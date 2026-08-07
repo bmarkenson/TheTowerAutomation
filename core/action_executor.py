@@ -630,9 +630,15 @@ def execute_actions(
                 if waivers:
                     effective_requirements["_gate_waivers"] = waivers
                 preflight_kwargs: Dict[str, Any] = {}
+                attached_route = bool(
+                    act.get("stay_in_battle_when_attached") is True
+                    and ctx.data.get("startup_gates_deferred") is True
+                )
                 if mv is not None:
-                    save_coordinator = ctx.data.get(
-                        "player_save_preflight_coordinator"
+                    save_coordinator = (
+                        ctx.data.get("player_save_attachment_evidence")
+                        if attached_route
+                        else ctx.data.get("player_save_preflight_coordinator")
                     )
                     setup_evidence = mv.get("gc_no_battle_setup_evidence")
                     if (
@@ -661,10 +667,7 @@ def execute_actions(
                         preflight_kwargs["player_save_preflight"] = (
                             save_coordinator
                         )
-                if (
-                    act.get("stay_in_battle_when_attached") is True
-                    and ctx.data.get("startup_gates_deferred") is True
-                ):
+                if attached_route:
                     preflight_kwargs["stay_in_battle"] = True
                 if validator == "tournament":
                     result = run_read_only_gc_preflight(

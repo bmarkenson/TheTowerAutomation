@@ -11,6 +11,16 @@ from core.no_strategy_observer import (
     DISSONANCE_BADGE_REGION,
     NoStrategyRunObserver,
 )
+from test.player_save_temporal_fixtures import (
+    running_attachment_observations,
+)
+
+
+def _typed_save(payload):
+    return running_attachment_observations(
+        payload["checks"],
+        captured_at=payload["captured_at"],
+    )
 
 
 class _InventoryUi:
@@ -211,7 +221,8 @@ def test_guarded_save_and_dissonance_badge_eliminate_redundant_ui_route():
     ui = _InventoryUi()
     observer = NoStrategyRunObserver()
     observer.record_player_save_observations(
-        {
+        _typed_save(
+            {
             "schema_version": 1,
             "source": "guarded_active_attachment_player_save",
             "mapping_id": "data-9-game-1073",
@@ -234,7 +245,8 @@ def test_guarded_save_and_dissonance_badge_eliminate_redundant_ui_route():
                 "poison_swamp_stun": {"value": "off"},
                 "spotlight_missiles": {"value": "on"},
             },
-        }
+            }
+        )
     )
 
     result = run_no_strategy_in_battle_inventory(
@@ -263,7 +275,8 @@ def test_utility_dissonance_keeps_attack_damage_slider_in_inventory_plan():
     ui = _InventoryUi(dissonance_subtype="utility")
     observer = NoStrategyRunObserver()
     observer.record_player_save_observations(
-        {
+        _typed_save(
+            {
             "schema_version": 1,
             "source": "guarded_active_attachment_player_save",
             "mapping_id": "data-9-game-1073",
@@ -284,7 +297,8 @@ def test_utility_dissonance_keeps_attack_damage_slider_in_inventory_plan():
                 "poison_swamp_stun": {"value": "off"},
                 "spotlight_missiles": {"value": "on"},
             },
-        }
+            }
+        )
     )
 
     with patch("core.no_strategy_inventory._capture_damage_slider") as capture:
@@ -309,7 +323,8 @@ def test_guarded_save_limits_ui_route_to_the_one_unresolved_section():
     ui = _InventoryUi()
     observer = NoStrategyRunObserver()
     observer.record_player_save_observations(
-        {
+        _typed_save(
+            {
             "schema_version": 1,
             "source": "guarded_active_attachment_player_save",
             "mapping_id": "data-9-game-1073",
@@ -329,7 +344,8 @@ def test_guarded_save_limits_ui_route_to_the_one_unresolved_section():
                 "poison_swamp_stun": {"value": "off"},
                 "spotlight_missiles": {"value": "on"},
             },
-        }
+            }
+        )
     )
 
     result = run_no_strategy_in_battle_inventory(

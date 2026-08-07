@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -5,16 +6,23 @@ import pytest
 from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
 from core.player_save import SaveCheckEvidence, pull_player_save_bytes
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+)
 from core.player_save_history import (
     CrossSourceHistoryStatus,
     PlayerSaveAttachmentContext,
     PlayerSaveHistoryReadStatus,
     PlayerSaveHistoryReader,
     corroborate_ui_and_save_history,
-    history_metadata_from_snapshot,
+    history_metadata_from_acquisition,
     history_sources_compatible,
     valid_history_tail_advance,
 )
+from core.player_save_temporal import PlayerSaveTemporalClass
 
 
 def _save_battle_date(
@@ -110,6 +118,25 @@ def _attachment_context(**changes):
     return PlayerSaveAttachmentContext(**values)
 
 
+def _acquisition(
+    snapshot,
+    acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+):
+    started = datetime(2026, 8, 4, 20, 0, tzinfo=timezone.utc)
+    captured = started + timedelta(milliseconds=1)
+    return PlayerSaveAcquisitionBundle(
+        acquisition_type=acquisition_type,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="save_acquired",
+        binding=PlayerSaveTargetBinding("private-target", 3),
+        acquisition_started_at=started,
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=snapshot,
+    )
+
+
 def _reader(
     *,
     target_snapshot_fn=lambda: AdbTargetSnapshot("private-target", 3, True),
@@ -164,12 +191,11 @@ def _read_active(reader, *, action_guard_fn=lambda: True):
 
 
 def test_structural_tail_remains_authoritative_when_semantics_are_unavailable():
-    result = history_metadata_from_snapshot(
-        _snapshot(
+    result = history_metadata_from_acquisition(
+        _acquisition(_snapshot(
             semantic_status="unavailable",
             semantic_reason="unmapped_killed_by_id:999",
-        ),
-        acquisition="authoritative_home_preflight_snapshot",
+        )),
     )
 
     assert result.complete
@@ -198,9 +224,8 @@ def _ui_history_metadata(**changes):
 
 
 def _save_history_metadata(**snapshot_changes):
-    result = history_metadata_from_snapshot(
-        _snapshot(**snapshot_changes),
-        acquisition="forced_active_attachment_android_home_serialization",
+    result = history_metadata_from_acquisition(
+        _acquisition(_snapshot(**snapshot_changes)),
     )
     assert result.metadata is not None
     return dict(result.metadata)
@@ -365,10 +390,8 @@ def test_reader_binds_stable_read_to_exact_target_scope_control_and_source():
 
     assert result.complete
     assert result.metadata is not None
-    assert result.metadata["acquisition"] == (
-        "stable_two_identical_read_exact_target"
-    )
-    assert calls == {"target": 2, "capture": 2, "pull": 1}
+    assert result.metadata["acquisition"]["type"] == "passive_stable_read"
+    assert calls == {"target": 4, "capture": 2, "pull": 1}
 
 
 def test_default_reader_transport_requires_two_identical_exact_target_reads(
@@ -450,14 +473,13 @@ def test_active_attachment_forces_serialization_and_restores_same_running_source
 
     assert result.complete
     assert result.metadata is not None
-    assert result.metadata["acquisition"] == (
-        "forced_active_attachment_android_home_serialization"
-    )
-    assert result.active_round_identity_fingerprint == (
-        "active-round-fingerprint"
-    )
+    assert result.metadata["acquisition"]["type"] == "forced_serialization"
+    observations = result.running_attachment_observations
+    assert observations is None  # the default snapshot has no profile facts
+    assert result.running_attachment_context == _attachment_context()
+    assert result.acquisition is not None
     assert calls == {
-        "target": 2,
+        "target": 4,
         "context": 5,
         "capture": 4,
         "background": 1,
@@ -530,19 +552,21 @@ def test_active_attachment_returns_complete_allowlisted_profile_observations():
     )
 
     assert result.complete
-    assert result.validated_profile_observations == {
-        "schema_version": 1,
-        "source": "guarded_active_attachment_player_save",
-        "mapping_id": "data-9-game-1073",
-        "mapping_maturity": "candidate",
-        "captured_at": "2026-08-04T20:00:00+00:00",
-        "checks": {
-            "cards_deck": {
-                "value": "Farm",
-                "source_fields": ["presetName", "currentPreset"],
-            }
-        },
-    }
+    observations = result.running_attachment_observations
+    assert observations is not None
+    assert observations.binding.mapping_id == "data-9-game-1073"
+    assert observations.binding.activity_scope_id is None
+    assert observations.binding.source_activity_scope_id == "scope-1"
+    assert observations.binding.active_round_identity_fingerprint == (
+        "active-round-fingerprint"
+    )
+    assert observations.binding.target_binding.fingerprint
+    assert len(observations.facts) == 1
+    fact = observations.facts[0]
+    assert fact.check_id == "cards_deck"
+    assert fact.temporal_class is PlayerSaveTemporalClass.POINT_IN_TIME
+    assert fact.copied_value() == "Farm"
+    assert fact.source_fields == ("presetName", "currentPreset")
 
 
 @pytest.mark.parametrize(
@@ -835,17 +859,20 @@ def test_boundary_or_control_loss_blocks_ui_fallback():
 
 
 def test_source_compatibility_and_capacity_rollover_are_explicit():
-    previous = history_metadata_from_snapshot(
-        _snapshot(fingerprint="a" * 64, entry_count=30),
-        acquisition="home",
+    previous = history_metadata_from_acquisition(
+        _acquisition(_snapshot(fingerprint="a" * 64, entry_count=30)),
     ).metadata
-    rollover = history_metadata_from_snapshot(
-        _snapshot(fingerprint="b" * 64, entry_count=30),
-        acquisition="retry",
+    rollover = history_metadata_from_acquisition(
+        _acquisition(
+            _snapshot(fingerprint="b" * 64, entry_count=30),
+            PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+        ),
     ).metadata
-    append = history_metadata_from_snapshot(
-        _snapshot(fingerprint="c" * 64, entry_count=30),
-        acquisition="retry",
+    append = history_metadata_from_acquisition(
+        _acquisition(
+            _snapshot(fingerprint="c" * 64, entry_count=30),
+            PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+        ),
     ).metadata
     assert previous is not None and rollover is not None and append is not None
 

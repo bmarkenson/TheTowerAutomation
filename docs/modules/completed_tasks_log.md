@@ -87,6 +87,85 @@ canonical document linked by an entry for current behavior.
   a fresh unpaused observation then reported normal `RUNNING` operation at
   wave 9393 with no Strategy Action Gate. No Surrender was used.
 
+### 2026-08-07 player-save temporal authority
+
+- `feature/player-save-temporal-authority` adds typed temporal classes to the
+  running-attachment projection. Its private binding covers exact mapping,
+  target generation, source and final activity scopes, active-round identity,
+  and capture time. Activity Continuity publishes facts only after persisting
+  the final scope; App revalidates current process/target/scope before fan-out,
+  and retained provenance is redacted.
+- No Strategy now feeds save-backed Workshop preset, equipped Guardians,
+  selected Bot preset, and equipped Modules into its actual
+  `observed_run_configuration` as round-invariant facts. Identical claims
+  merge, a complete same-round conflict becomes sticky `unavailable`, and
+  partial Guardian/Module UI evidence cannot replace a complete save claim.
+  Cards remain point-in-time, and Bot progression is separate from the selected
+  preset.
+- The same observation supplies Tournament's existing in-battle Workshop seam
+  through a one-use carrier that rechecks process, target generation, scope,
+  and active-battle ownership. A valid value avoids a second save read and any
+  additional game-Home or Android lifecycle route; invalid evidence preserves
+  the explicit Workshop deferral.
+- Focused temporal, attachment, No Strategy, and Tournament regression passed
+  201 tests. The supported development checkpoint compiled the repository,
+  passed state-definition validation and clickmap integrity with zero errors
+  and the established 44 orphan candidates, and passed all 1,737 tests in
+  322.38 seconds. No live/device validation was needed.
+
+### 2026-08-07 player-save terminal boundary handoff
+
+- `feature/player-save-boundary-handoff` splits the terminal structural History
+  transition from semantic completed-report projection. One natural terminal
+  bundle now proves the append or capped rollover once and stages only a
+  bounded, redacted, one-use payload in the activity-scope ledger; decoded and
+  raw save data never persist there.
+- Game Over → Home, Game Over → direct Retry, and Tournament Results → Home
+  validate process session, exact target generation, source/destination scope,
+  mapping, transition, and natural-boundary timing before adopting that tail as
+  `latest_completed_battle`. Acceptance performs no second save read or Battle
+  History navigation. Process, target, scope, shape, transition, or persistence
+  failure preserves the existing forced-save, passive-poll, or UI fallback.
+- An unknown `killedBy` or other semantic projection failure still opens the
+  applicable More Stats route but no longer discards structural continuity.
+  A `save_first` Home with neither handoff nor configuration requirements uses
+  the guarded baseline-only forced serialization path. Tournament Results
+  receives complete or explicitly unavailable conditions from the original
+  bundle and no longer performs its prior duplicate read.
+- Focused regression covers all three routes, one-use atomicity, redaction,
+  process/target/scope rejection, structural/semantic independence, malformed
+  provenance, baseline-only Home acquisition, and retained consumer fallback.
+  The supported development checkpoint compiled the repository, passed state-
+  definition validation and clickmap integrity with zero errors and the
+  established 44 orphan candidates, and passed all 1,724 tests in 377.86
+  seconds. No live/device validation was needed for this repository-only
+  lifecycle consolidation.
+
+### 2026-08-07 typed player-save acquisition foundation
+
+- `feature/player-save-acquisition-foundation` adds the immutable typed
+  acquisition bundle and `StablePlayerSaveAcquirer`. The owner serializes the
+  complete exact-target operation, verifies target generation before and after
+  a quiet two-identical-read transport, decodes in memory, immediately drops
+  raw payload references, and exposes only sanitized failures and redacted
+  provenance. It creates no global latest-snapshot cache.
+- The guarded serializer retains background/restore and source/control policy;
+  a forced bundle is published only after successful restoration and full
+  revalidation. Home preflight, ordinary and forced-attachment History,
+  natural terminal capture, passive audit, and standalone Tournament capture
+  now use the shared owner without changing their UI-fallback or blocking
+  policies. The local/ADB inspection tool remains an explicit offline path.
+- One natural terminal bundle fans out to profile progression, completed-report,
+  and Tournament-condition projectors without another pull. Focused tests cover
+  global lock serialization, exact target/generation loss, redaction, malformed
+  projection independence, restored-source ambiguity, and one-read/many-
+  projector behavior.
+- The focused migrated suite passed 173 tests. The supported development
+  checkpoint compiled the repository, passed state-definition validation and
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and passed all 1,712 tests in 322.50 seconds. No live/device validation was
+  needed for this repository-only ownership consolidation.
+
 ### 2026-08-07 Utility Dissonance subtype deployment and confirmation
 
 - `17e4e0c` separates localized purple Dissonance-family evidence from the

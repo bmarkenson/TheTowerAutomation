@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -52,7 +54,7 @@ PWR_FAMILY = "perk_wave_requirement"
 BOUNDARY_COVERAGE_COMPLETE = "complete"
 BOUNDARY_COVERAGE_VISIBILITY_GAP = "incomplete_visibility_gap"
 SELECTION_SCAN_MODE = "until_first_unchanged"
-PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION = 1
+PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION = 2
 PERKS_CLOSE_DESTINATIONS = {
     "RUNNING",
     "GAME_OVER",
@@ -191,6 +193,9 @@ class PerkProgress:
     next_wave: Optional[int]
     text_raw: str
     confidence: float
+    observed_at: Optional[str] = None
+    source_fingerprint: Optional[str] = None
+    source_region: str = "perk_progress_text"
 
     @property
     def token(self) -> Optional[tuple[str, Optional[int]]]:
@@ -250,6 +255,8 @@ class PerkTimelineTracker:
         self._selected_by_family: dict[str, dict[str, Any]] = {}
         self._pwr_maxed = False
         self._batches: list[dict[str, Any]] = []
+        self._selection_boundaries: list[dict[str, Any]] = []
+        self._exhaustion: Optional[dict[str, Any]] = None
         self._mapping_evidence: list[dict[str, Any]] = []
         self._warnings: list[str] = []
         self._candidate_token: Optional[tuple[str, Optional[int]]] = None
@@ -280,10 +287,22 @@ class PerkTimelineTracker:
         *,
         wave: Optional[int],
         boundary_observation_complete: bool = True,
+        activity_scope_id: Optional[str] = None,
     ) -> Optional[PerkCaptureRequest]:
         """Observe progress and return a request after its token stabilizes."""
 
         token = progress.token
+        if progress.status == "complete":
+            try:
+                complete_confidence = float(progress.confidence)
+            except (TypeError, ValueError):
+                token = None
+            else:
+                if (
+                    not math.isfinite(complete_confidence)
+                    or complete_confidence < DEFAULT_CONFIDENCE_THRESHOLD
+                ):
+                    token = None
         if token is None:
             self._candidate_token = None
             self._candidate_count = 0
@@ -295,6 +314,12 @@ class PerkTimelineTracker:
             self._candidate_count = 1
         if self._candidate_count < self._confirmation_frames:
             return self._pending
+        if progress.status == "complete":
+            self._record_exhaustion(
+                progress,
+                wave=wave,
+                activity_scope_id=activity_scope_id,
+            )
         if self._pending is not None:
             self._refresh_pending(
                 progress,
@@ -360,6 +385,7 @@ class PerkTimelineTracker:
                 else BOUNDARY_COVERAGE_VISIBILITY_GAP
             ),
         )
+        self._record_selection_boundary(self._pending, progress)
         return self._pending
 
     def confirmed_progress_resolves_visibility_gap(
@@ -393,6 +419,8 @@ class PerkTimelineTracker:
             "selected_by_family": copy.deepcopy(self._selected_by_family),
             "pwr_maxed": self._pwr_maxed,
             "batches": copy.deepcopy(self._batches),
+            "selection_boundaries": copy.deepcopy(self._selection_boundaries),
+            "exhaustion": copy.deepcopy(self._exhaustion),
             "warnings": list(self._warnings),
             "armed_next_wave": self._armed_next_wave,
             "pending": (
@@ -401,6 +429,22 @@ class PerkTimelineTracker:
                 else None
             ),
         }
+
+    def bind_exhaustion_identity(self, identity: Mapping[str, Any]) -> bool:
+        """Promote persisted exhaustion after its exact save identity is known."""
+
+        if self._exhaustion is None:
+            return False
+        try:
+            normalized = _validated_active_round_identity(identity)
+        except (TypeError, ValueError):
+            return False
+        current = self._exhaustion.get("active_round_identity")
+        if current is not None and current != normalized:
+            return False
+        self._exhaustion["active_round_identity"] = normalized
+        self._exhaustion["binding_status"] = "active_round_identity_bound"
+        return True
 
     def restore_checkpoint(self, payload: Mapping[str, Any]) -> bool:
         """Restore one validated checkpoint without accepting partial state."""
@@ -415,6 +459,8 @@ class PerkTimelineTracker:
         self._selected_by_family = restored["selected_by_family"]
         self._pwr_maxed = restored["pwr_maxed"]
         self._batches = restored["batches"]
+        self._selection_boundaries = restored["selection_boundaries"]
+        self._exhaustion = restored["exhaustion"]
         self._mapping_evidence = []
         self._warnings = restored["warnings"]
         self._armed_next_wave = restored["armed_next_wave"]
@@ -624,7 +670,7 @@ class PerkTimelineTracker:
         """Return a detached battle-record payload."""
 
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "source": "top_bar_schedule_and_selected_perks_panel",
             "batch_order_semantics": "selection_wave_order",
             "within_batch_order_semantics": "simultaneous_unordered",
@@ -639,6 +685,12 @@ class PerkTimelineTracker:
             "baseline_status": self._baseline_status,
             "pwr_maxed_observed": self._pwr_maxed,
             "batches": copy.deepcopy(self._batches),
+            "passive_top_bar": {
+                "selection_boundaries": copy.deepcopy(
+                    self._selection_boundaries
+                ),
+                "exhaustion": copy.deepcopy(self._exhaustion),
+            },
             "warnings": list(self._warnings),
             "pending_scheduled_wave": (
                 self._pending.scheduled_wave if self._pending else None
@@ -795,6 +847,80 @@ class PerkTimelineTracker:
             observed_wave_end=wave,
             boundary_coverage=boundary_coverage,
         )
+        if previous_next is not None:
+            self._record_selection_boundary(self._pending, progress)
+
+    def _record_selection_boundary(
+        self,
+        request: PerkCaptureRequest,
+        progress: PerkProgress,
+    ) -> None:
+        scheduled_wave = request.scheduled_waves[-1]
+        if any(
+            item.get("scheduled_wave") == scheduled_wave
+            for item in self._selection_boundaries
+        ):
+            return
+        self._selection_boundaries.append(
+            {
+                "scheduled_wave": scheduled_wave,
+                "observed_wave": request.observed_wave_end,
+                "observed_at": progress.observed_at,
+                "boundary_coverage": request.boundary_coverage,
+                "source": "stable_top_bar_schedule_transition",
+            }
+        )
+
+    def _record_exhaustion(
+        self,
+        progress: PerkProgress,
+        *,
+        wave: Optional[int],
+        activity_scope_id: Optional[str],
+    ) -> None:
+        scope_id = str(activity_scope_id or "").strip()
+        if (
+            type(wave) is not int
+            or wave < 0
+            or not scope_id
+            or not isinstance(progress.observed_at, str)
+            or not progress.observed_at
+            or not isinstance(progress.source_fingerprint, str)
+            or re.fullmatch(r"[0-9a-f]{64}", progress.source_fingerprint) is None
+            or float(progress.confidence) < DEFAULT_CONFIDENCE_THRESHOLD
+        ):
+            return
+        current = self._exhaustion
+        if current is not None:
+            current["stable_observation_count"] = max(
+                int(current.get("stable_observation_count") or 0),
+                self._candidate_count,
+            )
+            current["ocr_confidence"] = max(
+                float(current.get("ocr_confidence") or 0.0),
+                float(progress.confidence),
+            )
+            return
+        event_material = (
+            f"{scope_id}|{wave}|{progress.observed_at}|"
+            f"{progress.source_fingerprint}"
+        )
+        self._exhaustion = {
+            "schema_version": 1,
+            "source": "stable_top_bar_view_perks",
+            "event_id": hashlib.sha256(event_material.encode("utf-8")).hexdigest(),
+            "activity_scope_id": scope_id,
+            "binding_status": "pending_active_round_identity",
+            "observed_wave": wave,
+            "observed_at": progress.observed_at,
+            "stable_observation_count": self._candidate_count,
+            "ocr_confidence": float(progress.confidence),
+            "capture_provenance": {
+                "source": "main_loop_frame",
+                "region": progress.source_region,
+                "source_fingerprint": progress.source_fingerprint,
+            },
+        }
 
     def _warn_once(self, message: str) -> None:
         if message not in self._warnings:
@@ -813,6 +939,9 @@ def _capture_request_checkpoint(request: PerkCaptureRequest) -> dict[str, Any]:
             "next_wave": progress.next_wave,
             "text_raw": progress.text_raw,
             "confidence": progress.confidence,
+            "observed_at": progress.observed_at,
+            "source_fingerprint": progress.source_fingerprint,
+            "source_region": progress.source_region,
         },
         "snapshot_mode": request.snapshot_mode,
         "scheduled_waves": list(request.scheduled_waves),
@@ -861,6 +990,79 @@ def _validated_tracker_checkpoint(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("invalid tracker batch checkpoint")
     batches = [copy.deepcopy(dict(batch)) for batch in raw_batches]
 
+    raw_boundaries = payload.get("selection_boundaries")
+    if (
+        not isinstance(raw_boundaries, Sequence)
+        or isinstance(raw_boundaries, (str, bytes))
+        or not all(isinstance(item, Mapping) for item in raw_boundaries)
+    ):
+        raise ValueError("invalid passive selection-boundary checkpoint")
+    selection_boundaries: list[dict[str, Any]] = []
+    seen_boundary_waves: set[int] = set()
+    for raw_boundary in raw_boundaries:
+        scheduled_wave = _required_positive_int(
+            raw_boundary.get("scheduled_wave")
+        )
+        coverage = str(raw_boundary.get("boundary_coverage") or "")
+        if (
+            scheduled_wave in seen_boundary_waves
+            or coverage
+            not in {
+                BOUNDARY_COVERAGE_COMPLETE,
+                BOUNDARY_COVERAGE_VISIBILITY_GAP,
+            }
+            or raw_boundary.get("source")
+            != "stable_top_bar_schedule_transition"
+        ):
+            raise ValueError("invalid passive selection-boundary checkpoint")
+        seen_boundary_waves.add(scheduled_wave)
+        selection_boundaries.append(copy.deepcopy(dict(raw_boundary)))
+
+    raw_exhaustion = payload.get("exhaustion")
+    exhaustion = None
+    if raw_exhaustion is not None:
+        if not isinstance(raw_exhaustion, Mapping):
+            raise ValueError("invalid exhaustion checkpoint")
+        event_id = str(raw_exhaustion.get("event_id") or "")
+        provenance = raw_exhaustion.get("capture_provenance")
+        binding_status = str(raw_exhaustion.get("binding_status") or "")
+        raw_identity = raw_exhaustion.get("active_round_identity")
+        if binding_status == "active_round_identity_bound":
+            try:
+                _validated_active_round_identity(raw_identity)
+            except (TypeError, ValueError):
+                raise ValueError("invalid exhaustion checkpoint") from None
+        elif (
+            binding_status != "pending_active_round_identity"
+            or raw_identity is not None
+        ):
+            raise ValueError("invalid exhaustion checkpoint")
+        confidence = raw_exhaustion.get("ocr_confidence")
+        if (
+            raw_exhaustion.get("schema_version") != 1
+            or raw_exhaustion.get("source") != "stable_top_bar_view_perks"
+            or re.fullmatch(r"[0-9a-f]{64}", event_id) is None
+            or not str(raw_exhaustion.get("activity_scope_id") or "")
+            or type(raw_exhaustion.get("observed_wave")) is not int
+            or raw_exhaustion["observed_wave"] < 0
+            or type(raw_exhaustion.get("stable_observation_count")) is not int
+            or raw_exhaustion["stable_observation_count"] < 2
+            or not isinstance(confidence, (int, float))
+            or not math.isfinite(float(confidence))
+            or not DEFAULT_CONFIDENCE_THRESHOLD <= float(confidence) <= 100
+            or not _valid_aware_timestamp(raw_exhaustion.get("observed_at"))
+            or not isinstance(provenance, Mapping)
+            or provenance.get("source") != "main_loop_frame"
+            or provenance.get("region") != "perk_progress_text"
+            or re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(provenance.get("source_fingerprint") or ""),
+            )
+            is None
+        ):
+            raise ValueError("invalid exhaustion checkpoint")
+        exhaustion = copy.deepcopy(dict(raw_exhaustion))
+
     raw_warnings = payload.get("warnings")
     if (
         not isinstance(raw_warnings, Sequence)
@@ -878,10 +1080,51 @@ def _validated_tracker_checkpoint(payload: Mapping[str, Any]) -> dict[str, Any]:
         "selected_by_family": selected_by_family,
         "pwr_maxed": pwr_maxed,
         "batches": batches,
+        "selection_boundaries": selection_boundaries,
+        "exhaustion": exhaustion,
         "warnings": warnings,
         "armed_next_wave": armed_next_wave,
         "pending": pending,
     }
+
+
+def _validated_active_round_identity(identity: Any) -> dict[str, Any]:
+    if not isinstance(identity, Mapping):
+        raise TypeError("active-round identity must be a mapping")
+    normalized = {
+        "game_version": identity.get("game_version"),
+        "current_tier": identity.get("current_tier"),
+        "rounds_started_this_tier": identity.get("rounds_started_this_tier"),
+        "round_seed": identity.get("round_seed"),
+        "fingerprint": identity.get("fingerprint"),
+    }
+    if (
+        type(normalized["game_version"]) is not int
+        or normalized["game_version"] < 0
+        or type(normalized["current_tier"]) is not int
+        or normalized["current_tier"] < 0
+        or type(normalized["rounds_started_this_tier"]) is not int
+        or normalized["rounds_started_this_tier"] < 0
+        or type(normalized["round_seed"]) is not int
+        or normalized["round_seed"] <= 0
+        or re.fullmatch(
+            r"[0-9a-f]{64}",
+            str(normalized["fingerprint"] or ""),
+        )
+        is None
+    ):
+        raise ValueError("active-round identity is invalid")
+    return normalized
+
+
+def _valid_aware_timestamp(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 def _validated_capture_request_checkpoint(
@@ -919,6 +1162,19 @@ def _validated_capture_request_checkpoint(
         next_wave=next_wave,
         text_raw=str(progress_raw.get("text_raw") or ""),
         confidence=float(progress_raw.get("confidence")),
+        observed_at=(
+            str(progress_raw.get("observed_at"))
+            if progress_raw.get("observed_at") is not None
+            else None
+        ),
+        source_fingerprint=(
+            str(progress_raw.get("source_fingerprint"))
+            if progress_raw.get("source_fingerprint") is not None
+            else None
+        ),
+        source_region=str(
+            progress_raw.get("source_region") or "perk_progress_text"
+        ),
     )
     if progress.token is None:
         raise ValueError("pending Perk progress is implausible")
@@ -1077,6 +1333,24 @@ class PerkTimelineObserver:
         self._sync_persistence_scope(restore=True)
         return self.tracker.drain_mapping_evidence()
 
+    def exhaustion_evidence(self) -> Optional[dict[str, Any]]:
+        """Return persisted stable ``View Perks`` evidence, when available."""
+
+        self._sync_persistence_scope(restore=True)
+        evidence = self.tracker.snapshot().get("passive_top_bar", {}).get(
+            "exhaustion"
+        )
+        return copy.deepcopy(evidence) if isinstance(evidence, Mapping) else None
+
+    def bind_exhaustion_identity(self, identity: Mapping[str, Any]) -> bool:
+        """Persist the save-backed identity on stable exhaustion evidence."""
+
+        self._sync_persistence_scope(restore=True)
+        accepted = self.tracker.bind_exhaustion_identity(identity)
+        if accepted:
+            self._persist_state()
+        return accepted
+
     def _current_scope_id(self) -> Optional[str]:
         if self._state_path is None:
             return None
@@ -1230,6 +1504,7 @@ class PerkTimelineObserver:
                 boundary_observation_complete=(
                     not self._progress_visibility_interrupted
                 ),
+                activity_scope_id=self._active_scope_id,
             )
             if (
                 self._progress_visibility_interrupted
@@ -1699,6 +1974,7 @@ class PerkTimelineObserver:
             boundary_observation_complete=(
                 not self._progress_visibility_interrupted
             ),
+            activity_scope_id=self._active_scope_id,
         )
         if (
             self._progress_visibility_interrupted
@@ -1721,6 +1997,7 @@ class PerkTimelineObserver:
                 boundary_observation_complete=(
                     not self._progress_visibility_interrupted
                 ),
+                activity_scope_id=self._active_scope_id,
             )
             if (
                 self._progress_visibility_interrupted
@@ -1748,6 +2025,8 @@ def measure_perk_progress(
     crop = screenshot[y : y + height, x : x + width]
     if crop.size == 0:
         return PerkProgress("unreadable", None, None, "", -1.0)
+    observed_at = datetime.now(timezone.utc).isoformat()
+    source_fingerprint = hashlib.sha256(crop.tobytes()).hexdigest()
     enlarged = cv2.resize(crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
     raw_text, confidence = text_fn(enlarged)
     normalized = " ".join(str(raw_text or "").split())
@@ -1759,6 +2038,8 @@ def measure_perk_progress(
             None,
             normalized,
             float(confidence),
+            observed_at,
+            source_fingerprint,
         )
     if "NEW" in upper and "PERK" in upper:
         return PerkProgress(
@@ -1767,6 +2048,8 @@ def measure_perk_progress(
             None,
             normalized,
             float(confidence),
+            observed_at,
+            source_fingerprint,
         )
     numbers = [
         int(value)
@@ -1786,6 +2069,8 @@ def measure_perk_progress(
             next_wave,
             normalized,
             float(confidence),
+            observed_at,
+            source_fingerprint,
         )
     return PerkProgress(
         "unreadable",
@@ -1793,6 +2078,8 @@ def measure_perk_progress(
         None,
         normalized,
         float(confidence),
+        observed_at,
+        source_fingerprint,
     )
 
 

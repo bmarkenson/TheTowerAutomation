@@ -23,6 +23,7 @@ from core.battle_stats import (
     persist_battle_record,
 )
 from core.battle_perks import ocr_selected_perks
+from core.perk_save_monitor import merge_terminal_perk_evidence
 from core.terminal_save_report import terminal_save_report_complete
 
 
@@ -58,7 +59,8 @@ def handle_game_over(
 
     Workflow:
       1) Capture the initial Game Stats dialog in memory.
-      2) Capture the complete ordered Selected Perks list and return to Game Stats.
+      2) Use a proven save-backed final Perk inventory, or capture the complete
+         ordered Selected Perks list and return to Game Stats.
       3) Prefer the causally bound, exact-version save History projection.
       4) If save evidence is unavailable or contradicts Game Stats, open More
          Stats and copy the complete report through Android's clipboard service.
@@ -113,7 +115,9 @@ def handle_game_over(
         if img_game_stats is None:
             return _abort_handler("Capture Game Stats", session_id)
 
-        perks, perks_frames, perks_screen_restored = _capture_game_over_perks()
+        perks, perks_frames, perks_screen_restored = _resolve_game_over_perks(
+            context
+        )
         if not perks_screen_restored:
             return _abort_handler("Close Perks", session_id)
 
@@ -452,6 +456,81 @@ def _capture_game_over_perks():
             "DEBUG",
         )
     return perks, frames, restored
+
+
+def _resolve_game_over_perks(context: dict[str, Any]):
+    """Use a proven saved final inventory or retain the terminal UI route."""
+
+    monitoring = context.get("perk_save_monitoring")
+    inventory = (
+        monitoring.get("final_inventory")
+        if isinstance(monitoring, Mapping)
+        else None
+    )
+    if isinstance(inventory, Mapping):
+        quality = inventory.get("quality")
+        exact_picks = inventory.get("exact_saved_picks")
+        if (
+            monitoring.get("status") == "complete_final_prefix"
+            and monitoring.get("context_status") == "bound"
+            and monitoring.get("active_failure_reason") is None
+            and monitoring.get("round_conflict_reason") is None
+            and monitoring.get("ui_fallback", {}).get("required") is False
+            and isinstance(monitoring.get("checkpoint"), Mapping)
+            and isinstance(monitoring.get("exhaustion"), Mapping)
+            and monitoring.get("terminal_window", {}).get("status")
+            == "closed_by_inactive_cleared_projection"
+            and inventory.get("status") == "complete_exact_saved_inventory"
+            and inventory.get("source_method") == "player_save_perk_checkpoint"
+            and inventory.get("exact_saved_prefix") == monitoring.get("checkpoint")
+            and isinstance(exact_picks, list)
+            and bool(exact_picks)
+            and exact_picks == monitoring["checkpoint"].get("picks")
+            and isinstance(quality, Mapping)
+            and quality.get("valid") is True
+            and quality.get("source_complete") is True
+        ):
+            log(
+                "[BATTLE_PERKS] Complete post-exhaustion save checkpoint "
+                "replaced terminal Perks-panel navigation",
+                "INFO",
+            )
+            return dict(inventory), [], True
+
+    terminal_ui, frames, restored = _capture_game_over_perks()
+    if not restored or not isinstance(monitoring, Mapping):
+        return terminal_ui, frames, restored
+    if (
+        monitoring.get("context_status") != "bound"
+        or not isinstance(monitoring.get("checkpoint"), Mapping)
+        or monitoring.get("active_failure_reason")
+        or monitoring.get("round_conflict_reason")
+    ):
+        return terminal_ui, frames, restored
+
+    inventory, merge = merge_terminal_perk_evidence(
+        monitoring,
+        terminal_ui,
+        top_bar_timeline=context.get("perk_selection_timeline"),
+        game_over_wave=context.get("last_wave"),
+    )
+    context["perk_terminal_merge"] = merge
+    if inventory is not None:
+        return inventory, frames, restored
+
+    if merge.get("reason") != "terminal_ui_incomplete":
+        terminal_ui = dict(terminal_ui)
+        quality = dict(terminal_ui.get("quality") or {})
+        quality["valid"] = False
+        quality["retain_source_images"] = True
+        warnings = list(quality.get("warnings") or [])
+        warnings.append(
+            "Terminal Perks evidence conflicted with the retained exact saved "
+            f"prefix ({merge.get('reason') or 'unknown conflict'})"
+        )
+        quality["warnings"] = warnings
+        terminal_ui["quality"] = quality
+    return terminal_ui, frames, restored
 
 
 def _wait_for_visible(label: str, *, timeout: float, poll: float = 0.25):

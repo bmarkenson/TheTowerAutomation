@@ -1286,6 +1286,35 @@ def test_perk_order_and_instance_model_are_rendered_for_perusal():
     assert "| 2 | blue | leveled | Defense percent +25.00%" in markdown
 
 
+def test_exact_save_backed_perk_prefix_renders_without_ocr_row_shape():
+    record = _record()
+    perks = {
+        "source_method": "player_save_perk_checkpoint",
+        "exact_saved_prefix": {
+            "save_revision": 42,
+            "saved_wave": 700,
+            "captured_at": "2026-08-07T12:00:00+00:00",
+        },
+        "exact_saved_picks": [
+            {
+                "sequence": 1,
+                "saved_wave": 100,
+                "perk_key": "max_health",
+                "level_after": 1,
+            }
+        ],
+        "terminal_tail": {"status": "not_required", "aggregates": []},
+        "quality": {"valid": True, "warnings": []},
+    }
+
+    attach_battle_perks(record, perks)
+    markdown = render_battle_markdown(record)
+
+    assert "exact oldest-first selection order" in markdown
+    assert "| 1 | 100 | Max Health | 1 | exact saved pick |" in markdown
+    assert "No terminal aggregate was needed" in markdown
+
+
 def test_compact_coin_suffix_ocr_is_reconciled_against_exact_copied_total():
     def coin_icon_game_text(_frame, *, psm):
         assert psm == 6

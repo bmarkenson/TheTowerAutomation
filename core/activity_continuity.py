@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import time
 from typing import Any, Callable, Mapping, Optional
 
@@ -12,15 +12,26 @@ from core.battle_history import (
     read_latest_completed_battle,
 )
 from core.battle_lifecycle import HomeBattleControl
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+)
 from core.player_save_history import (
     BATTLE_HISTORY_UI_MAPPING_ID,
     BATTLE_HISTORY_UI_SOURCE,
     CrossSourceHistoryStatus,
+    PlayerSaveAttachmentContext,
     PlayerSaveHistoryReadResult,
     PlayerSaveHistoryReadStatus,
     corroborate_ui_and_save_history,
     history_sources_compatible,
     valid_history_tail_advance,
+)
+from core.player_save_temporal import RunningAttachmentSaveObservations
+from core.terminal_save_report import (
+    terminal_history_handoff_matches_source_scope,
+    validate_terminal_history_handoff,
 )
 from utils.logger import (
     capture_activity_boundary,
@@ -29,7 +40,9 @@ from utils.logger import (
     log_action_intent,
     log_result,
     record_activity_scope_battle_history,
+    record_activity_scope_terminal_history_handoff,
     start_activity_scope,
+    take_activity_scope_terminal_history_handoff,
 )
 
 
@@ -46,7 +59,13 @@ class ActivityContinuityOutcome:
     recapture: bool = False
     confirmed_same_battle_scope_id: Optional[str] = None
     confirmed_later_battle_scope_id: Optional[str] = None
-    validated_profile_observations: Optional[Mapping[str, Any]] = None
+    running_attachment_observations: Optional[
+        RunningAttachmentSaveObservations
+    ] = None
+    running_attachment_acquisition: Optional[
+        PlayerSaveAcquisitionBundle
+    ] = None
+    running_attachment_context: Optional[PlayerSaveAttachmentContext] = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +74,13 @@ class HomeHistoryBaselineOutcome:
     ui_required: bool = False
     blocked: bool = False
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class TerminalHistoryHandoffOutcome:
+    accepted: bool = False
+    reason: str = ""
+    scope_id: Optional[str] = None
 
 
 class ActivityContinuityCoordinator:
@@ -82,6 +108,148 @@ class ActivityContinuityCoordinator:
         self._boundary: Optional[Mapping[str, object]] = None
         self._action_logged = False
         self._retry_at = 0.0
+
+    def publish_terminal_history_handoff(
+        self,
+        history_transition: Mapping[str, Any],
+    ) -> bool:
+        """Persist a structurally proven terminal tail on its exact source scope."""
+
+        if not isinstance(history_transition, Mapping):
+            return False
+        handoff = history_transition.get("handoff")
+        binding = history_transition.get("run_binding")
+        if (
+            history_transition.get("status") != "complete"
+            or history_transition.get("complete") is not True
+            or not isinstance(handoff, Mapping)
+            or not isinstance(binding, Mapping)
+        ):
+            return False
+        run_id = str(binding.get("activity_scope_run_id") or "").strip()
+        scope = get_activity_scope()
+        if (
+            not run_id
+            or scope is None
+            or str(scope.get("run_id") or "") != run_id
+            or not terminal_history_handoff_matches_source_scope(
+                handoff, run_id
+            )
+        ):
+            return False
+        try:
+            updated = record_activity_scope_terminal_history_handoff(
+                run_id=run_id,
+                handoff=handoff,
+            )
+        except ValueError:
+            updated = None
+        if updated is None:
+            log(
+                "[BATTLE_CONTINUITY] Structurally proven terminal History "
+                "handoff could not be persisted; the next boundary will use "
+                "its established acquisition or UI fallback",
+                "WARN",
+            )
+            return False
+        log(
+            "[BATTLE_CONTINUITY] Structurally proven terminal History tail "
+            f"staged for one-use handoff scope_id={run_id}",
+            "INFO",
+        )
+        return True
+
+    def accept_pending_terminal_history_handoff(
+        self,
+        *,
+        expected_scope_id: str,
+        runtime_session_id: str,
+        target_snapshot: Any,
+    ) -> TerminalHistoryHandoffOutcome:
+        """Consume a redacted terminal tail without another save or UI read."""
+
+        scope = get_activity_scope()
+        run_id = str(expected_scope_id or "").strip()
+        if (
+            scope is None
+            or not run_id
+            or str(scope.get("run_id") or "") != run_id
+            or not isinstance(
+                scope.get("pending_terminal_history_handoff"), Mapping
+            )
+        ):
+            return TerminalHistoryHandoffOutcome(
+                reason="terminal_history_handoff_unavailable",
+                scope_id=run_id or None,
+            )
+        pending = take_activity_scope_terminal_history_handoff(run_id=run_id)
+        if not isinstance(pending, Mapping):
+            return self._rejected_terminal_handoff(
+                run_id, "terminal_history_handoff_consume_failed"
+            )
+        if (
+            pending.get("schema_version") != 1
+            or str(pending.get("destination_run_id") or "") != run_id
+        ):
+            return self._rejected_terminal_handoff(
+                run_id, "terminal_history_handoff_scope_changed"
+            )
+        target_binding = PlayerSaveTargetBinding.from_snapshot(target_snapshot)
+        metadata, reason = validate_terminal_history_handoff(
+            pending.get("handoff"),
+            runtime_session_id=runtime_session_id,
+            target_binding=target_binding,
+            destination_reason=str(scope.get("reason") or ""),
+        )
+        normalized = _normalize_history_metadata(metadata)
+        if normalized is None:
+            return self._rejected_terminal_handoff(
+                run_id,
+                reason
+                if metadata is None
+                else "terminal_history_handoff_identity_invalid",
+            )
+        updated = record_activity_scope_battle_history(
+            run_id=run_id,
+            latest_completed_battle=normalized,
+        )
+        if updated is None:
+            return self._rejected_terminal_handoff(
+                run_id, "terminal_history_handoff_write_failed"
+            )
+        self._checked_scope_id = run_id
+        self._reset_pending()
+        log_result(
+            "Battle History baseline accepted from the terminal boundary handoff",
+            detail=(
+                "[BATTLE_CONTINUITY] disposition=terminal_handoff_accepted "
+                f"terminal={pending.get('handoff', {}).get('terminal_state')} "
+                f"latest={_metadata_detail(normalized)} scope_id={run_id} "
+                "save_reads=0 history_navigation=0"
+            ),
+        )
+        return TerminalHistoryHandoffOutcome(
+            accepted=True,
+            reason=reason,
+            scope_id=run_id,
+        )
+
+    @staticmethod
+    def _rejected_terminal_handoff(
+        run_id: str,
+        reason: str,
+    ) -> TerminalHistoryHandoffOutcome:
+        log(
+            "[BATTLE_CONTINUITY] Terminal History handoff rejected; the "
+            f"established boundary fallback remains authoritative reason={reason} "
+            f"scope_id={run_id}",
+            "INFO",
+        )
+        return TerminalHistoryHandoffOutcome(
+            accepted=False,
+            reason=reason,
+            scope_id=run_id,
+        )
 
     def accept_home_save_baseline(
         self,
@@ -305,7 +473,9 @@ class ActivityContinuityCoordinator:
             )
 
         use_save = self._should_read_save(scope, player_save_mode)
-        validated_profile_observations = None
+        attachment_observations = None
+        attachment_acquisition = None
+        attachment_bundle_context = None
         if not self._action_logged:
             self._boundary = capture_activity_boundary()
             self._log_action(run_id, use_save=use_save)
@@ -329,9 +499,21 @@ class ActivityContinuityCoordinator:
                     and self._pending_source == "RUNNING"
                 ),
             )
-            validated_profile_observations = (
-                save_result.validated_profile_observations
+            attachment_observations = (
+                save_result.running_attachment_observations
             )
+            if active_attachment:
+                attachment_acquisition = save_result.acquisition
+                attachment_bundle_context = save_result.running_attachment_context
+                if (
+                    attachment_bundle_context is None
+                    and attachment_observations is not None
+                ):
+                    attachment_bundle_context = (
+                        _attachment_context_from_observations(
+                            attachment_observations
+                        )
+                    )
             if save_result.status is PlayerSaveHistoryReadStatus.BLOCKED:
                 log_result(
                     "Save-backed Battle History continuity paused without UI input",
@@ -384,9 +566,9 @@ class ActivityContinuityCoordinator:
                         return self._handle_metadata(
                             scope,
                             metadata,
-                            validated_profile_observations=(
-                                validated_profile_observations
-                            ),
+                            attachment_observations=attachment_observations,
+                            attachment_acquisition=attachment_acquisition,
+                            attachment_bundle_context=attachment_bundle_context,
                         )
                     else:
                         baseline = _scope_battle_history(scope)
@@ -398,9 +580,9 @@ class ActivityContinuityCoordinator:
                             return self._handle_metadata(
                                 scope,
                                 metadata,
-                                validated_profile_observations=(
-                                    validated_profile_observations
-                                ),
+                                attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                             )
                         elif compatible and (
                             baseline["fingerprint"]
@@ -409,9 +591,9 @@ class ActivityContinuityCoordinator:
                             return self._handle_metadata(
                                 scope,
                                 metadata,
-                                validated_profile_observations=(
-                                    validated_profile_observations
-                                ),
+                                attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                             )
                         elif compatible and not valid_history_tail_advance(
                             baseline,
@@ -427,17 +609,17 @@ class ActivityContinuityCoordinator:
                             return self._handle_metadata(
                                 scope,
                                 metadata,
-                                validated_profile_observations=(
-                                    validated_profile_observations
-                                ),
+                                attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                             )
                         elif compatible:
                             return self._handle_metadata(
                                 scope,
                                 metadata,
-                                validated_profile_observations=(
-                                    validated_profile_observations
-                                ),
+                                attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                             )
                         else:
                             corroboration = corroborate_ui_and_save_history(
@@ -449,16 +631,18 @@ class ActivityContinuityCoordinator:
                                     scope,
                                     metadata,
                                     reason=corroboration.reason,
-                                    validated_profile_observations=(
-                                        validated_profile_observations
+                                    attachment_observations=(
+                                        attachment_observations
                                     ),
+                                    attachment_acquisition=attachment_acquisition,
+                                    attachment_bundle_context=attachment_bundle_context,
                                 )
                             return self._handle_metadata(
                                 scope,
                                 metadata,
-                                validated_profile_observations=(
-                                    validated_profile_observations
-                                ),
+                                attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                                 attachment_change_confirmed=(
                                     corroboration.status
                                     is CrossSourceHistoryStatus.MISMATCH
@@ -488,9 +672,6 @@ class ActivityContinuityCoordinator:
                 return ActivityContinuityOutcome(
                     pending=True,
                     recapture=True,
-                    validated_profile_observations=(
-                        validated_profile_observations
-                    ),
                 )
             if not force_ui_fallback and not save_result.safe_ui_fallback:
                 self._action_logged = False
@@ -499,9 +680,6 @@ class ActivityContinuityCoordinator:
                 return ActivityContinuityOutcome(
                     pending=True,
                     recapture=True,
-                    validated_profile_observations=(
-                        validated_profile_observations
-                    ),
                 )
             log(
                 "[BATTLE_CONTINUITY] Stable save evidence could not establish "
@@ -520,7 +698,6 @@ class ActivityContinuityCoordinator:
             return ActivityContinuityOutcome(
                 pending=True,
                 recapture=True,
-                validated_profile_observations=validated_profile_observations,
             )
         if result.status is BattleHistoryReadStatus.BATTLE_ENDED:
             log_result(
@@ -535,15 +712,11 @@ class ActivityContinuityCoordinator:
             self._reset_pending()
             return ActivityContinuityOutcome(
                 recapture=True,
-                validated_profile_observations=validated_profile_observations,
             )
         if not result.complete or result.identity is None:
             return self._handle_failed_read(
                 scope,
                 result,
-                validated_profile_observations=(
-                    validated_profile_observations
-                ),
             )
         metadata = _normalize_history_metadata(result.identity.scope_metadata())
         if metadata is None:
@@ -553,9 +726,6 @@ class ActivityContinuityCoordinator:
                     BattleHistoryReadStatus.FAILED,
                     "UI History metadata normalization failed",
                     source_restored=True,
-                ),
-                validated_profile_observations=(
-                    validated_profile_observations
                 ),
             )
         if self._pending_mode == "post_retry_baseline":
@@ -569,7 +739,9 @@ class ActivityContinuityCoordinator:
         return self._handle_metadata(
             scope,
             metadata,
-            validated_profile_observations=validated_profile_observations,
+            attachment_observations=attachment_observations,
+            attachment_acquisition=attachment_acquisition,
+            attachment_bundle_context=attachment_bundle_context,
         )
 
     def _handle_cross_source_migration(
@@ -578,7 +750,11 @@ class ActivityContinuityCoordinator:
         metadata: Mapping[str, Any],
         *,
         reason: str,
-        validated_profile_observations: Optional[Mapping[str, Any]] = None,
+        attachment_observations: Optional[
+            RunningAttachmentSaveObservations
+        ] = None,
+        attachment_acquisition: Optional[PlayerSaveAcquisitionBundle] = None,
+        attachment_bundle_context: Optional[PlayerSaveAttachmentContext] = None,
     ) -> ActivityContinuityOutcome:
         """Persist a UI-to-save bridge without comparing source fingerprints."""
 
@@ -603,9 +779,6 @@ class ActivityContinuityCoordinator:
             return ActivityContinuityOutcome(
                 pending=True,
                 recapture=True,
-                validated_profile_observations=(
-                    validated_profile_observations
-                ),
             )
 
         log_result(
@@ -619,10 +792,25 @@ class ActivityContinuityCoordinator:
         )
         self._checked_scope_id = run_id
         self._reset_pending()
+        bound_attachment = _bind_attachment_observations(
+            attachment_observations,
+            run_id,
+        )
+        bound_bundle_context = _bind_attachment_context(
+            attachment_bundle_context,
+            run_id,
+        )
         return ActivityContinuityOutcome(
             recapture=True,
             confirmed_same_battle_scope_id=run_id,
-            validated_profile_observations=validated_profile_observations,
+            running_attachment_observations=bound_attachment,
+            running_attachment_acquisition=(
+                _matching_attachment_acquisition(
+                    attachment_acquisition,
+                    bound_bundle_context,
+                )
+            ),
+            running_attachment_context=bound_bundle_context,
         )
 
     def _should_read_save(
@@ -700,7 +888,11 @@ class ActivityContinuityCoordinator:
         scope: Mapping[str, object],
         metadata: Mapping[str, Any],
         *,
-        validated_profile_observations: Optional[Mapping[str, Any]] = None,
+        attachment_observations: Optional[
+            RunningAttachmentSaveObservations
+        ] = None,
+        attachment_acquisition: Optional[PlayerSaveAcquisitionBundle] = None,
+        attachment_bundle_context: Optional[PlayerSaveAttachmentContext] = None,
         attachment_change_confirmed: Optional[bool] = None,
         attachment_incompatibility_reason: str = "",
     ) -> ActivityContinuityOutcome:
@@ -758,9 +950,6 @@ class ActivityContinuityCoordinator:
                 self._reset_pending()
                 return ActivityContinuityOutcome(
                     recapture=True,
-                    validated_profile_observations=(
-                        validated_profile_observations
-                    ),
                 )
             run_id = str(active_scope["run_id"])
 
@@ -862,19 +1051,40 @@ class ActivityContinuityCoordinator:
 
         self._checked_scope_id = run_id
         self._reset_pending()
+        bound_attachment = (
+            _bind_attachment_observations(
+                attachment_observations,
+                run_id,
+            )
+            if updated is not None
+            else None
+        )
+        bound_bundle_context = (
+            _bind_attachment_context(
+                attachment_bundle_context,
+                run_id,
+            )
+            if updated is not None
+            else None
+        )
         return ActivityContinuityOutcome(
             recapture=True,
             confirmed_same_battle_scope_id=confirmed_same_battle_scope_id,
             confirmed_later_battle_scope_id=confirmed_later_battle_scope_id,
-            validated_profile_observations=validated_profile_observations,
+            running_attachment_observations=bound_attachment,
+            running_attachment_acquisition=(
+                _matching_attachment_acquisition(
+                    attachment_acquisition,
+                    bound_bundle_context,
+                )
+            ),
+            running_attachment_context=bound_bundle_context,
         )
 
     def _handle_failed_read(
         self,
         scope: Mapping[str, object],
         result: BattleHistoryReadResult,
-        *,
-        validated_profile_observations: Optional[Mapping[str, Any]] = None,
     ) -> ActivityContinuityOutcome:
         run_id = str(scope["run_id"])
         if not result.source_restored:
@@ -892,7 +1102,6 @@ class ActivityContinuityCoordinator:
             return ActivityContinuityOutcome(
                 pending=True,
                 recapture=True,
-                validated_profile_observations=validated_profile_observations,
             )
 
         if self._pending_mode == "post_retry_baseline":
@@ -907,7 +1116,6 @@ class ActivityContinuityCoordinator:
             self._defer_post_retry_poll()
             return ActivityContinuityOutcome(
                 recapture=True,
-                validated_profile_observations=validated_profile_observations,
             )
 
         if self._pending_mode == "compare":
@@ -939,7 +1147,6 @@ class ActivityContinuityCoordinator:
         self._reset_pending()
         return ActivityContinuityOutcome(
             recapture=True,
-            validated_profile_observations=validated_profile_observations,
         )
 
     def _defer_post_retry_poll(self) -> None:
@@ -1039,6 +1246,68 @@ def _pending_previous_battle(
     return _normalize_history_metadata(pending.get("previous_completed_battle"))
 
 
+def _bind_attachment_observations(
+    observations: Optional[RunningAttachmentSaveObservations],
+    activity_scope_id: str,
+) -> Optional[RunningAttachmentSaveObservations]:
+    """Publish attachment facts only after continuity persisted final scope."""
+
+    if observations is None:
+        return None
+    try:
+        return observations.bind_final_scope(activity_scope_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _matching_attachment_acquisition(
+    acquisition: Optional[PlayerSaveAcquisitionBundle],
+    context: Optional[PlayerSaveAttachmentContext],
+) -> Optional[PlayerSaveAcquisitionBundle]:
+    """Carry the same forced bundle only with its final-scope projection."""
+
+    if (
+        not isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        or context is None
+        or not acquisition.complete
+        or acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+        or acquisition.binding is None
+        or acquisition.binding.target != context.target
+        or acquisition.binding.generation != context.target_generation
+    ):
+        return None
+    return acquisition
+
+
+def _bind_attachment_context(
+    context: Optional[PlayerSaveAttachmentContext],
+    activity_scope_id: str,
+) -> Optional[PlayerSaveAttachmentContext]:
+    if context is None or not context.valid_for(context.activity_scope_id):
+        return None
+    try:
+        return replace(context, activity_scope_id=str(activity_scope_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def _attachment_context_from_observations(
+    observations: RunningAttachmentSaveObservations,
+) -> Optional[PlayerSaveAttachmentContext]:
+    binding = observations.binding
+    try:
+        return PlayerSaveAttachmentContext(
+            runtime_session_id=binding.runtime_session_id,
+            activity_scope_id=binding.source_activity_scope_id,
+            target=binding.target_binding.target,
+            target_generation=binding.target_binding.generation,
+            active_battle_observed=True,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 def _baseline_detail(identity: Optional[Mapping[str, Any]]) -> str:
     if identity is None:
         return "none"
@@ -1058,4 +1327,5 @@ __all__ = [
     "ActivityContinuityCoordinator",
     "ActivityContinuityOutcome",
     "HomeHistoryBaselineOutcome",
+    "TerminalHistoryHandoffOutcome",
 ]

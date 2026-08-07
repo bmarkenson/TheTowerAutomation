@@ -15,6 +15,95 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for unknown versions, shape changes,
   stale data, mismatches, and unmapped settings.
+  - [ ] Execute the
+    [typed acquisition and temporal-authority contract](../architecture/player_save.md#planned-acquisition-provenance-and-temporal-authority)
+    through one outcome coordinator and sequential stacked feature branches.
+    Preserve committed Perk prototype `d1c3dec` as a reference until the shared
+    foundation is stable; do not merge its private integration path.
+    - [x] **Foundation — `feature/player-save-acquisition-foundation`.** Add
+      the typed exact-target acquisition owner/result, normalized provenance,
+      and focused lock/binding/privacy/failure tests. Migrate the guarded
+      serializer, Home preflight, History reader, terminal capture, passive
+      audit, and standalone Tournament reader without changing each consumer's
+      fallback policy. Preserve the explicit offline import path. Replace
+      free-form acquisition strings and the runtime freshness boolean only
+      after all migrated callers carry typed evidence.
+      Implemented with one immutable bundle and acquirer-owned locked
+      transaction. Forced publication remains restoration-gated; terminal and
+      passive failures remain nonblocking; History and Home preserve their
+      established blocking/UI-fallback distinctions. The offline importer
+      remains separate, and focused regression proves exact binding,
+      redaction, one-read/many-projector fan-out, projection independence, and
+      restoration ambiguity. The supported development checkpoint passed all
+      1,712 tests in 322.50 seconds with state-definition and clickmap
+      validation clean (the established 44 orphan candidates, zero errors).
+    - [x] **Lifecycle — `feature/player-save-boundary-handoff`.** Project the
+      structural terminal transition once and persist a normalized one-use
+      handoff for Game Over → Home, Game Over → direct Retry, and Tournament
+      Results → Home. Reuse it without another read or History UI; when a
+      `save_first` Home baseline has neither a handoff nor configuration
+      requirements, obtain one guarded forced bundle instead of opening
+      History. Keep semantic-report failure independent from structural
+      continuity, eliminate the Tournament handler's second conditions read,
+      and preserve every current blocking/fail-open failure class.
+      Implemented with atomic activity-scope publication/consumption and exact
+      process, target-generation, source-scope, mapping, transition, and timing
+      validation. Game Over → Home, direct Retry, and Tournament Results → Home
+      reuse the terminal tail with zero reads/navigation; invalid handoffs keep
+      the established fallback. Structural success survives semantic report
+      failure, baseline-only `save_first` Home uses the guarded forced owner,
+      and Tournament Results receives explicit conditions without reacquiring.
+      The supported development checkpoint passed all 1,724 tests in 377.86
+      seconds with state-definition and clickmap validation clean (the
+      established 44 orphan candidates, zero errors).
+    - [x] **Temporal loadout — `feature/player-save-temporal-authority`.** Add
+      temporal metadata and fact-specific merge rules to attachment
+      projections. Treat Workshop preset, equipped Guardians, selected Bot
+      preset, and equipped Modules as round-invariant after exact round
+      binding; keep Cards point-in-time and Bot progression separate. Feed
+      those classified facts into No Strategy's actual loadout, and bind the
+      active Tournament Workshop preset without game-Home or Android-Home
+      input. Same-round invariant conflicts fail closed rather than using the
+      newest value. Implemented with typed per-fact temporal classes and a
+      private exact mapping/target-generation/final-scope/round binding that is
+      published only after continuity persistence. No Strategy's actual
+      loadout receives the four round invariants with sticky conflict handling;
+      Cards retain point-in-time capture provenance and Bot progression remains
+      separate. Tournament consumes the bound Workshop fact once, revalidating
+      target and scope without a second read or Home route. Focused regression
+      passed 201 tests; the supported development checkpoint passed all 1,737
+      tests in 322.38 seconds with state-definition and clickmap validation
+      clean (the established 44 orphan candidates, zero errors).
+    - [x] **Perks — `feature/save-backed-perk-monitoring-v2`.** Restart from
+      the shared interface and selectively port the pure monitor/domain tests
+      from `d1c3dec`. A normal scheduler independent of collector opt-in
+      consumes shared passive bundles; forced attachment and natural terminal
+      bundles fan out to the same monitor without another pull. Saved picks are
+      a monotonic same-round positive prefix, never proof that no later pick
+      exists. Open terminal Perks unless the bound exhaustion/final-prefix and
+      terminal-clear rules prove completeness; preserve compact Game Stats,
+      More Stats fallback, and every UI-owned lifecycle action.
+      Implemented as a pure typed-bundle monitor plus a normal passive
+      scheduler. The same immutable passive object reaches monitoring and the
+      optional audit projector; forced attachment and natural terminal bundles
+      use the same fan-out without reacquisition. Stable `View Perks` evidence,
+      a later nonempty same-round checkpoint, and a still-later bound natural
+      clear are all required before terminal Perks navigation is omitted.
+      Cleared fields never become inventory, `saveRevision` never establishes
+      freshness, and malformed, failed, lagging, regressed, reordered,
+      conflicted, rebound, empty, or terminal-only evidence retains the exact
+      UI fallback. Focused regression passed 301 tests.
+    - [x] Run the supported development checkpoint for the Perk phase and
+      retain its result with the phase commit. Automated coverage includes
+      one-read/many-projector identity, target/scope handoff rejection,
+      restoration ambiguity, structural/semantic independence, temporal and
+      prefix conflicts, malformed projections, and every consumer fallback.
+      The checkpoint passed all 1,774 tests in 330.07 seconds with
+      state-definition and clickmap validation clean (the established 44
+      orphan candidates, zero errors).
+    - [ ] After deployment, confirm on ordinary boundaries that valid Game
+      Over → Home and direct Retry transitions perform zero Battle History
+      navigation and no duplicate save read; do not create a special battle.
   - [ ] Confirm the deployed direct-Retry repair on the next ordinary
     `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
     retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh
@@ -59,37 +148,12 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
     and regress the full attachment path so a complete save skips Module UI.
     See the
     [promotion evidence](../issues/evidence/no-strategy-attachment-promotion-2026-08-06.md).
-  - [ ] Bind exact-version Workshop-preset save evidence to an already-active
-    Tournament attachment without game-Home or Android-Home input. Require a
-    stable read, exact target/version, selected Strategy fingerprint, and
-    authoritative active-run identity; stale, ambiguous, or unsupported saves
-    leave `workshop_preset` explicitly deferred while the in-battle checks
-    continue. This must not broaden attachment authority or reintroduce Exit
-    Battle → Go Home → Resume Battle.
-  - [ ] Add any other normal-runtime consumer of the observation-only polling
-    and same-round audit cache only after its own matrix evidence is complete.
-    The terminal report consumer is independent of that cache and uses its own
-    bound activity scope plus same-source tail proof. Perks-navigation
-    decisions, Strategy facts, lifecycle changes, and further UI suppression
-    remain outside `V1073-RUNTIME-013` and must preserve the current-process
-    terminal-binding rule.
-  - [ ] Replace the in-battle Perk UI timeline with a normal-runtime save
-    checkpoint cache independent of collector opt-in. Consume naturally
-    serialized stable revisions under the exact round identity; preserve the
-    exact saved `PerkPick` wave even when the checkpoint arrives later; and
-    obtain a terminal stable save to close the final prefix. Retain UI for an
-    unknown ID, acquisition/continuity failure, explicit audit, or unresolved
-    final state. Do not background an active battle merely to accelerate a
-    Perk checkpoint. The separate `save_first` replacement-process continuity
-    boundary is the only current forced active-battle serialization policy and
-    grants this cache no authority. This is a separate implementation phase,
-    not part of the continuity fix.
-  - [ ] Make terminal Perks navigation conditional after the normal-runtime
-    same-round checkpoint cache proves the complete final prefix. Save-derived
-    normal and Tournament reports are implemented independently with guarded
-    history-tail attachment. Preserve passive compact Game Stats OCR, the More
-    Stats UI fallback, and every verified
-    Wait/Retry/Home/mutation/transition control.
+  - [ ] Add any future normal-runtime consumer only through the shared typed
+    acquisition owner and only after its own matrix evidence is complete. The
+    optional `V1073-RUNTIME-013` audit collector may consume a passive bundle
+    but is not an acquisition service or an authority source. Every consumer
+    must preserve current-process terminal binding and its own temporal,
+    fallback, and action-authority rules.
   - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
     for future privacy-safe candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.

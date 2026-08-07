@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.player_save import PlayerSavePullError, SaveCheckEvidence
+from core.adb_target_session import AdbTargetSnapshot
 from core.tournament_conditions import (
     capture_current_tournament_conditions,
     derive_tournament_conditions,
@@ -223,3 +224,27 @@ def test_capture_failure_is_explicit_and_nonblocking():
     assert evidence["status"] == "unavailable"
     assert evidence["reason"] == "save_pull_failed"
     assert evidence["ui_fallback"]["required"]
+
+
+def test_standalone_capture_discards_projection_on_target_generation_change():
+    snapshots = iter(
+        (
+            AdbTargetSnapshot("private-target", 1, True),
+            AdbTargetSnapshot("private-target", 2, True),
+        )
+    )
+
+    evidence = capture_current_tournament_conditions(
+        captured_at=datetime(2026, 8, 1, 12, tzinfo=timezone.utc),
+        target_snapshot_fn=lambda: next(snapshots),
+        pull_fn=lambda **_kwargs: b"opaque-save",
+        decode_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            checks={},
+            mapping_id="data-9-game-1073",
+        ),
+    )
+
+    assert evidence["status"] == "unavailable"
+    assert evidence["reason"] == "save_capture_failed"
+    assert evidence["ui_fallback"]["required"]
+    assert "private-target" not in repr(evidence)
