@@ -30,10 +30,14 @@ the fields not already resolved by the save: Cards, Perks, Ultimate Weapons,
 Modules, Event/Bots, Guild/Guardians, Target Priority, and accessible Damage
 Slider. Every source/destination transition is verified; Pause mid-pass sends
 no cleanup input and Resume first restores a known screen. Attack Dissonance
-identity comes from its purple sword badge, not Tier alone, and that passive
-badge leaves its disabled Damage Slider explicitly unavailable without probing
-the Attack menu. A fully mapped save plus that badge produces no in-game
-inventory navigation.
+and Utility Dissonance identities come from the localized purple badge beside
+Tier: the validated white sword means Attack and the validated white star means
+Utility. Purple family evidence without a recognized icon never invents a
+subtype. Only the sword makes Damage Slider unavailable without probing the
+disabled Attack menu; the Utility star leaves Damage Slider unresolved so the
+normal guarded Attack read still runs. A fully mapped save plus the Attack
+badge can therefore produce no in-game inventory navigation, while Utility
+still requires any genuinely unresolved Attack-only field.
 
 At natural Game Over, keep the runtime resumed with an actionable terminal
 direction. No Strategy always performs full structured capture and routes Home

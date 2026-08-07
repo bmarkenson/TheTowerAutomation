@@ -809,13 +809,16 @@ implying that a No Strategy inventory pass occurred. Their declared intent and
 verified values remain under `run_configuration` and
 `runtime.session_preflight_evidence`, respectively.
 
-The fixed purple sword badge next to Tier is localized Attack Dissonance
-identity evidence. Standard Game Over plus that badge supports a high-confidence
+The fixed purple modifier badge next to Tier is localized Dissonance-family
+identity evidence. Its white icon supplies a separately validated subtype: the
+sword is Attack and the star is Utility. Shape comparison uses the existing
+Attack, Defense, Utility, and Ultimate Weapon tab icons as references, but an
+unvalidated subtype remains generic Dissonance rather than being guessed.
+Standard Game Over plus family evidence supports a high-confidence
 `dissonance` classification; Tier without the badge still remains `unknown`.
-The collector does not probe the disabled Attack menu or treat a failed action
-as identity evidence. The first passive Attack Dissonance badge records Damage
-Slider as unavailable before UI-route planning because that control cannot be
-inspected during the run.
+Only a recognized Attack sword records Damage Slider as unavailable before
+UI-route planning. Utility Dissonance disables Utility systems, so its star
+must not suppress the guarded Attack-menu Damage Slider read.
 
 Home-only facts use a second phase after natural completion. No Strategy forces
 full structured Game Over capture and the Home terminal action, even if the

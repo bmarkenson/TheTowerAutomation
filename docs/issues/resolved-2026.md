@@ -113,7 +113,9 @@ and actionable work lives in
 **Stable ID:** `ISSUE-2026-028` · **Lifecycle:** `resolved`
 
 - **Observed:** On 2026-08-06, a replacement No Strategy runtime attached to a
-  running Attack Dissonance battle without a persisted History baseline.
+  running battle then labeled Attack Dissonance by the purple-only detector.
+  The badge was later established as Utility Dissonance in
+  [ISSUE-2026-030](open-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - **Symptom:** The runtime opened Battle History instead of using
   `playerInfo.dat`, then revisited every configuration screen even when the
   exact-version save already supplied complete normalized values.
@@ -124,8 +126,10 @@ and actionable work lives in
 - **Resolution:** `cde691b` gives a missing running baseline an attachment mode
   and makes every `save_first` running attachment save-only. The same guarded
   snapshot supplies complete allowlisted observations, and the inventory visits
-  only fields that remain unresolved. Dissonance can resolve inaccessible
-  Damage Slider evidence without probing Attack.
+  only fields that remain unresolved. A validated Attack constraint can resolve
+  its inaccessible Damage Slider without probing the disabled menu; the
+  separate Utility subtype repair corrects the then-current detector's broader
+  assumption.
 - **Regression:** Focused save, continuity, No Strategy, lifecycle, and lease
   coverage passed 392 tests. The complete candidate checkpoint passed
   compilation, state and clickmap validation, and all 1,676 tests.
@@ -135,8 +139,11 @@ and actionable work lives in
   UI. Eleven configuration fields came from the save; only Modules used UI.
   The privacy-safe inspector proved that fallback was genuine:
   `modules.status=unmapped`, `complete=false`, reason
-  `unsupported primary module infoIndex`. The exact action rows and projection
-  are retained in
+  `unsupported primary module infoIndex`. This confirmation did not validate
+  the omitted Damage Slider read: the purple-only detector had incorrectly
+  marked it unavailable for Utility Dissonance, now tracked by
+  [ISSUE-2026-030](open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  The exact action rows and projection are retained in
   [promotion evidence](evidence/no-strategy-attachment-promotion-2026-08-06.md).
 - **Fixed by:** `cde691b`; deployed by `ab84a3c`.
 

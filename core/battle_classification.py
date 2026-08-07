@@ -18,6 +18,21 @@ UNBOUND_RUN_EVIDENCE_WARNING = (
     "not bound to an active battle observed in this process and activity scope"
 )
 
+_DISSONANCE_PRESET_PREFIXES = {
+    "attack": ("attack disso", "atk disso"),
+    "utility": ("utility disso", "util disso"),
+}
+
+
+def dissonance_subtype_from_preset_label(label: object) -> Optional[str]:
+    """Return a subtype encoded by an explicitly named Dissonance preset."""
+
+    normalized = " ".join(str(label or "").casefold().replace("-", " ").split())
+    for subtype, prefixes in _DISSONANCE_PRESET_PREFIXES.items():
+        if normalized.startswith(prefixes):
+            return subtype.title()
+    return None
+
 
 def unbound_run_evidence_warning(
     runtime_context: Optional[Mapping[str, Any]],
@@ -93,33 +108,32 @@ def analyze_battle_type(
         signals.append("strategy_identity:farm")
     if tournament_identity:
         signals.append("shared_loadout_identity:tournament_or_milestone")
-    attack_dissonance = (
-        observed_identity_family == "dissonance"
-        and observed_identity_subtype == "attack"
-    )
-    if attack_dissonance:
+    dissonance_identity = observed_identity_family == "dissonance"
+    if dissonance_identity:
+        subtype_signal = observed_identity_subtype.replace(" ", "_") or "unknown"
         signals.append(
-            "post_run_workshop_preset:attack_dissonance"
+            f"post_run_workshop_preset:{subtype_signal}_dissonance"
             if post_run_preset_identity
-            else "observed_identity:attack_dissonance"
+            else f"observed_identity:{subtype_signal}_dissonance"
         )
 
     if terminal == "TOURNAMENT_RESULTS":
         kind = "tournament"
         confidence = "high"
         reason = "The distinct Tournament Results terminal screen was detected."
-    elif terminal == "GAME_OVER" and attack_dissonance:
+    elif terminal == "GAME_OVER" and dissonance_identity:
         kind = "dissonance"
         confidence = "high"
+        identity_label = observed_identity_label or "Dissonance"
         if post_run_preset_identity:
             reason = (
                 "The run ended at Game Over and the immediately captured Home "
-                "Workshop preset identified Attack Dissonance."
+                f"Workshop preset identified {identity_label}."
             )
         else:
             reason = (
                 "The run ended at Game Over after the fixed Tier badge "
-                "identified the Attack Dissonance modifier."
+                f"identified the {identity_label} modifier."
             )
     elif terminal == "GAME_OVER" and farm_identity:
         kind = "farm"
@@ -233,12 +247,13 @@ def _observed_run_identity(
         return {}
     value = preset.get("value")
     label = str(value.get("label") or "") if isinstance(value, Mapping) else ""
-    if not label.casefold().startswith("attack disso"):
+    subtype = dissonance_subtype_from_preset_label(label)
+    if subtype is None:
         return {}
     return {
         "family": "Dissonance",
-        "subtype": "Attack",
-        "label": "Attack Dissonance",
+        "subtype": subtype,
+        "label": f"{subtype} Dissonance",
         "signals": {"post_run_workshop_preset": value},
     }
 
@@ -306,6 +321,7 @@ __all__ = [
     "UNBOUND_RUN_EVIDENCE_WARNING",
     "analyze_battle_type",
     "classification_for_record",
+    "dissonance_subtype_from_preset_label",
     "observed_tier_for_record",
     "unbound_run_evidence_warning",
 ]

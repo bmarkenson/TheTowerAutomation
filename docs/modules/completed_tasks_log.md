@@ -97,11 +97,13 @@ canonical document linked by an entry for current behavior.
 
 ### 2026-08-06 paused Home manual-start continuity repair
 
-- Live read-only diagnosis found that an Attack Dissonance battle manually
-  started from paused Home advanced normally while Activity Continuity retried
-  its obsolete Home-only Battle History source. The safe retry loop sent no
-  input, but its exclusive hold prevented the No Strategy inventory from
-  starting.
+- Live read-only diagnosis found that a battle then labeled Attack Dissonance
+  by the purple-only detector manually started from paused Home and advanced
+  normally while Activity Continuity retried its obsolete Home-only Battle
+  History source. The badge was later established as Utility Dissonance in
+  [`ISSUE-2026-030`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  The safe retry loop sent no input, but its exclusive hold prevented the No
+  Strategy inventory from starting.
 - `8cf5548` makes a pending Home continuity route follow a passively observed
   `RUNNING` transition in the same activity scope, clear the obsolete Home
   control expectation, and continue only after action authority returns. The
@@ -135,8 +137,10 @@ canonical document linked by an entry for current behavior.
   scope; failure waits without opening Battle History. The same accepted
   exact-version snapshot supplies complete allowlisted observations to No
   Strategy, whose in-battle and post-run routes now visit only unresolved
-  fields. The passive Attack Dissonance badge resolves its inaccessible Damage
-  Slider without probing the disabled Attack menu.
+  fields. The then-current purple-only detector labeled the badge Attack and
+  therefore resolved Damage Slider without probing the Attack menu; the later
+  Utility subtype correction is tracked in
+  [`ISSUE-2026-030`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - Terminal development directives are now recognized before former-runtime
   binding checks. Their original release result remains the sole outcome after
   restart; genuinely active leases that lose their runtime retain the abnormal
@@ -153,7 +157,11 @@ canonical document linked by an entry for current behavior.
   through one guarded save serialization, opened no Battle History UI, applied
   11 save-backed No Strategy fields, and visited only Modules. A privacy-safe
   read proved Modules was genuinely unresolved because of an unsupported
-  primary `infoIndex`; that mapping remains in the validation backlog.
+  primary `infoIndex`; that mapping remains in the validation backlog. The
+  absence of a Damage Slider visit was later separated from this confirmation:
+  the purple-only detector had mislabeled Utility Dissonance and suppressed an
+  accessible read, as tracked in
+  [`ISSUE-2026-030`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - The same replacement preserved the previously released terminal lease
   without an abnormal warning, duplicate result, or directive rewrite.
   `ISSUE-2026-028` and `ISSUE-2026-029` are resolved with exact retained

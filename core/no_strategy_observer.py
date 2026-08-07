@@ -10,12 +10,15 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 import cv2
 import numpy as np
 
 from core.auto_pick_perks import measure_auto_pick_perks
+from core.battle_classification import dissonance_subtype_from_preset_label
 from core.damage_adjuster import read_damage_adjuster
 from core.label_tapper import is_visible
 from core.module_icon_index import identify_equipped_ancestral_modules
@@ -31,11 +34,30 @@ Clock = Callable[[], datetime]
 
 # The modifier badge is fixed immediately to the right of the Tier label.  A
 # narrow fixed region prevents purple battle effects elsewhere in the frame
-# from becoming identity evidence.
-ATTACK_DISSONANCE_BADGE_REGION = (680, 985, 80, 80)
+# from becoming identity evidence.  Its white icon identifies which system is
+# disabled; purple alone proves only the Dissonance family.
+DISSONANCE_BADGE_REGION = (680, 985, 80, 80)
+# Compatibility for callers that imported the original sword-only name.
+ATTACK_DISSONANCE_BADGE_REGION = DISSONANCE_BADGE_REGION
+_DISSONANCE_BADGE_ICON_REGION = (680, 998, 46, 48)
 _PURPLE_LOWER = np.array((125, 70, 90), dtype=np.uint8)
 _PURPLE_UPPER = np.array((165, 255, 255), dtype=np.uint8)
 _MIN_BADGE_PURPLE_PIXELS = 500
+_BADGE_WHITE_LOWER = np.array((0, 0, 175), dtype=np.uint8)
+_BADGE_WHITE_UPPER = np.array((179, 100, 255), dtype=np.uint8)
+_REFERENCE_ICON_LOWER = np.array((0, 10, 80), dtype=np.uint8)
+_REFERENCE_ICON_UPPER = np.array((179, 255, 255), dtype=np.uint8)
+_MIN_BADGE_ICON_AREA = 100.0
+_MAX_BADGE_ICON_SHAPE_DISTANCE = 0.20
+_MIN_BADGE_ICON_SHAPE_MARGIN = 0.05
+_SUPPORTED_DISSONANCE_SUBTYPES = frozenset({"Attack", "Utility"})
+_ROOT = Path(__file__).resolve().parents[1]
+_DISSONANCE_ICON_REFERENCES = {
+    "Attack": _ROOT / "assets/match_templates/navigation/goto_attack.png",
+    "Defense": _ROOT / "assets/match_templates/navigation/goto_defense.png",
+    "Utility": _ROOT / "assets/match_templates/navigation/goto_utility.png",
+    "Ultimate Weapons": _ROOT / "assets/match_templates/navigation/goto_uw.png",
+}
 
 _CARD_SLOTS = tuple((12 + 213 * index, 371, 210, 98) for index in range(5))
 _WORKSHOP_SLOTS = tuple((12 + 213 * index, 185, 210, 98) for index in range(5))
@@ -73,33 +95,140 @@ _RESOLVED_STATUSES = frozenset(
 )
 
 
-def detect_attack_dissonance_badge(frame: Optional[Frame]) -> dict[str, Any]:
-    """Return localized purple-sword badge evidence without taking action."""
+def _largest_external_contour(mask: Frame) -> Optional[Frame]:
+    contours, _hierarchy = cv2.findContours(
+        mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    if not contours:
+        return None
+    return max(contours, key=cv2.contourArea)
 
-    x, y, width, height = ATTACK_DISSONANCE_BADGE_REGION
+
+@lru_cache(maxsize=1)
+def _dissonance_icon_reference_contours() -> dict[str, Frame]:
+    references: dict[str, Frame] = {}
+    for subtype, path in _DISSONANCE_ICON_REFERENCES.items():
+        icon = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        if icon is None:
+            continue
+        hsv = cv2.cvtColor(icon, cv2.COLOR_BGR2HSV)
+        contour = _largest_external_contour(
+            cv2.inRange(hsv, _REFERENCE_ICON_LOWER, _REFERENCE_ICON_UPPER)
+        )
+        if (
+            contour is not None
+            and cv2.contourArea(contour) >= _MIN_BADGE_ICON_AREA
+        ):
+            references[subtype] = contour
+    return references
+
+
+def detect_dissonance_badge(frame: Optional[Frame]) -> dict[str, Any]:
+    """Return localized Dissonance family and subtype evidence without input."""
+
+    x, y, width, height = DISSONANCE_BADGE_REGION
+    icon_x, icon_y, icon_width, icon_height = _DISSONANCE_BADGE_ICON_REGION
     if (
         frame is None
         or not isinstance(frame, np.ndarray)
         or frame.ndim != 3
         or y + height > frame.shape[0]
         or x + width > frame.shape[1]
+        or icon_y + icon_height > frame.shape[0]
+        or icon_x + icon_width > frame.shape[1]
     ):
         return {
             "observed": False,
+            "subtype": None,
+            "label": None,
             "purple_pixels": 0,
-            "region": list(ATTACK_DISSONANCE_BADGE_REGION),
+            "region": list(DISSONANCE_BADGE_REGION),
         }
     crop = frame[y : y + height, x : x + width]
     purple_pixels = int(
         cv2.countNonZero(
-            cv2.inRange(cv2.cvtColor(crop, cv2.COLOR_BGR2HSV), _PURPLE_LOWER, _PURPLE_UPPER)
+            cv2.inRange(
+                cv2.cvtColor(crop, cv2.COLOR_BGR2HSV),
+                _PURPLE_LOWER,
+                _PURPLE_UPPER,
+            )
         )
     )
-    return {
-        "observed": purple_pixels >= _MIN_BADGE_PURPLE_PIXELS,
+    observed = purple_pixels >= _MIN_BADGE_PURPLE_PIXELS
+    evidence: dict[str, Any] = {
+        "observed": observed,
+        "subtype": None,
+        "label": "Dissonance" if observed else None,
         "purple_pixels": purple_pixels,
         "minimum_purple_pixels": _MIN_BADGE_PURPLE_PIXELS,
-        "region": list(ATTACK_DISSONANCE_BADGE_REGION),
+        "region": list(DISSONANCE_BADGE_REGION),
+    }
+    if not observed:
+        return evidence
+
+    icon_crop = frame[
+        icon_y : icon_y + icon_height,
+        icon_x : icon_x + icon_width,
+    ]
+    icon_mask = cv2.inRange(
+        cv2.cvtColor(icon_crop, cv2.COLOR_BGR2HSV),
+        _BADGE_WHITE_LOWER,
+        _BADGE_WHITE_UPPER,
+    )
+    icon_contour = _largest_external_contour(icon_mask)
+    icon_area = (
+        float(cv2.contourArea(icon_contour))
+        if icon_contour is not None
+        else 0.0
+    )
+    evidence["icon_white_pixels"] = int(cv2.countNonZero(icon_mask))
+    evidence["icon_contour_area"] = round(icon_area, 3)
+    if icon_contour is None or icon_area < _MIN_BADGE_ICON_AREA:
+        return evidence
+
+    scores = {
+        subtype: float(
+            cv2.matchShapes(
+                icon_contour,
+                reference,
+                cv2.CONTOURS_MATCH_I1,
+                0.0,
+            )
+        )
+        for subtype, reference in _dissonance_icon_reference_contours().items()
+    }
+    evidence["icon_shape_scores"] = {
+        subtype: round(score, 6) for subtype, score in sorted(scores.items())
+    }
+    evidence["maximum_shape_distance"] = _MAX_BADGE_ICON_SHAPE_DISTANCE
+    evidence["minimum_shape_margin"] = _MIN_BADGE_ICON_SHAPE_MARGIN
+    if not scores:
+        return evidence
+    ranked = sorted(scores.items(), key=lambda item: item[1])
+    subtype, best_score = ranked[0]
+    margin = ranked[1][1] - best_score if len(ranked) > 1 else float("inf")
+    evidence["shape_margin"] = round(margin, 6)
+    if (
+        subtype in _SUPPORTED_DISSONANCE_SUBTYPES
+        and best_score <= _MAX_BADGE_ICON_SHAPE_DISTANCE
+        and margin >= _MIN_BADGE_ICON_SHAPE_MARGIN
+    ):
+        evidence["subtype"] = subtype
+        evidence["label"] = f"{subtype} Dissonance"
+    return evidence
+
+
+def detect_attack_dissonance_badge(frame: Optional[Frame]) -> dict[str, Any]:
+    """Return evidence only when the localized Dissonance icon is Attack."""
+
+    evidence = detect_dissonance_badge(frame)
+    return {
+        **evidence,
+        "observed": bool(
+            evidence.get("observed") and evidence.get("subtype") == "Attack"
+        ),
     }
 
 
@@ -169,21 +298,42 @@ class NoStrategyRunObserver:
         secondary = {str(value) for value in detection.get("secondary_states") or ()}
 
         if state == "RUNNING":
-            badge = detect_attack_dissonance_badge(frame)
+            badge = detect_dissonance_badge(frame)
             if badge["observed"]:
-                self._set(
-                    "run_identity",
-                    {
-                        "family": "Dissonance",
-                        "subtype": "Attack",
-                        "label": "Attack Dissonance",
-                        "signals": {"tier_badge": badge},
-                    },
-                    source="tier_attack_dissonance_badge",
-                    phase=phase,
-                    confidence="high",
+                subtype = str(badge.get("subtype") or "").strip() or None
+                label = str(badge.get("label") or "Dissonance")
+                source_subtype = (
+                    subtype.casefold().replace(" ", "_") if subtype else "unknown"
                 )
-                if not self.is_resolved("damage_slider"):
+                current_identity = self._fields["run_identity"].get("value")
+                current_subtype = (
+                    str(current_identity.get("subtype") or "").strip()
+                    if isinstance(current_identity, Mapping)
+                    else ""
+                )
+                subtype_conflicts = bool(
+                    subtype and current_subtype and subtype != current_subtype
+                )
+                if not subtype_conflicts and (
+                    subtype is not None or not current_subtype
+                ):
+                    self._set(
+                        "run_identity",
+                        {
+                            "family": "Dissonance",
+                            "subtype": subtype,
+                            "label": label,
+                            "signals": {"tier_badge": badge},
+                        },
+                        source=f"tier_{source_subtype}_dissonance_badge",
+                        phase=phase,
+                        confidence="high" if subtype else "medium",
+                    )
+                if (
+                    subtype == "Attack"
+                    and not subtype_conflicts
+                    and not self.is_resolved("damage_slider")
+                ):
                     self.record_unavailable(
                         "damage_slider",
                         reason="Attack menu disabled by Attack Dissonance",
@@ -200,13 +350,30 @@ class NoStrategyRunObserver:
                 "workshop_preset", frame, _WORKSHOP_SLOTS, phase
             )
             preset_label = str((preset or {}).get("label") or "").casefold()
-            if phase == "post_run_home" and preset_label.startswith("attack disso"):
+            dissonance_subtype = dissonance_subtype_from_preset_label(preset_label)
+            current_identity = self._fields["run_identity"].get("value")
+            current_family = (
+                str(current_identity.get("family") or "").strip().casefold()
+                if isinstance(current_identity, Mapping)
+                else ""
+            )
+            current_subtype = (
+                str(current_identity.get("subtype") or "").strip()
+                if isinstance(current_identity, Mapping)
+                else ""
+            )
+            if (
+                phase == "post_run_home"
+                and dissonance_subtype
+                and current_family in {"", "dissonance"}
+                and not current_subtype
+            ):
                 self._set(
                     "run_identity",
                     {
                         "family": "Dissonance",
-                        "subtype": "Attack",
-                        "label": "Attack Dissonance",
+                        "subtype": dissonance_subtype,
+                        "label": f"{dissonance_subtype} Dissonance",
                         "signals": {"post_run_workshop_preset": preset},
                     },
                     source="post_run_workshop_preset_selected_border",
@@ -603,7 +770,9 @@ class NoStrategyRunObserver:
 
 __all__ = [
     "ATTACK_DISSONANCE_BADGE_REGION",
+    "DISSONANCE_BADGE_REGION",
     "NoStrategyRunObserver",
     "OBSERVED_FIELDS",
     "detect_attack_dissonance_badge",
+    "detect_dissonance_badge",
 ]

@@ -22,7 +22,7 @@ from core.gc_preflight_navigation import (
     _wait_for,
 )
 from core.input import safe_tap, swipe_now, tap_if_visible
-from core.no_strategy_observer import detect_attack_dissonance_badge
+from core.no_strategy_observer import detect_dissonance_badge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_navigation import swipe_upgrade_menu
@@ -152,7 +152,11 @@ def run_no_strategy_in_battle_inventory(
             sleep_fn=sleep_fn,
         )
         observe(initial)
-        attack_dissonance = detect_attack_dissonance_badge(initial)["observed"]
+        dissonance_badge = detect_dissonance_badge(initial)
+        attack_dissonance = (
+            dissonance_badge.get("observed") is True
+            and dissonance_badge.get("subtype") == "Attack"
+        )
         unresolved = unresolved_inventory_fields()
         planned_fields = tuple(sorted(unresolved))
 

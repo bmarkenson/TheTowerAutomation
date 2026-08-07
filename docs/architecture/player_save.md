@@ -273,16 +273,23 @@ active-identity, or restoration ambiguity blocks all later input.
 The same accepted active-attachment snapshot projects complete normalized
 checks from the exact mapping's validation allowlist. No Strategy consumes
 those values as source-tagged observations, not as repair or action authority,
-and visits only fields that remain unresolved. Attack Dissonance's passive
-badge resolves its inaccessible Damage Slider without probing the disabled
-menu. Save-resolved Workshop, Free Upgrade-lock, Cards, and Perk configuration
-also remove their post-run Home detail traversal; finalization still requires
-verified Home. No raw save, private field, incomplete check, or unvalidated
-candidate value enters the observation. Home `RESUME_BATTLE`, interrupted
-History, `force_ui`, and `comparison_audit` retain their declared UI behavior.
-This path neither uses the unmapped Force Cloud Save control nor grants
-authority to passive polling, terminal record construction, Strategy,
-trackers, or any battle-lifecycle input.
+and visits only fields that remain unresolved. A validated Attack Dissonance
+sword resolves its inaccessible Damage Slider without probing the disabled
+menu; a Utility star does not. Save-resolved Workshop, Free Upgrade-lock,
+Cards, and Perk configuration also remove their post-run Home detail traversal;
+finalization still requires verified Home. No raw save, private field,
+incomplete check, or unvalidated candidate value enters the observation. Home
+`RESUME_BATTLE`, interrupted History, `force_ui`, and `comparison_audit` retain
+their declared UI behavior. This path neither uses the unmapped Force Cloud
+Save control nor grants authority to passive polling, terminal record
+construction, Strategy, trackers, or any battle-lifecycle input.
+
+The exact-version raw root contains `dissonanceActive` and
+`dissonanceSelected`, and completed History entries contain `dissonanceType`.
+Their selector/type enum is not in the validation allowlist, so the save may
+corroborate a UI calibration but does not currently publish run subtype or
+replace the badge. Promotion requires cross-channel evidence for each semantic
+value and the active-to-completed transition.
 
 Snapshot schema 2 contains the repository-local save-first runtime foundation;
 its runtime projection is schema 2. For the exact version-1073 mapping it

@@ -7,9 +7,11 @@ import numpy as np
 
 from core.no_strategy_observer import (
     ATTACK_DISSONANCE_BADGE_REGION,
+    DISSONANCE_BADGE_REGION,
     NoStrategyRunObserver,
     OBSERVED_FIELDS,
     detect_attack_dissonance_badge,
+    detect_dissonance_badge,
 )
 
 
@@ -17,33 +19,111 @@ def _clock():
     return datetime(2026, 7, 22, 16, 0, tzinfo=timezone.utc)
 
 
-def test_attack_dissonance_badge_is_localized_to_tier_badge_region():
+def _utility_dissonance_frame():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    badge = cv2.imread("test/fixtures/utility_dissonance_badge_20260806.png")
+    assert badge is not None
+    x, y, width, height = DISSONANCE_BADGE_REGION
+    frame[y : y + height, x : x + width] = badge
+    return frame
+
+
+def _synthetic_dissonance_frame(subtype: str):
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    purple = cv2.cvtColor(np.uint8([[[145, 220, 220]]]), cv2.COLOR_HSV2BGR)[0, 0]
+    x, y, width, height = DISSONANCE_BADGE_REGION
+    frame[y : y + height, x : x + width] = purple
+    reference = cv2.imread(
+        f"assets/match_templates/navigation/goto_{subtype}.png"
+    )
+    assert reference is not None
+    hsv = cv2.cvtColor(reference, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(
+        hsv,
+        np.array((0, 10, 80), dtype=np.uint8),
+        np.array((179, 255, 255), dtype=np.uint8),
+    )
+    contours, _hierarchy = cv2.findContours(
+        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    ref_x, ref_y, ref_width, ref_height = cv2.boundingRect(
+        max(contours, key=cv2.contourArea)
+    )
+    symbol = mask[ref_y : ref_y + ref_height, ref_x : ref_x + ref_width]
+    scale = min(26 / ref_width, 26 / ref_height)
+    symbol = cv2.resize(
+        symbol,
+        (max(1, round(ref_width * scale)), max(1, round(ref_height * scale))),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    symbol_y = 1007
+    symbol_x = 703 - symbol.shape[1] // 2
+    target = frame[
+        symbol_y : symbol_y + symbol.shape[0],
+        symbol_x : symbol_x + symbol.shape[1],
+    ]
+    target[symbol > 0] = (255, 255, 255)
+    return frame
+
+
+def test_utility_dissonance_badge_is_localized_and_subtyped_from_real_crop():
+    frame = _utility_dissonance_frame()
+
+    evidence = detect_dissonance_badge(frame)
+
+    assert evidence["observed"] is True
+    assert evidence["subtype"] == "Utility"
+    assert evidence["label"] == "Utility Dissonance"
+    assert evidence["purple_pixels"] == 1061
+    assert evidence["icon_shape_scores"]["Utility"] < 0.20
+    assert detect_attack_dissonance_badge(frame)["observed"] is False
+
+
+def test_attack_dissonance_requires_the_sword_icon_not_purple_alone():
+    frame = _synthetic_dissonance_frame("attack")
+
+    evidence = detect_dissonance_badge(frame)
+
+    assert evidence["observed"] is True
+    assert evidence["subtype"] == "Attack"
+    assert detect_attack_dissonance_badge(frame)["observed"] is True
+
+
+def test_unvalidated_defense_icon_keeps_only_dissonance_family_evidence():
+    evidence = detect_dissonance_badge(_synthetic_dissonance_frame("defense"))
+    scores = evidence["icon_shape_scores"]
+
+    assert evidence["observed"] is True
+    assert min(scores, key=scores.get) == "Defense"
+    assert evidence["subtype"] is None
+
+
+def test_purple_badge_without_a_recognized_icon_keeps_subtype_unknown():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     purple = cv2.cvtColor(np.uint8([[[145, 220, 220]]]), cv2.COLOR_HSV2BGR)[0, 0]
     x, y, width, height = ATTACK_DISSONANCE_BADGE_REGION
     frame[y + 10 : y + height - 10, x + 10 : x + width - 10] = purple
 
-    evidence = detect_attack_dissonance_badge(frame)
+    evidence = detect_dissonance_badge(frame)
 
     assert evidence["observed"] is True
-    assert evidence["purple_pixels"] == 3600
+    assert evidence["subtype"] is None
+    assert evidence["label"] == "Dissonance"
+    assert detect_attack_dissonance_badge(frame)["observed"] is False
 
 
 def test_purple_pixels_outside_badge_do_not_invent_dissonance():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     frame[400:800, 100:500] = (255, 0, 255)
 
-    evidence = detect_attack_dissonance_badge(frame)
+    evidence = detect_dissonance_badge(frame)
 
     assert evidence["observed"] is False
     assert evidence["purple_pixels"] == 0
 
 
-def test_no_strategy_observer_records_dissonance_as_observed_not_configured():
-    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
-    purple = cv2.cvtColor(np.uint8([[[145, 220, 220]]]), cv2.COLOR_HSV2BGR)[0, 0]
-    x, y, width, height = ATTACK_DISSONANCE_BADGE_REGION
-    frame[y : y + height, x : x + width] = purple
+def test_no_strategy_observer_records_utility_dissonance_without_attack_constraint():
+    frame = _utility_dissonance_frame()
     observer = NoStrategyRunObserver(clock=_clock)
 
     observer.observe(
@@ -54,16 +134,72 @@ def test_no_strategy_observer_records_dissonance_as_observed_not_configured():
 
     identity = snapshot["fields"]["run_identity"]
     assert identity["status"] == "observed"
-    assert identity["value"]["label"] == "Attack Dissonance"
-    assert identity["source"] == "tier_attack_dissonance_badge"
+    assert identity["value"]["subtype"] == "Utility"
+    assert identity["value"]["label"] == "Utility Dissonance"
+    assert identity["source"] == "tier_utility_dissonance_badge"
     assert identity["phase"] == "in_battle"
     assert snapshot["coverage"] == {
         "observed": 1,
         "evidence_captured": 0,
-        "unavailable": 1,
+        "unavailable": 0,
         "total": len(OBSERVED_FIELDS),
         "complete": False,
     }
+    damage = snapshot["fields"]["damage_slider"]
+    assert damage["status"] == "not_observed"
+
+
+def test_weaker_generic_badge_frame_does_not_erase_known_utility_subtype():
+    observer = NoStrategyRunObserver(clock=_clock)
+    detection = {
+        "state": "RUNNING",
+        "menu": "UTILITY_MENU",
+        "secondary_states": [],
+    }
+    observer.observe(_utility_dissonance_frame(), detection)
+    generic = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    purple = cv2.cvtColor(
+        np.uint8([[[145, 220, 220]]]), cv2.COLOR_HSV2BGR
+    )[0, 0]
+    x, y, width, height = DISSONANCE_BADGE_REGION
+    generic[y : y + height, x : x + width] = purple
+
+    observer.observe(generic, detection)
+
+    identity = observer.snapshot()["fields"]["run_identity"]
+    assert identity["value"]["label"] == "Utility Dissonance"
+    assert identity["source"] == "tier_utility_dissonance_badge"
+
+
+def test_conflicting_later_badge_shape_cannot_replace_known_utility_subtype():
+    observer = NoStrategyRunObserver(clock=_clock)
+    detection = {
+        "state": "RUNNING",
+        "menu": "UTILITY_MENU",
+        "secondary_states": [],
+    }
+    observer.observe(_utility_dissonance_frame(), detection)
+
+    observer.observe(_synthetic_dissonance_frame("attack"), detection)
+
+    snapshot = observer.snapshot()
+    identity = snapshot["fields"]["run_identity"]
+    assert identity["value"]["label"] == "Utility Dissonance"
+    assert identity["source"] == "tier_utility_dissonance_badge"
+    assert snapshot["fields"]["damage_slider"]["status"] == "not_observed"
+
+
+def test_no_strategy_observer_applies_attack_only_damage_constraint():
+    observer = NoStrategyRunObserver(clock=_clock)
+
+    observer.observe(
+        _synthetic_dissonance_frame("attack"),
+        {"state": "RUNNING", "menu": "UTILITY_MENU", "secondary_states": []},
+    )
+    snapshot = observer.snapshot()
+
+    identity = snapshot["fields"]["run_identity"]
+    assert identity["value"]["label"] == "Attack Dissonance"
     damage = snapshot["fields"]["damage_slider"]
     assert damage["status"] == "unavailable"
     assert damage["source"] == "attack_dissonance_menu_constraint"
@@ -267,6 +403,93 @@ def test_post_run_attack_dissonance_preset_restores_run_identity():
     assert identity["value"]["label"] == "Attack Dissonance"
     assert identity["source"] == "post_run_workshop_preset_selected_border"
     assert identity["phase"] == "post_run_home"
+
+
+def test_post_run_utility_dissonance_preset_restores_run_identity():
+    observer = NoStrategyRunObserver(clock=_clock)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    selected = SimpleNamespace(selected=True, green_pixels=2489, cyan_pixels=290)
+    unselected = SimpleNamespace(selected=False, green_pixels=0, cyan_pixels=0)
+
+    with (
+        patch(
+            "core.no_strategy_observer.measure_preset_slot_selection",
+            side_effect=[selected, unselected, unselected, unselected, unselected],
+        ),
+        patch(
+            "core.no_strategy_observer.ocr_text_and_conf",
+            return_value=("Util Disso", 96.0),
+        ),
+    ):
+        observer.observe(frame, {"state": "WORKSHOP"}, phase="post_run_home")
+
+    identity = observer.snapshot()["fields"]["run_identity"]
+    assert identity["status"] == "observed"
+    assert identity["value"]["subtype"] == "Utility"
+    assert identity["value"]["label"] == "Utility Dissonance"
+
+
+def test_post_run_utility_preset_refines_generic_dissonance_badge():
+    observer = NoStrategyRunObserver(clock=_clock)
+    generic = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    purple = cv2.cvtColor(
+        np.uint8([[[145, 220, 220]]]), cv2.COLOR_HSV2BGR
+    )[0, 0]
+    x, y, width, height = DISSONANCE_BADGE_REGION
+    generic[y : y + height, x : x + width] = purple
+    observer.observe(
+        generic,
+        {"state": "RUNNING", "menu": "UTILITY_MENU", "secondary_states": []},
+    )
+    selected = SimpleNamespace(selected=True, green_pixels=2489, cyan_pixels=290)
+    unselected = SimpleNamespace(selected=False, green_pixels=0, cyan_pixels=0)
+
+    with (
+        patch(
+            "core.no_strategy_observer.measure_preset_slot_selection",
+            side_effect=[selected, unselected, unselected, unselected, unselected],
+        ),
+        patch(
+            "core.no_strategy_observer.ocr_text_and_conf",
+            return_value=("Util Disso", 96.0),
+        ),
+    ):
+        observer.observe(
+            np.zeros((1920, 1080, 3), dtype=np.uint8),
+            {"state": "WORKSHOP"},
+            phase="post_run_home",
+        )
+
+    identity = observer.snapshot()["fields"]["run_identity"]
+    assert identity["value"]["label"] == "Utility Dissonance"
+    assert identity["source"] == "post_run_workshop_preset_selected_border"
+
+
+def test_post_run_preset_does_not_replace_stronger_live_badge_identity():
+    observer = NoStrategyRunObserver(clock=_clock)
+    observer.observe(
+        _utility_dissonance_frame(),
+        {"state": "RUNNING", "menu": "UTILITY_MENU", "secondary_states": []},
+    )
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    selected = SimpleNamespace(selected=True, green_pixels=2489, cyan_pixels=290)
+    unselected = SimpleNamespace(selected=False, green_pixels=0, cyan_pixels=0)
+
+    with (
+        patch(
+            "core.no_strategy_observer.measure_preset_slot_selection",
+            side_effect=[selected, unselected, unselected, unselected, unselected],
+        ),
+        patch(
+            "core.no_strategy_observer.ocr_text_and_conf",
+            return_value=("Attack Disso", 96.0),
+        ),
+    ):
+        observer.observe(frame, {"state": "WORKSHOP"}, phase="post_run_home")
+
+    identity = observer.snapshot()["fields"]["run_identity"]
+    assert identity["value"]["label"] == "Utility Dissonance"
+    assert identity["source"] == "tier_utility_dissonance_badge"
 
 
 def test_unknown_post_run_field_is_rejected():

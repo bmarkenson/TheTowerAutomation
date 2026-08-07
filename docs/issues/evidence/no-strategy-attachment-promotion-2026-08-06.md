@@ -51,9 +51,14 @@ reported:
 
 The Module UI visit was therefore the documented fail-closed fallback for an
 incomplete save check, not repetition of a save-resolved value. Mapping the new
-primary Module index remains active work. This replacement did not reproduce
-the separate paused-Home manual-start transition required to close
-`ISSUE-2026-027`.
+primary Module index remains active work. The `visited only ... modules` result
+does not establish that every other UI field was truly unavailable: the badge
+was later established as Utility Dissonance, and the then-current purple-only
+detector had incorrectly suppressed the accessible Damage Slider read. That
+separate subtype repair is tracked by
+[`ISSUE-2026-030`](../open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+This replacement did not reproduce the separate paused-Home manual-start
+transition required to close `ISSUE-2026-027`.
 
 ## Read-only extraction
 
