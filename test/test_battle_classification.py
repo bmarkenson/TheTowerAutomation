@@ -99,6 +99,62 @@ def test_observed_attack_dissonance_identity_classifies_no_strategy_run():
     assert "observed_identity:attack_dissonance" in result["signals"]
 
 
+def test_observed_utility_dissonance_identity_preserves_subtype_label():
+    observed = {
+        "fields": {
+            "run_identity": {
+                "status": "observed",
+                "value": {
+                    "family": "Dissonance",
+                    "subtype": "Utility",
+                    "label": "Utility Dissonance",
+                },
+            }
+        }
+    }
+
+    result = analyze_battle_type(
+        strategy_name="none",
+        run_configuration={},
+        terminal_state="GAME_OVER",
+        observed_tier=19,
+        observed_run_configuration=observed,
+    )
+
+    assert result["type"] == "dissonance"
+    assert result["label"] == "Utility Dissonance"
+    assert result["confidence"] == "high"
+    assert "observed_identity:utility_dissonance" in result["signals"]
+    assert "Utility Dissonance modifier" in result["reason"]
+
+
+def test_localized_dissonance_family_without_subtype_still_classifies_run():
+    observed = {
+        "fields": {
+            "run_identity": {
+                "status": "observed",
+                "value": {
+                    "family": "Dissonance",
+                    "subtype": None,
+                    "label": "Dissonance",
+                },
+            }
+        }
+    }
+
+    result = analyze_battle_type(
+        strategy_name="none",
+        run_configuration={},
+        terminal_state="GAME_OVER",
+        observed_tier=19,
+        observed_run_configuration=observed,
+    )
+
+    assert result["type"] == "dissonance"
+    assert result["label"] == "Dissonance"
+    assert "observed_identity:unknown_dissonance" in result["signals"]
+
+
 def test_post_run_attack_preset_recovers_identity_after_mid_run_reload():
     observed = {
         "fields": {
@@ -128,6 +184,35 @@ def test_post_run_attack_preset_recovers_identity_after_mid_run_reload():
     assert result["confidence"] == "high"
     assert "post_run_workshop_preset:attack_dissonance" in result["signals"]
     assert "immediately captured Home Workshop preset" in result["reason"]
+
+
+def test_post_run_utility_preset_recovers_identity_after_mid_run_reload():
+    observed = {
+        "fields": {
+            "run_identity": {"status": "not_observed", "value": None},
+            "workshop_preset": {
+                "status": "observed",
+                "phase": "post_run_home",
+                "value": {
+                    "slot": 3,
+                    "label": "Util Disso",
+                    "label_ocr_confidence": 96.0,
+                },
+            },
+        }
+    }
+
+    result = analyze_battle_type(
+        strategy_name="none",
+        run_configuration={},
+        terminal_state="GAME_OVER",
+        observed_tier=19,
+        observed_run_configuration=observed,
+    )
+
+    assert result["type"] == "dissonance"
+    assert result["label"] == "Utility Dissonance"
+    assert "post_run_workshop_preset:utility_dissonance" in result["signals"]
 
 
 def test_historical_record_derives_observed_tier_from_terminal_stats():

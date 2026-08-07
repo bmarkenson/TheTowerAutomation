@@ -808,6 +808,37 @@ def test_post_run_observations_refresh_previously_unknown_classification():
     assert record["battle_type_analysis"]["label"] == "Attack Dissonance"
 
 
+def test_utility_badge_observation_refreshes_record_with_utility_label():
+    record = {
+        "battle_id": "Battle20260806T190000-0700",
+        "strategy": "none",
+        "battle_type": "unknown",
+        "battle_type_analysis": {"type": "unknown", "confidence": "low"},
+        "run_configuration": {},
+        "runtime": {"terminal_state": "GAME_OVER", "observed_tier": 19},
+    }
+    observed = {
+        "fields": {
+            "run_identity": {
+                "status": "observed",
+                "value": {
+                    "family": "Dissonance",
+                    "subtype": "Utility",
+                    "label": "Utility Dissonance",
+                },
+            }
+        }
+    }
+
+    attach_observed_run_configuration(record, observed)
+
+    assert record["battle_type"] == "dissonance"
+    assert record["battle_type_analysis"]["label"] == "Utility Dissonance"
+    assert "observed_identity:utility_dissonance" in (
+        record["battle_type_analysis"]["signals"]
+    )
+
+
 def test_tower_number_parser_preserves_case_sensitive_magnitudes():
     assert parse_tower_number("2q") == Decimal("2e15")
     assert parse_tower_number("2Q") == Decimal("2e18")

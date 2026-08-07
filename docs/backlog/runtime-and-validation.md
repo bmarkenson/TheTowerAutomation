@@ -364,11 +364,21 @@ stages:
   the manual start, require passive `RUNNING`, then Resume. Confirm one guarded
   save records or validates the last completed battle without Battle History
   UI, releases No Strategy without a retry loop, and opens only genuinely
-  unresolved configuration sections. Require zero input while Paused and no
-  Attack-menu probe under Dissonance. The generic replacement attachment and
-  terminal-lease replay were confirmed during promotion of `ab84a3c`; track
-  only
+  unresolved configuration sections. Require zero input while Paused; an
+  Attack sword must not probe its disabled menu, while a Utility star must
+  leave the accessible Attack Damage Slider in the inventory plan. The generic
+  replacement attachment and terminal-lease replay were confirmed during
+  promotion of `ab84a3c`; track only
   [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle).
+- [ ] Promote and live-confirm the Utility Dissonance subtype repair. On a
+  complete `RUNNING` frame, require the localized purple badge plus white star
+  to record `Utility Dissonance`, preserve generic Dissonance if icon shape is
+  unresolved, and keep Damage Slider available for the guarded Attack read.
+  At natural Game Over, require `battle_type=dissonance`, label
+  `Utility Dissonance`, and retain the badge signal. Separately correlate the
+  active save selector with completed `dissonanceType` before either raw field
+  is allowlisted; track
+  [ISSUE-2026-030](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - [ ] Close an owned exclusive-validation `cleanup` receipt when the same
   runtime has already proved that its validation battle reached Game Over and
   later observes `RUNNING` before verified Home cleanup. Fail closed, release
