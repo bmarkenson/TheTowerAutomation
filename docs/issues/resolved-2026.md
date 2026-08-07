@@ -42,8 +42,20 @@ and actionable work lives in
 - **Validation:** The complete isolated checkpoint passed compilation, state
   definitions, clickmap integrity with zero errors and the 44 established
   orphan candidates, and all 1,686 tests in 319.51 seconds.
-- **Production confirmation:** Pending exact-candidate promotion and the
-  authorized Tier 19 Farm retry.
+- **Production confirmation:** Exact integration candidate `a8483f4` passed a
+  second complete 1,686-test checkpoint in 321.90 seconds and was promoted on
+  2026-08-07 behind rollback tag
+  `production-before-20260807T071511Z-538d4e2`. PID `178537` stopped cleanly;
+  replacement PID `292872` acquired the held `localhost:5555` lock and
+  acknowledged `PAUSED` / `NEXT_BATTLE` / `farm_t19` / `x2.0` at fresh Tier
+  19 Home. The original Auto Pick request was resolved with its scoped
+  `retry`, never a waiver. Live repair crossed the former failure boundary,
+  moving `Free Upgrade Chance` from estimated rank 13 to 8, `Inner Land Mines`
+  from 18 to 16, and `Damage` from 19 to 17 before authoritative read-back
+  matched all 17 Farm ranks. The remaining Home and running checks passed,
+  Battle started from verified `NEW_BATTLE`, and the runtime entered steady
+  Farm state at wave 200 with x2.0; later runtime and direct-screen evidence
+  showed waves 240 and 290 at x2.0 with no active Strategy Action Gate.
 - **Fixed by:** `6837c18`.
 
 ### Ban Perks verification treated Available rows as selected bans
