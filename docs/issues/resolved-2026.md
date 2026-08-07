@@ -8,6 +8,62 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Running attachment used Battle History and repeated save-backed configuration UI
+
+**Stable ID:** `ISSUE-2026-028` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-06, a replacement No Strategy runtime attached to a
+  running Attack Dissonance battle without a persisted History baseline.
+- **Symptom:** The runtime opened Battle History instead of using
+  `playerInfo.dat`, then revisited every configuration screen even when the
+  exact-version save already supplied complete normalized values.
+- **Cause:** The paused Home route changed its source to `RUNNING` but retained
+  baseline mode, and save selection required a comparable baseline. The
+  guarded serializer also dropped normalized profile checks at the History
+  boundary, while No Strategy traversed every section unconditionally.
+- **Resolution:** `cde691b` gives a missing running baseline an attachment mode
+  and makes every `save_first` running attachment save-only. The same guarded
+  snapshot supplies complete allowlisted observations, and the inventory visits
+  only fields that remain unresolved. Dissonance can resolve inaccessible
+  Damage Slider evidence without probing Attack.
+- **Regression:** Focused save, continuity, No Strategy, lifecycle, and lease
+  coverage passed 392 tests. The complete candidate checkpoint passed
+  compilation, state and clickmap validation, and all 1,676 tests.
+- **Production confirmation:** `ab84a3c` was promoted on 2026-08-06. The
+  replacement performed one guarded Android-Home serialization, restored the
+  battle, confirmed continuity from the save tail, and opened no Battle History
+  UI. Eleven configuration fields came from the save; only Modules used UI.
+  The privacy-safe inspector proved that fallback was genuine:
+  `modules.status=unmapped`, `complete=false`, reason
+  `unsupported primary module infoIndex`. The exact action rows and projection
+  are retained in
+  [promotion evidence](evidence/no-strategy-attachment-promotion-2026-08-06.md).
+- **Fixed by:** `cde691b`; deployed by `ab84a3c`.
+
+### Terminal development lease was replayed as an abnormal runtime change
+
+**Stable ID:** `ISSUE-2026-029` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-06, a replacement runtime emitted
+  `Lease ended abnormally ... the production runtime/session changed` for an
+  interactive-development lease whose durable directive was already terminal
+  with disposition `released`.
+- **Cause:** Runtime binding was checked before terminal directive state, so
+  historical released state was re-terminalized through the abnormal path.
+- **Resolution:** `cde691b` recognizes terminal state first, preserves the
+  original acknowledgement and disposition, removes any stale local hold, and
+  emits no duplicate warning or result. A genuinely active lease that loses
+  its runtime still follows the abnormal termination path.
+- **Regression:** A released lease under a replacement runtime proves no
+  persistence rewrite, abnormal warning, or duplicate result; the complete
+  candidate checkpoint passed all 1,676 tests.
+- **Production confirmation:** Production replacements at 18:12 and 18:20 PDT
+  retained terminal lease `65557dd436e44ea7a4132258fb7b8bb6` as released.
+  Neither emitted an abnormal lease warning, duplicate result, or terminal
+  rewrite. The bounded evidence is retained with the
+  [attachment promotion record](evidence/no-strategy-attachment-promotion-2026-08-06.md).
+- **Fixed by:** `cde691b`; deployed by `ab84a3c`.
+
 ### Process replacement discarded detailed session-preflight report evidence
 
 **Stable ID:** `ISSUE-2026-025` · **Lifecycle:** `resolved`
