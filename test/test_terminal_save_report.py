@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
+import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -12,9 +14,12 @@ from core.player_save_acquisition import (
     PlayerSaveTargetBinding,
 )
 from core.terminal_save_report import (
+    terminal_history_transition_from_acquisition,
     terminal_save_report_complete,
     terminal_save_report_from_acquisition,
+    validate_terminal_history_handoff,
 )
+from core.player_save_history import history_metadata_from_acquisition
 
 
 MAPPING_ID = "data-9-game-1073"
@@ -97,7 +102,7 @@ def _snapshot(
         ),
     )
     return SimpleNamespace(
-        captured_at="2026-08-06T11:00:00+00:00",
+        captured_at="2026-08-06T11:00:00.001000+00:00",
         mapping_id=MAPPING_ID,
         save_revision=48000,
         source_sha256="d" * 64,
@@ -234,3 +239,78 @@ def test_terminal_save_report_requires_semantic_entry_and_matching_kind():
 
     assert unavailable["reason"] == "unmapped_killed_by_id:42"
     assert mismatched["reason"] == "terminal_history_kind_mismatch"
+
+
+def test_structural_handoff_survives_unknown_semantic_killed_by_without_reprojection():
+    acquisition = _acquisition(
+        _snapshot(count=30, semantic_status="unavailable")
+    )
+    baseline = _metadata(fingerprint="a" * 64, count=29)
+
+    with patch(
+        "core.terminal_save_report.history_metadata_from_acquisition",
+        wraps=history_metadata_from_acquisition,
+    ) as structural_projector:
+        transition = terminal_history_transition_from_acquisition(
+            acquisition,
+            terminal_state="GAME_OVER",
+            run_binding=_binding(),
+            activity_scope=_scope(baseline),
+        )
+        report = terminal_save_report_from_acquisition(
+            acquisition,
+            terminal_state="GAME_OVER",
+            run_binding=_binding(),
+            activity_scope=_scope(baseline),
+            history_transition=transition,
+        )
+
+    structural_projector.assert_called_once_with(acquisition)
+    assert transition["complete"] is True
+    assert transition["history_transition"]["status"] == "append"
+    assert report["reason"] == "unmapped_killed_by_id:42"
+    assert report["structural_history"]["status"] == "complete"
+    assert report["history_transition"] == transition["history_transition"]
+    retained = json.dumps(transition["handoff"], sort_keys=True)
+    assert "private-target" not in retained
+    assert "runtime-1" not in retained
+    assert SCOPE_ID not in retained
+
+
+def test_terminal_handoff_rejects_process_and_target_generation_changes():
+    acquisition = _acquisition(_snapshot(count=30))
+    transition = terminal_history_transition_from_acquisition(
+        acquisition,
+        terminal_state="GAME_OVER",
+        run_binding=_binding(),
+        activity_scope=_scope(
+            _metadata(fingerprint="a" * 64, count=29)
+        ),
+    )
+    handoff = transition["handoff"]
+
+    accepted, reason = validate_terminal_history_handoff(
+        handoff,
+        runtime_session_id="runtime-1",
+        target_binding=acquisition.binding,
+        destination_reason="new_battle_preflight",
+    )
+    restarted, restarted_reason = validate_terminal_history_handoff(
+        handoff,
+        runtime_session_id="runtime-2",
+        target_binding=acquisition.binding,
+        destination_reason="new_battle_preflight",
+    )
+    retargeted, retargeted_reason = validate_terminal_history_handoff(
+        handoff,
+        runtime_session_id="runtime-1",
+        target_binding=PlayerSaveTargetBinding("private-target", 4),
+        destination_reason="new_battle_preflight",
+    )
+
+    assert accepted is not None
+    assert reason == "terminal_history_handoff_accepted"
+    assert restarted is None
+    assert restarted_reason == "terminal_history_handoff_process_changed"
+    assert retargeted is None
+    assert retargeted_reason == "terminal_history_handoff_target_changed"

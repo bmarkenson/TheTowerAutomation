@@ -544,7 +544,8 @@ class RunBoundaryTests(unittest.TestCase):
 
         self.assertEqual(strategy.run_starts, 2)
         start_activity_scope.assert_called_once_with(
-            reason="new_battle_preflight"
+            reason="new_battle_preflight",
+            carry_terminal_history_handoff=True,
         )
 
     def test_unknown_home_control_does_not_invent_a_run_boundary(self):
@@ -2341,6 +2342,7 @@ class GcFarmProfileTests(unittest.TestCase):
         app._strategy_boundary_confirmed = False
         app._handle_daily_gem_if_due = MagicMock(return_value=False)
         app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        app._accept_pending_terminal_history_handoff = MagicMock()
         _bind_terminal_context(app)
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
@@ -2348,6 +2350,7 @@ class GcFarmProfileTests(unittest.TestCase):
             patch("core.app.handle_game_over") as game_over,
             patch("core.app.start_retry_activity_scope") as retry_scope,
         ):
+            retry_scope.return_value = {"run_id": "retry-scope"}
             app._handle_primary_states("GAME_OVER", set(), frame)
 
             game_over.call_args.kwargs["after_retry_started"]()
@@ -2358,6 +2361,7 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertEqual(reported["free_upgrade_locks"], boundary_evidence)
         self.assertNotIn("observed_run_configuration", battle_context)
         retry_scope.assert_called_once_with()
+        app._accept_pending_terminal_history_handoff.assert_called_once_with()
         manager.on_game_over.assert_called_once_with()
 
     def test_home_repair_game_over_skips_surrendered_battle_capture(self):

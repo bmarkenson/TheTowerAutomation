@@ -37,7 +37,7 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       restoration ambiguity. The supported development checkpoint passed all
       1,712 tests in 322.50 seconds with state-definition and clickmap
       validation clean (the established 44 orphan candidates, zero errors).
-    - [ ] **Lifecycle — `feature/player-save-boundary-handoff`.** Project the
+    - [x] **Lifecycle — `feature/player-save-boundary-handoff`.** Project the
       structural terminal transition once and persist a normalized one-use
       handoff for Game Over → Home, Game Over → direct Retry, and Tournament
       Results → Home. Reuse it without another read or History UI; when a
@@ -46,6 +46,16 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       History. Keep semantic-report failure independent from structural
       continuity, eliminate the Tournament handler's second conditions read,
       and preserve every current blocking/fail-open failure class.
+      Implemented with atomic activity-scope publication/consumption and exact
+      process, target-generation, source-scope, mapping, transition, and timing
+      validation. Game Over → Home, direct Retry, and Tournament Results → Home
+      reuse the terminal tail with zero reads/navigation; invalid handoffs keep
+      the established fallback. Structural success survives semantic report
+      failure, baseline-only `save_first` Home uses the guarded forced owner,
+      and Tournament Results receives explicit conditions without reacquiring.
+      The supported development checkpoint passed all 1,724 tests in 377.86
+      seconds with state-definition and clickmap validation clean (the
+      established 44 orphan candidates, zero errors).
     - [ ] **Temporal loadout — `feature/player-save-temporal-authority`.** Add
       temporal metadata and fact-specific merge rules to attachment
       projections. Treat Workshop preset, equipped Guardians, selected Bot

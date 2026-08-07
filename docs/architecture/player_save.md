@@ -533,8 +533,9 @@ receipts never edit or promote their own authority manifest.
 
 This section defines the staged contract for the active acquisition-
 consolidation backlog. The acquisition foundation is implemented on
-`feature/player-save-acquisition-foundation`; terminal handoff, temporal merge,
-and Perk-monitor integration remain owned by their later stacked phases.
+`feature/player-save-acquisition-foundation`, and the lifecycle handoff is
+implemented on `feature/player-save-boundary-handoff`. Temporal merge and
+Perk-monitor integration remain owned by their later stacked phases.
 
 `StablePlayerSaveAcquirer` owns one in-flight exact-target runtime
 read under the ADB target-operation lock: owned target/generation checks before
@@ -581,6 +582,26 @@ bundle only after target, source, context, and control revalidation. Terminal
 capture issues the typed natural-boundary evidence and fans one bundle out to
 profile progression, completed-report, and Tournament-condition projectors;
 all existing consumer-specific UI fallback and blocking classes remain intact.
+
+The terminal History projector now proves the structural append or capped
+rollover once, independently of completed-report semantics. A successful
+projection is retained as a bounded, redacted, one-use activity-scope handoff
+for Game Over → Home, Game Over → direct Retry, and Tournament Results → Home.
+The destination validates the same process, exact target generation, source
+scope, mapping, transition, and natural-boundary timing before adopting the
+tail as its baseline. Unknown `killedBy` or another semantic report failure
+therefore preserves More Stats fallback while leaving structural continuity
+usable. A process restart, target handoff, scope mismatch, malformed payload,
+or failed atomic update rejects the handoff and restores the established
+acquisition or Battle History UI route.
+
+At Home, a valid handoff satisfies only structural History continuity. Current
+configuration still requires a new forced serialization when requirements are
+present. If `save_first` has no handoff and the configuration requirement set
+is empty, the same guarded Home owner now acquires one baseline-only forced
+bundle instead of opening Battle History first. Tournament Results always
+passes either complete or explicitly unavailable conditions from its terminal
+bundle; its handler performs no second player-save read.
 
 ### Temporal classes and merge rules
 

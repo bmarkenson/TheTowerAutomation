@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from core.adb_target_session import AdbTargetSnapshot
 from core.app import App
@@ -128,6 +128,15 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
         patch("core.app.decode_player_save_bytes", return_value=decoded),
         patch("core.app.get_activity_scope", return_value=scope),
         patch(
+            "core.app.terminal_history_transition_from_acquisition",
+            return_value={
+                "schema_version": 1,
+                "status": "unavailable",
+                "complete": False,
+                "reason": "test_transition_unavailable",
+            },
+        ) as transition_from_acquisition,
+        patch(
             "core.app.terminal_save_report_from_acquisition",
             return_value=report,
         ) as report_from_acquisition,
@@ -140,6 +149,7 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     assert result["profile_progression"]["status"] == "complete"
     assert result["terminal_save_report"] is report
     pull.assert_called_once()
+    transition_from_acquisition.assert_called_once()
     report_from_acquisition.assert_called_once()
     call = report_from_acquisition.call_args
     assert call.args[0].snapshot is decoded
@@ -148,6 +158,12 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
         "terminal_state": "GAME_OVER",
         "run_binding": binding,
         "activity_scope": scope,
+        "history_transition": {
+            "schema_version": 1,
+            "status": "unavailable",
+            "complete": False,
+            "reason": "test_transition_unavailable",
+        },
     }
 
 
@@ -156,6 +172,9 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
     app = App.__new__(App)
     app._adb_target_session = _StableSession(target, target)
     app._player_save_runtime_session_id = "runtime-1"
+    app._activity_continuity = SimpleNamespace(
+        publish_terminal_history_handoff=Mock()
+    )
     decoded = SimpleNamespace(
         profile_progression=_normalized_progression(),
         mapping_id="data-9-game-1073",
@@ -181,11 +200,22 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
         "activity_scope_run_id": "scope-1",
     }
     scope = {"schema_version": 1, "run_id": "scope-1"}
+    transition = {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+        "reason": "",
+        "handoff": {"schema_version": 1, "status": "ready"},
+    }
 
     with (
         patch("core.app.pull_player_save_bytes", return_value=b"save") as pull,
         patch("core.app.decode_player_save_bytes", return_value=decoded) as decode,
         patch("core.app.get_activity_scope", return_value=scope),
+        patch(
+            "core.app.terminal_history_transition_from_acquisition",
+            return_value=transition,
+        ),
         patch(
             "core.app.terminal_save_report_from_acquisition",
             return_value=report,
@@ -208,4 +238,7 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
     conditions_bundle = conditions_projector.call_args.args[0]
     assert report_bundle is conditions_bundle
     assert report_bundle.snapshot is decoded
-    assert result["battle_conditions"] is conditions
+    assert result["battle_conditions"] == conditions
+    app._activity_continuity.publish_terminal_history_handoff.assert_called_once_with(
+        transition
+    )

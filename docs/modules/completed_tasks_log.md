@@ -39,6 +39,34 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 player-save terminal boundary handoff
+
+- `feature/player-save-boundary-handoff` splits the terminal structural History
+  transition from semantic completed-report projection. One natural terminal
+  bundle now proves the append or capped rollover once and stages only a
+  bounded, redacted, one-use payload in the activity-scope ledger; decoded and
+  raw save data never persist there.
+- Game Over → Home, Game Over → direct Retry, and Tournament Results → Home
+  validate process session, exact target generation, source/destination scope,
+  mapping, transition, and natural-boundary timing before adopting that tail as
+  `latest_completed_battle`. Acceptance performs no second save read or Battle
+  History navigation. Process, target, scope, shape, transition, or persistence
+  failure preserves the existing forced-save, passive-poll, or UI fallback.
+- An unknown `killedBy` or other semantic projection failure still opens the
+  applicable More Stats route but no longer discards structural continuity.
+  A `save_first` Home with neither handoff nor configuration requirements uses
+  the guarded baseline-only forced serialization path. Tournament Results
+  receives complete or explicitly unavailable conditions from the original
+  bundle and no longer performs its prior duplicate read.
+- Focused regression covers all three routes, one-use atomicity, redaction,
+  process/target/scope rejection, structural/semantic independence, malformed
+  provenance, baseline-only Home acquisition, and retained consumer fallback.
+  The supported development checkpoint compiled the repository, passed state-
+  definition validation and clickmap integrity with zero errors and the
+  established 44 orphan candidates, and passed all 1,724 tests in 377.86
+  seconds. No live/device validation was needed for this repository-only
+  lifecycle consolidation.
+
 ### 2026-08-07 typed player-save acquisition foundation
 
 - `feature/player-save-acquisition-foundation` adds the immutable typed

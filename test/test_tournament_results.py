@@ -242,19 +242,20 @@ def test_tournament_handler_uses_only_visible_detail_controls_and_never_ok():
             "handlers.tournament_result_handler.persist_tournament_result",
             return_value=(Path("result.json"), Path("result.md")),
         ),
-        patch(
-            "handlers.tournament_result_handler.capture_current_tournament_conditions",
-            return_value=derive_tournament_conditions(
-                283,
-                5,
-                data_version=9,
-                game_version=1073,
-            ),
-        ),
         patch("handlers.tournament_result_handler._retain_evidence"),
         patch("handlers.tournament_result_handler.time.sleep"),
     ):
-        record = handle_tournament_results(summary)
+        record = handle_tournament_results(
+            summary,
+            battle_context={
+                "battle_conditions": derive_tournament_conditions(
+                    283,
+                    5,
+                    data_version=9,
+                    game_version=1073,
+                )
+            },
+        )
 
     assert record is not None
     assert [item.args[0] for item in tap.call_args_list] == [
@@ -308,9 +309,6 @@ def test_tournament_handler_uses_bound_save_without_opening_more_stats():
             return_value=(Path("result.json"), Path("result.md")),
         ),
         patch("handlers.tournament_result_handler.tap_if_visible") as tap,
-        patch(
-            "handlers.tournament_result_handler.capture_current_tournament_conditions"
-        ) as capture_conditions,
     ):
         result = handle_tournament_results(
             summary,
@@ -326,7 +324,6 @@ def test_tournament_handler_uses_bound_save_without_opening_more_stats():
     assert build.call_args.kwargs["detailed_stats"] is detailed
     assert build.call_args.kwargs["detailed_reason"] == "terminal_player_save"
     tap.assert_not_called()
-    capture_conditions.assert_not_called()
 
 
 def test_round_stats_copy_control_is_matched_not_static():
@@ -361,16 +358,15 @@ def test_recent_result_is_enriched_without_reopening_detail_controls():
             return_value=existing,
         ),
         patch(
-            "handlers.tournament_result_handler.capture_current_tournament_conditions",
-            return_value=conditions,
-        ),
-        patch(
             "handlers.tournament_result_handler.persist_tournament_result",
             return_value=(Path("result.json"), Path("result.md")),
         ) as persist,
         patch("handlers.tournament_result_handler.tap_if_visible") as tap,
     ):
-        result = handle_tournament_results(summary)
+        result = handle_tournament_results(
+            summary,
+            battle_context={"battle_conditions": conditions},
+        )
 
     assert result is not None
     assert result["battle_conditions"]["tournament_number"] == 283

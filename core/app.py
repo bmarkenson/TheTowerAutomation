@@ -79,12 +79,14 @@ from core.player_save_history import (
 )
 from core.profile_progression import unavailable_profile_progression
 from core.terminal_save_report import (
+    terminal_history_transition_from_acquisition,
     terminal_save_report_from_acquisition,
     unavailable_terminal_save_report,
 )
 from core.tournament_conditions import (
     tournament_conditions_complete,
     tournament_conditions_from_acquisition,
+    unavailable_tournament_conditions,
 )
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
@@ -626,7 +628,7 @@ class App:
         terminal = str(terminal_state or "UNKNOWN").upper()
 
         def unavailable(reason: str, *, mapping_id: Optional[str] = None):
-            return {
+            result = {
                 "profile_progression": unavailable_profile_progression(
                     reason,
                     captured_at=captured_at.isoformat(),
@@ -639,6 +641,11 @@ class App:
                     mapping_id=mapping_id,
                 ),
             }
+            if terminal == "TOURNAMENT_RESULTS":
+                result["battle_conditions"] = unavailable_tournament_conditions(
+                    reason
+                )
+            return result
 
         session = getattr(self, "_adb_target_session", None)
         if session is None:
@@ -719,7 +726,7 @@ class App:
             normalized_progression["source"] = source
 
         try:
-            terminal_report = terminal_save_report_from_acquisition(
+            history_transition = terminal_history_transition_from_acquisition(
                 acquisition,
                 terminal_state=terminal,
                 run_binding=run_binding,
@@ -727,8 +734,33 @@ class App:
             )
         except Exception as exc:
             log(
-                "[TERMINAL_SAVE] Battle History attachment failed without "
-                f"blocking the More Stats fallback: {exc}",
+                "[TERMINAL_SAVE] Structural Battle History projection failed "
+                f"without blocking the terminal fallback: {exc}",
+                "WARN",
+            )
+            history_transition = {
+                "schema_version": 1,
+                "status": "unavailable",
+                "complete": False,
+                "reason": "terminal_history_attachment_failed",
+            }
+        activity_continuity = getattr(self, "_activity_continuity", None)
+        if activity_continuity is not None:
+            activity_continuity.publish_terminal_history_handoff(
+                history_transition
+            )
+        try:
+            terminal_report = terminal_save_report_from_acquisition(
+                acquisition,
+                terminal_state=terminal,
+                run_binding=run_binding,
+                activity_scope=scope,
+                history_transition=history_transition,
+            )
+        except Exception as exc:
+            log(
+                "[TERMINAL_SAVE] Semantic battle report projection failed "
+                f"without blocking the More Stats fallback: {exc}",
                 "WARN",
             )
             terminal_report = unavailable_terminal_save_report(
@@ -746,9 +778,25 @@ class App:
             try:
                 conditions = tournament_conditions_from_acquisition(acquisition)
             except Exception:
-                conditions = None
-            if tournament_conditions_complete(conditions):
-                result["battle_conditions"] = conditions
+                conditions = unavailable_tournament_conditions(
+                    "condition_projection_failed",
+                    source={"acquisition": acquisition.redacted_provenance()},
+                )
+            explicit_unavailable = bool(
+                isinstance(conditions, Mapping)
+                and conditions.get("status") == "unavailable"
+                and conditions.get("complete") is False
+                and isinstance(conditions.get("ui_fallback"), Mapping)
+            )
+            if not (
+                tournament_conditions_complete(conditions)
+                or explicit_unavailable
+            ):
+                conditions = unavailable_tournament_conditions(
+                    "condition_projection_unavailable",
+                    source={"acquisition": acquisition.redacted_provenance()},
+                )
+            result["battle_conditions"] = dict(conditions)
         log(
             "[TERMINAL_SAVE] Captured terminal account and battle projections "
             f"revision={getattr(snapshot, 'save_revision', None)} "
@@ -757,6 +805,45 @@ class App:
             "DEBUG",
         )
         return result
+
+    def _accept_pending_terminal_history_handoff(self):
+        """Consume a carried terminal tail for this exact process and target."""
+
+        activity_continuity = getattr(self, "_activity_continuity", None)
+        if activity_continuity is None:
+            return None
+        scope = get_activity_scope()
+        if not isinstance(scope, Mapping) or not isinstance(
+            scope.get("pending_terminal_history_handoff"), Mapping
+        ):
+            return None
+        scope_id = str(scope.get("run_id") or "").strip()
+        runtime_session_id = str(
+            getattr(self, "_player_save_runtime_session_id", "") or ""
+        ).strip()
+        session = getattr(self, "_adb_target_session", None)
+        try:
+            target_snapshot = session.snapshot() if session is not None else None
+        except Exception:
+            target_snapshot = None
+        outcome = activity_continuity.accept_pending_terminal_history_handoff(
+            expected_scope_id=scope_id,
+            runtime_session_id=runtime_session_id,
+            target_snapshot=target_snapshot,
+        )
+        self._terminal_history_handoff_outcome = outcome
+        self._terminal_history_handoff_scope_id = scope_id
+        return outcome
+
+    @staticmethod
+    def _activity_scope_has_history_baseline(scope: Any) -> bool:
+        if not isinstance(scope, Mapping):
+            return False
+        metadata = scope.get("latest_completed_battle")
+        return bool(
+            isinstance(metadata, Mapping)
+            and str(metadata.get("fingerprint") or "").strip()
+        )
 
     def _capture_terminal_profile_progression(self) -> dict[str, Any]:
         """Compatibility wrapper for callers that need only global progression."""
@@ -1669,10 +1756,6 @@ class App:
         if not target.owned:
             raise RuntimeError("player-save preflight target is not owned")
         strategy = self._mission_mgr.strategy
-        if strategy is None:
-            raise RuntimeError(
-                "player-save preflight requires a selected strategy"
-            )
         scope = get_activity_scope()
         scope_id = str(scope.get("run_id") or "") if scope else ""
         if not scope_id:
@@ -1686,9 +1769,13 @@ class App:
             runtime_session_id=self._player_save_runtime_session_id,
             preflight_session_id=preflight_id,
             activity_scope_id=scope_id,
-            strategy_name=str(strategy.name or ""),
-            configuration_fingerprint=str(
-                strategy.session_preflight_fingerprint() or ""
+            strategy_name=(
+                str(strategy.name or "") if strategy is not None else "none"
+            ),
+            configuration_fingerprint=(
+                str(strategy.session_preflight_fingerprint() or "")
+                if strategy is not None
+                else "history-baseline-only"
             ),
             target=target.target,
             target_generation=target.generation,
@@ -3428,6 +3515,7 @@ class App:
                 # authority. No overlay handler, recovery tap, mission action,
                 # or blind tapper may run before this gate clears.
                 battle_started = self._mission_mgr.maybe_run_start(detection)
+                self._accept_pending_terminal_history_handoff()
                 self._cancel_pending_tournament_validation_after_boundary(
                     detection
                 )
@@ -3483,6 +3571,39 @@ class App:
                         if current_scope
                         else ""
                     )
+                    home_state = str(
+                        detection.get("state") or ""
+                    ).upper() in {"HOME", "HOME_SCREEN"}
+                    home_new_battle = bool(
+                        home_state
+                        and HomeBattleControl.parse(
+                            detection.get(
+                                "home_battle_control",
+                                "UNKNOWN",
+                            )
+                        )
+                        is HomeBattleControl.NEW_BATTLE
+                    )
+                    home_requirements = (
+                        self._mission_mgr.no_battle_setup_requirements()
+                    )
+                    current_preflight_ready = bool(
+                        getattr(
+                            self,
+                            "_player_save_preflight_activity_scope_id",
+                            None,
+                        )
+                        == current_scope_id
+                        and getattr(
+                            getattr(
+                                self,
+                                "_player_save_preflight_result",
+                                None,
+                            ),
+                            "ready",
+                            False,
+                        )
+                    )
                     save_history_baseline_blocked = bool(
                         getattr(
                             getattr(
@@ -3500,47 +3621,34 @@ class App:
                         )
                         == current_scope_id
                     )
-                    home_save_preflight_pending = bool(
-                        str(detection.get("state") or "").upper()
-                        in {"HOME", "HOME_SCREEN"}
-                        and HomeBattleControl.parse(
-                            detection.get(
-                                "home_battle_control",
-                                "UNKNOWN",
+                    forced_home_bundle_needed = bool(
+                        (
+                            player_save_mode
+                            in {"save_first", "comparison_audit"}
+                            and bool(home_requirements)
+                        )
+                        or (
+                            player_save_mode == "save_first"
+                            and not self._activity_scope_has_history_baseline(
+                                current_scope
                             )
                         )
-                        is HomeBattleControl.NEW_BATTLE
-                        and player_save_mode
-                        in {"save_first", "comparison_audit"}
+                    )
+                    home_save_preflight_pending = bool(
+                        home_new_battle
                         and getattr(
                             self,
                             "_player_save_preflight_coordinator",
                             None,
                         )
                         is not None
-                        and bool(
-                            self._mission_mgr.no_battle_setup_requirements()
-                        )
                         and (
-                            getattr(
-                                self,
-                                "_player_save_preflight_activity_scope_id",
-                                None,
+                            (
+                                forced_home_bundle_needed
+                                and not current_preflight_ready
                             )
-                            != current_scope_id
-                            or not bool(
-                                getattr(
-                                    getattr(
-                                        self,
-                                        "_player_save_preflight_result",
-                                        None,
-                                    ),
-                                    "ready",
-                                    False,
-                                )
-                            )
+                            or save_history_baseline_blocked
                         )
-                        or save_history_baseline_blocked
                     )
                     initialization_blocks_history = (
                         self._mission_mgr.run_initialization_pending()
@@ -5149,11 +5257,6 @@ class App:
                 battle_context=self._terminal_battle_context(
                     "TOURNAMENT_RESULTS"
                 ),
-                player_save_acquirer=getattr(
-                    self,
-                    "_player_save_acquirer",
-                    None,
-                ),
             )
             if record is not None:
                 self._tournament_results_captured = True
@@ -5234,7 +5337,9 @@ class App:
                 self._observe_strategy_request()
 
             def mark_retry_started() -> None:
-                start_retry_activity_scope()
+                retry_scope = start_retry_activity_scope()
+                if isinstance(retry_scope, Mapping):
+                    self._accept_pending_terminal_history_handoff()
 
             if repair_in_progress:
                 log(
@@ -5300,6 +5405,93 @@ class App:
             )
             home_control = detect_home_battle_control(img).control
             requirements = self._mission_mgr.no_battle_setup_requirements()
+            scope = get_activity_scope()
+            scope_id = str(scope.get("run_id") or "") if scope else ""
+            preflight_mode = str(
+                self._runtime_policy().get(
+                    "player_save_preflight",
+                    "save_first",
+                )
+            )
+            current_preflight_ready = bool(
+                getattr(
+                    self,
+                    "_player_save_preflight_activity_scope_id",
+                    None,
+                )
+                == scope_id
+                and getattr(
+                    getattr(
+                        self,
+                        "_player_save_preflight_result",
+                        None,
+                    ),
+                    "ready",
+                    False,
+                )
+            )
+            baseline_only_preflight = bool(
+                home_control is HomeBattleControl.NEW_BATTLE
+                and not requirements
+                and preflight_mode == "save_first"
+                and getattr(
+                    self,
+                    "_player_save_preflight_coordinator",
+                    None,
+                )
+                is not None
+                and not self._activity_scope_has_history_baseline(scope)
+                and not current_preflight_ready
+            )
+            if baseline_only_preflight:
+                prior_history_baseline = getattr(
+                    self,
+                    "_player_save_history_baseline_outcome",
+                    None,
+                )
+                if (
+                    bool(getattr(prior_history_baseline, "blocked", False))
+                    and getattr(
+                        self,
+                        "_player_save_preflight_activity_scope_id",
+                        None,
+                    )
+                    == scope_id
+                ):
+                    log(
+                        "[BATTLE_CONTINUITY] Save-first Home baseline remains "
+                        "blocked for this activity scope; no repeated save, "
+                        "History UI, or battle input is authorized",
+                        "INFO",
+                    )
+                    return
+                save_preflight = self._acquire_player_save_home_preflight(
+                    {},
+                    screenshot=img,
+                )
+                if save_preflight is not None and not save_preflight.ready:
+                    return
+                history_baseline = getattr(
+                    self,
+                    "_player_save_history_baseline_outcome",
+                    None,
+                )
+                if bool(getattr(history_baseline, "blocked", False)):
+                    log(
+                        "[BATTLE_CONTINUITY] Baseline-only Home serialization "
+                        "lost its activity/source binding; no History UI or "
+                        "battle input is authorized",
+                        "INFO",
+                    )
+                    return
+                if bool(getattr(history_baseline, "ui_required", False)):
+                    log(
+                        "[BATTLE_CONTINUITY] Baseline-only Home serialization "
+                        "could not project History; yielding the next action "
+                        "boundary to the guarded Battle History UI fallback",
+                        "INFO",
+                    )
+                    return
             if (
                 (self._auto_start_enabled or home_preflight_enabled)
                 and home_control is HomeBattleControl.NEW_BATTLE
@@ -5309,8 +5501,6 @@ class App:
                     or exclusive_request_pending
                 )
             ):
-                scope = get_activity_scope()
-                scope_id = str(scope.get("run_id") or "") if scope else ""
                 prior_history_baseline = getattr(
                     self,
                     "_player_save_history_baseline_outcome",

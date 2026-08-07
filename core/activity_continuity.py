@@ -12,6 +12,7 @@ from core.battle_history import (
     read_latest_completed_battle,
 )
 from core.battle_lifecycle import HomeBattleControl
+from core.player_save_acquisition import PlayerSaveTargetBinding
 from core.player_save_history import (
     BATTLE_HISTORY_UI_MAPPING_ID,
     BATTLE_HISTORY_UI_SOURCE,
@@ -22,6 +23,10 @@ from core.player_save_history import (
     history_sources_compatible,
     valid_history_tail_advance,
 )
+from core.terminal_save_report import (
+    terminal_history_handoff_matches_source_scope,
+    validate_terminal_history_handoff,
+)
 from utils.logger import (
     capture_activity_boundary,
     get_activity_scope,
@@ -29,7 +34,9 @@ from utils.logger import (
     log_action_intent,
     log_result,
     record_activity_scope_battle_history,
+    record_activity_scope_terminal_history_handoff,
     start_activity_scope,
+    take_activity_scope_terminal_history_handoff,
 )
 
 
@@ -57,6 +64,13 @@ class HomeHistoryBaselineOutcome:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class TerminalHistoryHandoffOutcome:
+    accepted: bool = False
+    reason: str = ""
+    scope_id: Optional[str] = None
+
+
 class ActivityContinuityCoordinator:
     """Run one exclusive continuity check for each activity-scope boundary."""
 
@@ -82,6 +96,148 @@ class ActivityContinuityCoordinator:
         self._boundary: Optional[Mapping[str, object]] = None
         self._action_logged = False
         self._retry_at = 0.0
+
+    def publish_terminal_history_handoff(
+        self,
+        history_transition: Mapping[str, Any],
+    ) -> bool:
+        """Persist a structurally proven terminal tail on its exact source scope."""
+
+        if not isinstance(history_transition, Mapping):
+            return False
+        handoff = history_transition.get("handoff")
+        binding = history_transition.get("run_binding")
+        if (
+            history_transition.get("status") != "complete"
+            or history_transition.get("complete") is not True
+            or not isinstance(handoff, Mapping)
+            or not isinstance(binding, Mapping)
+        ):
+            return False
+        run_id = str(binding.get("activity_scope_run_id") or "").strip()
+        scope = get_activity_scope()
+        if (
+            not run_id
+            or scope is None
+            or str(scope.get("run_id") or "") != run_id
+            or not terminal_history_handoff_matches_source_scope(
+                handoff, run_id
+            )
+        ):
+            return False
+        try:
+            updated = record_activity_scope_terminal_history_handoff(
+                run_id=run_id,
+                handoff=handoff,
+            )
+        except ValueError:
+            updated = None
+        if updated is None:
+            log(
+                "[BATTLE_CONTINUITY] Structurally proven terminal History "
+                "handoff could not be persisted; the next boundary will use "
+                "its established acquisition or UI fallback",
+                "WARN",
+            )
+            return False
+        log(
+            "[BATTLE_CONTINUITY] Structurally proven terminal History tail "
+            f"staged for one-use handoff scope_id={run_id}",
+            "INFO",
+        )
+        return True
+
+    def accept_pending_terminal_history_handoff(
+        self,
+        *,
+        expected_scope_id: str,
+        runtime_session_id: str,
+        target_snapshot: Any,
+    ) -> TerminalHistoryHandoffOutcome:
+        """Consume a redacted terminal tail without another save or UI read."""
+
+        scope = get_activity_scope()
+        run_id = str(expected_scope_id or "").strip()
+        if (
+            scope is None
+            or not run_id
+            or str(scope.get("run_id") or "") != run_id
+            or not isinstance(
+                scope.get("pending_terminal_history_handoff"), Mapping
+            )
+        ):
+            return TerminalHistoryHandoffOutcome(
+                reason="terminal_history_handoff_unavailable",
+                scope_id=run_id or None,
+            )
+        pending = take_activity_scope_terminal_history_handoff(run_id=run_id)
+        if not isinstance(pending, Mapping):
+            return self._rejected_terminal_handoff(
+                run_id, "terminal_history_handoff_consume_failed"
+            )
+        if (
+            pending.get("schema_version") != 1
+            or str(pending.get("destination_run_id") or "") != run_id
+        ):
+            return self._rejected_terminal_handoff(
+                run_id, "terminal_history_handoff_scope_changed"
+            )
+        target_binding = PlayerSaveTargetBinding.from_snapshot(target_snapshot)
+        metadata, reason = validate_terminal_history_handoff(
+            pending.get("handoff"),
+            runtime_session_id=runtime_session_id,
+            target_binding=target_binding,
+            destination_reason=str(scope.get("reason") or ""),
+        )
+        normalized = _normalize_history_metadata(metadata)
+        if normalized is None:
+            return self._rejected_terminal_handoff(
+                run_id,
+                reason
+                if metadata is None
+                else "terminal_history_handoff_identity_invalid",
+            )
+        updated = record_activity_scope_battle_history(
+            run_id=run_id,
+            latest_completed_battle=normalized,
+        )
+        if updated is None:
+            return self._rejected_terminal_handoff(
+                run_id, "terminal_history_handoff_write_failed"
+            )
+        self._checked_scope_id = run_id
+        self._reset_pending()
+        log_result(
+            "Battle History baseline accepted from the terminal boundary handoff",
+            detail=(
+                "[BATTLE_CONTINUITY] disposition=terminal_handoff_accepted "
+                f"terminal={pending.get('handoff', {}).get('terminal_state')} "
+                f"latest={_metadata_detail(normalized)} scope_id={run_id} "
+                "save_reads=0 history_navigation=0"
+            ),
+        )
+        return TerminalHistoryHandoffOutcome(
+            accepted=True,
+            reason=reason,
+            scope_id=run_id,
+        )
+
+    @staticmethod
+    def _rejected_terminal_handoff(
+        run_id: str,
+        reason: str,
+    ) -> TerminalHistoryHandoffOutcome:
+        log(
+            "[BATTLE_CONTINUITY] Terminal History handoff rejected; the "
+            f"established boundary fallback remains authoritative reason={reason} "
+            f"scope_id={run_id}",
+            "INFO",
+        )
+        return TerminalHistoryHandoffOutcome(
+            accepted=False,
+            reason=reason,
+            scope_id=run_id,
+        )
 
     def accept_home_save_baseline(
         self,
@@ -1058,4 +1214,5 @@ __all__ = [
     "ActivityContinuityCoordinator",
     "ActivityContinuityOutcome",
     "HomeHistoryBaselineOutcome",
+    "TerminalHistoryHandoffOutcome",
 ]

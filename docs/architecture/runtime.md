@@ -256,19 +256,19 @@ in [`player_save.md`](player_save.md).
 
 #### Planned single-boundary acquisition fan-out
 
-The acquisition foundation has replaced the runtime's separately composed
-save reads with the typed acquisition bundle defined in
+The acquisition foundation and lifecycle handoff have replaced the runtime's
+separately composed save reads with the typed acquisition bundle defined in
 [`player_save.md`](player_save.md#planned-acquisition-provenance-and-temporal-authority).
 `StablePlayerSaveAcquirer` now owns locking, exact target/generation checks,
 quiet stable transport, decode/disposal, timing, and redacted failure
 provenance for forced serialization, History, terminal, passive-audit, and
-standalone Tournament callers. One terminal bundle already feeds progression,
-the candidate report, and Tournament conditions. The lifecycle fan-out below
-is still planned: its structurally validated History tail is not yet handed to
-the new Home or Retry activity scope, and Home acquisition is still coupled to
-a nonempty configuration-requirement set. A plain Home baseline can therefore
-open Battle History even though the same process just decoded the completed
-battle.
+standalone Tournament callers. One terminal bundle feeds progression, one
+structural History transition, the candidate semantic report, and Tournament
+conditions. The valid transition is atomically staged and consumed once by the
+new Home or Retry activity scope, and baseline-only `save_first` Home
+acquisition no longer depends on a nonempty configuration-requirement set.
+Temporal actual-loadout merge and the shared Perk monitor remain assigned to
+their later stacked phases.
 
 The target flow is one acquisition per coherent boundary and any number of
 independent projections:
@@ -304,6 +304,14 @@ unavailable conditions from the terminal projection instead of performing a
 second save read. A restarted Perk monitor consumes the ordinary passive,
 already-forced attachment, and natural terminal bundles; it does not turn the
 optional audit collector into an acquisition service.
+
+`ActivityContinuityCoordinator` owns handoff publication and validation;
+`utils.logger` owns only bounded JSON detachment and exact-run atomic mutation.
+Home and direct Retry consume the pending payload before ordinary continuity
+dispatch. Acceptance records `latest_completed_battle`, clears any old Retry
+poll marker, and marks that scope checked, so it causes zero save reads and zero
+Battle History navigation. Rejection consumes the one-use candidate and leaves
+the existing forced-save, passive Retry poll, or guarded UI fallback unchanged.
 
 #### Save-first active-round and terminal evidence
 

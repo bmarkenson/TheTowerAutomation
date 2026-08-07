@@ -7,6 +7,7 @@ import numpy as np
 
 from automation.strategies import get_strategy
 from core.app import HOME_SETUP_MAX_ATTEMPTS, App
+from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_no_battle_setup import (
@@ -1978,6 +1979,26 @@ def test_app_feeds_history_from_the_same_home_preflight_result():
     assert app._player_save_preflight_activity_scope_id == "scope-1"
 
 
+def test_baseline_only_preflight_context_does_not_require_a_strategy():
+    app = App.__new__(App)
+    app._adb_target_session = SimpleNamespace(
+        snapshot=lambda: AdbTargetSnapshot("private-target", 3, True)
+    )
+    app._mission_mgr = SimpleNamespace(strategy=None)
+    app._player_save_preflight_session_id = "preflight-1"
+    app._player_save_runtime_session_id = "runtime-1"
+
+    with patch(
+        "core.app.get_activity_scope",
+        return_value={"run_id": "scope-1"},
+    ):
+        context = app._current_player_save_preflight_context()
+
+    assert context.strategy_name == "none"
+    assert context.configuration_fingerprint == "history-baseline-only"
+    assert context.activity_scope_id == "scope-1"
+
+
 def test_app_does_not_repeat_save_or_navigate_when_history_scope_is_blocked():
     frame = object()
     manager = Mock()
@@ -2016,6 +2037,76 @@ def test_app_does_not_repeat_save_or_navigate_when_history_scope_is_blocked():
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
     coordinator.acquire.assert_not_called()
+    run_setup.assert_not_called()
+    handle_home.assert_not_called()
+
+
+def test_save_first_home_without_requirements_forces_one_baseline_bundle():
+    frame = object()
+    manager = Mock()
+    manager.no_battle_setup_requirements.return_value = {}
+    manager.strategy.runtime_policy.return_value = {
+        "player_save_preflight": "save_first",
+        "handlers": [],
+    }
+    app = App.__new__(App)
+    app._auto_start_enabled = False
+    app._mission_mgr = manager
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._supervisor = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    app._player_save_preflight_activity_scope_id = None
+    app._player_save_preflight_result = None
+    app._player_save_history_baseline_outcome = None
+    result = SimpleNamespace(
+        ready=True,
+        history_tail={"disposition": "save_match"},
+        history_scope_id="scope-1",
+        decisions={},
+    )
+    coordinator = Mock()
+    coordinator.acquire.return_value = result
+    coordinator.carry = None
+    app._player_save_preflight_coordinator = coordinator
+    continuity = Mock()
+    continuity.accept_home_save_baseline.return_value = SimpleNamespace(
+        accepted=True,
+        blocked=False,
+        ui_required=False,
+    )
+    app._activity_continuity = continuity
+
+    with (
+        patch(
+            "core.app.get_activity_scope",
+            return_value={"run_id": "scope-1"},
+        ),
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch.object(app, "_handler_enabled", return_value=False),
+        patch.object(app, "_exclusive_validation_definition", return_value=None),
+        patch.object(app, "_report_home_policy"),
+        patch("core.app.run_gc_no_battle_setup") as run_setup,
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    coordinator.acquire.assert_called_once_with(
+        {},
+        mode="save_first",
+        initial_frame=frame,
+    )
+    continuity.accept_home_save_baseline.assert_called_once()
     run_setup.assert_not_called()
     handle_home.assert_not_called()
 
