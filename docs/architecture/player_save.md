@@ -288,8 +288,13 @@ The exact-version raw root contains `dissonanceActive` and
 `dissonanceSelected`, and completed History entries contain `dissonanceType`.
 Their selector/type enum is not in the validation allowlist, so the save may
 corroborate a UI calibration but does not currently publish run subtype or
-replace the badge. Promotion requires cross-channel evidence for each semantic
-value and the active-to-completed transition.
+replace the badge. A completed production confirmation on 2026-08-07 provides
+one cross-channel calibration for Utility Dissonance: the white-star UI
+observation coincided with active `dissonanceSelected=3`, and the same battle's
+completed History entry contained `dissonanceType=3`. Value `3` and every
+other selector/type value remain outside runtime authority until a separate
+mapping implementation and review promotes them; no semantics are inferred
+for the other values.
 
 Snapshot schema 2 contains the repository-local save-first runtime foundation;
 its runtime projection is schema 2. For the exact version-1073 mapping it

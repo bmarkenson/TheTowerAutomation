@@ -4,6 +4,13 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-07 Utility Dissonance production confirmation
+
+[`utility-dissonance-confirmation-2026-08-07.md`](utility-dissonance-confirmation-2026-08-07.md)
+preserves the exact runtime boundary, badge-shape metrics, guarded Damage
+Slider inventory, terminal battle record, and privacy-safe active-to-completed
+save correlation used to close `ISSUE-2026-032`.
+
 ## 2026-08-06 No Strategy attachment promotion
 
 [`no-strategy-attachment-promotion-2026-08-06.md`](no-strategy-attachment-promotion-2026-08-06.md)

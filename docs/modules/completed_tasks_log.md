@@ -39,7 +39,7 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
-### 2026-08-07 Utility Dissonance subtype deployment
+### 2026-08-07 Utility Dissonance subtype deployment and confirmation
 
 - `17e4e0c` separates localized purple Dissonance-family evidence from the
   validated white icon: star records Utility, sword records Attack, and an
@@ -58,9 +58,17 @@ canonical document linked by an entry for current behavior.
   normal future `auto_validate` policy. The screen had moved to Event/Bots
   without automation input during the maintenance window, so promotion did
   not tap or Resume that unowned navigation and never used Surrender.
-- The implementation and deployment are complete. Natural Utility-run and
-  Game Over confirmation remains active as
-  [`ISSUE-2026-032`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+- Production PID `360077` then confirmed the repaired boundary on an
+  operator-started Tier 19 Utility run. Two complete running frames classified
+  the white-star badge as `Utility Dissonance`; the guarded No Strategy
+  inventory visited only the accessible Attack Damage Slider. After the
+  operator's Surrender, `Battle20260807T011927-0700` recorded Game Over as
+  Dissonance with high-confidence label `Utility Dissonance`, Tier 19, wave
+  410, and Killed By `Surrender`. Byte-identical post-run save reads correlated
+  active selector `3` with completed type `3` while leaving the raw enum outside
+  runtime authority. `ISSUE-2026-032` is resolved; the exact metrics and
+  projections are retained in the
+  [confirmation evidence](../issues/evidence/utility-dissonance-confirmation-2026-08-07.md).
 
 ### 2026-08-06 confirmed scroll-edge and Auto Pick traversal repair
 
@@ -124,7 +132,7 @@ canonical document linked by an entry for current behavior.
   by the purple-only detector manually started from paused Home and advanced
   normally while Activity Continuity retried its obsolete Home-only Battle
   History source. The badge was later established as Utility Dissonance in
-  [`ISSUE-2026-032`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [`ISSUE-2026-032`](../issues/resolved-2026.md#utility-dissonance-star-was-labeled-as-attack).
   The safe retry loop sent no input, but its exclusive hold prevented the No
   Strategy inventory from starting.
 - `8cf5548` makes a pending Home continuity route follow a passively observed
@@ -163,7 +171,7 @@ canonical document linked by an entry for current behavior.
   fields. The then-current purple-only detector labeled the badge Attack and
   therefore resolved Damage Slider without probing the Attack menu; the later
   Utility subtype correction is tracked in
-  [`ISSUE-2026-032`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [`ISSUE-2026-032`](../issues/resolved-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - Terminal development directives are now recognized before former-runtime
   binding checks. Their original release result remains the sole outcome after
   restart; genuinely active leases that lose their runtime retain the abnormal
@@ -184,7 +192,7 @@ canonical document linked by an entry for current behavior.
   absence of a Damage Slider visit was later separated from this confirmation:
   the purple-only detector had mislabeled Utility Dissonance and suppressed an
   accessible read, as tracked in
-  [`ISSUE-2026-032`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [`ISSUE-2026-032`](../issues/resolved-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - The same replacement preserved the previously released terminal lease
   without an abnormal warning, duplicate result, or directive rewrite.
   `ISSUE-2026-028` and `ISSUE-2026-029` are resolved with exact retained
