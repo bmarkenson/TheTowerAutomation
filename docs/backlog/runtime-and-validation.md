@@ -397,6 +397,65 @@ stages:
   - After a configurable static grace period, warn before offering or performing
     a guarded return to the running battle.
   - Make the grace period interruptible and extendable through CLI/GUI controls.
+
+- [ ] **Better Control Model:** redesign the operator controls around
+  independent process lifecycle, automation action authority, observed
+  game/battle state, Strategy scope, and terminal policy. Do not use one
+  **Paused/Running** or **Next Battle** choice to imply more than one of those
+  dimensions.
+  - Begin with a command/transition matrix covering stopped and live services;
+    acknowledged automation paused and enabled; Home New Battle and Resume
+    Battle, active battle, Game Over, and Tournament Results; and current,
+    pending, and startup-default Strategies. Make illegal, unavailable, pending,
+    and no-op requests visibly distinct. Preserve directive/acknowledgement and
+    owner/freshness checks rather than deriving authority from GUI state.
+  - Separate **Start automation** and **Stop automation** from the battle
+    workflow. Provide explicit **Start battle** intent only at a verified new-run
+    Home boundary and explicit **Attach to battle** intent only for a verified
+    active or resumable battle. Starting a new battle runs its normal gates;
+    attachment preserves the existing battle identity and validates from fresh
+    save evidence before opening UI, with UI fallback only for unresolved
+    allowlisted fields. Reject a mismatched intent without silently choosing the
+    other workflow.
+  - Present post-terminal behavior separately as **When this battle ends** (or
+    equally unambiguous final wording): continue automatically, wait at the
+    terminal boundary, or return/stay Home. The existing `NEXT_BATTLE`, `WAIT`,
+    and `HOME` values may remain a compatible runtime representation, but an
+    immediate battle command must not be labelled as that future policy.
+  - Rename or qualify the current control labels so automation **Paused** means
+    zero automated device input while observation may continue, and automation
+    **Enabled** means the runtime may exercise its guarded action authority; it
+    does not assert that the game itself is in `RUNNING`. Home does not
+    implicitly require either state. Document which passive observations,
+    explicit operator-approved maintenance requests, and automatic actions are
+    allowed in every state.
+  - Add a first-class **Take manual control** / **Return control** workflow.
+    Taking control must obtain and acknowledge an indefinite automation Pause
+    before inviting manual game changes. Returning control must refresh
+    observation, reconcile the same/new battle boundary and relevant
+    configuration, and resume only by explicit operator intent. Unexpected
+    manual activity while automation is enabled must yield through the existing
+    manual-activity safety outcome rather than competing for input.
+  - Audit every path that claims to read a *new* or *current* save. Such a path
+    must invoke the approved serialization/refresh operation, bind stable reads
+    to the exact target and battle/session evidence, and report when Pause or
+    another authority boundary prevents refresh. A cached save may be consumed
+    only under an explicit age/identity contract and must never be described as
+    newly requested. Add regressions for attachment and return-from-manual-control
+    so save validation precedes any configuration UI fallback.
+  - Offer a save-backed **Capture current setup as...** authoring workflow so
+    manual loadout changes can become a named managed preset or custom Strategy
+    draft without hand-editing Strategy source. Inventory and extend the existing
+    preset/local editor owners instead of creating a parallel loadout schema;
+    retain unresolved fields explicitly, show the captured-versus-base diff,
+    validate through normal Linux authority, and never select, activate, or
+    apply the result merely because it was saved.
+  - Version any changed API model with a named capability and update native,
+    browser, CLI, architecture, and operator guidance together. Follow the
+    [action-log contract](../action_log_contract.md) for each resulting input
+    workflow. Cover the transition matrix with server and client regressions,
+    then run a Windows usability smoke; live game validation must use natural
+    safe boundaries and must never Surrender an operator-owned battle.
 - [ ] Finish the remaining native Windows GUI control-surface work described in
   [`../architecture/control_surface.md`](../architecture/control_surface.md).
   - [ ] Run the disposable-catalog Windows runtime smoke for Base and Strategy
