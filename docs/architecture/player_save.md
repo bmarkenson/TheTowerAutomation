@@ -564,7 +564,7 @@ reviewed classification and count/hash update. Unknown versions, shapes, IDs,
 values, ambiguity, or conflict continue through the UI. Runtime evidence and
 receipts never edit or promote their own authority manifest.
 
-## Planned acquisition provenance and temporal authority
+## Acquisition provenance and temporal authority
 
 This section defines the staged contract for the acquisition-consolidation
 stack. The acquisition foundation is implemented on

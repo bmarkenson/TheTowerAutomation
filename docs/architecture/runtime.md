@@ -254,11 +254,11 @@ raw exception text are not copied into preflight evidence. The component
 contract and version-update procedure are
 in [`player_save.md`](player_save.md).
 
-#### Planned single-boundary acquisition fan-out
+#### Single-boundary acquisition fan-out
 
 The completed acquisition stack has replaced the runtime's separately
 composed save reads with the typed acquisition bundle defined in
-[`player_save.md`](player_save.md#planned-acquisition-provenance-and-temporal-authority).
+[`player_save.md`](player_save.md#acquisition-provenance-and-temporal-authority).
 `StablePlayerSaveAcquirer` now owns locking, exact target/generation checks,
 quiet stable transport, decode/disposal, timing, and redacted failure
 provenance for forced serialization, History, terminal, passive-audit, and

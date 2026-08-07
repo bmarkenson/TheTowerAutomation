@@ -15,8 +15,8 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for unknown versions, shape changes,
   stale data, mismatches, and unmapped settings.
-  - [ ] Execute the
-    [typed acquisition and temporal-authority contract](../architecture/player_save.md#planned-acquisition-provenance-and-temporal-authority)
+  - [ ] Complete implementation and ordinary-boundary validation of the
+    [typed acquisition and temporal-authority contract](../architecture/player_save.md#acquisition-provenance-and-temporal-authority)
     through one outcome coordinator and sequential stacked feature branches.
     Preserve committed Perk prototype `d1c3dec` as a reference until the shared
     foundation is stable; do not merge its private integration path.
@@ -101,9 +101,58 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       The checkpoint passed all 1,774 tests in 330.07 seconds with
       state-definition and clickmap validation clean (the established 44
       orphan candidates, zero errors).
-    - [ ] After deployment, confirm on ordinary boundaries that valid Game
-      Over → Home and direct Retry transitions perform zero Battle History
-      navigation and no duplicate save read; do not create a special battle.
+    - [x] Integrate and deploy the preserved linear stack. Merge commit
+      `5e46e0594ba17953b85af3e274d763b9d7cddf77` retains current `develop`
+      parent `df184642181c51646f4ad4379aa6bc7ef772d92f` and stack-tip parent
+      `33a325b7b3792181b24f8d569135f5f12ac74c82`; the aggregate integration
+      passed the supported checkpoint with
+      all 1,777 tests in 327.69 seconds, state-definition validation, and
+      clickmap validation with zero errors and the established 44 orphan
+      candidates. That exact merge commit was fast-forwarded to production at
+      2026-08-07 13:14 PDT after both affected services stopped, behind the
+      annotated rollback tag
+      `production-before-20260807T201303Z-df18464`. Replacement control-
+      surface PID `1291663` and automation PID `1292147` were active with the
+      automation lock held on exact target `localhost:5555`; the target was
+      freshly `device`, control and runtime both acknowledged `RUNNING`, and a
+      fresh unpaused observation had no holds or Strategy Gate.
+    - [ ] Complete post-deployment validation only at ordinary natural
+      boundaries; do not create, surrender, accelerate, or otherwise alter a
+      battle for evidence.
+      - [x] The 2026-08-07 13:15–13:18 PDT guarded replacement proved Pause
+        blocked actions, then restored the prior `RUNNING` intent only after
+        the replacement PID, exact lock/target, acknowledgements, and a fresh
+        attached-battle observation were valid. The first continuity attempt
+        failed closed on an unverified restored-source boundary; the bounded
+        retry confirmed the unchanged terminal tail and published no
+        unverified evidence.
+      - [x] The successful forced-attachment boundary produced one shared
+        typed acquisition record at save revision `47927` (the owner's bounded
+        two-identical-read stability transaction, not a second consumer pull).
+        That bundle supplied a 37-pick initial complete Perk checkpoint and 11
+        guarded No Strategy fields, while the observation-only audit receipt
+        recorded `forced_running_attachment`; no consumer reacquisition or UI
+        fallback was used for those accepted fields. Because the fresh audit
+        session had no pre-round History baseline, it explicitly failed that
+        comparison closed and made no terminal claim.
+      - [x] The next normal passive interval completed at 2026-08-07 13:20 PDT.
+        Its single scheduler acquisition produced one `periodic_interval`
+        receipt at save revision `47928`, retained the exact same-round binding,
+        and advanced the complete Perk prefix from 37 to 38 picks. The deployed
+        scheduler passes that one immutable object through the Perk monitor and
+        enabled optional audit projector; no second acquisition or consumer
+        rejection was recorded.
+      - [ ] Confirm valid Game Over → Home and Game Over → direct Retry each
+        perform zero second save acquisition and zero Battle History
+        navigation.
+      - [ ] Confirm Tournament Results → Home reuses its valid terminal handoff
+        without reacquisition.
+      - [ ] Confirm one natural-terminal bundle fans out without duplicate
+        pulls and that terminal Perks navigation is omitted only after bound
+        exhaustion, a later nonempty final prefix with exact round binding,
+        and a later natural terminal clear prove completeness. No qualifying
+        natural terminal boundary occurred during the deployment window, so
+        every terminal UI fallback remains authoritative.
   - [ ] Confirm the deployed direct-Retry repair on the next ordinary
     `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
     retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh

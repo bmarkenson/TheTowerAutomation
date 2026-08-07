@@ -39,6 +39,55 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 player-save acquisition and freshness consolidation deployment
+
+- The reviewed contract, acquisition foundation, boundary handoff, temporal-
+  authority, and pure Perk-monitor commits remain a linear stack ending at
+  `33a325b7b3792181b24f8d569135f5f12ac74c82`; frozen prototype
+  `d1c3dece79f43ae044e1730110298779e30a1fb2` remains unchanged and unmerged.
+  Merge commit `5e46e0594ba17953b85af3e274d763b9d7cddf77` preserves both prior
+  `develop` commit `df184642181c51646f4ad4379aa6bc7ef772d92f` and the complete stack tip.
+  The integrated source and canonical contracts were reviewed together, and
+  the supported checkpoint compiled the repository,
+  passed state-definition and clickmap validation with zero errors and the 44
+  established orphan candidates, and passed all 1,777 tests in 327.69 seconds.
+- Production commit `df184642181c51646f4ad4379aa6bc7ef772d92f` was proven
+  ancestral to `5e46e0594ba17953b85af3e274d763b9d7cddf77`; every commit and the
+  aggregate diff were reviewed, and unique annotated rollback tag
+  `production-before-20260807T201303Z-df18464` was created at the former
+  production commit. After the automation and control-surface services both
+  stopped, production and `main` fast-forwarded to that exact integration
+  commit at 2026-08-07 13:14 PDT. Replacement control-surface PID `1291663` and
+  automation PID `1292147` were active, the exact `localhost:5555` runtime lock
+  was held by PID `1292147`, ADB was freshly `device`, and the unpaused attached
+  battle was `RUNNING` with no holds or Strategy Gate.
+- Live preflight used fresh host-backed process, lock, target, and complete-
+  screenshot evidence. The replacement first attached under an agent-owned
+  Pause, where action authority remained blocked, and resumed only after the
+  replacement boundary was proven. Activity Continuity failed closed on its
+  first unverified restored-source attempt, then confirmed the unchanged
+  completed tail on its bounded retry. The successful forced-attachment path
+  emitted one shared save observation at revision `47927`, with a bound Tier
+  17 round identity, a 37-pick initial complete Perk checkpoint, and guarded
+  projections for 11 No Strategy fields. The collector identified its source
+  as shared bundles; no second consumer acquisition or UI visit was used for
+  those accepted fields. Its fresh mid-round session had no pre-round History
+  baseline, so that independent audit comparison explicitly failed closed and
+  made no terminal claim.
+- The next unprompted passive interval completed at 2026-08-07 13:20 PDT. One
+  scheduler acquisition emitted one `periodic_interval` audit receipt at save
+  revision `47928`, preserved the exact same-round identity, and advanced the
+  complete Perk prefix from 37 to 38 picks. The deployed fan-out passes that
+  same immutable bundle through the Perk monitor and optional audit projector;
+  no duplicate acquisition or consumer rejection was recorded.
+- No natural Game Over, direct Retry, Tournament Results, or qualifying
+  terminal-Perks boundary occurred during the deployment window. Their zero-
+  reacquisition/zero-History and terminal-completeness claims remain explicit
+  ordinary-boundary observations in the canonical
+  [runtime and validation backlog](../backlog/runtime-and-validation.md); no
+  battle was created, surrendered, accelerated, or otherwise manipulated for
+  validation.
+
 ### 2026-08-07 replacement-state runbook clarification
 
 - `b994f0a` clarifies
