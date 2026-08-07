@@ -8,6 +8,48 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Ban Perks verification treated Available rows as selected bans
+
+**Stable ID:** `ISSUE-2026-030` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-06 while a naturally completed Attack Dissonance
+  battle was being followed by a queued Tier 19 Farm start.
+- **Symptom:** Farm repair left the six visible bans correct, but Home setup
+  blocked the battle with `Ban Perks remained non-authoritative after local
+  OCR retries`. Its closest OCR candidate was the Available-list row
+  `Unlock a random ultimate we`, even though that perk was not selected. The
+  operator found the retained viewport halfway down Available.
+- **Safety response:** Setup failed closed before Battle input and the operator
+  applied Pause. Diagnosis used bounded read-only capture and retained
+  artifacts; feature implementation and validation issued no device input or
+  runtime/control mutation.
+- **Cause:** The generic top-scroll helper accepted a mean content difference
+  at or below `1.0` as an edge. Repeated same-sized Perk tiles could satisfy
+  that heuristic after one topward swipe while still in Available. The Ban
+  extractor then treated the first six text-bearing rows as selected instead
+  of using the already-captured `selected_outline` evidence. The same fixed-six
+  assumption could pull an Available row into the temporary five-ban block
+  immediately after a valid deselection.
+- **Resolution:** A caller may now require a positive scroll boundary, in which
+  case visual stability cannot end the scroll. Ban navigation requires a
+  complete outlined Selected Perks block, and Ban extraction consumes only
+  outlined rows through either six selections or an outlined Empty Slot.
+  Available rows can no longer authorize comparison or repair.
+- **Regression:** `test/test_scrolling.py` covers visually stable viewports
+  before a required boundary. `test/test_perk_configuration.py` covers the
+  mid-Available `Unlock a random ultimate weapon` viewport and a five-ban
+  Empty Slot boundary. `test/test_home_perk_configuration.py` covers repeated
+  topward swipes until the complete outlined block appears.
+- **Validation:** The 45 focused tests and 102 adjacent setup, observation, and
+  timeline tests passed. Read-only replay of retained real UI frames produced
+  the exact six Farm bans at true top, rejected the mid-Available frame with
+  zero selected rows, and accepted a five-ban frame at its outlined Empty Slot.
+  The complete isolated checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the 44 established orphan
+  candidates, and all 1,680 tests in 322.42 seconds. Live input validation was
+  unnecessary.
+- **Fixed by:** `5cab87a`.
+
 ### Running attachment used Battle History and repeated save-backed configuration UI
 
 **Stable ID:** `ISSUE-2026-028` · **Lifecycle:** `resolved`

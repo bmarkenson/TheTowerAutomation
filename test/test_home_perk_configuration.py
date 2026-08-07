@@ -13,6 +13,7 @@ from core.home_perk_configuration import (
     _close_to_home,
     _repair_auto_pick_order,
     _repair_bans,
+    _scroll_ban_configuration_top,
     _tap_configuration_row,
     ensure_home_perk_configuration,
 )
@@ -428,6 +429,51 @@ def test_ban_ocr_retry_uses_fresh_capture_without_configuration_input():
     assert sleeps == [0.6]
 
 
+def test_ban_top_scroll_requires_complete_selected_block_boundary():
+    current = np.full((1920, 1080, 3), 1, dtype=np.uint8)
+    available = np.full((1920, 1080, 3), 2, dtype=np.uint8)
+    selected_top = np.full((1920, 1080, 3), 3, dtype=np.uint8)
+    captures = iter((available, selected_top))
+    swipes = []
+
+    def rows(frame):
+        at_top = int(frame[0, 0, 0]) == 3
+        keys = (
+            FARM_PERK_BANS
+            if at_top
+            else (
+                "perk_wave_requirement",
+                "game_speed",
+                "golden_tower_bonus",
+                "max_health",
+                "cash_bonus",
+                "defense_absolute",
+            )
+        )
+        return [
+            {
+                **_row(key, index),
+                "selected_outline": at_top,
+            }
+            for index, key in enumerate(keys)
+        ]
+
+    result = _scroll_ban_configuration_top(
+        current,
+        capture_fn=lambda: next(captures),
+        visible_fn=lambda *_args, **_kwargs: True,
+        swipe_fn=lambda key: swipes.append(key) or True,
+        row_fn=rows,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result is selected_top
+    assert swipes == [
+        "gesture_targets.goto_top:perks",
+        "gesture_targets.goto_top:perks",
+    ]
+
+
 def test_auto_pick_ocr_retry_rescans_locally_from_top_once():
     initial = np.zeros((1920, 1080, 3), dtype=np.uint8)
     fresh = np.ones((1920, 1080, 3), dtype=np.uint8)
@@ -542,7 +588,13 @@ def test_ban_repair_toggles_only_the_strategy_set():
             keys.extend(["empty_slot"] * (6 - len(keys)))
         else:
             keys = ["coin_tradeoff", "land_mine_damage", "cash_bonus"]
-        return [_row(key, index) for index, key in enumerate(keys)]
+        return [
+            {
+                **_row(key, index),
+                "selected_outline": page["value"] == 0,
+            }
+            for index, key in enumerate(keys)
+        ]
 
     def swipe(_current, _key, **_kwargs):
         page["value"] += 1
@@ -571,7 +623,7 @@ def test_ban_repair_toggles_only_the_strategy_set():
             side_effect=toggle,
         ) as tap,
         patch(
-            "core.home_perk_configuration._scroll_configuration_top",
+            "core.home_perk_configuration._scroll_ban_configuration_top",
             side_effect=top,
         ),
     ):

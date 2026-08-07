@@ -392,14 +392,23 @@ def extract_configured_perk_bans(
     """Read the fixed Selected Perks block at the top of the Ban tab."""
 
     rows = list(row_fn(frame))
+    slot_capacity = max(1, int(capacity))
+    outlined_rows = [
+        row for row in rows if row.get("selected_outline") is True
+    ]
     selected: list[dict[str, Any]] = []
     empty_slot_seen = False
-    for row in rows[: max(1, int(capacity))]:
+    for row in outlined_rows[:slot_capacity]:
         entry = _semantic_entry(row)
         if entry["key"] == "empty_slot":
             empty_slot_seen = True
             break
         selected.append(entry)
+    selected_block_visible = bool(outlined_rows)
+    selected_block_complete = bool(
+        selected_block_visible
+        and (len(selected) >= slot_capacity or empty_slot_seen)
+    )
 
     low_confidence = [
         str(entry["display_text"])
@@ -420,11 +429,13 @@ def extract_configured_perk_bans(
         if entry.get("semantic_conflict") is True
     ]
     warnings = []
-    if len(rows) < capacity:
+    if not selected_block_visible:
+        warnings.append("Ban Perks selected block was not visible")
+    elif not selected_block_complete:
         warnings.append(
-            f"Ban Perks selected block exposed {len(rows)} of {capacity} slots"
+            "Ban Perks selected block exposed "
+            f"{len(outlined_rows)} of {slot_capacity} outlined slots"
         )
-    if len(selected) < capacity and not empty_slot_seen:
         warnings.append("Ban Perks empty-slot boundary was not recognized")
     if low_confidence:
         warnings.append(
@@ -444,8 +455,11 @@ def extract_configured_perk_bans(
         "quality": {
             "valid": not warnings,
             "selected_count": len(selected),
-            "capacity": int(capacity),
+            "capacity": slot_capacity,
             "empty_slot_seen": empty_slot_seen,
+            "selected_outline_count": len(outlined_rows),
+            "selected_block_visible": selected_block_visible,
+            "selected_block_complete": selected_block_complete,
             "low_confidence": low_confidence,
             "unrecognized": unrecognized,
             "semantic_conflicts": semantic_conflicts,

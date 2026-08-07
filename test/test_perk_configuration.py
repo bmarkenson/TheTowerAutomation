@@ -449,6 +449,7 @@ def test_ban_capture_accepts_two_low_confidence_candidates_with_same_semantics()
             "text_raw": text,
             "confidence": confidence,
             "background_value_median": 83.0,
+            "selected_outline": True,
             "text_candidates": [
                 {
                     "display_text": text,
@@ -488,6 +489,75 @@ def test_ban_capture_accepts_two_low_confidence_candidates_with_same_semantics()
     )
     assert unconfirmed["quality"]["valid"] is False
     assert unconfirmed["quality"]["low_confidence"] == ["1.44 Cash Bonus"]
+
+
+def test_ban_capture_rejects_available_viewport_instead_of_filling_slots():
+    rows = [
+        _configuration_row(text, 430 + index * 172, 587 + index * 172, 96)
+        for index, text in enumerate(
+            (
+                "Orbs +1",
+                "Free upgrade chance for all +6.25%",
+                "Defense percent +5.00%",
+                "Perk wave requirement -25.00%",
+                "Unlock a random ultimate weapon",
+                "Increase max game speed by +1.25",
+            )
+        )
+    ]
+
+    result = extract_configured_perk_bans(
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        row_fn=lambda _frame: rows,
+    )
+
+    assert result["selected"] == []
+    assert result["quality"]["valid"] is False
+    assert result["quality"]["selected_block_visible"] is False
+    assert result["quality"]["warnings"] == [
+        "Ban Perks selected block was not visible"
+    ]
+
+
+def test_ban_capture_preserves_five_selected_rows_at_empty_slot_boundary():
+    selected = [
+        {
+            **_configuration_row(text, 430 + index * 172, 587 + index * 172, 83),
+            "selected_outline": True,
+        }
+        for index, text in enumerate(
+            (
+                "Lifesteal x2.75, but knockback force -70%",
+                "Enemies damage -55.0%, but tower damage -50%",
+                "x1.44 Defense Absolute",
+                "Interest x1.88",
+                "Land Mine Damage x4.38",
+                "Empty Slot",
+            )
+        )
+    ]
+    available = _configuration_row(
+        "Unlock a random ultimate weapon",
+        1500,
+        1657,
+        96,
+    )
+
+    result = extract_configured_perk_bans(
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        row_fn=lambda _frame: [*selected, available],
+    )
+
+    assert [entry["key"] for entry in result["selected"]] == [
+        "lifesteal_knockback_tradeoff",
+        "enemies_damage_tradeoff",
+        "defense_absolute",
+        "interest",
+        "land_mine_damage",
+    ]
+    assert result["quality"]["valid"] is True
+    assert result["quality"]["empty_slot_seen"] is True
+    assert result["quality"]["selected_block_complete"] is True
 
 
 def test_empty_ban_list_is_a_valid_observed_configuration():
@@ -680,7 +750,7 @@ def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():
         "damage": "x1.44 Damage",
     }
 
-    def rows(keys):
+    def rows(keys, *, selected_outline=False):
         return [
             {
                 "top": 430 + index * 172,
@@ -689,12 +759,16 @@ def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():
                 "text_raw": labels[key],
                 "confidence": 95.0,
                 "background_value_median": 100.0,
+                "selected_outline": selected_outline,
             }
             for index, key in enumerate(keys)
         ]
 
     correct = {
-        1: rows([*FARM_PERK_BANS, "empty_slot"]),
+        1: rows(
+            [*FARM_PERK_BANS, "empty_slot"],
+            selected_outline=True,
+        ),
         2: rows(FARM_AUTO_PICK_ORDER[:8]),
         3: rows(FARM_AUTO_PICK_ORDER[5:13]),
         4: rows(FARM_AUTO_PICK_ORDER[10:]),

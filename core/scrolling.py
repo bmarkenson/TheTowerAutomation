@@ -99,9 +99,15 @@ def scroll_to_edge(
     visible_fn: Callable[..., bool] = is_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
     sleep_fn: Callable[[float], None] = time.sleep,
+    stop_fn: Optional[StopFn] = None,
     action_guard_fn: Optional[ActionGuardFn] = None,
 ) -> ScrollResult:
-    """Repeat a guarded swipe until the content no longer moves or the bound is hit."""
+    """Repeat a guarded swipe until a required boundary or stable edge.
+
+    When ``stop_fn`` is supplied, visual stability alone is not authoritative:
+    repeated list rows can produce a very small image delta away from the real
+    edge. The caller-provided boundary must be observed within ``max_swipes``.
+    """
 
     current = screenshot if screenshot is not None else capture_fn()
     if current is None:
@@ -112,6 +118,9 @@ def scroll_to_edge(
             "DEBUG",
         )
         return ScrollResult(False, current, 0, "wrong_source_screen")
+    stop_reason = stop_fn(current) if stop_fn is not None else None
+    if stop_reason:
+        return ScrollResult(True, current, 0, stop_reason)
 
     total_swipes = 0
     for _ in range(max(1, int(max_swipes))):
@@ -130,9 +139,21 @@ def scroll_to_edge(
         if not step.success or step.screenshot is None:
             return ScrollResult(False, step.screenshot, total_swipes, step.reason)
 
+        stop_reason = stop_fn(step.screenshot) if stop_fn is not None else None
+        if stop_reason:
+            return ScrollResult(True, step.screenshot, total_swipes, stop_reason)
+
         difference = _mean_abs_difference(current, step.screenshot, progress_region)
         current = step.screenshot
         if difference <= max(0.0, stable_threshold):
+            if stop_fn is not None:
+                log(
+                    f"[SCROLL] '{swipe_key}' looked stable before the required "
+                    f"boundary after {total_swipes} swipe(s) "
+                    f"(difference={difference:.2f}); continuing",
+                    "DEBUG",
+                )
+                continue
             log(
                 f"[SCROLL] Reached edge with '{swipe_key}' after {total_swipes} swipe(s) "
                 f"(difference={difference:.2f})",
@@ -140,11 +161,17 @@ def scroll_to_edge(
             )
             return ScrollResult(True, current, total_swipes, "edge_reached")
 
+    reason = (
+        "required_boundary_not_reached"
+        if stop_fn is not None
+        else "max_swipes_exceeded"
+    )
     log(
-        f"[SCROLL] Edge not reached with '{swipe_key}' after {total_swipes} swipe(s)",
+        f"[SCROLL] {'Required boundary' if stop_fn is not None else 'Edge'} "
+        f"not reached with '{swipe_key}' after {total_swipes} swipe(s)",
         "DEBUG",
     )
-    return ScrollResult(False, current, total_swipes, "max_swipes_exceeded")
+    return ScrollResult(False, current, total_swipes, reason)
 
 
 def capture_scroll_to_edge(

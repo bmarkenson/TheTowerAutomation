@@ -39,6 +39,28 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 Ban Perks Selected/Available boundary repair
+
+- Live diagnosis of the blocked Tier 19 Farm transition showed that repair had
+  restored the visible bans, but the verifier's supposed top frame was halfway
+  down Available and included `Unlock a random ultimate weapon` as a selected
+  row. The battle start failed closed and the operator-owned Pause was left
+  unchanged.
+- `5cab87a` lets edge scrolling require a caller-proven boundary, makes Ban
+  navigation prove the complete outlined Selected Perks block, and restricts
+  fixed-block extraction to outlined rows through six selections or Empty
+  Slot. Generic callers retain their existing visual-stability behavior unless
+  they opt into a required boundary.
+- Regression coverage reproduces false visual stability, rejects six visible
+  Available rows, preserves a temporary five-ban Empty Slot block, and scrolls
+  until outlined Selected evidence appears. Read-only replay of retained real
+  frames verified all three relevant states. The complete isolated checkpoint
+  passed compilation, maintained validators, and all 1,680 tests in 322.42
+  seconds; no development device input was required.
+- `ISSUE-2026-030` is resolved. The feature branch is ready for integration;
+  deployment and any production confirmation remain separate operator-owned
+  steps.
+
 ### 2026-08-06 paused Home manual-start continuity repair
 
 - Live read-only diagnosis found that an Attack Dissonance battle manually
