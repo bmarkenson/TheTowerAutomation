@@ -56,9 +56,16 @@ from core.battle_stats import (
 )
 from core.battle_activation_tracker import BattleActivationTracker
 from core.player_save import (
-    PlayerSaveError,
     decode_player_save_bytes,
     pull_player_save_bytes,
+)
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    PlayerSaveBoundaryKind,
+    PlayerSaveNaturalBoundary,
+    StablePlayerSaveAcquirer,
+    quiet_player_save_read,
 )
 from core.player_save_audit import PlayerSaveAuditCollector
 from core.player_save_preflight import (
@@ -70,11 +77,14 @@ from core.player_save_history import (
     PlayerSaveAttachmentContext,
     PlayerSaveHistoryReader,
 )
-from core.player_save_serialization import quiet_player_save_read
 from core.profile_progression import unavailable_profile_progression
 from core.terminal_save_report import (
-    terminal_save_report_from_snapshot,
+    terminal_save_report_from_acquisition,
     unavailable_terminal_save_report,
+)
+from core.tournament_conditions import (
+    tournament_conditions_complete,
+    tournament_conditions_from_acquisition,
 )
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
@@ -230,12 +240,20 @@ class App:
         self._player_save_preflight_result = None
         self._player_save_preflight_activity_scope_id = None
         self._player_save_history_baseline_outcome = None
+        self._player_save_acquirer = (
+            StablePlayerSaveAcquirer(
+                target_snapshot_fn=adb_target_session.snapshot,
+            )
+            if adb_target_session is not None
+            else None
+        )
         self._player_save_preflight_coordinator = (
             PlayerSavePreflightCoordinator(
                 target_snapshot_fn=adb_target_session.snapshot,
                 context_fn=self._current_player_save_preflight_context,
                 action_guard_fn=self._runtime_action_guard,
                 capture_fn=self._capture_frame,
+                acquirer=self._player_save_acquirer,
             )
             if adb_target_session is not None
             else None
@@ -247,6 +265,7 @@ class App:
                 attachment_context_fn=(
                     self._current_player_save_attachment_context
                 ),
+                acquirer=self._player_save_acquirer,
             )
             if adb_target_session is not None
             else None
@@ -300,6 +319,7 @@ class App:
                     if adb_target_session is not None
                     else None
                 ),
+                acquirer=self._player_save_acquirer,
             )
         except Exception:
             log(
@@ -623,76 +643,84 @@ class App:
         session = getattr(self, "_adb_target_session", None)
         if session is None:
             return unavailable("adb_target_session_unavailable")
-        try:
-            target_before = session.snapshot()
-        except Exception:
-            return unavailable("adb_target_snapshot_unavailable")
-        if not target_before.owned:
-            return unavailable("adb_target_not_owned")
-
-        try:
-            payload = pull_player_save_bytes(
-                device_id=target_before.target,
-                attempts=3,
-                settle_seconds=0.1,
-                read_fn=quiet_player_save_read,
+        acquirer = getattr(self, "_player_save_acquirer", None)
+        if acquirer is None:
+            # Compatibility for focused unit instances that bypass App.__init__.
+            acquirer = StablePlayerSaveAcquirer(
+                target_snapshot_fn=session.snapshot,
+                pull_fn=pull_player_save_bytes,
+                decode_fn=decode_player_save_bytes,
+                pull_options={
+                    "attempts": 3,
+                    "settle_seconds": 0.1,
+                    "read_fn": quiet_player_save_read,
+                },
             )
-            snapshot = decode_player_save_bytes(
-                payload,
-                source_name="playerInfo.dat",
-                captured_at=captured_at,
-            )
-            del payload
-        except PlayerSaveError as exc:
-            log(
-                "[TERMINAL_SAVE] Stable terminal save capture was "
-                f"unavailable without blocking battle stats: {exc}",
-                "WARN",
-            )
-            return unavailable("stable_terminal_save_unavailable")
-        except Exception as exc:
-            log(
-                "[TERMINAL_SAVE] Terminal save projection failed "
-                f"without blocking battle stats: {exc}",
-                "WARN",
-            )
-            return unavailable("terminal_save_projection_failed")
-
-        try:
-            target_after = session.snapshot()
-        except Exception:
-            target_after = None
-        if (
-            target_after is None
-            or not target_after.owned
-            or target_after.target != target_before.target
-            or target_after.generation != target_before.generation
-        ):
-            return unavailable(
-                "adb_target_changed_during_terminal_capture",
-                mapping_id=snapshot.mapping_id,
-            )
-
-        progression = snapshot.profile_progression
-        if not isinstance(progression, Mapping) or not progression:
-            normalized_progression = unavailable_profile_progression(
-                "exact_version_progression_projection_unavailable",
-                captured_at=captured_at.isoformat(),
-                mapping_id=snapshot.mapping_id,
-            )
-        else:
-            normalized_progression = dict(progression)
-            source = dict(normalized_progression.get("source") or {})
-            source["acquisition"] = "stable_terminal_player_save"
-            normalized_progression["source"] = source
 
         try:
             scope = get_activity_scope()
         except Exception:
             scope = None
+        if terminal in {kind.value for kind in PlayerSaveBoundaryKind}:
+            runtime_session_id = str(
+                getattr(self, "_player_save_runtime_session_id", "") or ""
+            ).strip()
+            if not runtime_session_id:
+                return unavailable("player_save_runtime_session_unavailable")
+            boundary = PlayerSaveNaturalBoundary(
+                kind=PlayerSaveBoundaryKind(terminal),
+                observed_at=captured_at,
+                runtime_session_id=runtime_session_id,
+                activity_scope_id=(
+                    str(scope.get("run_id") or "")
+                    if isinstance(scope, Mapping)
+                    else None
+                ),
+            )
+            acquisition = acquirer.acquire(
+                PlayerSaveAcquisitionType.NATURAL_BOUNDARY,
+                boundary=boundary,
+            )
+        else:
+            acquisition = acquirer.acquire(
+                PlayerSaveAcquisitionType.PASSIVE_STABLE_READ
+            )
+
+        if not acquisition.complete or acquisition.snapshot is None:
+            reason = (
+                "adb_target_changed_during_terminal_capture"
+                if acquisition.status
+                is PlayerSaveAcquisitionStatus.BINDING_LOST
+                else "stable_terminal_save_unavailable"
+            )
+            log(
+                "[TERMINAL_SAVE] Stable terminal save capture was unavailable "
+                "without blocking battle stats: "
+                f"reason={acquisition.reason}",
+                "WARN",
+            )
+            return unavailable(reason)
+        snapshot = acquisition.snapshot
+
         try:
-            terminal_report = terminal_save_report_from_snapshot(
-                snapshot,
+            progression = snapshot.profile_progression
+        except Exception:
+            progression = None
+        if not isinstance(progression, Mapping) or not progression:
+            normalized_progression = unavailable_profile_progression(
+                "exact_version_progression_projection_unavailable",
+                captured_at=captured_at.isoformat(),
+                mapping_id=getattr(snapshot, "mapping_id", None),
+            )
+        else:
+            normalized_progression = dict(progression)
+            source = dict(normalized_progression.get("source") or {})
+            source["acquisition"] = acquisition.redacted_provenance()
+            normalized_progression["source"] = source
+
+        try:
+            terminal_report = terminal_save_report_from_acquisition(
+                acquisition,
                 terminal_state=terminal,
                 run_binding=run_binding,
                 activity_scope=scope,
@@ -707,29 +735,23 @@ class App:
                 "terminal_history_attachment_failed",
                 terminal_state=terminal,
                 captured_at=captured_at.isoformat(),
-                mapping_id=snapshot.mapping_id,
-                save_revision=snapshot.save_revision,
+                mapping_id=getattr(snapshot, "mapping_id", None),
+                save_revision=getattr(snapshot, "save_revision", None),
             )
         result = {
             "profile_progression": normalized_progression,
             "terminal_save_report": terminal_report,
         }
         if terminal == "TOURNAMENT_RESULTS":
-            checks = getattr(snapshot, "checks", {})
-            condition_evidence = (
-                checks.get("tournament_conditions")
-                if isinstance(checks, Mapping)
-                else None
-            )
-            condition_value = getattr(condition_evidence, "value", None)
-            if (
-                getattr(condition_evidence, "complete", False)
-                and isinstance(condition_value, Mapping)
-            ):
-                result["battle_conditions"] = dict(condition_value)
+            try:
+                conditions = tournament_conditions_from_acquisition(acquisition)
+            except Exception:
+                conditions = None
+            if tournament_conditions_complete(conditions):
+                result["battle_conditions"] = conditions
         log(
             "[TERMINAL_SAVE] Captured terminal account and battle projections "
-            f"revision={snapshot.save_revision} "
+            f"revision={getattr(snapshot, 'save_revision', None)} "
             f"progression={normalized_progression.get('status') or 'unknown'} "
             f"report={terminal_report.get('status') or 'unknown'}",
             "DEBUG",
@@ -5126,6 +5148,11 @@ class App:
                 img,
                 battle_context=self._terminal_battle_context(
                     "TOURNAMENT_RESULTS"
+                ),
+                player_save_acquirer=getattr(
+                    self,
+                    "_player_save_acquirer",
+                    None,
                 ),
             )
             if record is not None:

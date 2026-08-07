@@ -39,6 +39,31 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 typed player-save acquisition foundation
+
+- `feature/player-save-acquisition-foundation` adds the immutable typed
+  acquisition bundle and `StablePlayerSaveAcquirer`. The owner serializes the
+  complete exact-target operation, verifies target generation before and after
+  a quiet two-identical-read transport, decodes in memory, immediately drops
+  raw payload references, and exposes only sanitized failures and redacted
+  provenance. It creates no global latest-snapshot cache.
+- The guarded serializer retains background/restore and source/control policy;
+  a forced bundle is published only after successful restoration and full
+  revalidation. Home preflight, ordinary and forced-attachment History,
+  natural terminal capture, passive audit, and standalone Tournament capture
+  now use the shared owner without changing their UI-fallback or blocking
+  policies. The local/ADB inspection tool remains an explicit offline path.
+- One natural terminal bundle fans out to profile progression, completed-report,
+  and Tournament-condition projectors without another pull. Focused tests cover
+  global lock serialization, exact target/generation loss, redaction, malformed
+  projection independence, restored-source ambiguity, and one-read/many-
+  projector behavior.
+- The focused migrated suite passed 173 tests. The supported development
+  checkpoint compiled the repository, passed state-definition validation and
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and passed all 1,712 tests in 322.50 seconds. No live/device validation was
+  needed for this repository-only ownership consolidation.
+
 ### 2026-08-07 Utility Dissonance subtype deployment and confirmation
 
 - `17e4e0c` separates localized purple Dissonance-family evidence from the

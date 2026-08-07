@@ -7,16 +7,22 @@ authorizes a UI fallback: callers may do that only after ``SOURCE_RESTORED``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import time
 from typing import Any, Callable, Optional
 
-from core.adb_target_session import ADB_TARGET_OPERATION_LOCK, AdbTargetSnapshot
 from core.player_save import (
     PlayerSaveSnapshot,
     decode_player_save_bytes,
     pull_player_save_bytes,
+)
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+    StablePlayerSaveAcquirer,
+    quiet_player_save_read,
 )
 from utils.logger import log, log_input
 
@@ -31,8 +37,16 @@ class GuardedSerializationStatus(str, Enum):
 class GuardedSerializationResult:
     status: GuardedSerializationStatus
     reason: str
-    snapshot: Optional[PlayerSaveSnapshot] = None
+    acquisition: Optional[PlayerSaveAcquisitionBundle] = field(
+        default=None,
+        repr=False,
+    )
     background_dispatched: bool = False
+
+    @property
+    def snapshot(self) -> Optional[PlayerSaveSnapshot]:
+        acquisition = self.acquisition
+        return acquisition.snapshot if acquisition is not None else None
 
     @property
     def complete(self) -> bool:
@@ -63,19 +77,22 @@ class GuardedPlayerSaveSerializer:
         foreground_fn: Optional[Callable[[str], bool]] = None,
         pull_fn: Callable[..., bytes] = pull_player_save_bytes,
         decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
+        acquirer: Optional[StablePlayerSaveAcquirer] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         input_log_fn: Callable[..., None] = log_input,
         debug_log_fn: Callable[..., None] = log,
         log_prefix: str = "PLAYER_SAVE_SERIALIZATION",
     ) -> None:
-        self._target_snapshot_fn = target_snapshot_fn
+        self._acquirer = acquirer or StablePlayerSaveAcquirer(
+            target_snapshot_fn=target_snapshot_fn,
+            pull_fn=pull_fn,
+            decode_fn=decode_fn,
+        )
         self._context_guard_fn = context_guard_fn
         self._action_guard_fn = action_guard_fn
         self._source_guard_fn = source_guard_fn
         self._background_fn = background_fn or background_to_android_home
         self._foreground_fn = foreground_fn or restore_tower_launcher
-        self._pull_fn = pull_fn
-        self._decode_fn = decode_fn
         self._sleep_fn = sleep_fn
         self._input_log_fn = input_log_fn
         self._debug_log_fn = debug_log_fn
@@ -94,16 +111,16 @@ class GuardedPlayerSaveSerializer:
         """Return a snapshot or a reason whose restoration class is explicit."""
 
         background_dispatched = False
-        with ADB_TARGET_OPERATION_LOCK:
-            try:
-                target_before = self._target_snapshot_fn()
-            except Exception:
-                return _blocked("exact_target_ownership_unverified")
-            if not _target_matches(
-                target_before,
+        try:
+            expected_binding = PlayerSaveTargetBinding(
                 expected_target,
                 expected_generation,
-            ):
+            )
+        except (TypeError, ValueError):
+            return _blocked("exact_target_ownership_unverified")
+
+        with self._acquirer.locked_operation():
+            if not self._acquirer.binding_matches(expected_binding):
                 return _blocked("exact_target_ownership_unverified")
             if not self._context_matches():
                 return _blocked("initial_source_boundary_unverified")
@@ -137,19 +154,10 @@ class GuardedPlayerSaveSerializer:
             background_dispatched = True
             self._sleep_fn(0.25)
 
-            snapshot: Optional[PlayerSaveSnapshot] = None
-            try:
-                pull_kwargs: dict[str, Any] = {"device_id": expected_target}
-                if self._pull_fn is pull_player_save_bytes:
-                    pull_kwargs["read_fn"] = quiet_player_save_read
-                payload = self._pull_fn(**pull_kwargs)
-                snapshot = self._decode_fn(
-                    payload,
-                    source_name="playerInfo.dat",
-                )
-                del payload
-            except Exception:
-                snapshot = None
+            acquisition = self._acquirer.acquire(
+                PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+                expected_binding=expected_binding,
+            )
 
             if not self._action_allowed():
                 return _blocked(
@@ -179,20 +187,8 @@ class GuardedPlayerSaveSerializer:
                 )
             self._sleep_fn(0.5)
 
-            try:
-                target_after = self._target_snapshot_fn()
-            except Exception:
-                return _blocked(
-                    "restored_source_boundary_unverified",
-                    background_dispatched=True,
-                )
             if not (
-                _same_target(target_before, target_after)
-                and _target_matches(
-                    target_after,
-                    expected_target,
-                    expected_generation,
-                )
+                self._acquirer.binding_matches(expected_binding)
                 and self._context_matches()
                 and self._action_allowed()
             ):
@@ -213,16 +209,17 @@ class GuardedPlayerSaveSerializer:
                     background_dispatched=True,
                 )
 
-        if snapshot is None:
+        if not acquisition.complete:
             return GuardedSerializationResult(
                 GuardedSerializationStatus.SOURCE_RESTORED,
                 "save_acquisition_failed",
+                acquisition=acquisition,
                 background_dispatched=background_dispatched,
             )
         return GuardedSerializationResult(
             GuardedSerializationStatus.COMPLETE,
             "save_acquired",
-            snapshot=snapshot,
+            acquisition=acquisition,
             background_dispatched=background_dispatched,
         )
 
@@ -243,30 +240,6 @@ class GuardedPlayerSaveSerializer:
             return self._source_guard_fn(initial_frame, stable) is True
         except Exception:
             return False
-
-
-def _target_matches(
-    snapshot: AdbTargetSnapshot,
-    expected_target: str,
-    expected_generation: int,
-) -> bool:
-    return bool(
-        snapshot.owned
-        and snapshot.target == str(expected_target)
-        and snapshot.generation == int(expected_generation)
-    )
-
-
-def _same_target(
-    before: AdbTargetSnapshot,
-    after: AdbTargetSnapshot,
-) -> bool:
-    return bool(
-        before.owned
-        and after.owned
-        and before.target == after.target
-        and before.generation == after.generation
-    )
 
 
 def background_to_android_home(target: str) -> bool:
@@ -294,22 +267,6 @@ def restore_tower_launcher(target: str) -> bool:
         device_id=target,
         report_errors=False,
     ) is not None
-
-
-def quiet_player_save_read(
-    path: str,
-    *,
-    device_id: Optional[str] = None,
-) -> Optional[bytes]:
-    """Read the private save without printing target-bearing exceptions."""
-
-    from core.adb_utils import read_device_file
-
-    return read_device_file(
-        path,
-        device_id=device_id,
-        report_errors=False,
-    )
 
 
 def _blocked(

@@ -30,6 +30,7 @@ from core.tournament_conditions import (
     tournament_conditions_complete,
     unavailable_tournament_conditions,
 )
+from core.player_save_acquisition import StablePlayerSaveAcquirer
 from core.terminal_save_report import terminal_save_report_complete
 from utils.logger import log
 
@@ -42,6 +43,7 @@ def handle_tournament_results(
     *,
     battle_context: Optional[Mapping[str, Any]] = None,
     captured_at: Optional[datetime] = None,
+    player_save_acquirer: Optional[StablePlayerSaveAcquirer] = None,
 ) -> Optional[dict[str, Any]]:
     """Persist summary and Round Stats, then restore Tournament Stats.
 
@@ -60,7 +62,10 @@ def handle_tournament_results(
     existing = find_recent_tournament_result(summary, now=when)
     if existing is not None:
         if not tournament_conditions_complete(existing.get("battle_conditions")):
-            conditions = _capture_battle_conditions(when)
+            conditions = _capture_battle_conditions(
+                when,
+                acquirer=player_save_acquirer,
+            )
             if tournament_conditions_complete(conditions):
                 try:
                     enriched = attach_tournament_conditions(existing, conditions)
@@ -161,7 +166,10 @@ def handle_tournament_results(
                     detailed_reason += ":summary_not_restored"
 
     if not tournament_conditions_complete(battle_conditions):
-        battle_conditions = _capture_battle_conditions(when)
+        battle_conditions = _capture_battle_conditions(
+            when,
+            acquirer=player_save_acquirer,
+        )
     try:
         record = build_tournament_result(
             summary,
@@ -195,11 +203,18 @@ def handle_tournament_results(
     return record
 
 
-def _capture_battle_conditions(when: datetime) -> dict[str, Any]:
+def _capture_battle_conditions(
+    when: datetime,
+    *,
+    acquirer: Optional[StablePlayerSaveAcquirer] = None,
+) -> dict[str, Any]:
     """Keep optional save evidence from blocking terminal-result capture."""
 
     try:
-        return capture_current_tournament_conditions(captured_at=when)
+        return capture_current_tournament_conditions(
+            captured_at=when,
+            acquirer=acquirer,
+        )
     except Exception as exc:
         log(
             "[TOURNAMENT_RESULTS] Battle Condition save capture failed without "

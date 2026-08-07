@@ -256,14 +256,17 @@ in [`player_save.md`](player_save.md).
 
 #### Planned single-boundary acquisition fan-out
 
-The active backlog will replace the runtime's separately composed save reads
-with the typed acquisition bundle defined in
+The acquisition foundation has replaced the runtime's separately composed
+save reads with the typed acquisition bundle defined in
 [`player_save.md`](player_save.md#planned-acquisition-provenance-and-temporal-authority).
-This is a planned lifecycle change, not current behavior. Today the terminal
-read already feeds progression, the candidate report, and some Tournament
-conditions, but its structurally validated History tail is not handed to the
-new Home or Retry activity scope. Home acquisition is also coupled to a
-nonempty configuration-requirement set. A plain Home baseline can therefore
+`StablePlayerSaveAcquirer` now owns locking, exact target/generation checks,
+quiet stable transport, decode/disposal, timing, and redacted failure
+provenance for forced serialization, History, terminal, passive-audit, and
+standalone Tournament callers. One terminal bundle already feeds progression,
+the candidate report, and Tournament conditions. The lifecycle fan-out below
+is still planned: its structurally validated History tail is not yet handed to
+the new Home or Retry activity scope, and Home acquisition is still coupled to
+a nonempty configuration-requirement set. A plain Home baseline can therefore
 open Battle History even though the same process just decoded the completed
 battle.
 

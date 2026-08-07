@@ -20,7 +20,7 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
     through one outcome coordinator and sequential stacked feature branches.
     Preserve committed Perk prototype `d1c3dec` as a reference until the shared
     foundation is stable; do not merge its private integration path.
-    - [ ] **Foundation — `feature/player-save-acquisition-foundation`.** Add
+    - [x] **Foundation — `feature/player-save-acquisition-foundation`.** Add
       the typed exact-target acquisition owner/result, normalized provenance,
       and focused lock/binding/privacy/failure tests. Migrate the guarded
       serializer, Home preflight, History reader, terminal capture, passive
@@ -28,6 +28,15 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       fallback policy. Preserve the explicit offline import path. Replace
       free-form acquisition strings and the runtime freshness boolean only
       after all migrated callers carry typed evidence.
+      Implemented with one immutable bundle and acquirer-owned locked
+      transaction. Forced publication remains restoration-gated; terminal and
+      passive failures remain nonblocking; History and Home preserve their
+      established blocking/UI-fallback distinctions. The offline importer
+      remains separate, and focused regression proves exact binding,
+      redaction, one-read/many-projector fan-out, projection independence, and
+      restoration ambiguity. The supported development checkpoint passed all
+      1,712 tests in 322.50 seconds with state-definition and clickmap
+      validation clean (the established 44 orphan candidates, zero errors).
     - [ ] **Lifecycle — `feature/player-save-boundary-handoff`.** Project the
       structural terminal transition once and persist a normalized one-use
       handoff for Game Over → Home, Game Over → direct Retry, and Tournament

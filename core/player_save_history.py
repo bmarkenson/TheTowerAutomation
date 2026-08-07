@@ -17,7 +17,7 @@ import re
 import time
 from typing import Any, Callable, Mapping, Optional
 
-from core.adb_target_session import ADB_TARGET_OPERATION_LOCK, AdbTargetSnapshot
+from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import detect_home_battle_control
 from core.player_save import (
@@ -28,6 +28,12 @@ from core.player_save import (
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
+)
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    StablePlayerSaveAcquirer,
 )
 from core.state_detector import detect_state_and_overlays
 from utils.logger import get_activity_scope, log, log_input
@@ -87,6 +93,11 @@ class PlayerSaveHistoryReadResult:
         repr=False,
         compare=False,
     )
+    acquisition: Optional[PlayerSaveAcquisitionBundle] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def complete(self) -> bool:
@@ -137,12 +148,16 @@ class CrossSourceHistoryResult:
         return self.status is CrossSourceHistoryStatus.MATCH
 
 
-def history_metadata_from_snapshot(
-    snapshot: PlayerSaveSnapshot,
-    *,
-    acquisition: str,
+def history_metadata_from_acquisition(
+    acquisition: PlayerSaveAcquisitionBundle,
 ) -> PlayerSaveHistoryReadResult:
     """Project only the structural newest-tail identity needed by continuity."""
+
+    if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+        raise TypeError("History projection requires a typed acquisition")
+    snapshot = acquisition.snapshot
+    if not acquisition.complete or snapshot is None:
+        return _ui_fallback(acquisition.reason, acquisition=acquisition)
 
     runtime = snapshot.runtime_save
     if runtime is None:
@@ -183,13 +198,14 @@ def history_metadata_from_snapshot(
             "semantic_status": tail.completed_entry_status,
             "semantic_reason": _safe_reason(tail.completed_entry_reason),
             "captured_at": snapshot.captured_at,
-            "acquisition": str(acquisition),
+            "acquisition": acquisition.redacted_provenance(),
         },
+        acquisition=acquisition,
     )
 
 
-def validated_profile_observations_from_snapshot(
-    snapshot: PlayerSaveSnapshot,
+def validated_profile_observations_from_acquisition(
+    acquisition: PlayerSaveAcquisitionBundle,
 ) -> Optional[dict[str, Any]]:
     """Project only complete, allowlisted configuration observations.
 
@@ -200,6 +216,11 @@ def validated_profile_observations_from_snapshot(
     allowlist are omitted rather than converted into UI claims.
     """
 
+    if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+        raise TypeError("profile projection requires a typed acquisition")
+    snapshot = acquisition.snapshot
+    if not acquisition.complete or snapshot is None:
+        return None
     mapping_id = str(getattr(snapshot, "mapping_id", None) or "").strip()
     mapping_maturity = str(
         getattr(snapshot, "mapping_maturity", None) or ""
@@ -240,6 +261,7 @@ def validated_profile_observations_from_snapshot(
     return {
         "schema_version": 1,
         "source": "guarded_active_attachment_player_save",
+        "acquisition": acquisition.redacted_provenance(),
         "mapping_id": mapping_id,
         "mapping_maturity": mapping_maturity,
         "captured_at": captured_at,
@@ -330,6 +352,7 @@ class PlayerSaveHistoryReader:
         foreground_fn: Optional[Callable[[str], bool]] = None,
         pull_fn: Callable[..., bytes] = pull_player_save_bytes,
         decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
+        acquirer: Optional[StablePlayerSaveAcquirer] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         input_log_fn: Callable[..., None] = log_input,
         debug_log_fn: Callable[..., None] = log,
@@ -344,6 +367,11 @@ class PlayerSaveHistoryReader:
         self._foreground_fn = foreground_fn
         self._pull_fn = pull_fn
         self._decode_fn = decode_fn
+        self._acquirer = acquirer or StablePlayerSaveAcquirer(
+            target_snapshot_fn=target_snapshot_fn,
+            pull_fn=pull_fn,
+            decode_fn=decode_fn,
+        )
         self._sleep_fn = sleep_fn
         self._input_log_fn = input_log_fn
         self._debug_log_fn = debug_log_fn
@@ -368,14 +396,10 @@ class PlayerSaveHistoryReader:
                 action_guard_fn=action_guard_fn,
             )
 
-        with ADB_TARGET_OPERATION_LOCK:
-            try:
-                target_before = self._target_snapshot_fn()
-            except Exception:
-                return _blocked("exact_target_ownership_unverified")
+        with self._acquirer.locked_operation():
+            binding = self._acquirer.current_binding()
             if (
-                not target_before.owned
-                or not target_before.target
+                binding is None
                 or not _scope_matches(self._scope_fn, expected_scope_id)
                 or not _action_allowed(action_guard_fn)
                 or not self._source_matches(
@@ -385,31 +409,31 @@ class PlayerSaveHistoryReader:
             ):
                 return _blocked("history_source_binding_unverified")
 
-            try:
-                pull_kwargs: dict[str, Any] = {
-                    "device_id": target_before.target
-                }
-                if self._pull_fn is pull_player_save_bytes:
-                    pull_kwargs["read_fn"] = _quiet_player_save_read
-                payload = self._pull_fn(**pull_kwargs)
-                snapshot = self._decode_fn(
-                    payload,
-                    source_name="playerInfo.dat",
+            acquisition = self._acquirer.acquire(
+                PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+                expected_binding=binding,
+            )
+            if acquisition.complete:
+                try:
+                    observed = history_metadata_from_acquisition(acquisition)
+                except Exception:
+                    observed = _ui_fallback(
+                        "runtime_history_projection_unavailable",
+                        acquisition=acquisition,
+                    )
+            else:
+                observed = _ui_fallback(
+                    "save_history_acquisition_failed",
+                    acquisition=acquisition,
                 )
-                del payload
-                observed = history_metadata_from_snapshot(
-                    snapshot,
-                    acquisition="stable_two_identical_read_exact_target",
-                )
-            except Exception:
-                observed = _ui_fallback("save_history_acquisition_failed")
 
-            try:
-                target_after = self._target_snapshot_fn()
-            except Exception:
-                return _blocked("exact_target_ownership_lost")
             if (
-                not _same_target(target_before, target_after)
+                acquisition.status
+                in {
+                    PlayerSaveAcquisitionStatus.BINDING_REJECTED,
+                    PlayerSaveAcquisitionStatus.BINDING_LOST,
+                }
+                or not self._acquirer.binding_matches(binding)
                 or not _scope_matches(self._scope_fn, expected_scope_id)
                 or not _action_allowed(action_guard_fn)
                 or not self._source_matches(
@@ -453,6 +477,7 @@ class PlayerSaveHistoryReader:
             foreground_fn=self._foreground_fn,
             pull_fn=self._pull_fn,
             decode_fn=self._decode_fn,
+            acquirer=self._acquirer,
             sleep_fn=self._sleep_fn,
             input_log_fn=self._input_log_fn,
             debug_log_fn=self._debug_log_fn,
@@ -469,11 +494,18 @@ class PlayerSaveHistoryReader:
             return _blocked(
                 f"active_attachment_{serialized.reason}"
             )
+        acquisition = serialized.acquisition
         snapshot = serialized.snapshot
         if snapshot is None:
-            return _ui_fallback(serialized.reason)
+            return _ui_fallback(serialized.reason, acquisition=acquisition)
 
-        runtime = snapshot.runtime_save
+        try:
+            runtime = snapshot.runtime_save
+        except Exception:
+            return _ui_fallback(
+                "active_round_projection_unavailable",
+                acquisition=acquisition,
+            )
         if runtime is None:
             return _ui_fallback("active_round_projection_unavailable")
         active_identity = runtime.active_round_identity
@@ -488,13 +520,20 @@ class PlayerSaveHistoryReader:
         ):
             return _blocked("active_round_identity_invalid_after_restore")
 
-        observed = history_metadata_from_snapshot(
-            snapshot,
-            acquisition="forced_active_attachment_android_home_serialization",
-        )
-        profile_observations = validated_profile_observations_from_snapshot(
-            snapshot
-        )
+        assert acquisition is not None
+        try:
+            observed = history_metadata_from_acquisition(acquisition)
+        except Exception:
+            observed = _ui_fallback(
+                "runtime_history_projection_unavailable",
+                acquisition=acquisition,
+            )
+        try:
+            profile_observations = validated_profile_observations_from_acquisition(
+                acquisition
+            )
+        except Exception:
+            profile_observations = None
         return PlayerSaveHistoryReadResult(
             observed.status,
             observed.reason,
@@ -502,6 +541,7 @@ class PlayerSaveHistoryReader:
             safe_ui_fallback=observed.safe_ui_fallback,
             active_round_identity_fingerprint=active_identity.fingerprint,
             validated_profile_observations=profile_observations,
+            acquisition=acquisition,
         )
 
     def _same_attachment_context(
@@ -629,32 +669,6 @@ def _action_allowed(action_guard_fn: Callable[[], bool]) -> bool:
         return False
 
 
-def _same_target(
-    before: AdbTargetSnapshot,
-    after: AdbTargetSnapshot,
-) -> bool:
-    return bool(
-        before.owned
-        and after.owned
-        and before.target == after.target
-        and before.generation == after.generation
-    )
-
-
-def _quiet_player_save_read(
-    path: str,
-    *,
-    device_id: Optional[str] = None,
-) -> Optional[bytes]:
-    from core.adb_utils import read_device_file
-
-    return read_device_file(
-        path,
-        device_id=device_id,
-        report_errors=False,
-    )
-
-
 def _safe_reason(value: Any) -> str:
     normalized = "_".join(str(value or "").strip().lower().split())
     return "".join(
@@ -728,11 +742,16 @@ def _cross_source_ambiguous(reason: str) -> CrossSourceHistoryResult:
     )
 
 
-def _ui_fallback(reason: str) -> PlayerSaveHistoryReadResult:
+def _ui_fallback(
+    reason: str,
+    *,
+    acquisition: Optional[PlayerSaveAcquisitionBundle] = None,
+) -> PlayerSaveHistoryReadResult:
     return PlayerSaveHistoryReadResult(
         PlayerSaveHistoryReadStatus.UI_FALLBACK,
         _safe_reason(reason),
         safe_ui_fallback=True,
+        acquisition=acquisition,
     )
 
 
@@ -756,9 +775,9 @@ __all__ = [
     "PlayerSaveHistoryReadStatus",
     "PlayerSaveHistoryReader",
     "corroborate_ui_and_save_history",
-    "history_metadata_from_snapshot",
+    "history_metadata_from_acquisition",
     "history_sources_compatible",
     "ui_history_bridge_eligible",
-    "validated_profile_observations_from_snapshot",
+    "validated_profile_observations_from_acquisition",
     "valid_history_tail_advance",
 ]

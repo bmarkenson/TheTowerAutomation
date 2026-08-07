@@ -13,6 +13,13 @@ import copy
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Optional
 
+from core.adb_target_session import AdbTargetSnapshot
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionType,
+    StablePlayerSaveAcquirer,
+)
+
 
 SCHEMA_VERSION = 1
 MAPPING_ID = "data-9-game-1073-tournament-conditions-v1"
@@ -484,35 +491,56 @@ def capture_current_tournament_conditions(
     device_id: Optional[str] = None,
     pull_fn: Optional[Callable[..., bytes]] = None,
     decode_fn: Optional[Callable[..., Any]] = None,
+    target_snapshot_fn: Optional[Callable[[], AdbTargetSnapshot]] = None,
+    acquirer: Optional[StablePlayerSaveAcquirer] = None,
 ) -> dict[str, Any]:
     """Capture normalized current-event evidence without changing game state."""
 
-    from core.player_save import (
-        PlayerSaveDecodeError,
-        PlayerSaveError,
-        PlayerSavePullError,
-        decode_player_save_bytes,
-        pull_player_save_bytes,
-    )
-
     when = captured_at or datetime.now().astimezone()
-    pull = pull_fn or pull_player_save_bytes
-    decode = decode_fn or decode_player_save_bytes
+    owner = acquirer
+    if owner is None:
+        if target_snapshot_fn is not None:
+            owner = StablePlayerSaveAcquirer(
+                target_snapshot_fn=target_snapshot_fn,
+                pull_fn=pull_fn,
+                decode_fn=decode_fn,
+                now_fn=lambda: when,
+                pull_options={"attempts": 2},
+            )
+        else:
+            from core.adb_utils import resolve_adb_device
+
+            owner = StablePlayerSaveAcquirer(
+                fixed_target=resolve_adb_device(device_id),
+                pull_fn=pull_fn,
+                decode_fn=decode_fn,
+                now_fn=lambda: when,
+                pull_options={"attempts": 2},
+            )
+    acquisition = owner.acquire(
+        PlayerSaveAcquisitionType.PASSIVE_STABLE_READ
+    )
     try:
-        payload = pull(device_id=device_id, attempts=2)
-        snapshot = decode(
-            payload,
-            source_name="playerInfo.dat",
-            captured_at=when,
-        )
-    except PlayerSavePullError:
-        return unavailable_tournament_conditions("save_pull_failed")
-    except PlayerSaveDecodeError:
-        return unavailable_tournament_conditions("save_decode_failed")
-    except PlayerSaveError:
-        return unavailable_tournament_conditions("save_mapping_failed")
-    except (OSError, TypeError, ValueError):
+        return tournament_conditions_from_acquisition(acquisition)
+    except Exception:
         return unavailable_tournament_conditions("save_capture_failed")
+
+
+def tournament_conditions_from_acquisition(
+    acquisition: PlayerSaveAcquisitionBundle,
+) -> dict[str, Any]:
+    """Project current-event evidence without performing another save read."""
+
+    if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+        raise TypeError("Tournament projection requires a typed acquisition")
+    snapshot = acquisition.snapshot
+    if not acquisition.complete or snapshot is None:
+        reason = {
+            "stable_read_unavailable": "save_pull_failed",
+            "decoder_unavailable": "save_decode_failed",
+            "save_mapping_unavailable": "save_mapping_failed",
+        }.get(acquisition.reason, "save_capture_failed")
+        return unavailable_tournament_conditions(reason)
 
     evidence = snapshot.checks.get("tournament_conditions")
     if evidence is None or evidence.status != "observed" or not evidence.complete:
@@ -525,6 +553,7 @@ def capture_current_tournament_conditions(
                 "method": "versioned_seed_derivation",
                 "captured_at": snapshot.captured_at,
                 "mapping_id": snapshot.mapping_id,
+                "acquisition": acquisition.redacted_provenance(),
             },
         )
     if (
@@ -544,6 +573,7 @@ def capture_current_tournament_conditions(
             "mapping_id": snapshot.mapping_id,
             "save_revision": snapshot.save_revision,
             "save_sha256": snapshot.source_sha256,
+            "acquisition": acquisition.redacted_provenance(),
         }
     )
     result["source"] = source
@@ -569,6 +599,7 @@ __all__ = [
     "capture_current_tournament_conditions",
     "derive_tournament_conditions",
     "derive_tournament_conditions_from_save",
+    "tournament_conditions_from_acquisition",
     "tournament_conditions_complete",
     "unavailable_tournament_conditions",
 ]

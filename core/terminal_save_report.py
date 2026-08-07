@@ -12,10 +12,14 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
-from core.player_save import PlayerSaveSnapshot
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionType,
+    PlayerSaveBoundaryKind,
+)
 from core.player_save_history import (
     PLAYER_SAVE_HISTORY_SOURCE,
-    history_metadata_from_snapshot,
+    history_metadata_from_acquisition,
     history_sources_compatible,
     valid_history_tail_advance,
 )
@@ -55,8 +59,8 @@ def unavailable_terminal_save_report(
     }
 
 
-def terminal_save_report_from_snapshot(
-    snapshot: PlayerSaveSnapshot,
+def terminal_save_report_from_acquisition(
+    acquisition: PlayerSaveAcquisitionBundle,
     *,
     terminal_state: str,
     run_binding: Mapping[str, Any],
@@ -70,6 +74,9 @@ def terminal_save_report_from_snapshot(
     mismatch leaves the existing terminal UI route authoritative.
     """
 
+    if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+        raise TypeError("terminal report requires a typed acquisition")
+    snapshot = acquisition.snapshot
     terminal = _terminal_state(terminal_state)
 
     def unavailable(reason: str) -> dict[str, Any]:
@@ -81,8 +88,19 @@ def terminal_save_report_from_snapshot(
             save_revision=getattr(snapshot, "save_revision", None),
         )
 
+    if not acquisition.complete or snapshot is None:
+        return unavailable(acquisition.reason)
     if terminal not in _SUPPORTED_TERMINALS:
         return unavailable("unsupported_terminal_state")
+    if (
+        acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.NATURAL_BOUNDARY
+        or acquisition.boundary is None
+    ):
+        return unavailable("terminal_acquisition_type_invalid")
+    expected_boundary_kind = PlayerSaveBoundaryKind(terminal)
+    if acquisition.boundary.kind is not expected_boundary_kind:
+        return unavailable("terminal_natural_boundary_kind_mismatch")
     if not isinstance(run_binding, Mapping) or run_binding.get("status") != "bound":
         return unavailable("terminal_run_unbound")
     if not isinstance(activity_scope, Mapping):
@@ -92,15 +110,17 @@ def terminal_save_report_from_snapshot(
     actual_scope_id = str(activity_scope.get("run_id") or "")
     if not expected_scope_id or actual_scope_id != expected_scope_id:
         return unavailable("terminal_activity_scope_binding_lost")
+    if (
+        acquisition.boundary.activity_scope_id is not None
+        and acquisition.boundary.activity_scope_id != actual_scope_id
+    ):
+        return unavailable("terminal_natural_boundary_scope_mismatch")
 
     baseline = activity_scope.get("latest_completed_battle")
     if not isinstance(baseline, Mapping):
         return unavailable("pre_terminal_history_baseline_unavailable")
 
-    history_result = history_metadata_from_snapshot(
-        snapshot,
-        acquisition="stable_terminal_player_save",
-    )
+    history_result = history_metadata_from_acquisition(acquisition)
     if not history_result.complete or not isinstance(history_result.metadata, Mapping):
         return unavailable(
             history_result.reason or "terminal_history_tail_unavailable"
@@ -158,7 +178,7 @@ def terminal_save_report_from_snapshot(
             "captured_at": getattr(snapshot, "captured_at", None),
             "save_revision": getattr(snapshot, "save_revision", None),
             "source_fingerprint": getattr(snapshot, "source_sha256", None),
-            "acquisition": "stable_terminal_player_save",
+            "acquisition": acquisition.redacted_provenance(),
         },
         "run_binding": {
             "status": "bound",
@@ -209,6 +229,6 @@ def _safe_reason(value: Any) -> str:
 __all__ = [
     "TERMINAL_SAVE_REPORT_SCHEMA_VERSION",
     "terminal_save_report_complete",
-    "terminal_save_report_from_snapshot",
+    "terminal_save_report_from_acquisition",
     "unavailable_terminal_save_report",
 ]

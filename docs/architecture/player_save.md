@@ -531,14 +531,12 @@ receipts never edit or promote their own authority manifest.
 
 ## Planned acquisition provenance and temporal authority
 
-This section defines the target contract for the active acquisition-
-consolidation backlog. It is not yet a description of one implemented runtime
-owner. The two-identical-read transport is already centralized, but forced
-serialization, History continuity, terminal capture, passive audit, and the
-standalone Tournament reader still reassemble target binding, pull, decode,
-timing, cleanup, and failure handling independently.
+This section defines the staged contract for the active acquisition-
+consolidation backlog. The acquisition foundation is implemented on
+`feature/player-save-acquisition-foundation`; terminal handoff, temporal merge,
+and Perk-monitor integration remain owned by their later stacked phases.
 
-The planned `StablePlayerSaveAcquirer` owns one in-flight exact-target runtime
+`StablePlayerSaveAcquirer` owns one in-flight exact-target runtime
 read under the ADB target-operation lock: owned target/generation checks before
 and after the read, the quiet stable transport, decode, immediate payload
 disposal, capture timing, sanitized reason codes, and redacted provenance. It
@@ -564,14 +562,25 @@ behavior.
 | `natural_boundary` | A current-process lifecycle token binds one stable read to Game Over or Tournament Results, where the game naturally publishes terminal state. | Mapped terminal facts, a causally advanced structural History tail, and other explicitly validated terminal projections. | The next battle's current configuration or an arbitrary read that merely happens to occur on a terminal-looking screen. |
 | `passive_stable_read` | One exact-target stable read occurs without forcing a game flush. | A transport-stable checkpoint, including positive same-round facts whose temporal class tolerates unknown observation lag. | Snapshot freshness, current configuration, negative evidence, or completeness merely from two identical reads, capture time, or `saveRevision`. |
 
-The typed bundle replaces free-form acquisition labels and the runtime
-`freshness_verified=True` assertion. It carries type, status, safe reason,
+The typed bundle replaces free-form runtime acquisition labels and the runtime
+`freshness_verified=True` assertion. The explicit offline import command keeps
+its separate operator assertion and does not enter runtime authority. The
+bundle carries type, status, safe reason,
 private exact target/generation binding, a redacted binding fingerprint,
 acquisition/capture/completion times, transport stability, optional boundary
 kind/time, and the normalized `PlayerSaveSnapshot`. A target handoff discards
 the snapshot. Unsupported mappings, changed shapes, and unavailable semantic
 components are successful acquisitions followed by projection failures; they
 are not transport failures.
+
+Forced Home and attachment serialization, ordinary History reads, natural
+terminal capture, passive audit, and standalone Tournament acquisition now use
+this owner. `GuardedPlayerSaveSerializer` retains the full lock transaction
+across backgrounding and restoration and publishes a `forced_serialization`
+bundle only after target, source, context, and control revalidation. Terminal
+capture issues the typed natural-boundary evidence and fans one bundle out to
+profile progression, completed-report, and Tournament-condition projectors;
+all existing consumer-specific UI fallback and blocking classes remain intact.
 
 ### Temporal classes and merge rules
 
