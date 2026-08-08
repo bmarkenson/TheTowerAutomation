@@ -56,8 +56,15 @@ unavailable without disabling the separate No Strategy UI monitors.
 During `RUNNING`, the runtime owns one guarded read-only inventory across only
 the fields not already resolved by the save: Cards, Perks, Ultimate Weapons,
 Modules, Event/Bots, Guild/Guardians, Target Priority, and accessible Damage
-Slider. Every source/destination transition is verified; Pause mid-pass sends
-no cleanup input and Enable first restores a known screen. Attack Dissonance
+Slider. A new inventory route is granted only from fresh `RUNNING` while the
+battle lifecycle still owns that exact active battle. The synchronous route
+may traverse its verified panels, but a Cards/Perks/Modules/Event/Guild panel
+later observed by the main loop is never assumed to be automation-owned. This
+prevents an old No Strategy collector from closing or navigating an
+operator-opened Home panel. Every source/destination transition is verified;
+Pause mid-pass sends no cleanup input. A later Enable does not infer cleanup
+ownership from the panel; a new pass waits for fresh `RUNNING`. Attack
+Dissonance
 and Utility Dissonance identities come from the localized purple badge beside
 Tier: the validated white sword means Attack and the validated white star means
 Utility. Purple family evidence without a recognized icon never invents a
@@ -82,8 +89,12 @@ for its post-run sequence:
 
 Uncertain OCR stays raw/pending. If an optional read or persistence stage still
 fails after its bounded attempt, the runtime preserves the partial observation
-with explicit unresolved evidence and releases verified Home to the selected
-terminal policy; it does not Pause or hold all future battles indefinitely.
-Only restoration to verified Home may remain pending, and explicit `WAIT`
-continues to hold by operator choice. Architecture and evidence fields are in
+with explicit unresolved evidence and releases verified Home; it does not
+Pause or hold all future battles indefinitely. Continue selected for that
+exact Game Over may carry one bound, one-shot New Battle launch through this
+required Home inventory. Changing the future policy after the battle ended or
+while already at Home does not create that launch; use **Start Battle** for an
+immediate start. Only restoration to verified Home may remain pending, and
+explicit `WAIT` continues to hold by operator choice. Architecture and
+evidence fields are in
 [`architecture/runtime.md`](../architecture/runtime.md#no-strategy-observation-profile).

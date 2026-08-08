@@ -15,12 +15,14 @@ separate available **Start Battle** or **Attach to Battle** action. Do not
 interpret a live process as enabled input or a stopped process as a terminal
 policy.
 
-**Enable Automation** changes action authority only. While the runtime is still
-waiting for its initial battle intent, Enable at Home does not serialize a Home
-baseline, run configuration setup, claim a Tournament validation battle, or
-dispatch New Battle/Resume Battle. Those paths require the separate matching
-battle intent. An explicitly requested setup capture remains a separate
-workflow under its own exact evidence and serialization authority.
+**Enable Automation** changes action authority only. At an idle managed Home
+boundary—before the first battle or after any later one—Enable does not
+serialize a Home baseline, run configuration setup, recover navigation, claim
+a Tournament validation battle, or dispatch New Battle/Resume Battle. Those
+paths require an exact immediate owner: the separate matching battle intent,
+an already-bound terminal continuation, or the explicit one-shot validation
+workflow. An explicitly requested setup capture remains a separate workflow
+under its own exact evidence and serialization authority.
 
 **Start Battle** is available only from fresh, owner-matched Home **New
 Battle** evidence. If requested while Paused it remains `awaiting_enable`;
@@ -39,6 +41,28 @@ Stopping interrupts unfinished battle and manual-control workflows. Repeating
 an already satisfied Start or Stop is reported as a no-op. The old attached
 reload and Start-time attachment-policy controls are retired: after a process
 replacement, inspect fresh observation and issue a new exact battle intent.
+
+## Set what happens when a battle ends
+
+**When this battle ends** is future policy, not a Home command. **Continue
+automatically** normally taps Retry directly when the next ordinary Game Over
+is handled. **Wait** retains the supported terminal boundary, and **Return to /
+stay Home** follows its verified Home route. Selecting Continue while already
+at Home records and acknowledges only that future policy; it does not run save
+preflight, repair configuration, tap Battle, or tap Resume.
+
+Some completed-terminal workflows must reach Home before another battle can
+start: No Strategy post-run inventory, an operator-authorized configuration
+repair, and Tournament Results dismissal. If Continue was already selected
+for that exact terminal boundary, the runtime may carry one process-local
+continuation through the owned Home work. It is bound to the exact runtime,
+target generation, activity scope, and terminal-time state/policy request IDs;
+it accepts only fresh **New Battle**, runs normal new-run gates, and is consumed
+only after one verified dispatch. Pause/Enable or policy request changes,
+manual/workflow supersession, Resume Battle, changed binding, process restart,
+or unexpected manual activity cancels it. Changing Wait/Home to Continue after
+the terminal or at Home never manufactures that permission; use **Start
+Battle** if an immediate start is wanted.
 
 ## Attach to a current battle
 
@@ -67,8 +91,10 @@ that can only be fixed between battles, automation may Surrender only when the
 runtime offers **Surrender this battle and repair setup** and the operator
 selects that exact one-shot option. It records the nonrepresentative result,
 returns to verified Home, and lets ordinary Home repair and the separately
-selected future-battle policy continue. The one-shot permission does not
-select a later battle or grant Surrender authority beyond that exact repair.
+selected future-battle policy continue. Continue can launch from that Home
+only through the separate terminal-bound continuation described above. The
+repair permission itself does not select a later battle or grant Surrender
+authority beyond that exact repair.
 
 ## Take and return manual control
 

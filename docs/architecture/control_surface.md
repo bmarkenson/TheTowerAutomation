@@ -213,7 +213,8 @@ or exactly acknowledged repeat is a visible no-op.
 | Stopped | unavailable/stopped | any | Start Automation | launch service Paused; await observation and battle intent |
 | Live | paused | Home New Battle | Start Battle | `requested` → `awaiting_enable`; explicit Enable revalidates and acknowledges normal new-run gates |
 | Live | enabled | Home New Battle | Start Battle | revalidate and acknowledge normal new-run gates |
-| Live | enabled | Home New or Home Resume with no acknowledged initial battle intent | Enable or no additional request | observe only; do not serialize ordinary Home preflight, run configuration setup, claim validation, or dispatch a battle control |
+| Live | enabled | Home New or Home Resume with no exact immediate workflow grant | terminal-policy change, Enable, Strategy selection, or no additional request | observe and run independently safe Home collectors only; do not serialize ordinary Home preflight, run configuration setup, claim validation, recover Home, or dispatch a battle control |
+| Live | enabled | Home New Battle with a terminal-bound continuation | no new request | revalidate the exact terminal-time state/policy request IDs, runtime, target generation, activity scope, and New Battle control; run normal new-run gates, dispatch exactly one verified New Battle, and consume the claim only after successful dispatch |
 | Live | enabled | verified Home control was tapped | acknowledged Start or ready resumable Attach | record `action_dispatched`; keep unrelated automation suppressed until the same battle is adopted, a definitive mismatch interrupts, or the 20-second launch window fails |
 | Live | paused | Home Resume Battle or active battle | Attach to Battle | `requested` → `awaiting_enable`; explicit Enable enters `validating_save` without adopting the battle |
 | Live | enabled | Home Resume Battle or active battle | Attach to Battle | prefer a stable exact-target save; if its source is safely restored but the data/mapping is unusable, bind guarded Battle History instead; then become observation-only `ready` without selecting a Strategy |
@@ -234,7 +235,7 @@ or exactly acknowledged repeat is a visible no-op.
 | Live | capture owns or completed a forced refresh | ready/terminal ledger write fails | no additional request | retain the exact process-local result and retry only its atomic receipt without changing action authority or serializing again |
 | Live | capture has a terminal result | `saved`, `cancelled`, `unavailable`, `interrupted`, or `failed` | reopen Capture | inspect the prior result only; a new serialization requires the separate explicit **Try capture again** action |
 | Live | enabled | Game Over | selected future terminal policy | collect terminal data best effort, then follow Retry/Home; if the route fails, retain it for a fresh-evidence retry without changing authority |
-| Live | enabled | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result and use the verified dismissal route; failure retries from fresh evidence without changing authority or the independent next-battle policy |
+| Live | enabled | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result and use the verified dismissal route; failure retries from fresh evidence without changing authority; only Continue already selected for that terminal boundary can carry one exact launch through verified New Battle Home |
 | Live/stopped | already satisfied | any | repeated Pause, Enable, Start Automation, Stop Automation, terminal policy, or Take Manual Control where defined | return a visible no-op instead of fabricating a transition |
 
 An intent requested under Pause is pending, not acknowledged action authority.
@@ -247,8 +248,25 @@ At Tournament Results, `WAIT` is satisfied by retaining the screen. Continue
 automatically and Return/stay Home first preserve the result, then use the
 verified OK-to-Home dismissal owner. A failed dismissal retains the selected
 future policy and retries from fresh terminal evidence without changing action
-authority. Continue still does not mean that dismissal itself starts a battle:
-the next verified Home boundary owns that separate future policy.
+authority. Continue still does not make the policy control an immediate battle
+command. If Continue was already selected when this exact terminal boundary
+was handled, successful dismissal may freeze one process-local continuation
+claim for the next verified New Battle Home. Selecting Continue after a
+retained result can dismiss that result, but it does not retroactively create a
+Home launch claim.
+
+Managed Home launch authority is deliberately narrower than terminal policy.
+An ordinary Game Over under Continue uses its direct Retry control. A route
+that must pass through Home—No Strategy post-run collection, an explicitly
+authorized configuration-repair return, or Tournament Results dismissal—may
+carry a one-shot claim created from the exact terminal observation. The claim
+is bound to runtime/PID, ADB target and generation, activity scope, and the
+state and mode request identities in force at that terminal. It survives only
+its owned Home work, requires fresh `NEW_BATTLE`, and is consumed only after a
+verified dispatch. Policy or authority request changes, manual/workflow
+supersession, Resume Battle, owner/target/scope change, process replacement, or
+unexpected manual activity discard it. Being at Home, selecting a Strategy,
+or changing **When this battle ends** never creates one.
 
 The API retains `resume` as a deprecated alias for `enable` and the old
 directive-only `stop` for internal coordination compatibility. The latter sets
@@ -281,6 +299,11 @@ and requests another serialization; a heartbeat never retries it on its own.
 A Pause, Stop, or Take Manual Control that arrives during Home setup yields at
 the first denied input without cleanup. Only a later same-owner Enable may
 restore Home from that yielded route.
+Outside such an already-owned route, managed Home setup is authorized only by
+an acknowledged exact Start Battle request, an exact terminal-bound
+continuation, or the separate one-shot validation owner. Terminal policy,
+Strategy selection, prior battle history, and Automation Enabled are not Home
+navigation or recovery authority.
 Unexpected active-battle → Home Resume Battle activity while Enabled enters the
 same safe Pause/manual-control ledger rather than competing for input. Broader
 manual-activity detection and grace-period controls remain separately
@@ -829,8 +852,11 @@ Process request examples:
 - **When this battle ends** selects continue automatically, wait, or
   return/stay Home. The compatible `NEXT_BATTLE`, `WAIT`, and `HOME` values
   remain visible only as runtime representation; none is presented as an
-  immediate battle command. Legacy `RETRY` normalizes to `NEXT_BATTLE`. This
-  contract retains capability `terminal_dispositions_v2`.
+  immediate battle command. Continue normally owns direct Retry at the next
+  Game Over. A terminal route that necessarily returns Home can create the
+  exact one-shot continuation described above; the selected value alone never
+  does. Legacy `RETRY` normalizes to `NEXT_BATTLE`. This contract retains
+  capability `terminal_dispositions_v2`.
 - A distinct running-battle Strategy Action Gate banner based only on fresh,
   owner-matched structured status. It reads “Strategy actions blocked —
   observation and safe collectors remain active.” and shows the reason, failed

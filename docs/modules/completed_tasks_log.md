@@ -39,6 +39,33 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 Home launch-authority correction
+
+- Commit `b36f878` prevents a stale No Strategy inventory pass from reclaiming
+  an operator-opened Home panel. A route now requires fresh `RUNNING`, the
+  active No Strategy observation, and lifecycle-owned evidence for that exact
+  battle; Paused or later-observed Cards, Perks, Modules, Event, Guild, Target
+  Priority, and Damage Adjuster panels grant no cleanup or navigation input.
+- Commit `fad29e3` separates future terminal policy from managed Home launch
+  authority. Automation Enabled, Strategy selection, prior lifecycle state,
+  or selecting Continue at Home no longer runs setup, repairs navigation, or
+  taps Battle/Resume. Explicit Start still runs normal new-run gates, and an
+  ordinary Game Over under Continue still owns its direct Retry control.
+- A terminal workflow that must return Home can carry one process-local,
+  one-shot continuation only when Continue was already selected for that exact
+  terminal boundary. The claim binds runtime/PID, target generation, activity
+  scope, and state/policy request identities; it accepts only fresh New Battle
+  and is invalidated by authority/policy changes, manual or workflow
+  supersession, Resume Battle, binding changes, process replacement, or
+  unexpected manual activity.
+- The affected Home/control/No Strategy/Game Over/Tournament/repair slice
+  passed 461 tests. The complete supported checkpoint passed compilation,
+  state definitions, clickmap integrity with zero errors and the established
+  44 orphan candidates, and all 1,985 tests in 459.15 seconds. No deployment,
+  live/device action, or native Windows validation was performed; natural safe
+  terminal/Home and native Windows usability validation remain in the Better
+  Control backlog.
+
 ### 2026-08-08 save-to-UI fallback contract repair
 
 - The combined candidate is based directly on completed Better Control tip

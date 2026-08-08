@@ -722,6 +722,36 @@ stages:
       09:33:44, observed the overlay removed at 09:33:53, and completed its
       bounded floating-gem scan at 09:33:57. No Surrender or test battle
       boundary was used.
+  - Home launch-authority correction checkpoint (2026-08-08, feature branch):
+    - [x] Commit `b36f878` requires fresh `RUNNING`, an active No Strategy
+      observation, and lifecycle-owned active-battle evidence before granting
+      a new inventory route. A completed run can no longer reclaim or close an
+      operator-opened Cards, Perks, Modules, Event, Guild, Target Priority, or
+      Damage Adjuster panel from Home.
+    - [x] Commit `fad29e3` removes managed idle-Home serialization, setup,
+      recovery, and Battle/Resume dispatch derived only from Automation
+      Enabled, Strategy selection, prior lifecycle state, or `NEXT_BATTLE`.
+      Explicit Start still runs normal gates. Ordinary Continue still retries
+      directly at Game Over.
+    - [x] No Strategy post-run, an authorized configuration-repair return, and
+      Tournament Results dismissal can carry one process-local Home
+      continuation only when Continue was selected for that exact terminal.
+      The claim binds runtime/PID, target generation, activity scope, and the
+      state/mode request identities, accepts only New Battle, and is consumed
+      only after verified dispatch. Policy/authority cycles, manual/workflow
+      supersession, Resume Battle, binding change, process replacement, and
+      unexpected manual activity invalidate it. A policy change at Home or
+      after a retained terminal never creates immediate launch authority.
+    - [x] The affected Home/control/No Strategy/Game Over/Tournament/repair
+      slice passes 461 tests. Existing API and browser/native/CLI wording
+      already described terminal policy as future-only; runtime status now
+      also exposes the separate pending Home continuation without granting
+      replay authority.
+    - [x] The complete supported checkpoint passed compilation, state
+      definitions, clickmap integrity with zero errors and the established 44
+      orphan candidates, and all 1,985 tests in 459.15 seconds. Native Windows
+      usability and natural safe terminal/Home validation remain pending; no
+      deployment or device action is claimed by this checkpoint.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,
