@@ -234,6 +234,9 @@ class App:
         ] = None,
     ) -> None:
         self._config = config
+        self._operator_battle_intent_required = bool(
+            config.startup_gate_policy == "operator"
+        )
         self._adb_target_session = adb_target_session
         self._adb_connection_coordinator = (
             adb_connection_coordinator
@@ -417,6 +420,8 @@ class App:
                 )
         self._blind_tapper_suspended = False
         self._tournament_results_captured = False
+        self._tournament_terminal_continuation_bound = False
+        self._tournament_terminal_continuation_claim = None
         self._no_strategy_observer = NoStrategyRunObserver()
         self._no_strategy_observation_active = False
         self._no_strategy_inventory_complete = False
@@ -459,6 +464,7 @@ class App:
         self._interactive_development_ack: Optional[Dict[str, Any]] = None
         self._control_observation_sequence = 0
         self._control_observation: Optional[Dict[str, Any]] = None
+        self._terminal_home_continuation: Optional[Dict[str, Any]] = None
         self._watchdog_mutation_guard = CooperativeMutationGuard(
             lambda: self._runtime_action_guard(
                 action_class=RuntimeActionClass.LIFECYCLE_ACTION
@@ -1312,6 +1318,16 @@ class App:
                         if callable(active_battle_observed)
                         else False
                     ),
+                    "explicit_home_intent_required": bool(
+                        getattr(
+                            self,
+                            "_operator_battle_intent_required",
+                            False,
+                        )
+                    ),
+                    "terminal_home_continuation": (
+                        self._terminal_home_continuation_status()
+                    ),
                 },
                 "strategy_scope": {
                     "active_battle": (
@@ -1409,6 +1425,10 @@ class App:
             yielded = self._supervisor.yield_to_unexpected_manual_activity(
                 evidence
             )
+            if yielded is not None:
+                self._clear_terminal_home_continuation(
+                    "automation yielded to unexpected manual activity"
+                )
             return yielded is not None
         if not isinstance(previous, Mapping) or not isinstance(current, Mapping):
             return False
@@ -1434,6 +1454,9 @@ class App:
         yielded = self._supervisor.yield_to_unexpected_manual_activity(evidence)
         if yielded is None:
             return False
+        self._clear_terminal_home_continuation(
+            "automation yielded to unexpected manual activity"
+        )
         manual_id = str(yielded.get("manual_control_id") or "")
         self._log_operator_workflow_result(
             manual_id,
@@ -1461,6 +1484,230 @@ class App:
             }
         )
         return dict(evidence) if evidence is not None else None
+
+    def _current_control_request_identity(self) -> Dict[str, object]:
+        """Return the exact operator state and terminal-policy request IDs."""
+
+        identity = getattr(
+            getattr(self, "_supervisor", None),
+            "control_request_identity",
+            None,
+        )
+        if not isinstance(identity, Mapping):
+            return {}
+        return {
+            "state_request_id": identity.get("state_request_id"),
+            "mode_request_id": identity.get("mode_request_id"),
+        }
+
+    def _build_terminal_home_continuation_claim(
+        self,
+        *,
+        source: str,
+        evidence: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Freeze one future-policy grant at an exact terminal boundary."""
+
+        if not bool(
+            getattr(self, "_operator_battle_intent_required", False)
+        ):
+            return None
+        if AUTOMATION.mode is not ExecMode.NEXT_BATTLE:
+            return None
+        if str(
+            getattr(getattr(self, "_supervisor", None), "control_state", "")
+        ).upper() != "RUNNING":
+            return None
+        expected_game_state = {
+            "no_strategy_post_run": "game_over",
+            "session_preflight_repair": "game_over",
+            "tournament_results": "tournament_results",
+        }.get(str(source))
+        if expected_game_state is None:
+            raise ValueError(
+                f"Unsupported terminal Home continuation source {source!r}"
+            )
+        current = (
+            dict(evidence)
+            if isinstance(evidence, Mapping)
+            else self._current_control_workflow_evidence()
+        )
+        if not isinstance(current, Mapping):
+            return None
+        if current.get("game_state") != expected_game_state:
+            return None
+        request_identity = self._current_control_request_identity()
+        state_request_id = str(
+            request_identity.get("state_request_id") or ""
+        ).strip()
+        mode_request_id = str(
+            request_identity.get("mode_request_id") or ""
+        ).strip()
+        if not state_request_id or not mode_request_id:
+            return None
+        binding_fields = (
+            "runtime_id",
+            "pid",
+            "adb_target",
+            "target_generation",
+            "activity_scope_run_id",
+        )
+        if any(current.get(field) in {None, ""} for field in binding_fields):
+            return None
+        return {
+            "schema_version": 1,
+            "source": str(source),
+            "created_at": datetime.now(timezone.utc).astimezone().isoformat(
+                timespec="seconds"
+            ),
+            "terminal_observation_id": str(
+                current.get("observation_id") or ""
+            ),
+            "state_request_id": state_request_id,
+            "mode_request_id": mode_request_id,
+            "binding": {
+                field: copy.deepcopy(current.get(field))
+                for field in binding_fields
+            },
+        }
+
+    def _clear_terminal_home_continuation(self, reason: str) -> bool:
+        """Discard a process-local Home launch claim without sending input."""
+
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if not isinstance(claim, Mapping):
+            self._terminal_home_continuation = None
+            return False
+        self._terminal_home_continuation = None
+        log(
+            "[HOME] Cleared terminal-bound continuation authority — " + reason,
+            "INFO",
+        )
+        return True
+
+    def _commit_terminal_home_continuation(
+        self,
+        claim: Optional[Mapping[str, Any]],
+    ) -> bool:
+        """Arm an exact terminal claim only while its requests are unchanged."""
+
+        if not isinstance(claim, Mapping):
+            return False
+        if AUTOMATION.mode is not ExecMode.NEXT_BATTLE:
+            return False
+        if str(
+            getattr(getattr(self, "_supervisor", None), "control_state", "")
+        ).upper() != "RUNNING":
+            return False
+        identity = self._current_control_request_identity()
+        if (
+            str(identity.get("state_request_id") or "")
+            != str(claim.get("state_request_id") or "")
+            or str(identity.get("mode_request_id") or "")
+            != str(claim.get("mode_request_id") or "")
+        ):
+            return False
+        self._terminal_home_continuation = copy.deepcopy(dict(claim))
+        log(
+            "[HOME] Armed one terminal-bound Continue automatically launch "
+            f"from {claim.get('source')}",
+            "INFO",
+        )
+        return True
+
+    def _terminal_home_continuation_ready(
+        self,
+        *,
+        home_control: HomeBattleControl,
+    ) -> bool:
+        """Validate one exact claim against fresh New Battle Home evidence."""
+
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if not isinstance(claim, Mapping):
+            return False
+        if AUTOMATION.mode is not ExecMode.NEXT_BATTLE:
+            self._clear_terminal_home_continuation(
+                "the terminal policy changed before Home dispatch"
+            )
+            return False
+        if str(
+            getattr(getattr(self, "_supervisor", None), "control_state", "")
+        ).upper() != "RUNNING":
+            self._clear_terminal_home_continuation(
+                "the action-authority request changed before Home dispatch"
+            )
+            return False
+        identity = self._current_control_request_identity()
+        if (
+            str(identity.get("state_request_id") or "")
+            != str(claim.get("state_request_id") or "")
+            or str(identity.get("mode_request_id") or "")
+            != str(claim.get("mode_request_id") or "")
+        ):
+            self._clear_terminal_home_continuation(
+                "operator state or policy request identity changed"
+            )
+            return False
+        if home_control is not HomeBattleControl.NEW_BATTLE:
+            if home_control is HomeBattleControl.RESUME_BATTLE:
+                self._clear_terminal_home_continuation(
+                    "Home now offers Resume Battle instead of New Battle"
+                )
+            return False
+        current = self._current_control_workflow_evidence()
+        if not isinstance(current, Mapping):
+            return False
+        if current.get("game_state") != "home_new_battle":
+            return False
+        binding = claim.get("binding")
+        binding_fields = (
+            "runtime_id",
+            "pid",
+            "adb_target",
+            "target_generation",
+            "activity_scope_run_id",
+        )
+        if not (
+            isinstance(binding, Mapping)
+            and all(
+                binding.get(field) == current.get(field)
+                for field in binding_fields
+            )
+        ):
+            self._clear_terminal_home_continuation(
+                "runtime, target, or battle scope changed"
+            )
+            return False
+        return True
+
+    def _consume_terminal_home_continuation(self) -> bool:
+        """Consume a successfully dispatched terminal-bound Home launch."""
+
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if not isinstance(claim, Mapping):
+            return False
+        self._terminal_home_continuation = None
+        log(
+            "[HOME] Consumed terminal-bound continuation authority after "
+            "verified New Battle dispatch",
+            "INFO",
+        )
+        return True
+
+    def _terminal_home_continuation_status(self) -> Dict[str, object]:
+        """Publish non-authoritative operator visibility for a pending claim."""
+
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if not isinstance(claim, Mapping):
+            return {"pending": False}
+        return {
+            "pending": True,
+            "source": claim.get("source"),
+            "created_at": claim.get("created_at"),
+            "terminal_observation_id": claim.get(
+                "terminal_observation_id"
+            ),
+        }
 
     def _workflow_evidence_matches_runtime(
         self,
@@ -7587,6 +7834,10 @@ class App:
                 # authority. No overlay handler, recovery tap, mission action,
                 # or blind tapper may run before this gate clears.
                 battle_started = self._mission_mgr.maybe_run_start(detection)
+                if battle_started is True:
+                    self._clear_terminal_home_continuation(
+                        "a new active battle boundary was observed"
+                    )
                 self._accept_pending_terminal_history_handoff()
                 self._cancel_pending_tournament_validation_after_boundary(
                     detection
@@ -9833,6 +10084,8 @@ class App:
                 return
         if new_state == "RUNNING":
             self._tournament_results_captured = False
+            self._tournament_terminal_continuation_bound = False
+            self._tournament_terminal_continuation_claim = None
         if (
             not operator_workflow_only
             and self._handler_enabled("daily_gem")
@@ -9866,6 +10119,22 @@ class App:
             and self._handler_enabled("game_over")
         ):
             terminal_policy = AUTOMATION.mode.value
+            if not getattr(
+                self,
+                "_tournament_terminal_continuation_bound",
+                False,
+            ):
+                self._tournament_terminal_continuation_claim = (
+                    self._build_terminal_home_continuation_claim(
+                        source="tournament_results"
+                    )
+                )
+                self._tournament_terminal_continuation_bound = True
+            terminal_continuation_claim = getattr(
+                self,
+                "_tournament_terminal_continuation_claim",
+                None,
+            )
             if (
                 getattr(self, "_tournament_results_captured", False)
                 and terminal_policy == ExecMode.WAIT.value
@@ -9982,6 +10251,11 @@ class App:
                 ),
                 operation_id=operation_id,
             )
+            self._commit_terminal_home_continuation(
+                terminal_continuation_claim
+            )
+            self._tournament_terminal_continuation_claim = None
+            self._tournament_terminal_continuation_bound = False
             return
 
         if (
@@ -10099,6 +10373,28 @@ class App:
                 ):
                     self._pending_game_over_route = None
                     pending_terminal_route = None
+            if isinstance(pending_terminal_route, Mapping):
+                raw_terminal_continuation = pending_terminal_route.get(
+                    "terminal_home_continuation"
+                )
+                terminal_continuation_claim = (
+                    dict(raw_terminal_continuation)
+                    if isinstance(raw_terminal_continuation, Mapping)
+                    else None
+                )
+            elif not manual_return and (repair_in_progress or no_strategy_run):
+                terminal_continuation_claim = (
+                    self._build_terminal_home_continuation_claim(
+                        source=(
+                            "session_preflight_repair"
+                            if repair_in_progress
+                            else "no_strategy_post_run"
+                        ),
+                        evidence=current_manual_evidence,
+                    )
+                )
+            else:
+                terminal_continuation_claim = None
             boundary_finalized = bool(
                 isinstance(pending_terminal_route, Mapping)
                 and pending_terminal_route.get("boundary_finalized")
@@ -10275,6 +10571,9 @@ class App:
                             "record": None,
                             "stats_status": "skipped",
                             "boundary_finalized": boundary_finalized,
+                            "terminal_home_continuation": (
+                                copy.deepcopy(terminal_continuation_claim)
+                            ),
                             "retry_at": 0.0,
                         }
                         log(
@@ -10292,6 +10591,9 @@ class App:
                         "future-battle policy remain Enabled",
                         "INFO",
                         console=True,
+                    )
+                    self._commit_terminal_home_continuation(
+                        terminal_continuation_claim
                     )
                     return
             manual_full_disposition = None
@@ -10433,10 +10735,17 @@ class App:
                     "stats_status": terminal_outcome.stats_status,
                     "boundary_finalized": boundary_finalized,
                     "repair_failure_reason": repair_terminal_failure_reason,
+                    "terminal_home_continuation": (
+                        copy.deepcopy(terminal_continuation_claim)
+                    ),
                     "retry_at": 0.0,
                 }
                 return
             self._pending_game_over_route = None
+            if terminal_outcome.route == "home":
+                self._commit_terminal_home_continuation(
+                    terminal_continuation_claim
+                )
             if repair_terminal_failure_reason is not None:
                 self._mission_mgr.fail_session_preflight_repair(
                     repair_terminal_failure_reason
@@ -10671,8 +10980,74 @@ class App:
                 )
             )
             awaiting_initial_battle_intent = self._awaiting_initial_battle_intent()
-            home_preflight_authorized = not awaiting_initial_battle_intent
             home_control = detect_home_battle_control(img).control
+            terminal_mode = AUTOMATION.mode
+            workflow = self._supervisor.battle_workflow
+            workflow_active = bool(
+                isinstance(workflow, Mapping)
+                and workflow.get("status")
+                not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            )
+            explicit_start = bool(
+                workflow_active
+                and not awaiting_initial_battle_intent
+                and workflow.get("intent") == "start_battle"
+                and workflow.get("status") in {"acknowledged", "ready"}
+            )
+            explicit_attach = bool(
+                workflow_active
+                and workflow.get("intent") == "attach_battle"
+                and workflow.get("status") == "validating_save"
+            )
+            manual = self._supervisor.manual_control
+            manual_active = bool(
+                isinstance(manual, Mapping)
+                and manual.get("status")
+                not in MANUAL_CONTROL_TERMINAL_STATUSES
+            )
+            manual_return_resume = bool(
+                manual_active
+                and manual.get("status") == "reconciling"
+                and home_control is HomeBattleControl.RESUME_BATTLE
+            )
+            if workflow_active or manual_active:
+                self._clear_terminal_home_continuation(
+                    "an explicit operator workflow superseded it"
+                )
+                terminal_continuation_authorized = False
+            else:
+                terminal_continuation_authorized = (
+                    self._terminal_home_continuation_ready(
+                        home_control=home_control
+                    )
+                )
+            managed_home_control = bool(
+                getattr(
+                    self,
+                    "_operator_battle_intent_required",
+                    False,
+                )
+            )
+            legacy_home_launch_authorized = bool(
+                not managed_home_control
+                and not awaiting_initial_battle_intent
+                and self._auto_start_enabled
+                and terminal_mode is ExecMode.NEXT_BATTLE
+            )
+            legacy_home_preflight_authorized = bool(
+                not managed_home_control
+                and not awaiting_initial_battle_intent
+            )
+            validation_home_preflight_authorized = bool(
+                exclusive_request_pending
+                and not awaiting_initial_battle_intent
+            )
+            home_preflight_authorized = bool(
+                explicit_start
+                or terminal_continuation_authorized
+                or legacy_home_preflight_authorized
+                or validation_home_preflight_authorized
+            )
             requirements = self._mission_mgr.no_battle_setup_requirements()
             scope = get_activity_scope()
             scope_id = str(scope.get("run_id") or "") if scope else ""
@@ -10763,8 +11138,7 @@ class App:
                     )
                     return
             if (
-                (self._auto_start_enabled or home_preflight_enabled)
-                and home_preflight_authorized
+                home_preflight_authorized
                 and home_control is HomeBattleControl.NEW_BATTLE
                 and requirements
                 and (
@@ -10949,41 +11323,20 @@ class App:
                 ),
             )
             if home_handler_enabled:
-                terminal_mode = AUTOMATION.mode
-                workflow = self._supervisor.battle_workflow
-                workflow_active = bool(
-                    isinstance(workflow, Mapping)
-                    and workflow.get("status")
-                    not in BATTLE_WORKFLOW_TERMINAL_STATUSES
-                )
-                explicit_start = bool(
-                    workflow_active
-                    and not awaiting_initial_battle_intent
-                    and workflow.get("intent") == "start_battle"
-                    and workflow.get("status") in {"acknowledged", "ready"}
-                )
-                explicit_attach = bool(
-                    workflow_active
-                    and workflow.get("intent") == "attach_battle"
-                    and workflow.get("status") == "validating_save"
-                )
-                manual = self._supervisor.manual_control
-                manual_return_resume = bool(
-                    isinstance(manual, Mapping)
-                    and manual.get("status") == "reconciling"
-                    and home_control is HomeBattleControl.RESUME_BATTLE
-                )
+                if terminal_continuation_authorized:
+                    terminal_continuation_authorized = (
+                        self._terminal_home_continuation_ready(
+                            home_control=home_control
+                        )
+                    )
                 if workflow_active:
                     restart_enabled = explicit_start or explicit_attach
                 elif manual_return_resume:
                     restart_enabled = True
-                elif awaiting_initial_battle_intent:
-                    restart_enabled = False
+                elif terminal_continuation_authorized:
+                    restart_enabled = True
                 else:
-                    restart_enabled = bool(
-                        self._auto_start_enabled
-                        and terminal_mode is ExecMode.NEXT_BATTLE
-                    )
+                    restart_enabled = legacy_home_launch_authorized
                 save_coordinator = getattr(
                     self,
                     "_player_save_preflight_coordinator",
@@ -11010,7 +11363,9 @@ class App:
                         "unrelated_later_home_launch_boundary"
                     )
                 launch_authorized = True
-                if carry_pending and restart_enabled:
+                if restart_enabled and (
+                    carry_pending or terminal_continuation_authorized
+                ):
                     launch_authorized = self._runtime_action_guard(
                         action_class=RuntimeActionClass.LIFECYCLE_ACTION,
                     )
@@ -11057,6 +11412,26 @@ class App:
                         "resume the exact observed battle only for Return Control "
                         "save reconciliation"
                     )
+                elif terminal_continuation_authorized:
+                    continuation = getattr(
+                        self,
+                        "_terminal_home_continuation",
+                        {},
+                    )
+                    continuation_source = str(
+                        continuation.get("source")
+                        if isinstance(continuation, Mapping)
+                        else "terminal_route"
+                    )
+                    workflow_operation_id = new_operation_id()
+                    workflow_action_purpose = (
+                        "Continuing after the completed battle"
+                    )
+                    workflow_action_reason = (
+                        "consume the exact one-shot Home continuation from "
+                        f"{continuation_source}; the future policy alone does "
+                        "not authorize this launch"
+                    )
                 if explicit_attach or manual_return_resume:
                     launched = handle_home_screen(
                         restart_enabled=restart_enabled,
@@ -11065,7 +11440,7 @@ class App:
                         action_purpose=workflow_action_purpose,
                         action_reason=workflow_action_reason,
                     )
-                elif explicit_start:
+                elif explicit_start or terminal_continuation_authorized:
                     launched = handle_home_screen(
                         restart_enabled=restart_enabled,
                         require_new_battle=True,
@@ -11086,6 +11461,8 @@ class App:
                     self._mark_operator_battle_action_dispatched(
                         bool(launched)
                     )
+                if terminal_continuation_authorized and launched:
+                    self._consume_terminal_home_continuation()
                 if carry_pending:
                     if restart_enabled:
                         save_coordinator.mark_runtime_launch(

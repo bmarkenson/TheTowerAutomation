@@ -22,6 +22,7 @@ from core.player_save_acquisition import (
 )
 from core.player_save_history import PlayerSaveAttachmentContext
 from core.run_state import AUTOMATION, ExecMode
+from handlers.game_over_handler import GameOverHandlingOutcome
 from test.player_save_temporal_fixtures import (
     running_attachment_observations,
 )
@@ -95,8 +96,21 @@ def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
     app = _app_without_strategy()
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     record = {"battle_id": "Battle1"}
+    continuation = {"schema_version": 1, "source": "no_strategy_post_run"}
+    app._build_terminal_home_continuation_claim = MagicMock(
+        return_value=continuation
+    )
+    app._commit_terminal_home_continuation = MagicMock(return_value=True)
 
-    with patch("core.app.handle_game_over", return_value=record) as game_over:
+    with patch(
+        "core.app.handle_game_over",
+        return_value=GameOverHandlingOutcome(
+            True,
+            "home",
+            record,
+            "saved",
+        ),
+    ) as game_over:
         app._handle_primary_states("GAME_OVER", set(), frame)
 
     kwargs = game_over.call_args.kwargs
@@ -121,6 +135,63 @@ def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
     }
     assert app._pending_no_strategy_record is record
     assert app._no_strategy_post_run_stage == "locks"
+    app._build_terminal_home_continuation_claim.assert_called_once_with(
+        source="no_strategy_post_run",
+        evidence=None,
+    )
+    app._commit_terminal_home_continuation.assert_called_once_with(
+        continuation
+    )
+
+
+def test_no_strategy_terminal_retry_arms_continuation_only_after_home():
+    app = _app_without_strategy()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    binding = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "activity_scope_run_id": "run-1",
+        "game_state": "game_over",
+    }
+    app._current_control_workflow_evidence = MagicMock(return_value=binding)
+    continuation = {"schema_version": 1, "source": "no_strategy_post_run"}
+    app._build_terminal_home_continuation_claim = MagicMock(
+        return_value=continuation
+    )
+    app._commit_terminal_home_continuation = MagicMock(return_value=True)
+
+    with patch(
+        "core.app.handle_game_over",
+        side_effect=(
+            GameOverHandlingOutcome(
+                False,
+                "pending_retry",
+                None,
+                "unavailable",
+                "Game Stats recovery",
+            ),
+            GameOverHandlingOutcome(True, "home", None, "unavailable"),
+        ),
+    ) as game_over:
+        app._handle_primary_states("GAME_OVER", set(), frame)
+        app._commit_terminal_home_continuation.assert_not_called()
+        assert app._pending_game_over_route[
+            "terminal_home_continuation"
+        ] == continuation
+
+        app._handle_primary_states("GAME_OVER", set(), frame)
+
+    app._build_terminal_home_continuation_claim.assert_called_once_with(
+        source="no_strategy_post_run",
+        evidence=binding,
+    )
+    assert game_over.call_count == 2
+    assert game_over.call_args_list[1].kwargs["capture_stats"] is False
+    app._commit_terminal_home_continuation.assert_called_once_with(
+        continuation
+    )
 
 
 def test_save_resolved_post_run_fields_skip_home_configuration_navigation():
@@ -391,6 +462,83 @@ def test_next_battle_mode_auto_starts_from_home():
         AUTOMATION.mode = original_mode
 
     home.assert_called_once_with(restart_enabled=True)
+
+
+def test_managed_terminal_policy_does_not_start_from_idle_home():
+    app = _app_without_strategy()
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._handler_enabled = MagicMock(side_effect=lambda name: name == "home")
+    app._runtime_policy = MagicMock(return_value={})
+    app._mission_mgr.awaiting_initial_battle_intent.return_value = False
+    app._mission_mgr.no_battle_setup_requirements.return_value = {}
+    app._supervisor.battle_workflow = None
+    app._supervisor.manual_control = None
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    try:
+        with (
+            patch(
+                "core.app.detect_home_battle_control",
+                return_value=SimpleNamespace(
+                    control=HomeBattleControl.NEW_BATTLE
+                ),
+            ),
+            patch("core.app.handle_home_screen") as home,
+        ):
+            app._handle_primary_states("HOME_SCREEN", set(), frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    home.assert_called_once_with(restart_enabled=False)
+
+
+def test_terminal_bound_continuation_dispatches_exact_new_battle_once():
+    app = _app_without_strategy()
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._handler_enabled = MagicMock(side_effect=lambda name: name == "home")
+    app._runtime_policy = MagicMock(return_value={})
+    app._mission_mgr.awaiting_initial_battle_intent.return_value = False
+    app._mission_mgr.no_battle_setup_requirements.return_value = {}
+    app._supervisor.battle_workflow = None
+    app._supervisor.manual_control = None
+    app._terminal_home_continuation = {
+        "source": "no_strategy_post_run"
+    }
+    app._terminal_home_continuation_ready = MagicMock(return_value=True)
+    app._runtime_action_guard = MagicMock(return_value=True)
+    app._consume_terminal_home_continuation = MagicMock(return_value=True)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    try:
+        with (
+            patch(
+                "core.app.detect_home_battle_control",
+                return_value=SimpleNamespace(
+                    control=HomeBattleControl.NEW_BATTLE
+                ),
+            ),
+            patch("core.app.handle_home_screen", return_value=True) as home,
+        ):
+            app._handle_primary_states("HOME_SCREEN", set(), frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert app._terminal_home_continuation_ready.call_count == 2
+    home_call = home.call_args
+    assert home_call.kwargs["restart_enabled"] is True
+    assert home_call.kwargs["require_new_battle"] is True
+    assert home_call.kwargs["operation_id"]
+    assert home_call.kwargs["action_purpose"] == (
+        "Continuing after the completed battle"
+    )
+    assert "one-shot Home continuation" in home_call.kwargs["action_reason"]
+    app._consume_terminal_home_continuation.assert_called_once_with()
 
 
 def test_automatic_in_battle_inventory_is_exclusive_and_runs_once():

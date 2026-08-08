@@ -1850,8 +1850,10 @@ def test_guardian_replacement_templates_require_known_visible_loadout():
 def test_app_runs_no_battle_setup_before_starting_profile_battle():
     frame = object()
     manager = Mock()
+    manager.awaiting_initial_battle_intent.return_value = False
     manager.no_battle_setup_requirements.return_value = REQUIREMENTS
     app = App.__new__(App)
+    app._operator_battle_intent_required = True
     app._auto_start_enabled = True
     app._mission_mgr = manager
     app._fast_game_over = False
@@ -1859,6 +1861,15 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     app._last_wave_conf = -1.0
     app._status_reporter = Mock()
     app._supervisor = Mock()
+    app._supervisor.battle_workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "acknowledged",
+    }
+    app._supervisor.manual_control = None
+    app._current_control_workflow_evidence = Mock(
+        return_value={"observation_id": "runtime-1:home"}
+    )
     app._handle_daily_gem_if_due = Mock(return_value=False)
     app._handle_mission_rewards_if_due = Mock(return_value=False)
     setup = GcNoBattleSetupResult(
@@ -1887,8 +1898,79 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
         action_guard_fn=app._runtime_action_guard,
     )
     manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
-    handle_home.assert_called_once_with(restart_enabled=True)
+    handle_home.assert_called_once_with(
+        restart_enabled=True,
+        require_new_battle=True,
+        operation_id="start-1:runtime-1:home:home_dispatch",
+        action_purpose="Starting a new battle",
+        action_reason=(
+            "execute the exact verified New Battle intent after normal "
+            "new-run gates"
+        ),
+    )
     manager.on_home.assert_called_once_with()
+
+
+def test_managed_idle_home_policy_grants_no_save_setup_or_battle_input():
+    frame = object()
+    manager = Mock()
+    manager.strategy = None
+    manager.awaiting_initial_battle_intent.return_value = False
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    coordinator = Mock()
+    coordinator.carry = None
+    app = App.__new__(App)
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = SimpleNamespace(
+        manual_control=None,
+        battle_workflow=None,
+    )
+    app._handle_home_return_reconciliation = Mock(return_value=False)
+    app._handler_enabled = Mock(side_effect=lambda name: name == "home")
+    app._runtime_policy = Mock(
+        return_value={"player_save_preflight": "save_first"}
+    )
+    app._exclusive_validation_definition = Mock(return_value=None)
+    app._maybe_start_exclusive_validation = Mock(return_value=False)
+    app._report_home_policy = Mock()
+    app._acquire_player_save_home_preflight = Mock()
+    app._run_home_setup_attempts = Mock()
+    app._activity_scope_has_history_baseline = Mock(return_value=False)
+    app._player_save_preflight_coordinator = coordinator
+    app._player_save_preflight_activity_scope_id = None
+    app._player_save_preflight_result = None
+    app._player_save_history_baseline_outcome = None
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    try:
+        with (
+            patch(
+                "core.app.get_activity_scope",
+                return_value={"run_id": "scope-1"},
+            ),
+            patch(
+                "core.app.detect_home_battle_control",
+                return_value=HomeBattleEvidence(
+                    HomeBattleControl.NEW_BATTLE,
+                    "test",
+                    100.0,
+                ),
+            ),
+            patch("core.app.run_gc_no_battle_setup") as run_setup,
+            patch("core.app.handle_home_screen") as handle_home,
+        ):
+            app._handle_primary_states("HOME_SCREEN", set(), frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    app._acquire_player_save_home_preflight.assert_not_called()
+    app._run_home_setup_attempts.assert_not_called()
+    coordinator.acquire.assert_not_called()
+    run_setup.assert_not_called()
+    handle_home.assert_called_once_with(restart_enabled=False)
 
 
 @pytest.mark.parametrize(

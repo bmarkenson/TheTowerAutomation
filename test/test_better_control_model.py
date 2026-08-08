@@ -19,6 +19,7 @@ from core.action_authority import (
 )
 from core.app import App
 from core.automation_supervisor import AutomationSupervisor
+from core.battle_lifecycle import HomeBattleControl
 from core.control_directives import ControlDirectiveStore
 from core.control_model import (
     build_home_ui_reconciliation_receipt,
@@ -55,7 +56,7 @@ from core.player_save_history import PlayerSaveAttachmentContext
 from core.player_save_serialization import GuardedSerializationStatus
 from core.strategy_authoring import FARM_SETTING_REGISTRY
 from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
-from core.run_state import AUTOMATION
+from core.run_state import AUTOMATION, ExecMode
 from handlers.game_over_handler import GameOverHandlingOutcome
 from tools import automation_ctl
 
@@ -108,6 +109,122 @@ def _evidence(
         "activity_scope_run_id": scope,
         "target_generation": 7,
     }
+
+
+@pytest.mark.parametrize("request_change", ("policy_cycle", "authority_cycle"))
+def test_terminal_home_continuation_requires_unchanged_exact_requests(
+    tmp_path,
+    monkeypatch,
+    request_change,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    store.set_mode("NEXT_BATTLE", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    terminal = _evidence(
+        game_state="game_over",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    terminal["pid"] = owner["pid"]
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._operator_battle_intent_required = True
+    app._control_observation = {
+        key: value
+        for key, value in terminal.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+
+    claim = app._build_terminal_home_continuation_claim(
+        source="no_strategy_post_run"
+    )
+
+    assert claim is not None
+    assert claim["state_request_id"] == (
+        supervisor.control_request_identity["state_request_id"]
+    )
+    assert claim["mode_request_id"] == (
+        supervisor.control_request_identity["mode_request_id"]
+    )
+    assert app._commit_terminal_home_continuation(claim) is True
+    home = _evidence(
+        game_state="home_new_battle",
+        observation_id="runtime-1:home",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    home["pid"] = owner["pid"]
+    app._control_observation = {
+        key: value
+        for key, value in home.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    assert app._terminal_home_continuation_ready(
+        home_control=HomeBattleControl.NEW_BATTLE
+    ) is True
+
+    if request_change == "policy_cycle":
+        store.set_mode("HOME", source="test")
+        supervisor.apply_control()
+        store.set_mode("NEXT_BATTLE", source="test")
+    else:
+        store.set_state("PAUSED", source="test")
+        supervisor.apply_control()
+        store.set_state("RUNNING", source="test")
+    supervisor.apply_control()
+
+    assert AUTOMATION.mode is ExecMode.NEXT_BATTLE
+    assert app._terminal_home_continuation_ready(
+        home_control=HomeBattleControl.NEW_BATTLE
+    ) is False
+    assert app._terminal_home_continuation is None
+
+
+def test_terminal_home_continuation_never_authorizes_resume_battle():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_state="RUNNING",
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+    )
+    binding = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+    }
+    app._terminal_home_continuation = {
+        "schema_version": 1,
+        "source": "no_strategy_post_run",
+        "state_request_id": "state-1",
+        "mode_request_id": "mode-1",
+        "binding": binding,
+    }
+    app._current_control_workflow_evidence = MagicMock(
+        return_value={
+            **binding,
+            "game_state": "home_resume_battle",
+        }
+    )
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    try:
+        ready = app._terminal_home_continuation_ready(
+            home_control=HomeBattleControl.RESUME_BATTLE
+        )
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert ready is False
+    assert app._terminal_home_continuation is None
+    app._current_control_workflow_evidence.assert_not_called()
 
 
 def _save_receipt(
@@ -382,6 +499,8 @@ def _publish_runtime_observation(
     paused: bool = True,
     active_battle_adopted: bool = False,
     active_strategy: str | None = None,
+    explicit_home_intent_required: bool = False,
+    terminal_home_continuation: dict[str, object] | None = None,
 ) -> None:
     owner = {
         "runtime_id": evidence["runtime_id"],
@@ -413,6 +532,12 @@ def _publish_runtime_observation(
             "battle_lifecycle": {
                 "awaiting_initial_intent": not active_battle_adopted,
                 "active_battle_adopted": active_battle_adopted,
+                "explicit_home_intent_required": (
+                    explicit_home_intent_required
+                ),
+                "terminal_home_continuation": (
+                    terminal_home_continuation or {"pending": False}
+                ),
             },
             "strategy_scope": {
                 "active_battle": active_strategy,
@@ -697,6 +822,32 @@ def test_control_surface_exposes_separate_dimensions_and_exact_actions(tmp_path)
     with pytest.raises(ControlSurfaceRequestError) as busy:
         service.apply_control({"action": "start_battle"})
     assert busy.value.code == "workflow_busy"
+
+
+def test_control_surface_reports_terminal_home_entitlement_separately(
+    tmp_path,
+):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    _publish_runtime_observation(
+        service,
+        _evidence(),
+        explicit_home_intent_required=True,
+        terminal_home_continuation={
+            "pending": True,
+            "source": "no_strategy_post_run",
+            "terminal_observation_id": "runtime-1:terminal",
+        },
+    )
+
+    home = service.status()["control_model"]["home_behavior"]
+
+    assert home["explicit_intent_required"] is True
+    assert home["terminal_continuation"] == {
+        "pending": True,
+        "source": "no_strategy_post_run",
+        "terminal_observation_id": "runtime-1:terminal",
+    }
+    assert "matching explicit battle intent" in home["meaning"]
 
 
 @pytest.mark.parametrize(
