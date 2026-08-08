@@ -64,6 +64,16 @@ or unexpected manual activity cancels it. Changing Wait/Home to Continue after
 the terminal or at Home never manufactures that permission; use **Start
 Battle** if an immediate start is wanted.
 
+Home save/setup can take long enough for operator intent to change. Immediately
+after acquisition/setup, again before Home handling, and finally after fresh
+control verification but before the tap, the runtime must still find the same
+Start/Attach/Return request ID, intent, status, control type, and lifecycle
+authority. A replacement request starts from its own next observation and
+gates; it never inherits the earlier request's launch. Pause, Stop, manual
+control, or another workflow blocks the tap and invalidates pending carried
+launch evidence. The terminal continuation performs the same check and clears
+its published pending state when authority or manual ownership supersedes it.
+
 ## Attach to a current battle
 
 **Attach to Battle** is available only from fresh active-battle or Home

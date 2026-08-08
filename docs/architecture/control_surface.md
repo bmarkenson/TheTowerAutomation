@@ -304,6 +304,13 @@ an acknowledged exact Start Battle request, an exact terminal-bound
 continuation, or the separate one-shot validation owner. Terminal policy,
 Strategy selection, prior battle history, and Automation Enabled are not Home
 navigation or recovery authority.
+That owner is not a snapshot carried across setup: save acquisition and Home
+configuration work revalidate the original workflow/manual request identity,
+intent, status, and typed lifecycle authority before retaining completion.
+The runtime checks them again before Home handling and supplies the same exact
+revalidator to the verified tap's final input boundary. A replacement request,
+Pause/Stop, manual-control handoff, changed policy, or superseding workflow
+sends no battle input and cannot inherit pending carried-save launch evidence.
 Unexpected active-battle → Home Resume Battle activity while Enabled enters the
 same safe Pause/manual-control ledger rather than competing for input. Broader
 manual-activity detection and grace-period controls remain separately

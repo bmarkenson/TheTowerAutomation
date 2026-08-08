@@ -747,11 +747,23 @@ stages:
       already described terminal policy as future-only; runtime status now
       also exposes the separate pending Home continuation without granting
       replay authority.
-    - [x] The complete supported checkpoint passed compilation, state
+    - [x] Promotion review found and commit `a9b7269` closes the remaining
+      post-preflight race: save/setup, pre-handler, and final verified-tap
+      boundaries all require the same Start/Attach/Return request identity and
+      typed lifecycle authority. Replacement requests cannot inherit setup or
+      carried-save launch evidence; terminal claims clear when manual/control
+      ownership supersedes them. The revised affected slice passes 478 tests.
+    - [x] The pre-barrier candidate passed compilation, state
       definitions, clickmap integrity with zero errors and the established 44
       orphan candidates, and all 1,985 tests in 459.15 seconds. Native Windows
-      usability and natural safe terminal/Home validation remain pending; no
-      deployment or device action is claimed by this checkpoint.
+      usability and natural safe terminal/Home validation remain pending.
+    - [ ] Run the complete supported checkpoint at the exact post-review tip
+      before promotion; no deployment or device action is claimed yet.
+    - Coordination note: when `feature/launch-bound-home-preflight` is later
+      reconciled, retain its independent screenshot/profile-log changes but
+      drop its policy-derived ordinary Home auto-launch logic. The latter is
+      superseded by this exact authority model and would reintroduce the
+      reported defect.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

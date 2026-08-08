@@ -58,13 +58,21 @@ canonical document linked by an entry for current behavior.
   and is invalidated by authority/policy changes, manual or workflow
   supersession, Resume Battle, binding changes, process replacement, or
   unexpected manual activity.
-- The affected Home/control/No Strategy/Game Over/Tournament/repair slice
-  passed 461 tests. The complete supported checkpoint passed compilation,
-  state definitions, clickmap integrity with zero errors and the established
-  44 orphan candidates, and all 1,985 tests in 459.15 seconds. No deployment,
-  live/device action, or native Windows validation was performed; natural safe
-  terminal/Home and native Windows usability validation remain in the Better
-  Control backlog.
+- Promotion-review commit `a9b7269` adds the final temporal barrier omitted by
+  the first checkpoint. Save/setup completion, pre-handler dispatch, and the
+  final verified tap all revalidate the original Start, Attach, or Return
+  request identity and typed lifecycle authority. Replacement requests cannot
+  inherit the prior setup or carried-save launch; manual/control supersession
+  also clears a pending terminal continuation. The revised affected suite
+  passed 478 tests.
+- Before that promotion review, the affected Home/control/No Strategy/Game
+  Over/Tournament/repair slice passed 461 tests. Its complete supported
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan candidates, and all 1,985 tests in
+  459.15 seconds. The exact post-review checkpoint remains required before
+  deployment; no live/device action or native Windows validation was performed,
+  and natural safe terminal/Home and native Windows usability validation remain
+  in the Better Control backlog.
 
 ### 2026-08-08 save-to-UI fallback contract repair
 
