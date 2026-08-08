@@ -39,6 +39,36 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 recoverable runtime diagnostic reconciliation
+
+- Commit `101054f` selectively ports the two independent logging refinements
+  from stale mixed commit `e0fff88`. Permanent `strategy_profile` / `every_run`
+  skips now render as expected `INFO` policy with their actual reason, while
+  operator-selected one-run waivers retain `WARN` visibility. None of the
+  superseded policy-derived ordinary Home auto-launch code was merged.
+- A first incomplete raw or PNG screenshot remains rejected and retried, but
+  that in-budget event and a successful second capture now remain `DEBUG`
+  diagnostics. Two consecutive incomplete frames still reject the capture and
+  emit the operator-facing `WARN`; screenshot action authority is unchanged.
+  The August 8 recurrence analysis is retained under `ISSUE-2026-022`, whose
+  compositor/transport source remains unresolved.
+- The focused owner suites passed 96 tests and the broader owner/caller slice
+  passed 148. The exact candidate passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan
+  candidates, and all 2,003 tests in 338.67 seconds.
+- Production was fast-forwarded to `101054f` behind rollback tag
+  `production-before-20260808T230345Z-c9f60e2`. Automation stopped cleanly at
+  Home without input; replacement PID `3244540` acquired the held
+  `localhost:5555` lock, acknowledged the exact restored Enable request, and
+  published fresh Home/New Battle evidence. No Start Battle intent, battle
+  transition, incomplete-frame event, profile preflight, or device input was
+  manufactured for the smoke test.
+- The smoke also confirmed a separate pre-existing Better Control gap:
+  `operator_workflow` currently excludes auxiliary gem collectors while idle
+  Home awaits explicit Start/Attach. The exact observed Home-ad-gem interval is
+  retained as active work in the runtime backlog; this diagnostic-only
+  deployment did not change that authority decision.
+
 ### 2026-08-08 Home launch-authority correction
 
 - Commit `b36f878` prevents a stale No Strategy inventory pass from reclaiming

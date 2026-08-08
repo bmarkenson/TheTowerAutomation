@@ -770,11 +770,26 @@ stages:
       issued; the runtime explicitly logged that it was staying Home. Native
       Windows usability, a live policy-change-at-Home exercise, and a natural
       terminal-to-Home continuation remain pending rather than manufactured.
-    - Coordination note: when `feature/launch-bound-home-preflight` is later
-      reconciled, retain its independent screenshot/profile-log changes but
-      drop its policy-derived ordinary Home auto-launch logic. The latter is
-      superseded by this exact authority model and would reintroduce the
-      reported defect.
+    - [x] Follow-up commit `101054f` selectively reconciles the independent
+      screenshot and profile-policy logging from
+      `feature/launch-bound-home-preflight`. It does not merge that branch's
+      superseded policy-derived ordinary Home auto-launch. The affected owner
+      and caller slice passes 148 tests; the complete supported checkpoint
+      passes compilation, state definitions, clickmap integrity with zero
+      errors and the established 44 orphan candidates, and all 2,003 tests in
+      338.67 seconds.
+    - [x] Production was fast-forwarded to `101054f` behind rollback tag
+      `production-before-20260808T230345Z-c9f60e2`. Replacement automation PID
+      `3244540` acquired the held `localhost:5555` lock, acknowledged the exact
+      restored Enable request, and published fresh Home/New Battle evidence.
+      No Start Battle intent, battle transition, or device input was used.
+    - [ ] Decide and implement idle-Home auxiliary authority. Fresh production
+      evidence from 15:30:44 through 16:05:00 PDT showed Automation Enabled at
+      verified Home/New Battle with `HOME_AD_GEMS_AVAILABLE`, while the
+      `operator_workflow` hold awaiting explicit Start/Attach excluded every
+      auxiliary collector. Preserve explicit battle intent and manual-activity
+      yielding, but do not silently strand safe gem collection merely because
+      no battle workflow is active.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,
