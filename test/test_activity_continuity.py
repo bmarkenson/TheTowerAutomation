@@ -558,21 +558,22 @@ def test_attachment_observations_are_not_published_when_scope_write_fails(
     assert outcome.running_attachment_observations is None
 
 
-def test_missing_attachment_baseline_waits_for_save_without_history_ui(
+def test_missing_attachment_baseline_uses_history_ui_when_save_is_unusable(
     tmp_path,
     monkeypatch,
 ):
     log_path = tmp_path / "logs" / "actions.log"
     monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
     logger.start_activity_scope(reason="automation_started")
+    ui_reads = []
     coordinator = ActivityContinuityCoordinator(
         save_history_reader=lambda **_kwargs: PlayerSaveHistoryReadResult(
             PlayerSaveHistoryReadStatus.UI_FALLBACK,
             "save_history_acquisition_failed",
             safe_ui_fallback=True,
         ),
-        history_reader=lambda **_kwargs: pytest.fail(
-            "an attachment baseline must wait for its save, not open History"
+        history_reader=lambda **kwargs: (
+            ui_reads.append(kwargs) or _complete(_identity(wave="9333"))
         ),
     )
 
@@ -583,10 +584,13 @@ def test_missing_attachment_baseline_waits_for_save_without_history_ui(
         player_save_mode="save_first",
     )
 
-    assert outcome.pending and outcome.recapture
-    assert "attachment_save_retry_required" in log_path.read_text(
-        encoding="utf-8"
+    assert not outcome.pending
+    assert outcome.recapture
+    assert len(ui_reads) == 1
+    assert logger.get_activity_scope()["latest_completed_battle"]["source"] == (
+        "battle_history_ui"
     )
+    assert "using the guarded UI route" in log_path.read_text(encoding="utf-8")
 
 
 def test_post_retry_history_poll_waits_for_startup_gates(
@@ -1201,7 +1205,7 @@ def test_invalid_attachment_save_transition_starts_later_scope_without_ui(
     ).read_text(encoding="utf-8")
 
 
-def test_active_attachment_save_failure_waits_without_history_ui(
+def test_active_attachment_save_failure_uses_history_ui_fallback(
     tmp_path,
     monkeypatch,
 ):
@@ -1210,14 +1214,15 @@ def test_active_attachment_save_failure_waits_without_history_ui(
         str(tmp_path / "logs" / "actions.log"),
     )
     _scope_with_save_baseline(_save_metadata())
+    ui_reads = []
     coordinator = ActivityContinuityCoordinator(
         save_history_reader=lambda **_kwargs: PlayerSaveHistoryReadResult(
             PlayerSaveHistoryReadStatus.UI_FALLBACK,
-            "save_history_acquisition_failed",
+            "runtime_history_projection_unavailable",
             safe_ui_fallback=True,
         ),
-        history_reader=lambda **_kwargs: pytest.fail(
-            "a running attachment must wait for save evidence"
+        history_reader=lambda **kwargs: (
+            ui_reads.append(kwargs) or _complete(_identity(wave="9333"))
         ),
     )
 
@@ -1228,9 +1233,11 @@ def test_active_attachment_save_failure_waits_without_history_ui(
         player_save_mode="save_first",
     )
 
-    assert outcome.pending
+    assert not outcome.pending
     assert outcome.recapture
-    assert "attachment_save_retry_required" in (
+    assert len(ui_reads) == 1
+    assert ui_reads[0]["source_state"] == "RUNNING"
+    assert "using the guarded UI route" in (
         tmp_path / "logs" / "actions.log"
     ).read_text(encoding="utf-8")
 

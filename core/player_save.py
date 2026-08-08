@@ -1,14 +1,16 @@
 """Read, normalize, and reconcile The Tower ``playerInfo.dat`` snapshots.
 
 The save is an independent observation channel.  It may replace a mapped UI
-read only after an exact version mapping has been live-validated.  Unknown,
-structurally changed, stale, incomplete, or mismatched saves always route the
-check back through the existing UI implementation.
+read only after an exact mapping or a declared additive revision-compatibility
+gate supplies validated authority.  Structurally changed, stale, incomplete,
+or mismatched saves always route the check back through the existing UI
+implementation.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import gzip
@@ -45,6 +47,7 @@ MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
 SNAPSHOT_SCHEMA_VERSION = 3
 RAW_FIELD_MANIFEST_SCHEMA_VERSION = 1
+REVISION_COMPATIBILITY_SCHEMA_VERSION = 1
 RAW_FIELD_DISPOSITION_NAMES = frozenset(
     {
         "structural",
@@ -74,7 +77,7 @@ class PlayerSavePullError(PlayerSaveError):
 
 @dataclass(frozen=True)
 class SaveCheckEvidence:
-    """One profile-facing value derived from an exact save mapping."""
+    """One profile-facing value derived from a resolved save mapping."""
 
     check_id: str
     status: str
@@ -121,6 +124,9 @@ class PlayerSaveSnapshot:
     checks: Mapping[str, SaveCheckEvidence]
     runtime_save: Optional[NormalizedRuntimeSave]
     profile_progression: Mapping[str, Any] = field(default_factory=dict)
+    mapping_resolution: str = "exact"
+    mapping_authority_id: Optional[str] = None
+    mapping_structural_id: Optional[str] = None
 
     @property
     def mapping_supported(self) -> bool:
@@ -150,6 +156,9 @@ class PlayerSaveSnapshot:
                 "maturity": self.mapping_maturity,
                 "validated_checks": list(self.validated_checks),
                 "shape_valid": self.shape_valid,
+                "resolution": self.mapping_resolution,
+                "authority_id": self.mapping_authority_id,
+                "structural_id": self.mapping_structural_id,
             },
             "warnings": list(self.warnings),
             "profile_summary": dict(self.profile_summary),
@@ -164,6 +173,16 @@ class PlayerSaveSnapshot:
                 else None
             ),
         }
+
+
+@dataclass(frozen=True)
+class _MappingResolution:
+    mapping: Optional[dict[str, Any]]
+    resolution: str
+    shape_warnings: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    authority_mapping_id: Optional[str] = None
+    structural_mapping_id: Optional[str] = None
 
 
 def read_player_save_file(path: Path | str) -> PlayerSaveSnapshot:
@@ -224,14 +243,21 @@ def decode_player_save_bytes(
     data_version = _optional_int(decoded.get("dataVersion"))
     game_version = _optional_int(decoded.get("versionNumber"))
     save_revision = _optional_int(decoded.get("saveRevision"))
-    mapping = _select_mapping(data_version, game_version)
-    warnings: list[str] = []
+    mapping_resolution = _resolve_mapping(
+        decoded,
+        data_version=data_version,
+        game_version=game_version,
+    )
+    mapping = mapping_resolution.mapping
+    warnings = list(mapping_resolution.warnings)
     if mapping is None:
-        warnings.append(
-            "No exact player-save mapping exists for "
-            f"dataVersion={data_version}, versionNumber={game_version}; "
-            "all configuration checks require UI fallback."
-        )
+        if not warnings:
+            warnings.append(
+                "No exact or structurally compatible player-save mapping exists "
+                f"for dataVersion={data_version}, "
+                f"versionNumber={game_version}; all save-backed consumers "
+                "require UI fallback."
+            )
         return PlayerSaveSnapshot(
             captured_at=stamp.isoformat(),
             source_name=Path(source_name).name,
@@ -252,9 +278,16 @@ def decode_player_save_bytes(
             profile_summary={},
             checks={},
             runtime_save=None,
+            mapping_resolution=mapping_resolution.resolution,
+            mapping_authority_id=(
+                mapping_resolution.authority_mapping_id
+            ),
+            mapping_structural_id=(
+                mapping_resolution.structural_mapping_id
+            ),
         )
 
-    shape_warnings = _validate_shape(decoded, mapping)
+    shape_warnings = list(mapping_resolution.shape_warnings)
     warnings.extend(shape_warnings)
     shape_valid = not shape_warnings
     checks: dict[str, SaveCheckEvidence] = {}
@@ -280,7 +313,7 @@ def decode_player_save_bytes(
             )
         except ProfileProgressionError as exc:
             warnings.append(
-                "The exact-version profile progression projection failed "
+                "The selected profile progression projection failed "
                 f"closed: {exc}. Completed-run progression will be marked "
                 "unavailable."
             )
@@ -292,12 +325,12 @@ def decode_player_save_bytes(
             )
         except RuntimeSaveNormalizationError as exc:
             warnings.append(
-                "The exact-version runtime projection failed closed: "
+                "The selected runtime projection failed closed: "
                 f"{exc}. Runtime save evidence requires UI fallback."
             )
     else:
         warnings.append(
-            "The exact version matched but its structural signature changed; "
+            "The selected mapping's structural signature changed; "
             "all configuration checks require UI fallback."
         )
 
@@ -332,6 +365,9 @@ def decode_player_save_bytes(
         checks=checks,
         runtime_save=runtime_save,
         profile_progression=profile_progression,
+        mapping_resolution=mapping_resolution.resolution,
+        mapping_authority_id=mapping_resolution.authority_mapping_id,
+        mapping_structural_id=mapping_resolution.structural_mapping_id,
     )
 
 
@@ -408,6 +444,12 @@ def reconcile_requirements(
     elif not freshness_verified:
         snapshot_trust_reason = "save_freshness_unverified"
     snapshot_trusted = snapshot_trust_reason is None
+    save_reason_prefix = (
+        "compatible_revision"
+        if snapshot.mapping_resolution
+        in {"compatible_exact_revision", "compatible_forward_revision"}
+        else "exact_version"
+    )
 
     decisions: dict[str, dict[str, Any]] = {}
     for check_id, expected_value in expected.items():
@@ -455,10 +497,10 @@ def reconcile_requirements(
             reason = "save_requirement_outside_validated_scope"
         elif observation_only:
             disposition = "save_observation"
-            reason = "exact_version_save_observation"
+            reason = f"{save_reason_prefix}_save_observation"
         elif matches is True:
             disposition = "save_match"
-            reason = "exact_version_save_match"
+            reason = f"{save_reason_prefix}_save_match"
         elif matches is False:
             disposition = SAVE_MISMATCH_DISPOSITION
             reason = "save_mismatch"
@@ -525,6 +567,9 @@ def reconcile_requirements(
         "schema_version": 2,
         "mapping_id": snapshot.mapping_id,
         "mapping_maturity": snapshot.mapping_maturity,
+        "mapping_resolution": snapshot.mapping_resolution,
+        "mapping_authority_id": snapshot.mapping_authority_id,
+        "mapping_structural_id": snapshot.mapping_structural_id,
         "validated_checks": list(snapshot.validated_checks),
         "freshness_verified": bool(freshness_verified),
         "snapshot_trust": {
@@ -598,12 +643,44 @@ def reconcile_acquired_requirements(
 @lru_cache(maxsize=1)
 def _load_mappings() -> tuple[dict[str, Any], ...]:
     mappings: list[dict[str, Any]] = []
+    sources: dict[str, Path] = {}
+    identities: dict[tuple[Any, Any], str] = {}
     for path in sorted(PLAYER_SAVE_MAPPING_DIR.glob("*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("schema_version") != 1:
             raise PlayerSaveError(f"unsupported mapping schema in {path}")
         _validate_raw_field_manifest(payload, source=path)
+        mapping_id = str(payload.get("mapping_id") or "").strip()
+        if not mapping_id:
+            raise PlayerSaveError(f"mapping_id is missing in {path}")
+        if mapping_id in sources:
+            raise PlayerSaveError(
+                f"duplicate mapping_id {mapping_id!r} in {sources[mapping_id]} "
+                f"and {path}"
+            )
+        identity = payload.get("identity") or {}
+        identity_key = (
+            identity.get("data_version"),
+            identity.get("game_version"),
+        )
+        if identity_key in identities:
+            raise PlayerSaveError(
+                "duplicate player-save identity "
+                f"{identity_key!r} in mappings {identities[identity_key]!r} "
+                f"and {mapping_id!r}"
+            )
+        sources[mapping_id] = path
+        identities[identity_key] = mapping_id
         mappings.append(payload)
+    mappings_by_id = {
+        str(mapping["mapping_id"]): mapping for mapping in mappings
+    }
+    for mapping in mappings:
+        _validate_revision_compatibility(
+            mapping,
+            mappings_by_id=mappings_by_id,
+            source=sources[str(mapping["mapping_id"])],
+        )
     return tuple(mappings)
 
 
@@ -621,9 +698,307 @@ def _select_mapping(
     return None
 
 
+def _resolve_mapping(
+    decoded: Mapping[str, Any],
+    *,
+    data_version: Optional[int],
+    game_version: Optional[int],
+) -> _MappingResolution:
+    exact = _select_mapping(data_version, game_version)
+    if exact is not None:
+        mapping_id = str(exact["mapping_id"])
+        shape_warnings = tuple(_validate_shape(decoded, exact))
+        compatibility = exact.get("revision_compatibility")
+        if shape_warnings or not isinstance(compatibility, Mapping):
+            return _MappingResolution(
+                exact,
+                "exact",
+                shape_warnings=shape_warnings,
+                authority_mapping_id=mapping_id,
+                structural_mapping_id=mapping_id,
+            )
+        authority = _mapping_by_id(
+            str(compatibility["authority_mapping_id"])
+        )
+        additions = _decoded_additional_fields(decoded, authority)
+        return _MappingResolution(
+            _compatible_mapping(
+                structural=exact,
+                authority=authority,
+                data_version=data_version,
+                game_version=game_version,
+                mapping_id=mapping_id,
+                retain_exact_profile_progression=True,
+            ),
+            "compatible_exact_revision",
+            warnings=(
+                "The exact player-save mapping passed its declared additive "
+                "revision-compatibility gate; using validated semantics from "
+                f"{authority['mapping_id']} for "
+                f"{len(compatibility['validated_checks'])} configuration "
+                f"check(s). {len(additions)} added root field(s) remain "
+                "unpublished.",
+            ),
+            authority_mapping_id=str(authority["mapping_id"]),
+            structural_mapping_id=mapping_id,
+        )
+
+    structural = _select_forward_compatibility_mapping(
+        decoded,
+        data_version=data_version,
+        game_version=game_version,
+    )
+    if structural is None:
+        return _MappingResolution(None, "unsupported")
+    compatibility = structural["revision_compatibility"]
+    authority = _mapping_by_id(str(compatibility["authority_mapping_id"]))
+    shape_warnings = tuple(
+        _validate_shape(
+            decoded,
+            structural,
+            allow_additional_fields=True,
+        )
+    )
+    structural_id = str(structural["mapping_id"])
+    authority_id = str(authority["mapping_id"])
+    if shape_warnings:
+        detail = "; ".join(shape_warnings)
+        return _MappingResolution(
+            None,
+            "incompatible_revision",
+            warnings=(
+                "The newly observed player-save version is not structurally "
+                f"compatible with {structural_id}: {detail}. All save-backed "
+                "consumers require UI fallback.",
+            ),
+            authority_mapping_id=authority_id,
+            structural_mapping_id=structural_id,
+        )
+
+    assert data_version is not None
+    assert game_version is not None
+    mapping_id = (
+        f"data-{data_version}-game-{game_version}-compatible-via-"
+        f"{(structural.get('identity') or {})['game_version']}"
+    )
+    additions = _decoded_additional_fields(decoded, structural)
+    return _MappingResolution(
+        _compatible_mapping(
+            structural=structural,
+            authority=authority,
+            data_version=data_version,
+            game_version=game_version,
+            mapping_id=mapping_id,
+            retain_exact_profile_progression=False,
+        ),
+        "compatible_forward_revision",
+        warnings=(
+            "No exact player-save mapping exists for the observed game "
+            f"version, but its root is an additive structural match for "
+            f"{structural_id}. Using validated semantics from {authority_id}; "
+            f"{len(additions)} newly observed root field(s) remain unpublished.",
+        ),
+        authority_mapping_id=authority_id,
+        structural_mapping_id=structural_id,
+    )
+
+
+def _mapping_by_id(mapping_id: str) -> dict[str, Any]:
+    for mapping in _load_mappings():
+        if str(mapping.get("mapping_id") or "") == mapping_id:
+            return mapping
+    raise PlayerSaveError(f"player-save mapping {mapping_id!r} is unavailable")
+
+
+def _select_forward_compatibility_mapping(
+    decoded: Mapping[str, Any],
+    *,
+    data_version: Optional[int],
+    game_version: Optional[int],
+) -> Optional[dict[str, Any]]:
+    if type(data_version) is not int or type(game_version) is not int:
+        return None
+    actual_class = str(decoded.get("__class__") or "")
+    eligible: list[dict[str, Any]] = []
+    for mapping in _load_mappings():
+        compatibility = mapping.get("revision_compatibility")
+        identity = mapping.get("identity") or {}
+        mapped_version = identity.get("game_version")
+        if (
+            isinstance(compatibility, Mapping)
+            and compatibility.get("allow_forward_game_versions") is True
+            and identity.get("data_version") == data_version
+            and identity.get("root_class") == actual_class
+            and type(mapped_version) is int
+            and mapped_version < game_version
+        ):
+            eligible.append(mapping)
+    if not eligible:
+        return None
+    return max(
+        eligible,
+        key=lambda mapping: int((mapping.get("identity") or {})["game_version"]),
+    )
+
+
+def _compatible_mapping(
+    *,
+    structural: Mapping[str, Any],
+    authority: Mapping[str, Any],
+    data_version: int,
+    game_version: int,
+    mapping_id: str,
+    retain_exact_profile_progression: bool,
+) -> dict[str, Any]:
+    compatibility = structural["revision_compatibility"]
+    effective = deepcopy(dict(authority))
+    effective["mapping_id"] = mapping_id
+    effective["maturity"] = "candidate"
+    effective["validated_checks"] = list(compatibility["validated_checks"])
+    effective["identity"] = {
+        "data_version": data_version,
+        "game_version": game_version,
+        "root_class": str((structural.get("identity") or {})["root_class"]),
+    }
+    effective["raw_field_manifest"] = deepcopy(
+        structural["raw_field_manifest"]
+    )
+    if compatibility.get("runtime_save") is not True:
+        effective.pop("runtime_save", None)
+    if retain_exact_profile_progression and isinstance(
+        structural.get("profile_progression"), Mapping
+    ):
+        effective["profile_progression"] = deepcopy(
+            structural["profile_progression"]
+        )
+    else:
+        effective.pop("profile_progression", None)
+    return effective
+
+
+def _decoded_additional_fields(
+    decoded: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> tuple[str, ...]:
+    expected = set(_raw_field_manifest_names(mapping))
+    return tuple(
+        sorted(
+            key
+            for key in decoded
+            if isinstance(key, str) and key not in expected
+        )
+    )
+
+
+def _validate_revision_compatibility(
+    mapping: Mapping[str, Any],
+    *,
+    mappings_by_id: Mapping[str, Mapping[str, Any]],
+    source: Path | str,
+) -> None:
+    compatibility = mapping.get("revision_compatibility")
+    if compatibility is None:
+        return
+    expected_keys = {
+        "schema_version",
+        "authority_mapping_id",
+        "validated_checks",
+        "runtime_save",
+        "allow_forward_game_versions",
+    }
+    if not isinstance(compatibility, Mapping) or set(compatibility) != expected_keys:
+        raise PlayerSaveError(
+            f"revision compatibility is malformed in {source}"
+        )
+    if (
+        compatibility.get("schema_version")
+        != REVISION_COMPATIBILITY_SCHEMA_VERSION
+        or type(compatibility.get("runtime_save")) is not bool
+        or type(compatibility.get("allow_forward_game_versions")) is not bool
+    ):
+        raise PlayerSaveError(
+            f"revision compatibility policy is invalid in {source}"
+        )
+    authority_id = str(
+        compatibility.get("authority_mapping_id") or ""
+    ).strip()
+    authority = mappings_by_id.get(authority_id)
+    if authority is None or authority is mapping:
+        raise PlayerSaveError(
+            f"revision compatibility authority is invalid in {source}"
+        )
+    identity = mapping.get("identity") or {}
+    authority_identity = authority.get("identity") or {}
+    if not (
+        identity.get("data_version") == authority_identity.get("data_version")
+        and identity.get("root_class") == authority_identity.get("root_class")
+        and type(identity.get("game_version")) is int
+        and type(authority_identity.get("game_version")) is int
+        and identity["game_version"] > authority_identity["game_version"]
+    ):
+        raise PlayerSaveError(
+            f"revision compatibility identity is invalid in {source}"
+        )
+
+    source_fields = set(_raw_field_manifest_names(mapping))
+    authority_fields = set(_raw_field_manifest_names(authority))
+    if not authority_fields <= source_fields:
+        raise PlayerSaveError(
+            f"revision compatibility removed authority fields in {source}"
+        )
+    additions = source_fields - authority_fields
+    source_unknown = set(
+        (((mapping.get("raw_field_manifest") or {}).get("dispositions") or {}).get(
+            "unknown"
+        ) or ())
+    )
+    if not additions <= source_unknown:
+        raise PlayerSaveError(
+            "revision compatibility additions must remain unknown and "
+            f"unpublished in {source}"
+        )
+
+    source_required = {str(value) for value in mapping.get("required_fields") or ()}
+    authority_required = {
+        str(value) for value in authority.get("required_fields") or ()
+    }
+    if not authority_required <= source_required:
+        raise PlayerSaveError(
+            f"revision compatibility removed required fields in {source}"
+        )
+    source_lengths = mapping.get("required_array_lengths") or {}
+    for field_name, expected_length in (
+        authority.get("required_array_lengths") or {}
+    ).items():
+        if source_lengths.get(field_name) != expected_length:
+            raise PlayerSaveError(
+                "revision compatibility changed an authority array length "
+                f"for {field_name!r} in {source}"
+            )
+
+    checks = compatibility.get("validated_checks")
+    if (
+        not isinstance(checks, list)
+        or any(not isinstance(check, str) or not check for check in checks)
+        or len(checks) != len(set(checks))
+        or not set(checks) <= set(authority.get("validated_checks") or ())
+    ):
+        raise PlayerSaveError(
+            f"revision compatibility validated checks are invalid in {source}"
+        )
+    if compatibility.get("runtime_save") is True and not isinstance(
+        authority.get("runtime_save"), Mapping
+    ):
+        raise PlayerSaveError(
+            f"revision compatibility runtime authority is missing in {source}"
+        )
+
+
 def _validate_shape(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
+    *,
+    allow_additional_fields: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
     identity = mapping.get("identity") or {}
@@ -649,7 +1024,7 @@ def _validate_shape(
             f"{len(missing_fields)} classified field(s) are missing: "
             + _summarize_field_names(missing_fields)
         )
-    if unexpected_fields:
+    if unexpected_fields and not allow_additional_fields:
         warnings.append(
             "raw field manifest mismatch: "
             f"{len(unexpected_fields)} unclassified field(s) were decoded: "

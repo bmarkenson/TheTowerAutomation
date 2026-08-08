@@ -3,6 +3,29 @@
   "mapping_id": "data-9-game-1101",
   "maturity": "candidate",
   "validated_checks": [],
+  "revision_compatibility": {
+    "schema_version": 1,
+    "authority_mapping_id": "data-9-game-1073",
+    "validated_checks": [
+      "cards_deck",
+      "card_recharge_modes",
+      "workshop_preset",
+      "bots_preset",
+      "perk_first_choice",
+      "perk_bans",
+      "perk_auto_pick_order",
+      "free_upgrade_locks",
+      "guardian_chips",
+      "modules",
+      "auto_pick_perks",
+      "target_priority",
+      "ultimate_weapon_primaries",
+      "poison_swamp_stun",
+      "spotlight_missiles"
+    ],
+    "runtime_save": true,
+    "allow_forward_game_versions": true
+  },
   "identity": {
     "data_version": 9,
     "game_version": 1101,

@@ -19,6 +19,7 @@ from core.player_save import (
     _raw_field_manifest_names,
     _raw_field_name_sha256,
     _validate_raw_field_manifest,
+    _validate_revision_compatibility,
     decode_player_save_bytes,
     pull_player_save_bytes,
     reconcile_requirements,
@@ -79,7 +80,7 @@ def test_raw_field_manifest_is_complete_disjoint_and_canonical():
     assert progression_sources <= set(names)
 
 
-def test_v1101_raw_field_manifest_is_complete_audit_only_extension():
+def test_v1101_raw_field_manifest_is_complete_compatible_extension():
     manifest = VERSION_1101_MAPPING["raw_field_manifest"]
     old_names = set(_raw_field_manifest_names(VERSION_MAPPING))
     names = _raw_field_manifest_names(VERSION_1101_MAPPING)
@@ -90,6 +91,13 @@ def test_v1101_raw_field_manifest_is_complete_audit_only_extension():
     assert VERSION_1101_MAPPING["maturity"] == "candidate"
     assert VERSION_1101_MAPPING["validated_checks"] == []
     assert "runtime_save" not in VERSION_1101_MAPPING
+    assert VERSION_1101_MAPPING["revision_compatibility"] == {
+        "schema_version": 1,
+        "authority_mapping_id": "data-9-game-1073",
+        "validated_checks": VERSION_MAPPING["validated_checks"][:-1],
+        "runtime_save": True,
+        "allow_forward_game_versions": True,
+    }
     assert VERSION_1101_MAPPING["identity"] == {
         "data_version": 9,
         "game_version": 1101,
@@ -130,6 +138,65 @@ def test_v1101_raw_field_manifest_is_complete_audit_only_extension():
         VERSION_1101_MAPPING[key] == VERSION_MAPPING[key]
         for key in unchanged_semantic_sections
     )
+
+
+def test_revision_compatibility_rejects_published_additions():
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    dispositions = mapping["raw_field_manifest"]["dispositions"]
+    dispositions["unknown"].remove("enemiesKilledThisWave")
+    dispositions["automation_gating"].append("enemiesKilledThisWave")
+    dispositions["automation_gating"].sort()
+
+    with pytest.raises(
+        PlayerSaveError,
+        match="additions must remain unknown and unpublished",
+    ):
+        _validate_revision_compatibility(
+            mapping,
+            mappings_by_id={
+                VERSION_MAPPING["mapping_id"]: VERSION_MAPPING,
+                mapping["mapping_id"]: mapping,
+            },
+            source="test mapping",
+        )
+
+
+def test_revision_compatibility_rejects_unvalidated_authority_check():
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    mapping["revision_compatibility"]["validated_checks"].append(
+        "damage_slider"
+    )
+
+    with pytest.raises(
+        PlayerSaveError,
+        match="validated checks are invalid",
+    ):
+        _validate_revision_compatibility(
+            mapping,
+            mappings_by_id={
+                VERSION_MAPPING["mapping_id"]: VERSION_MAPPING,
+                mapping["mapping_id"]: mapping,
+            },
+            source="test mapping",
+        )
+
+
+def test_revision_compatibility_rejects_changed_authority_array():
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    mapping["required_array_lengths"]["perkLevel"] = 51
+
+    with pytest.raises(
+        PlayerSaveError,
+        match="changed an authority array length",
+    ):
+        _validate_revision_compatibility(
+            mapping,
+            mappings_by_id={
+                VERSION_MAPPING["mapping_id"]: VERSION_MAPPING,
+                mapping["mapping_id"]: mapping,
+            },
+            source="test mapping",
+        )
 
 
 def test_raw_field_manifest_rejects_invalid_categories():
@@ -485,16 +552,24 @@ def _snapshot_v1101(monkeypatch, decoded: dict | None = None):
     )
 
 
-def test_v1101_decode_is_shape_valid_but_keeps_ui_and_runtime_fallbacks(
+def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     monkeypatch,
 ):
     snapshot = _snapshot_v1101(monkeypatch)
 
     assert snapshot.mapping_id == "data-9-game-1101"
     assert snapshot.mapping_maturity == "candidate"
-    assert snapshot.validated_checks == ()
+    assert snapshot.mapping_resolution == "compatible_exact_revision"
+    assert snapshot.mapping_authority_id == "data-9-game-1073"
+    assert snapshot.mapping_structural_id == "data-9-game-1101"
+    assert snapshot.validated_checks == tuple(
+        VERSION_1101_MAPPING["revision_compatibility"]["validated_checks"]
+    )
     assert snapshot.shape_valid
-    assert snapshot.runtime_save is None
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.mapping_id == "data-9-game-1101"
+    assert snapshot.runtime_save.active_round_identity is not None
+    assert snapshot.runtime_save.active_round_identity.game_version == 1101
     assert snapshot.profile_progression["status"] == "complete"
     assert snapshot.profile_progression["identity"] == {
         "data_version": 9,
@@ -507,10 +582,10 @@ def test_v1101_decode_is_shape_valid_but_keeps_ui_and_runtime_fallbacks(
     assert snapshot.checks["perk_auto_pick_order"].complete
     assert snapshot.checks["tournament_conditions"].status == "unmapped"
     assert snapshot.checks["tournament_conditions"].reason == (
-        "tournament_mapping_config_changed"
+        "unsupported_game_version"
     )
     assert any(
-        "runtime mapping is unavailable" in warning
+        "passed its declared additive revision-compatibility gate" in warning
         for warning in snapshot.warnings
     )
 
@@ -519,9 +594,11 @@ def test_v1101_decode_is_shape_valid_but_keeps_ui_and_runtime_fallbacks(
         {"cards_deck": "Farm"},
         freshness_verified=True,
     )
-    assert plan["checks"]["cards_deck"]["disposition"] == "ui_required"
-    assert plan["checks"]["cards_deck"]["reason"] == "mapping_candidate_audit"
-    assert not plan["checks"]["cards_deck"]["save_evidence_authoritative"]
+    assert plan["checks"]["cards_deck"]["disposition"] == "save_match"
+    assert plan["checks"]["cards_deck"]["reason"] == (
+        "compatible_revision_save_match"
+    )
+    assert plan["checks"]["cards_deck"]["save_evidence_authoritative"]
 
     decoded = _decoded_save_v1101()
     decoded["enemiesKilledThisWave"] = "must-not-publish-v1101-wave-counter"
@@ -529,6 +606,102 @@ def test_v1101_decode_is_shape_valid_but_keeps_ui_and_runtime_fallbacks(
     assert "must-not-publish-v1101-wave-counter" not in json.dumps(
         redacted.as_dict()
     )
+
+
+def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
+    decoded = _decoded_save_v1101()
+    decoded.update(
+        {
+            "versionNumber": 1102,
+            "saveRevision": 1235,
+            "futureAdditiveCounter": "must-not-publish-future-counter",
+        }
+    )
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+
+    assert snapshot.mapping_id == "data-9-game-1102-compatible-via-1101"
+    assert snapshot.mapping_resolution == "compatible_forward_revision"
+    assert snapshot.mapping_authority_id == "data-9-game-1073"
+    assert snapshot.mapping_structural_id == "data-9-game-1101"
+    assert snapshot.shape_valid
+    assert snapshot.field_count == 742
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.mapping_id == snapshot.mapping_id
+    assert snapshot.runtime_save.active_round_identity is not None
+    assert snapshot.runtime_save.active_round_identity.game_version == 1102
+    assert snapshot.profile_progression["status"] == "unavailable"
+    assert snapshot.profile_progression["reason"] == (
+        "exact_version_progression_mapping_unavailable"
+    )
+    assert snapshot.checks["tournament_conditions"].reason == (
+        "unsupported_game_version"
+    )
+    assert snapshot.as_dict()["mapping"] == {
+        "supported": True,
+        "id": "data-9-game-1102-compatible-via-1101",
+        "maturity": "candidate",
+        "validated_checks": list(snapshot.validated_checks),
+        "shape_valid": True,
+        "resolution": "compatible_forward_revision",
+        "authority_id": "data-9-game-1073",
+        "structural_id": "data-9-game-1101",
+    }
+    assert "must-not-publish-future-counter" not in json.dumps(
+        snapshot.as_dict()
+    )
+
+    plan = reconcile_requirements(
+        snapshot,
+        {
+            "cards_deck": "Farm",
+            "tournament_conditions": {},
+        },
+        freshness_verified=True,
+    )
+    assert plan["checks"]["cards_deck"]["disposition"] == "save_match"
+    assert plan["checks"]["cards_deck"]["reason"] == (
+        "compatible_revision_save_match"
+    )
+    assert plan["checks"]["tournament_conditions"]["disposition"] == (
+        "ui_required"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("missing_field", "changed_array", "changed_data_version"),
+)
+def test_unknown_incompatible_version_falls_back_to_ui(monkeypatch, mutation):
+    decoded = _decoded_save_v1101()
+    decoded["versionNumber"] = 1102
+    if mutation == "missing_field":
+        decoded.pop("autoPickPerk")
+    elif mutation == "changed_array":
+        decoded["perkLevel"] = [0] * 51
+    else:
+        decoded["dataVersion"] = 10
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+    plan = reconcile_requirements(
+        snapshot,
+        {"cards_deck": "Farm"},
+        freshness_verified=True,
+    )
+
+    assert not snapshot.mapping_supported
+    assert not snapshot.shape_valid
+    assert snapshot.runtime_save is None
+    assert snapshot.checks == {}
+    assert snapshot.mapping_resolution in {
+        "incompatible_revision",
+        "unsupported",
+    }
+    assert plan["checks"]["cards_deck"]["disposition"] == "ui_required"
+    assert plan["checks"]["cards_deck"]["reason"] == (
+        "unsupported_save_version"
+    )
+    assert plan["checks"]["cards_deck"]["fallback"] == "existing_ui_check"
 
 
 def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
@@ -1865,7 +2038,9 @@ def test_unknown_game_version_decodes_metadata_but_requires_ui(monkeypatch):
     assert not snapshot.shape_valid
     assert snapshot.checks == {}
     assert snapshot.runtime_save is None
-    assert "No exact player-save mapping" in snapshot.warnings[0]
+    assert "No exact or structurally compatible player-save mapping" in (
+        snapshot.warnings[0]
+    )
 
     plan = reconcile_requirements(snapshot, {"cards_deck": "Farm"})
     decision = plan["checks"]["cards_deck"]

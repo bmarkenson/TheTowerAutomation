@@ -226,7 +226,7 @@ def running_attachment_observations_from_acquisition(
     This is an observation projection, not a requirement reconciliation.  It is
     suitable for an attached No Strategy run because the guarded serializer has
     already established snapshot freshness and active-round identity.  Unknown,
-    incomplete, or candidate checks outside the exact mapping's validation
+    incomplete, or candidate checks outside the resolved mapping's validation
     allowlist are omitted rather than converted into UI claims.
     """
 

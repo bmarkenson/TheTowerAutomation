@@ -13,27 +13,29 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
   game reports a different identity. Execute the complete
   [versioned audit matrix and rollout sequence](../architecture/player_save.md#versioned-audit-matrix-data-9-game-1073--revision-4).
   Promote only fully cross-validated fields; retain scheduled audits and every
-  existing UI checker as the fallback for unknown versions, shape changes,
-  stale data, mismatches, and unmapped settings.
-  - [x] **Version 1101 structural candidate — `feature/player-save-version-update`.**
+  existing UI checker as the fallback for incompatible versions, shape
+  changes, stale data, mismatches, and unmapped settings.
+  - [x] **Version 1101 compatibility boundary — `feature/player-save-version-update`.**
     Add `data-9-game-1101` for game `28.3.2` after a stable exact-target read
     proved the unchanged root, retention of all 739 version-1073 fields,
     unchanged required arrays, and two added integer counters:
     `enemiesKilledThisWave` and `enemiesSpawnedThisWave`. Classify both as
-    unknown, keep the validation allowlist empty, omit runtime authority, and
-    preserve UI fallback for every configuration and runtime consumer. All 12
-    profile-progression components are structurally complete and remain
-    observation-only; synthetic and live candidate decoding prove the
-    741-field manifest and zero save-authoritative reconciliation decisions.
+    unknown and declare version 1073 as the semantic authority for its 15
+    portable configuration checks and runtime normalizer. Exact and unknown
+    forward revisions now pass only an additive-root/required-array gate; every
+    check and runtime component retains its own type, ID, and shape validation.
+    Synthetic coverage proves compatible exact and future versions, redaction
+    of added fields, and UI fallback on field removal, array drift, or a new
+    data version. A safely restored running attachment now uses guarded Battle
+    History UI when the save projection is unusable instead of holding
+    indefinitely. Tournament derivation remains version-exact and UI-required.
     The supported checkpoint passed compilation, state-definition validation,
     clickmap integrity with zero errors and the 44 established orphan
-    candidates, and all 1,926 tests in 340.68 seconds.
-  - [ ] Cross-validate version 1101 configuration values at a verified Home
-    serialization boundary, then separately validate its active-round, Perk,
-    History/report, and Tournament components before adding any per-check
-    allowlist entry or runtime projection. Calibrate the two new per-wave enemy
-    counters independently if they gain a consumer; otherwise leave them
-    unpublished.
+    candidates, and all 1,933 tests in 340.78 seconds.
+  - [ ] Independently validate the version-1101 Tournament generator before
+    enabling it, and calibrate the two new per-wave enemy counters only if they
+    gain a consumer. Retain scheduled UI audits; any semantic discrepancy in an
+    inherited check removes it from the compatibility allowlist immediately.
   - [ ] Complete implementation and ordinary-boundary validation of the
     [typed acquisition and temporal-authority contract](../architecture/player_save.md#acquisition-provenance-and-temporal-authority)
     through one outcome coordinator and sequential stacked feature branches.
@@ -248,10 +250,11 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       versus active behavior, and restoration. Only if natural transitions are
       insufficient may a later coordinator authorize one owned bounded
       calibration.
-    - [ ] Continue routing unknown versions, shapes, IDs, values, unsupported
-      Module requests, and Damage Slider through UI. A unique exact-evidence mapping attempt may use
-      the existing fail-closed resolver; ambiguity/conflict remains UI-only,
-      and the observation collector never supplies preflight authority.
+    - [ ] Continue routing incompatible versions and shapes, unknown IDs or
+      values, unsupported Module requests, and Damage Slider through UI. A
+      unique exact-evidence mapping attempt may use the existing fail-closed
+      resolver; ambiguity/conflict remains UI-only, and the observation
+      collector never supplies preflight authority.
 - [ ] Capture the numeric level of every equipped Module from authoritative
   overview evidence, retain it with preflight and completed-run records, and
   surface threshold violations without confusing an intentional Tournament

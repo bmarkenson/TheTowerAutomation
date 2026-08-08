@@ -697,25 +697,6 @@ class ActivityContinuityCoordinator:
                 else:
                     force_ui_fallback = True
                     fallback_reason = "save_history_metadata_invalid"
-            if active_attachment:
-                reason = fallback_reason or save_result.reason
-                log_result(
-                    "Attached battle continuity deferred — the guarded save "
-                    "did not provide a usable History tail, so Battle History "
-                    "UI was not opened",
-                    detail=(
-                        "[BATTLE_CONTINUITY] "
-                        "disposition=attachment_save_retry_required "
-                        f"reason={reason} scope_id={run_id}"
-                    ),
-                )
-                self._action_logged = False
-                self._boundary = None
-                self._retry_at = self._clock() + SOURCE_RETRY_INTERVAL_SECONDS
-                return ActivityContinuityOutcome(
-                    pending=True,
-                    recapture=True,
-                )
             if not force_ui_fallback and not save_result.safe_ui_fallback:
                 self._action_logged = False
                 self._boundary = None
