@@ -20,7 +20,10 @@ from core.gc_no_battle_setup import (
 from core.gc_module_loadout import ModuleLoadoutCorrectionError
 from core.gate_decisions import build_gate_decision_options
 from core.home_battle import HomeBattleEvidence
-from core.home_perk_configuration import HomePerkConfigurationResult
+from core.home_perk_configuration import (
+    HomePerkConfigurationRepairExhausted,
+    HomePerkConfigurationResult,
+)
 from core.matcher import get_match
 from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.poison_swamp_stun import PoisonSwampStunState
@@ -1205,6 +1208,31 @@ def test_invalid_strategy_perk_configuration_blocks_before_workshop():
     assert "navigation.goto_workshop_home" not in router.static_actions
 
 
+def test_exhausted_local_perk_repair_is_not_retryable_from_home():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+    }
+    ensure = Mock(
+        side_effect=HomePerkConfigurationRepairExhausted(
+            "Ban Perks made no stable progress"
+        )
+    )
+
+    result = _run(
+        router,
+        requirements,
+        ensure_perk_configuration_fn=ensure,
+    )
+
+    assert result.status is GcNoBattleSetupStatus.FAILED
+    assert result.failed_check == "perk_configuration"
+    assert result.retryable_from_home is False
+    ensure.assert_called_once()
+
+
 def test_home_preflight_logs_concise_check_results_for_operator_activity():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
 
@@ -2295,6 +2323,32 @@ def test_app_blocks_battle_start_when_no_battle_setup_fails():
     manager.mark_no_battle_setup_complete.assert_not_called()
     handle_home.assert_not_called()
     manager.on_home.assert_not_called()
+
+
+def test_app_does_not_restart_home_setup_after_local_repair_exhaustion():
+    frame = object()
+    app = App.__new__(App)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._capture_frame = Mock()
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.FAILED,
+        "Ban Perks made no stable progress",
+        failed_check="perk_configuration",
+        retryable_from_home=False,
+    )
+
+    with patch(
+        "core.app.run_gc_no_battle_setup",
+        return_value=setup,
+    ) as run_setup:
+        result = app._run_home_setup_attempts(
+            REQUIREMENTS,
+            screenshot=frame,
+        )
+
+    assert result is setup
+    run_setup.assert_called_once()
+    app._capture_frame.assert_not_called()
 
 
 def test_app_retries_transient_home_setup_failure_before_starting_battle():

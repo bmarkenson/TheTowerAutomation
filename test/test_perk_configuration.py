@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -692,6 +693,27 @@ def test_farm_bans_use_all_six_slots_for_nonessential_farm_perks():
         "land_mine_damage",
         "cash_bonus",
     )
+
+
+def test_current_save_perk_ids_have_complete_home_semantics():
+    mapping = json.loads(
+        (
+            ROOT
+            / "config"
+            / "player_save_versions"
+            / "data_9_game_1073.json"
+        ).read_text(encoding="utf-8")
+    )
+    mapped_keys = set(mapping["perk_ids"].values())
+
+    assert mapped_keys <= set(PERK_CONFIGURATION_LABELS)
+    assert mapped_keys <= set(PERK_CONFIGURATION_OCR_EXEMPLARS)
+    assert {
+        key: classify_perk_configuration_text(
+            PERK_CONFIGURATION_OCR_EXEMPLARS[key]
+        )
+        for key in mapped_keys
+    } == {key: key for key in mapped_keys}
 
 
 def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():

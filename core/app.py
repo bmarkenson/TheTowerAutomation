@@ -4667,6 +4667,7 @@ class App:
                     getattr(setup, "status", None)
                     is not GcNoBattleSetupStatus.FAILED
                 )
+                or not getattr(setup, "retryable_from_home", True)
                 or attempt == HOME_SETUP_MAX_ATTEMPTS
             ):
                 return setup

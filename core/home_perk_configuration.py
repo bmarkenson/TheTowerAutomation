@@ -56,9 +56,13 @@ MAX_BAN_SCAN_SWIPES = 14
 MAX_AUTO_PICK_SCAN_SWIPES = 20
 MAX_AUTO_PICK_MOVE_TAPS = 300
 MAX_AUTO_PICK_LOCAL_REACQUIRE_SWIPES = 4
+MAX_AUTO_PICK_LOCAL_CONTEXT_RETRIES = 2
 MAX_AUTO_PICK_SEMANTIC_RESYNCS = 2
 MAX_PERK_OCR_RETRIES = 2
 PERK_OCR_RETRY_SETTLE_SECONDS = 0.6
+MAX_BAN_STABLE_CAPTURE_ATTEMPTS = 4
+MAX_BAN_RECONCILIATION_ACTIONS = 14
+MAX_BAN_NO_PROGRESS_RETRIES = 1
 AUTO_PICK_UP_X = 915
 BAN_SELECTED_TOGGLE_X = 540
 BAN_TOGGLE_X = 944
@@ -75,6 +79,12 @@ class HomePerkConfigurationResult:
 
 
 class HomePerkConfigurationError(RuntimeError):
+    pass
+
+
+class HomePerkConfigurationRepairExhausted(HomePerkConfigurationError):
+    """A bounded in-panel repair proved that a fresh Home retry cannot help."""
+
     pass
 
 
@@ -363,7 +373,7 @@ def ensure_home_perk_configuration(
             "starting guarded repair",
             "DEBUG",
         )
-        bans_top = _repair_bans(
+        bans_top, captured_bans = _repair_bans(
             bans_top,
             required_bans,
             capture_fn=capture_fn,
@@ -373,14 +383,6 @@ def ensure_home_perk_configuration(
             swipe_fn=swipe_fn,
             row_fn=row_fn,
             row_near_fn=row_near_fn,
-            sleep_fn=sleep_fn,
-        )
-        bans_top, captured_bans = _capture_bans_with_ocr_retries(
-            bans_top,
-            capture_fn=capture_fn,
-            detector=detector,
-            visible_fn=visible_fn,
-            row_fn=row_fn,
             sleep_fn=sleep_fn,
         )
         changed_fields.add("perk_bans")
@@ -528,129 +530,239 @@ def _repair_bans(
     row_fn: RowsFn,
     row_near_fn: Callable[..., Optional[dict[str, Any]]],
     sleep_fn: Callable[[float], None],
-) -> Frame:
-    captured = extract_configured_perk_bans(top, row_fn=row_fn)
-    if captured["quality"]["valid"] is not True:
-        raise HomePerkConfigurationError(
-            "Ban Perks selected block could not be read authoritatively"
-        )
-    selected = [
-        dict(entry)
-        for entry in captured["selected"]
-        if isinstance(entry, Mapping)
-    ]
+) -> tuple[Frame, dict[str, Any]]:
     expected = set(expected_keys)
-    current = top
-    recognized_required = {
-        entry.get("key")
-        for entry in selected
-        if entry.get("key") in expected
-    }
-    missing_before_removal = expected - recognized_required
-    known_extras = [
-        entry
-        for entry in selected
-        if entry.get("key") is not None
-        and entry.get("key") not in expected
-    ]
-    unknown_entries = [
-        entry for entry in selected if entry.get("key") is None
-    ]
-    if unknown_entries and missing_before_removal:
-        raise HomePerkConfigurationError(
-            "Ban Perks selected block was ambiguous; an unrecognized row "
-            "could be a required ban"
-        )
-
-    # Removing an extra selection is both shorter and more authoritative from
-    # the fixed Selected Perks block than searching the complete Available
-    # list for that row's checkbox.
-    for target in [*known_extras, *unknown_entries]:
-        fresh_capture = extract_configured_perk_bans(current, row_fn=row_fn)
-        if fresh_capture["quality"]["valid"] is not True:
-            raise HomePerkConfigurationError(
-                "Ban Perks selected block became unreadable before deselection"
-            )
-        fresh_selected = [
-            dict(entry)
-            for entry in fresh_capture["selected"]
-            if isinstance(entry, Mapping)
-        ]
-        row = next(
-            (
-                entry
-                for entry in fresh_selected
-                if perk_entries_match(target, entry)
-            ),
-            None,
-        )
-        if row is None:
-            raise HomePerkConfigurationError(
-                "Ban Perks extra selection changed identity before deselection"
-            )
-        before_count = len(fresh_selected)
-        current = _tap_configuration_row(
-            current,
-            row,
-            x=BAN_SELECTED_TOGGLE_X,
-            action=(
-                "perk_ban_deselect:"
-                f"{target.get('key') or 'unknown'}"
-            ),
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-            visible_fn=visible_fn,
-            row_fn=row_fn,
-            row_near_fn=row_near_fn,
-            sleep_fn=sleep_fn,
-            require_identity_after=False,
-        )
-        after_capture = extract_configured_perk_bans(current, row_fn=row_fn)
-        after_selected = [
-            dict(entry)
-            for entry in after_capture["selected"]
-            if isinstance(entry, Mapping)
-        ]
-        if (
-            after_capture["quality"]["valid"] is not True
-            or len(after_selected) != before_count - 1
-            or any(perk_entries_match(target, entry) for entry in after_selected)
-        ):
-            raise HomePerkConfigurationError(
-                "Ban Perks selected row did not disappear after deselection"
-            )
-
-    current_top = _scroll_ban_configuration_top(
-        current,
+    current, captured = _capture_stable_bans(
+        top,
         capture_fn=capture_fn,
+        detector=detector,
         visible_fn=visible_fn,
-        swipe_fn=swipe_fn,
         row_fn=row_fn,
         sleep_fn=sleep_fn,
     )
-    captured = extract_configured_perk_bans(current_top, row_fn=row_fn)
-    if captured["quality"]["valid"] is not True:
-        raise HomePerkConfigurationError(
-            "Ban Perks selected block became unreadable after deselection"
-        )
-    current_keys = {
-        entry.get("key")
-        for entry in captured["selected"]
-        if isinstance(entry, Mapping)
-    }
-    pending = [
-        {
-            "key": key,
-            "display_text": perk_configuration_label(key),
-        }
-        for key in expected_keys
-        if key not in current_keys
-    ]
-    if not pending:
-        return current_top
+    no_progress: dict[tuple[Any, ...], int] = {}
 
-    current = current_top
+    for action_number in range(1, MAX_BAN_RECONCILIATION_ACTIONS + 1):
+        if _ban_capture_matches(expected_keys, captured):
+            return current, captured
+
+        quality = captured.get("quality")
+        selected = [
+            dict(entry)
+            for entry in captured.get("selected") or ()
+            if isinstance(entry, Mapping)
+        ]
+        if not isinstance(quality, Mapping) or quality.get("valid") is not True:
+            raise HomePerkConfigurationRepairExhausted(
+                "Ban Perks selected block did not settle authoritatively"
+            )
+        selected_keys = {
+            str(entry["key"])
+            for entry in selected
+            if entry.get("key") is not None
+        }
+        missing = [key for key in expected_keys if key not in selected_keys]
+        extras = [
+            entry
+            for entry in selected
+            if entry.get("key") is not None
+            and entry.get("key") not in expected
+        ]
+        unknown = [entry for entry in selected if entry.get("key") is None]
+        if unknown and missing:
+            raise HomePerkConfigurationRepairExhausted(
+                "Ban Perks selected block was ambiguous; an unrecognized row "
+                "could be a required ban"
+            )
+
+        before_signature = _ban_capture_signature(captured)
+        action_kind: str
+        target: dict[str, Any]
+        if extras or unknown:
+            action_kind = "deselect"
+            target = dict((extras or unknown)[0])
+            current = _tap_configuration_row(
+                current,
+                target,
+                x=BAN_SELECTED_TOGGLE_X,
+                action=(
+                    "perk_ban_deselect:"
+                    f"{target.get('key') or 'unknown'}"
+                ),
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                visible_fn=visible_fn,
+                row_fn=row_fn,
+                row_near_fn=row_near_fn,
+                sleep_fn=sleep_fn,
+                require_identity_after=False,
+            )
+        else:
+            if not missing:
+                raise HomePerkConfigurationRepairExhausted(
+                    "Ban Perks stable readback had an unsupported duplicate state"
+                )
+            capacity = int(quality.get("capacity") or 0)
+            if capacity <= 0 or len(selected) >= capacity:
+                raise HomePerkConfigurationRepairExhausted(
+                    "Ban Perks was full before all required bans were selected"
+                )
+            action_kind = "select"
+            target = {
+                "key": missing[0],
+                "display_text": perk_configuration_label(missing[0]),
+            }
+            current = _select_available_ban(
+                current,
+                target,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                row_fn=row_fn,
+                row_near_fn=row_near_fn,
+                sleep_fn=sleep_fn,
+            )
+
+        current = _scroll_ban_configuration_top(
+            current,
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            row_fn=row_fn,
+            sleep_fn=sleep_fn,
+        )
+        current, refreshed = _capture_stable_bans(
+            current,
+            capture_fn=capture_fn,
+            detector=detector,
+            visible_fn=visible_fn,
+            row_fn=row_fn,
+            sleep_fn=sleep_fn,
+        )
+        after_signature = _ban_capture_signature(refreshed)
+        target_key = str(target.get("key") or "unknown")
+        progress_key = (
+            before_signature,
+            action_kind,
+            target_key,
+        )
+        if after_signature == before_signature:
+            retries = no_progress.get(progress_key, 0)
+            if retries >= MAX_BAN_NO_PROGRESS_RETRIES:
+                raise HomePerkConfigurationRepairExhausted(
+                    "Ban Perks made no stable progress after a guarded "
+                    f"{action_kind} retry for "
+                    f"{perk_configuration_label(target.get('key'))}"
+                )
+            no_progress[progress_key] = retries + 1
+            log(
+                "[HOME_PERKS] Ban Perks guarded input produced a stable "
+                "no-op; replanning one local retry "
+                f"({retries + 1}/{MAX_BAN_NO_PROGRESS_RETRIES}) "
+                f"action={action_kind} "
+                f"target={perk_configuration_label(target.get('key'))}",
+                "DEBUG",
+            )
+        else:
+            before_keys = set(_ban_capture_keys(captured))
+            after_keys = set(_ban_capture_keys(refreshed))
+            log(
+                "[HOME_PERKS] Ban Perks stable transition verified; "
+                f"action={action_kind} "
+                f"target={perk_configuration_label(target.get('key'))} "
+                f"removed={sorted(before_keys - after_keys)} "
+                f"added={sorted(after_keys - before_keys)} "
+                f"round={action_number}/{MAX_BAN_RECONCILIATION_ACTIONS}",
+                "DEBUG",
+            )
+        captured = refreshed
+        if _ban_capture_matches(expected_keys, captured):
+            return current, captured
+
+    raise HomePerkConfigurationRepairExhausted(
+        "Ban Perks repair exceeded its bounded in-panel action budget"
+    )
+
+
+def _ban_capture_keys(captured: Mapping[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(entry.get("key") or "")
+        for entry in captured.get("selected") or ()
+        if isinstance(entry, Mapping)
+    )
+
+
+def _ban_capture_signature(captured: Mapping[str, Any]) -> tuple[Any, ...] | None:
+    """Return comparable evidence only for a complete authoritative read."""
+
+    quality = captured.get("quality")
+    if not isinstance(quality, Mapping) or quality.get("valid") is not True:
+        return None
+    return (
+        _ban_capture_keys(captured),
+        int(quality.get("capacity") or 0),
+        bool(quality.get("empty_slot_seen")),
+        int(quality.get("selected_outline_count") or 0),
+    )
+
+
+def _capture_stable_bans(
+    current: Frame,
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    visible_fn: Callable[..., bool],
+    row_fn: RowsFn,
+    sleep_fn: Callable[[float], None],
+) -> tuple[Frame, dict[str, Any]]:
+    """Require two matching authoritative Selected Perks snapshots."""
+
+    captured = extract_configured_perk_bans(current, row_fn=row_fn)
+    previous_signature = _ban_capture_signature(captured)
+    for attempt in range(1, MAX_BAN_STABLE_CAPTURE_ATTEMPTS + 1):
+        fresh = _fresh_perk_configuration_capture(
+            capture_fn=capture_fn,
+            detector=detector,
+            visible_fn=visible_fn,
+            sleep_fn=sleep_fn,
+        )
+        fresh_capture = extract_configured_perk_bans(fresh, row_fn=row_fn)
+        fresh_signature = _ban_capture_signature(fresh_capture)
+        if fresh_signature is not None and fresh_signature == previous_signature:
+            return fresh, fresh_capture
+        log(
+            "[HOME_PERKS] Ban Perks Selected snapshot was not yet stable; "
+            "confirming again in the current panel "
+            f"({attempt}/{MAX_BAN_STABLE_CAPTURE_ATTEMPTS})",
+            "DEBUG",
+        )
+        current = fresh
+        captured = fresh_capture
+        previous_signature = fresh_signature
+    raise HomePerkConfigurationRepairExhausted(
+        "Ban Perks selected block did not produce two matching "
+        "authoritative snapshots"
+    )
+
+
+def _select_available_ban(
+    current: Frame,
+    target: Mapping[str, Any],
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    safe_tap_fn: Callable[..., bool],
+    visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str], bool],
+    row_fn: RowsFn,
+    row_near_fn: Callable[..., Optional[dict[str, Any]]],
+    sleep_fn: Callable[[float], None],
+) -> Frame:
+    """Find and select one missing Ban choice before the next replan."""
+
     for _ in range(BAN_AVAILABLE_START_SWIPES):
         current = _swipe_configuration(
             current,
@@ -660,84 +772,66 @@ def _repair_bans(
             swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
         )
+    located: dict[str, Any] | None = None
 
-    for _page in range(MAX_BAN_SCAN_SWIPES + 1):
-        rows = [semantic_perk_entry(row) for row in row_fn(current)]
-        for row in rows:
-            target = next(
-                (item for item in pending if perk_entries_match(item, row)),
-                None,
+    def target_stop(frame: Frame) -> Optional[str]:
+        nonlocal located
+        matches = [
+            row
+            for row in (
+                semantic_perk_entry(raw) for raw in row_fn(frame)
             )
-            if target is None:
-                continue
-            current = _tap_configuration_row(
-                current,
-                row,
-                x=BAN_TOGGLE_X,
-                action=f"perk_ban_toggle:{row.get('key') or 'unknown'}",
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-                visible_fn=visible_fn,
-                row_fn=row_fn,
-                row_near_fn=row_near_fn,
-                sleep_fn=sleep_fn,
-                require_identity_after=True,
-            )
-            pending.remove(target)
-            if not pending:
-                break
-        if not pending:
-            break
-        next_frame = _swipe_configuration(
-            current,
-            "gesture_targets.goto_next:perks",
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            sleep_fn=sleep_fn,
-        )
-        if _content_difference(current, next_frame) <= 1.0:
-            break
-        current = next_frame
-    if pending:
-        labels = [
-            perk_configuration_label(
-                str(item.get("key") or "") or None,
-                str(item.get("display_text") or ""),
-            )
-            for item in pending
+            if perk_entries_match(target, row)
         ]
-        raise HomePerkConfigurationError(
-            "could not locate Ban Perks choices: " + ", ".join(labels)
-        )
+        if len(matches) == 1:
+            located = matches[0]
+            return "ban_available_target_visible"
+        if len(matches) > 1:
+            raise HomePerkConfigurationRepairExhausted(
+                "Ban Perks Available list exposed duplicate target rows for "
+                f"{perk_configuration_label(target.get('key'))}"
+            )
+        return None
 
-    final_top = _scroll_ban_configuration_top(
-        current,
+    capture = capture_scroll_to_edge(
+        "gesture_targets.goto_next:perks",
+        source_label=PERK_CONFIGURATION_INDICATOR,
+        screenshot=current,
+        progress_region=PERK_CONTENT_REGION,
+        max_swipes=MAX_BAN_SCAN_SWIPES,
+        settle_s=0.8,
         capture_fn=capture_fn,
         visible_fn=visible_fn,
         swipe_fn=swipe_fn,
-        row_fn=row_fn,
         sleep_fn=sleep_fn,
+        stop_fn=target_stop,
     )
-    final_top, final = _capture_bans_with_ocr_retries(
-        final_top,
-        capture_fn=capture_fn,
-        detector=detector,
-        visible_fn=visible_fn,
-        row_fn=row_fn,
-        sleep_fn=sleep_fn,
-    )
-    final_keys = [entry.get("key") for entry in final["selected"]]
-    if (
-        final["quality"]["valid"] is not True
-        or len(final_keys) != len(expected_keys)
-        or set(final_keys) != set(expected_keys)
-    ):
-        raise HomePerkConfigurationError(
-            "Ban Perks remained different after guarded toggles"
+    if capture.reason == "ban_available_target_visible" and located is not None:
+        current = capture.screenshots[-1] if capture.screenshots else current
+        return _tap_configuration_row(
+            current,
+            located,
+            x=BAN_TOGGLE_X,
+            action=f"perk_ban_toggle:{located.get('key') or 'unknown'}",
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
+            visible_fn=visible_fn,
+            row_fn=row_fn,
+            row_near_fn=row_near_fn,
+            sleep_fn=sleep_fn,
+            require_identity_after=True,
         )
-    return final_top
+    if not capture.success and capture.reason != "max_swipes_exceeded":
+        raise HomePerkConfigurationRepairExhausted(
+            "Ban Perks Available list scan failed while locating "
+            f"{perk_configuration_label(target.get('key'))}: "
+            f"{capture.reason}"
+        )
+    raise HomePerkConfigurationRepairExhausted(
+        "could not locate Ban Perks choice: "
+        f"{perk_configuration_label(target.get('key'))}"
+    )
 
 
 def _repair_auto_pick_order(
@@ -872,6 +966,29 @@ def _repair_auto_pick_order(
                 )
                 restart_from_semantic_order = True
                 break
+
+            if (
+                target_taps == 0
+                and previous is not None
+                and previous.get("key") is None
+            ):
+                (
+                    current,
+                    row,
+                    previous,
+                    _following,
+                    at_top,
+                ) = _retry_unknown_auto_pick_predecessor(
+                    current,
+                    key,
+                    previous,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    visible_fn=visible_fn,
+                    swipe_fn=swipe_fn,
+                    row_fn=row_fn,
+                    sleep_fn=sleep_fn,
+                )
 
             if target_taps == 0 and not _auto_pick_context_matches_order(
                 working_order,
@@ -1058,6 +1175,75 @@ def _auto_pick_context_matches_order(
     return (
         previous_key not in working_order
         or previous_key == working_order[-1]
+    )
+
+
+def _retry_unknown_auto_pick_predecessor(
+    current: Frame,
+    key: str,
+    previous: Mapping[str, Any],
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str], bool],
+    row_fn: RowsFn,
+    sleep_fn: Callable[[float], None],
+) -> tuple[
+    Frame,
+    dict[str, Any],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    bool,
+]:
+    """Retry an unknown adjacent row locally; a top-prefix scan cannot help."""
+
+    predecessor_text = str(
+        previous.get("display_text") or previous.get("text_raw") or ""
+    ).strip()
+    last_reason = "local predecessor remained unrecognized"
+    for retry in range(1, MAX_AUTO_PICK_LOCAL_CONTEXT_RETRIES + 1):
+        log(
+            "[HOME_PERKS] Auto Pick predecessor OCR was unrecognized; "
+            "retrying fresh local context without rescanning the ranked "
+            f"prefix ({retry}/{MAX_AUTO_PICK_LOCAL_CONTEXT_RETRIES}) "
+            f"target={perk_configuration_label(key)} "
+            f"predecessor={predecessor_text!r}",
+            "DEBUG",
+        )
+        fresh = _fresh_perk_configuration_capture(
+            capture_fn=capture_fn,
+            detector=detector,
+            visible_fn=visible_fn,
+            sleep_fn=sleep_fn,
+        )
+        try:
+            context = _reacquire_auto_pick_move_context(
+                fresh,
+                key,
+                capture_fn=capture_fn,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                row_fn=row_fn,
+                sleep_fn=sleep_fn,
+            )
+        except HomePerkConfigurationError as exc:
+            last_reason = str(exc)
+            continue
+        current, row, predecessor, following, at_top = context
+        if predecessor is not None:
+            predecessor_text = str(
+                predecessor.get("display_text")
+                or predecessor.get("text_raw")
+                or ""
+            ).strip()
+            if predecessor.get("key") is not None:
+                return current, row, predecessor, following, at_top
+        last_reason = "local predecessor remained unrecognized"
+    raise HomePerkConfigurationRepairExhausted(
+        "Auto Pick could not identify the row immediately above "
+        f"{perk_configuration_label(key)} after local OCR retries; "
+        f"predecessor={predecessor_text!r}; reason={last_reason}"
     )
 
 
@@ -2119,6 +2305,7 @@ def _region_difference(
 __all__ = [
     "HOME_PERKS_CONTROL_REGION",
     "HomePerkConfigurationError",
+    "HomePerkConfigurationRepairExhausted",
     "HomePerkConfigurationResult",
     "PERK_CONFIGURATION_INDICATOR",
     "PERK_TABS",
