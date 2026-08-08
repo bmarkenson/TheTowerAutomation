@@ -15,6 +15,13 @@ separate available **Start Battle** or **Attach to Battle** action. Do not
 interpret a live process as enabled input or a stopped process as a terminal
 policy.
 
+**Enable Automation** changes action authority only. While the runtime is still
+waiting for its initial battle intent, Enable at Home does not serialize a Home
+baseline, run configuration setup, claim a Tournament validation battle, or
+dispatch New Battle/Resume Battle. Those paths require the separate matching
+battle intent. An explicitly requested setup capture remains a separate
+workflow under its own exact evidence and serialization authority.
+
 **Start Battle** is available only from fresh, owner-matched Home **New
 Battle** evidence. If requested while Paused it remains `awaiting_enable`;
 explicit **Enable Automation** revalidates the same runtime, target, activity
@@ -102,6 +109,15 @@ briefly performs its guarded serialization and presents representable values,
 unresolved fields, and an optional comparison Base. Automation Paused cannot
 perform this lifecycle refresh; the UI reports that outcome and never consumes
 a cached save.
+
+An exact or forward-compatible save revision may supply only the checks named
+by its resolved mapping's explicit compatibility allowlist; every other field
+stays unresolved. An unsupported or structurally incompatible revision, a
+missing runtime projection, or incomplete round identity reports Capture as
+`unavailable`, opens no configuration UI, and remains Paused after a dispatched
+serialization. Fresh save evidence that positively contradicts the requested
+Home/active boundary reports `failed` and also remains Paused. Retry only after
+the reported mapping or boundary condition has changed.
 
 There is one deliberate no-input path for manual changes: if Return Control
 already forced an exact active-battle save and then Paused on a trusted mismatch,

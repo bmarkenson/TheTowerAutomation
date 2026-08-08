@@ -631,6 +631,32 @@ stages:
     - [x] The complete self-contained Windows package was atomically rebuilt at
       `windows/TheTower.ControlSurface/publish/win-x64`, including both
       `TheTower.ControlSurface.exe` and `TheTower.TunnelHost.exe`.
+  - Compatible-save repair checkpoint (2026-08-08, feature branch based on
+    `b292779`):
+    - [x] Commit `f7c569c` accepts the effective compatible-v1101 runtime and
+      per-check authoring authority. The real synthetic v1101 decode now passes
+      runtime battle binding and the strict capture-preview validator; fields
+      outside the inherited allowlist remain unresolved and saving still grants
+      no selection, publication, queue, application, or input authority.
+    - [x] Unsupported/incompatible mappings, absent runtime projection, and
+      incomplete round identity report Capture `unavailable` without entering
+      authoring or UI fallback. A proved opposite round fact remains `failed`.
+      Every post-background outcome persists Automation Paused.
+    - [x] Enable at Home cannot inherit ordinary Home serialization/setup,
+      legacy auto-start, or one-shot Tournament-validation launch while the
+      initial Start Battle/Attach to Battle intent is unresolved. Stale
+      acknowledged Start state also cannot dispatch without the matching
+      in-process MissionManager authorization; explicit Start still owns normal
+      gates and Tournament validation through lifecycle adoption.
+    - [x] Focused Home/Better-Control/player-save/capture/Tournament validation
+      passed 305 tests. The complete supported checkpoint passed all 1,946
+      tests in 357.16 seconds, state-definition validation, and clickmap
+      validation with zero errors and the established 44 orphan candidates.
+      All 82 native authoring/compatibility tests passed on Linux; NuGet's
+      read-only vulnerability-cache warning did not affect build or execution.
+    - [ ] Deploy this repair through the production procedure only after
+      separate authorization, then retry setup capture from a natural safe
+      boundary. No live/device or Windows runtime validation is claimed here.
     - [ ] Confirm the native Windows usability flow and the Better Control
       transitions at natural Home, resumable/active-battle, manual-control, and
       terminal boundaries before closing this outcome.

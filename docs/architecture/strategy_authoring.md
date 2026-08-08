@@ -526,12 +526,13 @@ a trusted Strategy mismatch, Capture may instead consume that same process-local
 typed acquisition. The ledger labels this as
 `retained_return_control_refresh`; it performs no new device input, does not
 resolve Return Control, and cannot be reconstructed from the durable receipt.
-Only complete allowlisted observations from the exact mapping enter
-`settings`. Unmapped, incomplete, unsupported, or not-yet-authorable values
-remain explicit `unresolved` rows with their source check IDs and safe observed
-value where available. The preview includes redacted acquisition timing and
-binding fingerprints plus process/scope/round workflow binding; cached or
-passive reads cannot be relabelled as a capture.
+Only complete observations authorized by the resolved mapping's explicit
+validation or compatibility allowlist enter `settings`. Unmapped, incomplete,
+unsupported, or not-yet-authorable values remain explicit `unresolved` rows
+with their source check IDs and safe observed value where available. The
+preview includes redacted acquisition timing and binding fingerprints plus
+process/scope/round workflow binding; cached or passive reads cannot be
+relabelled as a capture.
 It also fingerprints bounded capture-origin metadata: a newly requested
 refresh remains distinguishable from a process-local Return Control reuse after
 the mutable workflow ledger moves on. That origin is review provenance only

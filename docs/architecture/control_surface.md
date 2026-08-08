@@ -111,6 +111,12 @@ agnostic.
   unresolved. A valid save advances it to `ready` as observation-only; the
   battle is adopted only after lifecycle confirmation. Selecting a Strategy
   for that battle is a later explicit action and never grants Surrender.
+- Automation Enable alone never substitutes for that initial battle intent.
+  While the process is waiting for Start Battle or Attach to Battle, Home
+  observation may continue but ordinary Home save/configuration preflight,
+  legacy auto-start, and one-shot validation launch remain input-blocked. A
+  stale acknowledged Start ledger cannot dispatch unless the current
+  MissionManager also owns that exact initial intent.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;
@@ -206,6 +212,7 @@ or exactly acknowledged repeat is a visible no-op.
 | Stopped | unavailable/stopped | any | Start Automation | launch service Paused; await observation and battle intent |
 | Live | paused | Home New Battle | Start Battle | `requested` → `awaiting_enable`; explicit Enable revalidates and acknowledges normal new-run gates |
 | Live | enabled | Home New Battle | Start Battle | revalidate and acknowledge normal new-run gates |
+| Live | enabled | Home New or Home Resume with no acknowledged initial battle intent | Enable or no additional request | observe only; do not serialize ordinary Home preflight, run configuration setup, claim validation, or dispatch a battle control |
 | Live | enabled | verified Home control was tapped | acknowledged Start or ready resumable Attach | record `action_dispatched`; keep unrelated automation suppressed until the same battle is adopted, a definitive mismatch interrupts, or the 20-second launch window fails |
 | Live | paused | Home Resume Battle or active battle | Attach to Battle | `requested` → `awaiting_enable`; explicit Enable enters `validating_save` without adopting the battle |
 | Live | enabled | Home Resume Battle or active battle | Attach to Battle | force a stable exact-target save, bind active-round identity and the final activity scope, then become observation-only `ready`; optional mapped facts do not replace the required round identity |
@@ -219,6 +226,8 @@ or exactly acknowledged repeat is a visible no-op.
 | Live | enabled, adopted active battle | repair-only mismatch | choose **Surrender this battle and repair setup** in the runtime gate | grant one exact-battle, exact-reason Surrender; write the nonrepresentative disposition before verified Home, Pause there, and do not start another battle |
 | Live | enabled | Home New, Home Resume, or active battle with exact binding | Capture current setup as… | force a new save, present captured and unresolved fields for review, then save a new inactive Module preset or Strategy draft without selecting, queueing, publishing, or applying it |
 | Live | paused, Return awaiting trusted-mismatch review | same exact active battle with its process-local forced acquisition retained | Capture current setup as… | project the Return acquisition without new input, label that provenance explicitly, and leave Return Control Paused and unresolved after any capture save |
+| Live | capture owns a forced refresh | compatible exact/forward save revision | no additional request | use only the resolved mapping's explicit compatibility allowlist; preserve every other setup field as unresolved |
+| Live | capture owns a forced refresh | unsupported/incompatible mapping, missing runtime projection, or incomplete round identity | no additional request | report `unavailable`, open no configuration UI, and remain Paused after dispatched serialization; a proved opposite round fact is instead `failed` |
 | Live | capture owns or completed a forced refresh | ready-ledger write fails or post-background save/round binding contradicts the request | no additional request | retain the exact process-local ready result and retry only its atomic receipt, or terminalize the contradiction Paused; never serialize a second time to recover the write |
 | Live | either | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result, use the verified dismissal route, and preserve the independent next-battle policy |
 | Live/stopped | already satisfied | any | repeated Pause, Enable, Start Automation, Stop Automation, terminal policy, or Take Manual Control where defined | return a visible no-op instead of fabricating a transition |
