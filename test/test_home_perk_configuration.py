@@ -8,10 +8,12 @@ from core.battle_lifecycle import HomeBattleControl
 from core.home_perk_configuration import (
     BAN_SELECTED_TOGGLE_X,
     HomePerkConfigurationError,
+    HomePerkConfigurationRepairExhausted,
     _capture_bans_with_ocr_retries,
     _capture_ranked_frames,
     _capture_ranked_order_with_ocr_retries,
     _close_to_home,
+    _confirm_auto_pick_local_swap,
     _locate_auto_pick_key,
     _reacquire_auto_pick_move_context,
     _repair_auto_pick_order,
@@ -201,6 +203,150 @@ def test_auto_pick_repair_acquires_only_live_shaped_mismatches():
     ]
     assert final_scan.call_count == 1
     assert scroll_top.call_count == 2
+
+
+def test_auto_pick_repair_moves_black_hole_past_off_prefix_chrono():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    expected = [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+        "golden_tower_bonus",
+        "black_hole_duration",
+    ]
+    order = [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+        "enemy_health_tradeoff",
+        "enemy_speed_tradeoff",
+        "golden_tower_bonus",
+        "chain_lightning_damage",
+        "chrono_field_duration",
+        "black_hole_duration",
+    ]
+    observed = list(order[: len(expected)])
+
+    def rows(_frame):
+        return [_row(key, index) for index, key in enumerate(order)]
+
+    def move_up(current, row, **_kwargs):
+        key = classify_perk_configuration_text(row["display_text"])
+        index = order.index(key)
+        order[index - 1], order[index] = order[index], order[index - 1]
+        return current
+
+    final = {
+        "quality": {"valid": True},
+        "selected": [{"key": key} for key in expected],
+    }
+    with (
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            side_effect=move_up,
+        ) as tap,
+        patch(
+            "core.home_perk_configuration._recapture_auto_pick_semantic_order",
+            side_effect=AssertionError(
+                "Chrono has a canonical local identity; the ranked prefix "
+                "does not need to be rescanned"
+            ),
+        ) as recapture,
+        patch(
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            return_value=([frame], frame, final),
+        ),
+    ):
+        _repair_auto_pick_order(
+            frame,
+            expected,
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "PERKS"},
+            safe_tap_fn=lambda *_args, **_kwargs: True,
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=rows,
+            row_near_fn=lambda *_args, **_kwargs: None,
+            observed_keys=observed,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert order[: len(expected)] == expected
+    assert tap.call_count == 6
+    recapture.assert_not_called()
+
+
+def test_auto_pick_unknown_predecessor_retries_locally_without_prefix_rescan():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    order = [
+        "perk_wave_requirement",
+        "game_speed",
+        "golden_tower_bonus",
+        "unknown_perk",
+        "coin_tradeoff",
+    ]
+    sleeps = []
+
+    def rows(_frame):
+        result = []
+        for index, key in enumerate(order):
+            if key == "unknown_perk":
+                result.append(
+                    {
+                        "top": 430 + index * 172,
+                        "bottom": 587 + index * 172,
+                        "display_text": "Unreadable local perk text",
+                        "text_raw": "Unreadable local perk text",
+                        "confidence": 35.0,
+                        "background_value_median": 100.0,
+                    }
+                )
+            else:
+                result.append(_row(key, index))
+        return result
+
+    with (
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+        ) as tap,
+        patch(
+            "core.home_perk_configuration._recapture_auto_pick_semantic_order",
+        ) as recapture,
+    ):
+        with pytest.raises(
+            HomePerkConfigurationRepairExhausted,
+            match="Unreadable local perk text",
+        ):
+            _repair_auto_pick_order(
+                frame,
+                [
+                    "perk_wave_requirement",
+                    "game_speed",
+                    "coin_tradeoff",
+                ],
+                capture_fn=lambda: frame,
+                detector=lambda _frame: {"state": "PERKS"},
+                safe_tap_fn=lambda *_args, **_kwargs: True,
+                visible_fn=lambda *_args, **_kwargs: True,
+                swipe_fn=lambda _key: True,
+                row_fn=rows,
+                row_near_fn=lambda *_args, **_kwargs: None,
+                observed_keys=order[:3],
+                sleep_fn=sleeps.append,
+            )
+
+    tap.assert_not_called()
+    recapture.assert_not_called()
+    assert sleeps == [0.6, 0.6]
 
 
 def test_auto_pick_repair_rechecks_rank_after_viewport_reflow():
@@ -764,6 +910,137 @@ def test_auto_pick_local_reacquire_retries_one_ignored_previous_swipe():
     ]
 
 
+def test_auto_pick_local_reacquire_ignores_two_stable_swipes_before_predecessor():
+    current = np.full((1920, 1080, 3), 1, dtype=np.uint8)
+    previous_page = np.full((1920, 1080, 3), 2, dtype=np.uint8)
+    captures = iter((current, current, previous_page))
+    swipes = []
+
+    def rows(frame):
+        keys = (
+            ("coins_bonus", "chain_lightning_damage")
+            if int(frame[0, 0, 0]) == 1
+            else (
+                "inner_land_mines",
+                "coins_bonus",
+                "chain_lightning_damage",
+            )
+        )
+        return [_row(key, index) for index, key in enumerate(keys)]
+
+    frame, row, predecessor, following, at_top = (
+        _reacquire_auto_pick_move_context(
+            current,
+            "coins_bonus",
+            capture_fn=lambda: next(captures),
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda key: swipes.append(key) or True,
+            row_fn=rows,
+            sleep_fn=lambda _seconds: None,
+        )
+    )
+
+    assert frame is previous_page
+    assert row["key"] == "coins_bonus"
+    assert predecessor is not None
+    assert predecessor["key"] == "inner_land_mines"
+    assert following is not None
+    assert following["key"] == "chain_lightning_damage"
+    assert at_top is False
+    assert swipes == ["gesture_targets.goto_previous:perks"] * 3
+
+
+def test_auto_pick_swap_confirmation_does_not_promote_viewport_top():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    current, row, predecessor, following, at_top = (
+        _confirm_auto_pick_local_swap(
+            "coins_bonus",
+            {"key": "chain_lightning_damage"},
+            current=frame,
+            capture_fn=Mock(side_effect=AssertionError("fresh capture not needed")),
+            detector=lambda _frame: {"state": "PERKS"},
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=lambda _frame: [
+                _row("coins_bonus", 0),
+                _row("chain_lightning_damage", 1),
+            ],
+            sleep_fn=lambda _seconds: None,
+        )
+    )
+
+    assert current is frame
+    assert row["key"] == "coins_bonus"
+    assert predecessor is None
+    assert following is not None
+    assert following["key"] == "chain_lightning_damage"
+    assert at_top is False
+
+
+def test_auto_pick_local_predecessor_exhaustion_is_non_retryable():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    expected = [
+        "perk_wave_requirement",
+        "game_speed",
+        "death_wave_quantity",
+        "coins_bonus",
+    ]
+    observed = [
+        "perk_wave_requirement",
+        "game_speed",
+        "death_wave_quantity",
+        "max_health",
+    ]
+
+    with (
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration._locate_auto_pick_key",
+            return_value=(None, frame, _row("coins_bonus", 0)),
+        ),
+        patch(
+            "core.home_perk_configuration._reacquire_auto_pick_move_context",
+            side_effect=HomePerkConfigurationError(
+                "required predecessor boundary was not reached"
+            ),
+        ),
+        patch(
+            "core.home_perk_configuration._recapture_auto_pick_semantic_order",
+            return_value=(frame, list(observed)),
+        ) as recapture,
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+        ) as tap,
+    ):
+        with pytest.raises(
+            HomePerkConfigurationRepairExhausted,
+            match=(
+                "target=Coins Bonus; predecessor=Death Wave Quantity; "
+                "reason=required predecessor boundary"
+            ),
+        ):
+            _repair_auto_pick_order(
+                frame,
+                expected,
+                capture_fn=lambda: frame,
+                detector=lambda _frame: {"state": "PERKS"},
+                safe_tap_fn=lambda *_args, **_kwargs: True,
+                visible_fn=lambda *_args, **_kwargs: True,
+                swipe_fn=lambda _key: True,
+                row_fn=lambda _frame: [],
+                row_near_fn=lambda *_args, **_kwargs: None,
+                observed_keys=observed,
+                sleep_fn=lambda _seconds: None,
+            )
+
+    assert recapture.call_count == 2
+    tap.assert_not_called()
+
+
 def test_auto_pick_ocr_retry_rescans_locally_from_top_once():
     initial = np.zeros((1920, 1080, 3), dtype=np.uint8)
     fresh = np.ones((1920, 1080, 3), dtype=np.uint8)
@@ -947,6 +1224,165 @@ def test_ban_repair_toggles_only_the_strategy_set():
     )
 
 
+def test_ban_repair_confirms_delayed_deselection_without_leaving_tab():
+    page = {"value": 0}
+    selected = [
+        key
+        for key in FARM_PERK_BANS
+        if key not in {"land_mine_damage", "cash_bonus"}
+    ]
+    selected.extend(["cash_tradeoff", "coins_bonus"])
+    pending_removal = {"key": None}
+    sleeps = []
+    selected_counts = [len(selected)]
+
+    def screenshot():
+        transient_missing_coins = False
+        if pending_removal["key"] is not None:
+            removed = pending_removal["key"]
+            selected.remove(removed)
+            pending_removal["key"] = None
+            transient_missing_coins = (
+                removed == "cash_tradeoff" and "coins_bonus" in selected
+            )
+            selected_counts.append(len(selected))
+        marker = 200 if transient_missing_coins else 10 + page["value"]
+        return np.full(
+            (1920, 1080, 3),
+            marker,
+            dtype=np.uint8,
+        )
+
+    def rows(frame):
+        if page["value"] == 0:
+            keys = [*selected]
+            if int(frame[0, 0, 0]) == 200:
+                keys.remove("coins_bonus")
+            keys.extend(["empty_slot"] * (6 - len(keys)))
+        else:
+            keys = [
+                "cash_tradeoff",
+                "coins_bonus",
+                "land_mine_damage",
+                "cash_bonus",
+            ]
+        return [
+            {
+                **_row(key, index),
+                "selected_outline": page["value"] == 0,
+            }
+            for index, key in enumerate(keys)
+        ]
+
+    def swipe(_current, _key, **_kwargs):
+        page["value"] += 1
+        return screenshot()
+
+    def toggle(current, row, **_kwargs):
+        key = classify_perk_configuration_text(row["display_text"])
+        if key in selected:
+            pending_removal["key"] = key
+        else:
+            assert len(selected) < 6
+            selected.append(key)
+            selected_counts.append(len(selected))
+        return current
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+
+    def top(current, **_kwargs):
+        page["value"] = 0
+        return current
+
+    with (
+        patch(
+            "core.home_perk_configuration._swipe_configuration",
+            side_effect=swipe,
+        ),
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            side_effect=toggle,
+        ) as tap,
+        patch(
+            "core.home_perk_configuration._scroll_ban_configuration_top",
+            side_effect=top,
+        ),
+    ):
+        _repair_bans(
+            screenshot(),
+            FARM_PERK_BANS,
+            capture_fn=screenshot,
+            detector=lambda _frame: {"state": "PERKS"},
+            safe_tap_fn=lambda *_args, **_kwargs: True,
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=rows,
+            row_near_fn=lambda *_args, **_kwargs: None,
+            sleep_fn=sleep,
+        )
+
+    assert set(selected) == set(FARM_PERK_BANS)
+    assert [call.kwargs["action"] for call in tap.call_args_list] == [
+        "perk_ban_deselect:cash_tradeoff",
+        "perk_ban_deselect:coins_bonus",
+        "perk_ban_toggle:land_mine_damage",
+        "perk_ban_toggle:cash_bonus",
+    ]
+    assert max(selected_counts) == 6
+    assert sleeps
+
+
+def test_ban_repair_bounds_a_stable_no_op_before_any_capacity_fill():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    selected = [
+        key for key in FARM_PERK_BANS if key != "cash_bonus"
+    ]
+    selected.append("coin_tradeoff")
+
+    def rows(_frame):
+        return [
+            {
+                **_row(key, index),
+                "selected_outline": True,
+            }
+            for index, key in enumerate(selected)
+        ]
+
+    with (
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            side_effect=lambda current, _row, **_kwargs: current,
+        ) as tap,
+        patch(
+            "core.home_perk_configuration._scroll_ban_configuration_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+    ):
+        with pytest.raises(
+            HomePerkConfigurationRepairExhausted,
+            match="made no stable progress",
+        ):
+            _repair_bans(
+                frame,
+                FARM_PERK_BANS,
+                capture_fn=lambda: frame,
+                detector=lambda _frame: {"state": "PERKS"},
+                safe_tap_fn=lambda *_args, **_kwargs: True,
+                visible_fn=lambda *_args, **_kwargs: True,
+                swipe_fn=lambda _key: True,
+                row_fn=rows,
+                row_near_fn=lambda *_args, **_kwargs: None,
+                sleep_fn=lambda _seconds: None,
+            )
+
+    assert tap.call_count == 2
+    assert {
+        call.kwargs["action"] for call in tap.call_args_list
+    } == {"perk_ban_deselect:coin_tradeoff"}
+    assert len(selected) == 6
+
+
 def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     events = []
@@ -964,7 +1400,10 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
 
     def repair(current, _expected, **_kwargs):
         events.append("repair:perk_bans")
-        return current
+        return current, {
+            "quality": {"valid": True},
+            "selected": [{"key": key} for key in FARM_PERK_BANS],
+        }
 
     evidence = {
         "boundary": "NEW_BATTLE",
@@ -999,7 +1438,7 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
                 "quality": {"valid": True},
                 "selected": selected,
             },
-        ),
+        ) as extract_bans,
         patch(
             "core.home_perk_configuration._repair_bans",
             side_effect=repair,
@@ -1040,6 +1479,7 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
         "repair:perk_bans",
         "select:perk_auto_pick_order",
     ]
+    extract_bans.assert_called_once()
     action_log.assert_called_once()
     assert action_log.call_args.args[0] == "Checking Home Perk configuration"
     result_log.assert_called_once()

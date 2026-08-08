@@ -8,6 +8,102 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Perk repair trusted transient Ban reads and local viewport edges
+
+**Stable ID:** `ISSUE-2026-033` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-07 during a queued Tier 19 Farm Home setup after a
+  No Strategy observation captured a mismatched Ban set and scrambled Auto Pick
+  order, and again during the same day's first rollout retry.
+- **Symptom:** The first Cash Trade-Off deselection actually succeeded, but its
+  immediate readback still showed the row and aborted repair. The next pass
+  temporarily omitted the remaining Coins Bonus extra, added Land Mine Damage
+  into the sixth slot, and accepted a visually changing but semantically
+  ineffective Cash Bonus tap before final readback failed. A third complete
+  Home pass fixed the bans and made 45 verified Auto Pick swaps, then Black Hole
+  Duration triggered two long top-17 rescans and failed without an input.
+  After the first fix recognized Chrono Field Duration and moved Black Hole
+  Duration correctly, Coins Bonus made four verified upward swaps. Two
+  consecutive accepted but visually ignored reverse swipes then made the target
+  the first OCR-visible row; the local helper called that the global list top,
+  failed before its Death Wave Quantity predecessor, and started another whole
+  Home setup attempt.
+- **Evidence:** The next Ban pass did not tap Cash Trade-Off again, proving the
+  first delayed transition had landed. Pre-run evidence already contained both
+  Cash Trade-Off and Coins Bonus, so Cash Bonus did not create Coins Bonus.
+  Retained Auto Pick evidence showed Chrono Field Duration immediately above
+  Black Hole Duration; the exact-version save manifest mapped that perk while
+  the Home semantic vocabulary did not. The rollout action log showed Coins
+  Bonus displace Cash Trade-Off, Spotlight Damage, Chrono Field Duration, and
+  Chain Lightning Damage, followed by two no-movement reverse swipes with only
+  one distinct viewport before the false top result.
+- **Safety response:** Every initial failed pass closed Perks and returned to
+  verified Home without starting a battle. The final failure installed the
+  existing `perk_configuration` gate. The first rollout retry was selected
+  without a waiver. When its false edge started a complete setup retry, the
+  coordinator requested indefinite Pause; PID `1903959` acknowledged it at
+  21:31:36 PDT and the Home setup guard waited without another cleanup or input.
+- **Cause:** Ban repair planned all removals and additions from one snapshot,
+  treated a single post-input OCR frame as settled truth, and allowed generic
+  row pixel change to consume an addition intent without proving selected-set
+  membership. The Auto Pick classifier omitted canonical
+  `chrono_field_duration`, so its real predecessor had `key=None`; the generic
+  context-conflict path rescanned only the top 17 rows and could never repair
+  that vocabulary gap. The outer app treated every locally exhausted Perk
+  failure as a reason to replay the whole Home setup. Separately, local Auto
+  Pick reacquisition used a visual-stability capture helper: two ignored
+  gestures became `edge_reached`, and both reacquisition and swap confirmation
+  promoted “no predecessor in this viewport” into global-top authority.
+- **Resolution:** Ban repair now requires consecutive matching authoritative
+  Selected snapshots, performs one remove-before-add action per round, enforces
+  capacity, verifies the stable semantic delta, replans unexpected settled
+  state, and bounds one stable no-op retry plus the total action budget. Its
+  final stable readback is reused. Chrono Field Duration now has a canonical
+  label, OCR exemplar, and exact classifier rule; a manifest-coverage contract
+  prevents another omitted current perk. A genuinely unknown Auto Pick
+  predecessor retries only fresh local context, not the unrelated ranked
+  prefix. Locally exhausted Perk repair is non-retryable from Home, so recovery
+  closes the panel once and publishes the gate instead of replaying three full
+  setups. Guarded predecessor reacquisition now uses required-boundary scrolling
+  that continues through visually stable swipes until a semantic predecessor is
+  visible or its bound exhausts. Swap confirmation no longer turns a target at
+  one viewport's top into global-top evidence, semantic resynchronization
+  restarts planning from rank one, and bounded local exhaustion emits the typed
+  non-retryable failure with its target and predecessor.
+- **Regression:** `test/test_home_perk_configuration.py` reproduces the exact
+  two-extra six-slot Ban state, delayed deselection, transient trailing-extra
+  omission, ordered four-tap correction, capacity bound, stable no-op budget,
+  live-shaped Chrono/Black Hole suffix, and unknown-predecessor local retry.
+  It also reproduces two ignored reverse swipes before Inner Land Mines becomes
+  visible above Coins Bonus, prevents viewport-top promotion during swap
+  confirmation, and requires bounded Coins Bonus/Death Wave Quantity local
+  exhaustion to use the non-retryable exception.
+  `test/test_perk_configuration.py` requires every current save-mapped perk to
+  have self-classifying Home semantics. `test/test_gc_no_battle_setup.py`
+  proves local exhaustion is propagated as non-retryable while unrelated
+  transient setup failures retain their existing retries.
+- **Validation:** The initial 107 focused Perk, semantic, setup, and retry tests
+  passed. Its complete isolated checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the 44 established orphan
+  candidates, and all 1,784 tests in 325.58 seconds. Commit `6122503` was
+  promoted under rollback tag
+  `production-before-20260808T041513Z-7bb0b6e`; the replacement PID `1903959`
+  acquired the exact `localhost:5555` owner/lock and produced a fresh Home
+  observation before the retry exposed the false edge. The fix-forward's 110
+  focused tests and complete isolated checkpoint then passed the same structural
+  checks and all 1,787 tests in 336.81 seconds. The exact `develop` candidate at
+  `e8d4add` repeated that checkpoint with all 1,787 tests passing in 346.67
+  seconds. It was promoted under rollback tag
+  `production-before-20260808T045617Z-6122503`; PID `1903959` stopped cleanly,
+  and replacement PID `1969498` acquired the exact `localhost:5555` owner/lock,
+  acknowledged `farm_t19` and the indefinite Pause, and published a fresh
+  `UNKNOWN/PAUSED` observation. A direct predeployment frame had unexpectedly
+  changed to the Android launcher, so the coordinator sent no restoration,
+  Resume, or other device input. Production remained Paused pending a fresh
+  operator-owned screen boundary; live completion of the Perk repair was not
+  claimed from that ambiguous state.
+- **Fixed by:** `a5825db`, `f747515`.
+
 ### Utility Dissonance star was labeled as Attack
 
 **Stable ID:** `ISSUE-2026-032` · **Lifecycle:** `resolved`

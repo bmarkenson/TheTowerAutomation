@@ -39,6 +39,44 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 Home Perk repair resilience
+
+- Commit `a5825db` replaces Ban Perks' single-frame, multi-action plan with a
+  bounded one-action reconciliation loop over consecutive stable Selected
+  snapshots. It removes extras before additions, enforces capacity, verifies
+  semantic progress, and reuses the authoritative final readback.
+- The same change adds the missing Chrono Field Duration Home semantic mapping
+  that blocked Black Hole Duration, guarantees current save-mapped perk
+  vocabulary coverage, keeps unknown-predecessor recovery local, and prevents
+  an exhausted local Perk repair from replaying the complete Home setup.
+- The initial 107 focused tests and complete isolated checkpoint passed; the
+  latter covered compilation, state definitions, clickmap integrity with zero
+  errors and the 44 established orphan candidates, and all 1,784 tests in
+  325.58 seconds.
+- Commit `6122503` was promoted under rollback tag
+  `production-before-20260808T041513Z-7bb0b6e`. PID `1292147` stopped cleanly;
+  replacement PID `1903959` acquired the exact `localhost:5555` owner/lock and
+  produced a fresh Home observation. The no-waiver retry then proved the
+  Black Hole/Chrono correction live before two ignored reverse swipes were
+  mistaken for the Auto Pick list top during the later Coins Bonus repair. The
+  coordinator Paused the resulting whole-Home retry, and PID `1903959`
+  acknowledged the action-free hold.
+- Fix-forward commit `f747515` makes a visible predecessor the required local
+  scroll boundary, removes viewport-top authority from swap confirmation,
+  restarts semantic plans at rank one, and types bounded exhaustion as
+  non-retryable. All 110 focused tests and the complete isolated checkpoint
+  passed, including all 1,787 tests in 336.81 seconds. The exact `develop`
+  candidate at `e8d4add` repeated all 1,787 tests in 346.67 seconds, then was
+  promoted under rollback tag
+  `production-before-20260808T045617Z-6122503`. PID `1903959` stopped cleanly;
+  replacement PID `1969498` acquired the exact `localhost:5555` lock and
+  acknowledged the indefinite Pause. Its first fresh observation was
+  `UNKNOWN/PAUSED`: a direct predeployment frame had unexpectedly shown the
+  Android launcher, so no restoration, Resume, or other device input was sent.
+  Production remained Paused pending a fresh operator-owned screen boundary;
+  the deployment smoke passed, but live completion of the repair remained
+  intentionally unclaimed.
+
 ### 2026-08-07 recoverable superseded feature retirement
 
 - `c23fe67` splits feature retirement into integrated and explicitly

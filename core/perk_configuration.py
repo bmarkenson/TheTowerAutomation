@@ -96,6 +96,7 @@ PERK_CONFIGURATION_LABELS = {
     "orbs": "Orbs",
     "bounce_shot": "Bounce Shot",
     "chain_lightning_damage": "Chain Lightning Damage",
+    "chrono_field_duration": "Chrono Field Duration",
     "inner_land_mines": "Inner Land Mines",
     "smart_missiles": "Smart Missiles",
     "spotlight_damage": "Spotlight Damage",
@@ -156,6 +157,7 @@ PERK_CONFIGURATION_OCR_EXEMPLARS = {
     "orbs": "Orbs +1",
     "bounce_shot": "Bounce Shot +2",
     "chain_lightning_damage": "Chain lightning damage x2",
+    "chrono_field_duration": "Chrono Field Duration +5s",
     "inner_land_mines": "Extra set of inner mines",
     "smart_missiles": "4 more smart missiles",
     "spotlight_damage": "Spotlight damage bonus x1.5",
@@ -300,6 +302,8 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "bounce_shot"
     if "chain lightning damage" in normalized:
         return "chain_lightning_damage"
+    if "chrono field duration" in normalized:
+        return "chrono_field_duration"
     if "extra set of inner mines" in normalized:
         return "inner_land_mines"
     if "more smart missiles" in normalized:

@@ -1156,26 +1156,37 @@ development-lease authority from warning text in `actions.log`.
   requirements independently declared by the selected strategy. First Perk
   Choice has its own tab and exact semantic comparison; Ban and Auto Pick
   repairs retain their independent profile-skip policy. Ban repair completes
-  before Auto Pick: extra selections are removed from the fixed Selected Perks
-  block,
-  while only missing required bans search the Available list. Each Ban toggle
-  and Auto Pick move recaptures the panel immediately before input, uniquely
-  reacquires the same semantic row at its settled coordinates, and requires
-  strict transition evidence. Auto Pick repair starts from one complete
-  authoritative ranked-prefix capture, returns once to a confirmed top, and
-  keeps that semantic order only as planning state. It scans forward for each
-  currently misplaced key, skips ranks already made correct by prior moves,
-  and updates the ranked prefix only after the target reaches its guarded
-  predecessor through locally verified adjacent swaps; a key below the prefix
-  can enter while the displaced tail leaves. Cached frames never authorize an
-  input. Pre-input viewport loss, conflicting local adjacency, or OCR
-  ambiguity triggers a bounded full semantic resynchronization. One final
-  authoritative top-to-bottom comparison remains mandatory and is reused by
-  the caller; an unavailable perk, unresolved ambiguity, or non-progress
-  blocks New Battle. Persistent control is synchronized before every Home
-  setup tap or swipe. Pause holds the workflow action-free, and Resume restores
-  verified Home before a fresh setup pass. The setup retains exact UI- or
-  save-derived configuration evidence for session preflight.
+  before Auto Pick. It requires two matching authoritative Selected Perks
+  snapshots, performs one action, returns to the fixed Selected block, and
+  replans from another stable pair. A recognized extra is always removed before
+  an Available-list search; a missing ban is never selected into a full block.
+  One stable no-op receives at most one newly authorized local retry, and every
+  transition remains inside a bounded action budget. Each Ban toggle and Auto
+  Pick move recaptures the panel immediately before input, uniquely reacquires
+  the same semantic row at its settled coordinates, and requires strict
+  transition evidence. Auto Pick repair starts from one complete authoritative
+  ranked-prefix capture, returns once to a confirmed top, and keeps that
+  semantic order only as planning state. It scans forward for each currently
+  misplaced key, skips ranks already made correct by prior moves, and updates
+  the ranked prefix only after the target reaches its guarded predecessor
+  through locally verified adjacent swaps; a key below the prefix can enter
+  while the displaced tail leaves. The Home semantic vocabulary covers every
+  perk ID in the current exact-version save mapping. A still-unrecognized local
+  predecessor receives bounded fresh local OCR retries and cannot trigger a
+  futile ranked-prefix rescan. Guarded predecessor reacquisition uses a
+  required semantic boundary: visually stable or ignored reverse swipes and a
+  target at the top of one OCR viewport do not prove the global list top. A
+  recognized adjacency contradiction retains the bounded semantic
+  resynchronization path, which restarts planning at rank one. Cached frames
+  never authorize an input. Final authoritative Ban and Auto Pick readbacks
+  remain mandatory and are reused by their callers. An unavailable perk,
+  unresolved ambiguity, or non-progress blocks New Battle. A locally exhausted
+  Perk repair returns to Home once and is marked non-retryable there; other
+  recoverable Home setup failures retain the complete fresh-Home retry policy.
+  Persistent control is synchronized before every Home setup tap or swipe.
+  Pause holds the workflow action-free, and Resume restores verified Home
+  before a fresh setup pass. The setup retains exact UI- or save-derived
+  configuration evidence for session preflight.
   Save-derived sections, including the exact current eight-slot Farm Module
   assignment, are accepted there only after their typed carry binds to the
   exact launched battle; supplied UI screens still override omission

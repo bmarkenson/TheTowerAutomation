@@ -21,6 +21,7 @@ from core.free_upgrade_locks import (
 )
 from core.home_battle import detect_home_battle_control
 from core.home_perk_configuration import (
+    HomePerkConfigurationRepairExhausted,
     HomePerkConfigurationResult,
     ensure_home_perk_configuration,
 )
@@ -152,6 +153,7 @@ class GcNoBattleSetupResult:
     reason: str
     evidence: Mapping[str, Any] = field(default_factory=dict)
     failed_check: str | None = None
+    retryable_from_home: bool = True
 
     @property
     def complete(self) -> bool:
@@ -198,6 +200,7 @@ def _finish_gc_no_battle_setup(
         detail=(
             f"[GC_NO_BATTLE] result={result.status.value} "
             f"failed_check={result.failed_check} reason={result.reason} "
+            f"retryable_from_home={result.retryable_from_home} "
             f"evidence_keys={sorted(result.evidence)} "
             f"repairs={list(repairs)}"
         ),
@@ -1454,6 +1457,10 @@ def run_gc_no_battle_setup(
                 str(exc),
                 evidence,
                 current_check,
+                retryable_from_home=not isinstance(
+                    exc,
+                    HomePerkConfigurationRepairExhausted,
+                ),
             ),
             repairs=repairs,
         )
