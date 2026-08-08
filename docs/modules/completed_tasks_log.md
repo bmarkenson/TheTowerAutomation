@@ -65,8 +65,17 @@ canonical document linked by an entry for current behavior.
   scroll boundary, removes viewport-top authority from swap confirmation,
   restarts semantic plans at rank one, and types bounded exhaustion as
   non-retryable. All 110 focused tests and the complete isolated checkpoint
-  passed, including all 1,787 tests in 336.81 seconds. Its production rollout
-  remained pending at this record boundary.
+  passed, including all 1,787 tests in 336.81 seconds. The exact `develop`
+  candidate at `e8d4add` repeated all 1,787 tests in 346.67 seconds, then was
+  promoted under rollback tag
+  `production-before-20260808T045617Z-6122503`. PID `1903959` stopped cleanly;
+  replacement PID `1969498` acquired the exact `localhost:5555` lock and
+  acknowledged the indefinite Pause. Its first fresh observation was
+  `UNKNOWN/PAUSED`: a direct predeployment frame had unexpectedly shown the
+  Android launcher, so no restoration, Resume, or other device input was sent.
+  Production remained Paused pending a fresh operator-owned screen boundary;
+  the deployment smoke passed, but live completion of the repair remained
+  intentionally unclaimed.
 
 ### 2026-08-07 recoverable superseded feature retirement
 

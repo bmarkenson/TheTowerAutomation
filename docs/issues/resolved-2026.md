@@ -91,8 +91,17 @@ and actionable work lives in
   acquired the exact `localhost:5555` owner/lock and produced a fresh Home
   observation before the retry exposed the false edge. The fix-forward's 110
   focused tests and complete isolated checkpoint then passed the same structural
-  checks and all 1,787 tests in 336.81 seconds. Fix-forward deployment remained
-  pending at this record boundary.
+  checks and all 1,787 tests in 336.81 seconds. The exact `develop` candidate at
+  `e8d4add` repeated that checkpoint with all 1,787 tests passing in 346.67
+  seconds. It was promoted under rollback tag
+  `production-before-20260808T045617Z-6122503`; PID `1903959` stopped cleanly,
+  and replacement PID `1969498` acquired the exact `localhost:5555` owner/lock,
+  acknowledged `farm_t19` and the indefinite Pause, and published a fresh
+  `UNKNOWN/PAUSED` observation. A direct predeployment frame had unexpectedly
+  changed to the Android launcher, so the coordinator sent no restoration,
+  Resume, or other device input. Production remained Paused pending a fresh
+  operator-owned screen boundary; live completion of the Perk repair was not
+  claimed from that ambiguous state.
 - **Fixed by:** `a5825db`, `f747515`.
 
 ### Utility Dissonance star was labeled as Attack
