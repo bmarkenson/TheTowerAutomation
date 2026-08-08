@@ -490,11 +490,13 @@ stages:
   action authority, and perform no Retry, Surrender, or other recovery input,
   as recorded in
   [open issue dossier](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
-- [ ] Make `STOPPED` interrupt an in-progress Home setup without another device
+- [x] Make `STOPPED` interrupt an in-progress Home setup without another device
   input, as recorded in
   [open issue dossier](../issues/open-2026.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
-  Preserve the current Pause behavior, but let Stop unwind the guarded route
-  and release the runtime lock without requiring `KeyboardInterrupt`.
+  Pause, Stop, and Take Manual Control now yield the synchronous route at its
+  first denied input without cleanup. Observation and acknowledgement resume
+  on the next heartbeat; only a later same-owner Enable can attempt one bounded
+  Home restoration, while Stop or changed workflow ownership discards it.
 - [ ] Detect likely manual player activity and automatically yield tap authority.
   - Treat unexpected Go Home/manual navigation during an active run as operator
     activity rather than an error to undo immediately.
@@ -570,6 +572,29 @@ stages:
       The supported development checkpoint passes all 1,904 tests in 335.03
       seconds, state-definition validation, and clickmap validation with zero
       errors and the established 44 orphan candidates.
+  - Integration hardening checkpoint (2026-08-08, feature branch after merging
+    production `08745f5`):
+    - [x] Home setup yields immediately on Pause, Stop, or Take Manual Control
+      instead of waiting inside the input guard. No cleanup input occurs at the
+      denied boundary. A process-local pending recovery is exact-owner,
+      runtime, target-generation, and activity-scope bound; one later Enable
+      may restore Home, while owner/binding change discards it and a failed
+      enabled recovery Pauses and terminalizes without repetition.
+    - [x] Home Return preserves a bounded nonretryable Perk-repair outcome as
+      `awaiting_manual_correction`, including the failed check, reason,
+      retryability, and forced-save receipt. It does not serialize or open UI
+      again until explicit Enable after the operator's correction; that retry
+      discards the former private claim and requests a new save.
+    - [x] Setup Capture consumes production's complete Perk vocabulary;
+      `chrono_field_duration` is covered by a captured, semantic-diffed,
+      saveable, nonactivating Strategy-draft regression.
+    - [x] Focused Better Control/Home/Save/Capture validation passed 217 tests;
+      the broader affected slice passed 479 tests; all 82 native
+      authoring/compatibility tests passed; and Linux cross-publishing produced
+      both self-contained Windows executables. The supported development
+      checkpoint passed all 1,924 tests in 330.30 seconds, state-definition
+      validation, and clickmap validation with zero errors and the established
+      44 orphan candidates.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

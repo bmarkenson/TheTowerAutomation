@@ -22,6 +22,11 @@ scope, and boundary before normal new-run gates receive action authority.
 Once the verified Home control is tapped, status reports `action_dispatched`;
 the workflow continues to suppress unrelated input until lifecycle adoption or
 a visible interrupted/failed result.
+If Pause, Stop, or Take Manual Control arrives during a Home configuration
+route, setup yields at the first denied input and performs no cleanup action.
+Observation and acknowledgement continue. A later Enable restores Home only
+when the original workflow still owns the exact runtime, target, and activity
+scope; otherwise that pending recovery is discarded.
 
 Stopping interrupts unfinished battle and manual-control workflows. Repeating
 an already satisfied Start or Stop is reported as a no-op. The old attached
@@ -82,6 +87,12 @@ If a Home New refresh is blocked, incomplete, or loses its binding after
 backgrounding, Return becomes failed/interrupted and Automation remains Paused.
 Do not retry by repeatedly selecting Enable; start a new explicit Return only
 after reviewing the reported boundary.
+If the forced save succeeds but the bounded Home UI repair exhausts instead,
+Return reports `awaiting_manual_correction` with the failed check and exact
+reason. Make the reported manual change while Pause remains acknowledged, then
+select Enable once. That explicit retry discards the former process-local claim
+and requests a new serialization before any UI validation; it never reuses the
+old receipt or retries from a heartbeat.
 
 ## Capture a manually changed setup
 

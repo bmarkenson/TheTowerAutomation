@@ -26,14 +26,15 @@ current runtime state.
 
 ### Stopped control could not interrupt an in-progress Home setup guard
 
-**Stable ID:** `ISSUE-2026-004` · **Lifecycle:** `confirmed_unresolved`
+**Stable ID:** `ISSUE-2026-004` · **Lifecycle:** `repair_awaiting_confirmation`
 
 - `STOPPED` was acknowledged while an unbounded Home input
-  guard retained the process and lock; Stop must unwind without another input,
-  while Pause may continue waiting for Resume.
+  guard retained the process and lock. The implemented repair makes Pause,
+  Stop, and authority handoff yield without cleanup input.
 - Load the [dossier](issues/open-2026.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard)
   before changing or diagnosing Home-setup Stop/Pause behavior or when this
-  wait recurs. Next: confirm clean Stop interruption and lock release; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+  wait recurs. Next: confirm the deployed Stop interruption and lock release at
+  a natural Home setup boundary; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Direct ADB screenshots intermittently returned incomplete black frames
 

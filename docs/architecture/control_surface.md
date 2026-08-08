@@ -256,6 +256,15 @@ becomes one durable failed/interrupted Return outcome, so later heartbeats do
 not background the game again. A trusted mismatch that deliberately advances
 to `awaiting_configuration` remains distinct and requires another explicit
 Enable before a new refresh.
+If a bounded Home configuration repair then cannot make stable progress, the
+manual-control ledger advances to `awaiting_manual_correction` with the exact
+failed check, reason, retryability, and retained forced-save receipt. Clients
+show that failure while Automation remains Paused. After the operator makes
+the reported correction, a new explicit Enable discards prior private claims
+and requests another serialization; a heartbeat never retries it on its own.
+A Pause, Stop, or Take Manual Control that arrives during Home setup yields at
+the first denied input without cleanup. Only a later same-owner Enable may
+restore Home from that yielded route.
 Unexpected active-battle → Home Resume Battle activity while Enabled enters the
 same safe Pause/manual-control ledger rather than competing for input. Broader
 manual-activity detection and grace-period controls remain separately

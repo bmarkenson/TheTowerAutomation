@@ -1184,9 +1184,17 @@ development-lease authority from warning text in `actions.log`.
   Perk repair returns to Home once and is marked non-retryable there; other
   recoverable Home setup failures retain the complete fresh-Home retry policy.
   Persistent control is synchronized before every Home setup tap or swipe.
-  Pause holds the workflow action-free, and Resume restores verified Home
-  before a fresh setup pass. The setup retains exact UI- or save-derived
-  configuration evidence for session preflight.
+  The first denied input boundary yields the synchronous setup immediately so
+  Pause, Stop, Take Manual Control, capture/detection, and acknowledgements do
+  not wait behind that route. It performs no cleanup input while yielding. A
+  later explicit Enable may restore verified Home and start a fresh setup pass
+  only when the same runtime, target, activity scope, and original workflow
+  owner still match; Stop or a manual-control handoff discards that recovery.
+  A Return-Control setup that exhausts its bounded repair publishes
+  `awaiting_manual_correction` with the exact failed check and reason while
+  retaining its forced-save receipt and Pause. Only another explicit Enable
+  after the manual correction requests a new save. The setup retains exact
+  UI- or save-derived configuration evidence for session preflight.
   Save-derived sections, including the exact current eight-slot Farm Module
   assignment, are accepted there only after their typed carry binds to the
   exact launched battle; supplied UI screens still override omission

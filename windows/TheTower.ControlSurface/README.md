@@ -244,6 +244,12 @@ at Tournament Results, unknown state, or without exact target/scope binding
 rather than advertising an incomplete workflow. A failed Home New refresh is
 recorded once as failed/interrupted and does not repeat background/foreground
 input on later status frames.
+A Home UI repair that exhausts after a successful save appears as
+`awaiting_manual_correction` with the failed check and reason. Automation stays
+Paused; after making that manual correction, Enable requests a new save rather
+than replaying the retained receipt. Pause, Stop, or Take Manual Control during
+Home setup yields before cleanup input, and only the same original workflow
+may restore Home on a later Enabled observation.
 
 The manual Surrender selector belongs to Take Manual Control. The default
 excludes manual Surrender stats and writes only a save-backed nonrepresentative
