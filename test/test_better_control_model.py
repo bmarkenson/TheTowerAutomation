@@ -123,13 +123,17 @@ def _running_save_claim(
     evidence: dict[str, object],
     *,
     kind: str = "running_attachment_reconciliation",
+    final_scope: str | None = None,
 ) -> tuple[
     dict[str, object],
     PlayerSaveAcquisitionBundle,
     RunningAttachmentTemporalBinding,
     PlayerSaveAttachmentContext,
 ]:
-    acquisition, temporal, context = _running_reconciliation_objects(evidence)
+    acquisition, temporal, context = _running_reconciliation_objects(
+        evidence,
+        final_scope=final_scope,
+    )
     receipt = build_running_save_reconciliation_receipt(
         kind=kind,
         workflow_id=workflow_id,
@@ -153,7 +157,7 @@ def _retain_running_save_claim(
     ],
 ) -> None:
     receipt, acquisition, temporal, context = claim
-    app._current_player_save_attachment_context = lambda: context
+    app._current_player_save_attachment_context = lambda **_kwargs: context
     app._retain_running_reconciliation_claim(
         workflow_id,
         receipt=receipt,
@@ -168,6 +172,7 @@ def _running_reconciliation_objects(
     evidence: dict[str, object],
     *,
     snapshot: object | None = None,
+    final_scope: str | None = None,
 ) -> tuple[
     PlayerSaveAcquisitionBundle,
     RunningAttachmentTemporalBinding,
@@ -190,6 +195,7 @@ def _running_reconciliation_objects(
         transport_stable=True,
         snapshot=snapshot if snapshot is not None else SimpleNamespace(),
     )
+    resolved_scope = str(final_scope or evidence["activity_scope_run_id"])
     temporal = RunningAttachmentTemporalBinding(
         runtime_session_id="save-runtime-1",
         source_activity_scope_id=str(evidence["activity_scope_run_id"]),
@@ -198,10 +204,10 @@ def _running_reconciliation_objects(
         active_round_identity_fingerprint="b" * 64,
         captured_at=captured.isoformat(),
         acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
-    ).bind_final_scope(str(evidence["activity_scope_run_id"]))
+    ).bind_final_scope(resolved_scope)
     context = PlayerSaveAttachmentContext(
         runtime_session_id="save-runtime-1",
-        activity_scope_id=str(evidence["activity_scope_run_id"]),
+        activity_scope_id=resolved_scope,
         target=str(evidence["adb_target"]),
         target_generation=int(evidence["target_generation"]),
         active_battle_observed=True,
@@ -464,6 +470,30 @@ def test_attachment_context_allows_one_expected_scope_rebind(monkeypatch):
         target_generation=7,
         active_battle_observed=True,
     )
+
+
+def test_attachment_scope_transition_requires_exact_typed_source_and_target():
+    app = App.__new__(App)
+    requested = _evidence(game_state="active_battle", scope="scope-before")
+    expected = _evidence(game_state="active_battle", scope="scope-after")
+    unexpected = _evidence(game_state="active_battle", scope="scope-other")
+
+    allowed, _ = app._workflow_evidence_matches_runtime(
+        requested,
+        expected,
+        intent="attach_battle",
+        allowed_activity_scope_transition=("scope-before", "scope-after"),
+    )
+    rejected, reason = app._workflow_evidence_matches_runtime(
+        requested,
+        unexpected,
+        intent="attach_battle",
+        allowed_activity_scope_transition=("scope-before", "scope-after"),
+    )
+
+    assert allowed is True
+    assert rejected is False
+    assert reason == "battle activity scope changed"
 
 
 def test_observed_game_dimensions_do_not_infer_a_workflow():
@@ -2002,7 +2032,12 @@ def test_validated_attach_completes_only_after_lifecycle_adoption(
         "validating_save",
         acknowledgement=evidence,
     )
-    claim = _running_save_claim(workflow["request_id"], evidence)
+    final_scope = "scope-after-continuity"
+    claim = _running_save_claim(
+        workflow["request_id"],
+        evidence,
+        final_scope=final_scope,
+    )
     store.transition_battle_workflow(
         workflow["request_id"],
         "ready",
@@ -2012,16 +2047,38 @@ def test_validated_attach_completes_only_after_lifecycle_adoption(
     app = App.__new__(App)
     app._supervisor = supervisor
     app._mission_mgr = manager
+    session = MagicMock()
+    session.snapshot.return_value = SimpleNamespace(
+        owned=True,
+        target="localhost:5555",
+        generation=7,
+    )
+    app._adb_target_session = session
+    app._player_save_runtime_session_id = "save-runtime-1"
+    monkeypatch.setattr(
+        "core.app.get_activity_scope",
+        lambda: {"run_id": final_scope},
+    )
+    current = _evidence(
+        game_state="active_battle",
+        observation_id="runtime-1:after-continuity",
+        runtime_id=str(owner["runtime_id"]),
+        scope=final_scope,
+    )
+    current["pid"] = owner["pid"]
     app._control_observation = {
         key: value
-        for key, value in evidence.items()
+        for key, value in current.items()
         if key not in {"runtime_id", "pid", "adb_target"}
     }
-    _retain_running_save_claim(
-        app,
+    receipt, acquisition, temporal, context = claim
+    app._retain_running_reconciliation_claim(
         workflow["request_id"],
-        evidence,
-        claim,
+        receipt=receipt,
+        acquisition=acquisition,
+        temporal_binding=temporal,
+        context=context,
+        evidence=evidence,
     )
 
     app._sync_operator_control_workflows({"state": "RUNNING"})
