@@ -40,7 +40,11 @@ from core.control_directives import (
     normalize_game_speed_target,
     normalize_interactive_development_lease,
 )
-from core.control_model import validate_battle_workflow, validate_manual_control
+from core.control_model import (
+    validate_battle_workflow,
+    validate_manual_control,
+    validate_setup_capture,
+)
 from core.strategy_profiles import is_configurable_strategy
 from utils.logger import log, log_action_intent, log_result
 from core.run_state import AUTOMATION
@@ -104,6 +108,13 @@ class AutomationSupervisor:
             initial_directives.get("manual_control") is not None
             and self._manual_control is None
         )
+        self._setup_capture = validate_setup_capture(
+            initial_directives.get("setup_capture")
+        )
+        self._setup_capture_error = bool(
+            initial_directives.get("setup_capture") is not None
+            and self._setup_capture is None
+        )
         self._runtime_id = uuid4().hex
         self.auto_return_secs = max(0, int(auto_return_secs))
         self.auto_return_enabled = bool(auto_return_enabled)
@@ -127,6 +138,7 @@ class AutomationSupervisor:
         self._last_applied_adb_request: Optional[Tuple[int, object]] = None
         self._last_deferred_adb_request: Optional[Tuple[int, object]] = None
         self._next_adb_handoff_attempt_at = 0.0
+        self._unexpected_manual_yield_emergency = False
 
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
@@ -209,6 +221,12 @@ class AutomationSupervisor:
         return deepcopy(self._manual_control) if self._manual_control else None
 
     @property
+    def setup_capture(self) -> Optional[Dict[str, object]]:
+        """Return the latest validated save-backed setup capture directive."""
+
+        return deepcopy(self._setup_capture) if self._setup_capture else None
+
+    @property
     def battle_workflow_error(self) -> bool:
         """Return whether a raw battle workflow exists but is malformed."""
 
@@ -221,12 +239,24 @@ class AutomationSupervisor:
         return bool(self._manual_control_error)
 
     @property
+    def setup_capture_error(self) -> bool:
+        """Return whether a raw setup capture exists but is malformed."""
+
+        return bool(self._setup_capture_error)
+
+    @property
     def control_state(self) -> str:
         """Return the currently applied operator run-state value."""
 
         state = getattr(AUTOMATION, "state", None)
         value = getattr(state, "value", state)
         return str(value or "UNKNOWN").strip().upper()
+
+    @property
+    def unexpected_manual_yield_emergency(self) -> bool:
+        """Return whether a failed durable yield is enforcing local Pause."""
+
+        return bool(self._unexpected_manual_yield_emergency)
 
     def apply_control(self) -> bool:
         """Apply directives and report whether tracked control intent changed."""
@@ -305,6 +335,15 @@ class AutomationSupervisor:
                 directives.get("manual_control") is not None
                 and self._manual_control is None
             )
+            self._setup_capture = validate_setup_capture(
+                directives.get("setup_capture")
+            )
+            self._setup_capture_error = bool(
+                directives.get("setup_capture") is not None
+                and self._setup_capture is None
+            )
+            if self._unexpected_manual_yield_emergency and self._manual_control:
+                self._unexpected_manual_yield_emergency = False
             self._apply_state(
                 directives.get("state"),
                 acknowledge_unchanged=state_directive_changed,
@@ -324,6 +363,9 @@ class AutomationSupervisor:
                 directives.get("adb_port"),
                 directives.get("adb_port_updated_at"),
             )
+
+        if self._unexpected_manual_yield_emergency:
+            self._apply_state("PAUSED")
 
         self._auto_resume_if_needed()
         return control_directive_changed
@@ -435,6 +477,7 @@ class AutomationSupervisor:
         expected: object,
         options,
         blocking: bool = True,
+        repair_authority: Optional[Mapping[str, object]] = None,
     ) -> Optional[Dict[str, object]]:
         try:
             directive = self._control_store.publish_gate_decision(
@@ -445,6 +488,7 @@ class AutomationSupervisor:
                 expected=expected,
                 options=options,
                 blocking=blocking,
+                repair_authority=repair_authority,
             )
         except (ControlDirectiveError, ValueError) as exc:
             log(f"[GATE_DECISION] Failed publishing request: {exc}", "WARN")
@@ -944,6 +988,47 @@ class AutomationSupervisor:
         self._manual_control = dict(manual) if manual else None
         return dict(manual) if manual else None
 
+    def transition_setup_capture(
+        self,
+        request_id: str,
+        status: str,
+        **details: object,
+    ) -> Optional[Dict[str, object]]:
+        """Persist one runtime-owned setup-capture transition."""
+
+        try:
+            capture = self._control_store.transition_setup_capture(
+                request_id,
+                status,
+                **details,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[SETUP_CAPTURE] Failed recording transition: {exc}", "WARN")
+            return None
+        self._setup_capture = dict(capture) if capture else None
+        return dict(capture) if capture else None
+
+    def record_manual_terminal_evidence(
+        self,
+        manual_control_id: str,
+        evidence: Mapping[str, object],
+    ) -> Optional[Dict[str, object]]:
+        """Persist passive exact-run terminal evidence for Manual Control."""
+
+        try:
+            manual = self._control_store.record_manual_terminal_evidence(
+                manual_control_id,
+                evidence,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                f"[MANUAL_CONTROL] Failed recording terminal evidence: {exc}",
+                "WARN",
+            )
+            return None
+        self._manual_control = dict(manual) if manual else None
+        return dict(manual) if manual else None
+
     def yield_to_unexpected_manual_activity(
         self,
         evidence: Mapping[str, object],
@@ -961,8 +1046,12 @@ class AutomationSupervisor:
                 f"[MANUAL_CONTROL] Could not yield after manual activity: {exc}",
                 "WARN",
             )
+            self._unexpected_manual_yield_emergency = True
+            self._last_applied_state = None
+            self._apply_state("PAUSED")
             return None
         self._manual_control = dict(manual)
+        self._unexpected_manual_yield_emergency = False
         self._last_applied_state = None
         self._apply_state("PAUSED")
         return dict(manual)

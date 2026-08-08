@@ -66,6 +66,7 @@
           <button id="returnControlButton" type="button" data-control-action="return_control">Return Control</button>
         </div>
         <p id="manualControlSummary" class="fine-print">Automation retains control.</p>
+        <p class="fine-print">Taking control first obtains an acknowledged indefinite Pause and asks how a manual Surrender should be collected.</p>
 
         <form id="customPauseForm" class="inline-form">
           <label for="customPauseMinutes">Custom timed pause</label>
@@ -139,6 +140,13 @@
           </div>
           <p id="battleWorkflowSummary" class="fine-print">Waiting for fresh game-boundary evidence.</p>
           <p class="fine-print">Start Battle is only for verified New Battle at Home and runs normal new-run gates. Attach is only for a verified active or resumable battle.</p>
+        </div>
+
+        <div class="lifecycle-control">
+          <label>Save-backed authoring</label>
+          <button id="captureSetupButton" type="button">Capture current setup as…</button>
+          <p id="captureSetupSummary" class="fine-print">Waiting for an exact runtime-owned boundary.</p>
+          <p class="fine-print">A capture is review-only until you save a new preset or draft. Saving never selects, activates, queues, or applies it.</p>
         </div>
       </article>
 
@@ -281,6 +289,90 @@
     </form>
   </dialog>
 
+  <dialog id="manualControlDialog" class="gate-dialog">
+    <form id="manualControlForm">
+      <span class="eyebrow">Manual authority</span>
+      <h2>Take Manual Control</h2>
+      <p>Automation will first obtain an acknowledged indefinite Pause. Observation may continue, but automated device input will be zero.</p>
+      <div class="gate-options">
+        <label class="gate-option">
+          <input type="radio" name="manualSurrenderCollection" value="minimal" checked>
+          <span><strong>Exclude manual Surrender stats</strong><span>Record only the save-backed nonrepresentative outcome and skip terminal collection UI.</span></span>
+        </label>
+        <label class="gate-option">
+          <input type="radio" name="manualSurrenderCollection" value="full">
+          <span><strong>Collect manual Surrender stats</strong><span>Opt in to the normal terminal collection path if this battle is manually surrendered.</span></span>
+        </label>
+      </div>
+      <p class="fine-print">This choice does not authorize automation to Surrender.</p>
+      <div class="dialog-actions">
+        <button type="button" data-close-dialog="manualControlDialog">Cancel</button>
+        <button class="primary" type="submit">Pause and take control</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="captureSetupDialog" class="battle-dialog">
+    <div class="dialog-heading">
+      <div>
+        <span class="eyebrow">Save-backed authoring</span>
+        <h2>Capture current setup as…</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-dialog="captureSetupDialog" aria-label="Close setup capture review">Close</button>
+    </div>
+    <div class="dialog-body">
+      <p id="captureDialogStatus">Requesting a newly serialized save…</p>
+      <dl class="detail-list capture-metadata">
+        <div><dt>Capture status</dt><dd id="captureStatus">—</dd></div>
+        <div><dt>Evidence source</dt><dd id="captureEvidenceSource">—</dd></div>
+        <div><dt>Captured</dt><dd id="captureTimestamp">—</dd></div>
+        <div><dt>Save mapping</dt><dd id="captureMapping">—</dd></div>
+        <div><dt>Representable fields</dt><dd id="captureFieldCount">—</dd></div>
+      </dl>
+      <div class="capture-review-grid">
+        <section>
+          <h3>Captured values</h3>
+          <div id="captureSettings" class="capture-list muted">Waiting for a fresh save.</div>
+        </section>
+        <section>
+          <h3>Unresolved values</h3>
+          <div id="captureUnresolved" class="capture-list muted">Unresolved fields will remain explicit.</div>
+        </section>
+      </div>
+
+      <form id="captureSetupForm" class="capture-save-form">
+        <h3>Save as a new managed artifact</h3>
+        <div class="form-grid">
+          <label>Kind
+            <select id="captureKind">
+              <option value="strategy_draft">Custom Strategy draft</option>
+              <option value="module_preset">Managed Module preset</option>
+            </select>
+          </label>
+          <label>ID
+            <input id="captureId" type="text" pattern="[a-z][a-z0-9_]{2,47}" maxlength="48" required>
+          </label>
+          <label>Display name
+            <input id="captureDisplayName" type="text" maxlength="80" required>
+          </label>
+          <label id="captureTierLabel">Tier
+            <input id="captureTier" type="number" min="1" max="20" step="1" value="19" required>
+          </label>
+          <label id="captureBaseLabel">Compare with Base
+            <select id="captureBase"><option value="">No Base</option></select>
+          </label>
+        </div>
+        <div id="captureDifferenceReview" class="callout" hidden></div>
+        <p class="fine-print">Unresolved capture rows are never filled from the comparison Base. A captured draft is not published until the ordinary Strategy editor validates and publishes it.</p>
+        <div class="dialog-actions capture-actions">
+          <button id="cancelCaptureButton" class="danger" type="button">Cancel capture</button>
+          <button id="reviewCaptureButton" type="button">Review captured vs Base</button>
+          <button id="saveCaptureButton" class="primary" type="submit" disabled>Save new artifact</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
   <dialog id="tournamentLaunchDialog" class="gate-dialog">
     <div>
       <span class="eyebrow">Tournament ready</span>
@@ -305,6 +397,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/client_model.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

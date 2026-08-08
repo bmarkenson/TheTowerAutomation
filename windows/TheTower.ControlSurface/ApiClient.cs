@@ -35,6 +35,19 @@ public sealed class ControlSurfaceApi : IDisposable
     public Task<StatusResponse> GetStatusAsync(CancellationToken cancellationToken) =>
         GetAsync<StatusResponse>("/api/v1/status", cancellationToken);
 
+    public Task<SetupCaptureResponse> GetSetupCaptureAsync(
+        CancellationToken cancellationToken) =>
+        GetAsync<SetupCaptureResponse>(
+            "/api/v1/setup-capture",
+            cancellationToken);
+
+    public Task<CapturedStrategyDraftResponse> GetCapturedStrategyDraftAsync(
+        string strategyId,
+        CancellationToken cancellationToken) =>
+        GetAsync<CapturedStrategyDraftResponse>(
+            $"/api/v1/setup-capture/drafts/{Uri.EscapeDataString(strategyId)}",
+            cancellationToken);
+
     public Task<BattleListResponse> GetBattlesAsync(CancellationToken cancellationToken) =>
         GetAsync<BattleListResponse>("/api/v1/battles?limit=100", cancellationToken);
 
@@ -133,6 +146,14 @@ public sealed class ControlSurfaceApi : IDisposable
         object payload,
         CancellationToken cancellationToken) =>
         PostAsync<StatusResponse>("/api/v1/process", payload, cancellationToken);
+
+    public Task<SetupCaptureResponse> PostSetupCaptureAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<SetupCaptureResponse>(
+            "/api/v1/setup-capture",
+            payload,
+            cancellationToken);
 
     public Task<StrategyProfileMutationResponse> PostStrategyProfileAsync(
         object payload,

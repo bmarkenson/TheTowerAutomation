@@ -24,6 +24,7 @@ from core.battle_classification import (
     classification_for_record,
     observed_tier_for_record,
 )
+from core.battle_stats import included_in_default_history
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
@@ -34,9 +35,12 @@ from core.control_directives import (
 from core.control_model import (
     BATTLE_WORKFLOW_TERMINAL_STATUSES,
     MANUAL_CONTROL_TERMINAL_STATUSES,
+    SETUP_CAPTURE_GAME_STATES,
+    SETUP_CAPTURE_TERMINAL_STATUSES,
     validate_battle_workflow,
     validate_manual_control,
     validate_observation,
+    validate_setup_capture,
     workflow_evidence_from_authority,
 )
 from core.gate_decisions import startup_gate_context_for_strategy
@@ -50,6 +54,10 @@ from core.host_performance import (
     HostPerformanceStore,
 )
 from core.module_presets import ModulePresetConflictError, ModulePresetError
+from core.player_save_setup_capture import (
+    SetupCaptureError,
+    module_preset_source_from_capture,
+)
 from core.strategy_profiles import (
     STRATEGY_AUTHORING_OPERATIONS,
     StrategyProfileConflictError,
@@ -64,11 +72,12 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 28
+CONTROL_SURFACE_REVISION = 29
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "better_control_model_v1",
+    "better_control_model_v2",
     "completed_battle_discard",
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
@@ -80,6 +89,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "managed_custom_module_presets_v1",
     "observed_game_speed",
     "persistent_adb_connection_v1",
+    "save_backed_setup_capture_v1",
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
     "strategy_authoring_profile_lifecycle_v1",
@@ -250,6 +260,465 @@ class ControlSurfaceService:
             return self.profile_store.authoring_catalog()
         except StrategyProfileError as exc:
             raise ControlSurfaceRequestError(str(exc)) from exc
+
+    def setup_capture(self) -> dict[str, Any]:
+        """Return the current safe capture ledger and save-as-new catalogs."""
+
+        current = self.status()
+        model = current.get("control_model") or {}
+        return {
+            "schema_version": 1,
+            "server_revision": CONTROL_SURFACE_REVISION,
+            "capability": "save_backed_setup_capture_v1",
+            "capture": model.get("setup_capture"),
+            "availability": (model.get("actions") or {}).get(
+                "capture_current_setup"
+            ),
+            "captured_drafts": self.profile_store.captured_strategy_draft_catalog(),
+            "module_presets": self.profile_store.module_preset_store.catalog(),
+            "bases": self.profile_store.base_store.catalog(),
+        }
+
+    def captured_setup_draft(self, strategy_id: object) -> dict[str, Any]:
+        """Return one durable captured source for the ordinary editor."""
+
+        try:
+            draft = self.profile_store.captured_strategy_draft(strategy_id)
+        except StrategyProfileConflictError as exc:
+            raise ControlSurfaceRequestError(str(exc), status=409) from exc
+        except StrategyProfileError as exc:
+            raise ControlSurfaceRequestError(str(exc), status=404) from exc
+        return {
+            "schema_version": 1,
+            "server_revision": CONTROL_SURFACE_REVISION,
+            "capability": "save_backed_setup_capture_v1",
+            "draft": draft,
+        }
+
+    def apply_setup_capture(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Request, save, or cancel one runtime-owned setup capture."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        with self._process_action_lock:
+            operation = str(request.get("operation") or "").strip().lower()
+            if operation == "request":
+                if set(request) != {"operation"}:
+                    raise ControlSurfaceRequestError(
+                        "Setup capture request accepts only operation=request"
+                    )
+                current = self.status()
+                availability = (
+                    current.get("control_model", {})
+                    .get("actions", {})
+                    .get("capture_current_setup", {})
+                )
+                if availability.get("available") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(
+                            availability.get("reason")
+                            or "Capture current setup is unavailable"
+                        ),
+                        status=409,
+                        code=str(availability.get("code") or "unavailable"),
+                    )
+                evidence = current.get("control_model", {}).get(
+                    "workflow_evidence"
+                )
+                manual_control = current.get("control_model", {}).get(
+                    "manual_control"
+                )
+                source_manual_control_id = (
+                    str(manual_control.get("manual_control_id") or "").strip()
+                    if availability.get("code")
+                    == "available_from_return_control"
+                    and isinstance(manual_control, Mapping)
+                    else None
+                )
+                try:
+                    capture = self.control_store.request_setup_capture(
+                        evidence=evidence,
+                        source_manual_control_id=source_manual_control_id,
+                        source="control-surface",
+                    )
+                except (ControlDirectiveError, ValueError) as exc:
+                    raise ControlSurfaceRequestError(
+                        str(exc), status=409
+                    ) from exc
+                audit = (
+                    "Requested Capture current setup from the exact retained "
+                    "Return Control forced save; no new refresh, cached evidence, "
+                    "Strategy, or preset was selected"
+                    if source_manual_control_id
+                    else "Requested save-backed Capture current setup; no cached "
+                    "evidence, Strategy, or preset was selected"
+                )
+                disposition = "requested"
+            elif operation == "cancel":
+                if set(request) != {"operation", "request_id"}:
+                    raise ControlSurfaceRequestError(
+                        "Setup capture cancellation requires operation and request_id"
+                    )
+                capture = validate_setup_capture(
+                    self.control_store.status().get("setup_capture")
+                )
+                request_id = str(request.get("request_id") or "").strip()
+                if capture is None or capture.get("request_id") != request_id:
+                    raise ControlSurfaceRequestError(
+                        "Setup capture is no longer current", status=409
+                    )
+                if capture.get("status") == "capturing":
+                    raise ControlSurfaceRequestError(
+                        "Setup capture cannot be cancelled while source restoration is in progress",
+                        status=409,
+                        code="capture_in_progress",
+                    )
+                if capture.get("status") in SETUP_CAPTURE_TERMINAL_STATUSES:
+                    disposition = "no_op"
+                else:
+                    capture = self.control_store.transition_setup_capture(
+                        request_id,
+                        "cancelled",
+                        reason="operator cancelled the capture review",
+                        source="control-surface",
+                    )
+                    if capture is None:
+                        raise ControlSurfaceRequestError(
+                            "Setup capture changed before cancellation",
+                            status=409,
+                        )
+                    disposition = "completed"
+                audit = "Cancelled setup capture review"
+            elif operation == "review":
+                capture = validate_setup_capture(
+                    self.control_store.status().get("setup_capture")
+                )
+                if capture is None or capture.get("status") != "ready":
+                    raise ControlSurfaceRequestError(
+                        "A runtime-issued ready capture is required before review",
+                        status=409,
+                        code="capture_not_ready",
+                    )
+                allowed = {
+                    "operation",
+                    "request_id",
+                    "expected_preview_fingerprint",
+                    "kind",
+                    "id",
+                    "display_name",
+                    "tier",
+                    "base",
+                }
+                if set(request) - allowed or not {
+                    "operation",
+                    "request_id",
+                    "expected_preview_fingerprint",
+                    "kind",
+                    "id",
+                    "display_name",
+                    "tier",
+                } <= set(request):
+                    raise ControlSurfaceRequestError(
+                        "Strategy capture review requires operation, request_id, "
+                        "expected_preview_fingerprint, kind, id, display_name, "
+                        "and tier; base is optional"
+                    )
+                if str(request.get("kind") or "").strip().lower() != (
+                    "strategy_draft"
+                ):
+                    raise ControlSurfaceRequestError(
+                        "Only Strategy drafts have a captured-versus-Base review"
+                    )
+                request_id = str(request.get("request_id") or "").strip()
+                if request_id != capture.get("request_id"):
+                    raise ControlSurfaceRequestError(
+                        "Setup capture is no longer current", status=409
+                    )
+                expected_fingerprint = str(
+                    request.get("expected_preview_fingerprint") or ""
+                ).strip()
+                if (
+                    not expected_fingerprint
+                    or expected_fingerprint
+                    != capture.get("preview_fingerprint")
+                ):
+                    raise ControlSurfaceRequestError(
+                        "Capture preview changed after review; refresh before continuing",
+                        status=409,
+                        code="capture_preview_changed",
+                    )
+                try:
+                    review_result = (
+                        self.profile_store.review_captured_strategy_draft(
+                            capture.get("preview"),
+                            strategy_id=request.get("id"),
+                            display_name=request.get("display_name"),
+                            tier=request.get("tier"),
+                            base=request.get("base"),
+                            expected_capture_fingerprint=expected_fingerprint,
+                        )
+                    )
+                except StrategyProfileConflictError as exc:
+                    raise ControlSurfaceRequestError(
+                        str(exc), status=409
+                    ) from exc
+                except StrategyProfileError as exc:
+                    raise ControlSurfaceRequestError(str(exc)) from exc
+                disposition = "reviewed"
+                audit = (
+                    "Reviewed captured Strategy draft differences without "
+                    "saving, publishing, selecting, queueing, or applying it"
+                )
+            elif operation == "save":
+                capture = validate_setup_capture(
+                    self.control_store.status().get("setup_capture")
+                )
+                if capture is None or capture.get("status") != "ready":
+                    raise ControlSurfaceRequestError(
+                        "A runtime-issued ready capture is required before saving",
+                        status=409,
+                        code="capture_not_ready",
+                    )
+                request_id = str(request.get("request_id") or "").strip()
+                if request_id != capture.get("request_id"):
+                    raise ControlSurfaceRequestError(
+                        "Setup capture is no longer current", status=409
+                    )
+                expected_fingerprint = str(
+                    request.get("expected_preview_fingerprint") or ""
+                ).strip()
+                if (
+                    not expected_fingerprint
+                    or expected_fingerprint
+                    != capture.get("preview_fingerprint")
+                ):
+                    raise ControlSurfaceRequestError(
+                        "Capture preview changed after review; refresh before saving",
+                        status=409,
+                        code="capture_preview_changed",
+                    )
+                preview = capture.get("preview")
+                if not isinstance(preview, Mapping):
+                    raise ControlSurfaceRequestError(
+                        "Runtime capture preview is invalid",
+                        status=409,
+                        code="capture_preview_invalid",
+                    )
+                save_kind = str(request.get("kind") or "").strip().lower()
+                identifier = request.get("id")
+                display_name = request.get("display_name")
+                try:
+                    if save_kind == "module_preset":
+                        if set(request) != {
+                            "operation",
+                            "request_id",
+                            "expected_preview_fingerprint",
+                            "kind",
+                            "id",
+                            "display_name",
+                        }:
+                            raise ControlSurfaceRequestError(
+                                "Module capture save requires operation, request_id, "
+                                "expected_preview_fingerprint, kind, id, and display_name"
+                            )
+                        source = module_preset_source_from_capture(preview)
+                        artifact = self.profile_store.create_module_preset(
+                            identifier,
+                            display_name,
+                            source,
+                        )
+                        saved_result = {
+                            "kind": save_kind,
+                            "id": artifact["id"],
+                            "display_name": artifact["display_name"],
+                            "artifact_disposition": "created",
+                            "selected": False,
+                            "activated": False,
+                            "queued": False,
+                            "applied": False,
+                        }
+                    elif save_kind == "strategy_draft":
+                        allowed = {
+                            "operation",
+                            "request_id",
+                            "expected_preview_fingerprint",
+                            "expected_review_fingerprint",
+                            "kind",
+                            "id",
+                            "display_name",
+                            "tier",
+                            "base",
+                        }
+                        if set(request) - allowed or not {
+                            "operation",
+                            "request_id",
+                            "expected_preview_fingerprint",
+                            "expected_review_fingerprint",
+                            "kind",
+                            "id",
+                            "display_name",
+                            "tier",
+                        } <= set(request):
+                            raise ControlSurfaceRequestError(
+                                "Strategy draft capture save requires operation, "
+                                "request_id, expected_preview_fingerprint, kind, "
+                                "id, display_name, tier, and the exact reviewed "
+                                "difference fingerprint; base is optional"
+                            )
+                        reviewed_fingerprint = str(
+                            request.get("expected_review_fingerprint") or ""
+                        ).strip()
+                        if not reviewed_fingerprint:
+                            raise ControlSurfaceRequestError(
+                                "Review captured-versus-Base differences before saving",
+                                status=409,
+                                code="capture_review_required",
+                            )
+                        artifact_disposition = "created"
+                        try:
+                            artifact = self.profile_store.save_captured_strategy_draft(
+                                preview,
+                                strategy_id=identifier,
+                                display_name=display_name,
+                                tier=request.get("tier"),
+                                base=request.get("base"),
+                                expected_capture_fingerprint=expected_fingerprint,
+                                expected_review_fingerprint=reviewed_fingerprint,
+                            )
+                        except StrategyProfileConflictError as conflict:
+                            # Only a draft that embeds this exact capture and
+                            # reviewed difference can recover an artifact whose
+                            # control-ledger receipt failed after atomic create.
+                            # Module presets do not embed that provenance and
+                            # therefore deliberately have no analogous shortcut.
+                            try:
+                                existing = (
+                                    self.profile_store.captured_strategy_draft(
+                                        identifier
+                                    )
+                                )
+                                expected_review = (
+                                    self.profile_store.review_captured_strategy_draft(
+                                        preview,
+                                        strategy_id=identifier,
+                                        display_name=display_name,
+                                        tier=request.get("tier"),
+                                        base=request.get("base"),
+                                        expected_capture_fingerprint=(
+                                            expected_fingerprint
+                                        ),
+                                    )
+                                )
+                            except StrategyProfileError:
+                                raise conflict
+                            existing_review = existing.get("review") or {}
+                            if not (
+                                existing.get("capture_fingerprint")
+                                == expected_fingerprint
+                                and existing.get("source")
+                                == expected_review["source"]
+                                and existing_review.get("captured_vs_base")
+                                == expected_review["captured_vs_base"]
+                                and existing_review.get("unresolved")
+                                == expected_review["unresolved"]
+                                and existing_review.get("review_fingerprint")
+                                == reviewed_fingerprint
+                                == expected_review["review_fingerprint"]
+                            ):
+                                raise conflict
+                            artifact = existing
+                            artifact_disposition = "recovered_existing"
+                        saved_result = {
+                            "kind": save_kind,
+                            "id": artifact["id"],
+                            "display_name": artifact["source"]["display_name"],
+                            "fingerprint": artifact["draft_fingerprint"],
+                            "artifact_disposition": artifact_disposition,
+                            "published": False,
+                            "selected": False,
+                            "activated": False,
+                            "queued": False,
+                            "applied": False,
+                        }
+                    else:
+                        raise ControlSurfaceRequestError(
+                            "kind must be module_preset or strategy_draft"
+                        )
+                except ControlSurfaceRequestError:
+                    raise
+                except ModulePresetConflictError as exc:
+                    raise ControlSurfaceRequestError(
+                        str(exc), status=409, code=exc.code
+                    ) from exc
+                except ModulePresetError as exc:
+                    raise ControlSurfaceRequestError(
+                        str(exc), code=exc.code
+                    ) from exc
+                except StrategyProfileConflictError as exc:
+                    raise ControlSurfaceRequestError(
+                        str(exc), status=409
+                    ) from exc
+                except (SetupCaptureError, StrategyProfileError) as exc:
+                    raise ControlSurfaceRequestError(str(exc)) from exc
+                try:
+                    capture = self.control_store.transition_setup_capture(
+                        request_id,
+                        "saved",
+                        reason=(
+                            "capture saved through its existing Linux owner; "
+                            "runtime selection and action authority are unchanged"
+                        ),
+                        saved_result=saved_result,
+                        source="control-surface",
+                    )
+                except (ControlDirectiveError, ValueError) as exc:
+                    raise ControlSurfaceRequestError(
+                        "Capture artifact is durable but its completion receipt "
+                        f"could not be recorded: {exc}",
+                        status=503,
+                        code="capture_receipt_write_failed",
+                    ) from exc
+                if capture is None:
+                    raise ControlSurfaceRequestError(
+                        "Capture artifact is durable but the workflow changed before acknowledgement",
+                        status=409,
+                        code="capture_receipt_interrupted",
+                    )
+                disposition = "completed"
+                audit = (
+                    f"Saved captured {save_kind.replace('_', ' ')} "
+                    f"{saved_result['id']} without selecting or applying it"
+                )
+            else:
+                raise ControlSurfaceRequestError(
+                    "operation must be request, review, save, or cancel"
+                )
+
+            audit_warning = self._append_audit(
+                audit,
+                # The runtime emits the single operation-ID-correlated ACTION
+                # immediately before any capture lifecycle input.  Recording
+                # the asynchronous request as a second ACTION would split one
+                # input workflow into two intents.
+                level="INFO" if operation == "request" else "ACTION",
+            )
+            response = self.setup_capture()
+            response["request"] = {
+                "accepted": True,
+                "operation": operation,
+                "request_id": capture.get("request_id") if capture else None,
+                "disposition": disposition,
+            }
+            if operation == "save":
+                response["request"]["saved_result"] = saved_result
+            if operation == "review":
+                response["review"] = review_result
+            if audit_warning:
+                response["request"]["warning"] = audit_warning
+            return response
 
     def strategy_history(
         self,
@@ -609,6 +1078,8 @@ class ControlSurfaceService:
                 "battle_workflow_error": None,
                 "manual_control": None,
                 "manual_control_error": None,
+                "setup_capture": None,
+                "setup_capture_error": None,
                 "exists": self.control_path.exists(),
             }
         control["path"] = self._display_path(self.control_path)
@@ -1000,12 +1471,24 @@ class ControlSurfaceService:
                             code=str(availability.get("code") or "unavailable"),
                         )
                 else:
+                    surrender_collection = str(
+                        request.get(
+                            "manual_surrender_collection",
+                            "minimal",
+                        )
+                    ).strip().lower()
+                    if surrender_collection not in {"minimal", "full"}:
+                        raise ControlSurfaceRequestError(
+                            "manual_surrender_collection must be minimal or full"
+                        )
                     manual_control = self.control_store.request_manual_control(
                         evidence=current["control_model"]["workflow_evidence"],
+                        surrender_collection=surrender_collection,
                         source="control-surface",
                     )
                     audit = (
-                        "Requested Take Manual Control with an indefinite Pause"
+                        "Requested Take Manual Control with an indefinite Pause; "
+                        f"manual Surrender collection={surrender_collection}"
                     )
             elif action == "return_control":
                 current = self.status()
@@ -1134,6 +1617,7 @@ class ControlSurfaceService:
                     if manual.get("status") not in {
                         "return_requested",
                         "awaiting_enable",
+                        "awaiting_configuration",
                     }:
                         raise ControlSurfaceRequestError(
                             "Use Return Control before enabling automated actions",
@@ -1145,6 +1629,9 @@ class ControlSurfaceService:
                         manual_control = dict(manual)
                         audit = "Automation Enable is already pending acknowledgement"
                     else:
+                        retrying_configuration = (
+                            manual.get("status") == "awaiting_configuration"
+                        )
                         manual_control = (
                             self.control_store.enable_after_return_control(
                                 str(manual.get("manual_control_id") or ""),
@@ -1152,8 +1639,11 @@ class ControlSurfaceService:
                             )
                         )
                         audit = (
-                            "Requested Automation Enabled; Return Control must "
-                            "refresh save evidence before ordinary input"
+                            "Requested Automation Enabled for a new Return "
+                            "Control configuration refresh"
+                            if retrying_configuration
+                            else "Requested Automation Enabled; Return Control "
+                            "must refresh save evidence before ordinary input"
                         )
                 else:
                     state_ack = current.get("acknowledgements", {}).get("state")
@@ -1666,6 +2156,25 @@ class ControlSurfaceService:
                         "apply_to_active_run requires an active automation runtime",
                         status=409,
                     )
+                if apply_to_active_run:
+                    current = self.status()
+                    availability = (
+                        current.get("control_model", {})
+                        .get("actions", {})
+                        .get("manage_active_battle", {})
+                    )
+                    if availability.get("available") is not True:
+                        raise ControlSurfaceRequestError(
+                            str(
+                                availability.get("reason")
+                                or "Manage this battle is unavailable"
+                            ),
+                            status=409,
+                            code=str(
+                                availability.get("code")
+                                or "active_battle_unavailable"
+                            ),
+                        )
                 apply_mode = (
                     "active_battle" if apply_to_active_run else "next_boundary"
                 )
@@ -2066,16 +2575,22 @@ class ControlSurfaceService:
             paths.extend(self.tournaments_dir.glob("Tournament*.json"))
             items: list[dict[str, Any]] = []
             errors: list[dict[str, str]] = []
+            excluded_nonrepresentative = 0
             for path in paths:
                 try:
                     record = self._load_completed_battle_path(path)
+                    if not included_in_default_history(record):
+                        excluded_nonrepresentative += 1
+                        continue
                     items.append(_battle_summary(record))
                 except (OSError, json.JSONDecodeError, ValueError) as exc:
                     errors.append({"file": path.name, "error": str(exc)})
         items.sort(key=_battle_sort_key, reverse=True)
         return {
             "items": items[:requested_limit],
-            "total": len(paths),
+            "total": len(paths) - excluded_nonrepresentative,
+            "source_total": len(paths),
+            "excluded_nonrepresentative": excluded_nonrepresentative,
             "errors": errors,
             "discarded_purged": purged,
         }
@@ -3131,6 +3646,7 @@ class ControlSurfaceService:
         evidence = workflow_evidence_from_authority(runtime_authority)
         runtime_observation = None
         runtime_lifecycle: Mapping[str, Any] = {}
+        runtime_strategy_scope: Mapping[str, Any] = {}
         runtime_model = runtime_authority.get("control_model")
         if isinstance(runtime_model, Mapping):
             runtime_observation = validate_observation(
@@ -3139,6 +3655,9 @@ class ControlSurfaceService:
             raw_lifecycle = runtime_model.get("battle_lifecycle")
             if isinstance(raw_lifecycle, Mapping):
                 runtime_lifecycle = raw_lifecycle
+            raw_strategy_scope = runtime_model.get("strategy_scope")
+            if isinstance(raw_strategy_scope, Mapping):
+                runtime_strategy_scope = raw_strategy_scope
         observation_age_seconds: Optional[int] = None
         if runtime_observation is not None:
             observed_at = _parse_timestamp(runtime_observation.get("observed_at"))
@@ -3190,8 +3709,12 @@ class ControlSurfaceService:
 
         workflow = validate_battle_workflow(control.get("battle_workflow"))
         manual = validate_manual_control(control.get("manual_control"))
+        setup_capture = validate_setup_capture(control.get("setup_capture"))
         workflow_error = str(control.get("battle_workflow_error") or "")
         manual_error = str(control.get("manual_control_error") or "")
+        setup_capture_error = str(
+            control.get("setup_capture_error") or ""
+        )
         workflow_busy = bool(
             workflow is not None
             and workflow.get("status") not in BATTLE_WORKFLOW_TERMINAL_STATUSES
@@ -3199,6 +3722,16 @@ class ControlSurfaceService:
         manual_busy = bool(
             manual is not None
             and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+        )
+        setup_capture_busy = bool(
+            setup_capture is not None
+            and setup_capture.get("status")
+            not in SETUP_CAPTURE_TERMINAL_STATUSES
+        )
+        setup_capture_input_busy = bool(
+            setup_capture is not None
+            and setup_capture.get("status")
+            in {"requested", "acknowledged", "capturing"}
         )
 
         def action_availability(
@@ -3237,6 +3770,18 @@ class ControlSurfaceService:
                     "code": "manual_control_invalid",
                     "reason": manual_error,
                 }
+            if setup_capture_error:
+                return {
+                    "available": False,
+                    "code": "setup_capture_invalid",
+                    "reason": setup_capture_error,
+                }
+            if setup_capture_input_busy:
+                return {
+                    "available": False,
+                    "code": "setup_capture_active",
+                    "reason": "save-backed setup capture currently owns device input",
+                }
             if manual_busy:
                 return {
                     "available": False,
@@ -3256,6 +3801,19 @@ class ControlSurfaceService:
                     "reason": (
                         f"{label} is unavailable for observed game state "
                         f"{game_state}"
+                    ),
+                }
+            if action_key == "attach_battle" and (
+                type(evidence.get("target_generation")) is not int
+                or int(evidence["target_generation"]) < 1
+                or not str(evidence.get("activity_scope_run_id") or "").strip()
+            ):
+                return {
+                    "available": False,
+                    "code": "exact_attachment_binding_unavailable",
+                    "reason": (
+                        "Attach requires an exact target generation and active "
+                        "activity scope"
                     ),
                 }
             if (
@@ -3282,6 +3840,8 @@ class ControlSurfaceService:
             and evidence is not None
             and not manual_busy
             and not manual_error
+            and not setup_capture_error
+            and not setup_capture_input_busy
         )
         take_manual = {
             "available": take_manual_available,
@@ -3298,9 +3858,13 @@ class ControlSurfaceService:
                             "manual_control_active"
                             if manual_busy
                             else (
-                                "fresh_observation_unavailable"
-                                if process_live
-                                else "process_stopped"
+                                "setup_capture_active"
+                                if setup_capture_input_busy
+                                else (
+                                    "fresh_observation_unavailable"
+                                    if process_live
+                                    else "process_stopped"
+                                )
                             )
                         )
                     )
@@ -3318,7 +3882,11 @@ class ControlSurfaceService:
                         else (
                             "manual control is already in progress"
                             if manual_busy
-                            else "fresh live observation is required"
+                            else (
+                                "save-backed setup capture currently owns device input"
+                                if setup_capture_input_busy
+                                else "fresh live observation is required"
+                            )
                         )
                     )
                 )
@@ -3338,6 +3906,19 @@ class ControlSurfaceService:
                 )
             )
         )
+        return_game_state = str(observation.get("game_state") or "unknown")
+        return_binding_available = bool(
+            evidence is not None
+            and type(evidence.get("target_generation")) is int
+            and int(evidence["target_generation"]) >= 1
+            and str(evidence.get("activity_scope_run_id") or "").strip()
+        )
+        return_boundary_available = return_game_state in {
+            "home_new_battle",
+            "home_resume_battle",
+            "active_battle",
+            "game_over",
+        }
         return_control_available = bool(
             not control_error
             and not manual_error
@@ -3345,6 +3926,8 @@ class ControlSurfaceService:
             and manual.get("status") == "active"
             and evidence is not None
             and indefinite_pause_acknowledged
+            and return_binding_available
+            and return_boundary_available
         )
         return_control = {
             "available": return_control_available,
@@ -3362,7 +3945,19 @@ class ControlSurfaceService:
                             if manual is not None
                             and manual.get("status") == "active"
                             and not indefinite_pause_acknowledged
-                            else "manual_control_not_acknowledged"
+                            else (
+                                "exact_return_binding_unavailable"
+                                if manual is not None
+                                and manual.get("status") == "active"
+                                and not return_binding_available
+                                else (
+                                    "return_boundary_unavailable"
+                                    if manual is not None
+                                    and manual.get("status") == "active"
+                                    and not return_boundary_available
+                                    else "manual_control_not_acknowledged"
+                                )
+                            )
                         )
                     )
                 )
@@ -3381,7 +3976,21 @@ class ControlSurfaceService:
                             if manual is not None
                             and manual.get("status") == "active"
                             and not indefinite_pause_acknowledged
-                            else "acknowledged active manual control and fresh observation are required"
+                            else (
+                                "Return Control requires an exact target generation "
+                                "and current activity scope"
+                                if manual is not None
+                                and manual.get("status") == "active"
+                                and not return_binding_available
+                                else (
+                                    "Return Control has no save-backed reconciliation "
+                                    f"path for observed game state {return_game_state}"
+                                    if manual is not None
+                                    and manual.get("status") == "active"
+                                    and not return_boundary_available
+                                    else "acknowledged active manual control and fresh observation are required"
+                                )
+                            )
                         )
                     )
                 )
@@ -3401,11 +4010,13 @@ class ControlSurfaceService:
             if isinstance(strategy_ack, Mapping)
             else ""
         )
+        runtime_active_strategy = str(
+            runtime_strategy_scope.get("active_battle") or ""
+        ).strip().lower()
         active_strategy = (
-            acknowledged_strategy
-            if observation.get("game_state")
-            in {"active_battle", "home_resume_battle"}
-            and acknowledged_strategy
+            runtime_active_strategy
+            if runtime_lifecycle.get("active_battle_adopted") is True
+            and runtime_active_strategy
             else None
         )
         pending_strategy = (
@@ -3428,21 +4039,39 @@ class ControlSurfaceService:
         terminal_policy_reason = "the selected policy applies at a supported terminal route"
         if (
             observation.get("game_state") == "tournament_results"
-            and mode != "WAIT"
         ):
-            terminal_policy_status = "pending_verified_terminal_dismissal"
+            terminal_policy_status = (
+                "retained" if mode == "WAIT" else "selected"
+            )
             terminal_policy_reason = (
-                "Tournament Results is retained because no verified dismissal "
-                "control is available; the selected policy is preserved"
+                "Tournament Results remains visible under the wait policy"
+                if mode == "WAIT"
+                else "saved Tournament Results will use the verified OK-to-Home route"
             )
 
+        manual_terminal = (
+            manual.get("terminal_evidence")
+            if isinstance(manual, Mapping)
+            and isinstance(manual.get("terminal_evidence"), Mapping)
+            else None
+        )
+        terminal_evidence_unavailable = bool(
+            isinstance(manual_terminal, Mapping)
+            and manual_terminal.get("status") == "unavailable"
+        )
         enable_available = bool(
             not control_error
             and process_live
             and not manual_error
+            and not terminal_evidence_unavailable
             and (
                 not manual_busy
-                or manual.get("status") in {"return_requested", "awaiting_enable"}
+                or manual.get("status")
+                in {
+                    "return_requested",
+                    "awaiting_enable",
+                    "awaiting_configuration",
+                }
             )
         )
         if control_error:
@@ -3454,9 +4083,16 @@ class ControlSurfaceService:
         elif manual_error:
             enable_code = "manual_control_invalid"
             enable_reason = manual_error
+        elif terminal_evidence_unavailable:
+            enable_code = "manual_terminal_evidence_unavailable"
+            enable_reason = (
+                "manual terminal evidence is ambiguous; Automation remains "
+                "Paused and terminal UI input is not authorized"
+            )
         elif manual_busy and manual.get("status") not in {
             "return_requested",
             "awaiting_enable",
+            "awaiting_configuration",
         }:
             enable_code = "return_control_required"
             enable_reason = "Use Return Control before enabling automated actions"
@@ -3485,6 +4121,189 @@ class ControlSurfaceService:
         else:
             pause_code = "available"
             pause_reason = "request zero automated device input"
+
+        manage_active_battle_available = bool(
+            not control_error
+            and process_live
+            and evidence is not None
+            and observation.get("game_state") == "active_battle"
+            and runtime_lifecycle.get("active_battle_adopted") is True
+            and runtime_lifecycle.get("awaiting_initial_intent") is not True
+            and not manual_busy
+            and not workflow_busy
+            and not setup_capture_input_busy
+        )
+        if control_error:
+            manage_active_battle_code = "control_invalid"
+            manage_active_battle_reason = control_error
+        elif not process_live:
+            manage_active_battle_code = "process_stopped"
+            manage_active_battle_reason = "Start Automation first"
+        elif evidence is None:
+            manage_active_battle_code = "fresh_observation_unavailable"
+            manage_active_battle_reason = (
+                "fresh exact active-battle observation is required"
+            )
+        elif observation.get("game_state") != "active_battle":
+            manage_active_battle_code = "intent_mismatch"
+            manage_active_battle_reason = (
+                "Manage this battle is available only for a verified active battle"
+            )
+        elif (
+            runtime_lifecycle.get("active_battle_adopted") is not True
+            or runtime_lifecycle.get("awaiting_initial_intent") is True
+        ):
+            manage_active_battle_code = "attach_required"
+            manage_active_battle_reason = (
+                "Attach to Battle and complete save validation before applying "
+                "a Strategy"
+            )
+        elif manual_busy:
+            manage_active_battle_code = "manual_control_active"
+            manage_active_battle_reason = "Return Control first"
+        elif workflow_busy:
+            manage_active_battle_code = "workflow_busy"
+            manage_active_battle_reason = (
+                "the current battle workflow must complete first"
+            )
+        elif setup_capture_input_busy:
+            manage_active_battle_code = "setup_capture_active"
+            manage_active_battle_reason = (
+                "save-backed setup capture currently owns device input"
+            )
+        else:
+            manage_active_battle_code = "available"
+            manage_active_battle_reason = (
+                "explicitly adopt the selected Strategy for this battle; "
+                "Surrender is not authorized"
+            )
+
+        capture_game_state = str(observation.get("game_state") or "unknown")
+        capture_binding_available = bool(
+            evidence is not None
+            and type(evidence.get("target_generation")) is int
+            and int(evidence["target_generation"]) > 0
+            and str(evidence.get("activity_scope_run_id") or "").strip()
+        )
+        manual_save_receipt = (
+            manual.get("save_receipt")
+            if isinstance(manual, Mapping)
+            and isinstance(manual.get("save_receipt"), Mapping)
+            else None
+        )
+        retained_return_capture_available = bool(
+            manual is not None
+            and manual.get("status") == "awaiting_configuration"
+            and manual.get("refresh_status") == "trusted_mismatch_paused"
+            and isinstance(manual_save_receipt, Mapping)
+            and manual_save_receipt.get("kind")
+            == "return_control_reconciliation"
+            and manual_save_receipt.get("workflow_id")
+            == manual.get("manual_control_id")
+            and isinstance(
+                manual_save_receipt.get("configuration"), Mapping
+            )
+            and manual_save_receipt["configuration"].get("status")
+            == "partial"
+            and bool(
+                manual_save_receipt["configuration"].get(
+                    "unresolved_check_ids"
+                )
+            )
+            and effective_authority == "paused"
+            and capture_game_state == "active_battle"
+            and capture_binding_available
+        )
+        capture_available = bool(
+            not control_error
+            and process_live
+            and evidence is not None
+            and (
+                effective_authority == "enabled"
+                or retained_return_capture_available
+            )
+            and capture_game_state in SETUP_CAPTURE_GAME_STATES
+            and not workflow_busy
+            and (not manual_busy or retained_return_capture_available)
+            and not setup_capture_busy
+            and not workflow_error
+            and not manual_error
+            and not setup_capture_error
+            and capture_binding_available
+        )
+        if control_error:
+            capture_code, capture_reason = "control_invalid", control_error
+        elif not process_live:
+            capture_code, capture_reason = (
+                "process_stopped",
+                "Start Automation before capturing current setup",
+            )
+        elif evidence is None:
+            capture_code, capture_reason = (
+                "fresh_observation_unavailable",
+                "fresh exact runtime-owned observation is required",
+            )
+        elif workflow_error:
+            capture_code, capture_reason = (
+                "battle_workflow_invalid",
+                workflow_error,
+            )
+        elif manual_error:
+            capture_code, capture_reason = (
+                "manual_control_invalid",
+                manual_error,
+            )
+        elif capture_game_state not in SETUP_CAPTURE_GAME_STATES:
+            capture_code, capture_reason = (
+                "capture_boundary_unavailable",
+                "Capture requires verified Home New, Home Resume, or active battle",
+            )
+        elif workflow_busy:
+            capture_code, capture_reason = (
+                "workflow_busy",
+                "complete the current battle workflow before capturing setup",
+            )
+        elif manual_busy and not retained_return_capture_available:
+            capture_code, capture_reason = (
+                "manual_control_active",
+                "Return Control before capturing current setup",
+            )
+        elif setup_capture_busy:
+            capture_code, capture_reason = (
+                "capture_review_pending",
+                "save or cancel the current capture before requesting another",
+            )
+        elif setup_capture_error:
+            capture_code, capture_reason = (
+                "setup_capture_invalid",
+                setup_capture_error,
+            )
+        elif not capture_binding_available:
+            capture_code, capture_reason = (
+                "exact_capture_binding_unavailable",
+                "Capture requires an exact target generation and activity scope",
+            )
+        elif retained_return_capture_available:
+            capture_code, capture_reason = (
+                "available_from_return_control",
+                "review the exact retained forced Return Control save without "
+                "new device input; this does not resolve or resume Return Control",
+            )
+        elif effective_authority == "paused":
+            capture_code, capture_reason = (
+                "automation_paused",
+                "Automation Paused blocks a new forced save refresh; cached evidence will not be used",
+            )
+        elif effective_authority != "enabled":
+            capture_code, capture_reason = (
+                "action_authority_pending",
+                "Automation Enabled must be acknowledged before forced save refresh",
+            )
+        else:
+            capture_code, capture_reason = (
+                "available",
+                "request a new forced save and review without applying anything",
+            )
 
         return {
             "schema_version": 1,
@@ -3520,6 +4339,9 @@ class ControlSurfaceService:
                 "active_battle": active_strategy,
                 "pending_next_boundary": pending_strategy,
                 "request_id": control.get("strategy_request_id"),
+                "observation_only": bool(
+                    runtime_strategy_scope.get("observation_only") is True
+                ),
             },
             "when_battle_ends": {
                 "value": terminal_labels.get(mode, "unknown"),
@@ -3545,6 +4367,7 @@ class ControlSurfaceService:
             },
             "battle_workflow": workflow,
             "manual_control": manual,
+            "setup_capture": setup_capture,
             "workflow_evidence": evidence,
             "actions": {
                 "start_battle": action_availability(
@@ -3566,6 +4389,16 @@ class ControlSurfaceService:
                     "available": enable_available,
                     "code": enable_code,
                     "reason": enable_reason,
+                },
+                "manage_active_battle": {
+                    "available": manage_active_battle_available,
+                    "code": manage_active_battle_code,
+                    "reason": manage_active_battle_reason,
+                },
+                "capture_current_setup": {
+                    "available": capture_available,
+                    "code": capture_code,
+                    "reason": capture_reason,
                 },
             },
         }

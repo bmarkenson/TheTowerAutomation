@@ -134,6 +134,9 @@ public sealed class BetterControlModelStatus
     [JsonPropertyName("manual_control")]
     public BetterControlManualStatus? ManualControl { get; set; }
 
+    [JsonPropertyName("setup_capture")]
+    public SetupCaptureStatus? SetupCapture { get; set; }
+
     [JsonPropertyName("actions")]
     public Dictionary<string, BetterControlActionAvailability> Actions { get; set; } = [];
 }
@@ -238,6 +241,186 @@ public sealed class BetterControlManualStatus
 
     [JsonPropertyName("refresh_status")]
     public string? RefreshStatus { get; set; }
+
+    [JsonPropertyName("surrender_collection")]
+    public string SurrenderCollection { get; set; } = "minimal";
+}
+
+public sealed class SetupCaptureResponse
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("server_revision")]
+    public int ServerRevision { get; set; }
+
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    [JsonPropertyName("capture")]
+    public SetupCaptureStatus? Capture { get; set; }
+
+    [JsonPropertyName("availability")]
+    public BetterControlActionAvailability Availability { get; set; } = new();
+
+    [JsonPropertyName("bases")]
+    public StrategyBaseCatalog Bases { get; set; } = new();
+
+    [JsonPropertyName("request")]
+    public SetupCaptureRequestStatus? Request { get; set; }
+
+    [JsonPropertyName("review")]
+    public CapturedStrategyReview? Review { get; set; }
+}
+
+public sealed class SetupCaptureStatus
+{
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    [JsonPropertyName("acquisition_source")]
+    public string AcquisitionSource { get; set; } = "";
+
+    [JsonPropertyName("source_manual_control_id")]
+    public string? SourceManualControlId { get; set; }
+
+    [JsonPropertyName("preview_fingerprint")]
+    public string PreviewFingerprint { get; set; } = "";
+
+    [JsonPropertyName("preview")]
+    public SetupCapturePreview? Preview { get; set; }
+
+    [JsonPropertyName("saved_result")]
+    public SetupCaptureSavedResult? SavedResult { get; set; }
+}
+
+public sealed class SetupCapturePreview
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("captured_at")]
+    public string? CapturedAt { get; set; }
+
+    [JsonPropertyName("mapping_id")]
+    public string MappingId { get; set; } = "";
+
+    [JsonPropertyName("mapping_maturity")]
+    public string MappingMaturity { get; set; } = "";
+
+    [JsonPropertyName("settings")]
+    public Dictionary<string, JsonElement> Settings { get; set; } = [];
+
+    [JsonPropertyName("unresolved")]
+    public List<SetupCaptureUnresolved> Unresolved { get; set; } = [];
+
+    [JsonPropertyName("capture_origin")]
+    public SetupCaptureOrigin CaptureOrigin { get; set; } = new();
+}
+
+public sealed class SetupCaptureOrigin
+{
+    [JsonPropertyName("acquisition_source")]
+    public string AcquisitionSource { get; set; } = "";
+
+    [JsonPropertyName("source_manual_control_fingerprint")]
+    public string? SourceManualControlFingerprint { get; set; }
+}
+
+public sealed class SetupCaptureUnresolved
+{
+    [JsonPropertyName("setting_id")]
+    public string SettingId { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unresolved";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("observed_value")]
+    public JsonElement? ObservedValue { get; set; }
+}
+
+public sealed class CapturedStrategyReview
+{
+    [JsonPropertyName("review_fingerprint")]
+    public string ReviewFingerprint { get; set; } = "";
+
+    [JsonPropertyName("source")]
+    public StrategyAuthoringSource Source { get; set; } = new();
+
+    [JsonPropertyName("resolution")]
+    public StrategyAuthoringResolution Resolution { get; set; } = new();
+
+    [JsonPropertyName("captured_vs_base")]
+    public JsonElement CapturedVsBase { get; set; }
+
+    [JsonPropertyName("unresolved")]
+    public List<SetupCaptureUnresolved> Unresolved { get; set; } = [];
+
+    [JsonPropertyName("saving_activates_strategy")]
+    public bool SavingActivatesStrategy { get; set; }
+
+    [JsonPropertyName("publication_activates_strategy")]
+    public bool PublicationActivatesStrategy { get; set; }
+}
+
+public sealed class SetupCaptureRequestStatus
+{
+    [JsonPropertyName("accepted")]
+    public bool Accepted { get; set; }
+
+    [JsonPropertyName("operation")]
+    public string Operation { get; set; } = "";
+
+    [JsonPropertyName("request_id")]
+    public string? RequestId { get; set; }
+
+    [JsonPropertyName("disposition")]
+    public string? Disposition { get; set; }
+
+    [JsonPropertyName("saved_result")]
+    public SetupCaptureSavedResult? SavedResult { get; set; }
+}
+
+public sealed class SetupCaptureSavedResult
+{
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = "";
+
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("artifact_disposition")]
+    public string ArtifactDisposition { get; set; } = "";
+
+    [JsonPropertyName("published")]
+    public bool Published { get; set; }
+
+    [JsonPropertyName("selected")]
+    public bool Selected { get; set; }
+
+    [JsonPropertyName("activated")]
+    public bool Activated { get; set; }
+
+    [JsonPropertyName("queued")]
+    public bool Queued { get; set; }
+
+    [JsonPropertyName("applied")]
+    public bool Applied { get; set; }
 }
 
 public sealed class BetterControlActionAvailability
@@ -857,11 +1040,99 @@ public sealed class StrategyAuthoringCatalogResponse
     [JsonPropertyName("module_presets")]
     public ModulePresetCatalog ModulePresets { get; set; } = new();
 
+    [JsonPropertyName("captured_drafts")]
+    public CapturedStrategyDraftCatalog CapturedDrafts { get; set; } = new();
+
     [JsonPropertyName("latest_compatible_base_revisions")]
     public List<CompatibleBaseRevision> LatestCompatibleBaseRevisions { get; set; } = [];
 
     [JsonPropertyName("catalog_errors")]
     public List<StrategyAuthoringCatalogError> CatalogErrors { get; set; } = [];
+}
+
+public sealed class CapturedStrategyDraftCatalog
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<CapturedStrategyDraftSummary> Items { get; set; } = [];
+
+    [JsonPropertyName("errors")]
+    public List<StrategyProfileCatalogError> Errors { get; set; } = [];
+}
+
+public sealed class CapturedStrategyDraftSummary
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("tier")]
+    public int Tier { get; set; }
+
+    [JsonPropertyName("unresolved_count")]
+    public int UnresolvedCount { get; set; }
+
+    [JsonPropertyName("saved_at")]
+    public string? SavedAt { get; set; }
+
+    [JsonPropertyName("acquisition_source")]
+    public string AcquisitionSource { get; set; } = "";
+
+    [JsonIgnore]
+    public string DetailLabel =>
+        $"Tier {Tier} • {UnresolvedCount} unresolved • "
+        + (AcquisitionSource == "retained_return_control_refresh"
+            ? "retained Return Control save"
+            : "new capture refresh");
+}
+
+public sealed class CapturedStrategyDraftResponse
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("server_revision")]
+    public int ServerRevision { get; set; }
+
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    [JsonPropertyName("draft")]
+    public CapturedStrategyDraftDocument Draft { get; set; } = new();
+}
+
+public sealed class CapturedStrategyDraftDocument
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("source")]
+    public StrategyAuthoringSource Source { get; set; } = new();
+
+    [JsonPropertyName("saved_at")]
+    public string? SavedAt { get; set; }
+
+    [JsonPropertyName("capture")]
+    public SetupCapturePreview Capture { get; set; } = new();
+
+    [JsonPropertyName("review")]
+    public CapturedStrategyStoredReview Review { get; set; } = new();
+}
+
+public sealed class CapturedStrategyStoredReview
+{
+    [JsonPropertyName("captured_vs_base")]
+    public JsonElement CapturedVsBase { get; set; }
+
+    [JsonPropertyName("unresolved")]
+    public List<SetupCaptureUnresolved> Unresolved { get; set; } = [];
+
+    [JsonPropertyName("review_fingerprint")]
+    public string ReviewFingerprint { get; set; } = "";
 }
 
 public sealed class StrategyAuthoringCapabilities

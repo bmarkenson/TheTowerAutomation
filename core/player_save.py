@@ -1976,6 +1976,28 @@ def _requirement_is_supported(
     return False
 
 
+def save_observation_supports_requirement(
+    check_id: str,
+    value: Any,
+    evidence: SaveCheckEvidence,
+) -> bool:
+    """Whether mapped evidence authorizes its value as a future requirement.
+
+    A validated save can sometimes identify a current value without granting
+    authority to ask the runtime to reproduce that value.  Capture authoring
+    uses this policy-free public seam rather than duplicating the mapping's
+    authority-kind rules.
+    """
+
+    if not isinstance(evidence, SaveCheckEvidence):
+        raise TypeError("save requirement support requires typed evidence")
+    return bool(
+        evidence.status == "observed"
+        and evidence.complete is True
+        and _requirement_is_supported(str(check_id), value, evidence)
+    )
+
+
 def _check_matches(check_id: str, expected: Any, observed: Any) -> bool:
     if check_id == "free_upgrade_locks":
         expected_set = {_normal_scalar(value) for value in expected or []}
@@ -2102,4 +2124,5 @@ __all__ = [
     "read_player_save_file",
     "reconcile_acquired_requirements",
     "reconcile_requirements",
+    "save_observation_supports_requirement",
 ]

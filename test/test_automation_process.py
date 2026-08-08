@@ -1085,24 +1085,20 @@ def test_control_surface_saves_or_queues_strategy_by_process_state(tmp_path):
         "disposition": "queued",
     }
 
-    response = service.apply_process_action(
-        {
-            "action": "set_strategy",
-            "strategy": "farm_t19",
-            "apply_to_active_run": True,
-        }
-    )
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        service.apply_process_action(
+            {
+                "action": "set_strategy",
+                "strategy": "farm_t19",
+                "apply_to_active_run": True,
+            }
+        )
 
-    assert manager.calls[-1] == "persist_strategy:farm_t19"
+    assert exc_info.value.code == "fresh_observation_unavailable"
+    assert manager.calls[-1] == "persist_strategy:farm_t18"
     control = service.control_store.status()
-    assert control["strategy"] == "farm_t19"
-    assert control["strategy_apply_mode"] == "active_battle"
-    assert response["request"] == {
-        "accepted": True,
-        "action": "set_strategy",
-        "strategy": "farm_t19",
-        "disposition": "active_battle_requested",
-    }
+    assert control["strategy"] == "farm_t18"
+    assert control["strategy_apply_mode"] == "next_boundary"
 
 
 def test_control_surface_rejects_active_battle_adoption_without_runtime(tmp_path):

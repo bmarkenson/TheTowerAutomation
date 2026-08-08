@@ -1,10 +1,12 @@
 from datetime import datetime
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import cv2
 
+from core.battle_lifecycle import HomeBattleControl
 from core.matcher import get_match
 from core.state_detector import detect_state_and_overlays
 from core.tournament_conditions import derive_tournament_conditions
@@ -15,7 +17,11 @@ from core.tournament_results import (
     ocr_tournament_summary,
     persist_tournament_result,
 )
-from handlers.tournament_result_handler import handle_tournament_results
+from handlers.tournament_result_handler import (
+    _tournament_ok_visible,
+    dismiss_tournament_results_to_home,
+    handle_tournament_results,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +57,49 @@ def test_tournament_summary_is_a_distinct_terminal_state():
     )
     assert point == (542, 938)
     assert confidence >= 0.99
+
+
+def test_tournament_ok_verifier_is_bounded_to_the_terminal_dialog():
+    tournament = _load("tournament_stats_20260718.png")
+    normal = _load("game_over_stats_20260715.png")
+
+    assert _tournament_ok_visible(tournament)
+    assert not _tournament_ok_visible(normal)
+
+
+def test_tournament_dismissal_taps_verified_ok_then_requires_new_battle_home():
+    tournament = _load("tournament_stats_20260718.png")
+    home = tournament.copy()
+
+    def verified_tap(point, **kwargs):
+        assert kwargs["verification"].authorizes(tuple(point))
+        assert kwargs["action_guard_fn"]()
+        return True
+
+    with (
+        patch(
+            "handlers.tournament_result_handler.safe_tap",
+            side_effect=verified_tap,
+        ) as tap,
+        patch(
+            "handlers.tournament_result_handler.detect_state_and_overlays",
+            return_value={"state": "HOME_SCREEN"},
+        ),
+        patch(
+            "handlers.tournament_result_handler.detect_home_battle_control",
+            return_value=SimpleNamespace(
+                control=HomeBattleControl.NEW_BATTLE
+            ),
+        ),
+    ):
+        dismissed = dismiss_tournament_results_to_home(
+            action_guard_fn=lambda: True,
+            capture_fn=iter([tournament, home]).__next__,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert dismissed is True
+    tap.assert_called_once()
 
 
 def test_tournament_summary_ocr_tracks_rank_and_coin_split():

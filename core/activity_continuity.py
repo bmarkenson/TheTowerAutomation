@@ -28,7 +28,10 @@ from core.player_save_history import (
     history_sources_compatible,
     valid_history_tail_advance,
 )
-from core.player_save_temporal import RunningAttachmentSaveObservations
+from core.player_save_temporal import (
+    RunningAttachmentSaveObservations,
+    RunningAttachmentTemporalBinding,
+)
 from core.terminal_save_report import (
     terminal_history_handoff_matches_source_scope,
     validate_terminal_history_handoff,
@@ -62,10 +65,14 @@ class ActivityContinuityOutcome:
     running_attachment_observations: Optional[
         RunningAttachmentSaveObservations
     ] = None
+    running_attachment_temporal_binding: Optional[
+        RunningAttachmentTemporalBinding
+    ] = None
     running_attachment_acquisition: Optional[
         PlayerSaveAcquisitionBundle
     ] = None
     running_attachment_context: Optional[PlayerSaveAttachmentContext] = None
+    operator_workflow_interruption_reason: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -366,6 +373,21 @@ class ActivityContinuityCoordinator:
             HomeBattleControl.RESUME_BATTLE,
         }
 
+    def request_running_reconciliation(self, activity_scope_id: str) -> bool:
+        """Rearm one same-scope check for an explicit Return Control request."""
+
+        run_id = str(activity_scope_id or "").strip()
+        scope = get_activity_scope()
+        if (
+            not run_id
+            or scope is None
+            or str(scope.get("run_id") or "") != run_id
+        ):
+            return False
+        self._checked_scope_id = None
+        self._reset_pending()
+        return True
+
     def handle(
         self,
         detection: Mapping[str, Any],
@@ -474,6 +496,7 @@ class ActivityContinuityCoordinator:
 
         use_save = self._should_read_save(scope, player_save_mode)
         attachment_observations = None
+        attachment_temporal_binding = None
         attachment_acquisition = None
         attachment_bundle_context = None
         if not self._action_logged:
@@ -502,6 +525,9 @@ class ActivityContinuityCoordinator:
             attachment_observations = (
                 save_result.running_attachment_observations
             )
+            attachment_temporal_binding = (
+                save_result.running_attachment_temporal_binding
+            )
             if active_attachment:
                 attachment_acquisition = save_result.acquisition
                 attachment_bundle_context = save_result.running_attachment_context
@@ -525,7 +551,15 @@ class ActivityContinuityCoordinator:
                 self._action_logged = False
                 self._boundary = None
                 self._retry_at = self._clock() + SOURCE_RETRY_INTERVAL_SECONDS
-                return ActivityContinuityOutcome(pending=True, recapture=True)
+                return ActivityContinuityOutcome(
+                    pending=True,
+                    recapture=True,
+                    operator_workflow_interruption_reason=(
+                        save_result.reason
+                        if save_result.operator_workflow_interrupted
+                        else None
+                    ),
+                )
             if save_result.complete:
                 metadata = _normalize_history_metadata(save_result.metadata)
                 if metadata is not None:
@@ -567,6 +601,7 @@ class ActivityContinuityCoordinator:
                             scope,
                             metadata,
                             attachment_observations=attachment_observations,
+                            attachment_temporal_binding=attachment_temporal_binding,
                             attachment_acquisition=attachment_acquisition,
                             attachment_bundle_context=attachment_bundle_context,
                         )
@@ -581,6 +616,7 @@ class ActivityContinuityCoordinator:
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_temporal_binding=attachment_temporal_binding,
                                 attachment_acquisition=attachment_acquisition,
                                 attachment_bundle_context=attachment_bundle_context,
                             )
@@ -592,6 +628,7 @@ class ActivityContinuityCoordinator:
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_temporal_binding=attachment_temporal_binding,
                                 attachment_acquisition=attachment_acquisition,
                                 attachment_bundle_context=attachment_bundle_context,
                             )
@@ -610,6 +647,7 @@ class ActivityContinuityCoordinator:
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_temporal_binding=attachment_temporal_binding,
                                 attachment_acquisition=attachment_acquisition,
                                 attachment_bundle_context=attachment_bundle_context,
                             )
@@ -618,6 +656,7 @@ class ActivityContinuityCoordinator:
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_temporal_binding=attachment_temporal_binding,
                                 attachment_acquisition=attachment_acquisition,
                                 attachment_bundle_context=attachment_bundle_context,
                             )
@@ -634,6 +673,9 @@ class ActivityContinuityCoordinator:
                                     attachment_observations=(
                                         attachment_observations
                                     ),
+                                    attachment_temporal_binding=(
+                                        attachment_temporal_binding
+                                    ),
                                     attachment_acquisition=attachment_acquisition,
                                     attachment_bundle_context=attachment_bundle_context,
                                 )
@@ -641,6 +683,7 @@ class ActivityContinuityCoordinator:
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_temporal_binding=attachment_temporal_binding,
                                 attachment_acquisition=attachment_acquisition,
                                 attachment_bundle_context=attachment_bundle_context,
                                 attachment_change_confirmed=(
@@ -740,6 +783,7 @@ class ActivityContinuityCoordinator:
             scope,
             metadata,
             attachment_observations=attachment_observations,
+            attachment_temporal_binding=attachment_temporal_binding,
             attachment_acquisition=attachment_acquisition,
             attachment_bundle_context=attachment_bundle_context,
         )
@@ -752,6 +796,9 @@ class ActivityContinuityCoordinator:
         reason: str,
         attachment_observations: Optional[
             RunningAttachmentSaveObservations
+        ] = None,
+        attachment_temporal_binding: Optional[
+            RunningAttachmentTemporalBinding
         ] = None,
         attachment_acquisition: Optional[PlayerSaveAcquisitionBundle] = None,
         attachment_bundle_context: Optional[PlayerSaveAttachmentContext] = None,
@@ -796,6 +843,10 @@ class ActivityContinuityCoordinator:
             attachment_observations,
             run_id,
         )
+        bound_temporal = _bind_attachment_temporal_binding(
+            attachment_temporal_binding,
+            run_id,
+        )
         bound_bundle_context = _bind_attachment_context(
             attachment_bundle_context,
             run_id,
@@ -804,6 +855,7 @@ class ActivityContinuityCoordinator:
             recapture=True,
             confirmed_same_battle_scope_id=run_id,
             running_attachment_observations=bound_attachment,
+            running_attachment_temporal_binding=bound_temporal,
             running_attachment_acquisition=(
                 _matching_attachment_acquisition(
                     attachment_acquisition,
@@ -890,6 +942,9 @@ class ActivityContinuityCoordinator:
         *,
         attachment_observations: Optional[
             RunningAttachmentSaveObservations
+        ] = None,
+        attachment_temporal_binding: Optional[
+            RunningAttachmentTemporalBinding
         ] = None,
         attachment_acquisition: Optional[PlayerSaveAcquisitionBundle] = None,
         attachment_bundle_context: Optional[PlayerSaveAttachmentContext] = None,
@@ -1059,6 +1114,14 @@ class ActivityContinuityCoordinator:
             if updated is not None
             else None
         )
+        bound_temporal = (
+            _bind_attachment_temporal_binding(
+                attachment_temporal_binding,
+                run_id,
+            )
+            if updated is not None
+            else None
+        )
         bound_bundle_context = (
             _bind_attachment_context(
                 attachment_bundle_context,
@@ -1072,6 +1135,7 @@ class ActivityContinuityCoordinator:
             confirmed_same_battle_scope_id=confirmed_same_battle_scope_id,
             confirmed_later_battle_scope_id=confirmed_later_battle_scope_id,
             running_attachment_observations=bound_attachment,
+            running_attachment_temporal_binding=bound_temporal,
             running_attachment_acquisition=(
                 _matching_attachment_acquisition(
                     attachment_acquisition,
@@ -1256,6 +1320,20 @@ def _bind_attachment_observations(
         return None
     try:
         return observations.bind_final_scope(activity_scope_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bind_attachment_temporal_binding(
+    binding: Optional[RunningAttachmentTemporalBinding],
+    activity_scope_id: str,
+) -> Optional[RunningAttachmentTemporalBinding]:
+    """Publish round identity even when no allowlisted fact was projected."""
+
+    if binding is None:
+        return None
+    try:
+        return binding.bind_final_scope(activity_scope_id)
     except (TypeError, ValueError):
         return None
 

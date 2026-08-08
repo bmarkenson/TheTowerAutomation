@@ -1,5 +1,6 @@
 """Game Over navigation and structured battle-stat capture."""
 
+import copy
 import os
 import time
 from datetime import datetime
@@ -54,6 +55,9 @@ def handle_game_over(
     after_retry_started: Optional[Callable[[], None]] = None,
     on_terminal_failure: Optional[Callable[[str], bool]] = None,
     return_home_after_battle: bool = False,
+    report_disposition: Optional[Mapping[str, Any]] = None,
+    captured_at: Optional[datetime] = None,
+    battle_id: Optional[str] = None,
 ):
     """
     Handle the GAME OVER flow: capture stats, close stats, and retry or pause.
@@ -92,10 +96,18 @@ def handle_game_over(
     Errors:
         Tap failures request Automation Paused without changing terminal policy.
     """
-    captured_at = datetime.now().astimezone()
+    captured_at = captured_at or datetime.now().astimezone()
+    expected_battle_id = make_battle_id(captured_at)
+    if battle_id is not None and str(battle_id) != expected_battle_id:
+        raise ValueError("battle_id does not match the supplied capture time")
+    battle_id = str(battle_id or expected_battle_id)
     session_id = _make_session_id(captured_at.timetuple())
-    battle_id = make_battle_id(captured_at)
     completed_record = None
+    disposition = (
+        copy.deepcopy(dict(report_disposition))
+        if isinstance(report_disposition, Mapping)
+        else None
+    )
     log_action_intent(
         "Completing the finished battle",
         reason=(
@@ -139,14 +151,16 @@ def handle_game_over(
         )
         if record is not None:
             attach_battle_perks(record, perks)
-            completed_record = record
-            _persist_battle_stats_record(
+            if disposition is not None:
+                record["report_disposition"] = copy.deepcopy(disposition)
+            if _persist_battle_stats_record(
                 record,
                 session_id=session_id,
                 game_stats_frame=img_game_stats,
                 more_stats_frames=[],
                 perks_frames=perks_frames,
-            )
+            ):
+                completed_record = record
         else:
             log(
                 "[BATTLE_STATS] Save-backed report unavailable "
@@ -171,14 +185,16 @@ def handle_game_over(
             )
             if record is not None:
                 attach_battle_perks(record, perks)
-                completed_record = record
-                _persist_battle_stats_record(
+                if disposition is not None:
+                    record["report_disposition"] = copy.deepcopy(disposition)
+                if _persist_battle_stats_record(
                     record,
                     session_id=session_id,
                     game_stats_frame=img_game_stats,
                     more_stats_frames=[],
                     perks_frames=perks_frames,
-                )
+                ):
+                    completed_record = record
             else:
                 log(
                     f"[BATTLE_STATS] Clipboard capture unavailable ({clipboard_reason}); "
@@ -231,6 +247,7 @@ def handle_game_over(
                     captured_at=captured_at,
                     perks=perks,
                     perks_frames=perks_frames,
+                    report_disposition=disposition,
                 )
 
             # Close More Stats only on the fallback route that opened it.
@@ -731,6 +748,7 @@ def _save_battle_stats_record(
     captured_at: Optional[datetime] = None,
     perks: Optional[Mapping[str, Any]] = None,
     perks_frames=(),
+    report_disposition: Optional[Mapping[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     """Persist OCR output and retain source images only for uncertain records."""
 
@@ -751,14 +769,18 @@ def _save_battle_stats_record(
         )
         if perks is not None:
             attach_battle_perks(record, perks)
-        _persist_battle_stats_record(
+        if isinstance(report_disposition, Mapping):
+            record["report_disposition"] = copy.deepcopy(
+                dict(report_disposition)
+            )
+        persisted = _persist_battle_stats_record(
             record,
             session_id=session_id,
             game_stats_frame=game_stats_frame,
             more_stats_frames=more_stats_frames,
             perks_frames=perks_frames,
         )
-        return record
+        return record if persisted else None
     except Exception as exc:
         log(f"[BATTLE_STATS] Structured capture failed: {exc}", "ERROR", console=True)
 
@@ -777,7 +799,7 @@ def _persist_battle_stats_record(
     game_stats_frame,
     more_stats_frames,
     perks_frames=(),
-) -> None:
+) -> bool:
     """Persist a built record and retain only the source frames it needs."""
 
     try:
@@ -794,10 +816,10 @@ def _persist_battle_stats_record(
             save_image(frame, f"{session_id}_more_stats_{index}_OCR_EVIDENCE")
         for index, frame in enumerate(perks_frames, start=1):
             save_image(frame, f"{session_id}_perks_{index}_OCR_EVIDENCE")
-        return
+        return False
 
     if not record["quality"]["retain_source_images"]:
-        return
+        return True
     warnings = "; ".join(record["quality"]["warnings"]) or "validation failed"
     log(f"[BATTLE_STATS] Retaining source screenshots: {warnings}", "WARN")
     save_image(game_stats_frame, f"{session_id}_game_stats_OCR_EVIDENCE")
@@ -805,6 +827,7 @@ def _persist_battle_stats_record(
         save_image(frame, f"{session_id}_more_stats_{index}_OCR_EVIDENCE")
     for index, frame in enumerate(perks_frames, start=1):
         save_image(frame, f"{session_id}_perks_{index}_OCR_EVIDENCE")
+    return True
 
 
 def _make_session_id(captured_at=None):

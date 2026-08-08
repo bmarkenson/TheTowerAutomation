@@ -96,6 +96,9 @@ class PlayerSaveHistoryReadResult:
         repr=False,
         compare=False,
     )
+    running_attachment_temporal_binding: Optional[
+        RunningAttachmentTemporalBinding
+    ] = field(default=None, repr=False, compare=False)
     running_attachment_context: Optional[
         "PlayerSaveAttachmentContext"
     ] = field(default=None, repr=False, compare=False)
@@ -104,6 +107,8 @@ class PlayerSaveHistoryReadResult:
         repr=False,
         compare=False,
     )
+    background_dispatched: bool = False
+    operator_workflow_interrupted: bool = False
 
     @property
     def complete(self) -> bool:
@@ -225,18 +230,12 @@ def running_attachment_observations_from_acquisition(
     allowlist are omitted rather than converted into UI claims.
     """
 
-    if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
-        raise TypeError("profile projection requires a typed acquisition")
-    if (
-        acquisition.acquisition_type
-        is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION
-        or acquisition.binding is None
-        or acquisition.captured_at is None
-        or context.target != acquisition.binding.target
-        or context.target_generation != acquisition.binding.generation
-        or not context.valid_for(context.activity_scope_id)
-        or not str(active_round_identity_fingerprint or "").strip()
-    ):
+    binding = running_attachment_temporal_binding_from_acquisition(
+        acquisition,
+        context=context,
+        active_round_identity_fingerprint=active_round_identity_fingerprint,
+    )
+    if binding is None:
         return None
     snapshot = acquisition.snapshot
     if not acquisition.complete or snapshot is None:
@@ -283,18 +282,49 @@ def running_attachment_observations_from_acquisition(
     if not projected:
         return None
     return RunningAttachmentSaveObservations(
-        binding=RunningAttachmentTemporalBinding(
-            runtime_session_id=context.runtime_session_id,
-            source_activity_scope_id=context.activity_scope_id,
-            target_binding=acquisition.binding,
-            mapping_id=mapping_id,
-            active_round_identity_fingerprint=(
-                active_round_identity_fingerprint
-            ),
-            captured_at=captured_at,
-            acquisition_type=acquisition.acquisition_type,
-        ),
+        binding=binding,
         facts=tuple(projected),
+    )
+
+
+def running_attachment_temporal_binding_from_acquisition(
+    acquisition: PlayerSaveAcquisitionBundle,
+    *,
+    context: PlayerSaveAttachmentContext,
+    active_round_identity_fingerprint: str,
+) -> Optional[RunningAttachmentTemporalBinding]:
+    """Retain typed round identity even when no configuration fact projects."""
+
+    if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+        raise TypeError("attachment binding requires a typed acquisition")
+    if (
+        acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+        or acquisition.binding is None
+        or acquisition.captured_at is None
+        or context.target != acquisition.binding.target
+        or context.target_generation != acquisition.binding.generation
+        or not context.valid_for(context.activity_scope_id)
+        or not str(active_round_identity_fingerprint or "").strip()
+        or not acquisition.complete
+        or acquisition.snapshot is None
+    ):
+        return None
+    mapping_id = str(
+        getattr(acquisition.snapshot, "mapping_id", None) or ""
+    ).strip()
+    if not mapping_id:
+        return None
+    return RunningAttachmentTemporalBinding(
+        runtime_session_id=context.runtime_session_id,
+        source_activity_scope_id=context.activity_scope_id,
+        target_binding=acquisition.binding,
+        mapping_id=mapping_id,
+        active_round_identity_fingerprint=(
+            str(active_round_identity_fingerprint).strip()
+        ),
+        captured_at=acquisition.captured_at.isoformat(),
+        acquisition_type=acquisition.acquisition_type,
     )
 
 
@@ -521,7 +551,11 @@ class PlayerSaveHistoryReader:
         )
         if serialized.status is GuardedSerializationStatus.BLOCKED:
             return _blocked(
-                f"active_attachment_{serialized.reason}"
+                f"active_attachment_{serialized.reason}",
+                background_dispatched=serialized.background_dispatched,
+                operator_workflow_interrupted=(
+                    serialized.background_dispatched
+                ),
             )
         acquisition = serialized.acquisition
         snapshot = serialized.snapshot
@@ -539,7 +573,11 @@ class PlayerSaveHistoryReader:
             return _ui_fallback("active_round_projection_unavailable")
         active_identity = runtime.active_round_identity
         if not runtime.round_active or active_identity is None:
-            return _blocked("active_round_identity_conflicted_after_restore")
+            return _blocked(
+                "active_round_identity_conflicted_after_restore",
+                background_dispatched=serialized.background_dispatched,
+                operator_workflow_interrupted=True,
+            )
         if (
             not active_identity.fingerprint
             or active_identity.game_version != snapshot.game_version
@@ -547,7 +585,11 @@ class PlayerSaveHistoryReader:
             or active_identity.rounds_started_this_tier < 0
             or active_identity.round_seed <= 0
         ):
-            return _blocked("active_round_identity_invalid_after_restore")
+            return _blocked(
+                "active_round_identity_invalid_after_restore",
+                background_dispatched=serialized.background_dispatched,
+                operator_workflow_interrupted=True,
+            )
 
         assert acquisition is not None
         try:
@@ -556,6 +598,28 @@ class PlayerSaveHistoryReader:
             observed = _ui_fallback(
                 "runtime_history_projection_unavailable",
                 acquisition=acquisition,
+            )
+        try:
+            attachment_temporal_binding = (
+                running_attachment_temporal_binding_from_acquisition(
+                    acquisition,
+                    context=context,
+                    active_round_identity_fingerprint=(
+                        active_identity.fingerprint
+                    ),
+                )
+            )
+        except Exception:
+            return _blocked(
+                "active_attachment_temporal_projection_unavailable",
+                background_dispatched=serialized.background_dispatched,
+                operator_workflow_interrupted=True,
+            )
+        if attachment_temporal_binding is None:
+            return _blocked(
+                "active_attachment_temporal_projection_unavailable",
+                background_dispatched=serialized.background_dispatched,
+                operator_workflow_interrupted=True,
             )
         try:
             attachment_observations = (
@@ -575,6 +639,9 @@ class PlayerSaveHistoryReader:
             metadata=observed.metadata,
             safe_ui_fallback=observed.safe_ui_fallback,
             running_attachment_observations=attachment_observations,
+            running_attachment_temporal_binding=(
+                attachment_temporal_binding
+            ),
             running_attachment_context=context,
             acquisition=acquisition,
         )
@@ -790,11 +857,18 @@ def _ui_fallback(
     )
 
 
-def _blocked(reason: str) -> PlayerSaveHistoryReadResult:
+def _blocked(
+    reason: str,
+    *,
+    background_dispatched: bool = False,
+    operator_workflow_interrupted: bool = False,
+) -> PlayerSaveHistoryReadResult:
     return PlayerSaveHistoryReadResult(
         PlayerSaveHistoryReadStatus.BLOCKED,
         _safe_reason(reason),
         safe_ui_fallback=False,
+        background_dispatched=background_dispatched,
+        operator_workflow_interrupted=operator_workflow_interrupted,
     )
 
 
@@ -814,5 +888,6 @@ __all__ = [
     "history_sources_compatible",
     "ui_history_bridge_eligible",
     "running_attachment_observations_from_acquisition",
+    "running_attachment_temporal_binding_from_acquisition",
     "valid_history_tail_advance",
 ]

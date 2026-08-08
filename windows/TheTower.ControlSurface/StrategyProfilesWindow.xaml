@@ -40,6 +40,8 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="3*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="2*" />
+            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
 
           <TextBlock Text="BASES" Foreground="#62D5FF"
@@ -82,7 +84,28 @@
             </ListBox.ItemTemplate>
           </ListBox>
 
-          <WrapPanel Grid.Row="4" Margin="0,10,0,0">
+          <TextBlock Grid.Row="4" Text="CAPTURED DRAFTS" Foreground="#62D5FF"
+                     FontSize="11" FontWeight="Bold" Margin="4,13,4,7"
+                     ToolTip="Save-backed drafts are immutable capture evidence until opened here and published through the normal review flow." />
+          <ListBox Grid.Row="5" x:Name="CapturedDraftsList"
+                   AutomationProperties.Name="Captured Strategy draft catalog"
+                   Background="#0D1420" BorderBrush="#263349"
+                   Foreground="#EDF2F7"
+                   SelectionChanged="CapturedDraftsList_SelectionChanged">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Margin="7,6">
+                  <TextBlock Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold"
+                             TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Id, Mode=OneWay}" Foreground="#93A4BB" FontSize="11" />
+                  <TextBlock Text="{Binding DetailLabel, Mode=OneWay}" Foreground="#7890AC"
+                             FontSize="10" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <WrapPanel Grid.Row="6" Margin="0,10,0,0">
             <Button x:Name="NewBaseButton" Content="New Base"
                     Click="NewBase_Click" />
             <Button x:Name="NewStrategyButton" Content="New Strategy"
@@ -114,6 +137,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
@@ -126,7 +150,22 @@
                        Foreground="#93A4BB" TextWrapping="Wrap" Margin="0,4,0,10" />
           </StackPanel>
 
-          <Border Grid.Row="1" x:Name="RebaseBanner" Visibility="Collapsed"
+          <Border Grid.Row="1" x:Name="CapturedDraftEvidencePanel"
+                  Visibility="Collapsed" Background="#10283A"
+                  BorderBrush="#368DB6" BorderThickness="1"
+                  CornerRadius="6" Padding="10" Margin="0,0,0,10">
+            <StackPanel>
+              <TextBlock Text="CAPTURED DRAFT EVIDENCE" Foreground="#62D5FF"
+                         FontSize="10" FontWeight="Bold" />
+              <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                <TextBlock x:Name="CapturedDraftEvidenceText"
+                           Foreground="#C8D5E6" FontFamily="Consolas"
+                           FontSize="10" TextWrapping="Wrap" />
+              </ScrollViewer>
+            </StackPanel>
+          </Border>
+
+          <Border Grid.Row="2" x:Name="RebaseBanner" Visibility="Collapsed"
                   Background="#3A2C11" BorderBrush="#D9A441" BorderThickness="1"
                   CornerRadius="6" Padding="10" Margin="0,0,0,10">
             <DockPanel>
@@ -137,7 +176,7 @@
             </DockPanel>
           </Border>
 
-          <StackPanel Grid.Row="2" Margin="0,0,0,10">
+          <StackPanel Grid.Row="3" Margin="0,0,0,10">
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="95" />
@@ -170,7 +209,7 @@
             </DockPanel>
           </StackPanel>
 
-          <DockPanel Grid.Row="3" Margin="0,0,0,8">
+          <DockPanel Grid.Row="4" Margin="0,0,0,8">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
               <RadioButton x:Name="ShowActiveOnlyButton" Content="Show active only"
                            GroupName="SettingFilter" IsChecked="True"
@@ -183,7 +222,7 @@
                        FontSize="10" FontWeight="Bold" VerticalAlignment="Center" />
           </DockPanel>
 
-          <ListView Grid.Row="4" x:Name="SettingsList"
+          <ListView Grid.Row="5" x:Name="SettingsList"
                     Background="#0D1420" BorderBrush="#263349"
                     Foreground="#EDF2F7"
                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -488,7 +527,7 @@
             </ListView.ItemTemplate>
           </ListView>
 
-          <Border Grid.Row="5" Background="#0D1420" BorderBrush="#263349"
+          <Border Grid.Row="6" Background="#0D1420" BorderBrush="#263349"
                   BorderThickness="1" CornerRadius="7" Padding="10" Margin="0,10,0,0">
             <TextBlock x:Name="ValidationSummaryText"
                        Text="Validate to refresh effective values, provenance, fingerprints, and generated rule count."

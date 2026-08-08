@@ -17,18 +17,24 @@ internal sealed record ControlSurfaceCompatibilityResult(
         && MissingCapabilities.Count == 0;
 }
 
+internal sealed record BetterControlWorkflowPresentation(
+    string Status,
+    string Label,
+    bool Pending,
+    bool Terminal);
+
 internal static class ControlSurfaceCompatibility
 {
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 28;
+    public const int MinimumServerRevision = 29;
 
     private static readonly string[] RequiredCapabilities =
     [
         "active_battle_strategy_adoption",
         "advisory_preflight_decisions",
-        "better_control_model_v1",
+        "better_control_model_v2",
         "completed_battle_discard",
         "current_run_activity_scope",
         "exclusive_strategy_validation_status",
@@ -39,6 +45,7 @@ internal static class ControlSurfaceCompatibility
         "managed_custom_module_presets_v1",
         "observed_game_speed",
         "selected_strategy_process_start",
+        "save_backed_setup_capture_v1",
         "strategy_action_gate_v1",
         "strategy_authoring_local_loadout_editors_v1",
         "strategy_authoring_profile_lifecycle_v1",
@@ -62,5 +69,70 @@ internal static class ControlSurfaceCompatibility
             status.ApiVersion,
             status.ServerRevision,
             missingCapabilities);
+    }
+
+    public static bool CanOpenSetupCapture(
+        ControlSurfaceCompatibilityResult? compatibility,
+        BetterControlModelStatus? model)
+    {
+        if (compatibility?.IsCompatible != true || model is null)
+        {
+            return false;
+        }
+        if (model.SetupCapture?.Status == "ready")
+        {
+            return true;
+        }
+        return model.Actions.TryGetValue(
+                "capture_current_setup",
+                out var availability)
+            && availability.Available;
+    }
+
+    public static BetterControlWorkflowPresentation PresentWorkflow(
+        string? status)
+    {
+        var normalized = (status ?? "unknown").Trim().ToLowerInvariant();
+        var label = normalized switch
+        {
+            "requested" => "Requested",
+            "pending" => "Pending acknowledgement",
+            "acknowledged" => "Acknowledged",
+            "action_dispatched" => "Action dispatched",
+            "validating_save" => "Validating fresh save",
+            "ready" => "Ready",
+            "completed" => "Completed",
+            "no_op" => "No change needed",
+            "stale" => "Stale",
+            "rejected" => "Rejected",
+            "unavailable" => "Unavailable",
+            "interrupted" => "Interrupted",
+            "failed" => "Failed",
+            "cancelled" => "Cancelled",
+            _ => string.Join(
+                " ",
+                normalized.Split(
+                    '_',
+                    StringSplitOptions.RemoveEmptyEntries)
+                    .Select(token => char.ToUpperInvariant(token[0]) + token[1..])),
+        };
+        var pending = normalized is "requested"
+            or "pending"
+            or "acknowledged"
+            or "action_dispatched"
+            or "validating_save";
+        var terminal = normalized is "completed"
+            or "no_op"
+            or "stale"
+            or "rejected"
+            or "unavailable"
+            or "interrupted"
+            or "failed"
+            or "cancelled";
+        return new BetterControlWorkflowPresentation(
+            normalized,
+            label,
+            pending,
+            terminal);
     }
 }

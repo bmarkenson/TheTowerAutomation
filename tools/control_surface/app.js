@@ -7,12 +7,18 @@ const state = {
   lastStatus: null,
   lastGatePrompted: null,
   lastTournamentLaunchPrompted: null,
+  captureCatalog: null,
+  captureCatalogLoading: false,
+  captureReview: null,
+  captureReviewInput: null,
 };
 
 const byId = (id) => document.getElementById(id);
 const dash = "—";
-const BETTER_CONTROL_MINIMUM_REVISION = 28;
-const BETTER_CONTROL_CAPABILITY = "better_control_model_v1";
+const BETTER_CONTROL_MINIMUM_REVISION = 29;
+const BETTER_CONTROL_CAPABILITY = "better_control_model_v2";
+const SETUP_CAPTURE_CAPABILITY = "save_backed_setup_capture_v1";
+const clientModel = globalThis.TheTowerControlClientModel;
 
 function authHeaders() {
   return state.token ? { Authorization: `Bearer ${state.token}` } : {};
@@ -182,6 +188,8 @@ function renderStatus(payload) {
     payload.api_version === 1
     && Number(payload.server_revision) >= BETTER_CONTROL_MINIMUM_REVISION
     && (payload.capabilities || []).includes(BETTER_CONTROL_CAPABILITY);
+  const setupCaptureCompatible = betterControlCompatible
+    && (payload.capabilities || []).includes(SETUP_CAPTURE_CAPABILITY);
   const processActive = Boolean(runtime.active || processService?.active);
   document.querySelectorAll("[data-process-action]").forEach((button) => {
     const action = button.dataset.processAction;
@@ -191,12 +199,13 @@ function renderStatus(payload) {
       || (action === "start" && processActive)
       || (action === "stop" && !processService?.active);
     if (action === "start" && !betterControlCompatible) {
-      button.title = "Linux API revision 28 with better_control_model_v1 is required.";
+      button.title = "Linux API revision 29 with better_control_model_v2 is required.";
     }
   });
   renderBetterControlModel(
     controlModel,
     betterControlCompatible,
+    setupCaptureCompatible,
     control.error || "",
   );
   renderRunConfiguration(
@@ -207,14 +216,14 @@ function renderStatus(payload) {
   renderGateDecision(control.gate_decision);
 }
 
-function renderBetterControlModel(model, compatible, controlError) {
+function renderBetterControlModel(model, compatible, captureCompatible, controlError) {
   const actions = model.actions || {};
   const pause = actions.pause || {};
   document.querySelectorAll('[data-control-action="pause"], #customPauseForm button').forEach((button) => {
     button.disabled = !compatible || pause.available !== true;
     button.title = compatible
       ? pause.reason || ""
-      : "Linux API revision 28 with better_control_model_v1 is required.";
+      : "Linux API revision 29 with better_control_model_v2 is required.";
   });
   for (const [id, action] of [
     ["startBattleButton", "start_battle"],
@@ -227,26 +236,27 @@ function renderBetterControlModel(model, compatible, controlError) {
     button.disabled = !compatible || availability.available !== true;
     button.title = compatible
       ? availability.reason || ""
-      : "Linux API revision 28 with better_control_model_v1 is required.";
+      : "Linux API revision 29 with better_control_model_v2 is required.";
   }
   const enable = document.querySelector('[data-control-action="enable"]');
   if (enable) {
     enable.disabled = !compatible || actions.enable?.available !== true;
     enable.title = compatible
       ? actions.enable?.reason || ""
-      : "Linux API revision 28 with better_control_model_v1 is required.";
+      : "Linux API revision 29 with better_control_model_v2 is required.";
   }
   const applyTerminalPolicy = byId("applyModeButton");
   applyTerminalPolicy.disabled = !compatible || Boolean(controlError);
   applyTerminalPolicy.title = controlError
     || (compatible
       ? "Set future terminal behavior without dispatching an immediate battle action."
-      : "Linux API revision 28 with better_control_model_v1 is required.");
+      : "Linux API revision 29 with better_control_model_v2 is required.");
   const workflow = model.battle_workflow;
+  const workflowStatus = clientModel.workflowPresentation(workflow?.status);
   setText(
     "battleWorkflowSummary",
     workflow
-      ? `${humanize(workflow.intent)} · ${humanize(workflow.status)}${workflow.reason ? ` — ${workflow.reason}` : ""}`
+      ? `${humanize(workflow.intent)} · ${workflowStatus.label}${workflow.reason ? ` — ${workflow.reason}` : ""}`
       : `${humanize(model.observation?.game_state || "unknown")} — choose only an available matching intent.`,
   );
   const manual = model.manual_control;
@@ -254,6 +264,9 @@ function renderBetterControlModel(model, compatible, controlError) {
     "manualControlSummary",
     manual
       ? `${humanize(manual.status)}${manual.detail ? ` — ${manual.detail}` : ""}`
+        + (manual.surrender_collection
+          ? ` · manual Surrender collection: ${humanize(manual.surrender_collection)}`
+          : "")
       : "Automation retains control.",
   );
   const terminalPolicy = model.when_battle_ends || {};
@@ -263,6 +276,363 @@ function renderBetterControlModel(model, compatible, controlError) {
       ? `${humanize(terminalPolicy.status || "selected")} — ${terminalPolicy.reason}`
       : "Future terminal policy status is unavailable.",
   );
+  renderSetupCapture(
+    model.setup_capture,
+    actions.capture_current_setup || {},
+    captureCompatible,
+  );
+}
+
+function renderSetupCapture(capture, availability, compatible) {
+  const button = byId("captureSetupButton");
+  const status = capture?.status || "";
+  const reviewable = status === "ready";
+  const inProgress = ["requested", "acknowledged", "capturing"].includes(status);
+  button.textContent = reviewable
+    ? "Review captured setup…"
+    : inProgress
+      ? "Capturing current setup…"
+      : "Capture current setup as…";
+  button.disabled = !compatible
+    || inProgress
+    || (!reviewable && availability.available !== true);
+  button.title = compatible
+    ? reviewable
+      ? "Review the fresh save-backed capture and save a new inactive artifact."
+      : availability.reason || ""
+    : "Linux API revision 29 with save_backed_setup_capture_v1 is required.";
+
+  const labels = {
+    requested: "Capture requested; waiting for the exact runtime owner.",
+    acknowledged: "Runtime acknowledged the capture request.",
+    capturing: "Requesting and restoring a newly serialized save.",
+    ready: "Fresh save capture is ready for review.",
+    saved: "Capture saved as a new inactive artifact.",
+    cancelled: "Capture review was cancelled.",
+    unavailable: "Capture could not obtain fresh evidence.",
+    interrupted: "Capture was interrupted without consuming cached evidence.",
+    failed: "Capture failed without changing runtime selection.",
+  };
+  setText(
+    "captureSetupSummary",
+    capture
+      ? `${labels[status] || humanize(status)}${capture.reason ? ` — ${capture.reason}` : ""}`
+      : availability.reason || "No setup capture is active.",
+  );
+  const dialog = byId("captureSetupDialog");
+  if (dialog.open) renderCaptureDialog(capture, state.captureCatalog);
+  if (
+    reviewable
+    && !clientModel.captureCatalogMatches(
+      capture,
+      state.captureCatalog?.capture,
+    )
+    && !state.captureCatalogLoading
+  ) {
+    loadSetupCaptureCatalog().catch((error) => toast(error.message, true));
+  }
+}
+
+function captureFromState() {
+  return clientModel.chooseLatestCapture(
+    state.lastStatus?.control_model?.setup_capture,
+    state.captureCatalog?.capture,
+  );
+}
+
+function captureValue(value) {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function captureRow(titleText, detailText) {
+  const row = document.createElement("div");
+  row.className = "capture-row";
+  const title = document.createElement("strong");
+  const detail = document.createElement("span");
+  title.textContent = titleText;
+  detail.textContent = detailText;
+  row.append(title, detail);
+  return row;
+}
+
+function populateCaptureList(container, rows, emptyText) {
+  container.replaceChildren();
+  if (!rows.length) {
+    container.append(captureRow("None", emptyText));
+    return;
+  }
+  rows.forEach((row) => container.append(row));
+}
+
+function populateCaptureBases(catalog) {
+  const select = byId("captureBase");
+  const selected = select.value;
+  select.replaceChildren();
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "No Base (compare with an empty draft)";
+  select.append(none);
+  for (const base of catalog?.bases?.items || []) {
+    for (const revision of base.revisions || []) {
+      const option = document.createElement("option");
+      option.value = `${base.id}@${revision.revision}`;
+      option.textContent = `${base.display_name || base.id} · revision ${revision.revision}`;
+      select.append(option);
+    }
+  }
+  if (Array.from(select.options).some((option) => option.value === selected)) {
+    select.value = selected;
+  }
+}
+
+function renderCaptureDialog(capture, catalog) {
+  const preview = capture?.preview;
+  setText("captureStatus", capture?.status ? humanize(capture.status) : dash);
+  setText(
+    "captureEvidenceSource",
+    capture?.acquisition_source === "retained_return_control_refresh"
+      ? "Exact retained Return Control forced save · no new device input"
+      : capture?.acquisition_source === "new_setup_capture_refresh"
+        ? "New setup-capture forced save"
+        : dash,
+  );
+  setText("captureTimestamp", formatDate(preview?.captured_at));
+  setText(
+    "captureMapping",
+    preview?.mapping_id
+      ? `${preview.mapping_id} · ${humanize(preview.mapping_maturity || "unknown")}`
+      : dash,
+  );
+  setText(
+    "captureFieldCount",
+    preview?.settings ? Object.keys(preview.settings).length : dash,
+  );
+  setText(
+    "captureDialogStatus",
+    capture?.reason
+      ? `${humanize(capture.status)} — ${capture.reason}`
+      : capture?.status === "ready"
+        ? "Review the exact forced-save projection. Unresolved rows remain unresolved."
+        : "Waiting for the runtime-owned forced serialization and restoration.",
+  );
+  const settingRows = Object.entries(preview?.settings || {}).map(
+    ([settingId, value]) => captureRow(humanize(settingId), captureValue(value)),
+  );
+  populateCaptureList(
+    byId("captureSettings"),
+    settingRows,
+    "The fresh save contained no representable authoring values.",
+  );
+  const unresolvedRows = (preview?.unresolved || []).map((item) =>
+    captureRow(
+      item.display_name || humanize(item.setting_id || "unknown"),
+      `${humanize(item.status || "unresolved")} — ${item.reason || "reason unavailable"}`
+        + (Object.hasOwn(item, "observed_value")
+          ? `\nObserved: ${captureValue(item.observed_value)}`
+          : ""),
+    ));
+  populateCaptureList(
+    byId("captureUnresolved"),
+    unresolvedRows,
+    "Every captured value is representable by existing authoring owners.",
+  );
+  populateCaptureBases(catalog);
+  byId("captureSetupForm").hidden = capture?.status !== "ready";
+  byId("cancelCaptureButton").disabled = !capture
+    || ["capturing", "saved", "cancelled", "failed", "interrupted", "unavailable"].includes(capture.status);
+  updateCaptureFormState();
+}
+
+function selectedCaptureBase() {
+  const selected = byId("captureBase").value;
+  if (!selected) return null;
+  const [id, revisionText] = selected.split("@");
+  return { id, revision: Number(revisionText) };
+}
+
+function captureStrategyFields() {
+  const fields = {
+    kind: "strategy_draft",
+    id: byId("captureId").value.trim(),
+    display_name: byId("captureDisplayName").value.trim(),
+    tier: Number(byId("captureTier").value),
+  };
+  const base = selectedCaptureBase();
+  if (base) fields.base = base;
+  return fields;
+}
+
+function captureReviewSignature() {
+  return JSON.stringify(captureStrategyFields());
+}
+
+function clearCaptureReview() {
+  state.captureReview = null;
+  state.captureReviewInput = null;
+  const review = byId("captureDifferenceReview");
+  review.hidden = true;
+  review.replaceChildren();
+}
+
+function updateCaptureFormState() {
+  const strategy = byId("captureKind").value === "strategy_draft";
+  byId("captureTierLabel").hidden = !strategy;
+  byId("captureBaseLabel").hidden = !strategy;
+  byId("captureTier").required = strategy;
+  byId("reviewCaptureButton").hidden = !strategy;
+  const ready = captureFromState()?.status === "ready";
+  const reviewed = strategy
+    && state.captureReview
+    && state.captureReviewInput === captureReviewSignature();
+  const modulesAvailable = Boolean(
+    captureFromState()?.preview?.settings?.modules?.local,
+  );
+  byId("saveCaptureButton").disabled = !ready
+    || (strategy ? !reviewed : !modulesAvailable);
+  byId("saveCaptureButton").title = !strategy && !modulesAvailable
+    ? "This capture has no complete local Module loadout to save."
+    : strategy && !reviewed
+      ? "Review captured-versus-Base differences before saving."
+      : "Saving creates a new inactive artifact only.";
+}
+
+function renderCaptureDifference(review) {
+  const container = byId("captureDifferenceReview");
+  container.replaceChildren();
+  const difference = review?.captured_vs_base || {};
+  const base = difference.base;
+  container.append(captureRow(
+    base ? `Compared with ${base.id} revision ${base.revision}` : "Compared with an empty draft",
+    `${difference.change_count || 0} effective difference(s); ${(difference.provenance_changed || []).length} provenance-only difference(s).`,
+  ));
+  for (const item of difference.changed || []) {
+    container.append(captureRow(
+      item.display_name || humanize(item.setting_id),
+      `Base: ${captureValue(item.before)}\nCaptured: ${captureValue(item.after)}`,
+    ));
+  }
+  container.append(captureRow(
+    "Unresolved capture fields",
+    `${(review?.unresolved || []).length} field(s) remain explicit and are not inherited from the comparison Base.`,
+  ));
+  container.hidden = false;
+}
+
+async function loadSetupCaptureCatalog() {
+  if (state.captureCatalogLoading) return state.captureCatalog;
+  state.captureCatalogLoading = true;
+  try {
+    state.captureCatalog = await api("/api/v1/setup-capture");
+    renderCaptureDialog(state.captureCatalog.capture, state.captureCatalog);
+    return state.captureCatalog;
+  } finally {
+    state.captureCatalogLoading = false;
+  }
+}
+
+async function openSetupCapture() {
+  const dialog = byId("captureSetupDialog");
+  if (!dialog.open) dialog.showModal();
+  clearCaptureReview();
+  try {
+    let capture = captureFromState();
+    if (capture?.status === "ready") {
+      await loadSetupCaptureCatalog();
+      return;
+    }
+    state.captureCatalog = await api("/api/v1/setup-capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "request" }),
+    });
+    renderCaptureDialog(state.captureCatalog.capture, state.captureCatalog);
+    toast("Fresh save-backed setup capture requested");
+    await refresh();
+  } catch (error) {
+    toast(error.message, true);
+    dialog.close();
+  }
+}
+
+async function reviewSetupCapture() {
+  const capture = captureFromState();
+  if (capture?.status !== "ready") return;
+  try {
+    const fields = captureStrategyFields();
+    const response = await api("/api/v1/setup-capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "review",
+        request_id: capture.request_id,
+        expected_preview_fingerprint: capture.preview_fingerprint,
+        ...fields,
+      }),
+    });
+    state.captureCatalog = response;
+    state.captureReview = response.review;
+    state.captureReviewInput = JSON.stringify(fields);
+    renderCaptureDifference(response.review);
+    updateCaptureFormState();
+    toast("Captured-versus-Base differences are ready for review");
+  } catch (error) {
+    clearCaptureReview();
+    updateCaptureFormState();
+    toast(error.message, true);
+  }
+}
+
+async function saveSetupCapture() {
+  const capture = captureFromState();
+  if (capture?.status !== "ready") return;
+  const strategy = byId("captureKind").value === "strategy_draft";
+  const fields = strategy
+    ? captureStrategyFields()
+    : {
+        kind: "module_preset",
+        id: byId("captureId").value.trim(),
+        display_name: byId("captureDisplayName").value.trim(),
+      };
+  const payload = {
+    operation: "save",
+    request_id: capture.request_id,
+    expected_preview_fingerprint: capture.preview_fingerprint,
+    ...fields,
+  };
+  if (strategy) payload.expected_review_fingerprint = state.captureReview?.review_fingerprint;
+  try {
+    const response = await api("/api/v1/setup-capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    state.captureCatalog = response;
+    renderCaptureDialog(response.capture, response);
+    const saved = response.request?.saved_result || {};
+    toast(`Saved ${saved.display_name || saved.id}; nothing was selected or applied`);
+    await refresh();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function cancelSetupCapture() {
+  const capture = captureFromState();
+  if (!capture?.request_id) return;
+  try {
+    state.captureCatalog = await api("/api/v1/setup-capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "cancel", request_id: capture.request_id }),
+    });
+    byId("captureSetupDialog").close();
+    clearCaptureReview();
+    toast("Setup capture review cancelled");
+    await refresh();
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 function renderExclusiveValidation(control) {
@@ -591,7 +961,7 @@ async function sendProcess(payload, successMessage) {
 }
 
 function setControlsBusy(busy) {
-  document.querySelectorAll("[data-control-action], [data-process-action], #applyModeButton, #customPauseForm button, #configureRunButton").forEach((button) => {
+  document.querySelectorAll("[data-control-action], [data-process-action], #applyModeButton, #customPauseForm button, #configureRunButton, #captureSetupButton").forEach((button) => {
     button.disabled = busy;
   });
   if (!busy && state.lastStatus) renderStatus(state.lastStatus);
@@ -815,6 +1185,11 @@ document.addEventListener("click", (event) => {
   if (control) {
     const action = control.dataset.controlAction;
     if (action === "stop" && !window.confirm("Persist STOPPED for the automation runtime?")) return;
+    if (action === "take_manual_control") {
+      const dialog = byId("manualControlDialog");
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
     const payload = { action };
     if (control.dataset.minutes) payload.minutes = Number(control.dataset.minutes);
     if (control.dataset.mode) payload.mode = control.dataset.mode;
@@ -832,6 +1207,22 @@ byId("customPauseForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const minutes = Number(byId("customPauseMinutes").value);
   sendControl({ action: "pause", minutes }, `Paused for ${minutes} minutes`);
+});
+
+byId("manualControlForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const selected = event.currentTarget.querySelector(
+    'input[name="manualSurrenderCollection"]:checked',
+  );
+  if (!selected) return;
+  byId("manualControlDialog").close();
+  sendControl(
+    {
+      action: "take_manual_control",
+      manual_surrender_collection: selected.value,
+    },
+    `Manual Control requested; manual Surrender collection is ${humanize(selected.value)}`,
+  );
 });
 
 byId("applyModeButton").addEventListener("click", () => {
@@ -865,6 +1256,21 @@ byId("battleRows").addEventListener("keydown", (event) => {
 
 byId("authButton").addEventListener("click", showAuthDialog);
 byId("configureRunButton").addEventListener("click", openRunConfiguration);
+byId("captureSetupButton").addEventListener("click", openSetupCapture);
+byId("reviewCaptureButton").addEventListener("click", reviewSetupCapture);
+byId("cancelCaptureButton").addEventListener("click", cancelSetupCapture);
+byId("captureSetupForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveSetupCapture();
+});
+byId("captureSetupForm").addEventListener("input", () => {
+  clearCaptureReview();
+  updateCaptureFormState();
+});
+byId("captureSetupForm").addEventListener("change", () => {
+  clearCaptureReview();
+  updateCaptureFormState();
+});
 byId("tournamentLaunchButton").addEventListener("click", openTournamentLaunch);
 byId("startTournamentLaunchButton").addEventListener(
   "click",

@@ -1433,9 +1433,23 @@ public partial class MainWindow : Window
             }
             else
             {
-                response = await _api.PostControlAsync(
-                    new { action = tag },
-                    CancellationToken.None);
+                response = string.Equals(
+                    tag,
+                    "take_manual_control",
+                    StringComparison.Ordinal)
+                    ? await _api.PostControlAsync(
+                        new
+                        {
+                            action = tag,
+                            manual_surrender_collection =
+                                (ManualSurrenderCollectionBox.SelectedItem as ComboBoxItem)
+                                    ?.Tag?.ToString()
+                                ?? "minimal",
+                        },
+                        CancellationToken.None)
+                    : await _api.PostControlAsync(
+                        new { action = tag },
+                        CancellationToken.None);
             }
             RenderStatus(response);
             await RefreshActivityAsync(force: true);
@@ -2630,7 +2644,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 28 with better_control_model_v1 is required."
+                    "Linux API revision 29 with better_control_model_v2 is required."
                 );
             }
             if (model is not null
@@ -2653,6 +2667,17 @@ public partial class MainWindow : Window
         var giveBack = Action("return_control");
         ReturnControlButton.IsEnabled = giveBack.Available;
         ReturnControlButton.ToolTip = giveBack.Reason;
+        var captureAction = Action("capture_current_setup");
+        var captureReady = model?.SetupCapture?.Status == "ready";
+        CaptureSetupButton.IsEnabled =
+            ControlSurfaceCompatibility.CanOpenSetupCapture(
+                _serverCompatibility,
+                model);
+        CaptureSetupButton.ToolTip = _serverCompatibility?.IsCompatible != true
+            ? captureAction.Reason
+            : captureReady
+            ? "Review the fresh capture and save a new inactive artifact."
+            : captureAction.Reason;
         var enable = Action("enable");
         ResumeButton.IsEnabled = processActive && enable.Available;
         ResumeButton.ToolTip = enable.Reason;
@@ -2666,7 +2691,8 @@ public partial class MainWindow : Window
 
         BattleWorkflowText.Text = model?.BattleWorkflow is { } workflow
             ? $"{FormatStatusToken(workflow.Intent)} · "
-                + $"{FormatStatusToken(workflow.Status)}"
+                + ControlSurfaceCompatibility.PresentWorkflow(
+                    workflow.Status).Label
                 + (string.IsNullOrWhiteSpace(workflow.Reason)
                     ? ""
                     : $" — {workflow.Reason}")
@@ -2682,7 +2708,22 @@ public partial class MainWindow : Window
                 + (string.IsNullOrWhiteSpace(manual.RefreshStatus)
                     ? ""
                     : $" ({FormatStatusToken(manual.RefreshStatus)})")
+                + $" · manual Surrender collection: "
+                + $"{FormatStatusToken(manual.SurrenderCollection)}"
             : "Automation retains control.";
+        CaptureSetupText.Text = model?.SetupCapture is { } capture
+            ? $"{FormatStatusToken(capture.Status)}"
+                + (string.IsNullOrWhiteSpace(capture.Reason)
+                    ? ""
+                    : $" — {capture.Reason}")
+            : captureAction.Reason;
+    }
+
+    private void CaptureSetup_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SetupCaptureWindow(_api) { Owner = this };
+        dialog.ShowDialog();
+        _ = RefreshStatusAsync(force: true);
     }
 
     private void HostPerformance_SnapshotUpdated(

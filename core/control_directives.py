@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -20,10 +21,19 @@ from core.gate_decisions import (
 from core.control_model import (
     BATTLE_INTENTS,
     BATTLE_WORKFLOW_TERMINAL_STATUSES,
+    HOME_RETURN_RECONCILIATION_KIND,
+    MANUAL_SURRENDER_COLLECTIONS,
+    TERMINAL_RETURN_RECONCILIATION_KIND,
     MANUAL_CONTROL_TERMINAL_STATUSES,
+    SETUP_CAPTURE_GAME_STATES,
+    SETUP_CAPTURE_TERMINAL_STATUSES,
     intent_matches_evidence,
     validate_battle_workflow,
     validate_manual_control,
+    validate_manual_terminal_evidence,
+    validate_save_reconciliation_receipt,
+    validate_setup_capture,
+    validate_setup_capture_preview,
     validate_workflow_evidence,
 )
 from core.exclusive_validation import (
@@ -189,6 +199,13 @@ class ControlDirectiveStore:
                 and validate_manual_control(data.get("manual_control")) is None
                 else None
             ),
+            "setup_capture": validate_setup_capture(data.get("setup_capture")),
+            "setup_capture_error": (
+                "setup capture directive is malformed"
+                if data.get("setup_capture") is not None
+                and validate_setup_capture(data.get("setup_capture")) is None
+                else None
+            ),
             "path": str(self.path),
             "exists": self.path.exists(),
         }
@@ -257,6 +274,17 @@ class ControlDirectiveStore:
                 raise ValueError(
                     "Return control before requesting a battle workflow"
                 )
+            capture = validate_setup_capture(data.get("setup_capture"))
+            if data.get("setup_capture") is not None and capture is None:
+                raise ValueError(
+                    "Existing setup capture directive is malformed; it was preserved"
+                )
+            if capture is not None and capture["status"] in {
+                "requested",
+                "acknowledged",
+                "capturing",
+            }:
+                raise ValueError("Setup capture currently owns device input")
             timestamp = _timestamp_at(now)
             if normalized_intent == "start_battle":
                 effective_strategy = (
@@ -346,14 +374,13 @@ class ControlDirectiveStore:
             "validating_save": {
                 "awaiting_configuration",
                 "ready",
-                "completed",
+                "action_dispatched",
                 "interrupted",
                 "failed",
             },
             "awaiting_configuration": {
                 "validating_save",
                 "ready",
-                "completed",
                 "interrupted",
                 "failed",
             },
@@ -363,7 +390,12 @@ class ControlDirectiveStore:
                 "interrupted",
                 "failed",
             },
-            "action_dispatched": {"completed", "interrupted", "failed"},
+            "action_dispatched": {
+                "ready",
+                "completed",
+                "interrupted",
+                "failed",
+            },
         }
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
@@ -377,6 +409,19 @@ class ControlDirectiveStore:
                 raise ValueError(
                     "Battle workflow cannot transition from "
                     f"{current_status} to {normalized_status}"
+                )
+            if (
+                workflow["intent"] == "attach_battle"
+                and normalized_status == "ready"
+                and validate_save_reconciliation_receipt(
+                    save_receipt,
+                    expected_kind="running_attachment_reconciliation",
+                    expected_workflow_id=normalized_id,
+                )
+                is None
+            ):
+                raise ValueError(
+                    "Attach cannot become ready without a typed forced-save receipt"
                 )
             timestamp = _timestamp_at(now)
             workflow["status"] = normalized_status
@@ -414,6 +459,7 @@ class ControlDirectiveStore:
         *,
         evidence: Mapping[str, object],
         reason: str = "operator",
+        surrender_collection: str = "minimal",
         source: Optional[str] = None,
         now: Optional[float] = None,
     ) -> dict[str, Any]:
@@ -421,12 +467,19 @@ class ControlDirectiveStore:
 
         normalized_evidence = validate_workflow_evidence(evidence)
         normalized_reason = str(reason or "").strip().lower()
+        normalized_collection = str(
+            surrender_collection or ""
+        ).strip().lower()
         if normalized_evidence is None:
             raise ValueError(
                 "Manual control requires fresh exact runtime observation evidence"
             )
         if normalized_reason not in {"operator", "unexpected_manual_activity"}:
             raise ValueError("Unsupported manual-control reason")
+        if normalized_collection not in MANUAL_SURRENDER_COLLECTIONS:
+            raise ValueError(
+                "Manual surrender collection must be minimal or full"
+            )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             raw_manual = data.get("manual_control")
@@ -440,6 +493,17 @@ class ControlDirectiveStore:
                 and current["status"] not in MANUAL_CONTROL_TERMINAL_STATUSES
             ):
                 raise ValueError("Manual control is already in progress")
+            capture = validate_setup_capture(data.get("setup_capture"))
+            if data.get("setup_capture") is not None and capture is None:
+                raise ValueError(
+                    "Existing setup capture directive is malformed; it was preserved"
+                )
+            if capture is not None and capture["status"] in {
+                "requested",
+                "acknowledged",
+                "capturing",
+            }:
+                raise ValueError("Setup capture currently owns device input")
             timestamp = _timestamp_at(now)
             workflow = validate_battle_workflow(data.get("battle_workflow"))
             if (
@@ -461,6 +525,7 @@ class ControlDirectiveStore:
                 "manual_control_id": uuid4().hex,
                 "status": "pause_requested",
                 "reason": normalized_reason,
+                "surrender_collection": normalized_collection,
                 "requested_at": timestamp,
                 "updated_at": timestamp,
                 "starting_evidence": normalized_evidence,
@@ -478,6 +543,258 @@ class ControlDirectiveStore:
 
         saved = self.update(mutate)
         return dict(saved["manual_control"])
+
+    def request_setup_capture(
+        self,
+        *,
+        evidence: Mapping[str, object],
+        source_manual_control_id: Optional[str] = None,
+        source: Optional[str] = None,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Request one runtime-owned forced-save setup projection."""
+
+        normalized_evidence = validate_workflow_evidence(evidence)
+        if (
+            normalized_evidence is None
+            or normalized_evidence.get("game_state")
+            not in SETUP_CAPTURE_GAME_STATES
+        ):
+            raise ValueError(
+                "Setup capture requires fresh Home New, Home Resume, or active-battle evidence"
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            raw_capture = data.get("setup_capture")
+            current = validate_setup_capture(raw_capture)
+            if raw_capture is not None and current is None:
+                raise ValueError(
+                    "Existing setup capture directive is malformed; it was preserved"
+                )
+            if (
+                current is not None
+                and current["status"] not in SETUP_CAPTURE_TERMINAL_STATUSES
+            ):
+                raise ValueError(
+                    "Save or cancel the current setup capture before requesting another"
+                )
+            workflow = validate_battle_workflow(data.get("battle_workflow"))
+            if (
+                workflow is not None
+                and workflow["status"] not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            ):
+                raise ValueError(
+                    "Complete the current battle workflow before capturing setup"
+                )
+            manual = validate_manual_control(data.get("manual_control"))
+            normalized_manual_id = str(
+                source_manual_control_id or ""
+            ).strip()
+            retained_return_receipt = (
+                validate_save_reconciliation_receipt(
+                    manual.get("save_receipt"),
+                    expected_kind="return_control_reconciliation",
+                    expected_workflow_id=normalized_manual_id,
+                )
+                if normalized_manual_id and manual is not None
+                else None
+            )
+            retained_configuration = (
+                retained_return_receipt.get("configuration")
+                if isinstance(retained_return_receipt, Mapping)
+                else None
+            )
+            retained_return_source = bool(
+                normalized_manual_id
+                and manual is not None
+                and manual.get("manual_control_id") == normalized_manual_id
+                and manual.get("status") == "awaiting_configuration"
+                and manual.get("refresh_status") == "trusted_mismatch_paused"
+                and isinstance(retained_configuration, Mapping)
+                and retained_configuration.get("status") == "partial"
+                and bool(retained_configuration.get("unresolved_check_ids"))
+            )
+            if normalized_manual_id and not retained_return_source:
+                raise ValueError(
+                    "Setup capture may reuse only the exact retained forced "
+                    "save from a trusted-mismatch Return Control workflow"
+                )
+            if (
+                manual is not None
+                and manual["status"] not in MANUAL_CONTROL_TERMINAL_STATUSES
+                and not retained_return_source
+            ):
+                raise ValueError(
+                    "Return control before capturing the current setup"
+                )
+            timestamp = _timestamp_at(now)
+            capture = {
+                "schema_version": 1,
+                "request_id": uuid4().hex,
+                "status": "requested",
+                "requested_at": timestamp,
+                "updated_at": timestamp,
+                "evidence": normalized_evidence,
+                "acquisition_source": (
+                    "retained_return_control_refresh"
+                    if retained_return_source
+                    else "new_setup_capture_refresh"
+                ),
+                "updated_by": source or "operator",
+            }
+            if retained_return_source:
+                capture["source_manual_control_id"] = normalized_manual_id
+            data["setup_capture"] = capture
+            data["updated_at"] = timestamp
+            data["updated_by"] = source or "operator"
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["setup_capture"])
+
+    def transition_setup_capture(
+        self,
+        request_id: str,
+        status: str,
+        *,
+        reason: Optional[str] = None,
+        acknowledgement: Optional[Mapping[str, object]] = None,
+        preview: Optional[Mapping[str, object]] = None,
+        saved_result: Optional[Mapping[str, object]] = None,
+        source: str = "runtime",
+        now: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Advance only the exact current capture through its typed ledger."""
+
+        normalized_id = str(request_id or "").strip()
+        normalized_status = str(status or "").strip().lower()
+        transitions = {
+            "requested": {
+                "acknowledged",
+                "unavailable",
+                "interrupted",
+                "failed",
+                "cancelled",
+            },
+            "acknowledged": {
+                "capturing",
+                "unavailable",
+                "interrupted",
+                "failed",
+                "cancelled",
+            },
+            "capturing": {
+                "ready",
+                "unavailable",
+                "interrupted",
+                "failed",
+            },
+            "ready": {"saved", "cancelled", "interrupted", "failed"},
+        }
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            capture = validate_setup_capture(data.get("setup_capture"))
+            if capture is None or capture["request_id"] != normalized_id:
+                return data
+            current_status = str(capture["status"])
+            if current_status == normalized_status:
+                return data
+            if normalized_status not in transitions.get(current_status, set()):
+                raise ValueError(
+                    "Setup capture cannot transition from "
+                    f"{current_status} to {normalized_status}"
+                )
+            timestamp = _timestamp_at(now)
+            capture["status"] = normalized_status
+            capture["updated_at"] = timestamp
+            capture["updated_by"] = source
+            if reason:
+                capture["reason"] = _bounded_text(reason, 512)
+            if acknowledgement is not None:
+                capture["acknowledgement"] = dict(acknowledgement)
+            if preview is not None:
+                if normalized_status != "ready":
+                    raise ValueError(
+                        "A setup capture preview is valid only for the ready transition"
+                    )
+                normalized_preview = validate_setup_capture_preview(
+                    preview,
+                    evidence=capture.get("evidence"),
+                )
+                if normalized_preview is None:
+                    raise ValueError(
+                        "Setup capture preview lacks exact forced-save workflow evidence"
+                    )
+                capture["preview"] = normalized_preview
+                capture["preview_fingerprint"] = _mapping_fingerprint(
+                    normalized_preview
+                )
+            if saved_result is not None:
+                capture["saved_result"] = dict(saved_result)
+            if normalized_status in {"acknowledged", "capturing"} and (
+                "acknowledged_at" not in capture
+            ):
+                capture["acknowledged_at"] = timestamp
+            if normalized_status in SETUP_CAPTURE_TERMINAL_STATUSES:
+                capture["completed_at"] = timestamp
+            data["setup_capture"] = capture
+            data["updated_at"] = timestamp
+            data["updated_by"] = source
+            return data
+
+        saved = self.update(mutate)
+        capture = validate_setup_capture(saved.get("setup_capture"))
+        if capture is None or capture["request_id"] != normalized_id:
+            return None
+        return capture
+
+    def record_manual_terminal_evidence(
+        self,
+        manual_control_id: str,
+        evidence: Mapping[str, object],
+        *,
+        source: str = "runtime",
+        now: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Persist one exact-run terminal classification without changing input."""
+
+        normalized_id = str(manual_control_id or "").strip()
+        normalized_evidence = validate_manual_terminal_evidence(
+            evidence,
+            expected_workflow_id=normalized_id,
+        )
+        if normalized_evidence is None:
+            raise ValueError("Manual terminal evidence is invalid")
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            manual = validate_manual_control(data.get("manual_control"))
+            if manual is None or manual["manual_control_id"] != normalized_id:
+                return data
+            if manual["status"] in MANUAL_CONTROL_TERMINAL_STATUSES:
+                return data
+            existing_evidence = manual.get("terminal_evidence")
+            if isinstance(existing_evidence, Mapping):
+                if existing_evidence.get("status") != "unavailable":
+                    return data
+                if normalized_evidence.get("status") == "unavailable":
+                    return data
+            timestamp = _timestamp_at(now)
+            manual["terminal_evidence"] = normalized_evidence
+            manual["refresh_status"] = (
+                "manual_terminal_confirmed"
+                if normalized_evidence["status"] != "unavailable"
+                else "manual_terminal_evidence_unavailable"
+            )
+            manual["updated_at"] = timestamp
+            manual["updated_by"] = source
+            data["manual_control"] = manual
+            data["updated_at"] = timestamp
+            data["updated_by"] = source
+            return data
+
+        saved = self.update(mutate)
+        manual = validate_manual_control(saved.get("manual_control"))
+        return dict(manual) if manual is not None else None
 
     def request_return_control(
         self,
@@ -556,7 +873,18 @@ class ControlDirectiveStore:
                 "failed",
             },
             "awaiting_enable": {"reconciling", "interrupted", "failed"},
-            "reconciling": {"completed", "interrupted", "failed"},
+            "reconciling": {
+                "awaiting_configuration",
+                "completed",
+                "interrupted",
+                "failed",
+            },
+            "awaiting_configuration": {
+                "reconciling",
+                "completed",
+                "interrupted",
+                "failed",
+            },
         }
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
@@ -571,6 +899,23 @@ class ControlDirectiveStore:
                     "Manual control cannot transition from "
                     f"{current_status} to {normalized_status}"
                 )
+            if normalized_status == "completed":
+                validated_receipt = validate_save_reconciliation_receipt(
+                    save_receipt,
+                    expected_workflow_id=normalized_id,
+                )
+                if (
+                    validated_receipt is None
+                    or validated_receipt.get("kind")
+                    not in {
+                        "return_control_reconciliation",
+                        HOME_RETURN_RECONCILIATION_KIND,
+                        TERMINAL_RETURN_RECONCILIATION_KIND,
+                    }
+                ):
+                    raise ValueError(
+                        "Return Control cannot complete without a typed save receipt"
+                    )
             timestamp = _timestamp_at(now)
             manual["status"] = normalized_status
             manual["updated_at"] = timestamp
@@ -615,7 +960,11 @@ class ControlDirectiveStore:
             manual = validate_manual_control(data.get("manual_control"))
             if manual is None or manual["manual_control_id"] != normalized_id:
                 raise ValueError("Manual control request is no longer current")
-            if manual["status"] not in {"return_requested", "awaiting_enable"}:
+            if manual["status"] not in {
+                "return_requested",
+                "awaiting_enable",
+                "awaiting_configuration",
+            }:
                 raise ValueError(
                     "Use Return Control before enabling automated actions"
                 )
@@ -626,10 +975,21 @@ class ControlDirectiveStore:
             ):
                 return data
             timestamp = _timestamp_at(now)
+            retrying_configuration = (
+                manual["status"] == "awaiting_configuration"
+            )
             manual.update(
                 {
-                    "status": "awaiting_enable",
-                    "refresh_status": "save_refresh_pending_after_enable",
+                    "status": (
+                        "awaiting_configuration"
+                        if retrying_configuration
+                        else "awaiting_enable"
+                    ),
+                    "refresh_status": (
+                        "configuration_retry_after_enable"
+                        if retrying_configuration
+                        else "save_refresh_pending_after_enable"
+                    ),
                     "updated_at": timestamp,
                     "updated_by": source or "operator",
                 }
@@ -689,6 +1049,22 @@ class ControlDirectiveStore:
                     }
                 )
                 data["manual_control"] = manual
+            capture = validate_setup_capture(data.get("setup_capture"))
+            if capture is not None and capture["status"] in {
+                "requested",
+                "acknowledged",
+                "capturing",
+            }:
+                capture.update(
+                    {
+                        "status": "interrupted",
+                        "reason": normalized_reason,
+                        "updated_at": timestamp,
+                        "completed_at": timestamp,
+                        "updated_by": source,
+                    }
+                )
+                data["setup_capture"] = capture
             data["updated_at"] = timestamp
             data["updated_by"] = source
             return data
@@ -1741,6 +2117,7 @@ class ControlDirectiveStore:
         expected: object = None,
         options: Sequence[Mapping[str, Any]],
         blocking: bool = True,
+        repair_authority: Optional[Mapping[str, object]] = None,
     ) -> dict[str, Any]:
         """Publish one idempotent operator decision request from the runtime."""
 
@@ -1753,6 +2130,26 @@ class ControlDirectiveStore:
         normalized_reason = _bounded_text(reason, 1000)
         if not normalized_strategy or not normalized_phase or not normalized_check:
             raise ValueError("gate decision requires strategy, phase, and check_id")
+        offers_repair = any(
+            option.get("action") == "repair_restart"
+            for option in normalized_options
+        )
+        normalized_repair_authority = (
+            validate_workflow_evidence(repair_authority)
+            if repair_authority is not None
+            else None
+        )
+        if offers_repair and (
+            normalized_repair_authority is None
+            or normalized_repair_authority.get("game_state") != "active_battle"
+        ):
+            raise ValueError(
+                "repair Surrender requires exact active-battle authority"
+            )
+        if not offers_repair and repair_authority is not None:
+            raise ValueError(
+                "repair authority is valid only when repair Surrender is offered"
+            )
 
         with self._lock():
             current = self._read_unlocked()
@@ -1765,6 +2162,8 @@ class ControlDirectiveStore:
                 and existing.get("check_id") == normalized_check
                 and existing.get("reason") == normalized_reason
                 and bool(existing.get("blocking", True)) == bool(blocking)
+                and existing.get("repair_authority")
+                == normalized_repair_authority
             ):
                 return existing
             timestamp = _updated_at()
@@ -1783,6 +2182,8 @@ class ControlDirectiveStore:
             expected_text = _bounded_text(expected, 500)
             if expected_text:
                 directive["expected"] = expected_text
+            if normalized_repair_authority is not None:
+                directive["repair_authority"] = normalized_repair_authority
             current["gate_decision"] = directive
             current["updated_at"] = timestamp
             current["updated_by"] = "runtime-gate-decision"
@@ -2425,6 +2826,19 @@ def _valid_gate_decision(value: object) -> Optional[dict[str, Any]]:
         or not options
     ):
         return None
+    offers_repair = any(
+        option.get("action") == "repair_restart" for option in options
+    )
+    repair_authority = (
+        validate_workflow_evidence(value.get("repair_authority"))
+        if value.get("repair_authority") is not None
+        else None
+    )
+    if offers_repair != bool(
+        repair_authority is not None
+        and repair_authority.get("game_state") == "active_battle"
+    ):
+        return None
     directive = dict(value)
     directive.update(
         request_id=request_id,
@@ -2436,6 +2850,8 @@ def _valid_gate_decision(value: object) -> Optional[dict[str, Any]]:
         blocking=value.get("blocking") is not False,
         options=options,
     )
+    if repair_authority is not None:
+        directive["repair_authority"] = repair_authority
     if status == "resolved":
         decision_id = _bounded_text(value.get("decision_id"), 100).lower()
         selected = next(
@@ -2688,6 +3104,17 @@ def _prune_exclusive_validation_receipts(
 
 def _bounded_text(value: object, limit: int) -> str:
     return str(value or "").strip()[:limit]
+
+
+def _mapping_fingerprint(value: Mapping[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _updated_at() -> str:

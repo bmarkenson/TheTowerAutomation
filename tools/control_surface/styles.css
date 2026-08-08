@@ -204,6 +204,7 @@ dialog::backdrop { background: rgba(1, 4, 10, .78); backdrop-filter: blur(3px); 
 .auth-dialog input { margin-bottom: 1rem; }
 .gate-options { display: grid; gap: .65rem; margin: 1rem 0; }
 .gate-option { display: grid; grid-template-columns: auto 1fr; gap: .7rem; align-items: start; padding: .8rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--panel-2); }
+.gate-option input { width: auto; }
 .gate-option strong, .gate-option span { display: block; }
 .gate-option span { color: var(--muted); font-size: .75rem; margin-top: .2rem; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: .6rem; }
@@ -215,6 +216,21 @@ dialog::backdrop { background: rgba(1, 4, 10, .78); backdrop-filter: blur(3px); 
 .record-section summary { padding: .85rem 1rem; cursor: pointer; font-weight: 800; background: rgba(21, 31, 49, .7); }
 .record-section table { margin: 0; }
 .warning-list { color: #f7d58f; font-size: .78rem; }
+.capture-metadata { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin-bottom: 1rem; }
+.capture-metadata div { display: block; padding: .7rem; border: 1px solid var(--border); border-radius: .65rem; }
+.capture-metadata dd { max-width: none; margin-top: .25rem; text-align: left; }
+.capture-review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.capture-review-grid h3, .capture-save-form h3 { margin: 0 0 .65rem; font-size: .88rem; }
+.capture-list { max-height: 18rem; overflow: auto; border: 1px solid var(--border); border-radius: .7rem; }
+.capture-row { padding: .7rem .8rem; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.capture-row:last-child { border-bottom: 0; }
+.capture-row strong, .capture-row span { display: block; }
+.capture-row span { margin-top: .2rem; font-size: .72rem; }
+.capture-save-form { margin-top: 1.2rem; padding-top: 1.2rem; border-top: 1px solid var(--border); }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.form-grid label { color: var(--muted); font-size: .75rem; font-weight: 700; }
+.form-grid input, .form-grid select { display: block; margin-top: .35rem; }
+.capture-actions { margin-top: 1rem; flex-wrap: wrap; }
 
 .toast { position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 20; max-width: 24rem; padding: .8rem 1rem; border: 1px solid var(--border); border-radius: .7rem; background: #172338; box-shadow: var(--shadow); font-size: .78rem; }
 .toast.error { color: #ffacb9; border-color: rgba(255, 113, 135, .45); }
@@ -234,4 +250,5 @@ dialog::backdrop { background: rgba(1, 4, 10, .78); backdrop-filter: blur(3px); 
   .control-panel { grid-row: auto; }
   .activity-list li { grid-template-columns: 1fr; gap: .15rem; }
   .detail-card-grid { grid-template-columns: 1fr 1fr; }
+  .capture-metadata, .capture-review-grid, .form-grid { grid-template-columns: 1fr; }
 }

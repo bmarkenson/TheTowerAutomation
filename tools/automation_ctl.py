@@ -11,8 +11,16 @@ Commands:
   - enable                → explicitly permit guarded automation actions
   - start-battle          → request only a verified new-run Home workflow
   - attach-battle         → request only a verified active/resumable workflow
-  - take-manual-control   → request an acknowledged indefinite Pause
+  - take-manual-control [minimal|full]
+                          → Pause and choose manual-Surrender collection
   - return-control        → request paused observation reconciliation
+  - capture-setup         → request a fresh save-backed setup preview
+  - capture-setup status|cancel
+  - capture-setup save-modules <id> [display name]
+  - capture-setup review-strategy <id> <tier> [display name]
+  - capture-setup save-strategy <id> <tier> [display name]
+      --review-fingerprint <sha256>
+  - capture-setup draft <id> → reopen a durable captured Strategy source
   - when-battle-ends <continue|wait|home> → set future terminal policy
   - game-speed <target>   → enforce x0.0..x6.0, or x6.3/max available
   - gate                  → prompt for a pending startup-gate decision
@@ -94,10 +102,168 @@ def _apply_better_control(path: str, action: str, **values: object) -> None:
         raise SystemExit(f"{action} unavailable{code}: {exc}") from exc
     request = response.get("request") or {}
     model = response.get("control_model") or {}
-    workflow = model.get("battle_workflow") or model.get("manual_control") or {}
+    workflow = (
+        model.get("battle_workflow")
+        if action in {"start_battle", "attach_battle"}
+        else model.get("manual_control")
+        if action in {"take_manual_control", "return_control"}
+        else {}
+    ) or {}
     disposition = str(request.get("disposition") or "requested")
     status = str(workflow.get("status") or "pending")
-    print(f"[OK] {action}: {disposition}; runtime status={status} @ {path}")
+    collection = (
+        f"; manual Surrender collection={workflow.get('surrender_collection')}"
+        if action == "take_manual_control"
+        and workflow.get("surrender_collection")
+        else ""
+    )
+    print(
+        f"[OK] {action}: {disposition}; runtime status={status}"
+        f"{collection} @ {path}"
+    )
+
+
+def _capture_base(value: str | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    identifier, separator, revision_text = value.strip().partition("@")
+    if not separator or not identifier or not revision_text.isdigit():
+        raise SystemExit("--base must use <base-id>@<revision>")
+    return {"id": identifier, "revision": int(revision_text)}
+
+
+def _print_capture_preview(capture: dict[str, object]) -> None:
+    preview = capture.get("preview") or {}
+    acquisition_source = str(capture.get("acquisition_source") or "unknown")
+    print(f"Evidence source: {acquisition_source}")
+    print("Captured values:")
+    print(json.dumps(preview.get("settings") or {}, indent=2, sort_keys=True))
+    print("Unresolved values:")
+    print(json.dumps(preview.get("unresolved") or [], indent=2, sort_keys=True))
+
+
+def _capture_setup(
+    path: str,
+    command: list[str],
+    *,
+    base_ref: str | None = None,
+    review_fingerprint: str | None = None,
+) -> None:
+    """Use only the Linux runtime-issued capture preview and save authority."""
+
+    service = _better_control_service(path)
+    try:
+        current = service.setup_capture()
+        capture = current.get("capture") or {}
+        if not command:
+            response = service.apply_setup_capture({"operation": "request"})
+        elif command == ["status"]:
+            print(json.dumps(current, indent=2))
+            return
+        elif command == ["cancel"]:
+            request_id = str(capture.get("request_id") or "")
+            if not request_id:
+                raise SystemExit("No current setup capture to cancel")
+            response = service.apply_setup_capture(
+                {"operation": "cancel", "request_id": request_id}
+            )
+        elif command[0:1] == ["draft"] and len(command) == 2:
+            print(
+                json.dumps(
+                    service.captured_setup_draft(command[1]),
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+        elif command[0] == "save-modules" and len(command) >= 2:
+            request_id = str(capture.get("request_id") or "")
+            fingerprint = str(capture.get("preview_fingerprint") or "")
+            if capture.get("status") != "ready" or not fingerprint:
+                raise SystemExit("Setup capture is not ready for review and saving")
+            identifier = command[1]
+            display_name = " ".join(command[2:]).strip() or None
+            _print_capture_preview(capture)
+            response = service.apply_setup_capture(
+                {
+                    "operation": "save",
+                    "request_id": request_id,
+                    "expected_preview_fingerprint": fingerprint,
+                    "kind": "module_preset",
+                    "id": identifier,
+                    "display_name": display_name,
+                }
+            )
+        elif command[0] in {"review-strategy", "save-strategy"} and len(command) >= 3:
+            request_id = str(capture.get("request_id") or "")
+            fingerprint = str(capture.get("preview_fingerprint") or "")
+            if capture.get("status") != "ready" or not fingerprint:
+                raise SystemExit("Setup capture is not ready for review and saving")
+            try:
+                tier = int(command[2])
+            except ValueError as exc:
+                raise SystemExit("Captured Strategy tier must be an integer") from exc
+            identifier = command[1]
+            display_name = " ".join(command[3:]).strip() or None
+            base = _capture_base(base_ref)
+            _print_capture_preview(capture)
+            review_request = {
+                "operation": "review",
+                "request_id": request_id,
+                "expected_preview_fingerprint": fingerprint,
+                "kind": "strategy_draft",
+                "id": identifier,
+                "display_name": display_name,
+                "tier": tier,
+            }
+            if base is not None:
+                review_request["base"] = base
+            if command[0] == "review-strategy":
+                reviewed = service.apply_setup_capture(review_request)
+                review = reviewed["review"]
+                print("Captured-versus-Base review:")
+                print(json.dumps(review, indent=2, sort_keys=True))
+                response = reviewed
+            else:
+                reviewed_fingerprint = str(
+                    review_fingerprint or ""
+                ).strip().lower()
+                if (
+                    len(reviewed_fingerprint) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in reviewed_fingerprint
+                    )
+                ):
+                    raise SystemExit(
+                        "save-strategy requires --review-fingerprint from a "
+                        "prior review-strategy command"
+                    )
+                save_request = {
+                    **review_request,
+                    "operation": "save",
+                    "expected_review_fingerprint": reviewed_fingerprint,
+                }
+                response = service.apply_setup_capture(save_request)
+        else:
+            raise SystemExit(
+                "Use capture-setup, capture-setup status, capture-setup cancel, "
+                "capture-setup save-modules <id> [display name], or "
+                "capture-setup review-strategy <id> <tier> [display name], or "
+                "capture-setup save-strategy <id> <tier> [display name] "
+                "--review-fingerprint <sha256>, or "
+                "capture-setup draft <id>"
+            )
+    except ControlSurfaceRequestError as exc:
+        code = f" [{exc.code}]" if exc.code else ""
+        raise SystemExit(f"capture-setup unavailable{code}: {exc}") from exc
+    request = response.get("request") or {}
+    capture = response.get("capture") or {}
+    print(
+        "[OK] capture-setup: "
+        f"{request.get('disposition') or 'requested'}; "
+        f"runtime status={capture.get('status') or 'pending'} @ {path}"
+    )
 
 
 def _request_force_continue(path: str) -> None:
@@ -221,7 +387,8 @@ def main(argv=None):
         nargs="+",
         help=(
             "pause | enable | start-battle | attach-battle | "
-            "take-manual-control | return-control | "
+            "take-manual-control [minimal|full] | return-control | "
+            "capture-setup [status|cancel|save-modules|save-strategy ...] | "
             "when-battle-ends <continue|wait|home> | gate [choice] | "
             "game-speed <0.0..6.0|6.3|max> | "
             "force-continue | configure-run [skip|default <check>] | "
@@ -234,6 +401,21 @@ def main(argv=None):
         default=None,
         metavar="N",
         help="Optional positive duration for the pause command",
+    )
+    p.add_argument(
+        "--base",
+        default=None,
+        metavar="ID@REVISION",
+        help="Optional comparison Base for captured Strategy review",
+    )
+    p.add_argument(
+        "--review-fingerprint",
+        default=None,
+        metavar="SHA256",
+        help=(
+            "Fingerprint printed by a prior capture-setup review-strategy; "
+            "required by capture-setup save-strategy"
+        ),
     )
     p.add_argument("--control-file", dest="ctrl", default=DEFAULT_CTRL_PATH, help=f"Control file path (default: {DEFAULT_CTRL_PATH})")
     args = p.parse_args(argv)
@@ -251,6 +433,17 @@ def main(argv=None):
         return 0
     if args.minutes is not None:
         p.error("--minutes is only valid with the pause command")
+    if args.base is not None and cmd[0] != "capture-setup":
+        p.error("--base is only valid with capture-setup")
+    if args.review_fingerprint is not None and cmd[0] != "capture-setup":
+        p.error("--review-fingerprint is only valid with capture-setup")
+    if args.review_fingerprint is not None and cmd[:2] != [
+        "capture-setup",
+        "save-strategy",
+    ]:
+        p.error(
+            "--review-fingerprint is only valid with capture-setup save-strategy"
+        )
     if cmd[0] == "enable" and len(cmd) == 1:
         _apply_better_control(ctrl, "enable")
         return 0
@@ -260,11 +453,26 @@ def main(argv=None):
     if cmd[0] == "attach-battle" and len(cmd) == 1:
         _apply_better_control(ctrl, "attach_battle")
         return 0
-    if cmd[0] == "take-manual-control" and len(cmd) == 1:
-        _apply_better_control(ctrl, "take_manual_control")
+    if cmd[0] == "take-manual-control" and len(cmd) in {1, 2}:
+        collection = cmd[1].strip().lower() if len(cmd) == 2 else "minimal"
+        if collection not in {"minimal", "full"}:
+            p.error("take-manual-control collection must be minimal or full")
+        _apply_better_control(
+            ctrl,
+            "take_manual_control",
+            manual_surrender_collection=collection,
+        )
         return 0
     if cmd[0] == "return-control" and len(cmd) == 1:
         _apply_better_control(ctrl, "return_control")
+        return 0
+    if cmd[0] == "capture-setup":
+        _capture_setup(
+            ctrl,
+            cmd[1:],
+            base_ref=args.base,
+            review_fingerprint=args.review_fingerprint,
+        )
         return 0
     if cmd[0] == "when-battle-ends" and len(cmd) == 2:
         aliases = {

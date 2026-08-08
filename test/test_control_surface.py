@@ -6,6 +6,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import subprocess
 import threading
 from unittest.mock import patch
 
@@ -1272,9 +1273,12 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 28" in native_compatibility
-    assert '"better_control_model_v1"' in native_compatibility
+    assert "MinimumServerRevision = 29" in native_compatibility
+    assert '"better_control_model_v2"' in native_compatibility
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_backed_setup_capture_v1"' in native_compatibility
+    assert "save_backed_setup_capture_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"terminal_dispositions_v2"' in native_compatibility
     assert "terminal_dispositions_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"managed_custom_module_presets_v1"' in native_compatibility
@@ -1303,6 +1307,60 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
     assert '"automatic_battle_attachment"' not in native_compatibility
+
+
+def test_better_control_clients_expose_distinct_workflows_and_capture_review():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    capture_xaml = (native_root / "SetupCaptureWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    authoring_xaml = (native_root / "StrategyProfilesWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    authoring_code = (native_root / "StrategyProfilesWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_compatibility = (
+        native_root / "ControlSurfaceCompatibility.cs"
+    ).read_text(encoding="utf-8")
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'id="startBattleButton"' in html
+    assert 'id="attachBattleButton"' in html
+    assert 'id="takeManualControlButton"' in html
+    assert 'id="returnControlButton"' in html
+    assert 'id="manualControlDialog"' in html
+    assert 'id="captureSetupButton"' in html
+    assert 'id="captureSetupDialog"' in html
+    assert 'id="captureEvidenceSource"' in html
+    assert '["startBattleButton", "start_battle"]' in script
+    assert '["attachBattleButton", "attach_battle"]' in script
+    assert '["returnControlButton", "return_control"]' in script
+    assert 'manual_surrender_collection' in script
+    assert 'expected_review_fingerprint' in script
+    assert 'retained_return_control_refresh' in script
+    assert 'Content="Start Battle"' in native_xaml
+    assert 'Content="Attach to Battle"' in native_xaml
+    assert 'Content="Take Manual Control"' in native_xaml
+    assert 'Content="Return Control"' in native_xaml
+    assert 'Content="Capture current setup as…"' in native_xaml
+    assert 'Content="Review differences"' in capture_xaml
+    assert 'x:Name="CapturedDraftsList"' in authoring_xaml
+    assert "GetCapturedStrategyDraftAsync" in authoring_code
     assert '"attached_automation_restart"' not in native_compatibility
     assert '"observed_game_speed"' in native_compatibility
     assert 'id="observedSpeed"' in html
@@ -1317,10 +1375,10 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'data-control-action="take_manual_control"' in html
     assert 'data-control-action="return_control"' in html
     assert "availability.available !== true" in script
-    assert "BETTER_CONTROL_MINIMUM_REVISION = 28" in script
+    assert "BETTER_CONTROL_MINIMUM_REVISION = 29" in script
     assert "(action === \"start\" && !betterControlCompatible)" in script
     assert '"terminalPolicyStatus"' in script
-    assert "workflow.status" in script
+    assert "workflow?.status" in script
     assert "actions.enable?.available !== true" in script
     assert 'model.Actions.TryGetValue(name, out var availability)' in native_code
     assert "workflow.Status" in native_code
@@ -1330,6 +1388,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "terminalPolicyStatus.Status" in native_code
     assert 'JsonPropertyName("status")' in native_models
     assert 'JsonPropertyName("reason")' in native_models
+    assert 'JsonPropertyName("acquisition_source")' in native_models
     assert "startup_gate_policy" not in script
     assert "run_state" not in script
     assert "restart_attached" not in script
@@ -1366,6 +1425,37 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="HOST HEALTH"' in native_xaml
     assert 'Text="BLUESTACKS CPU"' in native_xaml
     assert 'Text="OBSERVED SPEED"' in native_xaml
+
+
+def test_browser_client_executes_capture_and_workflow_transition_model():
+    model_path = STATIC_DIR / "client_model.js"
+    script = f"""
+const assert = require('assert');
+const model = require({json.dumps(str(model_path))});
+const requested = {{request_id: 'capture-1', status: 'requested', updated_at: '2026-08-07T10:00:00Z'}};
+const acknowledged = {{request_id: 'capture-1', status: 'acknowledged', updated_at: '2026-08-07T10:00:01Z'}};
+const ready = {{request_id: 'capture-1', status: 'ready', updated_at: '2026-08-07T10:00:02Z', preview_fingerprint: 'a'.repeat(64)}};
+const saved = {{request_id: 'capture-1', status: 'saved', updated_at: '2026-08-07T10:00:03Z', preview_fingerprint: 'a'.repeat(64)}};
+assert.strictEqual(model.chooseLatestCapture(acknowledged, requested), acknowledged);
+assert.strictEqual(model.chooseLatestCapture(ready, requested), ready);
+assert.strictEqual(model.chooseLatestCapture(ready, saved), saved);
+assert.strictEqual(model.captureCatalogMatches(ready, {{...ready}}), true);
+assert.strictEqual(model.captureCatalogMatches(ready, requested), false);
+for (const status of ['requested', 'pending', 'acknowledged']) {{
+  assert.strictEqual(model.workflowPresentation(status).pending, true);
+}}
+for (const status of ['no_op', 'stale', 'rejected', 'unavailable', 'interrupted']) {{
+  assert.strictEqual(model.workflowPresentation(status).terminal, true);
+}}
+assert.strictEqual(model.workflowPresentation('rejected').label, 'Rejected');
+"""
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_native_incompatible_api_has_prominent_start_mitigation():
@@ -1886,6 +1976,86 @@ def test_activity_rejects_invalid_level(tmp_path):
         _service(tmp_path).activity(levels=["ERROR;DROP"])
 
 
+def test_http_setup_capture_routes_include_durable_draft_reopen(
+    tmp_path,
+    monkeypatch,
+):
+    service = _service(tmp_path)
+    monkeypatch.setattr(
+        service,
+        "captured_setup_draft",
+        lambda strategy_id: {
+            "schema_version": 1,
+            "capability": "save_backed_setup_capture_v1",
+            "draft": {
+                "id": strategy_id,
+                "source": {"kind": "strategy", "id": strategy_id},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "apply_setup_capture",
+        lambda payload: {
+            "schema_version": 1,
+            "request": {
+                "accepted": payload == {"operation": "request"},
+                "operation": payload.get("operation"),
+            },
+        },
+    )
+    server = ControlSurfaceHTTPServer(
+        ("127.0.0.1", 0),
+        service=service,
+        static_dir=STATIC_DIR,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_port,
+        timeout=3,
+    )
+    try:
+        connection.request("GET", "/api/v1/setup-capture")
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload["capability"] == "save_backed_setup_capture_v1"
+
+        connection.request(
+            "GET",
+            "/api/v1/setup-capture/drafts/captured_farm",
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload["draft"]["source"]["id"] == "captured_farm"
+
+        body = json.dumps({"operation": "request"})
+        connection.request(
+            "POST",
+            "/api/v1/setup-capture",
+            body=body,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload["request"] == {
+            "accepted": True,
+            "operation": "request",
+        }
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
 def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
     _write_battle(tmp_path)
     server = ControlSurfaceHTTPServer(
@@ -1904,6 +2074,12 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         assert response.status == 200
         assert b"TheTower Control Surface" in body
         assert "default-src 'self'" in response.getheader("Content-Security-Policy")
+
+        connection.request("GET", "/client_model.js")
+        response = connection.getresponse()
+        client_model = response.read()
+        assert response.status == 200
+        assert b"chooseLatestCapture" in client_model
 
         connection.request("GET", "/api/v1/status")
         response = connection.getresponse()

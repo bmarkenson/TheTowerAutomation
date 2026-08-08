@@ -2694,6 +2694,14 @@ def test_terminal_session_bypass_rearms_only_the_failed_auto_pick_check():
 
 
 def test_attached_session_mismatch_restarts_only_after_operator_authorization():
+    repair_authority = {
+        "game_state": "active_battle",
+        "runtime_id": "runtime-1",
+        "pid": 1234,
+        "adb_target": "localhost:5555",
+        "target_generation": 1,
+        "activity_scope_run_id": "run-1",
+    }
     manager = Mock()
     manager.strategy = SimpleNamespace(
         name="farm_t18",
@@ -2702,6 +2710,7 @@ def test_attached_session_mismatch_restarts_only_after_operator_authorization():
     manager.session_preflight_failure_checks.return_value = ["modules"]
     manager.session_preflight_restart_available.return_value = True
     manager.authorize_session_preflight_restart.return_value = True
+    manager.active_battle_observed.return_value = True
     manager.gate_fallbacks.return_value = []
     manager.ctx.data = {
         "mission_vars": {
@@ -2721,6 +2730,7 @@ def test_attached_session_mismatch_restarts_only_after_operator_authorization():
         "reason": "configuration mismatch",
         "expected": {"cannon": "Farm"},
         "options": options,
+        "repair_authority": repair_authority,
     }
     resolved = {
         **pending,
@@ -2740,10 +2750,16 @@ def test_attached_session_mismatch_restarts_only_after_operator_authorization():
     app._supervisor = supervisor
     app._gate_decision_prompt = lambda _decision: "restart_and_repair"
     app._gate_prompted_request_id = None
+    app._current_control_workflow_evidence = lambda: repair_authority
 
     app._handle_terminal_session_gate_decision()
 
-    manager.authorize_session_preflight_restart.assert_called_once_with()
+    manager.authorize_session_preflight_restart.assert_called_once_with(
+        repair_authority,
+        request_id="gate-attached-modules",
+        check_id="modules",
+        reason="configuration mismatch",
+    )
     supervisor.consume_gate_decision.assert_called_once_with(
         "gate-attached-modules",
         completion_reason=(

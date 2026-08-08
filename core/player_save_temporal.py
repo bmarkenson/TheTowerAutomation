@@ -147,6 +147,14 @@ class RunningAttachmentTemporalBinding:
         return {
             "schema_version": 1,
             "mapping_id": self.mapping_id,
+            "runtime_session": _fingerprint(
+                "runtime-session",
+                self.runtime_session_id,
+            ),
+            "source_activity_scope": _fingerprint(
+                "activity-scope",
+                self.source_activity_scope_id,
+            ),
             "target_generation": self.target_binding.fingerprint,
             "activity_scope": _fingerprint(
                 "activity-scope", self.activity_scope_id

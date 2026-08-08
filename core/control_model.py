@@ -8,12 +8,48 @@ same evidence before it grants any battle-workflow authority.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Mapping, Optional
+import hashlib
+import json
+import re
+from typing import Any, Iterable, Mapping, Optional
+
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+)
+from core.player_save_temporal import RunningAttachmentTemporalBinding
+from core.strategy_authoring import FARM_SETTING_REGISTRY
 
 
 CONTROL_MODEL_SCHEMA_VERSION = 1
 BATTLE_WORKFLOW_SCHEMA_VERSION = 1
 MANUAL_CONTROL_SCHEMA_VERSION = 1
+SETUP_CAPTURE_SCHEMA_VERSION = 1
+SAVE_RECONCILIATION_RECEIPT_SCHEMA_VERSION = 1
+
+RUNNING_SAVE_RECONCILIATION_KINDS = frozenset(
+    {
+        "running_attachment_reconciliation",
+        "return_control_reconciliation",
+    }
+)
+HOME_RETURN_RECONCILIATION_KIND = "return_control_home_reconciliation"
+TERMINAL_RETURN_RECONCILIATION_KIND = (
+    "return_control_terminal_reconciliation"
+)
+MANUAL_SURRENDER_COLLECTIONS = frozenset({"minimal", "full"})
+SAVE_RECONCILIATION_DISPOSITIONS = frozenset(
+    {
+        "attachment_baseline",
+        "same_battle",
+        "later_battle",
+    }
+)
+SAVE_RECONCILIATION_CONFIGURATION_STATUSES = frozenset(
+    {"observation_only", "complete", "partial"}
+)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 BATTLE_INTENTS = frozenset({"start_battle", "attach_battle"})
 BATTLE_WORKFLOW_STATUSES = frozenset(
@@ -42,6 +78,7 @@ MANUAL_CONTROL_STATUSES = frozenset(
         "return_requested",
         "awaiting_enable",
         "reconciling",
+        "awaiting_configuration",
         "completed",
         "interrupted",
         "failed",
@@ -49,6 +86,25 @@ MANUAL_CONTROL_STATUSES = frozenset(
 )
 MANUAL_CONTROL_TERMINAL_STATUSES = frozenset(
     {"completed", "interrupted", "failed"}
+)
+SETUP_CAPTURE_STATUSES = frozenset(
+    {
+        "requested",
+        "acknowledged",
+        "capturing",
+        "ready",
+        "saved",
+        "unavailable",
+        "interrupted",
+        "failed",
+        "cancelled",
+    }
+)
+SETUP_CAPTURE_TERMINAL_STATUSES = frozenset(
+    {"saved", "unavailable", "interrupted", "failed", "cancelled"}
+)
+SETUP_CAPTURE_GAME_STATES = frozenset(
+    {"home_new_battle", "home_resume_battle", "active_battle"}
 )
 OBSERVED_GAME_STATES = frozenset(
     {
@@ -250,6 +306,18 @@ def validate_battle_workflow(value: object) -> Optional[dict[str, Any]]:
         text=("reason", "updated_by"),
         mappings=("acknowledgement", "save_receipt", "configuration"),
     )
+    if intent == "attach_battle" and status in {
+        "ready",
+        "completed",
+    }:
+        receipt = validate_save_reconciliation_receipt(
+            result.get("save_receipt"),
+            expected_kind="running_attachment_reconciliation",
+            expected_workflow_id=request_id,
+        )
+        if receipt is None:
+            return None
+        result["save_receipt"] = receipt
     return result
 
 
@@ -288,20 +356,1027 @@ def validate_manual_control(value: object) -> Optional[dict[str, Any]]:
             "return_requested_at",
             "completed_at",
         ),
-        text=("detail", "updated_by", "refresh_status"),
+        text=(
+            "detail",
+            "updated_by",
+            "refresh_status",
+            "surrender_collection",
+        ),
         mappings=(
             "pause_acknowledgement",
             "return_evidence",
             "save_receipt",
             "configuration",
+            "terminal_evidence",
         ),
     )
+    collection = str(result.get("surrender_collection") or "minimal").lower()
+    if collection not in MANUAL_SURRENDER_COLLECTIONS:
+        return None
+    result["surrender_collection"] = collection
     if "return_evidence" in result:
         normalized_return = validate_workflow_evidence(result["return_evidence"])
         if normalized_return is None:
             return None
         result["return_evidence"] = normalized_return
+    if "terminal_evidence" in result:
+        terminal_evidence = validate_manual_terminal_evidence(
+            result["terminal_evidence"],
+            expected_workflow_id=workflow_id,
+        )
+        if terminal_evidence is None:
+            return None
+        result["terminal_evidence"] = terminal_evidence
+    if status == "completed":
+        receipt = validate_save_reconciliation_receipt(
+            result.get("save_receipt"),
+            expected_workflow_id=workflow_id,
+        )
+        if receipt is None or receipt.get("kind") not in {
+            "return_control_reconciliation",
+            HOME_RETURN_RECONCILIATION_KIND,
+            TERMINAL_RETURN_RECONCILIATION_KIND,
+        }:
+            return None
+        result["save_receipt"] = receipt
     return result
+
+
+def validate_setup_capture_preview(
+    value: object,
+    *,
+    evidence: object = None,
+) -> Optional[dict[str, Any]]:
+    """Validate one exact runtime-issued, forced-save authoring projection."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_version",
+        "status",
+        "mapping_id",
+        "mapping_maturity",
+        "captured_at",
+        "acquisition",
+        "settings",
+        "captured_check_ids",
+        "unresolved",
+        "publication_activates_strategy",
+        "saving_activates_strategy",
+        "workflow_binding",
+        "capture_origin",
+    }:
+        return None
+    mapping_id = _bounded(value.get("mapping_id"), 128)
+    maturity = str(value.get("mapping_maturity") or "").strip().lower()
+    captured_at = _aware_timestamp(value.get("captured_at"))
+    acquisition = _validated_forced_acquisition_provenance(
+        value.get("acquisition")
+    )
+    settings = value.get("settings")
+    unresolved = value.get("unresolved")
+    if (
+        value.get("schema_version") != SETUP_CAPTURE_SCHEMA_VERSION
+        or value.get("status") not in {"complete", "partial"}
+        or mapping_id is None
+        or maturity not in {"candidate", "validated"}
+        or captured_at is None
+        or acquisition is None
+        or acquisition["timing"]["captured_at"] != captured_at
+        or not isinstance(settings, Mapping)
+        or not settings
+        or len(settings) > len(FARM_SETTING_REGISTRY)
+        or not isinstance(unresolved, list)
+        or len(unresolved) > 64
+        or value.get("publication_activates_strategy") is not False
+        or value.get("saving_activates_strategy") is not False
+    ):
+        return None
+    try:
+        canonical_settings = {
+            str(setting_id): FARM_SETTING_REGISTRY[str(setting_id)].normalizer(
+                setting_value
+            )
+            for setting_id, setting_value in settings.items()
+        }
+        json.dumps(canonical_settings)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if canonical_settings != dict(settings):
+        return None
+    try:
+        captured_check_ids = _check_id_list(value.get("captured_check_ids", ()))
+    except (TypeError, ValueError):
+        return None
+    if list(value.get("captured_check_ids") or []) != captured_check_ids:
+        return None
+
+    normalized_unresolved: list[dict[str, Any]] = []
+    unresolved_ids: set[str] = set()
+    for item in unresolved:
+        if not isinstance(item, Mapping):
+            return None
+        required = {
+            "setting_id",
+            "display_name",
+            "source_check_ids",
+            "status",
+            "reason",
+        }
+        if not required <= set(item) or set(item) - (required | {"observed_value"}):
+            return None
+        setting_id = _bounded(item.get("setting_id"), 128)
+        display_name = _bounded(item.get("display_name"), 128)
+        reason = _bounded(item.get("reason"), 512)
+        status = str(item.get("status") or "").strip().lower()
+        try:
+            source_check_ids = _check_id_list(item.get("source_check_ids", ()))
+            if "observed_value" in item:
+                json.dumps(item.get("observed_value"))
+        except (TypeError, ValueError):
+            return None
+        if (
+            setting_id is None
+            or display_name is None
+            or reason is None
+            or not source_check_ids
+            or status not in {
+                "unresolved",
+                "unsupported_authoring_value",
+                "observed_not_authorable",
+            }
+            or setting_id in unresolved_ids
+            or setting_id in canonical_settings
+        ):
+            return None
+        unresolved_ids.add(setting_id)
+        normalized_item: dict[str, Any] = {
+            "setting_id": setting_id,
+            "display_name": display_name,
+            "source_check_ids": source_check_ids,
+            "status": status,
+            "reason": reason,
+        }
+        if "observed_value" in item:
+            normalized_item["observed_value"] = item.get("observed_value")
+        normalized_unresolved.append(normalized_item)
+    if normalized_unresolved != unresolved:
+        return None
+    if (value.get("status") == "complete") != (not normalized_unresolved):
+        return None
+
+    binding = value.get("workflow_binding")
+    if not isinstance(binding, Mapping) or set(binding) != {
+        "schema_version",
+        "game_state",
+        "runtime_session_fingerprint",
+        "activity_scope_fingerprint",
+        "target_generation_fingerprint",
+        "active_round_identity_fingerprint",
+    }:
+        return None
+    game_state = str(binding.get("game_state") or "").strip().lower()
+    active_round = binding.get("active_round_identity_fingerprint")
+    if (
+        binding.get("schema_version") != 1
+        or game_state not in SETUP_CAPTURE_GAME_STATES
+        or not _sha256(binding.get("runtime_session_fingerprint"))
+        or not _sha256(binding.get("activity_scope_fingerprint"))
+        or not _sha256(binding.get("target_generation_fingerprint"))
+        or binding.get("target_generation_fingerprint")
+        != acquisition["binding_fingerprint"]
+        or (
+            game_state == "home_new_battle"
+            and active_round is not None
+        )
+        or (
+            game_state in {"active_battle", "home_resume_battle"}
+            and not _sha256(active_round)
+        )
+    ):
+        return None
+    normalized_evidence = (
+        validate_workflow_evidence(evidence)
+        if evidence is not None
+        else None
+    )
+    if evidence is not None and normalized_evidence is None:
+        return None
+    if normalized_evidence is not None:
+        try:
+            expected_target = PlayerSaveTargetBinding(
+                normalized_evidence["adb_target"],
+                int(normalized_evidence.get("target_generation") or 0),
+            )
+        except (TypeError, ValueError):
+            return None
+        if (
+            game_state != normalized_evidence["game_state"]
+            or binding["target_generation_fingerprint"]
+            != expected_target.fingerprint
+            or binding["runtime_session_fingerprint"]
+            != _fingerprint(
+                "setup-capture-runtime",
+                normalized_evidence["runtime_id"],
+            )
+            or binding["activity_scope_fingerprint"]
+            != _fingerprint(
+                "setup-capture-scope",
+                str(normalized_evidence.get("activity_scope_run_id") or ""),
+            )
+        ):
+            return None
+    origin = value.get("capture_origin")
+    if not isinstance(origin, Mapping) or set(origin) != {
+        "schema_version",
+        "acquisition_source",
+        "source_manual_control_fingerprint",
+    }:
+        return None
+    acquisition_source = str(
+        origin.get("acquisition_source") or ""
+    ).strip().lower()
+    source_manual_fingerprint = origin.get(
+        "source_manual_control_fingerprint"
+    )
+    if (
+        origin.get("schema_version") != 1
+        or acquisition_source
+        not in {
+            "new_setup_capture_refresh",
+            "retained_return_control_refresh",
+        }
+        or (
+            acquisition_source == "new_setup_capture_refresh"
+            and source_manual_fingerprint is not None
+        )
+        or (
+            acquisition_source == "retained_return_control_refresh"
+            and not _sha256(source_manual_fingerprint)
+        )
+    ):
+        return None
+    return {
+        "schema_version": SETUP_CAPTURE_SCHEMA_VERSION,
+        "status": str(value["status"]),
+        "mapping_id": mapping_id,
+        "mapping_maturity": maturity,
+        "captured_at": captured_at,
+        "acquisition": acquisition,
+        "settings": canonical_settings,
+        "captured_check_ids": captured_check_ids,
+        "unresolved": normalized_unresolved,
+        "publication_activates_strategy": False,
+        "saving_activates_strategy": False,
+        "workflow_binding": {
+            "schema_version": 1,
+            "game_state": game_state,
+            "runtime_session_fingerprint": str(
+                binding["runtime_session_fingerprint"]
+            ),
+            "activity_scope_fingerprint": str(
+                binding["activity_scope_fingerprint"]
+            ),
+            "target_generation_fingerprint": str(
+                binding["target_generation_fingerprint"]
+            ),
+            "active_round_identity_fingerprint": (
+                str(active_round) if active_round is not None else None
+            ),
+        },
+        "capture_origin": {
+            "schema_version": 1,
+            "acquisition_source": acquisition_source,
+            "source_manual_control_fingerprint": (
+                str(source_manual_fingerprint)
+                if source_manual_fingerprint is not None
+                else None
+            ),
+        },
+    }
+
+
+def validate_setup_capture(value: object) -> Optional[dict[str, Any]]:
+    """Return one normalized save-backed setup-capture ledger entry."""
+
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    request_id = _bounded(value.get("request_id"), 64)
+    status = str(value.get("status") or "").strip().lower()
+    requested_at = _aware_timestamp(value.get("requested_at"))
+    evidence = validate_workflow_evidence(value.get("evidence"))
+    acquisition_source = str(
+        value.get("acquisition_source") or "new_setup_capture_refresh"
+    ).strip().lower()
+    source_manual_control_id = _optional_bounded(
+        value.get("source_manual_control_id"),
+        64,
+    )
+    if (
+        request_id is None
+        or status not in SETUP_CAPTURE_STATUSES
+        or requested_at is None
+        or evidence is None
+        or evidence.get("game_state") not in SETUP_CAPTURE_GAME_STATES
+        or acquisition_source
+        not in {
+            "new_setup_capture_refresh",
+            "retained_return_control_refresh",
+        }
+        or (
+            acquisition_source == "retained_return_control_refresh"
+            and source_manual_control_id is None
+        )
+        or (
+            acquisition_source == "new_setup_capture_refresh"
+            and value.get("source_manual_control_id") is not None
+        )
+    ):
+        return None
+    result: dict[str, Any] = {
+        "schema_version": SETUP_CAPTURE_SCHEMA_VERSION,
+        "request_id": request_id,
+        "status": status,
+        "requested_at": requested_at,
+        "evidence": evidence,
+        "acquisition_source": acquisition_source,
+    }
+    if source_manual_control_id is not None:
+        result["source_manual_control_id"] = source_manual_control_id
+    _copy_optional_fields(
+        value,
+        result,
+        timestamps=("updated_at", "acknowledged_at", "completed_at"),
+        text=("reason", "updated_by", "preview_fingerprint"),
+        mappings=("acknowledgement", "preview", "saved_result"),
+    )
+    if status in {"ready", "saved"}:
+        preview = validate_setup_capture_preview(
+            result.get("preview"),
+            evidence=evidence,
+        )
+        preview_fingerprint = str(result.get("preview_fingerprint") or "")
+        if (
+            preview is None
+            or not _sha256(preview_fingerprint)
+            or preview_fingerprint != _mapping_fingerprint(preview)
+        ):
+            return None
+        result["preview"] = preview
+    if status == "saved" and not isinstance(result.get("saved_result"), Mapping):
+        return None
+    return result
+
+
+def validate_manual_terminal_evidence(
+    value: object,
+    *,
+    expected_workflow_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Validate one exact-run manual terminal classification."""
+
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    status = str(value.get("status") or "").strip().lower()
+    observation_id = _bounded(value.get("observation_id"), 128)
+    scope_fingerprint = value.get("activity_scope_fingerprint")
+    reason = _bounded(value.get("reason"), 256) or ""
+    if (
+        status not in {"confirmed_surrender", "confirmed_other", "unavailable"}
+        or observation_id is None
+        or not _sha256(scope_fingerprint)
+    ):
+        return None
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "status": status,
+        "observation_id": observation_id,
+        "activity_scope_fingerprint": str(scope_fingerprint),
+        "reason": reason,
+    }
+    if status == "unavailable":
+        if value.get("receipt") is not None:
+            return None
+        return result
+    receipt = validate_save_reconciliation_receipt(
+        value.get("receipt"),
+        expected_kind=TERMINAL_RETURN_RECONCILIATION_KIND,
+        expected_workflow_id=expected_workflow_id,
+        expected_observation_id=observation_id,
+    )
+    if receipt is None:
+        return None
+    is_surrender = receipt["terminal"]["surrendered"] is True
+    if (status == "confirmed_surrender") != is_surrender:
+        return None
+    result["receipt"] = receipt
+    battle_id = _optional_bounded(value.get("battle_id"), 96)
+    if value.get("battle_id") is not None and battle_id is None:
+        return None
+    if battle_id is not None:
+        result["battle_id"] = battle_id
+    return result
+
+
+def build_running_save_reconciliation_receipt(
+    *,
+    kind: str,
+    workflow_id: str,
+    observation_id: str,
+    acquisition: PlayerSaveAcquisitionBundle,
+    temporal_binding: RunningAttachmentTemporalBinding,
+    disposition: str,
+    resolved_check_ids: Iterable[str] = (),
+    unresolved_check_ids: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Build the persisted report for one process-local typed save decision.
+
+    The returned map is deliberately redacted.  Runtime callers must still
+    retain and revalidate the typed acquisition and temporal binding before
+    granting authority; this receipt is durable evidence, not a replay token.
+    """
+
+    normalized_kind = str(kind or "").strip().lower()
+    normalized_workflow_id = _bounded(workflow_id, 64)
+    normalized_observation_id = _bounded(observation_id, 128)
+    normalized_disposition = str(disposition or "").strip().lower()
+    if (
+        normalized_kind not in RUNNING_SAVE_RECONCILIATION_KINDS
+        or normalized_workflow_id is None
+        or normalized_observation_id is None
+        or normalized_disposition not in SAVE_RECONCILIATION_DISPOSITIONS
+        or not isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        or not acquisition.complete
+        or acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+        or not isinstance(temporal_binding, RunningAttachmentTemporalBinding)
+        or not temporal_binding.final
+        or acquisition.binding != temporal_binding.target_binding
+        or acquisition.captured_at is None
+        or acquisition.captured_at.isoformat() != temporal_binding.captured_at
+    ):
+        raise ValueError(
+            "running save reconciliation requires complete, final typed evidence"
+        )
+    resolved = _check_id_list(resolved_check_ids)
+    unresolved = _check_id_list(unresolved_check_ids)
+    if set(resolved).intersection(unresolved):
+        raise ValueError("resolved and unresolved save checks must be disjoint")
+    configuration_status = (
+        "partial" if unresolved else "complete" if resolved else "observation_only"
+    )
+    temporal_provenance = temporal_binding.redacted()
+    receipt = {
+        "schema_version": SAVE_RECONCILIATION_RECEIPT_SCHEMA_VERSION,
+        "kind": normalized_kind,
+        "workflow_id": normalized_workflow_id,
+        "observation_id": normalized_observation_id,
+        "acquisition": acquisition.redacted_provenance(),
+        "temporal": temporal_provenance,
+        "continuity": {
+            "status": "scope_bound",
+            "disposition": normalized_disposition,
+            "final_scope_fingerprint": temporal_provenance[
+                "activity_scope"
+            ],
+        },
+        "configuration": {
+            "status": configuration_status,
+            "resolved_check_ids": resolved,
+            "unresolved_check_ids": unresolved,
+        },
+    }
+    normalized = validate_save_reconciliation_receipt(
+        receipt,
+        expected_kind=normalized_kind,
+        expected_workflow_id=normalized_workflow_id,
+        expected_observation_id=normalized_observation_id,
+    )
+    if normalized is None:  # pragma: no cover - builder and validator share schema
+        raise ValueError("built save reconciliation receipt is invalid")
+    return normalized
+
+
+def validate_save_reconciliation_receipt(
+    value: object,
+    *,
+    expected_kind: Optional[str] = None,
+    expected_workflow_id: Optional[str] = None,
+    expected_observation_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Validate one redacted forced-save workflow receipt."""
+
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    kind = str(value.get("kind") or "").strip().lower()
+    workflow_id = _bounded(value.get("workflow_id"), 64)
+    observation_id = _bounded(value.get("observation_id"), 128)
+    if (
+        kind not in {
+            *RUNNING_SAVE_RECONCILIATION_KINDS,
+            HOME_RETURN_RECONCILIATION_KIND,
+            TERMINAL_RETURN_RECONCILIATION_KIND,
+        }
+        or workflow_id is None
+        or observation_id is None
+        or (expected_kind is not None and kind != str(expected_kind))
+        or (
+            expected_workflow_id is not None
+            and workflow_id != str(expected_workflow_id)
+        )
+        or (
+            expected_observation_id is not None
+            and observation_id != str(expected_observation_id)
+        )
+    ):
+        return None
+    if kind == TERMINAL_RETURN_RECONCILIATION_KIND:
+        return _validated_terminal_return_receipt(
+            value,
+            kind=kind,
+            workflow_id=workflow_id,
+            observation_id=observation_id,
+        )
+    acquisition = _validated_forced_acquisition_provenance(value.get("acquisition"))
+    if kind == HOME_RETURN_RECONCILIATION_KIND:
+        return _validated_home_return_receipt(
+            value,
+            kind=kind,
+            workflow_id=workflow_id,
+            observation_id=observation_id,
+            acquisition=acquisition,
+        )
+    temporal = _validated_running_temporal_provenance(value.get("temporal"))
+    continuity = value.get("continuity")
+    configuration = value.get("configuration")
+    if (
+        acquisition is None
+        or temporal is None
+        or acquisition["binding_fingerprint"]
+        != temporal["target_generation"]
+        or acquisition["timing"]["captured_at"] != temporal["captured_at"]
+        or not isinstance(continuity, Mapping)
+        or continuity.get("status") != "scope_bound"
+        or str(continuity.get("disposition") or "")
+        not in SAVE_RECONCILIATION_DISPOSITIONS
+        or not _sha256(continuity.get("final_scope_fingerprint"))
+        or continuity.get("final_scope_fingerprint")
+        != temporal.get("activity_scope")
+        or not isinstance(configuration, Mapping)
+        or str(configuration.get("status") or "")
+        not in SAVE_RECONCILIATION_CONFIGURATION_STATUSES
+    ):
+        return None
+    try:
+        resolved = _check_id_list(configuration.get("resolved_check_ids", ()))
+        unresolved = _check_id_list(
+            configuration.get("unresolved_check_ids", ())
+        )
+    except (TypeError, ValueError):
+        return None
+    status = str(configuration["status"])
+    if (
+        set(resolved).intersection(unresolved)
+        or (status == "observation_only" and (resolved or unresolved))
+        or (status == "complete" and (not resolved or unresolved))
+        or (status == "partial" and not unresolved)
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        "kind": kind,
+        "workflow_id": workflow_id,
+        "observation_id": observation_id,
+        "acquisition": acquisition,
+        "temporal": temporal,
+        "continuity": {
+            "status": "scope_bound",
+            "disposition": str(continuity["disposition"]),
+            "final_scope_fingerprint": str(
+                continuity["final_scope_fingerprint"]
+            ),
+        },
+        "configuration": {
+            "status": status,
+            "resolved_check_ids": resolved,
+            "unresolved_check_ids": unresolved,
+        },
+    }
+
+
+def build_home_return_reconciliation_receipt(
+    *,
+    workflow_id: str,
+    observation_id: str,
+    activity_scope_id: str,
+    acquisition: PlayerSaveAcquisitionBundle,
+    expected_binding: PlayerSaveTargetBinding,
+    resolved_check_ids: Iterable[str] = (),
+    unresolved_check_ids: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Build a forced-save Return receipt at verified Home/New Battle."""
+
+    normalized_workflow_id = _bounded(workflow_id, 64)
+    normalized_observation_id = _bounded(observation_id, 128)
+    normalized_scope = _bounded(activity_scope_id, 128)
+    if (
+        normalized_workflow_id is None
+        or normalized_observation_id is None
+        or normalized_scope is None
+        or not isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        or not acquisition.complete
+        or acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+        or acquisition.binding is None
+        or not isinstance(expected_binding, PlayerSaveTargetBinding)
+        or acquisition.binding != expected_binding
+    ):
+        raise ValueError(
+            "Home Return reconciliation requires a complete forced save"
+        )
+    resolved = _check_id_list(resolved_check_ids)
+    unresolved = _check_id_list(unresolved_check_ids)
+    if set(resolved).intersection(unresolved):
+        raise ValueError("resolved and unresolved save checks must be disjoint")
+    configuration_status = (
+        "partial" if unresolved else "complete" if resolved else "observation_only"
+    )
+    receipt = {
+        "schema_version": 1,
+        "kind": HOME_RETURN_RECONCILIATION_KIND,
+        "workflow_id": normalized_workflow_id,
+        "observation_id": normalized_observation_id,
+        "acquisition": acquisition.redacted_provenance(),
+        "home_boundary": {
+            "status": "verified_new_battle",
+            "activity_scope_fingerprint": _fingerprint(
+                "control-workflow-scope",
+                normalized_scope,
+            ),
+            "target_binding_fingerprint": acquisition.binding.fingerprint,
+        },
+        "configuration": {
+            "status": configuration_status,
+            "resolved_check_ids": resolved,
+            "unresolved_check_ids": unresolved,
+        },
+    }
+    normalized = validate_save_reconciliation_receipt(
+        receipt,
+        expected_kind=HOME_RETURN_RECONCILIATION_KIND,
+        expected_workflow_id=normalized_workflow_id,
+        expected_observation_id=normalized_observation_id,
+    )
+    if normalized is None:  # pragma: no cover
+        raise ValueError("built Home Return receipt is invalid")
+    return normalized
+
+
+def _validated_home_return_receipt(
+    value: Mapping[str, Any],
+    *,
+    kind: str,
+    workflow_id: str,
+    observation_id: str,
+    acquisition: Optional[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    boundary = value.get("home_boundary")
+    configuration = value.get("configuration")
+    if (
+        acquisition is None
+        or not isinstance(boundary, Mapping)
+        or boundary.get("status") != "verified_new_battle"
+        or not _sha256(boundary.get("activity_scope_fingerprint"))
+        or boundary.get("target_binding_fingerprint")
+        != acquisition.get("binding_fingerprint")
+        or not isinstance(configuration, Mapping)
+        or str(configuration.get("status") or "")
+        not in SAVE_RECONCILIATION_CONFIGURATION_STATUSES
+    ):
+        return None
+    try:
+        resolved = _check_id_list(configuration.get("resolved_check_ids", ()))
+        unresolved = _check_id_list(
+            configuration.get("unresolved_check_ids", ())
+        )
+    except (TypeError, ValueError):
+        return None
+    status = str(configuration["status"])
+    if (
+        set(resolved).intersection(unresolved)
+        or (status == "observation_only" and (resolved or unresolved))
+        or (status == "complete" and (not resolved or unresolved))
+        or (status == "partial" and not unresolved)
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        "kind": kind,
+        "workflow_id": workflow_id,
+        "observation_id": observation_id,
+        "acquisition": acquisition,
+        "home_boundary": {
+            "status": "verified_new_battle",
+            "activity_scope_fingerprint": str(
+                boundary["activity_scope_fingerprint"]
+            ),
+            "target_binding_fingerprint": str(
+                boundary["target_binding_fingerprint"]
+            ),
+        },
+        "configuration": {
+            "status": status,
+            "resolved_check_ids": resolved,
+            "unresolved_check_ids": unresolved,
+        },
+    }
+
+
+def build_terminal_return_reconciliation_receipt(
+    *,
+    workflow_id: str,
+    observation_id: str,
+    activity_scope_id: str,
+    acquisition: PlayerSaveAcquisitionBundle,
+    runtime_session_id: str,
+    expected_binding: PlayerSaveTargetBinding,
+    killed_by: str,
+    collection: str,
+) -> dict[str, Any]:
+    """Build a Return receipt from one causally bound natural Game Over save."""
+
+    normalized_workflow_id = _bounded(workflow_id, 64)
+    normalized_observation_id = _bounded(observation_id, 128)
+    normalized_scope = _bounded(activity_scope_id, 128)
+    normalized_runtime_session = _bounded(runtime_session_id, 128)
+    normalized_killed_by = _bounded(killed_by, 128)
+    normalized_collection = str(collection or "").strip().lower()
+    if (
+        normalized_workflow_id is None
+        or normalized_observation_id is None
+        or normalized_scope is None
+        or normalized_runtime_session is None
+        or normalized_killed_by is None
+        or normalized_collection not in MANUAL_SURRENDER_COLLECTIONS
+        or not isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        or not acquisition.complete
+        or acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.NATURAL_BOUNDARY
+        or acquisition.boundary is None
+        or acquisition.boundary.kind.value != "GAME_OVER"
+        or acquisition.boundary.runtime_session_id
+        != normalized_runtime_session
+        or acquisition.boundary.activity_scope_id != normalized_scope
+        or not isinstance(expected_binding, PlayerSaveTargetBinding)
+        or acquisition.binding != expected_binding
+    ):
+        raise ValueError(
+            "terminal Return reconciliation requires a bound natural Game Over save"
+        )
+    acquisition_provenance = acquisition.redacted_provenance()
+    receipt = {
+        "schema_version": 1,
+        "kind": TERMINAL_RETURN_RECONCILIATION_KIND,
+        "workflow_id": normalized_workflow_id,
+        "observation_id": normalized_observation_id,
+        "acquisition": acquisition_provenance,
+        "terminal": {
+            "status": "confirmed",
+            "activity_scope_fingerprint": acquisition_provenance[
+                "boundary"
+            ]["activity_scope"],
+            "runtime_session_fingerprint": acquisition_provenance[
+                "boundary"
+            ]["runtime_session"],
+            "killed_by": normalized_killed_by,
+            "surrendered": normalized_killed_by.lower() == "surrender",
+            "collection": normalized_collection,
+        },
+    }
+    normalized = validate_save_reconciliation_receipt(
+        receipt,
+        expected_kind=TERMINAL_RETURN_RECONCILIATION_KIND,
+        expected_workflow_id=normalized_workflow_id,
+        expected_observation_id=normalized_observation_id,
+    )
+    if normalized is None:  # pragma: no cover
+        raise ValueError("built terminal Return receipt is invalid")
+    return normalized
+
+
+def _validated_terminal_return_receipt(
+    value: Mapping[str, Any],
+    *,
+    kind: str,
+    workflow_id: str,
+    observation_id: str,
+) -> Optional[dict[str, Any]]:
+    acquisition = _validated_natural_terminal_acquisition_provenance(
+        value.get("acquisition")
+    )
+    terminal = value.get("terminal")
+    if (
+        acquisition is None
+        or not isinstance(terminal, Mapping)
+        or terminal.get("status") != "confirmed"
+        or not _sha256(terminal.get("activity_scope_fingerprint"))
+        or terminal.get("activity_scope_fingerprint")
+        != acquisition["boundary"].get("activity_scope")
+        or not _sha256(terminal.get("runtime_session_fingerprint"))
+        or terminal.get("runtime_session_fingerprint")
+        != acquisition["boundary"].get("runtime_session")
+    ):
+        return None
+    killed_by = _bounded(terminal.get("killed_by"), 128)
+    collection = str(terminal.get("collection") or "").strip().lower()
+    if (
+        killed_by is None
+        or collection not in MANUAL_SURRENDER_COLLECTIONS
+        or type(terminal.get("surrendered")) is not bool
+        or terminal.get("surrendered") != (killed_by.lower() == "surrender")
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        "kind": kind,
+        "workflow_id": workflow_id,
+        "observation_id": observation_id,
+        "acquisition": acquisition,
+        "terminal": {
+            "status": "confirmed",
+            "activity_scope_fingerprint": str(
+                terminal["activity_scope_fingerprint"]
+            ),
+            "runtime_session_fingerprint": str(
+                terminal["runtime_session_fingerprint"]
+            ),
+            "killed_by": killed_by,
+            "surrendered": bool(terminal["surrendered"]),
+            "collection": collection,
+        },
+    }
+
+
+def _validated_natural_terminal_acquisition_provenance(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    timing = value.get("timing")
+    boundary = value.get("boundary")
+    if (
+        value.get("type") != PlayerSaveAcquisitionType.NATURAL_BOUNDARY.value
+        or value.get("status") != "complete"
+        or value.get("transport_stable") is not True
+        or not _sha256(value.get("binding_fingerprint"))
+        or not isinstance(timing, Mapping)
+        or not isinstance(boundary, Mapping)
+        or boundary.get("kind") != "GAME_OVER"
+        or _aware_timestamp(boundary.get("observed_at")) is None
+        or not _sha256(boundary.get("runtime_session"))
+        or not _sha256(boundary.get("activity_scope"))
+    ):
+        return None
+    started = _aware_timestamp(timing.get("started_at"))
+    captured = _aware_timestamp(timing.get("captured_at"))
+    completed = _aware_timestamp(timing.get("completed_at"))
+    if started is None or captured is None or completed is None:
+        return None
+    if not (
+        datetime.fromisoformat(started)
+        <= datetime.fromisoformat(captured)
+        <= datetime.fromisoformat(completed)
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        "type": PlayerSaveAcquisitionType.NATURAL_BOUNDARY.value,
+        "status": "complete",
+        "reason": _bounded(value.get("reason"), 256) or "complete",
+        "binding_fingerprint": str(value["binding_fingerprint"]),
+        "transport_stable": True,
+        "timing": {
+            "started_at": started,
+            "captured_at": captured,
+            "completed_at": completed,
+        },
+        "boundary": {
+            "kind": "GAME_OVER",
+            "observed_at": _aware_timestamp(boundary["observed_at"]),
+            "runtime_session": str(boundary["runtime_session"]),
+            "activity_scope": str(boundary["activity_scope"]),
+        },
+    }
+
+
+def _validated_forced_acquisition_provenance(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    timing = value.get("timing")
+    if (
+        value.get("type") != PlayerSaveAcquisitionType.FORCED_SERIALIZATION.value
+        or value.get("status") != "complete"
+        or value.get("transport_stable") is not True
+        or value.get("boundary") is not None
+        or not _sha256(value.get("binding_fingerprint"))
+        or not isinstance(timing, Mapping)
+    ):
+        return None
+    started = _aware_timestamp(timing.get("started_at"))
+    captured = _aware_timestamp(timing.get("captured_at"))
+    completed = _aware_timestamp(timing.get("completed_at"))
+    if started is None or captured is None or completed is None:
+        return None
+    if not (
+        datetime.fromisoformat(started)
+        <= datetime.fromisoformat(captured)
+        <= datetime.fromisoformat(completed)
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        "type": PlayerSaveAcquisitionType.FORCED_SERIALIZATION.value,
+        "status": "complete",
+        "reason": _bounded(value.get("reason"), 256) or "complete",
+        "binding_fingerprint": str(value["binding_fingerprint"]),
+        "transport_stable": True,
+        "timing": {
+            "started_at": started,
+            "captured_at": captured,
+            "completed_at": completed,
+        },
+        "boundary": None,
+    }
+
+
+def _validated_running_temporal_provenance(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    mapping_id = _bounded(value.get("mapping_id"), 128)
+    captured_at = _aware_timestamp(value.get("captured_at"))
+    if (
+        mapping_id is None
+        or captured_at is None
+        or value.get("acquisition_type")
+        != PlayerSaveAcquisitionType.FORCED_SERIALIZATION.value
+        or not _sha256(value.get("target_generation"))
+        or not _sha256(value.get("runtime_session"))
+        or not _sha256(value.get("source_activity_scope"))
+        or not _sha256(value.get("activity_scope"))
+        or not _sha256(value.get("round_identity"))
+        or not _sha256(value.get("claim_fingerprint"))
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        "mapping_id": mapping_id,
+        "runtime_session": str(value["runtime_session"]),
+        "source_activity_scope": str(value["source_activity_scope"]),
+        "target_generation": str(value["target_generation"]),
+        "activity_scope": str(value["activity_scope"]),
+        "round_identity": str(value["round_identity"]),
+        "captured_at": captured_at,
+        "acquisition_type": PlayerSaveAcquisitionType.FORCED_SERIALIZATION.value,
+        "claim_fingerprint": str(value["claim_fingerprint"]),
+    }
+
+
+def _check_id_list(values: Iterable[object]) -> list[str]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+        raise TypeError("save check ids must be an iterable of strings")
+    normalized: list[str] = []
+    for value in values:
+        item = _bounded(value, 128)
+        if item is None:
+            raise ValueError("save check id is invalid")
+        if item not in normalized:
+            normalized.append(item)
+        if len(normalized) > 64:
+            raise ValueError("too many save check ids")
+    return sorted(normalized)
+
+
+def _sha256(value: object) -> bool:
+    return bool(_SHA256_RE.fullmatch(str(value or "")))
+
+
+def _fingerprint(label: str, value: str) -> str:
+    return hashlib.sha256(
+        f"thetower-{label}-v1\0{value}".encode("utf-8")
+    ).hexdigest()
+
+
+def _mapping_fingerprint(value: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def intent_matches_evidence(intent: str, evidence: Mapping[str, Any]) -> bool:
@@ -372,14 +1447,30 @@ __all__ = [
     "BATTLE_WORKFLOW_STATUSES",
     "BATTLE_WORKFLOW_TERMINAL_STATUSES",
     "CONTROL_MODEL_SCHEMA_VERSION",
+    "HOME_RETURN_RECONCILIATION_KIND",
     "MANUAL_CONTROL_SCHEMA_VERSION",
+    "MANUAL_SURRENDER_COLLECTIONS",
     "MANUAL_CONTROL_STATUSES",
     "MANUAL_CONTROL_TERMINAL_STATUSES",
+    "RUNNING_SAVE_RECONCILIATION_KINDS",
+    "SAVE_RECONCILIATION_RECEIPT_SCHEMA_VERSION",
+    "SETUP_CAPTURE_GAME_STATES",
+    "SETUP_CAPTURE_SCHEMA_VERSION",
+    "SETUP_CAPTURE_STATUSES",
+    "SETUP_CAPTURE_TERMINAL_STATUSES",
+    "TERMINAL_RETURN_RECONCILIATION_KIND",
+    "build_home_return_reconciliation_receipt",
+    "build_running_save_reconciliation_receipt",
+    "build_terminal_return_reconciliation_receipt",
     "intent_matches_evidence",
     "observed_game_state",
     "validate_battle_workflow",
     "validate_manual_control",
+    "validate_manual_terminal_evidence",
     "validate_observation",
+    "validate_save_reconciliation_receipt",
+    "validate_setup_capture",
+    "validate_setup_capture_preview",
     "validate_workflow_evidence",
     "workflow_evidence_from_authority",
 ]

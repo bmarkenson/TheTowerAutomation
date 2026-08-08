@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping, Optional
 import cv2
 import numpy as np
 
+from core.battle_stats import included_in_default_history
 from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import (
     FARM_FREE_UPGRADE_LOCKS,
@@ -94,6 +95,10 @@ def load_pending_no_strategy_record(
     for path in candidates:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(record, Mapping) or not included_in_default_history(
+                record
+            ):
+                continue
             observed = record.get("observed_run_configuration")
             captured_at = datetime.fromisoformat(str(record.get("captured_at") or ""))
         except (OSError, TypeError, ValueError, json.JSONDecodeError):

@@ -399,6 +399,11 @@
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"
                            Margin="6,2,6,4" />
+                <TextBlock Text="IF THIS MANUAL BATTLE IS SURRENDERED" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,4,4,0" />
+                <ComboBox x:Name="ManualSurrenderCollectionBox" Margin="4" ToolTip="This collection choice never authorizes automation to Surrender.">
+                  <ComboBoxItem Content="Exclude stats (minimal save-backed record)" Tag="minimal" IsSelected="True" />
+                  <ComboBoxItem Content="Collect normal terminal stats" Tag="full" />
+                </ComboBox>
                 <TextBlock Text="GAME SPEED" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
                 <ComboBox x:Name="GameSpeedTargetBox"
                           SelectionChanged="GameSpeedTargetBox_SelectionChanged"
@@ -463,6 +468,18 @@
                 </UniformGrid>
                 <TextBlock x:Name="BattleWorkflowText"
                            Text="Waiting for fresh game-boundary evidence."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,4" />
+                <TextBlock Text="SAVE-BACKED AUTHORING" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
+                <Button x:Name="CaptureSetupButton"
+                        Content="Capture current setup as…"
+                        Click="CaptureSetup_Click"
+                        IsEnabled="False"
+                        ToolTipService.ShowOnDisabled="True" />
+                <TextBlock x:Name="CaptureSetupText"
+                           Text="Waiting for an exact runtime-owned boundary."
                            TextWrapping="Wrap"
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"

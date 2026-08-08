@@ -569,7 +569,8 @@ def test_attached_mismatch_can_offer_guarded_restart():
         if option["id"] == "restart_and_repair"
     )
     assert restart["action"] == "repair_restart"
-    assert "guarded repair route" in restart["description"]
+    assert restart["label"] == "Surrender this battle and repair setup"
+    assert "separate authority" in restart["description"]
 
 
 def test_runtime_can_persist_advisory_pause(tmp_path):

@@ -6,14 +6,26 @@ import glob
 import json
 from typing import Optional
 
+from core.battle_stats import included_in_default_history
+
 # ---------- File selection ----------
 
 
 def _latest_battle_record(records_dir: str = "logs/battles") -> Optional[str]:
-    candidates = glob.glob(os.path.join(records_dir, "Battle*.json"))
-    if not candidates:
-        return None
-    return max(candidates, key=os.path.basename)
+    candidates = sorted(
+        glob.glob(os.path.join(records_dir, "Battle*.json")),
+        key=os.path.basename,
+        reverse=True,
+    )
+    for path in candidates:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                record = json.load(handle)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and included_in_default_history(record):
+            return path
+    return None
 
 
 # ---------- Public API ----------
