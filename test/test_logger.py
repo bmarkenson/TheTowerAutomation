@@ -368,6 +368,82 @@ def test_retry_scope_waits_for_a_new_history_identity(tmp_path, monkeypatch):
     assert "pending_latest_completed_battle" not in completed
 
 
+def test_terminal_history_handoff_moves_once_to_the_next_home_scope(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    source = logger.start_activity_scope(reason="new_battle_preflight")
+    assert source is not None
+    handoff = {
+        "schema_version": 1,
+        "status": "ready",
+        "terminal_state": "GAME_OVER",
+    }
+    staged = logger.record_activity_scope_terminal_history_handoff(
+        run_id=str(source["run_id"]),
+        handoff=handoff,
+    )
+    assert staged is not None
+
+    destination = logger.start_activity_scope(
+        reason="new_battle_preflight",
+        carry_terminal_history_handoff=True,
+    )
+    assert destination is not None
+    assert "terminal_history_handoff" not in destination
+    assert destination["pending_terminal_history_handoff"] == {
+        "schema_version": 1,
+        "destination_run_id": destination["run_id"],
+        "handoff": handoff,
+    }
+
+    consumed = logger.take_activity_scope_terminal_history_handoff(
+        run_id=str(destination["run_id"])
+    )
+    repeated = logger.take_activity_scope_terminal_history_handoff(
+        run_id=str(destination["run_id"])
+    )
+
+    assert consumed == destination["pending_terminal_history_handoff"]
+    assert repeated is None
+    assert "pending_terminal_history_handoff" not in logger.get_activity_scope()
+
+
+def test_retry_scope_carries_terminal_handoff_with_its_previous_tail(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    source = logger.start_activity_scope(reason="new_battle_preflight")
+    assert source is not None
+    previous = {"fingerprint": "previous-tail"}
+    source = logger.record_activity_scope_battle_history(
+        run_id=str(source["run_id"]),
+        latest_completed_battle=previous,
+    )
+    assert source is not None
+    staged = logger.record_activity_scope_terminal_history_handoff(
+        run_id=str(source["run_id"]),
+        handoff={"schema_version": 1, "status": "ready"},
+    )
+    assert staged is not None
+
+    retry = logger.start_retry_activity_scope()
+
+    assert retry is not None
+    assert retry["pending_latest_completed_battle"] == {
+        "schema_version": 1,
+        "previous_completed_battle": previous,
+    }
+    assert retry["pending_terminal_history_handoff"]["handoff"] == {
+        "schema_version": 1,
+        "status": "ready",
+    }
+
+
 def test_log_result_pairs_terminal_summary_with_diagnostic_detail(
     tmp_path,
     monkeypatch,

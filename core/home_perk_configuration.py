@@ -56,6 +56,7 @@ MAX_BAN_SCAN_SWIPES = 14
 MAX_AUTO_PICK_SCAN_SWIPES = 20
 MAX_AUTO_PICK_MOVE_TAPS = 300
 MAX_AUTO_PICK_LOCAL_REACQUIRE_SWIPES = 4
+MAX_AUTO_PICK_SEMANTIC_RESYNCS = 2
 MAX_PERK_OCR_RETRIES = 2
 PERK_OCR_RETRY_SETTLE_SECONDS = 0.6
 AUTO_PICK_UP_X = 915
@@ -443,8 +444,8 @@ def ensure_home_perk_configuration(
             "strategy; starting guarded repair",
             "DEBUG",
         )
-        current = _repair_auto_pick_order(
-            auto_top,
+        auto_frames, current, captured_auto = _repair_auto_pick_order(
+            current,
             required_auto_pick,
             capture_fn=capture_fn,
             detector=detector,
@@ -457,25 +458,6 @@ def ensure_home_perk_configuration(
             sleep_fn=sleep_fn,
         )
         changed_fields.add("perk_auto_pick_order")
-        auto_top = _scroll_configuration_top(
-            current,
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            sleep_fn=sleep_fn,
-        )
-        auto_frames, current, captured_auto = (
-            _capture_ranked_order_with_ocr_retries(
-                auto_top,
-                ranking_count=len(required_auto_pick),
-                capture_fn=capture_fn,
-                detector=detector,
-                visible_fn=visible_fn,
-                swipe_fn=swipe_fn,
-                row_fn=row_fn,
-                sleep_fn=sleep_fn,
-            )
-        )
         evidence = evaluate_profile_perk_configuration(
             requirements,
             bans_frame=bans_top,
@@ -759,7 +741,7 @@ def _repair_bans(
 
 
 def _repair_auto_pick_order(
-    top: Frame,
+    current: Frame,
     expected_keys: Sequence[str],
     *,
     capture_fn: Capture,
@@ -769,55 +751,47 @@ def _repair_auto_pick_order(
     swipe_fn: Callable[[str], bool],
     row_fn: RowsFn,
     row_near_fn: Callable[..., Optional[dict[str, Any]]],
-    observed_keys: Sequence[str | None] | None = None,
+    observed_keys: Sequence[str | None],
     sleep_fn: Callable[[float], None],
-) -> Frame:
-    current = top
+) -> tuple[list[Frame], Frame, dict[str, Any]]:
+    if (
+        len(observed_keys) != len(expected_keys)
+        or any(key is None for key in observed_keys)
+        or len(set(observed_keys)) != len(observed_keys)
+    ):
+        raise HomePerkConfigurationError(
+            "Auto Pick repair requires one complete authoritative ranked order"
+        )
+
+    working_order = [str(key) for key in observed_keys]
     total_taps = 0
-    first_mismatch = 1
-    if observed_keys is not None and len(observed_keys) == len(expected_keys):
-        first_mismatch = next(
-            (
-                rank
-                for rank, (observed, expected) in enumerate(
-                    zip(observed_keys, expected_keys),
-                    start=1,
-                )
-                if observed != expected
-            ),
-            len(expected_keys) + 1,
-        )
-    for desired_rank, key in enumerate(expected_keys, start=1):
-        if desired_rank < first_mismatch:
+    semantic_resyncs = 0
+    current = _scroll_configuration_top(
+        current,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+    )
+    desired_rank = 1
+    while desired_rank <= len(expected_keys):
+        key = expected_keys[desired_rank - 1]
+        if working_order[desired_rank - 1] == key:
+            desired_rank += 1
             continue
-        rank, current, row = _locate_auto_pick_key(
-            current,
-            key,
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            row_fn=row_fn,
-            sleep_fn=sleep_fn,
+
+        cached_rank = (
+            working_order.index(key) + 1
+            if key in working_order
+            else None
         )
-        if rank < desired_rank:
+        if cached_rank is not None and cached_rank < desired_rank:
             raise HomePerkConfigurationError(
                 f"{perk_configuration_label(key)} appeared above its guarded "
                 f"target rank {desired_rank}"
             )
-        estimated_rank = rank
-        anchor_key = (
-            expected_keys[desired_rank - 2]
-            if desired_rank > 1
-            else None
-        )
-        while True:
-            (
-                current,
-                row,
-                previous,
-                _following,
-                at_top,
-            ) = _reacquire_auto_pick_move_context(
+        try:
+            _rank, current, row = _locate_auto_pick_key(
                 current,
                 key,
                 capture_fn=capture_fn,
@@ -825,21 +799,127 @@ def _repair_auto_pick_order(
                 swipe_fn=swipe_fn,
                 row_fn=row_fn,
                 sleep_fn=sleep_fn,
+                return_to_top=False,
             )
+        except HomePerkConfigurationError as exc:
+            if semantic_resyncs >= MAX_AUTO_PICK_SEMANTIC_RESYNCS:
+                raise
+            semantic_resyncs += 1
+            log(
+                "[HOME_PERKS] Auto Pick forward target acquisition lost its "
+                "semantic viewport; recapturing the ranked order "
+                f"({semantic_resyncs}/{MAX_AUTO_PICK_SEMANTIC_RESYNCS}) "
+                f"target={perk_configuration_label(key)} reason={exc}",
+                "DEBUG",
+            )
+            current, working_order = _recapture_auto_pick_semantic_order(
+                current,
+                ranking_count=len(expected_keys),
+                capture_fn=capture_fn,
+                detector=detector,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                row_fn=row_fn,
+                sleep_fn=sleep_fn,
+            )
+            continue
+
+        estimated_rank = cached_rank
+        anchor_key = (
+            expected_keys[desired_rank - 2]
+            if desired_rank > 1
+            else None
+        )
+        target_taps = 0
+        restart_from_semantic_order = False
+        while True:
+            try:
+                (
+                    current,
+                    row,
+                    previous,
+                    _following,
+                    at_top,
+                ) = _reacquire_auto_pick_move_context(
+                    current,
+                    key,
+                    capture_fn=capture_fn,
+                    visible_fn=visible_fn,
+                    swipe_fn=swipe_fn,
+                    row_fn=row_fn,
+                    sleep_fn=sleep_fn,
+                )
+            except HomePerkConfigurationError as exc:
+                if semantic_resyncs >= MAX_AUTO_PICK_SEMANTIC_RESYNCS:
+                    raise
+                semantic_resyncs += 1
+                log(
+                    "[HOME_PERKS] Auto Pick local target context was lost; "
+                    "recapturing the ranked order "
+                    f"({semantic_resyncs}/{MAX_AUTO_PICK_SEMANTIC_RESYNCS}) "
+                    f"target={perk_configuration_label(key)} reason={exc}",
+                    "DEBUG",
+                )
+                current, working_order = _recapture_auto_pick_semantic_order(
+                    current,
+                    ranking_count=len(expected_keys),
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    visible_fn=visible_fn,
+                    swipe_fn=swipe_fn,
+                    row_fn=row_fn,
+                    sleep_fn=sleep_fn,
+                )
+                restart_from_semantic_order = True
+                break
+
+            if target_taps == 0 and not _auto_pick_context_matches_order(
+                working_order,
+                key,
+                previous,
+                at_top=at_top,
+            ):
+                if semantic_resyncs >= MAX_AUTO_PICK_SEMANTIC_RESYNCS:
+                    raise HomePerkConfigurationError(
+                        "Auto Pick local row context remained inconsistent "
+                        "with the authoritative ranked order"
+                    )
+                semantic_resyncs += 1
+                log(
+                    "[HOME_PERKS] Auto Pick local row context disagreed with "
+                    "the cached ranked order; recapturing before input "
+                    f"({semantic_resyncs}/{MAX_AUTO_PICK_SEMANTIC_RESYNCS}) "
+                    f"target={perk_configuration_label(key)}",
+                    "DEBUG",
+                )
+                current, working_order = _recapture_auto_pick_semantic_order(
+                    current,
+                    ranking_count=len(expected_keys),
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    visible_fn=visible_fn,
+                    swipe_fn=swipe_fn,
+                    row_fn=row_fn,
+                    sleep_fn=sleep_fn,
+                )
+                restart_from_semantic_order = True
+                break
+
             if anchor_key is not None and previous is not None and (
                 previous.get("key") == anchor_key
             ):
-                if estimated_rank != desired_rank:
+                if (
+                    estimated_rank is not None
+                    and estimated_rank != desired_rank
+                ):
                     log(
                         "[HOME_PERKS] Auto Pick local adjacency reconciled "
                         f"{perk_configuration_label(key)} rank estimate "
                         f"{estimated_rank} to target {desired_rank}",
                         "DEBUG",
                     )
-                rank = desired_rank
                 break
             if anchor_key is None and at_top:
-                rank = 1
                 break
             if at_top:
                 raise HomePerkConfigurationError(
@@ -872,6 +952,7 @@ def _repair_auto_pick_order(
                 require_identity_after=False,
             )
             total_taps += 1
+            target_taps += 1
             (
                 current,
                 row,
@@ -890,32 +971,43 @@ def _repair_auto_pick_order(
                 sleep_fn=sleep_fn,
             )
             prior_estimate = estimated_rank
-            estimated_rank = max(1, estimated_rank - 1)
+            if estimated_rank is not None:
+                estimated_rank = max(1, estimated_rank - 1)
             displaced_label = perk_configuration_label(
                 str(displaced.get("key") or "") or None,
                 str(displaced.get("display_text") or ""),
             )
+            rank_estimate = (
+                f"{prior_estimate}->{estimated_rank}"
+                if prior_estimate is not None
+                else "outside_cached_prefix"
+            )
             log(
                 "[HOME_PERKS] Auto Pick locally verified one upward swap; "
                 f"perk={perk_configuration_label(key)} "
-                f"rank_estimate={prior_estimate}->{estimated_rank} "
+                f"rank_estimate={rank_estimate} "
                 f"displaced={displaced_label}",
                 "DEBUG",
             )
             if anchor_key is not None and previous is not None and (
                 previous.get("key") == anchor_key
             ):
-                rank = desired_rank
                 break
             if anchor_key is None and at_top:
-                rank = 1
                 break
 
-        if rank != desired_rank:
+        if restart_from_semantic_order:
+            continue
+
+        if key in working_order:
+            working_order.remove(key)
+        working_order.insert(desired_rank - 1, key)
+        del working_order[len(expected_keys) :]
+        if working_order[desired_rank - 1] != key:
             raise HomePerkConfigurationError(
-                f"{perk_configuration_label(key)} reached rank "
-                f"{rank}, expected {desired_rank}"
+                "Auto Pick semantic order did not accept a verified move"
             )
+        desired_rank += 1
 
     final_top = _scroll_configuration_top(
         current,
@@ -939,7 +1031,34 @@ def _repair_auto_pick_order(
         raise HomePerkConfigurationError(
             "Auto Pick order remained different after guarded moves"
         )
-    return _current
+    return _frames, _current, final
+
+
+def _auto_pick_context_matches_order(
+    working_order: Sequence[str],
+    key: str,
+    previous: Mapping[str, Any] | None,
+    *,
+    at_top: bool,
+) -> bool:
+    """Check fresh local adjacency against the cached ranked prefix."""
+
+    if key in working_order:
+        index = working_order.index(key)
+        if index == 0:
+            return at_top
+        return bool(
+            previous is not None
+            and previous.get("key") == working_order[index - 1]
+        )
+
+    if at_top or previous is None or previous.get("key") is None:
+        return False
+    previous_key = str(previous["key"])
+    return (
+        previous_key not in working_order
+        or previous_key == working_order[-1]
+    )
 
 
 def _visible_auto_pick_move_context(
@@ -1117,19 +1236,31 @@ def _locate_auto_pick_key(
     swipe_fn: Callable[[str], bool],
     row_fn: RowsFn,
     sleep_fn: Callable[[float], None],
-) -> tuple[int, Frame, dict[str, Any]]:
-    current = _scroll_configuration_top(
-        current,
-        capture_fn=capture_fn,
-        visible_fn=visible_fn,
-        swipe_fn=swipe_fn,
-        sleep_fn=sleep_fn,
-    )
+    return_to_top: bool = True,
+) -> tuple[int | None, Frame, dict[str, Any]]:
+    if return_to_top:
+        current = _scroll_configuration_top(
+            current,
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            sleep_fn=sleep_fn,
+        )
     ordered: list[dict[str, Any]] = []
-    located: tuple[int, dict[str, Any]] | None = None
+    located: tuple[int | None, dict[str, Any]] | None = None
 
     def target_stop(frame: Frame) -> Optional[str]:
         nonlocal located
+        if not return_to_top:
+            matches = []
+            for raw in row_fn(frame):
+                row = semantic_perk_entry(raw)
+                if row.get("key") == key:
+                    matches.append(row)
+            if len(matches) == 1:
+                located = (None, matches[0])
+                return "auto_pick_key_visible"
+            return None
         for raw in row_fn(frame):
             row = semantic_perk_entry(raw)
             if any(perk_entries_match(existing, row) for existing in ordered):
@@ -1583,6 +1714,63 @@ def _capture_ranked_order_with_ocr_retries(
             sleep_fn=sleep_fn,
         )
     return frames, current, captured
+
+
+def _recapture_auto_pick_semantic_order(
+    current: Frame,
+    *,
+    ranking_count: int,
+    capture_fn: Capture,
+    detector: Detector,
+    visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str], bool],
+    row_fn: RowsFn,
+    sleep_fn: Callable[[float], None],
+) -> tuple[Frame, list[str]]:
+    """Rebuild planning state after a pre-input viewport or OCR conflict."""
+
+    top = _scroll_configuration_top(
+        current,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+    )
+    _frames, scanned, captured = _capture_ranked_order_with_ocr_retries(
+        top,
+        ranking_count=ranking_count,
+        capture_fn=capture_fn,
+        detector=detector,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        row_fn=row_fn,
+        sleep_fn=sleep_fn,
+    )
+    selected = [
+        entry
+        for entry in captured.get("selected") or ()
+        if isinstance(entry, Mapping)
+    ]
+    observed = [entry.get("key") for entry in selected]
+    quality = captured.get("quality")
+    if (
+        not isinstance(quality, Mapping)
+        or quality.get("valid") is not True
+        or len(observed) != ranking_count
+        or any(key is None for key in observed)
+        or len(set(observed)) != len(observed)
+    ):
+        raise HomePerkConfigurationError(
+            "Auto Pick semantic resynchronization was incomplete or ambiguous"
+        )
+    refreshed_top = _scroll_configuration_top(
+        scanned,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+    )
+    return refreshed_top, [str(key) for key in observed]
 
 
 def _fresh_perk_configuration_capture(

@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from core.adb_target_session import AdbTargetSnapshot
 from core.app import App
@@ -55,7 +55,7 @@ def test_terminal_progression_uses_stable_exact_target_and_marks_acquisition():
         result = app._capture_terminal_profile_progression()
 
     assert result["status"] == "complete"
-    assert result["source"]["acquisition"] == "stable_terminal_player_save"
+    assert result["source"]["acquisition"]["type"] == "passive_stable_read"
     pull.assert_called_once_with(
         device_id="localhost:5555",
         attempts=3,
@@ -86,7 +86,7 @@ def test_terminal_progression_discards_snapshot_across_target_generation_change(
 
     assert result["status"] == "unavailable"
     assert result["reason"] == "adb_target_changed_during_terminal_capture"
-    assert result["identity"]["mapping_id"] == "data-9-game-1073"
+    assert result["identity"]["mapping_id"] is None
 
 
 def test_terminal_progression_is_nonblocking_without_an_owned_target():
@@ -102,6 +102,13 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     target = AdbTargetSnapshot("localhost:5555", 4, True)
     app = App.__new__(App)
     app._adb_target_session = _StableSession(target, target)
+    app._player_save_runtime_session_id = "runtime-1"
+    app._perk_save_monitor = Mock()
+    app._player_save_audit_collector = Mock()
+    monitor_context = object()
+    app._current_perk_save_monitor_context = Mock(
+        return_value=monitor_context
+    )
     decoded = SimpleNamespace(
         profile_progression=_normalized_progression(),
         mapping_id="data-9-game-1073",
@@ -127,9 +134,18 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
         patch("core.app.decode_player_save_bytes", return_value=decoded),
         patch("core.app.get_activity_scope", return_value=scope),
         patch(
-            "core.app.terminal_save_report_from_snapshot",
+            "core.app.terminal_history_transition_from_acquisition",
+            return_value={
+                "schema_version": 1,
+                "status": "unavailable",
+                "complete": False,
+                "reason": "test_transition_unavailable",
+            },
+        ) as transition_from_acquisition,
+        patch(
+            "core.app.terminal_save_report_from_acquisition",
             return_value=report,
-        ) as report_from_snapshot,
+        ) as report_from_acquisition,
     ):
         result = app._capture_terminal_player_save(
             "GAME_OVER",
@@ -139,9 +155,102 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     assert result["profile_progression"]["status"] == "complete"
     assert result["terminal_save_report"] is report
     pull.assert_called_once()
-    report_from_snapshot.assert_called_once_with(
-        decoded,
-        terminal_state="GAME_OVER",
-        run_binding=binding,
-        activity_scope=scope,
+    transition_from_acquisition.assert_called_once()
+    report_from_acquisition.assert_called_once()
+    call = report_from_acquisition.call_args
+    assert call.args[0].snapshot is decoded
+    assert call.args[0].acquisition_type.value == "natural_boundary"
+    assert call.kwargs == {
+        "terminal_state": "GAME_OVER",
+        "run_binding": binding,
+        "activity_scope": scope,
+        "history_transition": {
+            "schema_version": 1,
+            "status": "unavailable",
+            "complete": False,
+            "reason": "test_transition_unavailable",
+        },
+    }
+    monitor_call = app._perk_save_monitor.observe_bundle.call_args
+    assert monitor_call.args[0] is call.args[0]
+    assert monitor_call.kwargs == {"context": monitor_context}
+    audit_call = app._player_save_audit_collector.observe_acquisition.call_args
+    assert audit_call.args == (call.args[0],)
+    assert audit_call.kwargs == {"reason_code": "game_over"}
+
+
+def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
+    target = AdbTargetSnapshot("localhost:5555", 4, True)
+    app = App.__new__(App)
+    app._adb_target_session = _StableSession(target, target)
+    app._player_save_runtime_session_id = "runtime-1"
+    app._activity_continuity = SimpleNamespace(
+        publish_terminal_history_handoff=Mock()
+    )
+    decoded = SimpleNamespace(
+        profile_progression=_normalized_progression(),
+        mapping_id="data-9-game-1073",
+        save_revision=47316,
+    )
+    report = {
+        "schema_version": 1,
+        "status": "unavailable",
+        "complete": False,
+        "reason": "semantic_projection_unavailable",
+        "completed_entry": None,
+        "ui_fallback": {"required": True},
+    }
+    conditions = {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+        "summary_codes": ["OR"],
+    }
+    binding = {
+        "schema_version": 1,
+        "status": "bound",
+        "activity_scope_run_id": "scope-1",
+    }
+    scope = {"schema_version": 1, "run_id": "scope-1"}
+    transition = {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+        "reason": "",
+        "handoff": {"schema_version": 1, "status": "ready"},
+    }
+
+    with (
+        patch("core.app.pull_player_save_bytes", return_value=b"save") as pull,
+        patch("core.app.decode_player_save_bytes", return_value=decoded) as decode,
+        patch("core.app.get_activity_scope", return_value=scope),
+        patch(
+            "core.app.terminal_history_transition_from_acquisition",
+            return_value=transition,
+        ),
+        patch(
+            "core.app.terminal_save_report_from_acquisition",
+            return_value=report,
+        ) as report_projector,
+        patch(
+            "core.app.tournament_conditions_from_acquisition",
+            return_value=conditions,
+        ) as conditions_projector,
+    ):
+        result = app._capture_terminal_player_save(
+            "TOURNAMENT_RESULTS",
+            run_binding=binding,
+        )
+
+    pull.assert_called_once()
+    decode.assert_called_once()
+    report_projector.assert_called_once()
+    conditions_projector.assert_called_once()
+    report_bundle = report_projector.call_args.args[0]
+    conditions_bundle = conditions_projector.call_args.args[0]
+    assert report_bundle is conditions_bundle
+    assert report_bundle.snapshot is decoded
+    assert result["battle_conditions"] == conditions
+    app._activity_continuity.publish_terminal_history_handoff.assert_called_once_with(
+        transition
     )

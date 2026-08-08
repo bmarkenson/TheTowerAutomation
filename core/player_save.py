@@ -29,6 +29,10 @@ from core.profile_progression import (
     normalize_profile_progression,
 )
 from core.tournament_conditions import derive_tournament_conditions_from_save
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionType,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -553,6 +557,42 @@ def reconcile_requirements(
             "ui_required_checks": ui_required,
         },
     }
+
+
+def reconcile_acquired_requirements(
+    acquisition: PlayerSaveAcquisitionBundle,
+    requirements: Mapping[str, Any],
+    *,
+    force_ui_audit: bool = False,
+    max_snapshot_age_s: Optional[float] = None,
+    now: Optional[datetime] = None,
+) -> dict[str, Any]:
+    """Reconcile runtime requirements from typed acquisition authority.
+
+    Current configuration is authoritative only at a successfully restored
+    forced-serialization boundary.  The legacy boolean API remains available
+    solely to the explicit offline inspection path.
+    """
+
+    if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+        raise TypeError("runtime reconciliation requires a typed acquisition")
+    if not acquisition.complete or acquisition.snapshot is None:
+        raise ValueError("runtime reconciliation requires a complete acquisition")
+    forced = (
+        acquisition.acquisition_type
+        is PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+    )
+    result = reconcile_requirements(
+        acquisition.snapshot,
+        requirements,
+        force_ui_audit=force_ui_audit,
+        freshness_verified=forced,
+        max_snapshot_age_s=max_snapshot_age_s,
+        now=now,
+    )
+    result.pop("freshness_verified", None)
+    result["acquisition"] = acquisition.redacted_provenance()
+    return result
 
 
 @lru_cache(maxsize=1)
@@ -2060,5 +2100,6 @@ __all__ = [
     "decode_player_save_bytes",
     "pull_player_save_bytes",
     "read_player_save_file",
+    "reconcile_acquired_requirements",
     "reconcile_requirements",
 ]

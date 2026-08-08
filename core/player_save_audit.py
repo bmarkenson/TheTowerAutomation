@@ -1,11 +1,11 @@
-"""Opt-in, observation-only natural-boundary player-save audit collection.
+"""Opt-in, observation-only player-save audit projection.
 
 The collector is deliberately outside every action and lifecycle authority
-path.  Its daemon worker performs stable reads, exact-version decoding,
-normalization, state reconciliation, and append-only receipt writes without
-blocking the App heartbeat.  Only a compact allowlisted projection crosses
-the acquisition boundary; raw save bytes, decoded roots, profile evidence,
-and completed-history rows are never retained by this module.
+path.  Normal App runtime gives its daemon worker the same typed bundles used
+by other consumers; the legacy internal cadence remains available to focused
+standalone callers.  Only a compact allowlisted projection crosses the
+acquisition boundary; raw save bytes, decoded roots, profile evidence, and
+completed-history rows are never retained by this module.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
-import hashlib
 import json
 import math
 import os
@@ -26,12 +25,12 @@ import time
 from typing import Any, Optional
 from uuid import uuid4
 
-from core.player_save import (
-    PlayerSaveDecodeError,
-    PlayerSaveError,
-    PlayerSavePullError,
-    decode_player_save_bytes,
-    pull_player_save_bytes,
+from core.player_save import decode_player_save_bytes, pull_player_save_bytes
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    StablePlayerSaveAcquirer,
 )
 from core.perk_id_resolver import (
     normalize_timeline_mapping_batch,
@@ -220,6 +219,12 @@ class _PerkMappingCommand:
 @dataclass(frozen=True)
 class _PerkMappingResetCommand:
     pass
+
+
+@dataclass(frozen=True)
+class _ExternalAcquisitionCommand:
+    acquisition: PlayerSaveAcquisitionBundle
+    request: AuditRequest
 
 
 @dataclass(frozen=True)
@@ -1162,7 +1167,7 @@ class PlayerSaveAuditStateMachine:
 
 
 class PlayerSaveAuditCollector:
-    """Nonblocking App facade backed by one bounded daemon acquisition worker."""
+    """Nonblocking audit facade backed by one bounded projection worker."""
 
     def __init__(
         self,
@@ -1174,6 +1179,8 @@ class PlayerSaveAuditCollector:
         manifest_path: Path | str = DEFAULT_PLAYER_SAVE_AUDIT_MANIFEST_PATH,
         pull_fn: Callable[..., bytes] = pull_player_save_bytes,
         decode_fn: Callable[..., Any] = decode_player_save_bytes,
+        acquirer: Optional[StablePlayerSaveAcquirer] = None,
+        acquire_internally: bool = True,
         now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         monotonic_fn: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -1185,9 +1192,16 @@ class PlayerSaveAuditCollector:
                 self._interval_seconds = _validated_interval_seconds(interval_seconds)
             except PlayerSaveAuditError:
                 interval_invalid = True
-        self._target_snapshot_fn = target_snapshot_fn
-        self._pull_fn = pull_fn
-        self._decode_fn = decode_fn
+        self._acquirer = acquirer
+        self._acquire_internally = bool(acquire_internally)
+        if self._acquirer is None and target_snapshot_fn is not None:
+            self._acquirer = StablePlayerSaveAcquirer(
+                target_snapshot_fn=target_snapshot_fn,
+                pull_fn=pull_fn,
+                decode_fn=decode_fn,
+                now_fn=now_fn,
+                pull_options={"attempts": 3, "settle_seconds": 0.1},
+            )
         self._now_fn = now_fn
         self._monotonic_fn = monotonic_fn
         self._commands: queue.Queue[Any] = queue.Queue(maxsize=_QUEUE_CAPACITY)
@@ -1287,6 +1301,35 @@ class PlayerSaveAuditCollector:
             boundary_observed_at=boundary_at,
         )
         self._enqueue(_BoundaryCommand(request))
+
+    def observe_acquisition(
+        self,
+        acquisition: PlayerSaveAcquisitionBundle,
+        *,
+        reason_code: str = "periodic_interval",
+        requested_at: Optional[datetime] = None,
+    ) -> None:
+        """Queue one already-acquired shared bundle for audit projection."""
+
+        if not self.enabled or self._closed:
+            return
+        if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+            self._enqueue(_OutcomeCommand("typed_acquisition_required", "acquisition"))
+            return
+        reason = _safe_code(reason_code, "request_reason")
+        with self._boundary_lock:
+            label = self._last_boundary_label
+            boundary_at = self._last_boundary_observed_at
+        request = AuditRequest(
+            reasons=(reason,),
+            requested_at=_aware_datetime(
+                requested_at or acquisition.acquisition_started_at,
+                "requested_at",
+            ),
+            boundary_label=label,
+            boundary_observed_at=boundary_at,
+        )
+        self._enqueue(_ExternalAcquisitionCommand(acquisition, request))
 
     def observe_visual_events(
         self,
@@ -1429,13 +1472,18 @@ class PlayerSaveAuditCollector:
             return
         state.start_session()
         next_periodic = self._monotonic_fn() + self._interval_seconds
+        mode = "internal cadence" if self._acquire_internally else "shared bundles"
         log(
             "[PLAYER_SAVE_AUDIT] Observation-only collector enabled; "
-            f"stable cadence={self._interval_seconds}s",
+            f"source={mode}",
             "INFO",
         )
         while True:
-            timeout = max(0.0, next_periodic - self._monotonic_fn())
+            timeout = (
+                max(0.0, next_periodic - self._monotonic_fn())
+                if self._acquire_internally
+                else None
+            )
             try:
                 command = self._commands.get(timeout=timeout)
             except queue.Empty:
@@ -1459,8 +1507,14 @@ class PlayerSaveAuditCollector:
                     if _starts_perk_mapping_round(command.request):
                         self._perk_mapping_batches.clear()
                     state.record_boundary(command.request)
-                    self._acquire_and_process(command.request)
+                    if self._acquire_internally:
+                        self._acquire_and_process(command.request)
                     next_periodic = self._monotonic_fn() + self._interval_seconds
+                elif isinstance(command, _ExternalAcquisitionCommand):
+                    self._process_acquisition(
+                        command.request,
+                        command.acquisition,
+                    )
                 elif isinstance(command, _VisualCommand):
                     state._record_normalized_visual_events(
                         command.events,
@@ -1489,85 +1543,38 @@ class PlayerSaveAuditCollector:
         state = self._state_machine
         if state is None:
             return
-        target_before = self._target_snapshot()
-        if target_before is None:
+        acquirer = self._acquirer
+        binding = acquirer.current_binding() if acquirer is not None else None
+        if binding is None:
             state.record_outcome("exact_target_unavailable", request=request)
             self._rate_limited_warning("exact_target_unavailable")
             return
-        target, generation = target_before
-        self._sync_perk_mapping_scope((target, generation))
-        target_fingerprint = _target_fingerprint(target)
-        started_at = self._now_fn()
-        try:
-            pull_kwargs: dict[str, Any] = {
-                "device_id": target,
-                "attempts": 3,
-                "settle_seconds": 0.1,
-            }
-            if self._pull_fn is pull_player_save_bytes:
-                pull_kwargs["read_fn"] = _quiet_player_save_read
-            payload = self._pull_fn(
-                **pull_kwargs,
-            )
-            captured_at = self._now_fn()
-            snapshot = self._decode_fn(
-                payload,
-                source_name="playerInfo.dat",
-                captured_at=captured_at,
-            )
-            del payload
-            runtime = snapshot.runtime_save
-            if runtime is None:
-                if not snapshot.mapping_supported:
-                    code = "unsupported_exact_version"
-                elif not snapshot.shape_valid:
-                    code = "save_shape_unavailable"
-                else:
-                    code = "runtime_projection_unavailable"
-                state.record_outcome(
-                    code,
-                    request=request,
-                    target_fingerprint=target_fingerprint,
-                    component="decoder",
-                )
-                self._rate_limited_warning(code)
-                return
-            game_version = snapshot.game_version
-            del snapshot
-        except PlayerSavePullError:
-            code = "stable_read_unavailable"
-            state.record_outcome(
-                code,
-                request=request,
-                target_fingerprint=target_fingerprint,
-                component="acquisition",
-            )
-            self._rate_limited_warning(code)
-            return
-        except (PlayerSaveDecodeError, PlayerSaveError):
-            code = "decoder_unavailable"
-            state.record_outcome(
-                code,
-                request=request,
-                target_fingerprint=target_fingerprint,
-                component="decoder",
-            )
-            self._rate_limited_warning(code)
-            return
-        except Exception:
-            code = "collector_acquisition_failed"
-            state.record_outcome(
-                code,
-                request=request,
-                target_fingerprint=target_fingerprint,
-                component="acquisition",
-            )
-            self._rate_limited_warning(code)
-            return
+        self._sync_perk_mapping_scope(binding.private_key)
+        acquisition = acquirer.acquire(
+            PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+            expected_binding=binding,
+        )
+        self._process_acquisition(request, acquisition)
 
-        target_after = self._target_snapshot()
-        if target_after != (target, generation):
-            self._sync_perk_mapping_scope(target_after)
+    def _process_acquisition(
+        self,
+        request: AuditRequest,
+        acquisition: PlayerSaveAcquisitionBundle,
+    ) -> None:
+        state = self._state_machine
+        if state is None:
+            return
+        binding = acquisition.binding
+        target_fingerprint = (
+            binding.fingerprint if binding is not None else "unavailable"
+        )
+        if acquisition.status in {
+            PlayerSaveAcquisitionStatus.BINDING_REJECTED,
+            PlayerSaveAcquisitionStatus.BINDING_LOST,
+        }:
+            self._sync_perk_mapping_scope(
+                binding.private_key if binding is not None else None
+            )
             state.record_outcome(
                 "target_handoff_discarded",
                 request=request,
@@ -1579,6 +1586,63 @@ class PlayerSaveAuditCollector:
                 "the live ADB target ownership changed",
                 "INFO",
             )
+            return
+        if binding is None:
+            state.record_outcome("exact_target_unavailable", request=request)
+            self._rate_limited_warning("exact_target_unavailable")
+            return
+        self._sync_perk_mapping_scope(binding.private_key)
+        if not acquisition.complete or acquisition.snapshot is None:
+            if acquisition.reason == "stable_read_unavailable":
+                code = "stable_read_unavailable"
+                component = "acquisition"
+            elif acquisition.reason in {
+                "decoder_unavailable",
+                "save_mapping_unavailable",
+            }:
+                code = "decoder_unavailable"
+                component = "decoder"
+            else:
+                code = "collector_acquisition_failed"
+                component = "acquisition"
+            state.record_outcome(
+                code,
+                request=request,
+                target_fingerprint=target_fingerprint,
+                component=component,
+            )
+            self._rate_limited_warning(code)
+            return
+
+        snapshot = acquisition.snapshot
+        try:
+            runtime = snapshot.runtime_save
+            mapping_supported = snapshot.mapping_supported
+            shape_valid = snapshot.shape_valid
+            game_version = snapshot.game_version
+        except Exception:
+            state.record_outcome(
+                "runtime_projection_unavailable",
+                request=request,
+                target_fingerprint=target_fingerprint,
+                component="decoder",
+            )
+            self._rate_limited_warning("runtime_projection_unavailable")
+            return
+        if runtime is None:
+            if not mapping_supported:
+                code = "unsupported_exact_version"
+            elif not shape_valid:
+                code = "save_shape_unavailable"
+            else:
+                code = "runtime_projection_unavailable"
+            state.record_outcome(
+                code,
+                request=request,
+                target_fingerprint=target_fingerprint,
+                component="decoder",
+            )
+            self._rate_limited_warning(code)
             return
         resolution = None
         mapping_context_matches = bool(
@@ -1626,8 +1690,8 @@ class PlayerSaveAuditCollector:
             runtime,
             game_version=game_version,
             target_fingerprint=target_fingerprint,
-            acquisition_started_at=started_at,
-            acquisition_completed_at=self._now_fn(),
+            acquisition_started_at=acquisition.acquisition_started_at,
+            acquisition_completed_at=acquisition.acquisition_completed_at,
         )
         state.observe_save(observation, request)
         if self._active_failure_code is not None:
@@ -1662,29 +1726,6 @@ class PlayerSaveAuditCollector:
             "perk_id_mapping_evidence_truncated",
             component="perk_id_calibration",
         )
-
-    def _target_snapshot(self) -> Optional[tuple[str, int]]:
-        provider = self._target_snapshot_fn
-        if provider is None:
-            return None
-        try:
-            snapshot = provider()
-        except Exception:
-            return None
-        if snapshot is None:
-            return None
-        target = getattr(snapshot, "target", None)
-        generation = getattr(snapshot, "generation", None)
-        owned = getattr(snapshot, "owned", False)
-        if (
-            owned is not True
-            or not isinstance(target, str)
-            or not target.strip()
-            or type(generation) is not int
-            or generation < 1
-        ):
-            return None
-        return target.strip(), generation
 
     def _enqueue(self, command: Any, *, allow_closed: bool = False) -> None:
         if (self._closed and not allow_closed) or not self.enabled:
@@ -2317,28 +2358,6 @@ def _boundary_label(value: Any) -> Optional[str]:
         return None
     label = str(value).strip().upper()
     return label if label in _BOUNDARY_REASON_CODES else None
-
-
-def _target_fingerprint(target: str) -> str:
-    return hashlib.sha256(
-        ("thetower-adb-target-v1\0" + str(target)).encode("utf-8")
-    ).hexdigest()
-
-
-def _quiet_player_save_read(
-    path: str,
-    *,
-    device_id: Optional[str] = None,
-) -> Optional[bytes]:
-    """Use the established exact target without per-attempt transport noise."""
-
-    from core.adb_utils import read_device_file
-
-    return read_device_file(
-        path,
-        device_id=device_id,
-        report_errors=False,
-    )
 
 
 def _validated_interval_seconds(value: Any) -> int:

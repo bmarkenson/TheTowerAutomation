@@ -210,9 +210,24 @@ operational, not a confidentiality boundary.
 Bounded exact-target read operations such as `get-state`, screenshots, and
 non-mutating shell/file reads do not require an interactive lease. Workers may
 perform them directly after the required live inspection. Production remains
-responsible for ADB connection management and long-lived capture processes;
-workers do not run `adb connect`, start/kill the ADB server, or start a second
-continuous screenrecord pipeline merely to answer a read-only question.
+responsible for ADB connection management and routine or unattended long-lived
+capture processes. An explicit operator instruction may also authorize one
+task-bounded, worker-owned passive stream under the
+[passive-stream procedure](../operations/passive_stream.md). That exception
+must use the exact production target, disable every control channel, retain an
+attached lifetime and cleanup boundary, and stop on observed production-capture
+or ADB degradation. It grants no input, lease, or connection-management
+authority. Without that explicit authorization, workers do not start a second
+continuous capture pipeline merely to answer a read-only question.
+
+Capture transports are evaluated separately. A failure or contention result
+from Android `screenrecord` is not evidence that a no-control `scrcpy` viewer
+also fails, and success from either transport does not authorize the other.
+The project keeps the smallest relevant live evidence and revises the supported
+procedure when current behavior disproves an assumption. Passive does not mean
+resource-free: a bounded viewer may impose an operator-accepted renderer cost
+without taking input authority, but that cost must be reported and reduced when
+it becomes material to the battle or production observation.
 
 ### Shared latest frame
 
@@ -474,16 +489,17 @@ Implementation proceeds in small reviewable steps:
    heartbeat expiry,
    runtime/target/battle boundaries, stale and near-expiry rejection, one
    bounded input, and fresh-observation release cleanup.
-6. **Perform bounded live validation.** After accepting the combined boundary,
-   the operator may explicitly authorize the outcome coordinator to schedule
-   one separately inspected cooperative lease, verify Pause precedence and
-   expiry, and confirm clean return to production. Add Home or owned-battle
-   behavior only in response to a concrete development need.
+6. **Completed: perform bounded live validation.** With explicit operator
+   authorization, the outcome coordinator separately inspected production,
+   exercised acknowledged expiry, one lease-aware exact-target no-op input,
+   Pause revocation, and explicit release, and confirmed clean return to
+   production. The evidence is recorded in the
+   [bounded live coordination completion](../modules/completed_tasks_log.md#2026-08-06-bounded-live-productiondevelopment-coordination-validation).
 
-Do not implement a later step merely to make the current step look complete.
-Repository-local tests use fakes and retained or copied production frames;
-live validation remains a separately inspected, operator-authorized outcome
-coordinator action.
+All six delivery steps are complete. Repository-local tests continue to use
+fakes and retained or copied production frames. Home queues, owned-battle
+behavior, or later live validation remain separate work that requires a
+concrete need and explicit operator authorization.
 
 ## Regression expectations
 

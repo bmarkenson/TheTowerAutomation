@@ -354,6 +354,36 @@ def test_same_home_snapshot_publishes_structural_history_baseline(monkeypatch):
     assert "activity-private" not in json.dumps(result.as_dict())
 
 
+def test_malformed_history_projection_does_not_poison_configuration_projector(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "core.player_save_preflight.history_metadata_from_acquisition",
+        lambda _acquisition: (_ for _ in ()).throw(
+            ValueError("malformed structural projection")
+        ),
+    )
+    pulls = []
+    coordinator = _coordinator(
+        monkeypatch,
+        pull_fn=lambda **kwargs: pulls.append(kwargs) or b"stable-save",
+        decode_fn=lambda _payload, **_kwargs: _snapshot(),
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert len(pulls) == 1
+    assert result.ready
+    assert result.decisions["cards_deck"]["disposition"] == "save_match"
+    assert result.history_tail["disposition"] == "ui_required"
+    assert result.history_tail["reason"] == (
+        "runtime_history_projection_unavailable"
+    )
+
+
 @pytest.mark.parametrize("collector_opt_in", ("0", "1"))
 def test_collector_opt_in_is_irrelevant_to_preflight_and_history_authority(
     monkeypatch,
@@ -480,6 +510,7 @@ def test_target_generation_change_blocks_all_followup_input(monkeypatch):
     assert result.status is PlayerSavePreflightStatus.BLOCKED
     assert not result.safe_ui_fallback
     assert result.reason == "restored_target_or_new_battle_boundary_unverified"
+    assert "acquisition" not in result.provenance
 
 
 def test_failed_foreground_restoration_blocks_ui_and_battle_progression(monkeypatch):
@@ -496,6 +527,7 @@ def test_failed_foreground_restoration_blocks_ui_and_battle_progression(monkeypa
     assert not result.ready
     assert not result.safe_ui_fallback
     assert result.reason == "foreground_restoration_failed"
+    assert "acquisition" not in result.provenance
 
 
 def test_control_interruption_while_backgrounded_cannot_dispatch_restore(

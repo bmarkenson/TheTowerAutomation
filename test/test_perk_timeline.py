@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -323,6 +324,107 @@ def test_measure_perk_progress_tolerates_ocr_artifacts_and_terminal_label():
     assert noisy.current_wave == 3003
     assert noisy.next_wave == 3025
     assert complete.status == "complete"
+
+
+def _complete_progress(*, confidence: float = 93.0) -> PerkProgress:
+    observed_at = "2026-08-07T12:00:00+00:00"
+    return PerkProgress(
+        "complete",
+        None,
+        None,
+        "View Perks",
+        confidence,
+        observed_at=observed_at,
+        source_fingerprint=hashlib.sha256(b"view-perks").hexdigest(),
+    )
+
+
+def test_stable_view_perks_persists_bound_exhaustion(tmp_path):
+    state_path = tmp_path / "perk-timeline.json"
+    observer = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: "same-battle",
+    )
+    observer.reset(fresh_battle=True)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    progress = _complete_progress()
+
+    for _ in range(2):
+        assert observer.handle(
+            running,
+            {"state": "RUNNING"},
+            wave=700,
+            actions_allowed=False,
+            action_guard_fn=lambda: False,
+            progress_fn=lambda frame: progress,
+        ) is False
+
+    evidence = observer.exhaustion_evidence()
+    assert evidence is not None
+    assert evidence["source"] == "stable_top_bar_view_perks"
+    assert evidence["activity_scope_id"] == "same-battle"
+    assert evidence["observed_wave"] == 700
+    assert evidence["stable_observation_count"] == 2
+    assert evidence["binding_status"] == "pending_active_round_identity"
+    assert observer.tracker.pending is None
+
+    identity = {
+        "game_version": 1073,
+        "current_tier": 22,
+        "rounds_started_this_tier": 9,
+        "round_seed": 12345,
+        "fingerprint": hashlib.sha256(b"active-round").hexdigest(),
+    }
+    assert observer.bind_exhaustion_identity(identity)
+    evidence = observer.exhaustion_evidence()
+    assert evidence["binding_status"] == "active_round_identity_bound"
+    assert evidence["active_round_identity"] == identity
+
+    restarted = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: "same-battle",
+    )
+    assert restarted.exhaustion_evidence() == evidence
+
+
+def test_unstable_or_low_confidence_view_perks_is_not_exhaustion(tmp_path):
+    observer = PerkTimelineObserver(
+        state_path=tmp_path / "perk-timeline.json",
+        scope_id_fn=lambda: "same-battle",
+    )
+    observer.reset(fresh_battle=True)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    observer.handle(
+        running,
+        {"state": "RUNNING"},
+        wave=700,
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+        progress_fn=lambda frame: _complete_progress(),
+    )
+    observer.handle(
+        running,
+        {"state": "RUNNING"},
+        wave=700,
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+        progress_fn=lambda frame: PerkProgress(
+            "unreadable", None, None, "", -1.0
+        ),
+    )
+    assert observer.exhaustion_evidence() is None
+
+    for _ in range(3):
+        observer.handle(
+            running,
+            {"state": "RUNNING"},
+            wave=700,
+            actions_allowed=False,
+            action_guard_fn=lambda: False,
+            progress_fn=lambda frame: _complete_progress(confidence=20.0),
+        )
+    assert observer.exhaustion_evidence() is None
 
 
 def test_measure_perk_progress_rejects_implausible_concatenated_wave():

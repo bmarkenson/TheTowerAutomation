@@ -39,6 +39,278 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 recoverable superseded feature retirement
+
+- `c23fe67` splits feature retirement into integrated and explicitly
+  superseded dispositions. Integrated tips retain the ancestry proof and safe
+  `git branch -d` guard. A superseded local tip requires exact operator
+  approval, inspected ownership and content, durable replacement history, and
+  a verified annotated archive tag before its unlinked local branch may be
+  force-deleted. Forced worktree removal, recursive deletion, remote deletion,
+  protected refs, and deletion of the recovery tag remain outside that path.
+- The documentation-only candidate passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the 44 established orphan
+  candidates, and all 1,777 tests in 328.73 seconds. It was promoted without
+  service or device action behind rollback tag
+  `production-before-20260807T222100Z-e7df147`.
+- The operator declared exact prototype tip
+  `d1c3dece79f43ae044e1730110298779e30a1fb2` superseded by deployed shared-
+  interface v2 tip `33a325b7b3792181b24f8d569135f5f12ac74c82` and approved its retirement.
+  Its worktree had no tracked or nonignored changes; ignored content was limited
+  to the development environment link, generated caches, empty scratch
+  directories, and one zero-byte test lock. No matching remote branch existed.
+- Annotated tag `archive/20260807-save-backed-perk-monitoring-d1c3dec` now
+  preserves the exact prototype tip. Git removed the worktree without force,
+  then deleted local branch `feature/save-backed-perk-monitoring`; `main`,
+  `develop`, the deployed v2 branch/worktree, rollback tags, and every other
+  feature worktree remained unchanged.
+
+### 2026-08-07 operator-authorized bounded passive stream
+
+- `735aa91` makes an explicit operator instruction sufficient authority for one
+  task-bounded passive stream after live preflight. The exact target,
+  no-control boundary, finite host and device lifetime, coexistence checks, and
+  cleanup are canonical in the
+  [passive-stream procedure](../operations/passive_stream.md). Routine and
+  unattended capture remain production-owned, and the passive viewer grants no
+  input, lease, navigation, or ADB connection-management authority.
+- The policy separates transport evidence instead of treating the unsuccessful
+  Android `screenrecord` experiment as proof against `scrcpy`. Retained action
+  logs also show that headless scrcpy became current in three July 13 startup
+  runs, including while frequent guarded production inputs continued.
+- After fresh live preflight at 2026-08-07 14:20 PDT, one `scrcpy 3.3.1` viewer
+  ran for 60 seconds against the exact production target with `--no-control`,
+  `--no-audio`, 15 FPS, and a 2 Mbps video limit. Production published multiple
+  newer complete 1080x1920 frames during and after the viewer; control-surface
+  ADB evidence remained connected with zero failures and no warning, and no
+  new capture or connection error appeared in the action log. The active battle
+  continued without worker input or navigation.
+- The operator directly observed the emulator-side FPS counter fall from its
+  approximately 55–59 FPS baseline to 45 FPS during the stream. That counter is
+  outside the captured Android framebuffer, so the production screenshots do
+  not retain it; the direct observation establishes a real roughly 18–24%
+  renderer impact rather than only expected 15-FPS viewer choppiness. The
+  follow-up mitigation benchmark is retained in the
+  [capture backlog](../backlog/state-and-detection.md#capture-and-action-architecture),
+  and the procedure now starts with a lower-resolution profile and records
+  viewer versus emulator impact separately. Optional x2 preparation caps a
+  faster battle for general inspection, while x1 is reserved for close
+  inspection; neither raises an already slower battle, and both remain
+  separately authorized, restored control changes.
+- Scrcpy reached its own time limit and exited successfully. The task-owned
+  host process and device-side scrcpy server were both absent afterward, and a
+  fresh complete production frame on the unchanged target confirmed cleanup.
+  This validates bounded passive scrcpy coexistence without a capture or ADB
+  failure for ordinary observation; it does not establish zero performance
+  cost or close the separate app-owned low-latency frame/action-source backlog.
+
+### 2026-08-07 player-save acquisition and freshness consolidation deployment
+
+- The reviewed contract, acquisition foundation, boundary handoff, temporal-
+  authority, and pure Perk-monitor commits remain a linear stack ending at
+  `33a325b7b3792181b24f8d569135f5f12ac74c82`; frozen prototype
+  `d1c3dece79f43ae044e1730110298779e30a1fb2` remains unchanged and unmerged.
+  Merge commit `5e46e0594ba17953b85af3e274d763b9d7cddf77` preserves both prior
+  `develop` commit `df184642181c51646f4ad4379aa6bc7ef772d92f` and the complete stack tip.
+  The integrated source and canonical contracts were reviewed together, and
+  the supported checkpoint compiled the repository,
+  passed state-definition and clickmap validation with zero errors and the 44
+  established orphan candidates, and passed all 1,777 tests in 327.69 seconds.
+- Production commit `df184642181c51646f4ad4379aa6bc7ef772d92f` was proven
+  ancestral to `5e46e0594ba17953b85af3e274d763b9d7cddf77`; every commit and the
+  aggregate diff were reviewed, and unique annotated rollback tag
+  `production-before-20260807T201303Z-df18464` was created at the former
+  production commit. After the automation and control-surface services both
+  stopped, production and `main` fast-forwarded to that exact integration
+  commit at 2026-08-07 13:14 PDT. Replacement control-surface PID `1291663` and
+  automation PID `1292147` were active, the exact `localhost:5555` runtime lock
+  was held by PID `1292147`, ADB was freshly `device`, and the unpaused attached
+  battle was `RUNNING` with no holds or Strategy Gate.
+- Live preflight used fresh host-backed process, lock, target, and complete-
+  screenshot evidence. The replacement first attached under an agent-owned
+  Pause, where action authority remained blocked, and resumed only after the
+  replacement boundary was proven. Activity Continuity failed closed on its
+  first unverified restored-source attempt, then confirmed the unchanged
+  completed tail on its bounded retry. The successful forced-attachment path
+  emitted one shared save observation at revision `47927`, with a bound Tier
+  17 round identity, a 37-pick initial complete Perk checkpoint, and guarded
+  projections for 11 No Strategy fields. The collector identified its source
+  as shared bundles; no second consumer acquisition or UI visit was used for
+  those accepted fields. Its fresh mid-round session had no pre-round History
+  baseline, so that independent audit comparison explicitly failed closed and
+  made no terminal claim.
+- The next unprompted passive interval completed at 2026-08-07 13:20 PDT. One
+  scheduler acquisition emitted one `periodic_interval` audit receipt at save
+  revision `47928`, preserved the exact same-round identity, and advanced the
+  complete Perk prefix from 37 to 38 picks. The deployed fan-out passes that
+  same immutable bundle through the Perk monitor and optional audit projector;
+  no duplicate acquisition or consumer rejection was recorded.
+- No natural Game Over, direct Retry, Tournament Results, or qualifying
+  terminal-Perks boundary occurred during the deployment window. Their zero-
+  reacquisition/zero-History and terminal-completeness claims remain explicit
+  ordinary-boundary observations in the canonical
+  [runtime and validation backlog](../backlog/runtime-and-validation.md); no
+  battle was created, surrendered, accelerated, or otherwise manipulated for
+  validation.
+
+### 2026-08-07 replacement-state runbook clarification
+
+- `b994f0a` clarifies
+  [managed process replacement](../operations/process_control.md#process-replacement-and-terminal-recovery):
+  an active-battle replacement uses an indefinite Pause only as a temporary
+  handoff boundary. After the replacement proves its PID, target lock, startup,
+  control acknowledgement, and fresh observation, the guarded reload restores
+  the prior `RUNNING`, indefinite `PAUSED`, or unexpired timed Pause; expiry
+  resolves to `RUNNING`, while a failed handoff remains `PAUSED`.
+- Exact integration candidate `611bb25` passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the 44 established
+  orphan candidates, and all 1,703 tests in 358.33 seconds. The
+  documentation-only candidate was promoted without service or device action
+  behind rollback tag `production-before-20260807T104757-4b176dd`.
+
+### 2026-08-07 incremental Auto Pick repair scans
+
+- Home Auto Pick repair now carries the one complete authoritative ranked
+  prefix into a mutable planning order. It skips ranks already correct or made
+  correct by an earlier insertion, scans forward only for a currently
+  misplaced target, and inserts a verified rank-18/19 target into the
+  top-17 prefix without expanding OCR authority into the unranked tail.
+- The input boundary remains local and fresh: the physical viewport is
+  re-anchored once after the initial read, every arrow tap still uniquely
+  reacquires its row and proves one adjacent swap, confirmed-edge and moved-row
+  traversal remain bounded, and a pre-input cache/context conflict performs at
+  most two full semantic resynchronizations. The repair's final authoritative
+  17-rank read-back is reused by its caller instead of scanning twice.
+- A synthetic reproduction of the production-confirmed shape places Free
+  Upgrade Chance, Inner Land Mines, and Damage at ranks 13, 18, and 19. The
+  repair makes the required nine verified swaps while acquiring only those
+  three targets, with no scans for the correct suffix. All 21 focused tests and
+  135 adjacent Home, Perk, setup, navigation, and clickmap tests passed. The
+  complete isolated checkpoint then compiled the repository, passed the state
+  and clickmap validators with zero errors and the 44 established orphan
+  candidates, and ran all 1,689 tests in 329.33 seconds. No process or device
+  interaction was used for this repository change.
+- Exact integration candidate `dd3a0fa` repeated compilation and both
+  maintained validators with zero errors and the same 44 established orphan
+  candidates, then passed all 1,703 tests in 328.22 seconds. It was promoted
+  behind rollback tag `production-before-20260807T171220Z-9db59e1` after PID
+  `425009` stopped cleanly. Replacement PID `1027338` acquired the held
+  `localhost:5555` lock, acknowledged `PAUSED` with `HOME`, `farm_t18`, and
+  x6.3 retained, and attached to the existing battle. After guarded Resume,
+  its continuity check confirmed the latest completed battle was unchanged;
+  a fresh unpaused observation then reported normal `RUNNING` operation at
+  wave 9393 with no Strategy Action Gate. No Surrender was used.
+
+### 2026-08-07 player-save temporal authority
+
+- `feature/player-save-temporal-authority` adds typed temporal classes to the
+  running-attachment projection. Its private binding covers exact mapping,
+  target generation, source and final activity scopes, active-round identity,
+  and capture time. Activity Continuity publishes facts only after persisting
+  the final scope; App revalidates current process/target/scope before fan-out,
+  and retained provenance is redacted.
+- No Strategy now feeds save-backed Workshop preset, equipped Guardians,
+  selected Bot preset, and equipped Modules into its actual
+  `observed_run_configuration` as round-invariant facts. Identical claims
+  merge, a complete same-round conflict becomes sticky `unavailable`, and
+  partial Guardian/Module UI evidence cannot replace a complete save claim.
+  Cards remain point-in-time, and Bot progression is separate from the selected
+  preset.
+- The same observation supplies Tournament's existing in-battle Workshop seam
+  through a one-use carrier that rechecks process, target generation, scope,
+  and active-battle ownership. A valid value avoids a second save read and any
+  additional game-Home or Android lifecycle route; invalid evidence preserves
+  the explicit Workshop deferral.
+- Focused temporal, attachment, No Strategy, and Tournament regression passed
+  201 tests. The supported development checkpoint compiled the repository,
+  passed state-definition validation and clickmap integrity with zero errors
+  and the established 44 orphan candidates, and passed all 1,737 tests in
+  322.38 seconds. No live/device validation was needed.
+
+### 2026-08-07 player-save terminal boundary handoff
+
+- `feature/player-save-boundary-handoff` splits the terminal structural History
+  transition from semantic completed-report projection. One natural terminal
+  bundle now proves the append or capped rollover once and stages only a
+  bounded, redacted, one-use payload in the activity-scope ledger; decoded and
+  raw save data never persist there.
+- Game Over → Home, Game Over → direct Retry, and Tournament Results → Home
+  validate process session, exact target generation, source/destination scope,
+  mapping, transition, and natural-boundary timing before adopting that tail as
+  `latest_completed_battle`. Acceptance performs no second save read or Battle
+  History navigation. Process, target, scope, shape, transition, or persistence
+  failure preserves the existing forced-save, passive-poll, or UI fallback.
+- An unknown `killedBy` or other semantic projection failure still opens the
+  applicable More Stats route but no longer discards structural continuity.
+  A `save_first` Home with neither handoff nor configuration requirements uses
+  the guarded baseline-only forced serialization path. Tournament Results
+  receives complete or explicitly unavailable conditions from the original
+  bundle and no longer performs its prior duplicate read.
+- Focused regression covers all three routes, one-use atomicity, redaction,
+  process/target/scope rejection, structural/semantic independence, malformed
+  provenance, baseline-only Home acquisition, and retained consumer fallback.
+  The supported development checkpoint compiled the repository, passed state-
+  definition validation and clickmap integrity with zero errors and the
+  established 44 orphan candidates, and passed all 1,724 tests in 377.86
+  seconds. No live/device validation was needed for this repository-only
+  lifecycle consolidation.
+
+### 2026-08-07 typed player-save acquisition foundation
+
+- `feature/player-save-acquisition-foundation` adds the immutable typed
+  acquisition bundle and `StablePlayerSaveAcquirer`. The owner serializes the
+  complete exact-target operation, verifies target generation before and after
+  a quiet two-identical-read transport, decodes in memory, immediately drops
+  raw payload references, and exposes only sanitized failures and redacted
+  provenance. It creates no global latest-snapshot cache.
+- The guarded serializer retains background/restore and source/control policy;
+  a forced bundle is published only after successful restoration and full
+  revalidation. Home preflight, ordinary and forced-attachment History,
+  natural terminal capture, passive audit, and standalone Tournament capture
+  now use the shared owner without changing their UI-fallback or blocking
+  policies. The local/ADB inspection tool remains an explicit offline path.
+- One natural terminal bundle fans out to profile progression, completed-report,
+  and Tournament-condition projectors without another pull. Focused tests cover
+  global lock serialization, exact target/generation loss, redaction, malformed
+  projection independence, restored-source ambiguity, and one-read/many-
+  projector behavior.
+- The focused migrated suite passed 173 tests. The supported development
+  checkpoint compiled the repository, passed state-definition validation and
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and passed all 1,712 tests in 322.50 seconds. No live/device validation was
+  needed for this repository-only ownership consolidation.
+
+### 2026-08-07 Utility Dissonance subtype deployment and confirmation
+
+- `17e4e0c` separates localized purple Dissonance-family evidence from the
+  validated white icon: star records Utility, sword records Attack, and an
+  unrecognized contour remains generic Dissonance. Utility keeps the guarded
+  Attack Damage Slider read available, and terminal classification preserves
+  the subtype label.
+- Exact integration candidate `7029456` passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the 44 established
+  orphan candidates, and all 1,700 tests in 325.73 seconds. It was promoted
+  behind rollback tag `production-before-20260807T075200Z-cfbad10`.
+- The old automation process completed its in-flight Perk timeline operation,
+  acknowledged Pause, and stopped cleanly. The shared control-surface service
+  reloaded as PID `359659`; replacement automation PID `360077` acquired the
+  held `localhost:5555` lock, acknowledged `PAUSED` / `NEXT_BATTLE` /
+  `farm_t19`, published a fresh `EVENT/PAUSED` observation, and retained the
+  normal future `auto_validate` policy. The screen had moved to Event/Bots
+  without automation input during the maintenance window, so promotion did
+  not tap or Resume that unowned navigation and never used Surrender.
+- Production PID `360077` then confirmed the repaired boundary on an
+  operator-started Tier 19 Utility run. Two complete running frames classified
+  the white-star badge as `Utility Dissonance`; the guarded No Strategy
+  inventory visited only the accessible Attack Damage Slider. After the
+  operator's Surrender, `Battle20260807T011927-0700` recorded Game Over as
+  Dissonance with high-confidence label `Utility Dissonance`, Tier 19, wave
+  410, and Killed By `Surrender`. Byte-identical post-run save reads correlated
+  active selector `3` with completed type `3` while leaving the raw enum outside
+  runtime authority. `ISSUE-2026-032` is resolved; the exact metrics and
+  projections are retained in the
+  [confirmation evidence](../issues/evidence/utility-dissonance-confirmation-2026-08-07.md).
+
 ### 2026-08-06 confirmed scroll-edge and Auto Pick traversal repair
 
 - Live Farm T19 retries showed Auto Pick making real ordering progress and
@@ -101,7 +373,7 @@ canonical document linked by an entry for current behavior.
   by the purple-only detector manually started from paused Home and advanced
   normally while Activity Continuity retried its obsolete Home-only Battle
   History source. The badge was later established as Utility Dissonance in
-  [`ISSUE-2026-030`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [`ISSUE-2026-032`](../issues/resolved-2026.md#utility-dissonance-star-was-labeled-as-attack).
   The safe retry loop sent no input, but its exclusive hold prevented the No
   Strategy inventory from starting.
 - `8cf5548` makes a pending Home continuity route follow a passively observed
@@ -140,7 +412,7 @@ canonical document linked by an entry for current behavior.
   fields. The then-current purple-only detector labeled the badge Attack and
   therefore resolved Damage Slider without probing the Attack menu; the later
   Utility subtype correction is tracked in
-  [`ISSUE-2026-030`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [`ISSUE-2026-032`](../issues/resolved-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - Terminal development directives are now recognized before former-runtime
   binding checks. Their original release result remains the sole outcome after
   restart; genuinely active leases that lose their runtime retain the abnormal
@@ -161,7 +433,7 @@ canonical document linked by an entry for current behavior.
   absence of a Damage Slider visit was later separated from this confirmation:
   the purple-only detector had mislabeled Utility Dissonance and suppressed an
   accessible read, as tracked in
-  [`ISSUE-2026-030`](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [`ISSUE-2026-032`](../issues/resolved-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - The same replacement preserved the previously released terminal lease
   without an abnormal warning, duplicate result, or directive rewrite.
   `ISSUE-2026-028` and `ISSUE-2026-029` are resolved with exact retained

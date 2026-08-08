@@ -68,17 +68,11 @@ Completed and superseded detail remains in the
   spending safeguards.
 ## Capture and action architecture
 
-- [ ] Reduce Home Auto Pick order repair's repeated full-list scans while
-  preserving fresh row-level action authority.
-  - Capture and parse the ranked order once, skip already-correct keys without
-    returning to the top, and update or recapture the semantic order only after
-    a verified mutation, viewport loss, or OCR ambiguity.
-  - Preserve bounded confirmed-edge traversal, local moved-row reacquisition,
-    per-tap fresh-row verification, and one authoritative final 17-rank
-    read-back. The live `ISSUE-2026-031` confirmation proved correctness but
-    spent about seven minutes repeatedly re-anchoring and rescanning.
 - [ ] Build and validate an app-owned low-latency frame/state source for
   multi-frame decisions and short-lived action authorization.
+  A task-bounded, operator-authorized no-control viewer is a separate passive
+  observation facility and does not complete or substitute for this runtime
+  architecture.
   - Define sequence, capture-time, freshness, and post-input frame semantics.
   - Publish a thread-safe UI-state snapshot and short-lived `RUNNING` action
     lease. Immediately before a scheduled floating-gem tap, make an O(1)
@@ -99,3 +93,10 @@ Completed and superseded detail remains in the
     competing recording processes.
   - Decide whether a post-input fresh-frame barrier belongs in the action
     layer while preserving source-screen guards and action ownership.
+- [ ] Reduce and characterize emulator FPS degradation from the bounded passive
+  scrcpy viewer. The first full-resolution 15-FPS/2-Mbps run reduced the
+  emulator-side counter from approximately 55–59 FPS to 45 FPS. Compare the
+  1280/15-FPS/2-Mbps low-load profile with only the minimum useful alternatives
+  and retain production capture cadence, ADB health, scrcpy `--print-fps`, and
+  host-performance evidence. Game speed x1 or x2 may be tested for readability
+  and render headroom, but is not a substitute for transport-load measurement.

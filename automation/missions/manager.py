@@ -179,7 +179,10 @@ class MissionManager:
         )
         if starting_preflight_scope:
             self._clear_restored_session_preflight_report()
-            start_activity_scope(reason="new_battle_preflight")
+            start_activity_scope(
+                reason="new_battle_preflight",
+                carry_terminal_history_handoff=True,
+            )
         if self._startup_gates_deferred and (
             normalized_state in {"GAME_OVER", "TOURNAMENT_RESULTS"}
             or new_battle_home

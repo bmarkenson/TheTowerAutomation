@@ -56,7 +56,7 @@ does not establish that every other UI field was truly unavailable: the badge
 was later established as Utility Dissonance, and the then-current purple-only
 detector had incorrectly suppressed the accessible Damage Slider read. That
 separate subtype repair is tracked by
-[`ISSUE-2026-030`](../open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+[`ISSUE-2026-032`](../resolved-2026.md#utility-dissonance-star-was-labeled-as-attack).
 This replacement did not reproduce the separate paused-Home manual-start
 transition required to close `ISSUE-2026-027`.
 

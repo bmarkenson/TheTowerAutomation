@@ -1457,24 +1457,30 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
     perks = record.get("perks", {})
     selected_perks = perks.get("selected", [])
     if perks:
-        lines.extend(["", "## Selected Perks", ""])
-        lines.append(
-            "Order is latest selection first; a blue leveled perk moves to the "
-            "front when its newest level is selected."
-        )
-        lines.extend(
-            [
-                "",
-                "| Rank | Color | Instance model | Displayed perk | OCR confidence |",
-                "| ---: | --- | --- | --- | ---: |",
-            ]
-        )
-        for perk in selected_perks:
+        if perks.get("source_method") in {
+            "player_save_perk_checkpoint",
+            "player_save_checkpoint_plus_terminal_ui",
+        }:
+            lines.extend(render_save_backed_perks_markdown(perks))
+        else:
+            lines.extend(["", "## Selected Perks", ""])
             lines.append(
-                f"| {perk['latest_selection_rank']} | {perk['color']} | "
-                f"{perk['instance_model']} | {perk['display_text']} | "
-                f"{float(perk['confidence']):.1f} |"
+                "Order is latest selection first; a blue leveled perk moves to the "
+                "front when its newest level is selected."
             )
+            lines.extend(
+                [
+                    "",
+                    "| Rank | Color | Instance model | Displayed perk | OCR confidence |",
+                    "| ---: | --- | --- | --- | ---: |",
+                ]
+            )
+            for perk in selected_perks:
+                lines.append(
+                    f"| {perk['latest_selection_rank']} | {perk['color']} | "
+                    f"{perk['instance_model']} | {perk['display_text']} | "
+                    f"{float(perk['confidence']):.1f} |"
+                )
 
     for section in record.get("more_stats", {}).get("sections", []):
         lines.extend(
@@ -1744,6 +1750,137 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
     if isinstance(warnings, Sequence) and not isinstance(warnings, (str, bytes)):
         for warning in warnings:
             lines.append(f"- Warning: {warning}")
+    return lines
+
+
+def render_save_backed_perks_markdown(perks: Any) -> list[str]:
+    """Render exact saved picks separately from aggregate terminal evidence."""
+
+    if not isinstance(perks, Mapping):
+        return []
+    raw_picks = perks.get("exact_saved_picks")
+    picks = (
+        [item for item in raw_picks if isinstance(item, Mapping)]
+        if isinstance(raw_picks, Sequence)
+        and not isinstance(raw_picks, (str, bytes))
+        else []
+    )
+    lines = [
+        "",
+        "## Selected Perks",
+        "",
+        (
+            "The saved prefix uses exact oldest-first selection order, saved "
+            "waves, semantic Perk keys, and level-after values from the "
+            "exact-version player-save projection."
+        ),
+    ]
+    prefix = perks.get("exact_saved_prefix")
+    if isinstance(prefix, Mapping):
+        lines.append(
+            "Checkpoint provenance: save revision "
+            f"{prefix.get('save_revision', 'unknown')}, saved wave "
+            f"{prefix.get('saved_wave', 'unknown')}, captured "
+            f"{prefix.get('captured_at', 'unknown')}."
+        )
+    if picks:
+        lines.extend(
+            [
+                "",
+                "| Exact sequence | Saved wave | Perk | Level after | Evidence |",
+                "| ---: | ---: | --- | ---: | --- |",
+            ]
+        )
+        for pick in picks:
+            lines.append(
+                f"| {pick.get('sequence', 'unknown')} | "
+                f"{pick.get('saved_wave', 'unknown')} | "
+                f"{_display_key(str(pick.get('perk_key') or 'unknown'))} | "
+                f"{pick.get('level_after', 'unknown')} | exact saved pick |"
+            )
+    else:
+        lines.append("- The exact saved prefix contains no selected Perks.")
+
+    terminal_tail = perks.get("terminal_tail")
+    if not isinstance(terminal_tail, Mapping):
+        return lines
+    raw_aggregates = terminal_tail.get("aggregates")
+    aggregates = (
+        [item for item in raw_aggregates if isinstance(item, Mapping)]
+        if isinstance(raw_aggregates, Sequence)
+        and not isinstance(raw_aggregates, (str, bytes))
+        else []
+    )
+    if terminal_tail.get("status") == "not_required":
+        lines.extend(
+            [
+                "",
+                "No terminal aggregate was needed: a newer active checkpoint "
+                "included the stable `View Perks` exhaustion boundary.",
+            ]
+        )
+        return lines
+
+    lines.extend(
+        [
+            "",
+            "### Terminal aggregate tail",
+            "",
+            (
+                "Terminal rows describe final aggregate/recency evidence. A "
+                "collapsed leveled row never proves multiple individual "
+                "selections."
+            ),
+        ]
+    )
+    if not aggregates:
+        lines.append(
+            "- No distinct terminal addition or net level change could be "
+            "proved beyond the saved prefix."
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "| Perk | Aggregate change | Timing and order |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for aggregate in aggregates:
+            change = aggregate.get("net_level_change")
+            change_text = (
+                f"+{change} level(s)"
+                if type(change) is int
+                else "addition/change count unknown"
+            )
+            wave = aggregate.get("wave")
+            if type(wave) is int and aggregate.get("order_status") == (
+                "exact_unique_correspondence"
+            ):
+                timing = (
+                    f"wave {wave}; exact only because passive boundaries and "
+                    "terminal recency had one unique correspondence"
+                )
+            else:
+                interval = aggregate.get("interval")
+                if isinstance(interval, Mapping):
+                    timing = (
+                        "after saved wave "
+                        f"{interval.get('after_saved_wave_exclusive', 'unknown')} "
+                        "and by Game Over wave "
+                        f"{interval.get('before_game_over_wave_inclusive', 'unknown')}; "
+                        "exact wave and order unknown"
+                    )
+                else:
+                    timing = "exact wave and order unknown"
+            lines.append(
+                f"| {_display_key(str(aggregate.get('perk_key') or 'unknown'))} "
+                f"| {change_text} | {timing} |"
+            )
+    warnings = terminal_tail.get("warnings")
+    if isinstance(warnings, Sequence) and not isinstance(warnings, (str, bytes)):
+        for warning in warnings:
+            lines.append(f"- Uncertainty: {warning}")
     return lines
 
 
@@ -2624,5 +2761,6 @@ __all__ = [
     "render_battle_markdown",
     "render_coin_rate_samples_markdown",
     "render_perk_selection_timeline_markdown",
+    "render_save_backed_perks_markdown",
     "render_survival_ability_activations_markdown",
 ]

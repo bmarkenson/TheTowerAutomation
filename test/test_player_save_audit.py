@@ -15,6 +15,12 @@ import pytest
 from core.app import App
 from core.app_setup import config_from_args, parse_args
 from core.player_save import PlayerSaveDecodeError, PlayerSavePullError
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+)
 from core.player_save_audit import (
     AppendOnlyAuditReceiptWriter,
     AuditRequest,
@@ -468,6 +474,61 @@ def test_enabled_worker_projects_only_normalized_runtime_evidence(tmp_path):
         "inactive_home_baseline_recorded"
     )
     assert raw_payload.decode() not in json.dumps(records)
+
+
+def test_external_mode_projects_shared_bundle_without_another_pull(tmp_path):
+    receipt = tmp_path / "receipts.jsonl"
+    pull = Mock()
+    runtime = _unmapped_runtime(1)
+    captured = datetime.fromisoformat(str(runtime.capture["captured_at"]))
+    snapshot = SimpleNamespace(
+        runtime_save=runtime,
+        mapping_supported=True,
+        shape_valid=True,
+        game_version=1073,
+        mapping_id=runtime.mapping_id,
+    )
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="save_acquired",
+        binding=PlayerSaveTargetBinding("localhost:5555", 1),
+        acquisition_started_at=captured - timedelta(milliseconds=100),
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=25),
+        transport_stable=True,
+        snapshot=snapshot,
+    )
+    collector = PlayerSaveAuditCollector(
+        enabled=True,
+        interval_seconds=300,
+        target_snapshot_fn=lambda: SimpleNamespace(
+            target="localhost:5555",
+            generation=1,
+            owned=True,
+        ),
+        receipt_path=receipt,
+        pull_fn=pull,
+        acquire_internally=False,
+    )
+
+    collector.observe_screen({"state": "RUNNING"})
+    collector.observe_acquisition(
+        acquisition,
+        reason_code="periodic_interval",
+    )
+    assert collector.wait_until_idle(2.0)
+    collector.close(wait=True, timeout=1.0)
+
+    pull.assert_not_called()
+    records = [json.loads(line) for line in receipt.read_text().splitlines()]
+    saves = _records(records, "save_observation")
+    assert len(saves) == 1
+    assert saves[0]["capture"]["save_revision"] == 1
+    assert saves[0]["request"]["reason_codes"] == ["periodic_interval"]
+    assert datetime.fromisoformat(saves[0]["request"]["requested_at"]) == (
+        acquisition.acquisition_started_at
+    )
 
 
 def test_collector_maps_unknown_perk_and_keeps_mapping_across_retry_reset(tmp_path):

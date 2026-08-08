@@ -19,6 +19,7 @@ DEFAULT_ACTIVITY_SCOPE_FILENAME = "activity_scope.json"
 DEFAULT_ACTION_LOG_MAX_BYTES = 16 * 1024 * 1024
 DEFAULT_ACTION_LOG_BACKUP_COUNT = 5
 SESSION_PREFLIGHT_REPORT_EVIDENCE_MAX_BYTES = 64 * 1024
+TERMINAL_HISTORY_HANDOFF_MAX_BYTES = 32 * 1024
 ACTION_LOG_MAX_BYTES_ENV = "TOWER_ACTION_LOG_MAX_BYTES"
 ACTION_LOG_BACKUP_COUNT_ENV = "TOWER_ACTION_LOG_BACKUP_COUNT"
 _WRITE_LOCK = threading.Lock()
@@ -101,25 +102,24 @@ def start_activity_scope(
     *,
     reason: str,
     boundary: Optional[Mapping[str, object]] = None,
+    carry_terminal_history_handoff: bool = False,
 ) -> Optional[dict[str, object]]:
     """Start one explicit current-run activity scope without risking runtime work."""
 
-    return _start_activity_scope(reason=reason, boundary=boundary)
+    return _start_activity_scope(
+        reason=reason,
+        boundary=boundary,
+        carry_terminal_history_handoff=carry_terminal_history_handoff,
+    )
 
 
 def start_retry_activity_scope() -> Optional[dict[str, object]]:
     """Start a Retry-owned scope whose new History baseline is still pending."""
 
-    current_scope = _load_activity_scope()
-    previous_completed_battle = _scope_completed_battle(current_scope)
     return _start_activity_scope(
         reason="game_over_retry",
-        extra_payload={
-            "pending_latest_completed_battle": {
-                "schema_version": 1,
-                "previous_completed_battle": previous_completed_battle,
-            }
-        },
+        carry_terminal_history_handoff=True,
+        carry_previous_completed_battle=True,
     )
 
 
@@ -127,6 +127,8 @@ def _start_activity_scope(
     *,
     reason: str,
     boundary: Optional[Mapping[str, object]] = None,
+    carry_terminal_history_handoff: bool = False,
+    carry_previous_completed_battle: bool = False,
     extra_payload: Optional[Mapping[str, object]] = None,
 ) -> Optional[dict[str, object]]:
     """Persist one scope, optionally with internally owned lifecycle metadata."""
@@ -163,6 +165,32 @@ def _start_activity_scope(
     write_error: Optional[OSError] = None
     with _WRITE_LOCK:
         try:
+            previous_scope = (
+                _load_activity_scope()
+                if (
+                    carry_terminal_history_handoff
+                    or carry_previous_completed_battle
+                )
+                else None
+            )
+            if carry_previous_completed_battle:
+                payload["pending_latest_completed_battle"] = {
+                    "schema_version": 1,
+                    "previous_completed_battle": _scope_completed_battle(
+                        previous_scope
+                    ),
+                }
+            previous_handoff = (
+                previous_scope.get("terminal_history_handoff")
+                if isinstance(previous_scope, Mapping)
+                else None
+            )
+            if isinstance(previous_handoff, Mapping):
+                payload["pending_terminal_history_handoff"] = {
+                    "schema_version": 1,
+                    "destination_run_id": payload["run_id"],
+                    "handoff": dict(previous_handoff),
+                }
             os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
             with open(primary_path, "ab"):
                 pass
@@ -221,6 +249,59 @@ def record_activity_scope_battle_history(
         except OSError:
             return None
     return dict(payload)
+
+
+def record_activity_scope_terminal_history_handoff(
+    *,
+    run_id: str,
+    handoff: Mapping[str, object],
+) -> Optional[dict[str, object]]:
+    """Persist one detached terminal handoff on the exact source run scope."""
+
+    expected_run_id = str(run_id or "").strip()
+    if not expected_run_id:
+        raise ValueError("Activity scope run ID must not be empty")
+    normalized = _normalize_terminal_history_handoff(handoff)
+    scope_path = get_activity_scope_path()
+    with _WRITE_LOCK:
+        payload = _load_activity_scope()
+        if (
+            payload is None
+            or str(payload.get("run_id") or "") != expected_run_id
+        ):
+            return None
+        payload["terminal_history_handoff"] = normalized
+        try:
+            _write_json_atomic(scope_path, payload)
+        except OSError:
+            return None
+    return dict(payload)
+
+
+def take_activity_scope_terminal_history_handoff(
+    *,
+    run_id: str,
+) -> Optional[dict[str, object]]:
+    """Atomically consume the pending handoff from one destination scope."""
+
+    expected_run_id = str(run_id or "").strip()
+    if not expected_run_id:
+        raise ValueError("Activity scope run ID must not be empty")
+    scope_path = get_activity_scope_path()
+    with _WRITE_LOCK:
+        payload = _load_activity_scope()
+        if (
+            payload is None
+            or str(payload.get("run_id") or "") != expected_run_id
+            or "pending_terminal_history_handoff" not in payload
+        ):
+            return None
+        pending = payload.pop("pending_terminal_history_handoff")
+        try:
+            _write_json_atomic(scope_path, payload)
+        except OSError:
+            return None
+    return dict(pending) if isinstance(pending, Mapping) else None
 
 
 def record_activity_scope_session_preflight(
@@ -304,6 +385,34 @@ def normalize_session_preflight_report_evidence(
     normalized = json.loads(encoded)
     if not isinstance(normalized, dict) or not normalized:
         raise ValueError("Session preflight report evidence must not be empty")
+    return normalized
+
+
+def _normalize_terminal_history_handoff(
+    handoff: Mapping[str, object],
+) -> dict[str, object]:
+    """Detach and bound the already policy-normalized handoff payload."""
+
+    if not isinstance(handoff, Mapping):
+        raise ValueError("Terminal History handoff must be a mapping")
+    try:
+        _require_json_mapping_keys(handoff)
+        encoded = json.dumps(
+            dict(handoff),
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (OverflowError, RecursionError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "Terminal History handoff must contain only finite, acyclic JSON values"
+        ) from exc
+    if len(encoded.encode("utf-8")) > TERMINAL_HISTORY_HANDOFF_MAX_BYTES:
+        raise ValueError("Terminal History handoff exceeds the size limit")
+    normalized = json.loads(encoded)
+    if not isinstance(normalized, dict) or not normalized:
+        raise ValueError("Terminal History handoff must not be empty")
     return normalized
 
 

@@ -8,6 +8,56 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Utility Dissonance star was labeled as Attack
+
+**Stable ID:** `ISSUE-2026-032` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-06 during an active Tier 19 No Strategy run. A
+  complete 1080x1920 frame showed a purple circle with a white star beside
+  `Tier 19`; the operator identified it as Utility Dissonance.
+- **Symptom:** The former `detect_attack_dissonance_badge()` counted purple
+  pixels only. The star passed its 500-pixel family threshold with 1,061
+  pixels, so the observer recorded `Attack Dissonance` and marked Damage
+  Slider unavailable even though Utility Dissonance leaves Attack accessible.
+- **Safety response:** Initial diagnosis was read-only and did not alter the
+  operator-owned battle. The later confirmation used Strategy `none` only
+  after explicit operator coordination; the operator retained ownership of
+  the manual battle start and Surrender.
+- **Cause:** The localized region was named and consumed as an Attack sword
+  detector, but implementation had no sword/icon check. Dissonance-family color
+  and subtype shape were collapsed into one boolean.
+- **Resolution:** The detector now treats localized purple as family evidence
+  and compares the white icon contour with the existing tab symbols. The
+  historically established sword and retained star are the only promoted
+  subtypes; an unvalidated shape remains generic Dissonance. Utility keeps the
+  guarded Attack Damage Slider read available, `Util Disso` can recover the
+  identity after process replacement, and terminal classification preserves
+  the subtype label.
+- **Regression:** Observer, inventory, classification, and battle-record tests
+  cover the live star crop, Attack-only constraint, generic fallback, post-run
+  recovery, and terminal record label. The isolated implementation checkpoint
+  passed compilation, state-definition validation, clickmap integrity with
+  zero errors and the 44 established orphan candidates, and all 1,690 tests.
+  The exact integration candidate passed all 1,700 tests in 325.73 seconds.
+- **Deployment:** Repair `17e4e0c` was deployed through production merge
+  `7029456` on 2026-08-07 behind rollback tag
+  `production-before-20260807T075200Z-cfbad10`; deployment documentation was
+  merged through `c862ab4`.
+- **Production confirmation:** PID `360077` observed two complete Tier 19
+  running frames whose deployed contour detector labeled the purple white-star
+  badge `Utility Dissonance`. Guarded attachment supplied 12 save-backed
+  configuration observations, after which No Strategy visited only the
+  accessible Attack Damage Slider. Following the operator's Surrender, record
+  `Battle20260807T011927-0700` captured Game Over with
+  `battle_type=dissonance`, high-confidence label `Utility Dissonance`, Tier
+  19, wave 410, and `Killed By: Surrender`. Two byte-identical post-run save
+  reads correlated active `dissonanceSelected=3` with completed
+  `dissonanceType=3`. The raw enum remains outside runtime authority pending a
+  separate mapping review. Exact metrics, action rows, record fields, and the
+  privacy-safe projection are retained in the
+  [confirmation evidence](evidence/utility-dissonance-confirmation-2026-08-07.md).
+- **Fixed by:** `17e4e0c`; deployed by `7029456`.
+
 ### One ignored swipe truncated Auto Pick traversal before the real edge
 
 **Stable ID:** `ISSUE-2026-031` · **Lifecycle:** `resolved`
@@ -115,7 +165,7 @@ and actionable work lives in
 - **Observed:** On 2026-08-06, a replacement No Strategy runtime attached to a
   running battle then labeled Attack Dissonance by the purple-only detector.
   The badge was later established as Utility Dissonance in
-  [ISSUE-2026-030](open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [ISSUE-2026-032](#utility-dissonance-star-was-labeled-as-attack).
 - **Symptom:** The runtime opened Battle History instead of using
   `playerInfo.dat`, then revisited every configuration screen even when the
   exact-version save already supplied complete normalized values.
@@ -142,7 +192,7 @@ and actionable work lives in
   `unsupported primary module infoIndex`. This confirmation did not validate
   the omitted Damage Slider read: the purple-only detector had incorrectly
   marked it unavailable for Utility Dissonance, now tracked by
-  [ISSUE-2026-030](open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [ISSUE-2026-032](#utility-dissonance-star-was-labeled-as-attack).
   The exact action rows and projection are retained in
   [promotion evidence](evidence/no-strategy-attachment-promotion-2026-08-06.md).
 - **Fixed by:** `cde691b`; deployed by `ab84a3c`.

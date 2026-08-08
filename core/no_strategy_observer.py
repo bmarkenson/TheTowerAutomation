@@ -22,6 +22,14 @@ from core.battle_classification import dissonance_subtype_from_preset_label
 from core.damage_adjuster import read_damage_adjuster
 from core.label_tapper import is_visible
 from core.module_icon_index import identify_equipped_ancestral_modules
+from core.player_save_temporal import (
+    PlayerSaveTemporalClass,
+    ROUND_INVARIANT_ATTACHMENT_CHECKS,
+    RunningAttachmentSaveFact,
+    RunningAttachmentSaveObservations,
+    attachment_temporal_class,
+    canonical_temporal_value,
+)
 from core.target_priority import detect_target_priority_order
 from core.upgrade_box_detector import detect_visible_boxes
 from core.gc_preflight import merge_ultimate_weapon_observations
@@ -251,6 +259,9 @@ class NoStrategyRunObserver:
             }
             for name in OBSERVED_FIELDS
         }
+        self._round_invariant_claims: dict[str, tuple[str, str]] = {}
+        self._round_invariant_conflicts: set[str] = set()
+        self._attachment_claim_fingerprint: Optional[str] = None
 
     def restore_snapshot(self, snapshot: Mapping[str, Any]) -> None:
         """Restore a persisted unfinished observation after a process reload."""
@@ -283,6 +294,37 @@ class NoStrategyRunObserver:
             raise ValueError("No Strategy observation start time is missing")
         self._started_at = started_at
         self._fields = restored
+        self._round_invariant_claims = {}
+        self._round_invariant_conflicts = set()
+        self._attachment_claim_fingerprint = None
+        for name in ROUND_INVARIANT_ATTACHMENT_CHECKS:
+            field = restored.get(name)
+            if not isinstance(field, Mapping):
+                continue
+            if (
+                field.get("status") == "unavailable"
+                and field.get("reason") == "same_round_invariant_conflict"
+            ):
+                self._round_invariant_conflicts.add(name)
+                continue
+            provenance = field.get("provenance")
+            temporal = (
+                provenance.get("temporal")
+                if isinstance(provenance, Mapping)
+                else None
+            )
+            claim = (
+                str(temporal.get("claim_fingerprint") or "").strip()
+                if isinstance(temporal, Mapping)
+                else ""
+            )
+            if field.get("status") == "observed" and claim:
+                if self._attachment_claim_fingerprint in {None, claim}:
+                    self._attachment_claim_fingerprint = claim
+                self._round_invariant_claims[name] = (
+                    claim,
+                    _canonical_invariant_value(name, field.get("value")),
+                )
 
     def observe(
         self,
@@ -444,27 +486,33 @@ class NoStrategyRunObserver:
 
     def record_player_save_observations(
         self,
-        observations: Mapping[str, Any],
+        observations: RunningAttachmentSaveObservations,
     ) -> tuple[str, ...]:
-        """Attach complete exact-mapping values from one guarded active save."""
+        """Merge facts only after continuity binds their final run scope."""
 
-        if (
-            observations.get("schema_version") != 1
-            or observations.get("source")
-            != "guarded_active_attachment_player_save"
-        ):
-            raise ValueError("invalid active-attachment player-save observations")
-        mapping_id = str(observations.get("mapping_id") or "").strip()
-        captured_at = str(observations.get("captured_at") or "").strip()
-        checks = observations.get("checks")
-        if not mapping_id or not captured_at or not isinstance(checks, Mapping):
-            raise ValueError("incomplete active-attachment player-save observations")
+        if not isinstance(observations, RunningAttachmentSaveObservations):
+            raise TypeError("typed active-attachment observations are required")
+        binding = observations.binding
+        if not binding.final:
+            raise ValueError("active-attachment observations lack a final scope")
+        claim_fingerprint = binding.claim_fingerprint
+        if self._attachment_claim_fingerprint not in {
+            None,
+            claim_fingerprint,
+        }:
+            raise ValueError("active-attachment temporal binding changed")
 
-        def value_for(check_id: str) -> Any:
-            evidence = checks.get(check_id)
-            if not isinstance(evidence, Mapping) or "value" not in evidence:
+        facts = {fact.check_id: fact for fact in observations.facts}
+
+        def fact_for(check_id: str) -> Optional[RunningAttachmentSaveFact]:
+            fact = facts.get(check_id)
+            if fact is None:
                 return None
-            return deepcopy(evidence["value"])
+            if fact.temporal_class is not attachment_temporal_class(check_id):
+                raise ValueError(
+                    f"invalid temporal class for save check {check_id!r}"
+                )
+            return fact
 
         applied: list[str] = []
         direct_checks = {
@@ -481,24 +529,19 @@ class NoStrategyRunObserver:
             "perk_auto_pick_order": "perk_auto_pick_order",
         }
         for field, check_id in direct_checks.items():
-            if check_id not in checks:
+            fact = fact_for(check_id)
+            if fact is None:
                 continue
-            value = value_for(check_id)
+            value = fact.copied_value()
             if field in {"cards_deck", "workshop_preset", "bots_preset"}:
                 value = {"label": value}
             elif field == "auto_pick_perks":
                 value = {"enabled": value}
-            self._set(
-                field,
-                value,
-                source="guarded_active_attachment_player_save",
-                phase="in_battle_attachment_save",
-                confidence="high",
-                observed_at=captured_at,
-                provenance={
-                    "mapping_id": mapping_id,
-                    "save_checks": [check_id],
-                },
+            self._merge_player_save_fact(
+                field=field,
+                value=value,
+                fact=fact,
+                observations=observations,
             )
             applied.append(field)
 
@@ -507,10 +550,13 @@ class NoStrategyRunObserver:
             "poison_swamp_stun",
             "spotlight_missiles",
         )
-        if all(check_id in checks for check_id in ultimate_check_ids):
-            primaries = value_for("ultimate_weapon_primaries")
-            poison_stun = value_for("poison_swamp_stun")
-            spotlight_missiles = value_for("spotlight_missiles")
+        ultimate_facts = tuple(
+            fact_for(check_id) for check_id in ultimate_check_ids
+        )
+        if all(fact is not None for fact in ultimate_facts):
+            primaries = ultimate_facts[0].copied_value()
+            poison_stun = ultimate_facts[1].copied_value()
+            spotlight_missiles = ultimate_facts[2].copied_value()
             if isinstance(primaries, Mapping):
                 ultimate_weapons = {
                     str(weapon): dict(toggles)
@@ -527,20 +573,100 @@ class NoStrategyRunObserver:
                     ultimate_weapons["Spotlight"]["missiles"] = (
                         spotlight_missiles
                     )
+                    temporal = observations.binding.redacted()
+                    temporal["temporal_class"] = (
+                        PlayerSaveTemporalClass.CURRENT_CONFIGURATION.value
+                    )
+                    temporal["save_checks"] = list(ultimate_check_ids)
                     self._set(
                         "ultimate_weapons",
                         ultimate_weapons,
                         source="guarded_active_attachment_player_save",
                         phase="in_battle_attachment_save",
                         confidence="high",
-                        observed_at=captured_at,
+                        observed_at=binding.captured_at,
                         provenance={
-                            "mapping_id": mapping_id,
+                            "mapping_id": binding.mapping_id,
                             "save_checks": list(ultimate_check_ids),
+                            "temporal": temporal,
                         },
                     )
                     applied.append("ultimate_weapons")
+        if applied:
+            self._attachment_claim_fingerprint = claim_fingerprint
         return tuple(applied)
+
+    def _merge_player_save_fact(
+        self,
+        *,
+        field: str,
+        value: Any,
+        fact: RunningAttachmentSaveFact,
+        observations: RunningAttachmentSaveObservations,
+    ) -> None:
+        binding = observations.binding
+        temporal = observations.redacted_provenance(fact)
+        provenance = {
+            "mapping_id": binding.mapping_id,
+            "save_checks": [fact.check_id],
+            "temporal": temporal,
+        }
+        if fact.temporal_class is PlayerSaveTemporalClass.ROUND_INVARIANT:
+            claim = binding.claim_fingerprint
+            canonical = _canonical_invariant_value(field, value)
+            existing = self._round_invariant_claims.get(field)
+            if field in self._round_invariant_conflicts:
+                return
+            if existing is not None and existing[0] != claim:
+                raise ValueError("round-invariant temporal binding changed")
+            if existing is not None and existing[1] != canonical:
+                self._record_round_invariant_conflict(
+                    field,
+                    temporal=temporal,
+                )
+                return
+            current = self._fields[field]
+            if (
+                existing is None
+                and _authoritative_ui_invariant(field, current)
+                and _canonical_invariant_value(field, current.get("value"))
+                != canonical
+            ):
+                self._record_round_invariant_conflict(
+                    field,
+                    temporal=temporal,
+                )
+                return
+            self._round_invariant_claims[field] = (claim, canonical)
+
+        self._set(
+            field,
+            value,
+            source="guarded_active_attachment_player_save",
+            phase="in_battle_attachment_save",
+            confidence="high",
+            observed_at=binding.captured_at,
+            provenance=provenance,
+            temporal_merge=True,
+        )
+
+    def _record_round_invariant_conflict(
+        self,
+        field: str,
+        *,
+        temporal: Mapping[str, Any],
+    ) -> None:
+        self._round_invariant_conflicts.add(field)
+        self._fields[field] = {
+            "status": "unavailable",
+            "value": None,
+            "reason": "same_round_invariant_conflict",
+            "source": "temporal_authority",
+            "phase": "in_battle_attachment_save",
+            "confidence": "high",
+            "observed_at": self._timestamp(),
+            "provenance": {"temporal": deepcopy(dict(temporal))},
+        }
 
     def is_resolved(self, field: str) -> bool:
         """Return whether one observation has a terminal evidence status."""
@@ -599,6 +725,14 @@ class NoStrategyRunObserver:
 
         if field not in self._fields:
             raise ValueError(f"unknown No Strategy observation field {field!r}")
+        if (
+            field in ROUND_INVARIANT_ATTACHMENT_CHECKS
+            and (
+                field in self._round_invariant_claims
+                or field in self._round_invariant_conflicts
+            )
+        ):
+            return
         self._fields[field] = {
             "status": "evidence_captured",
             "value": value,
@@ -621,6 +755,10 @@ class NoStrategyRunObserver:
 
         if field not in self._fields:
             raise ValueError(f"unknown No Strategy observation field {field!r}")
+        if field in self._round_invariant_conflicts:
+            return
+        if field in self._round_invariant_claims:
+            return
         self._fields[field] = {
             "status": "unavailable",
             "value": None,
@@ -751,7 +889,41 @@ class NoStrategyRunObserver:
         confidence: str,
         observed_at: Optional[str] = None,
         provenance: Optional[Mapping[str, Any]] = None,
+        temporal_merge: bool = False,
     ) -> None:
+        if field in ROUND_INVARIANT_ATTACHMENT_CHECKS and not temporal_merge:
+            if field in self._round_invariant_conflicts:
+                return
+            if field in self._round_invariant_claims:
+                current = self._fields[field]
+                if (
+                    _authoritative_ui_invariant(
+                        field,
+                        {
+                            "status": "observed",
+                            "value": value,
+                            "source": source,
+                            "confidence": confidence,
+                        },
+                    )
+                    and _canonical_invariant_value(
+                        field, current.get("value")
+                    )
+                    != _canonical_invariant_value(field, value)
+                ):
+                    provenance_value = current.get("provenance")
+                    temporal = (
+                        provenance_value.get("temporal")
+                        if isinstance(provenance_value, Mapping)
+                        else {}
+                    )
+                    self._record_round_invariant_conflict(
+                        field,
+                        temporal=(
+                            temporal if isinstance(temporal, Mapping) else {}
+                        ),
+                    )
+                return
         observation = {
             "status": "observed",
             "value": value,
@@ -766,6 +938,38 @@ class NoStrategyRunObserver:
 
     def _timestamp(self) -> str:
         return self._clock().isoformat(timespec="seconds")
+
+
+def _authoritative_ui_invariant(
+    field: str,
+    observation: Mapping[str, Any],
+) -> bool:
+    """Only complete preset UI evidence may contradict a save invariant."""
+
+    if field not in {"workshop_preset", "bots_preset"}:
+        return False
+    value = observation.get("value")
+    return bool(
+        observation.get("status") == "observed"
+        and observation.get("source")
+        != "guarded_active_attachment_player_save"
+        and observation.get("confidence") == "high"
+        and isinstance(value, Mapping)
+        and str(value.get("label") or "").strip()
+    )
+
+
+def _canonical_invariant_value(field: str, value: Any) -> str:
+    if field in {"workshop_preset", "bots_preset"}:
+        label = value.get("label") if isinstance(value, Mapping) else value
+        return canonical_temporal_value(
+            " ".join(str(label or "").split()).casefold()
+        )
+    if field == "guardian_chips" and isinstance(value, (list, tuple, set)):
+        return canonical_temporal_value(
+            sorted(str(item) for item in value)
+        )
+    return canonical_temporal_value(value)
 
 
 __all__ = [

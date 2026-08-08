@@ -4,7 +4,9 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pytest
 
+from core.module_icon_index import EquippedModuleMatch
 from core.no_strategy_observer import (
     ATTACK_DISSONANCE_BADGE_REGION,
     DISSONANCE_BADGE_REGION,
@@ -12,6 +14,9 @@ from core.no_strategy_observer import (
     OBSERVED_FIELDS,
     detect_attack_dissonance_badge,
     detect_dissonance_badge,
+)
+from test.player_save_temporal_fixtures import (
+    running_attachment_observations,
 )
 
 
@@ -280,7 +285,9 @@ def test_guarded_attachment_save_records_only_normalized_observed_values():
         },
     }
 
-    applied = observer.record_player_save_observations(observations)
+    applied = observer.record_player_save_observations(
+        running_attachment_observations(observations["checks"])
+    )
     snapshot = observer.snapshot()
 
     assert set(applied) == set(OBSERVED_FIELDS).difference(
@@ -301,14 +308,184 @@ def test_guarded_attachment_save_records_only_normalized_observed_values():
         "missiles": "on",
     }
     assert ultimate["phase"] == "in_battle_attachment_save"
-    assert ultimate["provenance"] == {
-        "mapping_id": "data-9-game-1073",
-        "save_checks": [
-            "ultimate_weapon_primaries",
-            "poison_swamp_stun",
-            "spotlight_missiles",
+    provenance = ultimate["provenance"]
+    assert provenance["mapping_id"] == "data-9-game-1073"
+    assert provenance["save_checks"] == [
+        "ultimate_weapon_primaries",
+        "poison_swamp_stun",
+        "spotlight_missiles",
+    ]
+    assert provenance["temporal"]["temporal_class"] == (
+        "current_configuration"
+    )
+    assert provenance["temporal"]["target_generation"]
+    assert provenance["temporal"]["activity_scope"]
+    assert "private-target" not in str(provenance)
+    assert "scope-1" not in str(provenance)
+
+
+def test_round_invariant_save_facts_feed_actual_loadout_with_temporal_provenance():
+    observer = NoStrategyRunObserver(clock=_clock)
+    observations = running_attachment_observations(
+        {
+            "workshop_preset": "Attack Disso",
+            "guardian_chips": ["Fetch", "Summon", "Scout"],
+            "bots_preset": "Farm",
+            "modules": {"cannon_primary": "Amplifying Strike"},
+            "cards_deck": "Farm",
+            "bots_progression": {"medals_spent": 42},
+        }
+    )
+
+    observer.record_player_save_observations(observations)
+    fields = observer.snapshot()["fields"]
+
+    for field in (
+        "workshop_preset",
+        "guardian_chips",
+        "bots_preset",
+        "modules",
+    ):
+        assert fields[field]["status"] == "observed"
+        assert fields[field]["provenance"]["temporal"][
+            "temporal_class"
+        ] == "round_invariant"
+    assert fields["cards_deck"]["provenance"]["temporal"][
+        "temporal_class"
+    ] == "point_in_time"
+    # Bot progression is deliberately not the selected Bot preset fact.
+    assert fields["bots_preset"]["value"] == {"label": "Farm"}
+    assert "medals_spent" not in str(fields["bots_preset"])
+
+
+def test_same_round_invariant_conflict_is_sticky_and_fails_closed():
+    observer = NoStrategyRunObserver(clock=_clock)
+    first = running_attachment_observations(
+        {"workshop_preset": "Farm"}
+    )
+    conflict = running_attachment_observations(
+        {"workshop_preset": "Tourney"},
+        captured_at="2026-08-06T23:32:05+00:00",
+    )
+
+    observer.record_player_save_observations(first)
+    observer.record_player_save_observations(conflict)
+    observer.record_player_save_observations(first)
+
+    workshop = observer.snapshot()["fields"]["workshop_preset"]
+    assert workshop["status"] == "unavailable"
+    assert workshop["reason"] == "same_round_invariant_conflict"
+    assert workshop["value"] is None
+
+
+def test_cards_remain_point_in_time_and_can_change_at_a_later_boundary():
+    observer = NoStrategyRunObserver(clock=_clock)
+    observer.record_player_save_observations(
+        running_attachment_observations({"cards_deck": "Farm"})
+    )
+    observer.record_player_save_observations(
+        running_attachment_observations(
+            {"cards_deck": "Tourney"},
+            captured_at="2026-08-06T23:32:05+00:00",
+        )
+    )
+
+    cards = observer.snapshot()["fields"]["cards_deck"]
+    assert cards["status"] == "observed"
+    assert cards["value"] == {"label": "Tourney"}
+    assert cards["provenance"]["temporal"]["temporal_class"] == (
+        "point_in_time"
+    )
+    assert cards["observed_at"] == "2026-08-06T23:32:05+00:00"
+
+
+def test_changed_temporal_binding_rejects_before_any_partial_merge():
+    observer = NoStrategyRunObserver(clock=_clock)
+    observer.record_player_save_observations(
+        running_attachment_observations({"workshop_preset": "Farm"})
+    )
+    changed = running_attachment_observations(
+        {
+            "cards_deck": "Tourney",
+            "bots_preset": "Tourney",
+        },
+        target_generation=4,
+    )
+
+    with pytest.raises(ValueError, match="temporal binding changed"):
+        observer.record_player_save_observations(changed)
+
+    fields = observer.snapshot()["fields"]
+    assert fields["cards_deck"]["status"] == "not_observed"
+    assert fields["bots_preset"]["status"] == "not_observed"
+
+
+def test_partial_guardian_and_module_ui_cannot_replace_save_invariants():
+    observer = NoStrategyRunObserver(clock=_clock)
+    observer.record_player_save_observations(
+        running_attachment_observations(
+            {
+                "guardian_chips": ["Fetch", "Summon", "Scout"],
+                "modules": {"cannon_primary": "Amplifying Strike"},
+            }
+        )
+    )
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    observer.observe(
+        frame,
+        {
+            "state": "GUILD",
+            "secondary_states": ["GUILD_GUARDIAN_SCREEN", "GUARDIAN_FETCH_EQUIPPED"],
+        },
+    )
+    with patch(
+        "core.no_strategy_observer.identify_equipped_ancestral_modules",
+        return_value=[
+            EquippedModuleMatch(
+                slot_key="cannon_primary",
+                family="cannon",
+                role="primary",
+                status="matched",
+                name="Different Module",
+                slug="different-module",
+                confidence=0.99,
+                margin=0.5,
+                green_fraction=0.8,
+                best_candidate="Different Module",
+                runner_up="Other Module",
+            )
         ],
+    ):
+        observer.observe(frame, {"state": "MODULES"})
+
+    fields = observer.snapshot()["fields"]
+    assert fields["guardian_chips"]["value"] == [
+        "Fetch",
+        "Summon",
+        "Scout",
+    ]
+    assert fields["modules"]["value"] == {
+        "cannon_primary": "Amplifying Strike"
     }
+
+
+def test_authoritative_same_round_preset_ui_conflict_fails_closed():
+    observer = NoStrategyRunObserver(clock=_clock)
+    observer.record_player_save_observations(
+        running_attachment_observations({"workshop_preset": "Farm"})
+    )
+
+    observer.record_post_run_value(
+        "workshop_preset",
+        {"slot": 2, "label": "Tourney"},
+        source="workshop_preset_selected_border",
+        confidence="high",
+    )
+
+    workshop = observer.snapshot()["fields"]["workshop_preset"]
+    assert workshop["status"] == "unavailable"
+    assert workshop["reason"] == "same_round_invariant_conflict"
 
 
 def test_unfinished_snapshot_can_be_restored_after_process_reload():

@@ -23,14 +23,14 @@ from core.player_save import (
     SAVE_MISMATCH_DISPOSITION,
     decode_player_save_bytes,
     pull_player_save_bytes,
-    reconcile_requirements,
+    reconcile_acquired_requirements,
 )
-from core.player_save_history import history_metadata_from_snapshot
+from core.player_save_acquisition import StablePlayerSaveAcquirer
+from core.player_save_history import history_metadata_from_acquisition
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
     background_to_android_home,
-    quiet_player_save_read,
     restore_tower_launcher,
 )
 from core.state_detector import detect_state_and_overlays
@@ -314,6 +314,7 @@ class PlayerSavePreflightCoordinator:
         foreground_fn: Optional[Callable[[str], bool]] = None,
         pull_fn: Callable[..., bytes] = pull_player_save_bytes,
         decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
+        acquirer: Optional[StablePlayerSaveAcquirer] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
     ) -> None:
         self._target_snapshot_fn = target_snapshot_fn
@@ -326,6 +327,11 @@ class PlayerSavePreflightCoordinator:
         self._foreground_fn = foreground_fn or restore_tower_launcher
         self._pull_fn = pull_fn
         self._decode_fn = decode_fn
+        self._acquirer = acquirer or StablePlayerSaveAcquirer(
+            target_snapshot_fn=target_snapshot_fn,
+            pull_fn=pull_fn,
+            decode_fn=decode_fn,
+        )
         self._sleep_fn = sleep_fn
         self._carry: Optional[CarriedPlayerSaveEvidence] = None
         self._decisions: dict[str, dict[str, Any]] = {}
@@ -442,6 +448,7 @@ class PlayerSavePreflightCoordinator:
             foreground_fn=self._foreground_fn,
             pull_fn=self._pull_fn,
             decode_fn=self._decode_fn,
+            acquirer=self._acquirer,
             sleep_fn=self._sleep_fn,
             input_log_fn=log_input,
             debug_log_fn=log,
@@ -473,6 +480,9 @@ class PlayerSavePreflightCoordinator:
                 operation_id,
             )
 
+        acquisition = serialized.acquisition
+        if acquisition is not None:
+            provenance["acquisition"] = acquisition.redacted_provenance()
         snapshot = serialized.snapshot
         acquisition_reason = serialized.reason
 
@@ -505,10 +515,10 @@ class PlayerSavePreflightCoordinator:
             "data": snapshot.data_version,
             "game": snapshot.game_version,
         }
-        plan = reconcile_requirements(
-            snapshot,
+        assert acquisition is not None
+        plan = reconcile_acquired_requirements(
+            acquisition,
             requirements,
-            freshness_verified=True,
             force_ui_audit=selected_mode == "comparison_audit",
         )
         decisions = {
@@ -525,15 +535,18 @@ class PlayerSavePreflightCoordinator:
             check_id: dict(decision)
             for check_id, decision in decisions.items()
         }
-        history_observation = history_metadata_from_snapshot(
-            snapshot,
-            acquisition="authoritative_home_preflight_snapshot",
-        )
-        history_tail = _history_save_decision(
-            history_observation,
-            mode=selected_mode,
-            mapping_id=snapshot.mapping_id,
-        )
+        try:
+            history_observation = history_metadata_from_acquisition(acquisition)
+        except Exception:
+            history_tail = _history_ui_decision(
+                "runtime_history_projection_unavailable"
+            )
+        else:
+            history_tail = _history_save_decision(
+                history_observation,
+                mode=selected_mode,
+                mapping_id=snapshot.mapping_id,
+            )
         carry = None
         if selected_mode == "save_first":
             values = {
@@ -979,14 +992,6 @@ def _background_default(target: str) -> bool:
 
 def _foreground_default(target: str) -> bool:
     return restore_tower_launcher(target)
-
-
-def _quiet_player_save_read(
-    path: str,
-    *,
-    device_id: Optional[str] = None,
-) -> Optional[bytes]:
-    return quiet_player_save_read(path, device_id=device_id)
 
 
 __all__ = [
