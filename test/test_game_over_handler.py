@@ -91,6 +91,7 @@ def test_missing_game_over_perks_button_is_recoverable_without_blind_tap():
         "buttons.perks:game_over",
         screenshot=frame,
         retries=1,
+        action_guard_fn=None,
     )
     scroll.assert_not_called()
 
@@ -238,7 +239,7 @@ def test_malformed_complete_looking_inventory_preserves_terminal_perks_navigatio
     assert "monitoring_record_unavailable" in perks["quality"]["warnings"][0]
     assert frames == ["frame"]
     assert restored is True
-    capture_perks.assert_called_once_with()
+    capture_perks.assert_called_once_with(action_guard_fn=None)
 
 
 def test_missing_terminal_closure_preserves_existing_perks_navigation():
@@ -264,7 +265,7 @@ def test_missing_terminal_closure_preserves_existing_perks_navigation():
     assert perks is terminal_ui
     assert frames == ["frame"]
     assert restored is True
-    capture_perks.assert_called_once_with()
+    capture_perks.assert_called_once_with(action_guard_fn=None)
 
 
 def test_home_mode_taps_game_stats_home_instead_of_retry():
@@ -282,7 +283,11 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
     finally:
         AUTOMATION.mode = original_mode
 
-    tap.assert_called_once_with("buttons.home:game_over", retries=1)
+    tap.assert_called_once_with(
+        "buttons.home:game_over",
+        retries=1,
+        action_guard_fn=None,
+    )
     action_log.assert_called_once_with(
         "Completing the finished battle",
         reason="follow the configured post-run route without stats capture",
@@ -296,7 +301,7 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
     )
 
 
-def test_game_over_abort_emits_failed_terminal_result():
+def test_game_over_terminal_failure_preserves_enabled_for_retry():
     original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode
     AUTOMATION.state = RunState.RUNNING
@@ -310,20 +315,78 @@ def test_game_over_abort_emits_failed_terminal_result():
             patch("handlers.game_over_handler.log_result") as result_log,
             patch("handlers.game_over_handler.time.sleep"),
         ):
-            handle_game_over(capture_stats=False)
+            outcome = handle_game_over(capture_stats=False)
     finally:
-        assert AUTOMATION.state is RunState.PAUSED
+        assert AUTOMATION.state is RunState.RUNNING
         assert AUTOMATION.mode is ExecMode.HOME
         AUTOMATION.state = original_state
         AUTOMATION.mode = original_mode
 
+    assert outcome.route_completed is False
+    assert outcome.route == "pending_retry"
+    assert outcome.failure_step == "Go Home from Game Stats"
     result_log.assert_called_once_with(
-        "Finished-battle handling failed — Go Home from Game Stats did not complete",
+        "Finished-battle route pending — Go Home from Game Stats did not complete",
         detail=(
-            "[GAME_OVER] result=failed session=test "
+            "[GAME_OVER] result=pending_retry session=test "
             "failed_step=Go Home from Game Stats terminal_policy=HOME "
-            "action_authority=PAUSED"
+            "action_authority=RUNNING retry=true"
         ),
+    )
+
+
+def test_game_over_route_retries_after_a_transient_terminal_tap_failure():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        with (
+            patch(
+                "handlers.game_over_handler.tap_if_visible",
+                side_effect=[False, True],
+            ),
+            patch("handlers.game_over_handler.capture_adb_screenshot"),
+            patch("handlers.game_over_handler.save_image"),
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            first = handle_game_over(capture_stats=False)
+            second = handle_game_over(capture_stats=False)
+    finally:
+        assert AUTOMATION.state is RunState.RUNNING
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    assert first.route_completed is False
+    assert first.route == "pending_retry"
+    assert second.route_completed is True
+    assert second.route == "retry"
+
+
+def test_unavailable_stats_capture_does_not_block_retry():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        with (
+            patch("handlers.game_over_handler.capture_adb_screenshot", return_value=None),
+            patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            outcome = handle_game_over(capture_stats=True)
+    finally:
+        assert AUTOMATION.state is RunState.RUNNING
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    assert outcome.route_completed is True
+    assert outcome.route == "retry"
+    assert outcome.stats_status == "unavailable"
+    tap.assert_called_once_with(
+        "buttons.retry:game_over",
+        retries=1,
+        action_guard_fn=None,
     )
 
 
@@ -371,7 +434,11 @@ def test_guarded_preflight_repair_forces_home_after_control_allows_actions():
         AUTOMATION.state = original_state
         AUTOMATION.mode = original_mode
 
-    tap.assert_called_once_with("buttons.home:game_over", retries=1)
+    tap.assert_called_once_with(
+        "buttons.home:game_over",
+        retries=1,
+        action_guard_fn=None,
+    )
 
 
 def test_required_post_run_home_inventory_bypasses_wait_mode():
@@ -392,7 +459,11 @@ def test_required_post_run_home_inventory_bypasses_wait_mode():
         AUTOMATION.state = original_state
         AUTOMATION.mode = original_mode
 
-    tap.assert_called_once_with("buttons.home:game_over", retries=1)
+    tap.assert_called_once_with(
+        "buttons.home:game_over",
+        retries=1,
+        action_guard_fn=None,
+    )
 
 
 def test_required_post_run_home_inventory_still_waits_while_paused():
@@ -451,7 +522,11 @@ def test_game_over_wait_reports_completed_actions_before_polling_for_direction()
         AUTOMATION.state = original_state
         AUTOMATION.mode = original_mode
 
-    tap.assert_called_once_with("buttons.home:game_over", retries=1)
+    tap.assert_called_once_with(
+        "buttons.home:game_over",
+        retries=1,
+        action_guard_fn=None,
+    )
     assert action_log.call_count == 2
     action_log.assert_any_call(
         "Following the finished-battle direction",
@@ -637,6 +712,7 @@ def test_capture_failure_is_recorded_without_stranding_game_over_navigation():
             ),
             patch("handlers.game_over_handler.capture_scroll_to_edge") as capture_scroll,
             patch("handlers.game_over_handler._save_battle_stats_record") as save_record,
+            patch("handlers.game_over_handler._wait_for_game_stats", return_value=frame),
             patch("handlers.game_over_handler.time.sleep"),
         ):
             handle_game_over(
@@ -696,6 +772,7 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
             patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
             patch("handlers.game_over_handler.scroll_to_edge") as scroll,
             patch("handlers.game_over_handler._persist_battle_stats_record") as persist,
+            patch("handlers.game_over_handler._wait_for_game_stats", return_value=frame),
             patch("handlers.game_over_handler.time.sleep"),
         ):
             result = handle_game_over(
@@ -706,7 +783,9 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
         AUTOMATION.mode = original_mode
 
     scroll.assert_not_called()
-    assert result is record
+    assert result.route_completed is True
+    assert result.record is record
+    assert result.stats_status == "saved"
     assert record["perks"] == perks
     assert record["report_disposition"] == disposition
     assert persist.call_args.kwargs["perks_frames"] == [frame]
@@ -774,7 +853,9 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
     finally:
         AUTOMATION.mode = original_mode
 
-    assert result is record
+    assert result.route_completed is True
+    assert result.record is record
+    assert result.stats_status == "saved"
     assert record["perks"] == perks
     assert record["report_disposition"] == disposition
     assert build.call_args.kwargs["strategy_name"] == "farm_t19"

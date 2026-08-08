@@ -498,6 +498,18 @@ def test_gate_activation_never_mutates_pause_or_dispatches_lifecycle_input():
     exit_battle.assert_not_called()
 
 
+def test_terminal_boundary_does_not_recreate_a_failed_battle_gate():
+    app = _terminal_gate_app()
+
+    app._sync_strategy_action_gate(
+        terminally_blocked=True,
+        detection={"state": "GAME_OVER"},
+    )
+
+    assert app._get_action_authority().strategy_gate is None
+    app._supervisor.persist_state.assert_not_called()
+
+
 def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
     app = _terminal_gate_app()
     manager = app._mission_mgr

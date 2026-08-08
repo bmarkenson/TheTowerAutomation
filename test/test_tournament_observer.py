@@ -904,7 +904,7 @@ def test_tournament_results_are_recorded_once_without_changing_policy(
 
 
 @pytest.mark.parametrize("terminal_policy", [ExecMode.NEXT_BATTLE, ExecMode.HOME])
-def test_tournament_dismissal_failure_pauses_without_changing_policy(
+def test_tournament_dismissal_failure_retries_without_changing_authority(
     terminal_policy,
 ):
     strategy = get_strategy("tournament")
@@ -944,14 +944,14 @@ def test_tournament_dismissal_failure_pauses_without_changing_policy(
         AUTOMATION.mode = previous_mode
 
     operation_id = action_log.call_args.kwargs["operation_id"]
-    app._supervisor.persist_state.assert_called_once_with("PAUSED")
+    app._supervisor.persist_state.assert_not_called()
     result_log.assert_called_once_with(
         "Tournament result was saved, but verified Home was not reached; "
-        "Automation Paused",
+        "the same terminal route will retry without changing Automation authority",
         detail=(
-            "[TOURNAMENT_RESULTS] result=failed "
+            "[TOURNAMENT_RESULTS] result=pending_retry "
             f"terminal_policy={terminal_policy.value} screen=retained "
-            "action_authority=PAUSED"
+            "action_authority=RUNNING retry=true"
         ),
         operation_id=operation_id,
     )

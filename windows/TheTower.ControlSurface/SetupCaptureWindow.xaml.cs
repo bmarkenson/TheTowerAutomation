@@ -43,7 +43,7 @@ public partial class SetupCaptureWindow : Window
         {
             var current = await _api.GetSetupCaptureAsync(cancellationToken);
             var status = current.Capture?.Status ?? "";
-            if (status == "ready" || IsInProgress(status))
+            if (status == "ready" || IsInProgress(status) || IsTerminal(status))
             {
                 ApplyResponse(current);
                 return;
@@ -81,7 +81,10 @@ public partial class SetupCaptureWindow : Window
         var status = capture?.Status ?? "unavailable";
         StatusText.Text = string.IsNullOrWhiteSpace(capture?.Reason)
             ? Format(status)
-            : $"{Format(status)} — {capture.Reason}";
+            : $"{Format(status)} — {capture.Reason}"
+                + (string.IsNullOrWhiteSpace(capture.AuthorityOutcome)
+                    ? ""
+                    : $" · authority: {Format(capture.AuthorityOutcome)}");
         EvidenceText.Text = preview is null
             ? "No newly serialized save preview is available. Cached evidence is not substituted."
             : $"{FormatAcquisitionSource(capture?.AcquisitionSource)} · "
@@ -128,6 +131,11 @@ public partial class SetupCaptureWindow : Window
             _pollTimer.Stop();
         }
         var ready = status == "ready" && preview is not null;
+        TryAgainButton.Visibility = IsTerminal(status)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        TryAgainButton.IsEnabled = IsTerminal(status)
+            && response.Availability.Available;
         CancelCaptureButton.IsEnabled = capture is not null
             && status is not "capturing"
             && status is not "saved"
@@ -176,6 +184,18 @@ public partial class SetupCaptureWindow : Window
                 + Environment.NewLine
                 + $"Unresolved fields retained: {_review.Unresolved.Count}.";
             UpdateSaveAvailability();
+        });
+    }
+
+    private async void TryAgain_Click(object sender, RoutedEventArgs e)
+    {
+        await RunAsync(async cancellationToken =>
+        {
+            _review = null;
+            _reviewInput = null;
+            ApplyResponse(await _api.PostSetupCaptureAsync(
+                new Dictionary<string, object> { ["operation"] = "request" },
+                cancellationToken));
         });
     }
 
@@ -424,6 +444,10 @@ public partial class SetupCaptureWindow : Window
 
     private static bool IsInProgress(string status) =>
         status is "requested" or "acknowledged" or "capturing";
+
+    private static bool IsTerminal(string status) =>
+        status is "saved" or "cancelled" or "unavailable"
+            or "interrupted" or "failed";
 
     private static string Format(string value) =>
         string.Join(" ", value.Split('_')).Trim();

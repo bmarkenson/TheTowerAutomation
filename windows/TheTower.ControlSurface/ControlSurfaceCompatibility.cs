@@ -23,12 +23,21 @@ internal sealed record BetterControlWorkflowPresentation(
     bool Pending,
     bool Terminal);
 
+internal enum SetupCaptureOpenAction
+{
+    Unavailable,
+    Request,
+    Progress,
+    Review,
+    Inspect,
+}
+
 internal static class ControlSurfaceCompatibility
 {
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 29;
+    public const int MinimumServerRevision = 30;
 
     private static readonly string[] RequiredCapabilities =
     [
@@ -45,7 +54,7 @@ internal static class ControlSurfaceCompatibility
         "managed_custom_module_presets_v1",
         "observed_game_speed",
         "selected_strategy_process_start",
-        "save_backed_setup_capture_v1",
+        "save_backed_setup_capture_v2",
         "strategy_action_gate_v1",
         "strategy_authoring_local_loadout_editors_v1",
         "strategy_authoring_profile_lifecycle_v1",
@@ -79,14 +88,33 @@ internal static class ControlSurfaceCompatibility
         {
             return false;
         }
-        if (model.SetupCapture?.Status == "ready")
+        return SetupCaptureAction(model) != SetupCaptureOpenAction.Unavailable;
+    }
+
+    public static SetupCaptureOpenAction SetupCaptureAction(
+        BetterControlModelStatus model)
+    {
+        var status = model.SetupCapture?.Status ?? "";
+        if (status == "ready")
         {
-            return true;
+            return SetupCaptureOpenAction.Review;
         }
-        return model.Actions.TryGetValue(
+        if (status is "requested" or "acknowledged" or "capturing")
+        {
+            return SetupCaptureOpenAction.Progress;
+        }
+        if (status is "saved" or "cancelled" or "unavailable"
+            or "interrupted" or "failed")
+        {
+            return SetupCaptureOpenAction.Inspect;
+        }
+        var available = model.Actions.TryGetValue(
                 "capture_current_setup",
                 out var availability)
             && availability.Available;
+        return available
+            ? SetupCaptureOpenAction.Request
+            : SetupCaptureOpenAction.Unavailable;
     }
 
     public static BetterControlWorkflowPresentation PresentWorkflow(

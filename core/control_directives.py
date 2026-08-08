@@ -25,6 +25,7 @@ from core.control_model import (
     MANUAL_SURRENDER_COLLECTIONS,
     TERMINAL_RETURN_RECONCILIATION_KIND,
     MANUAL_CONTROL_TERMINAL_STATUSES,
+    SETUP_CAPTURE_AUTHORITY_OUTCOMES,
     SETUP_CAPTURE_GAME_STATES,
     SETUP_CAPTURE_TERMINAL_STATUSES,
     intent_matches_evidence,
@@ -661,6 +662,7 @@ class ControlDirectiveStore:
         acknowledgement: Optional[Mapping[str, object]] = None,
         preview: Optional[Mapping[str, object]] = None,
         saved_result: Optional[Mapping[str, object]] = None,
+        authority_outcome: Optional[str] = None,
         source: str = "runtime",
         now: Optional[float] = None,
     ) -> Optional[dict[str, Any]]:
@@ -731,6 +733,13 @@ class ControlDirectiveStore:
                 )
             if saved_result is not None:
                 capture["saved_result"] = dict(saved_result)
+            if authority_outcome is not None:
+                normalized_authority = str(authority_outcome).strip().lower()
+                if normalized_authority not in SETUP_CAPTURE_AUTHORITY_OUTCOMES:
+                    raise ValueError(
+                        "Setup capture authority outcome is invalid"
+                    )
+                capture["authority_outcome"] = normalized_authority
             if normalized_status in {"acknowledged", "capturing"} and (
                 "acknowledged_at" not in capture
             ):

@@ -284,6 +284,9 @@ public sealed class SetupCaptureStatus
     [JsonPropertyName("reason")]
     public string? Reason { get; set; }
 
+    [JsonPropertyName("authority_outcome")]
+    public string? AuthorityOutcome { get; set; }
+
     [JsonPropertyName("acquisition_source")]
     public string AcquisitionSource { get; set; } = "";
 

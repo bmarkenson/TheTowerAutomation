@@ -1273,12 +1273,13 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 29" in native_compatibility
+    assert "MinimumServerRevision = 30" in native_compatibility
     assert '"better_control_model_v2"' in native_compatibility
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
-    assert '"save_backed_setup_capture_v1"' in native_compatibility
+    assert '"save_backed_setup_capture_v2"' in native_compatibility
     assert "save_backed_setup_capture_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert "save_backed_setup_capture_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"terminal_dispositions_v2"' in native_compatibility
     assert "terminal_dispositions_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"managed_custom_module_presets_v1"' in native_compatibility
@@ -1375,7 +1376,7 @@ def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     assert 'data-control-action="take_manual_control"' in html
     assert 'data-control-action="return_control"' in html
     assert "availability.available !== true" in script
-    assert "BETTER_CONTROL_MINIMUM_REVISION = 29" in script
+    assert "BETTER_CONTROL_MINIMUM_REVISION = 30" in script
     assert "(action === \"start\" && !betterControlCompatible)" in script
     assert '"terminalPolicyStatus"' in script
     assert "workflow?.status" in script
@@ -1441,6 +1442,14 @@ assert.strictEqual(model.chooseLatestCapture(ready, requested), ready);
 assert.strictEqual(model.chooseLatestCapture(ready, saved), saved);
 assert.strictEqual(model.captureCatalogMatches(ready, {{...ready}}), true);
 assert.strictEqual(model.captureCatalogMatches(ready, requested), false);
+assert.strictEqual(model.setupCaptureOpenAction(null, {{available: true}}), 'request');
+assert.strictEqual(model.setupCaptureOpenAction(requested, {{available: false}}), 'progress');
+assert.strictEqual(model.setupCaptureOpenAction(ready, {{available: false}}), 'review');
+for (const status of ['saved', 'cancelled', 'unavailable', 'interrupted', 'failed']) {{
+  const terminal = {{request_id: 'capture-1', status}};
+  assert.strictEqual(model.captureIsTerminal(terminal), true);
+  assert.strictEqual(model.setupCaptureOpenAction(terminal, {{available: true}}), 'inspect');
+}}
 for (const status of ['requested', 'pending', 'acknowledged']) {{
   assert.strictEqual(model.workflowPresentation(status).pending, true);
 }}
@@ -1456,6 +1465,12 @@ assert.strictEqual(model.workflowPresentation('rejected').label, 'Rejected');
         text=True,
     )
     assert completed.returncode == 0, completed.stderr
+
+    browser = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    assert 'openAction !== "request"' in browser
+    assert "async function retrySetupCapture()" in browser
+    assert 'id="retryCaptureButton"' in html
 
 
 def test_native_incompatible_api_has_prominent_start_mitigation():
@@ -1986,7 +2001,7 @@ def test_http_setup_capture_routes_include_durable_draft_reopen(
         "captured_setup_draft",
         lambda strategy_id: {
             "schema_version": 1,
-            "capability": "save_backed_setup_capture_v1",
+            "capability": "save_backed_setup_capture_v2",
             "draft": {
                 "id": strategy_id,
                 "source": {"kind": "strategy", "id": strategy_id},
@@ -2021,7 +2036,7 @@ def test_http_setup_capture_routes_include_durable_draft_reopen(
         response = connection.getresponse()
         payload = json.loads(response.read())
         assert response.status == 200
-        assert payload["capability"] == "save_backed_setup_capture_v1"
+        assert payload["capability"] == "save_backed_setup_capture_v2"
 
         connection.request(
             "GET",

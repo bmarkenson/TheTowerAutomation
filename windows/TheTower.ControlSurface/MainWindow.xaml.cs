@@ -2644,7 +2644,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 29 with better_control_model_v2 is required."
+                    "Linux API revision 30 with better_control_model_v2 is required."
                 );
             }
             if (model is not null
@@ -2669,14 +2669,26 @@ public partial class MainWindow : Window
         ReturnControlButton.ToolTip = giveBack.Reason;
         var captureAction = Action("capture_current_setup");
         var captureReady = model?.SetupCapture?.Status == "ready";
+        var captureOpenAction = model is null
+            ? SetupCaptureOpenAction.Unavailable
+            : ControlSurfaceCompatibility.SetupCaptureAction(model);
         CaptureSetupButton.IsEnabled =
             ControlSurfaceCompatibility.CanOpenSetupCapture(
                 _serverCompatibility,
                 model);
+        CaptureSetupButton.Content = captureOpenAction switch
+        {
+            SetupCaptureOpenAction.Review => "Review captured setup…",
+            SetupCaptureOpenAction.Progress => "View capture progress…",
+            SetupCaptureOpenAction.Inspect => "View capture result…",
+            _ => "Capture current setup as…",
+        };
         CaptureSetupButton.ToolTip = _serverCompatibility?.IsCompatible != true
             ? captureAction.Reason
             : captureReady
             ? "Review the fresh capture and save a new inactive artifact."
+            : captureOpenAction == SetupCaptureOpenAction.Inspect
+            ? "Inspect the completed result; retry requires a separate explicit action."
             : captureAction.Reason;
         var enable = Action("enable");
         ResumeButton.IsEnabled = processActive && enable.Available;

@@ -3,6 +3,7 @@
 import copy
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Mapping, Optional
 
@@ -34,6 +35,26 @@ PERKS_INDICATOR = "indicators.perks_panel"
 PERKS_CONTENT_REGION = (100, 414, 880, 1340)
 
 
+@dataclass(frozen=True)
+class GameOverHandlingOutcome:
+    """Separate optional collection from terminal-route completion."""
+
+    route_completed: bool
+    route: str
+    record: Optional[dict[str, Any]] = None
+    stats_status: str = "unavailable"
+    failure_step: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class _GameOverStatsCaptureOutcome:
+    """Best-effort data result plus the terminal modal restoration fact."""
+
+    record: Optional[dict[str, Any]] = None
+    screen_restored: bool = True
+    failure_step: Optional[str] = None
+
+
 def _game_stats_visible(screenshot) -> bool:
     """Accept either stable Game Stats title or More Stats button evidence."""
 
@@ -54,6 +75,7 @@ def handle_game_over(
     before_terminal_action: Optional[Callable[[], None]] = None,
     after_retry_started: Optional[Callable[[], None]] = None,
     on_terminal_failure: Optional[Callable[[str], bool]] = None,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
     return_home_after_battle: bool = False,
     report_disposition: Optional[Mapping[str, Any]] = None,
     captured_at: Optional[datetime] = None,
@@ -94,7 +116,9 @@ def handle_game_over(
         Uses several sleeps between actions (≈1.2–1.5s), and a final 2s sleep.
 
     Errors:
-        Tap failures request Automation Paused without changing terminal policy.
+        Collection failures are best effort. An unavailable terminal control
+        leaves the route pending for a later fresh frame without rewriting
+        action authority or terminal policy.
     """
     captured_at = captured_at or datetime.now().astimezone()
     expected_battle_id = make_battle_id(captured_at)
@@ -119,146 +143,34 @@ def handle_game_over(
         detail=f"[GAME_OVER] session={session_id} capture_stats={capture_stats}",
     )
 
+    stats_screen_restored = True
+    stats_failure_step = None
     if capture_stats:
-        context = dict(battle_context or {})
-        terminal_save_report = context.pop("terminal_save_report", None)
-        # Keep source frames in memory. Routine successful captures persist only
-        # structured data; screenshots are failure evidence.
-        img_game_stats = capture_adb_screenshot()
-        if img_game_stats is None:
-            return _abort_handler(
-                "Capture Game Stats",
-                session_id,
-                on_terminal_failure=on_terminal_failure,
-            )
-
-        perks, perks_frames, perks_screen_restored = _resolve_game_over_perks(
-            context
-        )
-        if not perks_screen_restored:
-            return _abort_handler(
-                "Close Perks",
-                session_id,
-                on_terminal_failure=on_terminal_failure,
-            )
-
-        record, save_reason = _capture_save_battle_record(
-            terminal_save_report,
-            battle_id=battle_id,
-            game_stats_frame=img_game_stats,
-            battle_context=context,
-            captured_at=captured_at,
-        )
-        if record is not None:
-            attach_battle_perks(record, perks)
-            if disposition is not None:
-                record["report_disposition"] = copy.deepcopy(disposition)
-            if _persist_battle_stats_record(
-                record,
-                session_id=session_id,
-                game_stats_frame=img_game_stats,
-                more_stats_frames=[],
-                perks_frames=perks_frames,
-            ):
-                completed_record = record
-        else:
-            log(
-                "[BATTLE_STATS] Save-backed report unavailable "
-                f"({save_reason}); using verified More Stats fallback",
-                "INFO",
-            )
-            # Tap "More Stats" only after Perks capture has restored Game Stats.
-            if not tap_if_visible("buttons.more_stats:game_over", retries=1):
-                return _abort_handler(
-                    "Tap More Stats",
-                    session_id,
-                    on_terminal_failure=on_terminal_failure,
-                )
-
-            time.sleep(1.5)
-
-            record, clipboard_reason = _capture_clipboard_battle_record(
+        try:
+            stats_outcome = _capture_game_over_stats(
+                battle_context=battle_context,
                 battle_id=battle_id,
-                game_stats_frame=img_game_stats,
-                battle_context=context,
                 captured_at=captured_at,
+                session_id=session_id,
+                disposition=disposition,
+                action_guard_fn=action_guard_fn,
             )
-            if record is not None:
-                attach_battle_perks(record, perks)
-                if disposition is not None:
-                    record["report_disposition"] = copy.deepcopy(disposition)
-                if _persist_battle_stats_record(
-                    record,
-                    session_id=session_id,
-                    game_stats_frame=img_game_stats,
-                    more_stats_frames=[],
-                    perks_frames=perks_frames,
-                ):
-                    completed_record = record
-            else:
-                log(
-                    f"[BATTLE_STATS] Clipboard capture unavailable ({clipboard_reason}); "
-                    "using guarded OCR fallback",
-                    "WARN",
-                )
-                # Repeatedly swipe to the true top, verifying the Round Stats panel
-                # before and after every fallback gesture.
-                top = scroll_to_edge(
-                    "gesture_targets.goto_top:more_stats",
-                    source_label=MORE_STATS_INDICATOR,
-                    progress_region=MORE_STATS_CONTENT_REGION,
-                    max_swipes=8,
-                    settle_s=1.2,
-                )
-                if top.screenshot is None:
-                    return _abort_handler(
-                        f"Scroll More Stats to top ({top.reason})",
-                        session_id,
-                        on_terminal_failure=on_terminal_failure,
-                    )
-
-                if top.success:
-                    capture = capture_scroll_to_edge(
-                        "gesture_targets.goto_pg2:more_stats",
-                        source_label=MORE_STATS_INDICATOR,
-                        screenshot=top.screenshot,
-                        progress_region=MORE_STATS_CONTENT_REGION,
-                        max_swipes=16,
-                        settle_s=1.2,
-                    )
-                    more_stats_frames = list(capture.screenshots)
-                    source_complete = capture.success
-                    source_reason = capture.reason
-                else:
-                    # Preserve incomplete evidence but do not strand the completed
-                    # battle on a paging/OCR failure.
-                    more_stats_frames = [top.screenshot]
-                    source_complete = False
-                    source_reason = f"top_{top.reason}"
-
-                completed_record = _save_battle_stats_record(
-                    battle_id=battle_id,
-                    session_id=session_id,
-                    game_stats_frame=img_game_stats,
-                    more_stats_frames=more_stats_frames,
-                    source_complete=source_complete,
-                    source_reason=source_reason,
-                    battle_context=context,
-                    captured_at=captured_at,
-                    perks=perks,
-                    perks_frames=perks_frames,
-                    report_disposition=disposition,
-                )
-
-            # Close More Stats only on the fallback route that opened it.
-            if not tap_if_visible("buttons.close:more_stats", retries=1):
-                return _abort_handler(
-                    "Close More Stats",
-                    session_id,
-                    on_terminal_failure=on_terminal_failure,
-                )
-
-            time.sleep(1.2)
+        except Exception as exc:
+            # Data extraction is deliberately subordinate to the selected
+            # terminal route. Retain diagnostic evidence, then continue toward
+            # Home/Retry instead of converting a data bug into global Pause.
+            log(
+                f"[BATTLE_STATS] Optional terminal collection failed: {exc}",
+                "ERROR",
+                console=True,
+            )
+            stats_outcome = _GameOverStatsCaptureOutcome(
+                screen_restored=False,
+                failure_step=f"terminal collection exception: {exc}",
+            )
+        completed_record = stats_outcome.record
+        stats_screen_restored = stats_outcome.screen_restored
+        stats_failure_step = stats_outcome.failure_step
     else:
         log("[GAME_OVER] Fast mode enabled — skipping More Stats capture", "DEBUG")
 
@@ -311,7 +223,25 @@ def handle_game_over(
                     f"stats_saved={completed_record is not None}"
                 ),
             )
-        return
+        return GameOverHandlingOutcome(
+            False,
+            "stopped",
+            completed_record,
+            stats_status,
+            "automation stopped before post-run navigation",
+        )
+    if not stats_screen_restored:
+        stats_screen_restored = restore_game_stats_for_terminal_route(
+            action_guard_fn=action_guard_fn,
+        )
+        if not stats_screen_restored:
+            return _abort_handler(
+                stats_failure_step or "Restore Game Stats after collection",
+                session_id,
+                on_terminal_failure=on_terminal_failure,
+                record=completed_record,
+                stats_status=stats_status,
+            )
     if entered_wait:
         log_action_intent(
             "Following the finished-battle direction",
@@ -326,21 +256,33 @@ def handle_game_over(
     if return_home_after_battle:
         mode = ExecMode.HOME
     if mode == ExecMode.HOME:
-        if not tap_if_visible("buttons.home:game_over", retries=1):
+        if not tap_if_visible(
+            "buttons.home:game_over",
+            retries=1,
+            action_guard_fn=action_guard_fn,
+        ):
             return _abort_handler(
                 "Go Home from Game Stats",
                 session_id,
                 on_terminal_failure=on_terminal_failure,
+                record=completed_record,
+                stats_status=stats_status,
             )
         route = "home"
         route_summary = "returned Home"
         log("[GAME_OVER] Mode HOME selected after Game Stats", "DEBUG")
     else:
-        if not tap_if_visible("buttons.retry:game_over", retries=1):
+        if not tap_if_visible(
+            "buttons.retry:game_over",
+            retries=1,
+            action_guard_fn=action_guard_fn,
+        ):
             return _abort_handler(
                 "Retry Game",
                 session_id,
                 on_terminal_failure=on_terminal_failure,
+                record=completed_record,
+                stats_status=stats_status,
             )
         if after_retry_started is not None:
             after_retry_started()
@@ -355,7 +297,227 @@ def handle_game_over(
             f"stats={stats_status}"
         ),
     )
-    return completed_record
+    return GameOverHandlingOutcome(
+        True,
+        route,
+        completed_record,
+        stats_status,
+    )
+
+
+def _capture_game_over_stats(
+    *,
+    battle_context: Optional[Mapping[str, Any]],
+    battle_id: str,
+    captured_at: datetime,
+    session_id: str,
+    disposition: Optional[Mapping[str, Any]],
+    action_guard_fn: Optional[Callable[[], bool]],
+) -> _GameOverStatsCaptureOutcome:
+    """Attempt terminal collection without owning the Home/Retry decision."""
+
+    context = dict(battle_context or {})
+    terminal_save_report = context.pop("terminal_save_report", None)
+    # Keep source frames in memory. Routine successful captures persist only
+    # structured data; screenshots are failure evidence.
+    img_game_stats = capture_adb_screenshot()
+    if img_game_stats is None:
+        log(
+            "[BATTLE_STATS] Game Stats capture unavailable; continuing to the "
+            "selected terminal route",
+            "WARN",
+        )
+        return _GameOverStatsCaptureOutcome(
+            failure_step="Capture Game Stats",
+        )
+
+    perks, perks_frames, perks_screen_restored = _resolve_game_over_perks(
+        context,
+        action_guard_fn=action_guard_fn,
+    )
+    if not perks_screen_restored:
+        log(
+            "[BATTLE_STATS] Perks collection did not restore Game Stats; "
+            "terminal-screen recovery will take precedence over data",
+            "WARN",
+        )
+        return _GameOverStatsCaptureOutcome(
+            screen_restored=False,
+            failure_step="Close Perks",
+        )
+
+    record, save_reason = _capture_save_battle_record(
+        terminal_save_report,
+        battle_id=battle_id,
+        game_stats_frame=img_game_stats,
+        battle_context=context,
+        captured_at=captured_at,
+    )
+    if record is not None:
+        attach_battle_perks(record, perks)
+        if disposition is not None:
+            record["report_disposition"] = copy.deepcopy(dict(disposition))
+        if _persist_battle_stats_record(
+            record,
+            session_id=session_id,
+            game_stats_frame=img_game_stats,
+            more_stats_frames=[],
+            perks_frames=perks_frames,
+        ):
+            return _GameOverStatsCaptureOutcome(record=record)
+        return _GameOverStatsCaptureOutcome(
+            failure_step="Persist save-backed battle record",
+        )
+
+    log(
+        "[BATTLE_STATS] Save-backed report unavailable "
+        f"({save_reason}); using verified More Stats fallback",
+        "INFO",
+    )
+    # Tap More Stats only after Perks capture has restored Game Stats. A miss
+    # leaves the terminal modal untouched, so routing may continue immediately.
+    if not tap_if_visible(
+        "buttons.more_stats:game_over",
+        retries=1,
+        action_guard_fn=action_guard_fn,
+    ):
+        log(
+            "[BATTLE_STATS] More Stats could not be opened; continuing to the "
+            "selected terminal route",
+            "WARN",
+        )
+        return _GameOverStatsCaptureOutcome(
+            failure_step="Tap More Stats",
+        )
+
+    time.sleep(1.5)
+    completed_record = None
+    record, clipboard_reason = _capture_clipboard_battle_record(
+        battle_id=battle_id,
+        game_stats_frame=img_game_stats,
+        battle_context=context,
+        captured_at=captured_at,
+        action_guard_fn=action_guard_fn,
+    )
+    if record is not None:
+        attach_battle_perks(record, perks)
+        if disposition is not None:
+            record["report_disposition"] = copy.deepcopy(dict(disposition))
+        if _persist_battle_stats_record(
+            record,
+            session_id=session_id,
+            game_stats_frame=img_game_stats,
+            more_stats_frames=[],
+            perks_frames=perks_frames,
+        ):
+            completed_record = record
+    else:
+        log(
+            f"[BATTLE_STATS] Clipboard capture unavailable ({clipboard_reason}); "
+            "using guarded OCR fallback",
+            "WARN",
+        )
+        # Repeatedly swipe to the true top, verifying the Round Stats panel
+        # before and after every fallback gesture.
+        top = scroll_to_edge(
+            "gesture_targets.goto_top:more_stats",
+            source_label=MORE_STATS_INDICATOR,
+            progress_region=MORE_STATS_CONTENT_REGION,
+            max_swipes=8,
+            settle_s=1.2,
+            action_guard_fn=action_guard_fn,
+        )
+        if top.screenshot is None:
+            log(
+                "[BATTLE_STATS] More Stats OCR source is unavailable "
+                f"({top.reason}); preserving terminal navigation",
+                "WARN",
+            )
+        else:
+            if top.success:
+                capture = capture_scroll_to_edge(
+                    "gesture_targets.goto_pg2:more_stats",
+                    source_label=MORE_STATS_INDICATOR,
+                    screenshot=top.screenshot,
+                    progress_region=MORE_STATS_CONTENT_REGION,
+                    max_swipes=16,
+                    settle_s=1.2,
+                    action_guard_fn=action_guard_fn,
+                )
+                more_stats_frames = list(capture.screenshots)
+                source_complete = capture.success
+                source_reason = capture.reason
+            else:
+                # Preserve incomplete evidence but do not strand the completed
+                # battle on a paging/OCR failure.
+                more_stats_frames = [top.screenshot]
+                source_complete = False
+                source_reason = f"top_{top.reason}"
+
+            completed_record = _save_battle_stats_record(
+                battle_id=battle_id,
+                session_id=session_id,
+                game_stats_frame=img_game_stats,
+                more_stats_frames=more_stats_frames,
+                source_complete=source_complete,
+                source_reason=source_reason,
+                battle_context=context,
+                captured_at=captured_at,
+                perks=perks,
+                perks_frames=perks_frames,
+                report_disposition=disposition,
+            )
+
+    # More Stats is optional, but leaving its modal open would block the
+    # authoritative Home/Retry control. Close it under the same live guard and
+    # verify Game Stats before reporting the collection route complete.
+    close_dispatched = tap_if_visible(
+        "buttons.close:more_stats",
+        retries=1,
+        action_guard_fn=action_guard_fn,
+    )
+    if close_dispatched:
+        restored = _wait_for_game_stats(timeout=3.0) is not None
+    else:
+        current = capture_adb_screenshot()
+        restored = bool(current is not None and _game_stats_visible(current))
+    if not restored:
+        return _GameOverStatsCaptureOutcome(
+            record=completed_record,
+            screen_restored=False,
+            failure_step="Close More Stats",
+        )
+    time.sleep(1.2)
+    return _GameOverStatsCaptureOutcome(record=completed_record)
+
+
+def restore_game_stats_for_terminal_route(
+    screenshot=None,
+    *,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+) -> bool:
+    """Restore the terminal modal from a collection sub-screen, if proven."""
+
+    current = screenshot if screenshot is not None else capture_adb_screenshot()
+    if current is None:
+        return False
+    if _game_stats_visible(current):
+        return True
+    close_label = None
+    if is_visible(PERKS_INDICATOR, screenshot=current):
+        close_label = "buttons.close:perks"
+    elif is_visible(MORE_STATS_INDICATOR, screenshot=current):
+        close_label = "buttons.close:more_stats"
+    if close_label is None:
+        return False
+    if not tap_if_visible(
+        close_label,
+        screenshot=current,
+        retries=1,
+        action_guard_fn=action_guard_fn,
+    ):
+        return False
+    return _wait_for_game_stats(timeout=3.0) is not None
 
 
 def _wait_for_game_over_direction(
@@ -379,7 +541,10 @@ def _wait_for_game_over_direction(
         return AUTOMATION.mode
 
 
-def _capture_game_over_perks():
+def _capture_game_over_perks(
+    *,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+):
     """Capture every ordered Selected Perks row and restore Game Stats."""
 
     game_stats_screen = capture_adb_screenshot()
@@ -407,6 +572,7 @@ def _capture_game_over_perks():
         "buttons.perks:game_over",
         screenshot=game_stats_screen,
         retries=1,
+        action_guard_fn=action_guard_fn,
     ):
         return (
             ocr_selected_perks(
@@ -442,6 +608,7 @@ def _capture_game_over_perks():
         progress_region=PERKS_CONTENT_REGION,
         max_swipes=8,
         settle_s=0.8,
+        action_guard_fn=action_guard_fn,
     )
     if top.screenshot is None:
         frames = []
@@ -455,6 +622,7 @@ def _capture_game_over_perks():
             progress_region=PERKS_CONTENT_REGION,
             max_swipes=20,
             settle_s=0.8,
+            action_guard_fn=action_guard_fn,
         )
         frames = list(capture.screenshots)
         source_complete = capture.success
@@ -484,7 +652,11 @@ def _capture_game_over_perks():
 
     restored = False
     for attempt in range(2):
-        if not tap_if_visible("buttons.close:perks", retries=1):
+        if not tap_if_visible(
+            "buttons.close:perks",
+            retries=1,
+            action_guard_fn=action_guard_fn,
+        ):
             break
         game_stats_screen = _wait_for_game_stats(timeout=3.0)
         if game_stats_screen is not None:
@@ -501,7 +673,11 @@ def _capture_game_over_perks():
     return perks, frames, restored
 
 
-def _resolve_game_over_perks(context: dict[str, Any]):
+def _resolve_game_over_perks(
+    context: dict[str, Any],
+    *,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+):
     """Use a proven saved final inventory or retain the terminal UI route."""
 
     monitoring = context.get("perk_save_monitoring")
@@ -540,7 +716,9 @@ def _resolve_game_over_perks(context: dict[str, Any]):
             )
             return dict(inventory), [], True
 
-    terminal_ui, frames, restored = _capture_game_over_perks()
+    terminal_ui, frames, restored = _capture_game_over_perks(
+        action_guard_fn=action_guard_fn,
+    )
     if not restored or not isinstance(monitoring, Mapping):
         return terminal_ui, frames, restored
     if (
@@ -663,6 +841,7 @@ def _capture_clipboard_battle_record(
     game_stats_frame,
     battle_context: Optional[Mapping[str, Any]],
     captured_at: datetime,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
 ):
     """Copy, read, parse, and freshness-check the visible More Stats report."""
 
@@ -677,6 +856,7 @@ def _capture_clipboard_battle_record(
         "buttons.copy:more_stats",
         screenshot=stats_screen,
         retries=1,
+        action_guard_fn=action_guard_fn,
     ):
         return None, "copy_tap_failed"
 
@@ -870,12 +1050,14 @@ def _abort_handler(
     session_id,
     *,
     on_terminal_failure: Optional[Callable[[str], bool]] = None,
+    record: Optional[dict[str, Any]] = None,
+    stats_status: str = "unavailable",
 ):
     """
     Abort helper for the GAME OVER handler.
 
-    Logs an error, captures a debug screenshot, writes it to disk, and requests
-    Automation Paused without changing the future terminal policy.
+    Log and retain evidence for a terminal route that should retry from a later
+    fresh frame. This helper never changes global action authority.
 
     Args:
         step (str): Human-readable step name that failed.
@@ -886,31 +1068,35 @@ def _abort_handler(
 
     Side effects:
         [adb][cv2][fs][log] Capture & persist debug screenshot; emit error.
-        [state] Requests or applies Automation Paused for safe intervention.
+        [state] Reports the failure to the caller without changing authority.
     """
     log(f"[ABORT] Game Over handler failed at: {step}", "ERROR")
     debug_img = capture_adb_screenshot()
     save_image(debug_img, f"{session_id}_ABORT_{step.replace(' ', '_')}")
     terminal_policy = AUTOMATION.mode.value
-    pause_persisted = False
     if on_terminal_failure is not None:
         try:
-            pause_persisted = on_terminal_failure(step) is not False
+            on_terminal_failure(step)
         except Exception as exc:
             log(
-                "[ABORT] Could not persist Automation Paused after terminal "
-                f"failure: {exc}",
+                "[ABORT] Could not publish the pending terminal failure: "
+                f"{exc}",
                 "ERROR",
                 console=True,
             )
-    if not pause_persisted:
-        AUTOMATION.state = RunState.PAUSED
+    action_authority = AUTOMATION.state.value
     log_result(
-        f"Finished-battle handling failed — {step} did not complete",
+        f"Finished-battle route pending — {step} did not complete",
         detail=(
-            f"[GAME_OVER] result=failed session={session_id} "
+            f"[GAME_OVER] result=pending_retry session={session_id} "
             f"failed_step={step} terminal_policy={terminal_policy} "
-            "action_authority=PAUSED"
+            f"action_authority={action_authority} retry=true"
         ),
     )
-    return
+    return GameOverHandlingOutcome(
+        False,
+        "pending_retry",
+        record,
+        stats_status,
+        str(step),
+    )

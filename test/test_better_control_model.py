@@ -3168,7 +3168,7 @@ def test_setup_capture_api_saves_normal_strategy_draft_without_publication(
     draft = service.profile_store.captured_strategy_draft("captured_farm")
     assert draft["review"]["unresolved"] == _capture_preview()["unresolved"]
     detail = service.captured_setup_draft("captured_farm")
-    assert detail["capability"] == "save_backed_setup_capture_v1"
+    assert detail["capability"] == "save_backed_setup_capture_v2"
     assert detail["draft"]["source"] == draft["source"]
 
 
@@ -3344,6 +3344,14 @@ def test_runtime_setup_capture_forces_save_before_publishing_preview(
     app._player_save_acquirer = object()
     app._runtime_action_guard = lambda **_kwargs: True
     app._log_operator_workflow_result = lambda *_args, **_kwargs: None
+    app._get_action_authority().activate_strategy_gate(
+        strategy="none",
+        battle_scope=str(evidence["activity_scope_run_id"]),
+        source="setup_capture",
+        phase="running_battle",
+        failed_check_ids=("setup_capture_battle_identity",),
+        reason="earlier capture contradiction",
+    )
 
     app._sync_operator_control_workflows({"state": "RUNNING"})
 
@@ -3355,6 +3363,40 @@ def test_runtime_setup_capture_forces_save_before_publishing_preview(
     assert projected == [acquisition]
     assert app._setup_capture_source_refreshed is True
     assert ready["request_id"] == capture["request_id"]
+    assert app._get_action_authority().strategy_gate is None
+
+
+def test_setup_capture_gate_is_not_cleared_by_unrelated_session_preflight_success():
+    strategy = SimpleNamespace(
+        requires_session_preflight=lambda: True,
+        is_session_preflight_complete=lambda _context: True,
+    )
+    app = App.__new__(App)
+    app._mission_mgr = SimpleNamespace(
+        strategy=strategy,
+        ctx=SimpleNamespace(
+            data={
+                "mission_vars": {
+                    "gc_session_preflight_last_reason": "different mismatch",
+                }
+            }
+        ),
+        session_preflight_failure_checks=lambda: ["cards_deck"],
+    )
+    gate = app._get_action_authority().activate_strategy_gate(
+        strategy="farm",
+        battle_scope="scope-1",
+        source="setup_capture",
+        phase="running_battle",
+        failed_check_ids=("setup_capture_battle_identity",),
+        reason="fresh save contradicted the observed battle boundary",
+    )
+
+    app._sync_strategy_action_gate(terminally_blocked=False)
+
+    assert app._get_action_authority().strategy_gate == gate
+    app._sync_strategy_action_gate(terminally_blocked=True)
+    assert app._get_action_authority().strategy_gate == gate
 
 
 def test_setup_capture_request_and_runtime_share_one_action_result_pair(
@@ -3504,11 +3546,13 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
 
     assert app._sync_setup_capture(object()) is True
     assert supervisor.setup_capture["status"] == "capturing"
-    assert supervisor.is_paused is True
+    assert supervisor.is_paused is False
     app._setup_capture_source_refreshed = False
     assert app._sync_setup_capture(object()) is True
 
     assert supervisor.setup_capture["status"] == "ready"
+    assert supervisor.setup_capture["authority_outcome"] == "preserved"
+    assert supervisor.is_paused is False
     assert serializer_calls == ["serialize"]
     assert app._pending_setup_capture_claims() == {}
 
@@ -3522,6 +3566,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
         "snapshot_kind",
         "expected_status",
         "reason_fragment",
+        "expected_authority",
+        "paused",
     ),
     (
         (
@@ -3532,6 +3578,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime",
             "failed",
             "round identity contradicts",
+            "continuity_gated",
+            False,
         ),
         (
             "home_new_battle",
@@ -3541,6 +3589,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime",
             "failed",
             "round identity contradicts",
+            "paused_for_safety",
+            True,
         ),
         (
             "active_battle",
@@ -3550,6 +3600,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime",
             "unavailable",
             "did not prove an active battle identity",
+            "preserved",
+            False,
         ),
         (
             "home_new_battle",
@@ -3559,6 +3611,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime",
             "unavailable",
             "did not prove an inactive round",
+            "preserved",
+            False,
         ),
         (
             "home_new_battle",
@@ -3568,6 +3622,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "unsupported",
             "unavailable",
             "save version is unsupported",
+            "preserved",
+            False,
         ),
         (
             "home_new_battle",
@@ -3577,6 +3633,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "incompatible",
             "unavailable",
             "structurally incompatible",
+            "preserved",
+            False,
         ),
         (
             "home_new_battle",
@@ -3586,6 +3644,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime_projection_unavailable",
             "unavailable",
             "no usable runtime projection",
+            "preserved",
+            False,
         ),
         (
             "active_battle",
@@ -3593,12 +3653,14 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "a" * 64,
             False,
             "runtime",
-            "failed",
+            "unavailable",
             "no stable current save",
+            "preserved",
+            False,
         ),
     ),
 )
-def test_runtime_setup_capture_failure_pauses_after_background(
+def test_runtime_setup_capture_evidence_failure_preserves_enabled_after_restoration(
     tmp_path,
     monkeypatch,
     game_state,
@@ -3608,6 +3670,8 @@ def test_runtime_setup_capture_failure_pauses_after_background(
     snapshot_kind,
     expected_status,
     reason_fragment,
+    expected_authority,
+    paused,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
     path = tmp_path / "automation_ctl.json"
@@ -3675,6 +3739,8 @@ def test_runtime_setup_capture_failure_pauses_after_background(
             serializer_calls.append("serialize")
             return SimpleNamespace(
                 status=GuardedSerializationStatus.COMPLETE,
+                source_restored=True,
+                lifecycle_input_attempted=True,
                 background_dispatched=True,
                 acquisition=acquisition if acquisition_present else None,
             )
@@ -3705,10 +3771,179 @@ def test_runtime_setup_capture_failure_pauses_after_background(
     result = supervisor.setup_capture
     assert result["status"] == expected_status
     assert reason_fragment in result["reason"]
-    assert "Automation remains Paused" in result["reason"]
-    assert supervisor.is_paused is True
+    assert result["authority_outcome"] == expected_authority
+    assert supervisor.is_paused is paused
+    if expected_authority == "preserved":
+        assert "did not change automation authority" in result["reason"]
+    elif expected_authority == "continuity_gated":
+        assert app._get_action_authority().strategy_gate is not None
     assert serializer_calls == ["serialize"]
     project.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("lifecycle_input_attempted", "expected_status", "paused"),
+    (
+        (False, "unavailable", False),
+        (True, "failed", True),
+    ),
+)
+def test_runtime_setup_capture_pauses_only_when_attempted_source_is_unrestored(
+    tmp_path,
+    monkeypatch,
+    lifecycle_input_attempted,
+    expected_status,
+    paused,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    store.request_setup_capture(evidence=evidence, source="test")
+    supervisor.apply_control()
+
+    class FakeSerializer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def acquire(self, **_kwargs):
+            return SimpleNamespace(
+                status=GuardedSerializationStatus.BLOCKED,
+                reason="source boundary unavailable",
+                source_restored=False,
+                lifecycle_input_attempted=lifecycle_input_attempted,
+                # A transport failure can report no accepted dispatch even
+                # though KEYCODE_HOME was already attempted.
+                background_dispatched=False,
+                acquisition=None,
+            )
+
+    monkeypatch.setattr("core.app.GuardedPlayerSaveSerializer", FakeSerializer)
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MissionManager(None, None)
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._adb_target_session = SimpleNamespace(snapshot=lambda: None)
+    app._player_save_acquirer = object()
+    app._runtime_action_guard = lambda **_kwargs: True
+    app._log_operator_workflow_intent = lambda *_args, **_kwargs: None
+    app._log_operator_workflow_result = lambda *_args, **_kwargs: None
+    app._setup_capture_source_refreshed = False
+
+    assert app._sync_setup_capture(object()) is True
+
+    result = supervisor.setup_capture
+    assert result["status"] == expected_status
+    assert supervisor.is_paused is paused
+    assert result["authority_outcome"] == (
+        "paused_for_safety" if paused else "preserved"
+    )
+    assert app._setup_capture_source_refreshed is lifecycle_input_attempted
+
+
+def test_runtime_setup_capture_terminal_write_retry_never_serializes_twice(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="home_new_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    store.request_setup_capture(evidence=evidence, source="test")
+    supervisor.apply_control()
+    captured = datetime.now(timezone.utc)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="captured",
+        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        acquisition_started_at=captured - timedelta(milliseconds=1),
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=SimpleNamespace(
+            runtime_save=None,
+            mapping_id=None,
+            mapping_resolution="unsupported",
+            shape_valid=False,
+        ),
+    )
+    serializer_calls = []
+
+    class FakeSerializer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def acquire(self, **_kwargs):
+            serializer_calls.append("serialize")
+            return SimpleNamespace(
+                status=GuardedSerializationStatus.COMPLETE,
+                source_restored=True,
+                lifecycle_input_attempted=True,
+                background_dispatched=True,
+                acquisition=acquisition,
+            )
+
+    monkeypatch.setattr("core.app.GuardedPlayerSaveSerializer", FakeSerializer)
+    original_transition = supervisor.transition_setup_capture
+    failures = []
+
+    def fail_first_terminal(request_id, status, **details):
+        if status == "unavailable" and not failures:
+            failures.append(request_id)
+            return None
+        return original_transition(request_id, status, **details)
+
+    monkeypatch.setattr(
+        supervisor,
+        "transition_setup_capture",
+        fail_first_terminal,
+    )
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MissionManager(None, None)
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._adb_target_session = SimpleNamespace(snapshot=lambda: None)
+    app._player_save_acquirer = object()
+    app._runtime_action_guard = lambda **_kwargs: True
+    app._log_operator_workflow_intent = lambda *_args, **_kwargs: None
+    app._log_operator_workflow_result = lambda *_args, **_kwargs: None
+
+    assert app._sync_setup_capture(object()) is True
+    assert supervisor.setup_capture["status"] == "capturing"
+    assert supervisor.is_paused is False
+    assert app._sync_setup_capture(object()) is True
+
+    terminal = supervisor.setup_capture
+    assert terminal["status"] == "unavailable"
+    assert terminal["authority_outcome"] == "preserved"
+    assert supervisor.is_paused is False
+    assert serializer_calls == ["serialize"]
+    assert app._pending_setup_capture_claims() == {}
 
 
 def test_runtime_setup_capture_reports_pause_without_using_cached_evidence(

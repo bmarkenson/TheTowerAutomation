@@ -104,6 +104,14 @@ SETUP_CAPTURE_STATUSES = frozenset(
 SETUP_CAPTURE_TERMINAL_STATUSES = frozenset(
     {"saved", "unavailable", "interrupted", "failed", "cancelled"}
 )
+SETUP_CAPTURE_AUTHORITY_OUTCOMES = frozenset(
+    {
+        "continuity_gated",
+        "preserved",
+        "paused_for_safety",
+        "unchanged_paused",
+    }
+)
 SETUP_CAPTURE_GAME_STATES = frozenset(
     {"home_new_battle", "home_resume_battle", "active_battle"}
 )
@@ -671,6 +679,9 @@ def validate_setup_capture(value: object) -> Optional[dict[str, Any]]:
         value.get("source_manual_control_id"),
         64,
     )
+    authority_outcome = str(
+        value.get("authority_outcome") or ""
+    ).strip().lower()
     if (
         request_id is None
         or status not in SETUP_CAPTURE_STATUSES
@@ -690,6 +701,10 @@ def validate_setup_capture(value: object) -> Optional[dict[str, Any]]:
             acquisition_source == "new_setup_capture_refresh"
             and value.get("source_manual_control_id") is not None
         )
+        or (
+            authority_outcome
+            and authority_outcome not in SETUP_CAPTURE_AUTHORITY_OUTCOMES
+        )
     ):
         return None
     result: dict[str, Any] = {
@@ -702,6 +717,8 @@ def validate_setup_capture(value: object) -> Optional[dict[str, Any]]:
     }
     if source_manual_control_id is not None:
         result["source_manual_control_id"] = source_manual_control_id
+    if authority_outcome:
+        result["authority_outcome"] = authority_outcome
     _copy_optional_fields(
         value,
         result,
@@ -1455,6 +1472,7 @@ __all__ = [
     "MANUAL_CONTROL_TERMINAL_STATUSES",
     "RUNNING_SAVE_RECONCILIATION_KINDS",
     "SAVE_RECONCILIATION_RECEIPT_SCHEMA_VERSION",
+    "SETUP_CAPTURE_AUTHORITY_OUTCOMES",
     "SETUP_CAPTURE_GAME_STATES",
     "SETUP_CAPTURE_SCHEMA_VERSION",
     "SETUP_CAPTURE_STATUSES",

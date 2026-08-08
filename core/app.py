@@ -176,7 +176,11 @@ from automation.missions.manager import (
 from automation.missions import get_mission
 from automation.missions.yaml_mission import YamlMission
 from automation.strategies import get_strategy
-from handlers.game_over_handler import handle_game_over
+from handlers.game_over_handler import (
+    GameOverHandlingOutcome,
+    handle_game_over,
+    restore_game_stats_for_terminal_route,
+)
 from handlers.tournament_result_handler import (
     dismiss_tournament_results_to_home,
     handle_tournament_results,
@@ -2287,14 +2291,39 @@ class App:
             "Strategy and Module authoring values"
         )
 
-        def finish(final_status: str, reason: str) -> None:
+        def existing_authority_outcome() -> str:
+            return (
+                "unchanged_paused"
+                if self._supervisor.is_paused
+                else "preserved"
+            )
+
+        def finish(
+            final_status: str,
+            reason: str,
+            *,
+            authority_outcome: Optional[str] = None,
+        ) -> None:
             transitioned = self._supervisor.transition_setup_capture(
                 request_id,
                 final_status,
                 reason=reason,
                 acknowledgement=(current or {}),
+                authority_outcome=(
+                    authority_outcome or existing_authority_outcome()
+                ),
             )
-            if transitioned is not None:
+            if transitioned is None:
+                claims = self._pending_setup_capture_claims()
+                claims.clear()
+                claims[request_id] = {
+                    "terminal_status": final_status,
+                    "reason": reason,
+                    "authority_outcome": (
+                        authority_outcome or existing_authority_outcome()
+                    ),
+                }
+            else:
                 self._pending_setup_capture_claims().pop(request_id, None)
             self._log_operator_workflow_result(
                 request_id,
@@ -2328,6 +2357,32 @@ class App:
             )
             return True
         ready_claim = self._pending_setup_capture_claims().get(request_id)
+        if isinstance(ready_claim, Mapping) and ready_claim.get(
+            "terminal_status"
+        ):
+            final_status = str(ready_claim.get("terminal_status") or "failed")
+            reason = str(
+                ready_claim.get("reason") or "setup capture ended"
+            )
+            terminal = self._supervisor.transition_setup_capture(
+                request_id,
+                final_status,
+                reason=reason,
+                acknowledgement=current,
+                authority_outcome=str(
+                    ready_claim.get("authority_outcome") or "preserved"
+                ),
+            )
+            if terminal is None:
+                return True
+            self._pending_setup_capture_claims().pop(request_id, None)
+            self._log_operator_workflow_result(
+                request_id,
+                purpose="Capturing the current setup",
+                reason=workflow_log_reason,
+                result=f"Setup capture {final_status} — {reason}",
+            )
+            return True
         if isinstance(ready_claim, Mapping):
             ready = self._supervisor.transition_setup_capture(
                 request_id,
@@ -2335,12 +2390,14 @@ class App:
                 reason=str(ready_claim.get("reason") or "capture ready"),
                 acknowledgement=current,
                 preview=ready_claim.get("preview"),
+                authority_outcome=existing_authority_outcome(),
             )
             if ready is None:
-                # The exact typed result remains process-local.  Pause before
-                # retrying only its atomic ledger receipt; never serialize a
-                # second time to recover a partial write.
-                self._supervisor.persist_state("PAUSED")
+                # The exact typed result remains process-local.  Retry only
+                # its atomic ledger receipt; never serialize a
+                # second time to recover a partial write.  The capture hold is
+                # sufficient ownership; do not overwrite Enabled merely
+                # because its reporting receipt needs another atomic attempt.
                 return True
             self._pending_setup_capture_claims().pop(request_id, None)
             self._log_operator_workflow_result(
@@ -2375,6 +2432,7 @@ class App:
             finish(
                 "interrupted",
                 "runtime capture ownership ended before its ready receipt; no second serialization was attempted and Automation remains Paused",
+                authority_outcome="paused_for_safety",
             )
             return True
         if self._supervisor.is_paused and not retained_return_source:
@@ -2408,7 +2466,6 @@ class App:
             reason=workflow_log_reason,
         )
 
-        background_dispatched = False
         if retained_return_source:
             acquisition = retained_return_claim.get("acquisition")
         else:
@@ -2456,15 +2513,29 @@ class App:
                 ),
                 initial_frame=frame,
             )
-            if serialized.background_dispatched:
-                background_dispatched = True
+            lifecycle_input_attempted = bool(
+                getattr(
+                    serialized,
+                    "lifecycle_input_attempted",
+                    serialized.background_dispatched,
+                )
+            )
+            source_restored = bool(
+                getattr(
+                    serialized,
+                    "source_restored",
+                    serialized.status is GuardedSerializationStatus.COMPLETE,
+                )
+            )
+            if lifecycle_input_attempted:
                 self._setup_capture_source_refreshed = True
             if serialized.status is GuardedSerializationStatus.BLOCKED:
-                if serialized.background_dispatched:
+                if lifecycle_input_attempted and not source_restored:
                     self._supervisor.persist_state("PAUSED")
                     finish(
                         "failed",
                         "source restoration or exact workflow authority was lost after backgrounding; Automation remains Paused",
+                        authority_outcome="paused_for_safety",
                     )
                 else:
                     finish(
@@ -2477,15 +2548,14 @@ class App:
             isinstance(acquisition, PlayerSaveAcquisitionBundle)
             and acquisition.complete
         ):
-            if background_dispatched or retained_return_source:
-                self._supervisor.persist_state("PAUSED")
             finish(
-                "failed" if background_dispatched else "unavailable",
-                "forced serialization completed but no stable current save was acquired"
-                + (
-                    "; Automation remains Paused"
-                    if background_dispatched or retained_return_source
-                    else ""
+                "unavailable",
+                "the source was restored, but no stable current save was acquired; "
+                "the capture did not change automation authority",
+                authority_outcome=(
+                    "unchanged_paused"
+                    if retained_return_source
+                    else existing_authority_outcome()
                 ),
             )
             return True
@@ -2493,27 +2563,80 @@ class App:
             self._setup_capture_workflow_binding(acquisition, requested)
         )
         if workflow_binding is None:
-            remains_paused = background_dispatched or retained_return_source
-            if remains_paused:
+            authority_outcome = (
+                "unchanged_paused"
+                if retained_return_source
+                else existing_authority_outcome()
+            )
+            if (
+                binding_status == "failed"
+                and not retained_return_source
+                and requested.get("game_state")
+                in {"active_battle", "home_resume_battle"}
+            ):
+                reason = str(
+                    binding_reason
+                    or "setup-capture battle identity is contradictory"
+                )
+                authority = self._get_action_authority()
+                prior_gate = authority.strategy_gate
+                if prior_gate is None or prior_gate.source == "setup_capture":
+                    authority.activate_strategy_gate(
+                        strategy=self._current_strategy_name(),
+                        battle_scope=str(
+                            requested.get("activity_scope_run_id") or ""
+                        )
+                        or None,
+                        source="setup_capture",
+                        phase="running_battle",
+                        failed_check_ids=("setup_capture_battle_identity",),
+                        reason=reason,
+                    )
+                authority_outcome = "continuity_gated"
+                binding_reason = (
+                    f"{reason}; Automation remains Enabled with strategy and "
+                    "lifecycle input gated while safe gem collection and "
+                    "observation may continue"
+                )
+            elif binding_status == "failed" and not retained_return_source:
                 self._supervisor.persist_state("PAUSED")
+                authority_outcome = "paused_for_safety"
+                binding_reason = (
+                    str(binding_reason or "setup-capture boundary contradiction")
+                    + "; Automation Paused because the fresh save contradicts "
+                    "the observed new-run Home boundary"
+                )
             finish(
                 binding_status or "unavailable",
                 str(binding_reason or "setup-capture save binding is unavailable")
-                + ("; Automation remains Paused" if remains_paused else ""),
+                + (
+                    "; the capture did not change automation authority"
+                    if authority_outcome
+                    in {"preserved", "unchanged_paused"}
+                    else ""
+                ),
+                authority_outcome=authority_outcome,
             )
             return True
+        existing_gate = self._get_action_authority().strategy_gate
+        if existing_gate is not None and existing_gate.source == "setup_capture":
+            self._get_action_authority().clear_strategy_gate(
+                event=StrategyGateExitEvent.SUCCESSFUL_VALIDATION,
+                reason=(
+                    "a later exact setup capture proved a coherent battle boundary"
+                ),
+            )
         try:
             preview = project_forced_save_setup(acquisition)
         except (SetupCaptureError, TypeError, ValueError) as exc:
-            if background_dispatched or retained_return_source:
-                self._supervisor.persist_state("PAUSED")
             finish(
-                "failed",
-                f"save-backed setup projection failed: {exc}"
-                + (
-                    "; Automation remains Paused"
-                    if background_dispatched or retained_return_source
-                    else ""
+                "unavailable",
+                f"save-backed setup projection is unavailable: {exc}; "
+                "the capture did not change automation authority",
+                authority_outcome=(
+                    "unchanged_paused"
+                    if retained_return_source
+                    else existing_authority_outcome()
                 ),
             )
             return True
@@ -2558,9 +2681,9 @@ class App:
             reason=ready_reason,
             acknowledgement=current,
             preview=preview,
+            authority_outcome=existing_authority_outcome(),
         )
         if ready is None:
-            self._supervisor.persist_state("PAUSED")
             return True
         self._pending_setup_capture_claims().pop(request_id, None)
         self._log_operator_workflow_result(
@@ -6025,7 +6148,13 @@ class App:
                     reason=str(directive.get("reason") or ""),
                 )
             ):
-                self._supervisor.persist_state("PAUSED")
+                log(
+                    "[SESSION_PREFLIGHT] Repair authorization no longer "
+                    "matches the live battle; the Strategy Gate remains in "
+                    "place while safe collectors continue",
+                    "WARN",
+                    console=True,
+                )
                 return False
             completion_reason = (
                 f"authorized guarded battle restart to repair {check_id}"
@@ -6250,11 +6379,35 @@ class App:
         self,
         *,
         terminally_blocked: bool,
+        detection: Optional[Mapping[str, Any]] = None,
     ) -> None:
         """Translate terminal preflight evidence into the typed gate state."""
 
         authority = self._get_action_authority()
         if terminally_blocked:
+            state = str((detection or {}).get("state") or "").upper()
+            home_control = HomeBattleControl.parse(
+                (detection or {}).get("home_battle_control", "UNKNOWN")
+            )
+            if state in {"GAME_OVER", "TOURNAMENT_RESULTS", "WORKSHOP"} or (
+                state in {"HOME", "HOME_SCREEN"}
+                and home_control is HomeBattleControl.NEW_BATTLE
+            ):
+                # The mismatch belongs to the battle that just ended. Do not
+                # recreate its running-battle gate after authoritative natural
+                # boundary evidence has cleared it; terminal routing and the
+                # next run's normal gates remain available.
+                return
+            existing_gate = authority.strategy_gate
+            if (
+                existing_gate is not None
+                and existing_gate.source != "session_preflight"
+            ):
+                # Every running-battle gate has the same input envelope. Keep
+                # the older independent safety fact instead of silently
+                # replacing it; the new preflight evidence remains available
+                # through its own gate-decision ledger.
+                return
             mission_vars = self._mission_mgr.ctx.data.setdefault(
                 "mission_vars",
                 {},
@@ -6284,7 +6437,8 @@ class App:
             return
         strategy = self._mission_mgr.strategy
         if (
-            strategy is not None
+            gate.source == "session_preflight"
+            and strategy is not None
             and strategy.requires_session_preflight()
             and strategy.is_session_preflight_complete(self._mission_mgr.ctx)
         ):
@@ -7316,7 +7470,8 @@ class App:
                         and self._mission_mgr.session_preflight_terminally_blocked()
                     )
                 self._sync_strategy_action_gate(
-                    terminally_blocked=session_preflight_terminally_blocked
+                    terminally_blocked=session_preflight_terminally_blocked,
+                    detection=detection,
                 )
                 operator_workflow_hold = (
                     self._operator_workflow_authority_hold()
@@ -7395,6 +7550,15 @@ class App:
                     and self._action_decision(
                         RuntimeActionClass.LIFECYCLE_ACTION,
                         owner=operator_action_owner,
+                    ).allowed
+                )
+                repair_terminal_action_allowed = bool(
+                    str(detection.get("state") or "").upper() == "GAME_OVER"
+                    and self._mission_mgr.session_preflight_repair_in_progress()
+                    is True
+                    and self._action_decision(
+                        RuntimeActionClass.LIFECYCLE_ACTION,
+                        owner=AuthorityHold.SESSION_PREFLIGHT,
                     ).allowed
                 )
                 game_speed_guard = getattr(self, "_game_speed_guard", None)
@@ -7792,6 +7956,23 @@ class App:
                                 img,
                                 operator_workflow_only=True,
                             )
+                    finally:
+                        self._active_action_authority_owner = previous_owner
+                elif repair_terminal_action_allowed:
+                    previous_owner = getattr(
+                        self,
+                        "_active_action_authority_owner",
+                        None,
+                    )
+                    self._active_action_authority_owner = (
+                        AuthorityHold.SESSION_PREFLIGHT
+                    )
+                    try:
+                        self._handle_primary_states(
+                            new_state,
+                            overlays,
+                            img,
+                        )
                     finally:
                         self._active_action_authority_owner = previous_owner
                 elif (
@@ -8323,7 +8504,18 @@ class App:
                 current_authority
             )
         ):
-            self._supervisor.persist_state("PAUSED")
+            reason = (
+                "guarded repair ownership could not be bound to the current "
+                "battle"
+            )
+            self._mission_mgr.fail_session_preflight_repair(reason)
+            log(
+                "[SESSION_PREFLIGHT] Repair input was not authorized; "
+                "Automation remains Enabled with strategy input gated and "
+                "safe gem collection available",
+                "WARN",
+                console=True,
+            )
             return
 
         attached_authorization = (
@@ -8823,6 +9015,68 @@ class App:
         )
         return True
 
+    def _finish_incomplete_no_strategy_post_run(
+        self,
+        *,
+        reason: str,
+        new_state: str,
+        img: Frame,
+    ) -> bool:
+        """Persist what exists and release Home after a noncritical failure."""
+
+        persistence_reason = None
+        try:
+            self._persist_pending_no_strategy_record(finalized=True)
+        except Exception as exc:
+            persistence_reason = str(exc)
+            log(
+                "[NO_STRATEGY] Could not persist the incomplete post-run "
+                f"observation ({exc}); continuity still takes precedence",
+                "ERROR",
+                console=True,
+            )
+        if new_state != "HOME_SCREEN":
+            try:
+                restore_post_run_home(
+                    img,
+                    action_guard_fn=self._no_strategy_action_guard,
+                )
+            except NoStrategyPostRunPaused:
+                self._no_strategy_post_run_retry_at = 0.0
+                return True
+            except Exception as exc:
+                self._no_strategy_post_run_retry_at = time.time() + 5.0
+                log(
+                    "[NO_STRATEGY] Incomplete inventory is waiting only for "
+                    f"verified Home restoration ({exc}); Automation remains "
+                    "Enabled and recovery will retry",
+                    "WARN",
+                    console=True,
+                )
+                return True
+
+        detail = reason
+        if persistence_reason:
+            detail = f"{detail}; persistence={persistence_reason}"
+        if AUTOMATION.mode is ExecMode.WAIT:
+            self._no_strategy_post_run_stage = "complete_wait"
+            self._no_strategy_post_run_retry_at = 0.0
+            log(
+                "[NO_STRATEGY] Post-run inventory ended incomplete at verified "
+                f"Home ({detail}); explicit WAIT still holds the boundary",
+                "WARN",
+                console=True,
+            )
+            return True
+        self._release_no_strategy_post_run()
+        log(
+            "[NO_STRATEGY] Post-run inventory ended incomplete at verified "
+            f"Home ({detail}); the next-battle path was released",
+            "WARN",
+            console=True,
+        )
+        return True
+
     def _handle_no_strategy_post_run(
         self,
         new_state: str,
@@ -8958,23 +9212,17 @@ class App:
             )
             return True
         except NoStrategyPostRunError as exc:
-            self._no_strategy_post_run_retry_at = time.time() + 60.0
-            log(
-                f"[NO_STRATEGY] Post-run inventory is still holding the next "
-                f"battle: {exc}. It will retry after 60 seconds.",
-                "WARN",
-                console=True,
+            return self._finish_incomplete_no_strategy_post_run(
+                reason=str(exc),
+                new_state=new_state,
+                img=img,
             )
-            return True
         except Exception as exc:
-            self._no_strategy_post_run_retry_at = time.time() + 60.0
-            log(
-                f"[NO_STRATEGY] Could not persist post-run inventory: {exc}. "
-                "The next battle remains held.",
-                "ERROR",
-                console=True,
+            return self._finish_incomplete_no_strategy_post_run(
+                reason=f"unexpected failure: {exc}",
+                new_state=new_state,
+                img=img,
             )
-            return True
         return True
 
     def _recover_no_strategy_post_run(
@@ -9035,6 +9283,105 @@ class App:
         self._no_strategy_inventory_retry_at = 0.0
         self._no_strategy_observer.reset()
 
+    def _advance_pending_game_over_route_recovery(
+        self,
+        new_state: str,
+        img: Frame,
+    ) -> bool:
+        """Recover an optional-collection modal before retrying Home/Retry."""
+
+        pending = getattr(self, "_pending_game_over_route", None)
+        if not isinstance(pending, dict):
+            return False
+        if new_state == "GAME_OVER":
+            return False
+        if new_state not in {"PERKS", "UNKNOWN"}:
+            self._pending_game_over_route = None
+            return False
+        try:
+            current = self._current_control_workflow_evidence()
+        except Exception:
+            current = None
+        expected = pending.get("binding")
+        binding_fields = (
+            "runtime_id",
+            "pid",
+            "adb_target",
+            "target_generation",
+            "activity_scope_run_id",
+        )
+        if not (
+            isinstance(expected, Mapping)
+            and isinstance(current, Mapping)
+            and all(
+                expected.get(field) == current.get(field)
+                for field in binding_fields
+            )
+        ):
+            self._pending_game_over_route = None
+            log(
+                "[GAME_OVER] Discarded pending terminal-screen recovery after "
+                "its exact runtime or battle binding changed",
+                "WARN",
+            )
+            return False
+        now = time.monotonic()
+        if now < float(pending.get("retry_at") or 0.0):
+            return True
+        operation_id = new_operation_id()
+        owner = getattr(self, "_active_action_authority_owner", None)
+
+        def action_allowed() -> bool:
+            return self._runtime_action_guard(
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                owner=owner,
+            )
+
+        log_action_intent(
+            "Restoring Game Stats for the pending terminal route",
+            reason=(
+                "optional data collection left a verified Perks or More Stats "
+                "screen in front of Home/Retry"
+            ),
+            detail=(
+                "[GAME_OVER_RECOVERY] route="
+                f"{pending.get('desired_route') or 'selected_policy'}"
+            ),
+            operation_id=operation_id,
+        )
+        restored = restore_game_stats_for_terminal_route(
+            img,
+            action_guard_fn=action_allowed,
+        )
+        if restored:
+            pending["retry_at"] = 0.0
+            result = "completed"
+            message = (
+                "Game Stats restored; Home/Retry will use a fresh observation"
+            )
+        else:
+            pending["retry_at"] = now + 5.0
+            result = (
+                "failed"
+                if self._supervisor.control_state == "RUNNING"
+                else "interrupted"
+            )
+            message = (
+                "Game Stats recovery remains pending; automation authority and "
+                "the selected terminal policy were preserved"
+            )
+        log_result(
+            message,
+            detail=(
+                f"[GAME_OVER_RECOVERY] result={result} retry="
+                f"{'false' if restored else 'true'}"
+            ),
+            operation_id=operation_id,
+        )
+        # Whether recovery succeeded or yielded, the supplied frame predates
+        # that bounded attempt. Never run another handler against it.
+        return True
+
     def _handle_primary_states(
         self,
         new_state: str,
@@ -9047,6 +9394,8 @@ class App:
         selector = getattr(self, "_run_perk_selector", None)
         if selector is not None:
             selector.observe_state(new_state)
+        if self._advance_pending_game_over_route_recovery(new_state, img):
+            return
         if new_state != "GAME_OVER":
             self._exclusive_validation_terminal_hold = None
         if new_state != "HOME_SCREEN":
@@ -9188,14 +9537,14 @@ class App:
                 )
             )
             if not dismissed:
-                self._supervisor.persist_state("PAUSED")
                 log_result(
                     "Tournament result was saved, but verified Home was not "
-                    "reached; Automation Paused",
+                    "reached; the same terminal route will retry without "
+                    "changing Automation authority",
                     detail=(
-                        "[TOURNAMENT_RESULTS] result=failed "
+                        "[TOURNAMENT_RESULTS] result=pending_retry "
                         f"terminal_policy={terminal_policy} screen=retained "
-                        "action_authority=PAUSED"
+                        f"action_authority={AUTOMATION.state.value} retry=true"
                     ),
                     operation_id=operation_id,
                 )
@@ -9282,7 +9631,35 @@ class App:
             repair_in_progress = (
                 self._mission_mgr.session_preflight_repair_in_progress()
             )
-            boundary_finalized = False
+            pending_terminal_route = getattr(
+                self,
+                "_pending_game_over_route",
+                None,
+            )
+            if isinstance(pending_terminal_route, Mapping):
+                expected_binding = pending_terminal_route.get("binding")
+                binding_fields = (
+                    "runtime_id",
+                    "pid",
+                    "adb_target",
+                    "target_generation",
+                    "activity_scope_run_id",
+                )
+                if not (
+                    isinstance(expected_binding, Mapping)
+                    and isinstance(current_manual_evidence, Mapping)
+                    and all(
+                        expected_binding.get(field)
+                        == current_manual_evidence.get(field)
+                        for field in binding_fields
+                    )
+                ):
+                    self._pending_game_over_route = None
+                    pending_terminal_route = None
+            boundary_finalized = bool(
+                isinstance(pending_terminal_route, Mapping)
+                and pending_terminal_route.get("boundary_finalized")
+            )
 
             def finalize_run_boundary() -> None:
                 nonlocal boundary_finalized
@@ -9317,6 +9694,18 @@ class App:
                     "GAME_OVER",
                     observed_run_configuration=observed_run_configuration,
                 )
+            repair_terminal_failure_reason = (
+                str(
+                    pending_terminal_route.get("repair_failure_reason") or ""
+                )
+                if isinstance(pending_terminal_route, Mapping)
+                else ""
+            ) or None
+            if repair_in_progress and repair_terminal_failure_reason:
+                # The save/record attempt already failed in this process. Keep
+                # only the bounded terminal route pending; never repeat data
+                # work merely because its Home/Retry receipt is still pending.
+                repair_in_progress = False
             if repair_in_progress:
                 repair_grant = (
                     self._mission_mgr.session_preflight_repair_grant()
@@ -9392,57 +9781,76 @@ class App:
                     )
                 except (OSError, TypeError, ValueError) as exc:
                     reason = f"repair Surrender record failed: {exc}"
-                    self._mission_mgr.fail_session_preflight_repair(reason)
-                    self._supervisor.persist_state("PAUSED")
+                    repair_terminal_failure_reason = reason
+                    repair_in_progress = False
                     log(
-                        "[SESSION_PREFLIGHT] Repair Surrender remains at Game "
-                        f"Over — {reason}",
+                        "[SESSION_PREFLIGHT] Repair data failed, but the "
+                        "selected terminal policy remains actionable — "
+                        f"{reason}",
                         "ERROR",
                         console=True,
                     )
-                    return
-                log(
-                    "[SESSION_PREFLIGHT] Repair Surrender was retained as "
-                    f"non-representative battle {repair_record.get('battle_id')}; "
-                    "verifying the return Home",
-                    "INFO",
-                    console=True,
-                )
-                finalize_run_boundary()
-                returned_home = return_home_from_game_over(
-                    timeout_s=8.0,
-                    action_guard=lambda: bool(
-                        self._mission_mgr.session_preflight_repair_authorized_for(
-                            repair_grant
-                        )
-                        and self._runtime_action_guard(
-                            action_class=RuntimeActionClass.LIFECYCLE_ACTION,
-                            owner=AuthorityHold.SESSION_PREFLIGHT,
-                        )
-                    ),
-                )
-                self._supervisor.persist_state("PAUSED")
-                if not returned_home:
-                    reason = (
-                        "repair Surrender record was saved, but verified Home "
-                        "was not reached"
-                    )
-                    self._mission_mgr.fail_session_preflight_repair(reason)
+                else:
                     log(
-                        "[SESSION_PREFLIGHT] Repair Surrender remains at Game "
-                        f"Over — {reason}",
-                        "ERROR",
+                        "[SESSION_PREFLIGHT] Repair Surrender was retained as "
+                        f"non-representative battle {repair_record.get('battle_id')}; "
+                        "verifying the return Home",
+                        "INFO",
+                        console=True,
+                    )
+                    finalize_run_boundary()
+                    returned_home = return_home_from_game_over(
+                        timeout_s=8.0,
+                        action_guard=lambda: bool(
+                            self._mission_mgr.session_preflight_repair_authorized_for(
+                                repair_grant
+                            )
+                            and self._runtime_action_guard(
+                                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                                owner=AuthorityHold.SESSION_PREFLIGHT,
+                            )
+                        ),
+                    )
+                    if not returned_home:
+                        binding = (
+                            {
+                                field: current_terminal.get(field)
+                                for field in (
+                                    "runtime_id",
+                                    "pid",
+                                    "adb_target",
+                                    "target_generation",
+                                    "activity_scope_run_id",
+                                )
+                            }
+                            if isinstance(current_terminal, Mapping)
+                            else None
+                        )
+                        self._pending_game_over_route = {
+                            "binding": binding,
+                            "desired_route": "home",
+                            "record": None,
+                            "stats_status": "skipped",
+                            "boundary_finalized": boundary_finalized,
+                            "retry_at": 0.0,
+                        }
+                        log(
+                            "[SESSION_PREFLIGHT] Verified Home was not reached; "
+                            "the repair terminal route will retry without "
+                            "changing automation authority",
+                            "ERROR",
+                            console=True,
+                        )
+                        return
+                    self._pending_game_over_route = None
+                    log(
+                        "[SESSION_PREFLIGHT] Repair Surrender returned to "
+                        "verified Home; normal Home repair and the selected "
+                        "future-battle policy remain Enabled",
+                        "INFO",
                         console=True,
                     )
                     return
-                log(
-                    "[SESSION_PREFLIGHT] Repair Surrender returned to verified "
-                    "Home and Automation Paused; starting another battle "
-                    "requires separate explicit authority",
-                    "INFO",
-                    console=True,
-                )
-                return
             manual_full_disposition = None
             if (
                 manual_return
@@ -9468,8 +9876,11 @@ class App:
                         dict(manual_terminal.get("receipt") or {})
                     ),
                 }
-            completed_record = handle_game_over(
+            terminal_outcome = handle_game_over(
                 capture_stats=(
+                    not isinstance(pending_terminal_route, Mapping)
+                    and repair_terminal_failure_reason is None
+                    and
                     not repair_in_progress
                     and (
                         (
@@ -9493,8 +9904,14 @@ class App:
                 control_sync=sync_terminal_control,
                 before_terminal_action=finalize_run_boundary,
                 after_retry_started=mark_retry_started,
-                on_terminal_failure=lambda _step: (
-                    self._supervisor.persist_state("PAUSED")
+                on_terminal_failure=lambda _step: True,
+                action_guard_fn=lambda: self._runtime_action_guard(
+                    action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                    owner=getattr(
+                        self,
+                        "_active_action_authority_owner",
+                        None,
+                    ),
                 ),
                 return_home_after_battle=(repair_in_progress or no_strategy_run),
                 battle_context=terminal_battle_context,
@@ -9518,12 +9935,89 @@ class App:
                     else None
                 ),
             )
+            if not isinstance(terminal_outcome, GameOverHandlingOutcome):
+                # Keep old in-process test/extension doubles compatible while
+                # the runtime itself uses the typed route/data separation.
+                terminal_outcome = GameOverHandlingOutcome(
+                    True,
+                    "legacy",
+                    (
+                        terminal_outcome
+                        if isinstance(terminal_outcome, dict)
+                        else None
+                    ),
+                    "saved" if isinstance(terminal_outcome, dict) else "unavailable",
+                )
+            completed_record = terminal_outcome.record
+            if (
+                completed_record is None
+                and isinstance(pending_terminal_route, Mapping)
+                and isinstance(pending_terminal_route.get("record"), dict)
+            ):
+                completed_record = pending_terminal_route.get("record")
+            if not terminal_outcome.route_completed:
+                # Keep the selected terminal policy and existing control
+                # authority. A later fresh frame retries the bounded terminal
+                # route; optional collection failure must not strand gems or
+                # future battles behind a global Pause.
+                binding = (
+                    {
+                        field: current_manual_evidence.get(field)
+                        for field in (
+                            "runtime_id",
+                            "pid",
+                            "adb_target",
+                            "target_generation",
+                            "activity_scope_run_id",
+                        )
+                    }
+                    if isinstance(current_manual_evidence, Mapping)
+                    else None
+                )
+                self._pending_game_over_route = {
+                    "binding": binding,
+                    "desired_route": (
+                        "home"
+                        if repair_in_progress
+                        or no_strategy_run
+                        or AUTOMATION.mode is ExecMode.HOME
+                        else "retry"
+                    ),
+                    "record": completed_record,
+                    "stats_status": terminal_outcome.stats_status,
+                    "boundary_finalized": boundary_finalized,
+                    "repair_failure_reason": repair_terminal_failure_reason,
+                    "retry_at": 0.0,
+                }
+                return
+            self._pending_game_over_route = None
+            if repair_terminal_failure_reason is not None:
+                self._mission_mgr.fail_session_preflight_repair(
+                    repair_terminal_failure_reason
+                )
+                log(
+                    "[SESSION_PREFLIGHT] Repair data failed; the terminal "
+                    "route completed under the selected policy and Automation "
+                    "remains Enabled in degraded strategy mode",
+                    "WARN",
+                    console=True,
+                )
             if manual_return:
                 if (
                     manual_full_disposition is not None
                     and completed_record is None
                 ):
-                    self._supervisor.persist_state("PAUSED")
+                    self._supervisor.transition_manual_control(
+                        str(manual.get("manual_control_id") or ""),
+                        "failed",
+                        detail=(
+                            "full manual-Surrender collection was unavailable, "
+                            "but the selected terminal route completed and "
+                            "automation authority was preserved"
+                        ),
+                        refresh_status="terminal_collection_unavailable",
+                        save_receipt=dict(manual_terminal["receipt"]),
+                    )
                     return
                 completion_configuration = {
                     "schema_version": 1,
@@ -9561,7 +10055,13 @@ class App:
                     configuration=completion_configuration,
                 )
                 if completed_manual is None:
-                    self._supervisor.persist_state("PAUSED")
+                    log(
+                        "[MANUAL_CONTROL] Terminal route completed; retrying "
+                        "only the manual-control completion receipt without "
+                        "changing action authority",
+                        "WARN",
+                        console=True,
+                    )
                 else:
                     self._manual_terminal_claims().pop(
                         manual_id,

@@ -12,7 +12,7 @@ from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
 )
 from core.no_strategy_observer import NoStrategyRunObserver
-from core.no_strategy_post_run import NoStrategyPostRunPaused
+from core.no_strategy_post_run import NoStrategyPostRunError, NoStrategyPostRunPaused
 from core.player_save_history import PlayerSaveAttachmentContext
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
@@ -249,6 +249,32 @@ def test_post_run_perk_capture_finalizes_same_record_and_releases_boundary():
     assert app._pending_no_strategy_record is None
     assert app._no_strategy_post_run_stage is None
     assert app._no_strategy_observation_active is False
+
+
+def test_post_run_collection_failure_releases_next_battle_with_incomplete_data():
+    app = _app_without_strategy()
+    app._pending_no_strategy_record = {"battle_id": "BattleIncomplete"}
+    app._no_strategy_post_run_stage = "locks"
+    app._persist_pending_no_strategy_record = MagicMock()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        with patch(
+            "core.app.inspect_post_run_free_upgrade_locks",
+            side_effect=NoStrategyPostRunError("lock evidence unavailable"),
+        ):
+            handled = app._handle_no_strategy_post_run("HOME_SCREEN", frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert handled is True
+    app._persist_pending_no_strategy_record.assert_called_once_with(
+        finalized=True
+    )
+    assert app._pending_no_strategy_record is None
+    assert app._no_strategy_post_run_stage is None
+    app._supervisor.persist_state.assert_not_called()
 
 
 def test_completed_post_run_inventory_holds_home_until_wait_mode_changes():
@@ -515,6 +541,65 @@ def test_pending_post_run_inventory_blocks_normal_home_handler():
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
     home.assert_not_called()
+
+
+def test_pending_game_over_modal_recovery_preserves_enabled_authority():
+    app = _app_without_strategy()
+    binding = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "activity_scope_run_id": "run-1",
+    }
+    app._pending_game_over_route = {
+        "binding": binding,
+        "desired_route": "retry",
+        "retry_at": 0.0,
+    }
+    app._current_control_workflow_evidence = MagicMock(return_value=binding)
+    app._runtime_action_guard = MagicMock(return_value=True)
+    app._supervisor.control_state = "RUNNING"
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch(
+        "core.app.restore_game_stats_for_terminal_route",
+        return_value=True,
+    ) as restore:
+        handled = app._advance_pending_game_over_route_recovery("PERKS", frame)
+
+    assert handled is True
+    assert app._pending_game_over_route["retry_at"] == 0.0
+    restore.assert_called_once()
+    assert restore.call_args.args == (frame,)
+    assert restore.call_args.kwargs["action_guard_fn"]() is True
+    app._supervisor.persist_state.assert_not_called()
+
+
+def test_pending_game_over_modal_recovery_rejects_changed_battle_binding():
+    app = _app_without_strategy()
+    expected = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "activity_scope_run_id": "run-1",
+    }
+    current = {**expected, "activity_scope_run_id": "run-2"}
+    app._pending_game_over_route = {
+        "binding": expected,
+        "desired_route": "retry",
+        "retry_at": 0.0,
+    }
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch("core.app.restore_game_stats_for_terminal_route") as restore:
+        handled = app._advance_pending_game_over_route_recovery("PERKS", frame)
+
+    assert handled is False
+    assert app._pending_game_over_route is None
+    restore.assert_not_called()
 
 
 def test_no_battle_home_recovers_unfinished_inventory_after_process_reload():

@@ -19,9 +19,9 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var result = ControlSurfaceCompatibility.Evaluate(
             Status(
-                28,
+                29,
                 "better_control_model_v2",
-                "save_backed_setup_capture_v1")
+                "save_backed_setup_capture_v2")
         );
 
         Assert.False(result.IsCompatible);
@@ -31,13 +31,13 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(29);
+        var status = Status(30);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
         Assert.Contains("better_control_model_v2", result.MissingCapabilities);
         Assert.Contains(
-            "save_backed_setup_capture_v1",
+            "save_backed_setup_capture_v2",
             result.MissingCapabilities);
     }
 
@@ -48,8 +48,8 @@ public sealed class ControlSurfaceCompatibilityTests
             """
             {
               "schema_version": 1,
-              "server_revision": 29,
-              "capability": "save_backed_setup_capture_v1",
+              "server_revision": 30,
+              "capability": "save_backed_setup_capture_v2",
               "capture": {
                 "request_id": "capture-1",
                 "status": "ready",
@@ -71,9 +71,9 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var oldServer = ControlSurfaceCompatibility.Evaluate(
             Status(
-                28,
+                29,
                 "better_control_model_v2",
-                "save_backed_setup_capture_v1"));
+                "save_backed_setup_capture_v2"));
         var model = new BetterControlModelStatus
         {
             SetupCapture = new SetupCaptureStatus { Status = "ready" },
@@ -92,7 +92,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                29,
+                30,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
@@ -106,7 +106,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "managed_custom_module_presets_v1",
                 "observed_game_speed",
                 "selected_strategy_process_start",
-                "save_backed_setup_capture_v1",
+                "save_backed_setup_capture_v2",
                 "strategy_action_gate_v1",
                 "strategy_authoring_local_loadout_editors_v1",
                 "strategy_authoring_profile_lifecycle_v1",
@@ -126,11 +126,38 @@ public sealed class ControlSurfaceCompatibilityTests
             },
         };
 
-        Assert.False(
+        Assert.True(
             ControlSurfaceCompatibility.CanOpenSetupCapture(compatible, model));
         model.SetupCapture.Status = "ready";
         Assert.True(
             ControlSurfaceCompatibility.CanOpenSetupCapture(compatible, model));
+    }
+
+    [Fact]
+    public void TerminalCaptureOpensReadOnlyAndRetryRemainsSeparate()
+    {
+        var model = new BetterControlModelStatus
+        {
+            SetupCapture = new SetupCaptureStatus
+            {
+                Status = "unavailable",
+                AuthorityOutcome = "preserved",
+            },
+            Actions = new Dictionary<string, BetterControlActionAvailability>
+            {
+                ["capture_current_setup"] = new() { Available = false },
+            },
+        };
+
+        Assert.Equal(
+            SetupCaptureOpenAction.Inspect,
+            ControlSurfaceCompatibility.SetupCaptureAction(model));
+
+        model.SetupCapture = null;
+        model.Actions["capture_current_setup"].Available = true;
+        Assert.Equal(
+            SetupCaptureOpenAction.Request,
+            ControlSurfaceCompatibility.SetupCaptureAction(model));
     }
 
     [Theory]

@@ -2484,6 +2484,59 @@ class GcFarmProfileTests(unittest.TestCase):
             },
         )
         manager.on_game_over.assert_called_once_with()
+        app._supervisor.persist_state.assert_not_called()
+
+    def test_repair_record_failure_routes_terminal_without_global_pause(self):
+        strategy = get_strategy("farm_t18")
+        manager = MagicMock()
+        manager.strategy = strategy
+        manager.ctx = MissionContext(data={"mission_vars": {}})
+        manager.session_preflight_repair_in_progress.return_value = True
+        manager.session_preflight_repair_grant.return_value = {
+            **_repair_authority(),
+            "request_id": "repair-1",
+            "check_id": "cards_deck",
+            "reason": "Cards deck does not match",
+        }
+        app = App.__new__(App)
+        app._mission_mgr = manager
+        app._fast_game_over = False
+        app._last_wave_value = 130
+        app._last_wave_conf = 95.0
+        app._supervisor = MagicMock()
+        app._status_reporter = MagicMock()
+        app._status_reporter.coin_rate_samples = []
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+        app._handle_daily_gem_if_due = MagicMock(return_value=False)
+        app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        app._player_save_runtime_session_id = "save-runtime-1"
+        app._current_control_workflow_evidence = MagicMock(
+            return_value={
+                **_repair_authority(),
+                "game_state": "game_over",
+                "observation_id": "runtime-1:terminal",
+            }
+        )
+        acquisition = _repair_terminal_acquisition()
+        app._terminal_battle_bundle = MagicMock(
+            return_value=({"terminal_save_report": {}}, acquisition)
+        )
+        app._persist_minimal_surrender_record = MagicMock(
+            side_effect=OSError("record store unavailable")
+        )
+        app._runtime_action_guard = MagicMock(return_value=True)
+        app._accept_pending_terminal_history_handoff = MagicMock()
+        _bind_terminal_context(app)
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+        with patch("core.app.handle_game_over", return_value=None) as game_over:
+            app._handle_primary_states("GAME_OVER", set(), frame)
+
+        assert game_over.call_args.kwargs["capture_stats"] is False
+        assert game_over.call_args.kwargs["return_home_after_battle"] is False
+        manager.fail_session_preflight_repair.assert_called_once()
+        app._supervisor.persist_state.assert_not_called()
 
     def test_mid_run_farm_adoption_supplies_battle_end_identity(self):
         manager = MissionManager(None, None)
@@ -2902,6 +2955,25 @@ class GcFarmProfileTests(unittest.TestCase):
         manager.fail_session_preflight_repair.assert_called_once_with(
             "guarded Surrender did not reach Game Over"
         )
+        app._supervisor.persist_state.assert_not_called()
+
+    def test_unbound_repair_yields_to_strategy_gate_without_global_pause(self):
+        manager = MagicMock()
+        manager.begin_session_preflight_repair.return_value = False
+        app = App.__new__(App)
+        app._mission_mgr = manager
+        app._supervisor = MagicMock()
+        authority = _repair_authority()
+        app._current_control_workflow_evidence = lambda: authority
+
+        with patch("core.app.surrender_run") as surrender:
+            app._attempt_session_preflight_repair({"state": "RUNNING"})
+
+        manager.fail_session_preflight_repair.assert_called_once_with(
+            "guarded repair ownership could not be bound to the current battle"
+        )
+        app._supervisor.persist_state.assert_not_called()
+        surrender.assert_not_called()
 
     def test_natural_game_over_during_preflight_remains_pending_for_next_run(self):
         strategy = get_strategy("gc_farm_t19_experiment")

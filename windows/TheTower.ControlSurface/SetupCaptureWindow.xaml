@@ -17,7 +17,7 @@
       <StackPanel>
         <TextBlock Text="SAVE-BACKED AUTHORING" Foreground="#62D5FF" FontSize="10" FontWeight="Bold" />
         <TextBlock Text="Capture current setup as…" FontSize="20" FontWeight="Bold" Margin="0,3,0,4" />
-        <TextBlock x:Name="StatusText" Text="Requesting a newly serialized save…" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+        <TextBlock x:Name="StatusText" Text="Loading the current capture state…" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
         <TextBlock x:Name="EvidenceText" Text="-" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,4,0,0" />
       </StackPanel>
     </Border>
@@ -83,12 +83,14 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Saving creates a new inactive artifact. It never publishes, selects, activates, queues, applies, or changes control authority." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" VerticalAlignment="Center" Margin="0,0,12,0" />
       <Button Grid.Column="1" Content="Close" Click="Close_Click" Margin="3" />
-      <Button Grid.Column="2" x:Name="CancelCaptureButton" Content="Cancel capture" Click="CancelCapture_Click" Style="{StaticResource DangerButton}" Margin="3" />
-      <Button Grid.Column="3" x:Name="ReviewButton" Content="Review differences" Click="Review_Click" Margin="3" IsEnabled="False" />
-      <Button Grid.Column="4" x:Name="SaveButton" Content="Save new artifact" Click="Save_Click" Style="{StaticResource PrimaryButton}" Margin="3" IsEnabled="False" />
+      <Button Grid.Column="2" x:Name="TryAgainButton" Content="Try capture again" Click="TryAgain_Click" Margin="3" Visibility="Collapsed" />
+      <Button Grid.Column="3" x:Name="CancelCaptureButton" Content="Cancel capture" Click="CancelCapture_Click" Style="{StaticResource DangerButton}" Margin="3" />
+      <Button Grid.Column="4" x:Name="ReviewButton" Content="Review differences" Click="Review_Click" Margin="3" IsEnabled="False" />
+      <Button Grid.Column="5" x:Name="SaveButton" Content="Save new artifact" Click="Save_Click" Style="{StaticResource PrimaryButton}" Margin="3" IsEnabled="False" />
     </Grid>
   </Grid>
 </Window>

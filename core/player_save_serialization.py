@@ -41,6 +41,11 @@ class GuardedSerializationResult:
         default=None,
         repr=False,
     )
+    # True from the moment KEYCODE_HOME is attempted.  A transport-level
+    # failure is not proof that Android ignored the input, so callers must
+    # recapture before using their pre-serialization frame even when
+    # ``background_dispatched`` is false.
+    lifecycle_input_attempted: bool = False
     background_dispatched: bool = False
 
     @property
@@ -150,7 +155,10 @@ class GuardedPlayerSaveSerializer:
                 "DEBUG",
             )
             if not backgrounded:
-                return _blocked("background_serialization_boundary_failed")
+                return _blocked(
+                    "background_serialization_boundary_failed",
+                    lifecycle_input_attempted=True,
+                )
             background_dispatched = True
             self._sleep_fn(0.25)
 
@@ -214,12 +222,14 @@ class GuardedPlayerSaveSerializer:
                 GuardedSerializationStatus.SOURCE_RESTORED,
                 "save_acquisition_failed",
                 acquisition=acquisition,
+                lifecycle_input_attempted=True,
                 background_dispatched=background_dispatched,
             )
         return GuardedSerializationResult(
             GuardedSerializationStatus.COMPLETE,
             "save_acquired",
             acquisition=acquisition,
+            lifecycle_input_attempted=True,
             background_dispatched=background_dispatched,
         )
 
@@ -272,11 +282,15 @@ def restore_tower_launcher(target: str) -> bool:
 def _blocked(
     reason: str,
     *,
+    lifecycle_input_attempted: bool = False,
     background_dispatched: bool = False,
 ) -> GuardedSerializationResult:
     return GuardedSerializationResult(
         GuardedSerializationStatus.BLOCKED,
         reason,
+        lifecycle_input_attempted=(
+            lifecycle_input_attempted or background_dispatched
+        ),
         background_dispatched=background_dispatched,
     )
 

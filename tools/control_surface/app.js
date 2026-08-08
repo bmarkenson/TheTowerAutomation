@@ -15,9 +15,9 @@ const state = {
 
 const byId = (id) => document.getElementById(id);
 const dash = "—";
-const BETTER_CONTROL_MINIMUM_REVISION = 29;
+const BETTER_CONTROL_MINIMUM_REVISION = 30;
 const BETTER_CONTROL_CAPABILITY = "better_control_model_v2";
-const SETUP_CAPTURE_CAPABILITY = "save_backed_setup_capture_v1";
+const SETUP_CAPTURE_CAPABILITY = "save_backed_setup_capture_v2";
 const clientModel = globalThis.TheTowerControlClientModel;
 
 function authHeaders() {
@@ -199,7 +199,7 @@ function renderStatus(payload) {
       || (action === "start" && processActive)
       || (action === "stop" && !processService?.active);
     if (action === "start" && !betterControlCompatible) {
-      button.title = "Linux API revision 29 with better_control_model_v2 is required.";
+      button.title = "Linux API revision 30 with better_control_model_v2 is required.";
     }
   });
   renderBetterControlModel(
@@ -223,7 +223,7 @@ function renderBetterControlModel(model, compatible, captureCompatible, controlE
     button.disabled = !compatible || pause.available !== true;
     button.title = compatible
       ? pause.reason || ""
-      : "Linux API revision 29 with better_control_model_v2 is required.";
+      : "Linux API revision 30 with better_control_model_v2 is required.";
   });
   for (const [id, action] of [
     ["startBattleButton", "start_battle"],
@@ -236,21 +236,21 @@ function renderBetterControlModel(model, compatible, captureCompatible, controlE
     button.disabled = !compatible || availability.available !== true;
     button.title = compatible
       ? availability.reason || ""
-      : "Linux API revision 29 with better_control_model_v2 is required.";
+      : "Linux API revision 30 with better_control_model_v2 is required.";
   }
   const enable = document.querySelector('[data-control-action="enable"]');
   if (enable) {
     enable.disabled = !compatible || actions.enable?.available !== true;
     enable.title = compatible
       ? actions.enable?.reason || ""
-      : "Linux API revision 29 with better_control_model_v2 is required.";
+      : "Linux API revision 30 with better_control_model_v2 is required.";
   }
   const applyTerminalPolicy = byId("applyModeButton");
   applyTerminalPolicy.disabled = !compatible || Boolean(controlError);
   applyTerminalPolicy.title = controlError
     || (compatible
       ? "Set future terminal behavior without dispatching an immediate battle action."
-      : "Linux API revision 29 with better_control_model_v2 is required.");
+      : "Linux API revision 30 with better_control_model_v2 is required.");
   const workflow = model.battle_workflow;
   const workflowStatus = clientModel.workflowPresentation(workflow?.status);
   setText(
@@ -288,19 +288,20 @@ function renderSetupCapture(capture, availability, compatible) {
   const status = capture?.status || "";
   const reviewable = status === "ready";
   const inProgress = ["requested", "acknowledged", "capturing"].includes(status);
+  const openAction = clientModel.setupCaptureOpenAction(capture, availability);
   button.textContent = reviewable
     ? "Review captured setup…"
     : inProgress
       ? "Capturing current setup…"
+      : openAction === "inspect"
+        ? "View capture result…"
       : "Capture current setup as…";
-  button.disabled = !compatible
-    || inProgress
-    || (!reviewable && availability.available !== true);
+  button.disabled = !compatible || openAction === "unavailable";
   button.title = compatible
     ? reviewable
       ? "Review the fresh save-backed capture and save a new inactive artifact."
       : availability.reason || ""
-    : "Linux API revision 29 with save_backed_setup_capture_v1 is required.";
+    : "Linux API revision 30 with save_backed_setup_capture_v2 is required.";
 
   const labels = {
     requested: "Capture requested; waiting for the exact runtime owner.",
@@ -412,6 +413,9 @@ function renderCaptureDialog(capture, catalog) {
     "captureDialogStatus",
     capture?.reason
       ? `${humanize(capture.status)} — ${capture.reason}`
+        + (capture.authority_outcome
+          ? ` · authority: ${humanize(capture.authority_outcome)}`
+          : "")
       : capture?.status === "ready"
         ? "Review the exact forced-save projection. Unresolved rows remain unresolved."
         : "Waiting for the runtime-owned forced serialization and restoration.",
@@ -439,6 +443,10 @@ function renderCaptureDialog(capture, catalog) {
   );
   populateCaptureBases(catalog);
   byId("captureSetupForm").hidden = capture?.status !== "ready";
+  const retry = byId("retryCaptureButton");
+  retry.hidden = !clientModel.captureIsTerminal(capture)
+    || catalog?.availability?.available !== true;
+  retry.disabled = retry.hidden;
   byId("cancelCaptureButton").disabled = !capture
     || ["capturing", "saved", "cancelled", "failed", "interrupted", "unavailable"].includes(capture.status);
   updateCaptureFormState();
@@ -536,9 +544,14 @@ async function openSetupCapture() {
   if (!dialog.open) dialog.showModal();
   clearCaptureReview();
   try {
-    let capture = captureFromState();
-    if (capture?.status === "ready") {
-      await loadSetupCaptureCatalog();
+    state.captureCatalog = await api("/api/v1/setup-capture");
+    const capture = captureFromState();
+    const openAction = clientModel.setupCaptureOpenAction(
+      capture,
+      state.captureCatalog.availability,
+    );
+    if (openAction !== "request") {
+      renderCaptureDialog(capture, state.captureCatalog);
       return;
     }
     state.captureCatalog = await api("/api/v1/setup-capture", {
@@ -552,6 +565,22 @@ async function openSetupCapture() {
   } catch (error) {
     toast(error.message, true);
     dialog.close();
+  }
+}
+
+async function retrySetupCapture() {
+  try {
+    state.captureCatalog = await api("/api/v1/setup-capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "request" }),
+    });
+    clearCaptureReview();
+    renderCaptureDialog(state.captureCatalog.capture, state.captureCatalog);
+    toast("Fresh save-backed setup capture requested");
+    await refresh();
+  } catch (error) {
+    toast(error.message, true);
   }
 }
 
@@ -1257,6 +1286,7 @@ byId("battleRows").addEventListener("keydown", (event) => {
 byId("authButton").addEventListener("click", showAuthDialog);
 byId("configureRunButton").addEventListener("click", openRunConfiguration);
 byId("captureSetupButton").addEventListener("click", openSetupCapture);
+byId("retryCaptureButton").addEventListener("click", retrySetupCapture);
 byId("reviewCaptureButton").addEventListener("click", reviewSetupCapture);
 byId("cancelCaptureButton").addEventListener("click", cancelSetupCapture);
 byId("captureSetupForm").addEventListener("submit", (event) => {

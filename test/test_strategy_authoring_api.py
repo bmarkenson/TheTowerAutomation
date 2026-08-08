@@ -1256,9 +1256,10 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
 
         status, server_status = request("GET", "/api/v1/status")
         assert status == 200
-        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 29
+        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 30
         assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
         assert "save_backed_setup_capture_v1" in CONTROL_SURFACE_CAPABILITIES
+        assert "save_backed_setup_capture_v2" in CONTROL_SURFACE_CAPABILITIES
         assert (
             "strategy_authoring_local_loadout_editors_v1"
             in CONTROL_SURFACE_CAPABILITIES

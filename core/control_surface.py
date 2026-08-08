@@ -72,7 +72,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 29
+CONTROL_SURFACE_REVISION = 30
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -90,6 +90,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "observed_game_speed",
     "persistent_adb_connection_v1",
     "save_backed_setup_capture_v1",
+    "save_backed_setup_capture_v2",
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
     "strategy_authoring_profile_lifecycle_v1",
@@ -269,7 +270,7 @@ class ControlSurfaceService:
         return {
             "schema_version": 1,
             "server_revision": CONTROL_SURFACE_REVISION,
-            "capability": "save_backed_setup_capture_v1",
+            "capability": "save_backed_setup_capture_v2",
             "capture": model.get("setup_capture"),
             "availability": (model.get("actions") or {}).get(
                 "capture_current_setup"
@@ -291,7 +292,7 @@ class ControlSurfaceService:
         return {
             "schema_version": 1,
             "server_revision": CONTROL_SURFACE_REVISION,
-            "capability": "save_backed_setup_capture_v1",
+            "capability": "save_backed_setup_capture_v2",
             "draft": draft,
         }
 

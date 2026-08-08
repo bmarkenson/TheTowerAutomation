@@ -71,6 +71,26 @@
       && (statusCapture.updated_at || "") === (catalogCapture.updated_at || "");
   }
 
+  function captureIsTerminal(capture) {
+    return [
+      "saved",
+      "cancelled",
+      "unavailable",
+      "interrupted",
+      "failed",
+    ].includes(String(capture?.status || "").toLowerCase());
+  }
+
+  function setupCaptureOpenAction(capture, availability) {
+    const status = String(capture?.status || "").toLowerCase();
+    if (status === "ready") return "review";
+    if (["requested", "acknowledged", "capturing"].includes(status)) {
+      return "progress";
+    }
+    if (captureIsTerminal(capture)) return "inspect";
+    return availability?.available === true ? "request" : "unavailable";
+  }
+
   function workflowPresentation(status) {
     const normalized = String(status || "unknown").trim().toLowerCase();
     return {
@@ -99,7 +119,9 @@
 
   return {
     captureCatalogMatches,
+    captureIsTerminal,
     chooseLatestCapture,
+    setupCaptureOpenAction,
     workflowPresentation,
   };
 }));
