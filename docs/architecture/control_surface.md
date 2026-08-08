@@ -65,7 +65,8 @@ agnostic.
   standard Game Over whose type remains `unknown`.
 - The allowlisted write surface is pause, timed pause, explicit enable,
   exact-evidence-bound Start Battle and Attach to Battle intent, Take Manual
-  Control and Return Control, future terminal policy,
+  Control and Return Control, save-backed setup capture/review/save-as-new,
+  future terminal policy,
   persistent numeric game-speed target selection,
   resolution of a runtime-published startup-gate decision,
   optional strategy-scoped one-run check configuration,
@@ -106,10 +107,10 @@ agnostic.
   the ordinary new-run lifecycle and its normal gates. Attach to Battle is
   available only from fresh Home `RESUME_BATTLE` or active-battle evidence and
   never falls back to Start Battle. Attachment stays input-blocked before
-  battle adoption while its save/configuration validation is unresolved.
-  The save-freshness integration that advances `validating_save` to `ready`
-  remains pending in the Better Control Model backlog; revision 28 therefore
-  does not claim a completed attachment or Return Control reconciliation.
+  battle adoption while its exact forced-save identity validation is
+  unresolved. A valid save advances it to `ready` as observation-only; the
+  battle is adopted only after lifecycle confirmation. Selecting a Strategy
+  for that battle is a later explicit action and never grants Surrender.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;
@@ -170,8 +171,10 @@ expiry attempt.
 
 ## Better Control Model
 
-Server revision 28 advertises `better_control_model_v1`. The additive
-`control_model` status object keeps five dimensions independent:
+Server revision 29 retains `better_control_model_v1` for additive compatibility
+and advertises `better_control_model_v2` plus
+`save_backed_setup_capture_v1`. The additive `control_model` status object
+keeps five dimensions independent:
 
 | Dimension | Values and authority |
 | --- | --- |
@@ -205,11 +208,19 @@ or exactly acknowledged repeat is a visible no-op.
 | Live | enabled | Home New Battle | Start Battle | revalidate and acknowledge normal new-run gates |
 | Live | enabled | verified Home control was tapped | acknowledged Start or ready resumable Attach | record `action_dispatched`; keep unrelated automation suppressed until the same battle is adopted, a definitive mismatch interrupts, or the 20-second launch window fails |
 | Live | paused | Home Resume Battle or active battle | Attach to Battle | `requested` → `awaiting_enable`; explicit Enable enters `validating_save` without adopting the battle |
-| Live | enabled | Home Resume Battle or active battle | Attach to Battle | enter `validating_save` without adopting the battle |
+| Live | enabled | Home Resume Battle or active battle | Attach to Battle | force a stable exact-target save, bind active-round identity and the final activity scope, then become observation-only `ready`; optional mapped facts do not replace the required round identity |
 | Live | either | Game Over, Tournament Results, unknown, stale, or mismatched evidence | Start Battle or Attach to Battle | reject as unavailable/mismatched; never substitute the other workflow |
 | Live | enabled or paused | any fresh exact state | Take Manual Control | atomically request indefinite Pause; become `active` only after runtime acknowledgement |
-| Live | paused and manual control `active` | any fresh exact state | Return Control | remain Paused; record passive observation; await explicit Enable |
-| Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; ordinary input remains unavailable until save/configuration reconciliation completes |
+| Live | paused and manual control `active` | Home New, Home Resume, active battle, or Game Over with exact target/scope binding | Return Control | remain Paused; record passive observation; await explicit Enable |
+| Live | paused and manual control `active` | Tournament Results, unknown, or incomplete exact binding | Return Control | unavailable; no save-backed Return route is advertised or substituted |
+| Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; ordinary input remains unavailable until a new forced save (or a bound natural Game Over save) reconciles identity and active Strategy configuration |
+| Live | reconciling Return | Home New refresh is blocked, incomplete, or loses its post-background binding | no additional request | persist Automation Paused and terminalize that Return as failed/interrupted; do not repeat lifecycle input or open configuration UI |
+| Live | enabled, adopted active battle | active battle | apply selected Strategy to this battle | adopt only after explicit selection; preserve battle identity and defer new-run/Home-only gates; Surrender remains unauthorized |
+| Live | enabled, adopted active battle | repair-only mismatch | choose **Surrender this battle and repair setup** in the runtime gate | grant one exact-battle, exact-reason Surrender; write the nonrepresentative disposition before verified Home, Pause there, and do not start another battle |
+| Live | enabled | Home New, Home Resume, or active battle with exact binding | Capture current setup as… | force a new save, present captured and unresolved fields for review, then save a new inactive Module preset or Strategy draft without selecting, queueing, publishing, or applying it |
+| Live | paused, Return awaiting trusted-mismatch review | same exact active battle with its process-local forced acquisition retained | Capture current setup as… | project the Return acquisition without new input, label that provenance explicitly, and leave Return Control Paused and unresolved after any capture save |
+| Live | capture owns or completed a forced refresh | ready-ledger write fails or post-background save/round binding contradicts the request | no additional request | retain the exact process-local ready result and retry only its atomic receipt, or terminalize the contradiction Paused; never serialize a second time to recover the write |
+| Live | either | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result, use the verified dismissal route, and preserve the independent next-battle policy |
 | Live/stopped | already satisfied | any | repeated Pause, Enable, Start Automation, Stop Automation, terminal policy, or Take Manual Control where defined | return a visible no-op instead of fabricating a transition |
 
 An intent requested under Pause is pending, not acknowledged action authority.
@@ -218,27 +229,44 @@ acknowledgement, the request becomes `rejected` or `interrupted`. Stop and a new
 process boundary interrupt unfinished workflows. Home alone never enables or
 pauses input.
 
-At Tournament Results, capture preserves the selected terminal policy and does
-not invent a dismissal control. `WAIT` is satisfied by retaining the screen;
-`NEXT_BATTLE` and `HOME` are reported as
-`pending_verified_terminal_dismissal` until a verified result-screen route is
-implemented. A failed supported Game Over navigation requests Automation
-Paused while retaining the selected future policy.
+At Tournament Results, `WAIT` is satisfied by retaining the screen. Continue
+automatically and Return/stay Home first preserve the result, then use the
+verified OK-to-Home dismissal owner; a failed dismissal requests Automation
+Paused and retains the selected future policy. Continue still does not mean
+that dismissal itself starts a battle: the next verified Home boundary owns
+that separate future policy.
 
 The API retains `resume` as a deprecated alias for `enable` and the old
 directive-only `stop` for internal coordination compatibility. The latter sets
-authority `STOPPED` but does not manage the systemd process. Revision-28
-browser, native, and CLI clients do not expose either spelling; operator
+authority `STOPPED` but does not manage the systemd process. Revision-28 and
+later browser, native, and CLI clients do not expose either spelling; operator
 process lifecycle uses `/api/v1/process` Start/Stop Automation.
 
 Take Manual Control is not merely a label for Pause. Its durable request owns
 an indefinite Pause and exposes `pause_requested` until the runtime applies it.
 Return Control is also not Resume: it records a separate return request while
 Pause remains authoritative, then requires an explicit Enable request and an
-exclusive reconciliation hold. Unexpected active-battle → Home Resume Battle
-activity while Enabled enters the same safe Pause/manual-control ledger rather
-than competing for input. Broader manual-activity detection and grace-period
-controls remain separately backlogged.
+exclusive reconciliation hold. Running and resumable returns require a newly
+forced exact-target save before any allowlisted unresolved-field UI fallback;
+Home New uses the normal Home serializer, and Game Over uses the bound natural
+terminal acquisition. A loss after backgrounding terminates that exact
+workflow and leaves Automation Paused rather than retrying from cached data.
+Home New follows the same rule: a blocked/incomplete refresh or changed binding
+becomes one durable failed/interrupted Return outcome, so later heartbeats do
+not background the game again. A trusted mismatch that deliberately advances
+to `awaiting_configuration` remains distinct and requires another explicit
+Enable before a new refresh.
+Unexpected active-battle → Home Resume Battle activity while Enabled enters the
+same safe Pause/manual-control ledger rather than competing for input. Broader
+manual-activity detection and grace-period controls remain separately
+backlogged.
+
+Take Manual Control also records the operator's terminal-collection choice.
+The default `minimal` choice detects manual Surrender from the natural save,
+writes a nonrepresentative excluded record, and performs no terminal UI
+collection. `full` opts that manual Surrender into the ordinary terminal
+collection path. Neither choice authorizes automation to Surrender, and there
+is no generic manual Surrender button.
 
 ## Transport and access
 
@@ -361,6 +389,9 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/strategy-authoring/history/{id}` | One custom Strategy lineage and its ordered revision summaries |
 | `GET` | `/api/v1/strategy-authoring/history/{id}/{version}` | One retained revision's review-safe source, Base snapshot, resolution, fingerprints, audit identity, and validation state without its generated plan |
 | `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, create an immutable custom Module preset, compare retained revisions, or review/confirm restore-as-new, without activation |
+| `GET` | `/api/v1/setup-capture` | Current runtime-issued capture status, availability, inactive captured-draft catalog, Module presets, and comparison Bases |
+| `POST` | `/api/v1/setup-capture` | Request a new forced-save capture, review a fingerprinted captured-versus-Base difference, save through the existing Module/Strategy owner, or cancel; never activate or publish |
+| `GET` | `/api/v1/setup-capture/drafts/{id}` | Reopen one immutable captured Strategy source in the ordinary authoring editor without selecting or activating it |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -758,7 +789,18 @@ Process request examples:
   and Take Manual Control/Return Control controls. Their availability and
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
-  requires server revision 28 and capability `better_control_model_v1`.
+  requires server revision 29 and capability `better_control_model_v2`;
+  save-backed capture additionally requires `save_backed_setup_capture_v1`.
+- Take Manual Control selects default minimal or opt-in full collection for a
+  later save-confirmed manual Surrender without granting Surrender authority.
+  **Capture current setup as…** shows fresh-save captured values, unresolved
+  rows, and a fingerprinted Strategy/Base review, then saves only an inactive
+  artifact. Captured Strategy drafts remain reopenable in the ordinary native
+  authoring catalog together with their own immutable origin, difference, and
+  unresolved review—not whichever capture happens to be current. A trusted-
+  mismatch Return Control may supply its exact
+  still-retained forced acquisition without a second refresh; the client shows
+  that provenance, and capture completion does not complete Return Control.
 - **When this battle ends** selects continue automatically, wait, or
   return/stay Home. The compatible `NEXT_BATTLE`, `WAIT`, and `HOME` values
   remain visible only as runtime representation; none is presented as an
@@ -926,8 +968,7 @@ These are the next useful additions, in approximate priority order:
    named users/roles, request IDs, and a durable control audit log before adding
    more write operations.
 
-The save-backed Attach/Return reconciliation and **Capture current setup
-as...** authoring work is tracked in the Better Control Model backlog. It is
-not part of revision 28's completed capability and must extend the existing
-player-save and Strategy-authoring owners rather than introducing a parallel
-schema.
+Repository implementation of save-backed Attach/Return reconciliation and
+**Capture current setup as…** is included in revision 29. The Better Control
+Model backlog retains the unperformed Windows usability and natural-boundary
+live validation; those checks are not implied by the repository checkpoint.

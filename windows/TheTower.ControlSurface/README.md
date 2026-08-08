@@ -236,13 +236,25 @@ interrupted state. A verified Home tap appears as `action_dispatched` and keeps
 unrelated automation suppressed until battle adoption or a bounded failure.
 **Take Manual Control** first obtains an acknowledged
 indefinite Pause. **Return Control** stays Paused until an explicit Enable and
-exclusive reconciliation complete. The current revision-28 stage keeps Attach
-and Return input-blocked at their save-validation boundaries; do not treat
-either pending state as complete.
+exclusive reconciliation complete. Attach and running Return use a newly
+forced exact-target save, same-round identity, and final activity scope before
+any unresolved allowlisted configuration UI can open. A post-background
+restoration or authority loss leaves Automation Paused. Return is unavailable
+at Tournament Results, unknown state, or without exact target/scope binding
+rather than advertising an incomplete workflow. A failed Home New refresh is
+recorded once as failed/interrupted and does not repeat background/foreground
+input on later status frames.
 
-Tournament Results remains visible after capture. Wait is satisfied there;
-Continue automatically and Return/stay Home are shown as pending because this
-revision does not invent an unverified result-screen dismissal control.
+The manual Surrender selector belongs to Take Manual Control. The default
+excludes manual Surrender stats and writes only a save-backed nonrepresentative
+record; the opt-in choice performs full terminal collection. Neither choice
+authorizes automation to Surrender. A Strategy repair Surrender is available
+only as the runtime's exact one-shot gate option for the current battle and
+reason.
+
+At Tournament Results, Wait retains the captured screen. Continue
+automatically and Return/stay Home use the verified dismissal owner after the
+result is saved; dismissal itself does not start another battle.
 
 The strategy dropdown likewise preserves an unsent choice across refreshes.
 For an active process, selection alone does not
@@ -304,10 +316,11 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 25 preserves `strategy_authoring_v1`,
+server revision 29 preserves `strategy_authoring_v1`,
 `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains `strategy_revision_history_v1`, and adds
+`save_backed_setup_capture_v1`; revision 25 added
 `managed_custom_module_presets_v1` after revision 24 added
 `strategy_authoring_local_loadout_editors_v1`. It provides separate **Bases**
 and **Strategies** catalogs plus immutable custom-Strategy History while
@@ -315,6 +328,26 @@ retaining the older latest-only profile endpoint for older clients. A Base is
 a sparse reusable component and is never activatable. Editing one publishes the
 next immutable revision. Strategies already pinned to an earlier revision
 continue to use their embedded snapshot.
+
+**Capture current setup as…** is a separate control for verified Home New,
+Home Resume, or active-battle evidence while Automation Enabled. Linux requests
+a new guarded serialization and shows captured values, explicit unresolved
+rows, and an optional comparison Base. Save creates either a new immutable
+Module preset or an unpublished custom Strategy draft and never selects,
+queues, activates, applies, or publishes it. The Base is comparison-only. A
+saved Strategy draft appears under **Captured Drafts** in Strategy Authoring;
+select it to reopen the normal editable source together with that draft's own
+captured origin, captured-versus-Base difference, and unresolved rows, then use
+ordinary Validate → Review → Publish authority. Equivalent preset/local
+definitions and set-ordered Guardian/Perk values are shown as provenance-only,
+not effective setup changes. Paused capture reports that refresh is blocked and
+does not use cached evidence. If active-battle Return Control already Paused on
+a trusted mismatch after its own exact forced save, the same button may review
+that retained process-local acquisition without new device input. Saving still
+leaves Return Control Paused and unresolved. A ready-receipt write failure
+Pauses and retries only the retained receipt; it never performs a second
+serialization. The native capture button remains disabled when revision or
+capability compatibility fails, even if a stale payload says `ready`.
 
 Settings are grouped by the server registry. **Show active only** keeps the
 normal view compact, while **Show all settings** exposes omitted settings.
@@ -654,7 +687,7 @@ Battle**, preserves the requested battle identity, and must complete save-
 backed validation before any unresolved allowlisted configuration UI may open.
 A mismatched intent is rejected rather than converted to the other workflow.
 The old Validate/Skip attachment radio buttons and attached-reload action are
-not part of revision 28.
+not part of revision 29.
 
 The managed runtime ADB port, bundled strategy, and startup-gate policy share
 the Linux environment file while remaining independent settings. The Process
@@ -672,8 +705,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Better Control Model build requires revision 28,
-`better_control_model_v1`, `terminal_dispositions_v2`,
+current Better Control Model build requires revision 29,
+`better_control_model_v2`, `save_backed_setup_capture_v1`,
+`terminal_dispositions_v2`,
 `managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`, and
 `strategy_revision_history_v1` while retaining all earlier required

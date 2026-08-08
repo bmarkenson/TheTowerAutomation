@@ -16,22 +16,36 @@ may continue while Paused, but every automated input remains blocked.
 For manual play, first use **Take Manual Control** and wait for its
 acknowledged indefinite Pause. **Return Control** is not an alias for Enable:
 it records fresh passive observation while remaining Paused, and a later
-explicit Enable enters configuration reconciliation. The revision-28 feature
-branch intentionally holds both Return reconciliation and **Attach to Battle**
-at their save-validation boundaries while the separate save-freshness slice is
-in progress. Do not use either pending workflow in a live observation run and
-do not Stop/Start merely to infer attachment.
-
-After the separate Return/Attach integration is complete, expect one guarded
-active-battle save acquisition: the game is
-briefly backgrounded to Android Home, two byte-identical save reads are taken,
-and the same battle is restored and reverified. The save's newest completed
-battle becomes or validates the continuity baseline. A `save_first` running
-attachment never opens Battle History UI; an unusable save logs a deferred
-result and retries without game-UI navigation. The same snapshot supplies
-complete allowlisted configuration observations, so only unresolved sections
-may be opened afterward. The future terminal policy does not repair or replace this
+explicit Enable enters configuration reconciliation. Running Return and
+**Attach to Battle** each perform one guarded active-battle acquisition: the
+game is briefly backgrounded to Android Home, stable exact-target reads are
+taken, and the same battle is restored and reverified. Active-round identity
+and the final activity scope are mandatory; an unusable save or restoration
+loss never opens Battle History or configuration UI and leaves the workflow
+failed/interrupted and Paused. Home New Return follows the same one-attempt
+rule rather than repeating a blocked serializer on later heartbeats. The same snapshot supplies complete allowlisted
+configuration observations, so only unresolved sections may be opened
+afterward. The future terminal policy does not repair or replace this
 continuity step.
+
+Attachment is observation-only by default: the configured startup Strategy is
+not silently applied to the existing battle. Remain on No Strategy to monitor
+and collect, or use the separate active-battle Strategy action when explicitly
+warranted. Strategy adoption never grants Surrender authority.
+
+When taking manual control, choose whether a manual Surrender uses the default
+minimal excluded record with no terminal UI or opts into full terminal
+collection. Detection comes from the bound natural save; neither choice is a
+Surrender command.
+
+To turn a manually changed loadout into managed authoring data, use **Capture
+current setup as…** at a verified supported boundary after explicitly enabling
+the guarded capture hold. Review the fresh-save values and unresolved rows,
+then save a new Module preset or inactive Strategy draft. Saving does not
+select or apply it. Automation Paused reports that refresh is unavailable and
+never substitutes a cached snapshot. A failed capture receipt is retried from
+the exact process-local preview without a second serialization; any lost owner
+or round contradiction remains Paused.
 
 During `RUNNING`, the runtime owns one guarded read-only inventory across only
 the fields not already resolved by the save: Cards, Perks, Ultimate Weapons,

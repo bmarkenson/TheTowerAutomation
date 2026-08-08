@@ -514,6 +514,63 @@ definition snapshots. History comparison, restore-as-new validation, and plan
 loading therefore remain valid if the custom catalog later becomes unavailable;
 they do not acquire a new catalog dependency from custom preset authoring.
 
+### Save-backed setup capture
+
+Server revision 29 adds `save_backed_setup_capture_v1`. **Capture current setup
+as…** does not define another loadout format: one runtime-owned
+`forced_serialization` bundle is projected through the existing Farm setting
+registry, setting normalizers, local loadout selectors, and Module preset
+store. Normally Capture requests that serialization itself. If an active-battle
+Return Control has already persisted an exact forced-save receipt and Paused on
+a trusted Strategy mismatch, Capture may instead consume that same process-local
+typed acquisition. The ledger labels this as
+`retained_return_control_refresh`; it performs no new device input, does not
+resolve Return Control, and cannot be reconstructed from the durable receipt.
+Only complete allowlisted observations from the exact mapping enter
+`settings`. Unmapped, incomplete, unsupported, or not-yet-authorable values
+remain explicit `unresolved` rows with their source check IDs and safe observed
+value where available. The preview includes redacted acquisition timing and
+binding fingerprints plus process/scope/round workflow binding; cached or
+passive reads cannot be relabelled as a capture.
+It also fingerprints bounded capture-origin metadata: a newly requested
+refresh remains distinguishable from a process-local Return Control reuse after
+the mutable workflow ledger moves on. That origin is review provenance only
+and cannot replay the acquisition or grant action authority.
+
+Saving a Module loadout calls the ordinary immutable custom Module preset
+owner. It is save-as-new: an existing ID is a conflict even if its visible
+definition happens to match, because a Module preset does not embed enough
+capture provenance to prove a failed-receipt retry.
+
+Saving a custom Strategy first requires a fingerprinted
+captured-versus-Base review. A selected Base is comparison context only; it is
+not pinned into the captured source and cannot make an unresolved save field
+look inherited or captured. Linux builds a normal sparse schema-3 Strategy
+source, validates and resolves it through `StrategyProfileStore`, and stores
+one immutable draft beneath that owner's fixed `captured_drafts` directory.
+Only an existing draft whose embedded capture, source, difference, unresolved
+rows, and review fingerprints all match may recover an atomic-create receipt
+failure. The captured-draft catalog reports malformed entries rather than
+silently adopting them.
+
+The capture-specific difference view compares normalized effective definitions,
+not whether an equivalent value was represented by a shared preset or a local
+definition. Guardian-chip and Perk-ban order is canonicalized because those
+runtime comparisons are set-based; representation/source changes remain visible
+as provenance-only differences. Ordered settings such as Target Priority and
+Auto Pick priority retain order semantics.
+
+Captured drafts remain unpublished, unselected, unqueued, unapplied, and
+inactive. The native Strategy authoring catalog can reopen their source later;
+the selected draft's own stored capture origin, captured-versus-Base review,
+and unresolved rows are displayed with it. The CLI and detail API expose the
+same durable draft. CLI Strategy saving is deliberately two-step:
+`review-strategy` prints the exact review fingerprint and a later
+`save-strategy --review-fingerprint <sha256>` must supply it. Publishing still requires
+the ordinary Linux Validate → Review → Publish flow. Saving a capture never
+performs that publication or changes process, battle, Strategy, terminal, or
+input authority.
+
 ## Code ownership
 
 Implementation should introduce these responsibilities without moving them
@@ -531,7 +588,10 @@ into the runtime evaluator:
 - `StrategyProfileStore` (or a narrowly separated authoring store behind it)
   owns strategy drafts and publications, embeds the pinned base snapshot, and
   retains the existing fixed-directory and fixed-filename safety boundary. It
-  also owns immutable lineage/adoption, recoverable publication transactions,
+  also owns immutable save-backed captured drafts and their exact review
+  fingerprints; they reuse ordinary Strategy source rather than a second
+  schema. It also owns immutable lineage/adoption, recoverable publication
+  transactions,
   semantic history comparison, restore-as-new, and custom-Strategy retirement
   under the same catalog writer lock; the client never supplies a history,
   transaction, or archive path.
@@ -583,13 +643,15 @@ Each slice should be completed and validated in its own development thread.
 The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
 
-All four original slices, the immutable-history/safe-fallback slice, and managed
-custom Module preset creation are implemented. Server revision 25 retains
+All four original slices, the immutable-history/safe-fallback slice, managed
+custom Module preset creation, and save-backed setup capture are implemented.
+Server revision 29 retains
 `strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`, and
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains revision-23 `strategy_revision_history_v1`, and adds
+`save_backed_setup_capture_v1`; revision 25 added
 `managed_custom_module_presets_v1` after revision 24 added
-`strategy_authoring_local_loadout_editors_v1`; the original profile endpoint
+`strategy_authoring_local_loadout_editors_v1`. The original profile endpoint
 remains the compatibility facade. The native shell handles every
 registered editor type with server-declared managed controls or an honest fixed
 presentation, retains dormant Ignore values and unknown Ultimate Weapon
@@ -611,6 +673,6 @@ lineages; a successful explicit restore review publishes the historical intent
 as the next version and refreshes history/latest catalogs without selecting or
 activating it. The retirement archive remains evidence rather than a competing
 editable rollback model.
-The profile-local backend contract, custom Module catalog, and additive API/WPF
-editing above are implemented. The expanded disposable-catalog Windows runtime
-smoke remains the separate follow-up slice.
+The profile-local backend contract, custom Module catalog, captured-draft
+reopen path, and additive API/WPF editing above are implemented. The expanded
+disposable-catalog Windows runtime smoke remains the separate follow-up slice.

@@ -510,8 +510,10 @@ stages:
   dimensions.
   - Implementation checkpoint (2026-08-07, feature branch):
     - [x] Linux status/API/runtime plus native, browser, and CLI clients expose
-      the five independent dimensions under server revision 28 and capability
-      `better_control_model_v1`. Start/Stop Automation, exact Start Battle,
+      the five independent dimensions under server revision 29 and capabilities
+      `better_control_model_v2` and `save_backed_setup_capture_v1`, while
+      retaining additive `better_control_model_v1`. Start/Stop Automation,
+      exact Start Battle,
       exact Attach to Battle, future terminal policy, and Take/Return Control
       have durable requested/acknowledged/error state. State and terminal-policy
       acknowledgements are correlated by exact request identity rather than
@@ -526,26 +528,48 @@ stages:
       Verified Home input is recorded as `action_dispatched` and remains under
       an exclusive workflow hold until battle adoption, interruption, or a
       bounded failure.
-    - [ ] Implement a verified Tournament Results dismissal/navigation owner
-      for `continue automatically` and `return/stay Home`. Revision 28 retains
-      Tournament Results after capture, preserves all three selected policies,
-      and reports non-`WAIT` choices as
-      `pending_verified_terminal_dismissal`; it does not claim to execute an
-      unverified result-screen control.
-    - [ ] Attach is intentionally held at `validating_save` before battle
-      adoption, and Return Control is intentionally held at `reconciling`
-      before ordinary input. The complete save-freshness audit, approved
-      refresh/serialization receipts, same-battle/configuration reconciliation,
-      and proof that save validation precedes UI fallback are suspended here at
-      operator request because a conflicting parallel work slice is beginning.
-      Reconcile that slice before advancing either workflow.
-    - [ ] The save-backed **Capture current setup as...** preset/custom-Strategy
-      authoring workflow is part of the same suspended slice. No parallel
-      loadout schema or placeholder authoring endpoint has been added, and
-      saving must remain non-activating when that work resumes.
+    - [x] Tournament Results capture retains `WAIT`; Continue and Home use the
+      verified OK-to-Home dismissal owner after persisting the result, Pause on
+      failed navigation, and keep dismissal separate from the future
+      next-battle policy.
+    - [x] Attach and Return consume production's typed player-save acquisition
+      paradigm. Active/resumable paths use one guarded exact-target forced
+      serialization, mandatory active-round identity, final activity-scope
+      binding, and process-local typed claims. Home New Return uses the normal
+      Home serialization; Game Over Return uses the bound natural acquisition.
+      Cached/passive reads cannot satisfy a current-save claim, save receipts
+      precede any allowlisted unresolved-field UI fallback, and a loss after
+      backgrounding terminates the exact workflow with Automation Paused.
+      Home New Return also terminalizes a blocked or incomplete refresh once,
+      rather than repeating lifecycle input on a later heartbeat.
+      Attach becomes observation-only before any later explicit active-battle
+      Strategy adoption. Adoption grants no Surrender authority.
+    - [x] Take/Return Control includes manual Surrender disposition without a
+      Surrender button: minimal save-backed excluded recording is the default,
+      with explicit opt-in to full terminal collection. Strategy repair can
+      Surrender only through the exact one-shot runtime gate option; it records
+      the nonrepresentative outcome before verified Home, Pauses, and does not
+      start another battle.
+    - [x] **Capture current setup as…** performs a guarded fresh serialization,
+      projects through existing Strategy/local-loadout/Module-preset owners,
+      preserves unresolved fields, requires a fingerprinted captured-versus-
+      Base review for Strategy drafts, and saves only new inactive artifacts.
+      A trusted-mismatch active-battle Return can expose its exact retained
+      forced acquisition to Capture without another input; that path remains
+      Paused and does not resolve Return Control.
+      The optional Base is comparison-only. Captured Strategy source is durable
+      and reopenable with its own fingerprinted origin, semantic difference,
+      and unresolved review through Linux API, two-step CLI, and the native
+      authoring catalog. A failed ready receipt retries from the process-local
+      result without another serialization; normal Linux validation/publication
+      remains separate.
     - [ ] Windows package build/usability smoke and natural-boundary live game
-      validation remain pending. No live/device action is authorized by this
-      checkpoint.
+      validation remain pending. The WPF project cross-builds on Linux and its
+      82 native authoring/compatibility tests pass, but no Windows runtime or
+      live/device action is authorized or claimed by this checkpoint.
+      The supported development checkpoint passes all 1,904 tests in 335.03
+      seconds, state-definition validation, and clickmap validation with zero
+      errors and the established 44 orphan candidates.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,
