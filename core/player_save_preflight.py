@@ -374,7 +374,7 @@ class PlayerSavePreflightCoordinator:
         initial_frame: Any = None,
     ) -> PlayerSavePreflightResult:
         selected_mode = normalize_player_save_preflight_mode(mode)
-        requested = _requested_check_ids(requirements)
+        requested = requested_player_save_check_ids(requirements)
         if self._carry is not None:
             self._carry.invalidate("superseded_by_new_home_preflight")
             self._carry = None
@@ -522,6 +522,7 @@ class PlayerSavePreflightCoordinator:
                 operation_id,
                 history_tail=_history_ui_decision(acquisition_reason),
                 acquisition=acquisition,
+                context=context,
             )
 
         provenance["source_fingerprint"] = _redacted(
@@ -891,7 +892,11 @@ class PlayerSavePreflightCoordinator:
         return result
 
 
-def _requested_check_ids(requirements: Mapping[str, Any]) -> set[str]:
+def requested_player_save_check_ids(
+    requirements: Mapping[str, Any],
+) -> set[str]:
+    """Return normalized configuration checks owned by save/UI reconciliation."""
+
     values: Mapping[str, Any] = requirements
     for key in ("invariants", "settings"):
         nested = requirements.get(key)
@@ -1029,4 +1034,5 @@ __all__ = [
     "PlayerSavePreflightResult",
     "PlayerSavePreflightStatus",
     "normalize_player_save_preflight_mode",
+    "requested_player_save_check_ids",
 ]

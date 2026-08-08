@@ -55,11 +55,15 @@ from core.control_model import (
     BATTLE_WORKFLOW_TERMINAL_STATUSES,
     MANUAL_CONTROL_TERMINAL_STATUSES,
     SETUP_CAPTURE_TERMINAL_STATUSES,
+    build_home_ui_reconciliation_receipt,
     build_home_return_reconciliation_receipt,
+    build_running_ui_reconciliation_receipt,
     build_running_save_reconciliation_receipt,
+    build_terminal_ui_reconciliation_receipt,
     build_terminal_return_reconciliation_receipt,
     intent_matches_evidence,
     observed_game_state,
+    ui_reconciliation_receipt_matches_evidence,
     validate_workflow_evidence,
 )
 from core.battle_stats import (
@@ -91,6 +95,7 @@ from core.player_save_preflight import (
     CarriedEvidenceState,
     PlayerSavePreflightContext,
     PlayerSavePreflightCoordinator,
+    requested_player_save_check_ids,
 )
 from core.player_save_history import (
     PlayerSaveAttachmentContext,
@@ -2775,6 +2780,49 @@ class App:
         persist_battle_record(record)
         return record
 
+    @staticmethod
+    def _terminal_record_killed_by(record: object) -> str:
+        """Return the normalized terminal cause discovered by supported UI."""
+
+        if not isinstance(record, Mapping):
+            return ""
+        game_stats = record.get("game_stats")
+        fields = (
+            game_stats.get("fields")
+            if isinstance(game_stats, Mapping)
+            else None
+        )
+        killed_by = (
+            fields.get("killed_by")
+            if isinstance(fields, Mapping)
+            else None
+        )
+        if isinstance(killed_by, Mapping):
+            value = str(
+                killed_by.get("value") or killed_by.get("raw") or ""
+            ).strip()
+            if value:
+                return value
+        more_stats = record.get("more_stats")
+        sections = (
+            more_stats.get("sections")
+            if isinstance(more_stats, Mapping)
+            else None
+        )
+        if not isinstance(sections, list):
+            return ""
+        for section in sections:
+            if not (
+                isinstance(section, Mapping)
+                and section.get("key") == "battle_report"
+                and isinstance(section.get("rows"), list)
+            ):
+                continue
+            for row in section["rows"]:
+                if isinstance(row, Mapping) and row.get("key") == "killed_by":
+                    return str(row.get("value") or row.get("raw") or "").strip()
+        return ""
+
     def _observe_manual_terminal(
         self,
         manual: Mapping[str, Any],
@@ -3083,12 +3131,9 @@ class App:
             return None
         acquisition = claim.get("acquisition")
         evidence = claim.get("evidence")
-        if not (
+        ui_fallback = claim.get("ui_fallback") is True
+        same_runtime_binding = bool(
             isinstance(current, Mapping)
-            and isinstance(acquisition, PlayerSaveAcquisitionBundle)
-            and acquisition.complete
-            and acquisition.acquisition_type
-            is PlayerSaveAcquisitionType.NATURAL_BOUNDARY
             and isinstance(evidence, Mapping)
             and all(
                 evidence.get(field) == current.get(field)
@@ -3099,7 +3144,24 @@ class App:
                     "target_generation",
                 )
             )
-        ):
+        )
+        pending_receipt = pending.get("save_receipt")
+        valid_ui_claim = bool(
+            ui_fallback
+            and isinstance(pending_receipt, Mapping)
+            and ui_reconciliation_receipt_matches_evidence(
+                pending_receipt,
+                evidence,
+            )
+        )
+        valid_save_claim = bool(
+            not ui_fallback
+            and isinstance(acquisition, PlayerSaveAcquisitionBundle)
+            and acquisition.complete
+            and acquisition.acquisition_type
+            is PlayerSaveAcquisitionType.NATURAL_BOUNDARY
+        )
+        if not same_runtime_binding or not (valid_ui_claim or valid_save_claim):
             self._supervisor.persist_state("PAUSED")
             return None
         completed = self._supervisor.transition_manual_control(
@@ -3122,7 +3184,8 @@ class App:
             ),
         )
         if completed is None or completed.get("status") != "completed":
-            self._supervisor.persist_state("PAUSED")
+            if not ui_fallback:
+                self._supervisor.persist_state("PAUSED")
             return None
         self._manual_terminal_claims().pop(manual_id, None)
         return dict(completed)
@@ -3175,6 +3238,7 @@ class App:
             Mapping,
         ):
             return False
+        ui_fallback = isinstance(receipt.get("ui_fallback"), Mapping)
 
         mismatched = tuple(check_sets.get("mismatched", ()) or ())
         ui_required = tuple(check_sets.get("ui_required", ()) or ())
@@ -3208,7 +3272,10 @@ class App:
             workflow_id,
             "awaiting_configuration",
             detail=(
-                "fresh forced save found configuration checks that require "
+                "save evidence was unusable; supported UI checks require "
+                "reconciliation before Strategy input resumes"
+                if ui_fallback
+                else "fresh forced save found configuration checks that require "
                 "operator-visible reconciliation before Strategy input resumes"
             ),
             refresh_status=(
@@ -3267,6 +3334,22 @@ class App:
         context = claim.get("context")
         evidence = claim.get("evidence")
         receipt = claim.get("receipt")
+        if claim.get("ui_fallback") is True:
+            if (
+                isinstance(evidence, Mapping)
+                and isinstance(receipt, Mapping)
+                and ui_reconciliation_receipt_matches_evidence(receipt, current)
+                and self._repair_authority_matches_runtime(evidence, current)
+                and current.get("game_state") == "active_battle"
+            ):
+                return dict(claim)
+            self._pending_return_reconciliation_claims().pop(
+                workflow_id,
+                None,
+            )
+            self._mission_mgr.finish_manual_return_reconciliation()
+            self._supervisor.persist_state("PAUSED")
+            return None
         try:
             live_context = self._current_player_save_attachment_context()
         except Exception:
@@ -3309,10 +3392,14 @@ class App:
         check_sets = claim.get("check_sets")
         acquisition = claim.get("acquisition")
         temporal = claim.get("temporal_binding")
-        if not (
-            isinstance(receipt, Mapping)
-            and isinstance(check_sets, Mapping)
-            and isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        ui_fallback = claim.get("ui_fallback") is True
+        if not isinstance(receipt, Mapping) or not isinstance(
+            check_sets,
+            Mapping,
+        ):
+            return False
+        if not ui_fallback and not (
+            isinstance(acquisition, PlayerSaveAcquisitionBundle)
             and isinstance(temporal, RunningAttachmentTemporalBinding)
         ):
             return False
@@ -3328,19 +3415,44 @@ class App:
                 )
             )
             try:
-                final_receipt = build_running_save_reconciliation_receipt(
-                    kind="return_control_reconciliation",
-                    workflow_id=workflow_id,
-                    observation_id=str(current.get("observation_id") or ""),
-                    acquisition=acquisition,
-                    temporal_binding=temporal,
-                    disposition=str(
-                        receipt.get("continuity", {}).get("disposition")
-                        if isinstance(receipt.get("continuity"), Mapping)
-                        else "attachment_baseline"
-                    ),
-                    resolved_check_ids=all_checks,
+                disposition = str(
+                    receipt.get("continuity", {}).get("disposition")
+                    if isinstance(receipt.get("continuity"), Mapping)
+                    else "attachment_baseline"
                 )
+                if ui_fallback:
+                    fallback = receipt.get("ui_fallback")
+                    final_receipt = build_running_ui_reconciliation_receipt(
+                        kind="return_control_reconciliation",
+                        workflow_id=workflow_id,
+                        observation_id=str(
+                            current.get("observation_id") or ""
+                        ),
+                        evidence=current,
+                        disposition=disposition,
+                        reason=str(
+                            fallback.get("reason")
+                            if isinstance(fallback, Mapping)
+                            else "save_evidence_unavailable"
+                        ),
+                        fallback_complete=bool(
+                            isinstance(fallback, Mapping)
+                            and fallback.get("status") == "complete"
+                        ),
+                        resolved_check_ids=all_checks,
+                    )
+                else:
+                    final_receipt = build_running_save_reconciliation_receipt(
+                        kind="return_control_reconciliation",
+                        workflow_id=workflow_id,
+                        observation_id=str(
+                            current.get("observation_id") or ""
+                        ),
+                        acquisition=acquisition,
+                        temporal_binding=temporal,
+                        disposition=disposition,
+                        resolved_check_ids=all_checks,
+                    )
             except (TypeError, ValueError):
                 self._supervisor.persist_state("PAUSED")
                 return False
@@ -3348,10 +3460,17 @@ class App:
             workflow_id,
             "completed",
             detail=(
-                "fresh forced save confirmed battle identity and active "
+                "supported UI discovery reconciled battle continuity and active "
+                "Strategy configuration after manual control"
+                if ui_fallback
+                else "fresh forced save confirmed battle identity and active "
                 "Strategy configuration after manual control"
             ),
-            refresh_status="save_reconciliation_complete",
+            refresh_status=(
+                "ui_fallback_reconciliation_complete"
+                if ui_fallback
+                else "save_reconciliation_complete"
+            ),
             save_receipt=final_receipt,
             configuration=self._return_configuration_report(
                 final_receipt,
@@ -3504,6 +3623,31 @@ class App:
         temporal = claim.get("temporal_binding")
         context = claim.get("context")
         evidence = claim.get("evidence")
+        receipt = claim.get("receipt")
+        if claim.get("ui_fallback") is True:
+            if not (
+                isinstance(evidence, Mapping)
+                and isinstance(receipt, Mapping)
+                and receipt == workflow.get("save_receipt")
+                and ui_reconciliation_receipt_matches_evidence(
+                    receipt,
+                    current,
+                )
+                and all(
+                    evidence.get(field) == current.get(field)
+                    for field in (
+                        "runtime_id",
+                        "pid",
+                        "adb_target",
+                        "target_generation",
+                        "activity_scope_run_id",
+                        "game_state",
+                    )
+                )
+            ):
+                self._running_reconciliation_claims().pop(workflow_id, None)
+                return None
+            return dict(claim)
         if not (
             isinstance(acquisition, PlayerSaveAcquisitionBundle)
             and acquisition.complete
@@ -3515,7 +3659,7 @@ class App:
             and evidence.get("game_state") == "active_battle"
             and temporal.matches_context(context)
             and acquisition.binding == temporal.target_binding
-            and claim.get("receipt") == workflow.get("save_receipt")
+            and receipt == workflow.get("save_receipt")
             and self._workflow_evidence_matches_runtime(
                 evidence,
                 current,
@@ -3555,8 +3699,8 @@ class App:
             str(workflow.get("request_id") or ""),
             "interrupted",
             reason=(
-                "process-local typed save evidence is unavailable; the redacted "
-                "receipt cannot grant attachment authority"
+                "process-local reconciliation evidence is unavailable; the "
+                "redacted receipt cannot grant attachment authority"
             ),
             acknowledgement=current,
         )
@@ -3575,16 +3719,21 @@ class App:
             and self._mission_mgr.active_battle_observed()
         ):
             return False
-        if self._matching_running_reconciliation_claim(workflow, current) is None:
+        claim = self._matching_running_reconciliation_claim(workflow, current)
+        if claim is None:
             self._interrupt_unbacked_ready_attachment(workflow, current)
             return False
-        if not self._supervisor.persist_state("PAUSED"):
+        ui_fallback = claim.get("ui_fallback") is True
+        if not ui_fallback and not self._supervisor.persist_state("PAUSED"):
             return False
         completed = self._supervisor.transition_battle_workflow(
             str(workflow.get("request_id") or ""),
             "completed",
             reason=(
-                "validated battle was adopted after the same active-battle "
+                "the supported UI fallback adopted the active battle and "
+                "released normal UI monitoring"
+                if ui_fallback
+                else "validated battle was adopted after the same active-battle "
                 "boundary was observed"
             ),
             acknowledgement=current,
@@ -3611,10 +3760,16 @@ class App:
             str(workflow.get("request_id") or "") + ":completed",
             purpose="Completing observation-only battle attachment",
             reason=(
-                "return to zero automated input after save-backed identity adoption"
+                "continue with supported UI monitoring after unusable save evidence"
+                if ui_fallback
+                else "return to zero automated input after save-backed identity adoption"
             ),
             result=(
-                "Battle attached for observation — Automation Paused; choose a "
+                "Battle attached through the UI fallback — Automation remains "
+                "Enabled for supported monitoring and safe collectors; no Strategy "
+                "was adopted"
+                if ui_fallback
+                else "Battle attached for observation — Automation Paused; choose a "
                 "Strategy and Enable explicitly to manage it"
             ),
         )
@@ -4849,20 +5004,29 @@ class App:
         except (RuntimeError, TypeError, ValueError):
             live_context = None
             expected_binding = None
-        if not (
+        base_bound = bool(
             isinstance(manual, Mapping)
             and manual.get("status") == "reconciling"
             and isinstance(current, Mapping)
             and current.get("game_state") == "home_new_battle"
             and getattr(result, "ready", False) is True
+            and result_context == live_context
+            and isinstance(expected_binding, PlayerSaveTargetBinding)
+        )
+        save_backed = bool(
+            base_bound
             and isinstance(acquisition, PlayerSaveAcquisitionBundle)
             and acquisition.complete
             and acquisition.acquisition_type
             is PlayerSaveAcquisitionType.FORCED_SERIALIZATION
-            and result_context == live_context
-            and isinstance(expected_binding, PlayerSaveTargetBinding)
             and acquisition.binding == expected_binding
-        ):
+        )
+        ui_backed = bool(
+            base_bound
+            and not save_backed
+            and getattr(result, "safe_ui_fallback", False) is True
+        )
+        if not base_bound or not (save_backed or ui_backed):
             return False
         workflow_id = str(manual.get("manual_control_id") or "")
         decisions = getattr(result, "decisions", {})
@@ -4880,17 +5044,30 @@ class App:
             )
         )
         try:
-            receipt = build_home_return_reconciliation_receipt(
-                workflow_id=workflow_id,
-                observation_id=str(current.get("observation_id") or ""),
-                activity_scope_id=str(
-                    current.get("activity_scope_run_id") or ""
-                ),
-                acquisition=acquisition,
-                expected_binding=expected_binding,
-                resolved_check_ids=resolved,
-                unresolved_check_ids=unresolved,
-            )
+            if ui_backed:
+                receipt = build_home_ui_reconciliation_receipt(
+                    workflow_id=workflow_id,
+                    observation_id=str(current.get("observation_id") or ""),
+                    evidence=current,
+                    reason=str(
+                        getattr(result, "reason", "")
+                        or "save_evidence_unavailable"
+                    ),
+                    resolved_check_ids=resolved,
+                    unresolved_check_ids=unresolved,
+                )
+            else:
+                receipt = build_home_return_reconciliation_receipt(
+                    workflow_id=workflow_id,
+                    observation_id=str(current.get("observation_id") or ""),
+                    activity_scope_id=str(
+                        current.get("activity_scope_run_id") or ""
+                    ),
+                    acquisition=acquisition,
+                    expected_binding=expected_binding,
+                    resolved_check_ids=resolved,
+                    unresolved_check_ids=unresolved,
+                )
         except (TypeError, ValueError) as exc:
             self._supervisor.persist_state("PAUSED")
             self._supervisor.transition_manual_control(
@@ -4905,7 +5082,10 @@ class App:
                 workflow_id,
                 "awaiting_configuration",
                 detail=(
-                    "fresh Home save found configuration checks that must be "
+                    "save evidence was unusable, so supported Home UI checks "
+                    "must be resolved before guarded automation resumes"
+                    if ui_backed
+                    else "fresh Home save found configuration checks that must be "
                     "resolved before guarded automation resumes"
                 ),
                 refresh_status=(
@@ -4994,25 +5174,44 @@ class App:
                     }
                 )
             )
-            receipt = build_home_return_reconciliation_receipt(
-                workflow_id=workflow_id,
-                observation_id=str(current.get("observation_id") or ""),
-                activity_scope_id=str(
-                    current.get("activity_scope_run_id") or ""
-                ),
-                acquisition=acquisition,
-                expected_binding=expected_binding,
-                resolved_check_ids=all_checks,
-            )
+            if ui_backed:
+                receipt = build_home_ui_reconciliation_receipt(
+                    workflow_id=workflow_id,
+                    observation_id=str(current.get("observation_id") or ""),
+                    evidence=current,
+                    reason=str(
+                        getattr(result, "reason", "")
+                        or "save_evidence_unavailable"
+                    ),
+                    resolved_check_ids=all_checks,
+                )
+            else:
+                receipt = build_home_return_reconciliation_receipt(
+                    workflow_id=workflow_id,
+                    observation_id=str(current.get("observation_id") or ""),
+                    activity_scope_id=str(
+                        current.get("activity_scope_run_id") or ""
+                    ),
+                    acquisition=acquisition,
+                    expected_binding=expected_binding,
+                    resolved_check_ids=all_checks,
+                )
 
         completed = self._supervisor.transition_manual_control(
             workflow_id,
             "completed",
             detail=(
-                "fresh Home save confirmed there is no active battle and "
+                "verified Home UI discovery replaced unusable save evidence and "
+                "reconciled current configuration"
+                if ui_backed
+                else "fresh Home save confirmed there is no active battle and "
                 "reconciled current configuration evidence"
             ),
-            refresh_status="home_save_reconciliation_complete",
+            refresh_status=(
+                "home_ui_fallback_reconciliation_complete"
+                if ui_backed
+                else "home_save_reconciliation_complete"
+            ),
             save_receipt=receipt,
             configuration=self._return_configuration_report(
                 receipt,
@@ -5116,7 +5315,10 @@ class App:
                 "ui_required_check_ids": list(
                     check_sets.get("ui_required", ())
                 ),
-                "ui_fallback_restricted": True,
+                "ui_fallback_restricted": not isinstance(
+                    receipt.get("ui_fallback"),
+                    Mapping,
+                ),
             }
         )
         return report
@@ -6973,13 +7175,16 @@ class App:
     ) -> bool:
         """Persist typed Attach/Return evidence after final-scope continuity."""
 
-        if not (
+        save_backed = bool(
             isinstance(acquisition, PlayerSaveAcquisitionBundle)
             and isinstance(temporal_binding, RunningAttachmentTemporalBinding)
             and isinstance(context, PlayerSaveAttachmentContext)
             and temporal_binding.matches_context(context)
             and acquisition.binding == temporal_binding.target_binding
-        ):
+        )
+        if not save_backed:
+            if getattr(outcome, "ui_monitoring_fallback", False) is True:
+                return self._complete_ui_backed_operator_reconciliation(outcome)
             return False
         current = self._current_control_workflow_evidence()
         if not (
@@ -7123,6 +7328,130 @@ class App:
             }
             return self._retry_pending_running_return(manual, current)
         return False
+
+    def _complete_ui_backed_operator_reconciliation(
+        self,
+        outcome: object,
+    ) -> bool:
+        """Release Attach/Return into supported UI discovery after save failure."""
+
+        current = self._current_control_workflow_evidence()
+        if not (
+            isinstance(current, Mapping)
+            and current.get("game_state") == "active_battle"
+        ):
+            return False
+        confirmed_same = getattr(
+            outcome,
+            "confirmed_same_battle_scope_id",
+            None,
+        )
+        confirmed_later = getattr(
+            outcome,
+            "confirmed_later_battle_scope_id",
+            None,
+        )
+        disposition = (
+            "later_battle"
+            if confirmed_later
+            else "same_battle"
+            if confirmed_same
+            else "attachment_baseline"
+        )
+        reason = str(
+            getattr(outcome, "ui_fallback_reason", "")
+            or "save_evidence_unavailable"
+        )
+        fallback_complete = bool(
+            getattr(outcome, "ui_fallback_complete", False)
+        )
+        workflow = self._supervisor.battle_workflow
+        if (
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "attach_battle"
+            and workflow.get("status")
+            in {"validating_save", "action_dispatched"}
+        ):
+            workflow_id = str(workflow.get("request_id") or "")
+            try:
+                receipt = build_running_ui_reconciliation_receipt(
+                    kind="running_attachment_reconciliation",
+                    workflow_id=workflow_id,
+                    observation_id=str(current.get("observation_id") or ""),
+                    evidence=current,
+                    disposition=disposition,
+                    reason=reason,
+                    fallback_complete=fallback_complete,
+                )
+            except (TypeError, ValueError) as exc:
+                log(
+                    "[PLAYER_SAVE] Could not bind the running UI fallback "
+                    f"receipt: {exc}",
+                    "ERROR",
+                )
+                return False
+            ready = self._supervisor.transition_battle_workflow(
+                workflow_id,
+                "ready",
+                reason=(
+                    "save evidence was unusable; Battle History/UI continuity "
+                    "was bound and supported UI monitoring remains available"
+                ),
+                acknowledgement=current,
+                save_receipt=receipt,
+                configuration=receipt["configuration"],
+            )
+            if ready is None or ready.get("status") != "ready":
+                return False
+            self._running_reconciliation_claims()[workflow_id] = {
+                "receipt": copy.deepcopy(receipt),
+                "evidence": dict(current),
+                "ui_fallback": True,
+            }
+            return True
+
+        manual = self._supervisor.manual_control
+        if not (
+            isinstance(manual, Mapping)
+            and manual.get("status") == "reconciling"
+        ):
+            return False
+        workflow_id = str(manual.get("manual_control_id") or "")
+        requirements = self._active_strategy_session_requirements()
+        ui_required = tuple(
+            sorted(requested_player_save_check_ids(requirements))
+        )
+        check_sets = {
+            "accepted": (),
+            "mismatched": (),
+            "ui_required": ui_required,
+        }
+        try:
+            receipt = build_running_ui_reconciliation_receipt(
+                kind="return_control_reconciliation",
+                workflow_id=workflow_id,
+                observation_id=str(current.get("observation_id") or ""),
+                evidence=current,
+                disposition=disposition,
+                reason=reason,
+                fallback_complete=fallback_complete,
+                unresolved_check_ids=ui_required,
+            )
+        except (TypeError, ValueError) as exc:
+            log(
+                "[PLAYER_SAVE] Could not bind the Return Control UI fallback "
+                f"receipt: {exc}",
+                "ERROR",
+            )
+            return False
+        self._pending_return_reconciliation_claims()[workflow_id] = {
+            "receipt": copy.deepcopy(receipt),
+            "evidence": dict(current),
+            "requirements": copy.deepcopy(requirements),
+            "check_sets": copy.deepcopy(check_sets),
+            "ui_fallback": True,
+        }
+        return self._retry_pending_running_return(manual, current)
 
     def _annotate_home_battle_control(
         self,
@@ -9676,7 +10005,7 @@ class App:
                 and isinstance(current_manual_evidence, Mapping)
                 else None
             )
-            manual_return = bool(
+            save_backed_manual_return = bool(
                 operator_workflow_only
                 and isinstance(manual, Mapping)
                 and manual.get("status") == "reconciling"
@@ -9686,15 +10015,34 @@ class App:
                 and isinstance(manual_terminal.get("receipt"), Mapping)
                 and isinstance(manual_terminal_claim, Mapping)
             )
+            ui_backed_manual_return = bool(
+                operator_workflow_only
+                and isinstance(manual, Mapping)
+                and manual.get("status") == "reconciling"
+                and isinstance(manual_terminal, Mapping)
+                and manual_terminal.get("status") == "unavailable"
+                and isinstance(current_manual_evidence, Mapping)
+                and current_manual_evidence.get("game_state") == "game_over"
+            )
+            manual_return = bool(
+                save_backed_manual_return or ui_backed_manual_return
+            )
             if operator_workflow_only and not manual_return:
-                self._supervisor.persist_state("PAUSED")
                 log(
                     "[MANUAL_CONTROL] Return Control reached Game Over without "
-                    "confirmed save evidence; terminal UI input remains blocked",
+                    "a safe save or UI fallback boundary; terminal input remains "
+                    "blocked without changing automation authority",
                     "WARN",
                     console=True,
                 )
                 return
+            if ui_backed_manual_return:
+                log(
+                    "[MANUAL_CONTROL] Terminal save evidence is unavailable; "
+                    "using the supported Game Stats/Perks/More Stats UI route",
+                    "INFO",
+                    console=True,
+                )
             log("Detected GAME_OVER. Executing handler.", "INFO", console=True)
             strategy = self._mission_mgr.strategy
             no_strategy_run = strategy is None
@@ -9756,7 +10104,7 @@ class App:
                     self._accept_pending_terminal_history_handoff()
 
             terminal_acquisition = None
-            if manual_return:
+            if save_backed_manual_return:
                 terminal_battle_context = dict(
                     manual_terminal_claim["context"]
                 )
@@ -9928,7 +10276,7 @@ class App:
                     return
             manual_full_disposition = None
             if (
-                manual_return
+                save_backed_manual_return
                 and manual_terminal.get("status") == "confirmed_surrender"
                 and str(
                     manual.get("surrender_collection") or "minimal"
@@ -10081,70 +10429,178 @@ class App:
                     console=True,
                 )
             if manual_return:
-                if (
-                    manual_full_disposition is not None
-                    and completed_record is None
-                ):
-                    self._supervisor.transition_manual_control(
-                        str(manual.get("manual_control_id") or ""),
-                        "failed",
-                        detail=(
-                            "full manual-Surrender collection was unavailable, "
-                            "but the selected terminal route completed and "
-                            "automation authority was preserved"
-                        ),
-                        refresh_status="terminal_collection_unavailable",
-                        save_receipt=dict(manual_terminal["receipt"]),
-                    )
-                    return
-                completion_configuration = {
-                    "schema_version": 1,
-                    "terminal_status": manual_terminal.get("status"),
-                    "collection": manual.get("surrender_collection"),
-                    "battle_id": (
-                        completed_record.get("battle_id")
-                        if isinstance(completed_record, Mapping)
-                        else manual_terminal.get("battle_id")
-                    ),
-                }
-                completion_payload = {
-                    "detail": (
-                        "terminal save evidence was reconciled and the explicit "
-                        "collection disposition was completed"
-                    ),
-                    "refresh_status": "terminal_reconciliation_complete",
-                    "save_receipt": dict(manual_terminal["receipt"]),
-                    "configuration": completion_configuration,
-                }
                 manual_id = str(manual.get("manual_control_id") or "")
-                retained_claim = self._manual_terminal_claims().get(manual_id)
-                if isinstance(retained_claim, Mapping):
-                    retained_claim = dict(retained_claim)
-                    retained_claim["pending_completion"] = copy.deepcopy(
-                        completion_payload
-                    )
-                    self._manual_terminal_claims()[manual_id] = retained_claim
-                completed_manual = self._supervisor.transition_manual_control(
-                    manual_id,
-                    "completed",
-                    detail=str(completion_payload["detail"]),
-                    refresh_status=str(completion_payload["refresh_status"]),
-                    save_receipt=dict(completion_payload["save_receipt"]),
-                    configuration=completion_configuration,
-                )
-                if completed_manual is None:
-                    log(
-                        "[MANUAL_CONTROL] Terminal route completed; retrying "
-                        "only the manual-control completion receipt without "
-                        "changing action authority",
-                        "WARN",
-                        console=True,
-                    )
+                if ui_backed_manual_return:
+                    killed_by = self._terminal_record_killed_by(completed_record)
+                    if not killed_by:
+                        self._supervisor.transition_manual_control(
+                            manual_id,
+                            "failed",
+                            detail=(
+                                "the save was unusable and terminal UI discovery "
+                                "could not produce a bound outcome; the selected "
+                                "terminal route still completed and automation "
+                                "authority was preserved"
+                            ),
+                            refresh_status="terminal_ui_collection_unavailable",
+                        )
+                    else:
+                        try:
+                            ui_receipt = (
+                                build_terminal_ui_reconciliation_receipt(
+                                    workflow_id=manual_id,
+                                    observation_id=str(
+                                        current_manual_evidence.get(
+                                            "observation_id"
+                                        )
+                                        or ""
+                                    ),
+                                    evidence=current_manual_evidence,
+                                    killed_by=killed_by,
+                                    reason=str(
+                                        manual_terminal.get("reason")
+                                        or "terminal_save_unavailable"
+                                    ),
+                                )
+                            )
+                        except (TypeError, ValueError) as exc:
+                            self._supervisor.transition_manual_control(
+                                manual_id,
+                                "failed",
+                                detail=(
+                                    "terminal UI discovery completed, but its "
+                                    f"bound receipt was rejected: {exc}; automation "
+                                    "authority was preserved"
+                                ),
+                                refresh_status="terminal_ui_receipt_rejected",
+                            )
+                        else:
+                            completion_configuration = {
+                                "schema_version": 1,
+                                "terminal_status": (
+                                    "confirmed_surrender"
+                                    if ui_receipt["terminal"]["surrendered"]
+                                    else "confirmed_other"
+                                ),
+                                "collection": "full_ui_fallback",
+                                "battle_id": (
+                                    completed_record.get("battle_id")
+                                    if isinstance(completed_record, Mapping)
+                                    else None
+                                ),
+                            }
+                            completion_payload = {
+                                "detail": (
+                                    "terminal save evidence was unusable; the "
+                                    "supported UI collector reconciled the outcome"
+                                ),
+                                "refresh_status": (
+                                    "terminal_ui_fallback_reconciliation_complete"
+                                ),
+                                "save_receipt": ui_receipt,
+                                "configuration": completion_configuration,
+                            }
+                            self._manual_terminal_claims()[manual_id] = {
+                                "receipt": copy.deepcopy(ui_receipt),
+                                "evidence": dict(current_manual_evidence),
+                                "ui_fallback": True,
+                                "pending_completion": copy.deepcopy(
+                                    completion_payload
+                                ),
+                            }
+                            completed_manual = (
+                                self._supervisor.transition_manual_control(
+                                    manual_id,
+                                    "completed",
+                                    detail=str(completion_payload["detail"]),
+                                    refresh_status=str(
+                                        completion_payload["refresh_status"]
+                                    ),
+                                    save_receipt=dict(ui_receipt),
+                                    configuration=completion_configuration,
+                                )
+                            )
+                            if completed_manual is None:
+                                log(
+                                    "[MANUAL_CONTROL] Terminal UI route completed; "
+                                    "retrying only its completion receipt without "
+                                    "changing action authority",
+                                    "WARN",
+                                    console=True,
+                                )
+                            else:
+                                self._manual_terminal_claims().pop(
+                                    manual_id,
+                                    None,
+                                )
                 else:
-                    self._manual_terminal_claims().pop(
-                        manual_id,
-                        None,
+                    if (
+                        manual_full_disposition is not None
+                        and completed_record is None
+                    ):
+                        self._supervisor.transition_manual_control(
+                            manual_id,
+                            "failed",
+                            detail=(
+                                "full manual-Surrender collection was unavailable, "
+                                "but the selected terminal route completed and "
+                                "automation authority was preserved"
+                            ),
+                            refresh_status="terminal_collection_unavailable",
+                            save_receipt=dict(manual_terminal["receipt"]),
+                        )
+                        return
+                    completion_configuration = {
+                        "schema_version": 1,
+                        "terminal_status": manual_terminal.get("status"),
+                        "collection": manual.get("surrender_collection"),
+                        "battle_id": (
+                            completed_record.get("battle_id")
+                            if isinstance(completed_record, Mapping)
+                            else manual_terminal.get("battle_id")
+                        ),
+                    }
+                    completion_payload = {
+                        "detail": (
+                            "terminal save evidence was reconciled and the explicit "
+                            "collection disposition was completed"
+                        ),
+                        "refresh_status": "terminal_reconciliation_complete",
+                        "save_receipt": dict(manual_terminal["receipt"]),
+                        "configuration": completion_configuration,
+                    }
+                    retained_claim = self._manual_terminal_claims().get(manual_id)
+                    if isinstance(retained_claim, Mapping):
+                        retained_claim = dict(retained_claim)
+                        retained_claim["pending_completion"] = copy.deepcopy(
+                            completion_payload
+                        )
+                        self._manual_terminal_claims()[manual_id] = retained_claim
+                    completed_manual = (
+                        self._supervisor.transition_manual_control(
+                            manual_id,
+                            "completed",
+                            detail=str(completion_payload["detail"]),
+                            refresh_status=str(
+                                completion_payload["refresh_status"]
+                            ),
+                            save_receipt=dict(completion_payload["save_receipt"]),
+                            configuration=completion_configuration,
+                        )
                     )
+                    if completed_manual is None:
+                        log(
+                            "[MANUAL_CONTROL] Terminal route completed; retrying "
+                            "only the manual-control completion receipt without "
+                            "changing action authority",
+                            "WARN",
+                            console=True,
+                        )
+                    else:
+                        self._manual_terminal_claims().pop(
+                            manual_id,
+                            None,
+                        )
             finalize_run_boundary()
             if no_strategy_run and completed_record is not None:
                 self._pending_no_strategy_record = completed_record

@@ -680,6 +680,32 @@ stages:
     - [ ] Native Windows usability and natural Home/active/terminal boundary
       validation remain pending; no live/device behavior is claimed by this
       checkpoint.
+  - UI-fallback contract repair checkpoint (2026-08-08, feature branch based
+    directly on the completed Better Control tip `848c886`):
+    - [x] Better Control's typed reconciliation receipt now accepts exactly one
+      process-local authority source: a forced/natural save acquisition or a
+      runtime/target-generation/activity-scope-bound UI fallback. The durable
+      receipt remains diagnostic and cannot replay either source.
+    - [x] Missing, unsupported-revision, structurally incompatible, and
+      unprojectable saves automatically select the complete supported UI route
+      after safe source restoration. Active/resumable Attach uses Battle
+      History and remains observation-only with No Strategy monitoring
+      Enabled; running Return additionally runs every active-Strategy UI check;
+      Home New Return runs every Home configuration check; and Game Over Return
+      uses the full Game Stats/Perks/More Stats collector without suppressing
+      the selected terminal route.
+    - [x] Source-restoration, process, target, owner, scope, and action-authority
+      loss still block input. A trusted mapped mismatch remains valid evidence
+      with its explicit review semantics. Save-backed setup capture remains the
+      explicit exception because no supported UI route can create one coherent
+      authoring snapshot; an unavailable capture preserves ordinary UI
+      monitoring and the documented authority outcome.
+    - [x] The broader affected control, save, No Strategy, run-initialization,
+      Home-setup, and terminal slice passes 622 tests. The complete supported
+      checkpoint passed compilation, state-definition validation, clickmap
+      validation with zero errors and the established 44 orphan candidates,
+      and all 1,968 tests in 340.15 seconds. Production promotion evidence
+      remains pending.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,
@@ -690,10 +716,11 @@ stages:
     workflow. Provide explicit **Start battle** intent only at a verified new-run
     Home boundary and explicit **Attach to battle** intent only for a verified
     active or resumable battle. Starting a new battle runs its normal gates;
-    attachment preserves the existing battle identity and validates from fresh
-    save evidence before opening UI, with UI fallback only for unresolved
-    allowlisted fields. Reject a mismatched intent without silently choosing the
-    other workflow.
+    attachment preserves the existing battle identity and first attempts fresh
+    save evidence. Safely restored unusable save data selects the supported UI
+    continuity and discovery route; an unsafe owner/source/binding boundary
+    blocks input. Reject a mismatched intent without silently choosing the other
+    workflow.
   - Present post-terminal behavior separately as **When this battle ends** (or
     equally unambiguous final wording): continue automatically, wait at the
     terminal boundary, or return/stay Home. The existing `NEXT_BATTLE`, `WAIT`,

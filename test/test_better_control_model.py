@@ -21,10 +21,15 @@ from core.app import App
 from core.automation_supervisor import AutomationSupervisor
 from core.control_directives import ControlDirectiveStore
 from core.control_model import (
+    build_home_ui_reconciliation_receipt,
+    build_running_ui_reconciliation_receipt,
     build_running_save_reconciliation_receipt,
+    build_terminal_ui_reconciliation_receipt,
     build_terminal_return_reconciliation_receipt,
     intent_matches_evidence,
     observed_game_state,
+    ui_reconciliation_receipt_matches_evidence,
+    validate_save_reconciliation_receipt,
     validate_workflow_evidence,
 )
 from core.gc_no_battle_setup import (
@@ -51,6 +56,7 @@ from core.player_save_serialization import GuardedSerializationStatus
 from core.strategy_authoring import FARM_SETTING_REGISTRY
 from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
 from core.run_state import AUTOMATION
+from handlers.game_over_handler import GameOverHandlingOutcome
 from tools import automation_ctl
 
 
@@ -526,6 +532,70 @@ def test_workflow_evidence_requires_exact_aware_owner_and_observation():
     assert validate_workflow_evidence(unknown_target) is None
     mismatched_classification = {**evidence, "game_state": "active_battle"}
     assert validate_workflow_evidence(mismatched_classification) is None
+
+
+def test_ui_fallback_receipts_bind_running_home_and_terminal_workflows():
+    running = _evidence(game_state="active_battle")
+    running_receipt = build_running_ui_reconciliation_receipt(
+        kind="running_attachment_reconciliation",
+        workflow_id="attach-1",
+        observation_id=str(running["observation_id"]),
+        evidence=running,
+        disposition="attachment_baseline",
+        reason="unsupported_save_version",
+        fallback_complete=True,
+    )
+    assert validate_save_reconciliation_receipt(running_receipt) == (
+        running_receipt
+    )
+    assert ui_reconciliation_receipt_matches_evidence(
+        running_receipt,
+        running,
+    )
+
+    home = _evidence(game_state="home_new_battle")
+    home_receipt = build_home_ui_reconciliation_receipt(
+        workflow_id="return-home-1",
+        observation_id=str(home["observation_id"]),
+        evidence=home,
+        reason="save_mapping_unavailable",
+        resolved_check_ids=("workshop_preset",),
+    )
+    assert home_receipt["ui_fallback"]["source"] == (
+        "home_configuration_ui"
+    )
+    assert ui_reconciliation_receipt_matches_evidence(home_receipt, home)
+
+    terminal = _evidence(game_state="game_over")
+    terminal_receipt = build_terminal_ui_reconciliation_receipt(
+        workflow_id="return-terminal-1",
+        observation_id=str(terminal["observation_id"]),
+        evidence=terminal,
+        killed_by="Boss",
+        reason="terminal_save_report_unavailable",
+    )
+    assert terminal_receipt["terminal"]["collection"] == "full"
+    assert ui_reconciliation_receipt_matches_evidence(
+        terminal_receipt,
+        terminal,
+    )
+
+    refreshed = {
+        **running,
+        "observation_id": "runtime-1:next-heartbeat",
+        "observed_at": "2026-08-07T12:00:01+00:00",
+    }
+    assert ui_reconciliation_receipt_matches_evidence(
+        running_receipt,
+        refreshed,
+    )
+
+    changed = dict(running)
+    changed["target_generation"] = 8
+    assert not ui_reconciliation_receipt_matches_evidence(
+        running_receipt,
+        changed,
+    )
 
 
 def test_directive_store_rejects_mismatched_intent_and_serializes_workflows(
@@ -1121,6 +1191,70 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
     assert supervisor.battle_workflow["status"] == "completed"
 
 
+def test_unusable_attach_save_releases_enabled_ui_monitoring(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+        source="test",
+    )
+    for status in ("acknowledged", "validating_save"):
+        store.transition_battle_workflow(
+            workflow["request_id"],
+            status,
+            acknowledgement=evidence,
+        )
+    supervisor.apply_control()
+    manager = MagicMock()
+    manager.strategy = None
+    manager.active_battle_observed.return_value = True
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+
+    app._apply_activity_continuity_outcome(
+        SimpleNamespace(
+            ui_monitoring_fallback=True,
+            ui_fallback_complete=True,
+            ui_fallback_reason="unsupported_save_version",
+            confirmed_same_battle_scope_id="scope-1",
+            confirmed_later_battle_scope_id=None,
+        )
+    )
+
+    ready = supervisor.battle_workflow
+    assert ready["status"] == "ready"
+    assert ready["save_receipt"]["ui_fallback"]["source"] == (
+        "battle_history_ui"
+    )
+    assert app._complete_ready_attachment_after_adoption() is True
+    assert supervisor.battle_workflow["status"] == "completed"
+    assert supervisor.is_paused is False
+
+
 def test_return_control_stays_input_blocked_during_reconciliation(
     tmp_path,
     monkeypatch,
@@ -1218,6 +1352,10 @@ def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
         evidence=evidence,
         source="test",
     )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
     store.transition_manual_control(
         manual["manual_control_id"],
         "reconciling",
@@ -1265,6 +1403,97 @@ def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
     assert "Automation remains Paused" in terminal["detail"]
     assert supervisor.is_paused is True
     assert acquisitions == [result]
+
+
+def test_home_return_uses_ui_when_restored_save_is_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="home_new_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=evidence, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = SimpleNamespace(
+        session_preflight_requirements=lambda: {
+            "workshop_preset": "Farm"
+        }
+    )
+    app._startup_gate_waivers = {}
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    context = object()
+    app._current_player_save_preflight_context = lambda: context
+    result = SimpleNamespace(
+        ready=True,
+        reason="stable_save_unavailable",
+        safe_ui_fallback=True,
+        acquisition=None,
+        context=context,
+        decisions={
+            "workshop_preset": {
+                "disposition": "ui_required",
+                "reason": "stable_save_unavailable",
+            }
+        },
+        as_dict=lambda: {"safe_ui_fallback": True},
+    )
+    app._run_home_setup_attempts = MagicMock(
+        return_value=GcNoBattleSetupResult(
+            GcNoBattleSetupStatus.COMPLETE,
+            "verified through UI",
+            evidence={"workshop_preset": "Farm"},
+        )
+    )
+
+    assert app._complete_home_return_reconciliation(
+        result,
+        screenshot=object(),
+    ) is True
+
+    completed = supervisor.manual_control
+    assert completed["status"] == "completed"
+    assert completed["refresh_status"] == (
+        "home_ui_fallback_reconciliation_complete"
+    )
+    assert completed["save_receipt"]["ui_fallback"]["source"] == (
+        "home_configuration_ui"
+    )
+    assert supervisor.is_paused is False
+    app._run_home_setup_attempts.assert_called_once()
 
 
 def test_home_return_reports_nonretryable_setup_for_manual_correction(
@@ -1532,6 +1761,48 @@ def test_running_return_trusted_save_mismatch_pauses_without_ui_fallback(
     assert manual["configuration"]["ui_required_check_ids"] == []
     assert supervisor.is_paused is True
     manager.begin_manual_return_reconciliation.assert_not_called()
+
+
+def test_unusable_running_return_save_starts_supported_ui_reconciliation(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    (
+        app,
+        supervisor,
+        manager,
+        _evidence_value,
+        _acquisition,
+        _temporal,
+        _observations,
+        _context,
+    ) = _running_return_fixture(
+        tmp_path,
+        snapshot=_player_save_snapshot("workshop_preset", "Farm"),
+        observed_value="Farm",
+    )
+    manager.begin_manual_return_reconciliation.return_value = True
+
+    app._apply_activity_continuity_outcome(
+        SimpleNamespace(
+            ui_monitoring_fallback=True,
+            ui_fallback_complete=False,
+            ui_fallback_reason="save_mapping_unavailable",
+            confirmed_same_battle_scope_id=None,
+            confirmed_later_battle_scope_id=None,
+        )
+    )
+
+    pending = supervisor.manual_control
+    assert pending["status"] == "awaiting_configuration"
+    assert pending["refresh_status"] == "configuration_validation_pending"
+    assert pending["save_receipt"]["ui_fallback"]["status"] == "degraded"
+    assert pending["configuration"]["ui_required_check_ids"] == [
+        "workshop_preset"
+    ]
+    assert supervisor.is_paused is False
+    manager.begin_manual_return_reconciliation.assert_called_once_with()
 
 
 def test_capture_reviews_manual_changes_from_exact_retained_return_save(
@@ -1958,6 +2229,208 @@ def test_terminal_return_write_retry_does_not_repeat_save_or_ui_work(
     assert completed["status"] == "completed"
     app._terminal_battle_bundle.assert_not_called()
     assert app._manual_terminal_claims() == {}
+
+
+def test_terminal_ui_fallback_completion_retry_preserves_enabled_authority(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    active = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    active["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=active, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=active,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=active,
+        source="test",
+    )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    supervisor.apply_control()
+    terminal = _evidence(
+        game_state="game_over",
+        observation_id="runtime-1:terminal-ui",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    terminal["pid"] = owner["pid"]
+    receipt = build_terminal_ui_reconciliation_receipt(
+        workflow_id=manual["manual_control_id"],
+        observation_id=str(terminal["observation_id"]),
+        evidence=terminal,
+        killed_by="Boss",
+        reason="terminal_save_report_unavailable",
+    )
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._manual_terminal_save_claims = {
+        manual["manual_control_id"]: {
+            "receipt": receipt,
+            "evidence": terminal,
+            "ui_fallback": True,
+            "pending_completion": {
+                "detail": "terminal UI fallback complete",
+                "refresh_status": (
+                    "terminal_ui_fallback_reconciliation_complete"
+                ),
+                "save_receipt": receipt,
+                "configuration": {
+                    "schema_version": 1,
+                    "terminal_status": "confirmed_other",
+                    "collection": "full_ui_fallback",
+                },
+            },
+        }
+    }
+
+    completed = app._retry_pending_manual_terminal_completion(
+        supervisor.manual_control,
+        terminal,
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["save_receipt"]["ui_fallback"]["source"] == (
+        "terminal_stats_ui"
+    )
+    assert supervisor.is_paused is False
+    assert app._manual_terminal_claims() == {}
+
+
+def test_terminal_return_uses_supported_ui_when_save_is_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    active = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    active["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=active, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=active,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=active,
+        source="test",
+    )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    supervisor.apply_control()
+    terminal = _evidence(
+        game_state="game_over",
+        observation_id="runtime-1:terminal-fallback",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    terminal["pid"] = owner["pid"]
+    supervisor.record_manual_terminal_evidence(
+        manual["manual_control_id"],
+        {
+            "schema_version": 1,
+            "status": "unavailable",
+            "observation_id": terminal["observation_id"],
+            "activity_scope_fingerprint": hashlib.sha256(
+                str(terminal["activity_scope_run_id"]).encode("utf-8")
+            ).hexdigest(),
+            "reason": "terminal_save_report_unavailable",
+        },
+    )
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = SimpleNamespace(name="farm")
+    app._mission_mgr.session_preflight_repair_in_progress.return_value = False
+    app._status_reporter = MagicMock()
+    app._fast_game_over = False
+    app._pending_game_over_route = None
+    app._manual_terminal_save_claims = {}
+    app._current_control_workflow_evidence = lambda: terminal
+    app._advance_pending_game_over_route_recovery = lambda *_args: False
+    app._handler_enabled = lambda name: name == "game_over"
+    app._handle_exclusive_validation_game_over = lambda: False
+    app._terminal_battle_bundle = MagicMock(
+        return_value=(
+            {
+                "terminal_save_report": {
+                    "status": "unavailable",
+                    "reason": "terminal_save_report_unavailable",
+                }
+            },
+            None,
+        )
+    )
+    app._runtime_action_guard = lambda **_kwargs: True
+    app._apply_pending_strategy = MagicMock()
+    app._strategy_boundary_confirmed = False
+    record = {
+        "battle_id": "BattleUiFallback",
+        "game_stats": {
+            "fields": {"killed_by": {"value": "Boss", "raw": "Boss"}}
+        },
+    }
+    game_over = MagicMock(
+        return_value=GameOverHandlingOutcome(
+            True,
+            "home",
+            record,
+            "saved",
+        )
+    )
+    monkeypatch.setattr("core.app.handle_game_over", game_over)
+
+    app._handle_primary_states(
+        "GAME_OVER",
+        set(),
+        object(),
+        operator_workflow_only=True,
+    )
+
+    completed = supervisor.manual_control
+    assert completed["status"] == "completed"
+    assert completed["refresh_status"] == (
+        "terminal_ui_fallback_reconciliation_complete"
+    )
+    assert completed["save_receipt"]["ui_fallback"]["source"] == (
+        "terminal_stats_ui"
+    )
+    assert completed["configuration"]["collection"] == "full_ui_fallback"
+    assert supervisor.is_paused is False
+    assert game_over.call_args.kwargs["capture_stats"] is True
 
 
 def test_attach_stays_pending_before_battle_adoption(tmp_path, monkeypatch):

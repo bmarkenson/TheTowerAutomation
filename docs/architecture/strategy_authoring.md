@@ -551,6 +551,10 @@ longer safe. Ready or terminal receipt-write failure retains the exact
 process-local result for atomic-write retry without another serialization or
 authority change. Reopening a terminal capture is inspect-only; **Try capture
 again** is the separate operator intent that may request another refresh.
+Capture is intentionally save-only because the supported UI checkers cannot
+produce one coherent, same-boundary authoring projection. Its `unavailable`
+result does not disable the separate Battle History, configuration-discovery,
+No Strategy, or safe-collector UI fallbacks.
 
 Saving a Module loadout calls the ordinary immutable custom Module preset
 owner. It is save-as-new: an existing ID is a conflict even if its visible

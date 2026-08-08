@@ -48,13 +48,16 @@ not adopt the observed battle merely because the intent was accepted. The
 runtime first revalidates the exact PID, ADB target/generation, activity scope,
 and observed boundary.
 
-The runtime remains input-blocked in `validating_save` while it performs one
-guarded exact-target serialization, restores the source, binds active-round
-identity to the final activity scope, and writes the typed receipt. `ready`
-means the existing battle is validated for observation-only attachment; it
-does not select a Strategy. Lifecycle adoption then completes the attachment.
-An unusable save, changed owner/scope, or restoration failure never falls back
-to an unvalidated attach; a post-background loss leaves Automation Paused.
+The runtime remains input-blocked in `validating_save` while it attempts one
+guarded exact-target serialization and restores the source. A usable save
+binds active-round identity to the final activity scope. If the save is absent,
+uses an unsupported revision, has an incompatible shape, or cannot be
+projected after safe restoration, the runtime automatically uses guarded
+Battle History instead and writes a target/scope-bound UI receipt. `ready`
+means the existing battle is validated for observation-only attachment through
+one of those routes; it does not select a Strategy. A changed owner, target,
+scope, action authority, or unproved restoration still blocks input and leaves
+Automation Paused.
 
 To monitor and collect without changing the battle, leave the active Strategy
 as **No Strategy** after attachment. To apply the selected Strategy, use the
@@ -86,13 +89,18 @@ command to announce in advance.
 It is available only at exact-bound Home New, Home Resume, active battle, or
 Game Over evidence; Tournament Results, unknown state, or missing target/scope
 binding is visibly unavailable. Explicit **Enable Automation** then authorizes
-only reconciliation: a newly forced save (or the bound Game Over natural save)
-must reconcile battle identity and the active Strategy's configuration before
-ordinary input returns. A trusted mismatch Pauses for operator review, and only
-unresolved allowlisted checks may open their existing verifier after the save
-receipt. Do not use Enable as a shortcut around Return.
-If a Home New refresh is blocked, incomplete, or loses its binding after
-backgrounding, Return becomes failed/interrupted and Automation remains Paused.
+only reconciliation. The runtime first requests a newly forced save (or the
+bound Game Over natural save). If it is usable, mapped evidence reconciles
+battle identity and configuration; a trusted mismatch Pauses for operator
+review. If the save is unusable after safe restoration, active and resumable
+Return uses Battle History plus every supported active-Strategy UI verifier,
+Home New uses every supported Home configuration verifier, and Game Over uses
+the full Game Stats/Perks/More Stats collector. Each route writes a bound typed
+reconciliation receipt before ordinary input returns. Do not use Enable as a
+shortcut around Return.
+If a Home New refresh loses its source restoration, owner, target, scope, or
+authority binding after backgrounding, Return becomes failed/interrupted and
+Automation remains Paused.
 Do not retry by repeatedly selecting Enable; start a new explicit Return only
 after reviewing the reported boundary.
 If the forced save succeeds but the bounded Home UI repair exhausts instead,
@@ -117,7 +125,10 @@ stays unresolved. An unsupported or structurally incompatible revision, a
 missing runtime projection, or incomplete round identity reports Capture as
 `unavailable` and opens no configuration UI. When the guarded refresh has
 proved source restoration, that outcome preserves the prior action-authority
-state. Fresh active/resumable evidence that contradicts the requested battle
+state and does not disable ordinary Battle History/configuration UI monitoring.
+Capture is the deliberate exception to full UI fallback because no supported
+UI route can produce one coherent, reviewable authoring snapshot. Fresh
+active/resumable evidence that contradicts the requested battle
 reports `failed` and enters a Strategy Gate so observation and safe gem
 collectors continue. A proved Home New contradiction, or an attempted
 lifecycle transition whose source restoration cannot be proved, reports

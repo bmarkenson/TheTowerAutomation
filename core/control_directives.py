@@ -422,7 +422,7 @@ class ControlDirectiveStore:
                 is None
             ):
                 raise ValueError(
-                    "Attach cannot become ready without a typed forced-save receipt"
+                    "Attach cannot become ready without a typed reconciliation receipt"
                 )
             timestamp = _timestamp_at(now)
             workflow["status"] = normalized_status
@@ -930,7 +930,7 @@ class ControlDirectiveStore:
                     }
                 ):
                     raise ValueError(
-                        "Return Control cannot complete without a typed save receipt"
+                        "Return Control cannot complete without a typed reconciliation receipt"
                     )
             timestamp = _timestamp_at(now)
             manual["status"] = normalized_status

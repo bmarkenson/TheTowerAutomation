@@ -20,22 +20,26 @@ explicit Enable enters configuration reconciliation. Running Return and
 **Attach to Battle** each perform one guarded active-battle acquisition: the
 game is briefly backgrounded to Android Home, stable exact-target reads are
 taken, and the same battle is restored and reverified. Active-round identity
-and the final activity scope are mandatory; an unusable save or restoration
-loss never opens Battle History or configuration UI and leaves the workflow
-failed/interrupted and Paused. Home New Return follows the same one-attempt
-rule rather than repeating a blocked serializer on later heartbeats. The same snapshot supplies complete allowlisted
-configuration observations, so only unresolved sections may be opened
-afterward. The future terminal policy does not repair or replace this
-continuity step.
+and the final activity scope remain mandatory when the save is usable. If its
+revision, structure, mapping, or projection is unusable after the source is
+safely restored, the runtime automatically opens Battle History and all
+supported configuration discovery instead; attachment completes
+observation-only with Automation Enabled so No Strategy monitoring and safe
+collectors continue. Home New Return similarly runs the supported Home UI
+checks, and Game Over Return runs the full terminal UI collector. Restoration,
+owner, target, scope, or authority loss still blocks input. A blocked Home
+serializer is terminalized once rather than repeated on later heartbeats. The
+future terminal policy does not repair or replace this continuity step.
 
 Attachment is observation-only by default: the configured startup Strategy is
 not silently applied to the existing battle. Remain on No Strategy to monitor
 and collect, or use the separate active-battle Strategy action when explicitly
 warranted. Strategy adoption never grants Surrender authority.
 
-When taking manual control, choose whether a manual Surrender uses the default
-minimal excluded record with no terminal UI or opts into full terminal
-collection. Detection comes from the bound natural save; neither choice is a
+When taking manual control, choose whether a save-confirmed manual Surrender
+uses the default minimal excluded record with no terminal UI or opts into full
+terminal collection. If the natural save is unusable, the minimal shortcut is
+unavailable and the full terminal UI route is used. Neither choice is a
 Surrender command.
 
 To turn a manually changed loadout into managed authoring data, use **Capture
@@ -45,7 +49,9 @@ then save a new Module preset or inactive Strategy draft. Saving does not
 select or apply it. Automation Paused reports that refresh is unavailable and
 never substitutes a cached snapshot. A failed capture receipt is retried from
 the exact process-local preview without a second serialization; any lost owner
-or round contradiction remains Paused.
+or round contradiction retains its documented gate/Pause outcome. Capture has
+no complete UI authoring equivalent; an unusable save reports the capture
+unavailable without disabling the separate No Strategy UI monitors.
 
 During `RUNNING`, the runtime owns one guarded read-only inventory across only
 the fields not already resolved by the save: Cards, Perks, Ultimate Weapons,

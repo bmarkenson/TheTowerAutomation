@@ -39,6 +39,33 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 save-to-UI fallback contract repair
+
+- The combined candidate is based directly on completed Better Control tip
+  `848c886`, so it includes that thread's unstaged-for-production repair without
+  modifying its worktree or creating a competing implementation.
+- Attach and Return now treat a missing, unsupported-revision, structurally
+  incompatible, or unprojectable save as unusable data after safe source
+  restoration. Attach binds guarded Battle History and keeps observation-only
+  No Strategy monitoring Enabled; active Return runs Battle History and every
+  active-Strategy UI check; Home New Return runs every supported Home check;
+  and Game Over Return uses the full Game Stats/Perks/More Stats collector while
+  preserving the selected terminal route and action authority.
+- Typed reconciliation receipts bind exactly one process-local source: save
+  acquisition provenance or runtime/target-generation/activity-scope UI
+  provenance. They remain non-replayable. Source-restoration, process, owner,
+  target, scope, and action-authority loss still block input, while a trusted
+  mapped mismatch retains explicit review semantics.
+- Setup capture remains the explicit save-only exception because the supported
+  UI checkers cannot produce one coherent same-boundary authoring snapshot. Its
+  unavailable result preserves ordinary UI monitoring and the documented
+  authority outcome.
+- The affected control/save/No Strategy/Home/terminal slice passed 622 tests.
+  The complete supported checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and all 1,968 tests in 340.15 seconds. No live/device action was performed by
+  this checkpoint.
+
 ### 2026-08-08 Better Control failure continuity
 
 - Commit `e7dfb51` makes recoverable setup-capture, terminal-data,

@@ -276,7 +276,7 @@ independent projections:
 | Boundary | Acquisition or reuse | Consumers | Failure policy |
 | --- | --- | --- | --- |
 | Home `NEW_BATTLE` under `save_first` | Consume a valid one-use terminal History handoff when present. If current configuration is requested, or an authoritative History baseline has no handoff, perform one guarded `forced_serialization` even when the configuration requirement set is empty. | Configuration reconciliation, structural History baseline, and every eligible Home projection. | A safely restored acquisition failure may use the existing guarded UI fallback. Restoration, ownership, context, or control ambiguity blocks later input. |
-| Replacement process attached at `RUNNING` | One guarded `forced_serialization`. | Active identity, structural History continuity, temporally classified actual-loadout observations, Perk prefix, and optional audit projection. | Defer and retry without opening Battle History or configuration UI. A failed or rebound attachment never publishes authoritative monitor evidence. |
+| Replacement process attached at `RUNNING` | Prefer one guarded `forced_serialization`; when its source is safely restored but its data or mapping is unusable, bind the established Battle History/UI route instead. | Save-backed active identity, structural History continuity, temporally classified actual-loadout observations, Perk prefix, and optional audit projection; otherwise UI continuity plus supported UI monitoring. | Data, revision, mapping, or projection failure automatically selects UI and completes observation-only attachment. Source-restoration, owner, target, scope, or control ambiguity blocks input. |
 | `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, optional audit projection, and Tournament conditions. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
 | Ordinary monitoring | Scheduled `passive_stable_read`, independent of audit opt-in. | The Perk monitor and, when enabled, audit receipts consume the same immutable bundle; other consumers require their own lag-tolerant temporal class. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
@@ -1324,19 +1324,22 @@ development-lease authority from warning text in `actions.log`.
   before the guarded UI route may run; acquisition/shape failure safely falls
   back after Home setup, while target/control/scope/restoration loss authorizes
   no input. At a `RUNNING` attachment, including a missing baseline, the
-  continuity owner always uses the guarded save and never opens Battle History
-  UI. It binds the exact runtime/scope/target and lifecycle state, requires
-  stable `RUNNING` before and after the shared Android-Home serializer, and
-  accepts only two byte-identical reads with an exact active-round identity. A
-  save baseline uses its source-specific fingerprint and append/rollover
-  evidence. A UI baseline bridges only through normalized Tier/Wave/Battle
-  Date; agreement migrates it, explicit mismatch proves a later scope, and
-  ambiguous or insufficient evidence starts an unverified conservative scope
-  from the fresh save. An unusable attachment save waits and retries without
-  game-UI navigation. Source fingerprints are never compared across mappings.
-  Any ownership, process, identity, control, source, or restoration ambiguity
-  blocks later input. `force_ui`, `comparison_audit`, Home `RESUME_BATTLE`, and
-  interrupted Battle History retain the UI route. A readable identity is
+  continuity owner first attempts the guarded save. It binds the exact
+  runtime/scope/target and lifecycle state, requires stable `RUNNING` before and
+  after the shared Android-Home serializer, and accepts only two byte-identical
+  reads with an exact active-round identity. If source restoration succeeds but
+  the save is absent, unsupported, structurally incompatible, or otherwise
+  unprojectable, the owner immediately opens the guarded Battle History route
+  and completes observation-only attachment with a target/scope-bound UI
+  receipt. A save baseline uses its source-specific fingerprint and
+  append/rollover evidence. A UI baseline bridges only through normalized
+  Tier/Wave/Battle Date; agreement migrates it, explicit mismatch proves a
+  later scope, and ambiguous or insufficient evidence starts an unverified
+  conservative scope. Source fingerprints are never compared across mappings.
+  Ownership, process, control, target, activity-scope, or source-restoration
+  ambiguity blocks later input; unusable save data alone does not. `force_ui`,
+  `comparison_audit`, Home `RESUME_BATTLE`, and interrupted Battle History
+  retain the UI route. A readable identity is
   persisted with a run-ID
   compare-and-set so stale evidence cannot overwrite a newer lifecycle
   boundary. When Pause preserves a pending Home continuity source and the same

@@ -445,6 +445,7 @@ def test_pull_failure_restores_home_and_authorizes_normal_ui_fallback(monkeypatc
 
     assert result.ready
     assert result.safe_ui_fallback
+    assert result.context is not None
     assert set(result.decisions) == {"cards_deck", "auto_pick_perks"}
     assert all(item["ui_required"] for item in result.decisions.values())
     assert foreground == ["private-device-target"]

@@ -586,6 +586,9 @@ def test_missing_attachment_baseline_uses_history_ui_when_save_is_unusable(
 
     assert not outcome.pending
     assert outcome.recapture
+    assert outcome.ui_monitoring_fallback is True
+    assert outcome.ui_fallback_complete is True
+    assert outcome.ui_fallback_reason == "save_history_acquisition_failed"
     assert len(ui_reads) == 1
     assert logger.get_activity_scope()["latest_completed_battle"]["source"] == (
         "battle_history_ui"
@@ -720,6 +723,9 @@ def test_unverified_attachment_uses_conservative_new_scope(
 
     current = logger.get_activity_scope()
     assert outcome.recapture
+    assert outcome.ui_monitoring_fallback is True
+    assert outcome.ui_fallback_complete is False
+    assert outcome.ui_fallback_reason == "clipboard unreadable"
     assert current is not None
     assert current["run_id"] != original["run_id"]
     assert current["reason"] == "battle_history_unavailable_on_attachment"
@@ -1235,6 +1241,11 @@ def test_active_attachment_save_failure_uses_history_ui_fallback(
 
     assert not outcome.pending
     assert outcome.recapture
+    assert outcome.ui_monitoring_fallback is True
+    assert outcome.ui_fallback_complete is True
+    assert outcome.ui_fallback_reason == (
+        "runtime_history_projection_unavailable"
+    )
     assert len(ui_reads) == 1
     assert ui_reads[0]["source_state"] == "RUNNING"
     assert "using the guarded UI route" in (
@@ -1374,6 +1385,9 @@ def test_save_acquisition_failure_restores_guarded_history_ui_fallback(
 
     current = logger.get_activity_scope()
     assert outcome.recapture
+    assert outcome.ui_monitoring_fallback is True
+    assert outcome.ui_fallback_complete is True
+    assert outcome.ui_fallback_reason == "save_history_acquisition_failed"
     assert len(ui_reads) == 1
     assert current is not None
     assert current["run_id"] == retry_scope["run_id"]

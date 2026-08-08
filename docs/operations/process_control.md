@@ -40,16 +40,23 @@ Start Battle is accepted only with fresh verified Home `NEW_BATTLE` evidence;
 Attach to Battle requires fresh Home `RESUME_BATTLE` or active-battle evidence.
 Unavailable, stale, and mismatched requests fail without substituting the
 other route. Attach remains input-blocked at `validating_save` until one
-guarded exact-target serialization proves source restoration, active-round
-identity, and the final owner/activity scope. It then adopts the battle for
-observation only; applying a Strategy is a separate explicit action.
+guarded exact-target serialization proves source restoration and either binds
+usable save evidence or selects the established Battle History UI fallback.
+An absent, unsupported, incompatible, or unprojectable save after safe
+restoration therefore still adopts the battle for observation only and keeps
+supported UI monitoring available. Owner, target, scope, authority, or
+restoration loss blocks input. Applying a Strategy remains a separate explicit
+action.
 
 Take Manual Control first requests an indefinite Pause and becomes active only
 after runtime acknowledgement. Return Control remains Paused; explicit Enable
 starts an exclusive reconciliation hold. A newly forced save, or the exact
-bound natural Game Over save, must reconcile battle identity and relevant
-configuration before ordinary input returns. A trusted mismatch remains
-Paused for explicit operator review; cached evidence cannot satisfy Return.
+bound natural Game Over save, is preferred. When that save is unusable after a
+safe source restoration, the same hold automatically uses the supported
+active/Home/terminal UI discovery route and a target/scope-bound UI receipt.
+A trusted mapped mismatch remains Paused for explicit operator review; cached
+evidence cannot satisfy Return, and an unsafe source or authority boundary
+cannot authorize UI input.
 
 `NEXT_BATTLE`, `WAIT`, and `HOME` are terminal dispositions. `NEXT_BATTLE`
 uses the next authorized Retry/Battle/Resume path after terminal capture;

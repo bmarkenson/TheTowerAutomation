@@ -73,6 +73,9 @@ class ActivityContinuityOutcome:
     ] = None
     running_attachment_context: Optional[PlayerSaveAttachmentContext] = None
     operator_workflow_interruption_reason: Optional[str] = None
+    ui_monitoring_fallback: bool = False
+    ui_fallback_complete: bool = False
+    ui_fallback_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -499,6 +502,7 @@ class ActivityContinuityCoordinator:
         attachment_temporal_binding = None
         attachment_acquisition = None
         attachment_bundle_context = None
+        ui_fallback_reason = ""
         if not self._action_logged:
             self._boundary = capture_activity_boundary()
             self._log_action(run_id, use_save=use_save)
@@ -712,6 +716,7 @@ class ActivityContinuityCoordinator:
                 "UI route",
                 "INFO",
             )
+            ui_fallback_reason = fallback_reason or save_result.reason
 
         result = self._history_reader(
             source_state=self._pending_source,
@@ -741,6 +746,7 @@ class ActivityContinuityCoordinator:
             return self._handle_failed_read(
                 scope,
                 result,
+                ui_fallback_reason=ui_fallback_reason,
             )
         metadata = _normalize_history_metadata(result.identity.scope_metadata())
         if metadata is None:
@@ -751,6 +757,7 @@ class ActivityContinuityCoordinator:
                     "UI History metadata normalization failed",
                     source_restored=True,
                 ),
+                ui_fallback_reason=ui_fallback_reason,
             )
         if self._pending_mode == "post_retry_baseline":
             previous = _pending_previous_battle(scope)
@@ -767,6 +774,7 @@ class ActivityContinuityCoordinator:
             attachment_temporal_binding=attachment_temporal_binding,
             attachment_acquisition=attachment_acquisition,
             attachment_bundle_context=attachment_bundle_context,
+            ui_fallback_reason=ui_fallback_reason,
         )
 
     def _handle_cross_source_migration(
@@ -931,6 +939,7 @@ class ActivityContinuityCoordinator:
         attachment_bundle_context: Optional[PlayerSaveAttachmentContext] = None,
         attachment_change_confirmed: Optional[bool] = None,
         attachment_incompatibility_reason: str = "",
+        ui_fallback_reason: str = "",
     ) -> ActivityContinuityOutcome:
         run_id = str(scope["run_id"])
         baseline = _scope_battle_history(scope)
@@ -1124,12 +1133,26 @@ class ActivityContinuityCoordinator:
                 )
             ),
             running_attachment_context=bound_bundle_context,
+            ui_monitoring_fallback=(
+                str(metadata.get("source") or "") == BATTLE_HISTORY_UI_SOURCE
+            ),
+            ui_fallback_complete=(
+                str(metadata.get("source") or "") == BATTLE_HISTORY_UI_SOURCE
+            ),
+            ui_fallback_reason=(
+                str(ui_fallback_reason or "battle_history_ui_selected")
+                if str(metadata.get("source") or "")
+                == BATTLE_HISTORY_UI_SOURCE
+                else ""
+            ),
         )
 
     def _handle_failed_read(
         self,
         scope: Mapping[str, object],
         result: BattleHistoryReadResult,
+        *,
+        ui_fallback_reason: str = "",
     ) -> ActivityContinuityOutcome:
         run_id = str(scope["run_id"])
         if not result.source_restored:
@@ -1161,6 +1184,11 @@ class ActivityContinuityCoordinator:
             self._defer_post_retry_poll()
             return ActivityContinuityOutcome(
                 recapture=True,
+                ui_monitoring_fallback=True,
+                ui_fallback_complete=False,
+                ui_fallback_reason=str(
+                    ui_fallback_reason or result.reason or "history_ui_read_failed"
+                ),
             )
 
         if self._pending_mode == "compare":
@@ -1192,6 +1220,11 @@ class ActivityContinuityCoordinator:
         self._reset_pending()
         return ActivityContinuityOutcome(
             recapture=True,
+            ui_monitoring_fallback=True,
+            ui_fallback_complete=False,
+            ui_fallback_reason=str(
+                ui_fallback_reason or result.reason or "history_ui_read_failed"
+            ),
         )
 
     def _defer_post_retry_poll(self) -> None:

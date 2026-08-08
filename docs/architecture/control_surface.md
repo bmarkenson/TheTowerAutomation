@@ -216,13 +216,13 @@ or exactly acknowledged repeat is a visible no-op.
 | Live | enabled | Home New or Home Resume with no acknowledged initial battle intent | Enable or no additional request | observe only; do not serialize ordinary Home preflight, run configuration setup, claim validation, or dispatch a battle control |
 | Live | enabled | verified Home control was tapped | acknowledged Start or ready resumable Attach | record `action_dispatched`; keep unrelated automation suppressed until the same battle is adopted, a definitive mismatch interrupts, or the 20-second launch window fails |
 | Live | paused | Home Resume Battle or active battle | Attach to Battle | `requested` → `awaiting_enable`; explicit Enable enters `validating_save` without adopting the battle |
-| Live | enabled | Home Resume Battle or active battle | Attach to Battle | force a stable exact-target save, bind active-round identity and the final activity scope, then become observation-only `ready`; optional mapped facts do not replace the required round identity |
+| Live | enabled | Home Resume Battle or active battle | Attach to Battle | prefer a stable exact-target save; if its source is safely restored but the data/mapping is unusable, bind guarded Battle History instead; then become observation-only `ready` without selecting a Strategy |
 | Live | either | Game Over, Tournament Results, unknown, stale, or mismatched evidence | Start Battle or Attach to Battle | reject as unavailable/mismatched; never substitute the other workflow |
 | Live | enabled or paused | any fresh exact state | Take Manual Control | atomically request indefinite Pause; become `active` only after runtime acknowledgement |
 | Live | paused and manual control `active` | Home New, Home Resume, active battle, or Game Over with exact target/scope binding | Return Control | remain Paused; record passive observation; await explicit Enable |
 | Live | paused and manual control `active` | Tournament Results, unknown, or incomplete exact binding | Return Control | unavailable; no save-backed Return route is advertised or substituted |
-| Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; ordinary input remains unavailable until a new forced save (or a bound natural Game Over save) reconciles identity and active Strategy configuration |
-| Live | reconciling Return | Home New refresh is blocked, incomplete, or loses its post-background binding | no additional request | persist Automation Paused and terminalize that Return as failed/interrupted; do not repeat lifecycle input or open configuration UI |
+| Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; prefer a new forced save (or a bound natural Game Over save), then automatically use the supported active/Home/terminal UI route if that save is unusable after safe restoration |
+| Live | reconciling Return | source restoration, owner, target, scope, or authority binding is lost after lifecycle input | no additional request | persist Automation Paused and terminalize that Return as failed/interrupted; do not repeat lifecycle input or open UI from an unsafe boundary |
 | Live | enabled, adopted active battle | active battle | apply selected Strategy to this battle | adopt only after explicit selection; preserve battle identity and defer new-run/Home-only gates; Surrender remains unauthorized |
 | Live | enabled, adopted active battle | repair-only mismatch | choose **Surrender this battle and repair setup** in the runtime gate | grant one exact-battle, exact-reason Surrender; write the nonrepresentative disposition before verified Home, then let normal Home repair and the separately selected future-battle policy continue without an implicit Pause |
 | Live | enabled | Home New, Home Resume, or active battle with exact binding | Capture current setup as… | force a new save, present captured and unresolved fields for review, then save a new inactive Module preset or Strategy draft without selecting, queueing, publishing, or applying it |
@@ -260,15 +260,17 @@ Take Manual Control is not merely a label for Pause. Its durable request owns
 an indefinite Pause and exposes `pause_requested` until the runtime applies it.
 Return Control is also not Resume: it records a separate return request while
 Pause remains authoritative, then requires an explicit Enable request and an
-exclusive reconciliation hold. Running and resumable returns require a newly
-forced exact-target save before any allowlisted unresolved-field UI fallback;
-Home New uses the normal Home serializer, and Game Over uses the bound natural
-terminal acquisition. A loss after backgrounding terminates that exact
-workflow and leaves Automation Paused rather than retrying from cached data.
-Home New follows the same rule: a blocked/incomplete refresh or changed binding
-becomes one durable failed/interrupted Return outcome, so later heartbeats do
-not background the game again. A trusted mismatch that deliberately advances
-to `awaiting_configuration` remains distinct and requires another explicit
+exclusive reconciliation hold. Running and resumable returns prefer a newly
+forced exact-target save; Home New prefers the normal Home serializer, and
+Game Over prefers the bound natural terminal acquisition. If that save is
+absent, unsupported, structurally incompatible, or unprojectable after safe
+source restoration, the runtime automatically uses the complete supported UI
+route for that boundary and writes an exact-bound UI reconciliation receipt.
+A loss of restoration, owner, target, scope, or action authority terminates
+the exact workflow and leaves Automation Paused rather than opening UI from
+cached data. Home New terminalizes that unsafe outcome once, so later
+heartbeats do not background the game again. A trusted mapped mismatch remains
+distinct from unusable save data and requires explicit review and another
 Enable before a new refresh.
 If a bounded Home configuration repair then cannot make stable progress, the
 manual-control ledger advances to `awaiting_manual_correction` with the exact
