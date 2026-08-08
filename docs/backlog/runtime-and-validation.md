@@ -704,8 +704,24 @@ stages:
       Home-setup, and terminal slice passes 622 tests. The complete supported
       checkpoint passed compilation, state-definition validation, clickmap
       validation with zero errors and the established 44 orphan candidates,
-      and all 1,968 tests in 340.15 seconds. Production promotion evidence
-      remains pending.
+      and all 1,968 tests in 340.15 seconds.
+    - [x] Production was fast-forwarded through repair commit `d32b811` after
+      rebuilding the exact self-contained `win-x64` control-surface package and
+      passing all 83 native tests. Rollback tag
+      `production-before-20260808T162821Z-d6f6bb7` preserves the prior
+      production boundary.
+    - [x] Post-restart host and API evidence showed control-surface PID
+      `2710166`, automation PID `2710563`, healthy revision 30, connected exact
+      target `localhost:5555`, acknowledged `RUNNING`, No Strategy, and the
+      expected safe auxiliary-collector allowlist. The compatible
+      `data-9-game-1101` Attach smoke test exercised the save-backed branch, so
+      the unusable-save UI branch remains regression-proven rather than
+      artificially forced against the operator's live battle.
+    - [x] The restored No Strategy runtime detected an ad gem at 09:33:37 PDT,
+      dispatched the verified ad-gem tap at 09:33:40, recorded collection at
+      09:33:44, observed the overlay removed at 09:33:53, and completed its
+      bounded floating-gem scan at 09:33:57. No Surrender or test battle
+      boundary was used.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

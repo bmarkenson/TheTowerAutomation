@@ -65,6 +65,27 @@ canonical document linked by an entry for current behavior.
   clickmap integrity with zero errors and the established 44 orphan candidates,
   and all 1,968 tests in 340.15 seconds. No live/device action was performed by
   this checkpoint.
+- Production was subsequently fast-forwarded through repair commit `d32b811`.
+  The exact self-contained `win-x64` control-surface package rebuilt
+  successfully, all 83 native tests passed, and rollback tag
+  `production-before-20260808T162821Z-d6f6bb7` preserves the prior production
+  boundary. The known read-only NuGet vulnerability-cache warning did not
+  affect the package or test result.
+- Shared-runtime deployment cleanly replaced both fixed services. Host-backed
+  evidence showed control-surface PID `2710166` and automation PID `2710563`;
+  revision-30 API evidence matched the automation service PID, reported the
+  exact `localhost:5555` target connected, and acknowledged `RUNNING` with No
+  Strategy and the safe auxiliary collectors available.
+- The active-battle Attach smoke test used a compatible forced save mapped as
+  `data-9-game-1101`, completed observation-only adoption, and then restored
+  the operator's prior Enabled No Strategy monitoring state. It intentionally
+  did not manufacture an incompatible save against the live battle, so the
+  unusable-save UI branch is supported by the complete regression checkpoint
+  rather than a forced production failure.
+- Fresh production behavior then detected an ad gem at 09:33:37 PDT,
+  dispatched its verified tap at 09:33:40, recorded collection at 09:33:44,
+  observed the overlay removed at 09:33:53, and completed the bounded
+  floating-gem scan at 09:33:57. No Surrender or test battle boundary was used.
 
 ### 2026-08-08 Better Control failure continuity
 
