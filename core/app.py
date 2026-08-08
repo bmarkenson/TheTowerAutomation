@@ -1461,6 +1461,7 @@ class App:
         *,
         intent: str,
         allow_new_run_scope: bool = False,
+        allowed_activity_scope_transition: Optional[Tuple[str, str]] = None,
     ) -> tuple[bool, str]:
         """Revalidate target/session/battle evidence without changing intent."""
 
@@ -1477,10 +1478,33 @@ class App:
         scope_changed = requested.get("activity_scope_run_id") != current.get(
             "activity_scope_run_id"
         )
+        allowed_source_scope = ""
+        allowed_target_scope = ""
+        if (
+            isinstance(allowed_activity_scope_transition, tuple)
+            and len(allowed_activity_scope_transition) == 2
+        ):
+            allowed_source_scope = str(
+                allowed_activity_scope_transition[0] or ""
+            ).strip()
+            allowed_target_scope = str(
+                allowed_activity_scope_transition[1] or ""
+            ).strip()
+        attachment_scope_transition = bool(
+            intent == "attach_battle"
+            and current.get("game_state") == "active_battle"
+            and allowed_source_scope
+            and allowed_target_scope
+            and requested.get("activity_scope_run_id") == allowed_source_scope
+            and current.get("activity_scope_run_id") == allowed_target_scope
+        )
         if scope_changed and not (
-            allow_new_run_scope
-            and intent == "start_battle"
-            and current.get("game_state") == "home_new_battle"
+            (
+                allow_new_run_scope
+                and intent == "start_battle"
+                and current.get("game_state") == "home_new_battle"
+            )
+            or attachment_scope_transition
         ):
             return False, "battle activity scope changed"
         if not intent_matches_evidence(intent, current):
@@ -1911,18 +1935,32 @@ class App:
         if status == "ready" and intent == "attach_battle":
             if current is None:
                 return
-            if self._matching_running_reconciliation_claim(
+            claim = self._matching_running_reconciliation_claim(
                 workflow,
                 current,
-            ) is None:
+            )
+            if claim is None:
                 self._interrupt_unbacked_ready_attachment(workflow, current)
                 return
             requested = workflow.get("evidence")
             if isinstance(requested, Mapping):
+                temporal = claim.get("temporal_binding")
+                allowed_scope_transition = (
+                    (
+                        temporal.source_activity_scope_id,
+                        temporal.activity_scope_id,
+                    )
+                    if isinstance(temporal, RunningAttachmentTemporalBinding)
+                    and temporal.activity_scope_id is not None
+                    else None
+                )
                 matches, reason = self._workflow_evidence_matches_runtime(
                     requested,
                     current,
                     intent=intent,
+                    allowed_activity_scope_transition=(
+                        allowed_scope_transition
+                    ),
                 )
                 if matches:
                     if self._mission_mgr.active_battle_observed():
@@ -3289,15 +3327,26 @@ class App:
             and isinstance(temporal, RunningAttachmentTemporalBinding)
             and isinstance(context, PlayerSaveAttachmentContext)
             and isinstance(evidence, Mapping)
+            and evidence.get("game_state") == "active_battle"
             and temporal.matches_context(context)
             and acquisition.binding == temporal.target_binding
             and claim.get("receipt") == workflow.get("save_receipt")
-            and self._repair_authority_matches_runtime(evidence, current)
+            and self._workflow_evidence_matches_runtime(
+                evidence,
+                current,
+                intent="attach_battle",
+                allowed_activity_scope_transition=(
+                    temporal.source_activity_scope_id,
+                    temporal.activity_scope_id or "",
+                ),
+            )[0]
         ):
             self._running_reconciliation_claims().pop(workflow_id, None)
             return None
         try:
-            live_context = self._current_player_save_attachment_context()
+            live_context = self._current_player_save_attachment_context(
+                pending_adoption_workflow_id=workflow_id,
+            )
         except Exception:
             return None
         if live_context != context or not temporal.matches_context(live_context):
@@ -4349,14 +4398,18 @@ class App:
         self,
         *,
         transition_source_activity_scope_id: Optional[str] = None,
+        pending_adoption_workflow_id: Optional[str] = None,
     ) -> PlayerSaveAttachmentContext:
         """Return exact process/scope authority for a RUNNING attachment.
 
         A continuity comparison can durably replace the activity scope before
         the next captured frame publishes that new scope. During that single
         recapture boundary, accept only the source scope carried by the same
-        forced-save claim; every other owner, target, generation, or scope
-        mismatch still fails closed.
+        forced-save claim. A retained ready claim may also be revalidated just
+        before observation-only lifecycle adoption; that exception is scoped
+        to the exact process-local workflow and cannot authorize another save
+        read. Every other owner, target, generation, or scope mismatch still
+        fails closed.
         """
 
         session = self._adb_target_session
@@ -4376,6 +4429,30 @@ class App:
         current = self._current_control_workflow_evidence()
         reconciliation_owner = self._running_save_reconciliation_owner()
         active_battle = self._mission_mgr.active_battle_observed()
+        pending_workflow_id = str(
+            pending_adoption_workflow_id or ""
+        ).strip()
+        supervisor = getattr(self, "_supervisor", None)
+        workflow = (
+            supervisor.battle_workflow
+            if pending_workflow_id and supervisor is not None
+            else None
+        )
+        pending_adoption_owner = bool(
+            pending_workflow_id
+            and isinstance(workflow, Mapping)
+            and workflow.get("request_id") == pending_workflow_id
+            and workflow.get("intent") == "attach_battle"
+            and workflow.get("status") == "ready"
+            and isinstance(
+                self._running_reconciliation_claims().get(
+                    pending_workflow_id
+                ),
+                Mapping,
+            )
+            and isinstance(current, Mapping)
+            and current.get("game_state") == "active_battle"
+        )
         if not (
             active_battle is True
             or (
@@ -4383,11 +4460,12 @@ class App:
                 and isinstance(current, Mapping)
                 and current.get("game_state") == "active_battle"
             )
+            or pending_adoption_owner
         ):
             raise RuntimeError(
                 "player-save attachment battle identity is not active"
             )
-        if reconciliation_owner is not None:
+        if reconciliation_owner is not None or pending_adoption_owner:
             observed_scope_id = (
                 str(current.get("activity_scope_run_id") or "")
                 if isinstance(current, Mapping)
