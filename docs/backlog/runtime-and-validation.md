@@ -15,23 +15,6 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for incompatible versions, shape
   changes, stale data, mismatches, and unmapped settings.
-  - [x] **Version 1101 compatibility boundary — `feature/player-save-version-update`.**
-    Add `data-9-game-1101` for game `28.3.2` after a stable exact-target read
-    proved the unchanged root, retention of all 739 version-1073 fields,
-    unchanged required arrays, and two added integer counters:
-    `enemiesKilledThisWave` and `enemiesSpawnedThisWave`. Classify both as
-    unknown and declare version 1073 as the semantic authority for its 15
-    portable configuration checks and runtime normalizer. Exact and unknown
-    forward revisions now pass only an additive-root/required-array gate; every
-    check and runtime component retains its own type, ID, and shape validation.
-    Synthetic coverage proves compatible exact and future versions, redaction
-    of added fields, and UI fallback on field removal, array drift, or a new
-    data version. A safely restored running attachment now uses guarded Battle
-    History UI when the save projection is unusable instead of holding
-    indefinitely. Tournament derivation remains version-exact and UI-required.
-    The supported checkpoint passed compilation, state-definition validation,
-    clickmap integrity with zero errors and the 44 established orphan
-    candidates, and all 1,933 tests in 340.78 seconds.
   - [ ] Independently validate the version-1101 Tournament generator before
     enabling it, and calibrate the two new per-wave enemy counters only if they
     gain a consumer. Retain scheduled UI audits; any semantic discrepancy in an

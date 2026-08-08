@@ -39,6 +39,48 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 player-save revision compatibility deployment
+
+- Commits `9ce79b9` and `b292779` add exact `data-9-game-1101` support for
+  game `28.3.2`. A stable exact-target read retained all 739 version-1073
+  fields and required array shapes and added only the unpublished integer
+  counters `enemiesKilledThisWave` and `enemiesSpawnedThisWave`. Version 1073
+  remains the semantic authority for 15 portable configuration checks and the
+  runtime normalizer. Exact and unknown forward game versions are accepted
+  only through the additive-root/required-array compatibility gate; each
+  consumer still enforces its own type, ID, length, and shape contract.
+  Structural drift, a new data version, or an incompatible field continues
+  through the existing UI checker instead of stopping indefinitely. The
+  version-derived Tournament generator remains exact-version and UI-required.
+- The first bounded production smoke proved that mapping 1101 decoded and
+  projected the live save, then exposed two attachment-handoff defects rather
+  than a mapping failure. Fix-forward `543894b` preserves typed save evidence
+  across an exact continuity-owned activity-scope rebind. Fix-forward
+  `e39a785` permits that exact typed source-to-final transition through the
+  ready, pre-adoption frame without weakening runtime, PID, ADB target,
+  generation, battle-state, or unrelated-scope checks. It also removes the
+  circular requirement that lifecycle adoption already be complete before
+  the retained claim can authorize observation-only adoption.
+- Exact candidate `e39a78552572a6ea71e281568e0f0d056ad6d2c7` passed the
+  complete isolated checkpoint: compilation, state-definition validation,
+  clickmap integrity with zero errors and the 44 established orphan
+  candidates, and all 1,936 tests in 336.01 seconds. Production was stopped
+  for each runtime-code boundary. The final promotion used annotated rollback
+  tag `production-before-20260808T121511Z-543894b`; the two earlier bounded
+  attempts retain rollback tags `production-before-20260808T114321Z-c6a2ff5`
+  and `production-before-20260808T115858Z-b292779`.
+- Replacement PID `2406590` acquired exact target `localhost:5555` under the
+  selected `none` strategy. Workflow `b142e214ca6b424991478bdf0dba9f52`
+  completed after a guarded forced serialization confirmed unchanged battle
+  continuity with mapping `data-9-game-1101`, applied 11 save-backed No
+  Strategy observations, and adopted the active battle. After explicit Enable,
+  the UI fallback visited only unresolved `modules` and `damage_slider` fields.
+  Auxiliary authority then collected the visible in-battle ad gem at 05:17:42
+  PDT, the overlay disappeared, and the bounded floating-gem scan completed
+  normally. Final fresh status was `RUNNING`, observation-only Strategy
+  `none`, with no Pause, workflow hold, or stale authority. No Surrender,
+  battle start, or terminal action was used.
+
 ### 2026-08-07 Home Perk repair resilience
 
 - Commit `a5825db` replaces Ban Perks' single-frame, multi-action plan with a
