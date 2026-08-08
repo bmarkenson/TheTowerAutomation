@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from core.app import App
 from core.perk_save_monitor import PerkSaveMonitorContext
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionStatus,
@@ -153,3 +154,35 @@ def test_activity_scope_change_during_read_discards_bundle_before_projection():
     pull.assert_called_once_with(device_id="localhost:5555")
     decode.assert_called_once()
     consumer.assert_not_called()
+
+
+def test_app_applies_worker_checkpoint_only_on_matching_current_context():
+    app = App.__new__(App)
+    context = _context()
+    checkpoint = {"schema_version": 1, "picked_count": 2}
+    observer = Mock()
+    observer.observe_saved_checkpoint.return_value = "initial_saved_prefix"
+    app._perk_timeline_observer = observer
+    app._pending_perk_timeline_save_checkpoint = (context, checkpoint)
+    app._current_perk_save_monitor_context = lambda: context
+
+    assert app._sync_perk_timeline_save_checkpoint() == "initial_saved_prefix"
+    observer.observe_saved_checkpoint.assert_called_once_with(checkpoint)
+    assert app._pending_perk_timeline_save_checkpoint is None
+
+
+def test_app_discards_worker_checkpoint_after_activity_scope_changes():
+    app = App.__new__(App)
+    observer = Mock()
+    app._perk_timeline_observer = observer
+    app._pending_perk_timeline_save_checkpoint = (
+        _context(activity="scope-1"),
+        {"schema_version": 1},
+    )
+    app._current_perk_save_monitor_context = lambda: _context(
+        activity="scope-2"
+    )
+
+    assert app._sync_perk_timeline_save_checkpoint() is None
+    observer.observe_saved_checkpoint.assert_not_called()
+    assert app._pending_perk_timeline_save_checkpoint is None

@@ -576,6 +576,36 @@ def test_render_perk_selection_timeline_preserves_atomic_batches():
     assert "Perk Wave Requirement −75% observed: yes" in rendered
 
 
+def test_render_save_backed_perk_timeline_describes_passive_pending_boundary():
+    lines = render_perk_selection_timeline_markdown(
+        {
+            "source": "player_save_perk_prefix_with_passive_top_bar",
+            "baseline_status": "save_backed_mid_battle",
+            "pwr_maxed_observed": False,
+            "batches": [
+                {
+                    "sequence": 1,
+                    "scheduled_wave": 100,
+                    "observed_wave": 130,
+                    "selection_model": "exact_saved_pick",
+                    "selections": [
+                        {"display_text": "Max Health (level 1)"}
+                    ],
+                }
+            ],
+            "warnings": [],
+            "pending_scheduled_wave": 142,
+            "pending_scheduled_waves": [142],
+        }
+    )
+
+    rendered = "\n".join(lines)
+    assert "exact oldest-first player-save pick" in rendered
+    assert "do not open the in-battle Perks panel" in rendered
+    assert "Pending save reconciliation for scheduled wave 142" in rendered
+    assert "Pending panel observation" not in rendered
+
+
 def test_render_perk_selection_timeline_marks_pause_interval_aggregates():
     lines = render_perk_selection_timeline_markdown(
         {

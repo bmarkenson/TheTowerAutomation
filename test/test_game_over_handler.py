@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from handlers.game_over_handler import (
+    _capture_game_over_perk_tail,
     _capture_game_over_perks,
     _game_stats_visible,
     _resolve_game_over_perks,
@@ -155,6 +156,38 @@ def test_perks_capture_retries_close_until_game_stats_is_restored():
     ]
 
 
+def test_terminal_tail_capture_never_scrolls_through_the_full_inventory():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    parsed = {
+        "source_method": "ocr",
+        "order_semantics": "latest_selected_first",
+        "selected": [{"display_text": "Orbs +1", "confidence": 95.0}],
+        "quality": {"valid": True, "source_complete": True},
+    }
+
+    with (
+        patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+        patch("handlers.game_over_handler._game_stats_visible", return_value=True),
+        patch("handlers.game_over_handler._wait_for_visible", return_value=frame),
+        patch(
+            "handlers.game_over_handler.scroll_to_edge",
+            return_value=ScrollResult(True, frame, 2, "edge_reached"),
+        ),
+        patch("handlers.game_over_handler.ocr_selected_perks", return_value=parsed),
+        patch("handlers.game_over_handler.tap_if_visible", return_value=True),
+        patch("handlers.game_over_handler._close_game_over_perks", return_value=True),
+        patch("handlers.game_over_handler.capture_scroll_to_edge") as full_scroll,
+    ):
+        result, frames, restored = _capture_game_over_perk_tail()
+
+    assert result["capture_scope"] == "newest_visible_prefix"
+    assert result["quality"]["scope_complete"] is True
+    assert result["quality"]["inventory_complete"] is False
+    assert frames == [frame]
+    assert restored is True
+    full_scroll.assert_not_called()
+
+
 def test_proven_final_prefix_skips_terminal_perks_navigation():
     checkpoint = {
         "picked_count": 1,
@@ -228,7 +261,7 @@ def test_malformed_complete_looking_inventory_preserves_terminal_perks_navigatio
     }
 
     with patch(
-        "handlers.game_over_handler._capture_game_over_perks",
+        "handlers.game_over_handler._capture_game_over_perk_tail",
         return_value=(terminal_ui, ["frame"], True),
     ) as capture_perks:
         perks, frames, restored = _resolve_game_over_perks(context)
@@ -236,10 +269,88 @@ def test_malformed_complete_looking_inventory_preserves_terminal_perks_navigatio
     assert perks["selected"] == terminal_ui["selected"]
     assert perks["quality"]["valid"] is False
     assert perks["quality"]["retain_source_images"] is True
-    assert "monitoring_record_unavailable" in perks["quality"]["warnings"][0]
+    assert any(
+        "monitoring_record_unavailable" in warning
+        for warning in perks["quality"]["warnings"]
+    )
     assert frames == ["frame"]
     assert restored is True
     capture_perks.assert_called_once_with(action_guard_fn=None)
+
+
+def test_pending_saved_prefix_uses_only_terminal_top_reconciliation():
+    checkpoint = {
+        "saved_wave": 200,
+        "picked_count": 1,
+        "picks": [
+            {
+                "sequence": 1,
+                "saved_wave": 100,
+                "perk_id": 0,
+                "perk_key": "max_health",
+                "level_after": 1,
+            }
+        ],
+        "levels": [
+            {"perk_id": 0, "perk_key": "max_health", "level": 1}
+        ],
+    }
+    terminal_top = {
+        "source_method": "terminal_perks_top_prefix_ocr",
+        "capture_scope": "newest_visible_prefix",
+        "order_semantics": "latest_selected_first",
+        "selected": [
+            {
+                "display_text": "Orbs +1",
+                "latest_selection_rank": 1,
+                "instance_model": "single_instance",
+                "confidence": 96.0,
+            },
+            {
+                "display_text": "x1.25 Max Health",
+                "latest_selection_rank": 2,
+                "instance_model": "leveled",
+                "confidence": 95.0,
+            },
+        ],
+        "quality": {"valid": True, "scope_complete": True},
+    }
+    context = {
+        "last_wave": 300,
+        "perk_selection_timeline": {
+            "passive_top_bar": {
+                "selection_boundaries": [
+                    {"scheduled_wave": 250, "boundary_coverage": "complete"}
+                ]
+            }
+        },
+        "perk_save_monitoring": {
+            "schema_version": 1,
+            "status": "fallback_required",
+            "context_status": "bound",
+            "active_failure_reason": None,
+            "round_conflict_reason": None,
+            "checkpoint": checkpoint,
+        },
+    }
+
+    with (
+        patch(
+            "handlers.game_over_handler._capture_game_over_perk_tail",
+            return_value=(terminal_top, ["top-frame"], True),
+        ) as capture_top,
+        patch("handlers.game_over_handler._capture_game_over_perks") as capture_full,
+    ):
+        perks, frames, restored = _resolve_game_over_perks(context)
+
+    assert perks["source_method"] == (
+        "player_save_checkpoint_plus_terminal_top_prefix"
+    )
+    assert perks["terminal_tail"]["aggregates"][0]["perk_key"] == "orbs"
+    assert frames == ["top-frame"]
+    assert restored is True
+    capture_top.assert_called_once_with(action_guard_fn=None)
+    capture_full.assert_not_called()
 
 
 def test_missing_terminal_closure_preserves_existing_perks_navigation():

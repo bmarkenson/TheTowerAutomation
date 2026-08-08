@@ -12,6 +12,7 @@ from core.perk_save_monitor import (
     PerkSaveMonitor,
     PerkSaveMonitorContext,
     merge_terminal_perk_evidence,
+    merge_terminal_perk_tail,
 )
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
@@ -501,6 +502,37 @@ def test_failed_forced_attachment_never_publishes_or_erases_prior_prefix():
     assert evidence["reason"] == "source_restoration_ambiguous"
 
 
+def test_bound_checkpoint_accessor_retains_positive_prefix_after_later_failure():
+    monitor = PerkSaveMonitor()
+    context = _context()
+    assert _observe(
+        monitor,
+        _runtime(
+            1,
+            saved_wave=150,
+            picks=(_pick(1, 100, 1, "max_health"),),
+        ),
+        context=context,
+    ) == "initial_complete_prefix"
+    failed = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+        status=PlayerSaveAcquisitionStatus.UNAVAILABLE,
+        reason="passive_source_temporarily_unavailable",
+        binding=context.target_binding,
+        acquisition_started_at=START + timedelta(seconds=20),
+        captured_at=None,
+        acquisition_completed_at=START + timedelta(seconds=21),
+        transport_stable=False,
+    )
+    assert monitor.observe_bundle(failed, context=context) == "rejected_acquisition"
+
+    checkpoint = monitor.bound_checkpoint_evidence(context)
+    assert checkpoint is not None
+    assert checkpoint["picked_count"] == 1
+    assert checkpoint["picks"][0]["perk_key"] == "max_health"
+    assert monitor.bound_checkpoint_evidence(_context(generation=9)) is None
+
+
 def test_post_exhaustion_checkpoint_and_terminal_window_close_exact_inventory():
     evidence = _qualified_monitoring()
 
@@ -747,6 +779,120 @@ def test_terminal_tail_uses_exact_schedule_only_for_unique_correspondence():
             "wave_status": "exact_passive_schedule_correspondence",
         }
     ]
+
+
+def test_terminal_top_prefix_fills_only_tail_before_saved_recency_marker():
+    monitoring = _qualified_monitoring()
+    terminal_top = {
+        "source_method": "terminal_perks_top_prefix_ocr",
+        "capture_scope": "newest_visible_prefix",
+        "order_semantics": "latest_selected_first",
+        "selected": [
+            {
+                "display_text": "Perk Wave Requirement -25%",
+                "latest_selection_rank": 1,
+                "instance_model": "leveled",
+                "confidence": 95.0,
+            },
+            {
+                "display_text": "x1.44 Damage",
+                "latest_selection_rank": 2,
+                "instance_model": "leveled",
+                "confidence": 95.0,
+            },
+            {
+                "display_text": "x1.25 Max Health",
+                "latest_selection_rank": 3,
+                "instance_model": "leveled",
+                "confidence": 95.0,
+            },
+        ],
+        "quality": {
+            "valid": True,
+            "scope_complete": True,
+            "inventory_complete": False,
+        },
+    }
+    timeline = {
+        "passive_top_bar": {
+            "selection_boundaries": [
+                {"scheduled_wave": 300, "boundary_coverage": "complete"}
+            ]
+        }
+    }
+
+    inventory, merge = merge_terminal_perk_tail(
+        monitoring,
+        terminal_top,
+        top_bar_timeline=timeline,
+        game_over_wave=400,
+    )
+
+    assert inventory is not None
+    assert inventory["source_method"] == (
+        "player_save_checkpoint_plus_terminal_top_prefix"
+    )
+    assert merge["overlap_marker"]["perk_key"] == "damage"
+    assert merge["tail_correspondence"] == "unique"
+    assert merge["tail_aggregates"] == [
+        {
+            "perk_key": "perk_wave_requirement",
+            "kind": "aggregate_addition",
+            "level_before": 0,
+            "level_after": 1,
+            "net_level_change": 1,
+            "minimum_level_change": 1,
+            "latest_selection_rank": 1,
+            "display_text": "Perk Wave Requirement -25%",
+            "sequence": 3,
+            "wave": 300,
+            "order_status": "exact_unique_correspondence",
+            "wave_status": "exact_passive_schedule_correspondence",
+        }
+    ]
+
+
+def test_terminal_top_prefix_preserves_uncertainty_when_marker_is_not_visible():
+    monitoring = _qualified_monitoring()
+    monitoring["active_failure_reason"] = "later_passive_read_failed"
+    terminal_top = {
+        "capture_scope": "newest_visible_prefix",
+        "order_semantics": "latest_selected_first",
+        "selected": [
+            {
+                "display_text": "Orbs +1",
+                "latest_selection_rank": 1,
+                "instance_model": "single_instance",
+                "confidence": 96.0,
+            },
+            {
+                "display_text": "Perk Wave Requirement -25%",
+                "latest_selection_rank": 2,
+                "instance_model": "leveled",
+                "confidence": 95.0,
+            },
+        ],
+        "quality": {"valid": True, "scope_complete": True},
+    }
+
+    inventory, merge = merge_terminal_perk_tail(
+        monitoring,
+        terminal_top,
+        game_over_wave=400,
+    )
+
+    assert inventory is not None
+    assert merge["overlap_marker"] is None
+    assert merge["tail_correspondence"] == "interval_or_unresolved"
+    assert {item["perk_key"] for item in merge["tail_aggregates"]} == {
+        "orbs",
+        "perk_wave_requirement",
+    }
+    assert all(item["sequence"] is None for item in merge["tail_aggregates"])
+    assert any(
+        "later save observation failed" in warning
+        for warning in inventory["quality"]["warnings"]
+    )
 
 
 @pytest.mark.parametrize(

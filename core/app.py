@@ -401,6 +401,7 @@ class App:
             state_path=perk_timeline_state
         )
         self._last_requested_perk_checkpoint_signature = None
+        self._pending_perk_timeline_save_checkpoint = None
         self._player_save_passive_scheduler = None
         if self._player_save_acquirer is not None:
             try:
@@ -591,6 +592,10 @@ class App:
         if monitor is not None:
             with self._perk_save_monitor_guard():
                 monitor.observe_bundle(acquisition, context=context)
+                self._retain_perk_timeline_save_checkpoint(
+                    monitor,
+                    context,
+                )
         self._observe_shared_acquisition_for_audit(
             acquisition,
             reason_code=reason_code,
@@ -622,7 +627,57 @@ class App:
         context = self._current_perk_save_monitor_context()
         if monitor is not None and context is not None:
             with self._perk_save_monitor_guard():
+                self._pending_perk_timeline_save_checkpoint = None
                 monitor.bind_context(context, new_activity=True)
+
+    def _retain_perk_timeline_save_checkpoint(
+        self,
+        monitor: PerkSaveMonitor,
+        context: PerkSaveMonitorContext,
+    ) -> None:
+        """Queue one detached positive prefix while holding the monitor lock."""
+
+        checkpoint = monitor.bound_checkpoint_evidence(context)
+        if checkpoint is not None:
+            self._pending_perk_timeline_save_checkpoint = (
+                context,
+                checkpoint,
+            )
+
+    def _sync_perk_timeline_save_checkpoint(self) -> Optional[str]:
+        """Apply worker-produced save evidence on the serialized App thread."""
+
+        context = self._current_perk_save_monitor_context()
+        with self._perk_save_monitor_guard():
+            pending = getattr(
+                self,
+                "_pending_perk_timeline_save_checkpoint",
+                None,
+            )
+            if not (
+                isinstance(pending, tuple)
+                and len(pending) == 2
+                and isinstance(pending[0], PerkSaveMonitorContext)
+                and isinstance(pending[1], Mapping)
+            ):
+                return None
+            pending_context, checkpoint = pending
+            if context is None:
+                return None
+            if pending_context != context:
+                self._pending_perk_timeline_save_checkpoint = None
+                return None
+            self._pending_perk_timeline_save_checkpoint = None
+        disposition = self._perk_timeline().observe_saved_checkpoint(
+            checkpoint
+        )
+        if disposition.startswith("rejected_"):
+            log(
+                "[PERK_TIMELINE] Monitor-validated save checkpoint was "
+                f"rejected by the timeline: {disposition}",
+                "WARN",
+            )
+        return disposition
 
     def _perk_save_monitor_guard(self) -> threading.RLock:
         """Serialize domain-monitor calls at the App coordination boundary."""
@@ -787,6 +842,7 @@ class App:
             terminal,
             run_binding=binding,
         )
+        self._sync_perk_timeline_save_checkpoint()
         acquisition = terminal_save.get("_acquisition")
         typed_acquisition = (
             acquisition
@@ -970,6 +1026,10 @@ class App:
                     monitor.observe_bundle(
                         acquisition,
                         context=monitor_context,
+                    )
+                    self._retain_perk_timeline_save_checkpoint(
+                        monitor,
+                        monitor_context,
                     )
 
         if not acquisition.complete or acquisition.snapshot is None:
@@ -7076,6 +7136,10 @@ class App:
                                 attachment_acquisition,
                                 context=monitor_context,
                             )
+                            self._retain_perk_timeline_save_checkpoint(
+                                monitor,
+                                monitor_context,
+                            )
                 self._observe_shared_acquisition_for_audit(
                     attachment_acquisition,
                     reason_code="forced_running_attachment",
@@ -8191,22 +8255,16 @@ class App:
                     if self._last_wave_ts > 0
                     else None
                 )
-                perk_timeline_handled = False
                 if self._perk_timeline_enabled():
-                    perk_timeline_handled = self._perk_timeline().handle(
+                    self._sync_perk_timeline_save_checkpoint()
+                    self._perk_timeline().observe_passive(
                         img,
                         detection,
                         wave=wave_val,
-                        actions_allowed=strategy_action_allowed,
-                        action_guard_fn=self._runtime_action_guard,
                     )
                     self._sync_perk_exhaustion_evidence()
                     self._request_perk_checkpoint_for_passive_boundary()
                     self._observe_player_save_audit_perk_mapping_evidence()
-                if perk_timeline_handled:
-                    # The observer owns its Perks modal route. Re-enter through
-                    # capture before any consumer uses the pre-route frame.
-                    continue
                 activation_tracker = self._activation_tracker()
                 activation_events = activation_tracker.observe(
                     img,

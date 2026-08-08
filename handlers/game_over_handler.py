@@ -25,7 +25,10 @@ from core.battle_stats import (
     persist_battle_record,
 )
 from core.battle_perks import ocr_selected_perks
-from core.perk_save_monitor import merge_terminal_perk_evidence
+from core.perk_save_monitor import (
+    merge_terminal_perk_evidence,
+    merge_terminal_perk_tail,
+)
 from core.terminal_save_report import terminal_save_report_complete
 
 
@@ -86,8 +89,10 @@ def handle_game_over(
 
     Workflow:
       1) Capture the initial Game Stats dialog in memory.
-      2) Use a proven save-backed final Perk inventory, or capture the complete
-         ordered Selected Perks list and return to Game Stats.
+      2) Use a proven save-backed final Perk inventory. If only an exact saved
+         prefix exists, inspect the newest terminal Perk viewport and reconcile
+         its tail without a full-list scroll. Capture the complete ordered list
+         only when no usable saved prefix exists, then return to Game Stats.
       3) Prefer the causally bound, exact-version save History projection.
       4) If save evidence is unavailable or contradicts Game Stats, open More
          Stats and copy the complete report through Android's clipboard service.
@@ -651,6 +656,117 @@ def _capture_game_over_perks(
             source_reason=f"ocr_failed:{exc}",
         )
 
+    restored = _close_game_over_perks(
+        action_guard_fn=action_guard_fn,
+    )
+    return perks, frames, restored
+
+
+def _capture_game_over_perk_tail(
+    *,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+):
+    """Capture only the newest terminal Perk viewport and restore Game Stats."""
+
+    game_stats_screen = capture_adb_screenshot()
+    if game_stats_screen is None or not _game_stats_visible(game_stats_screen):
+        game_stats_missing = game_stats_screen is None
+        perks = ocr_selected_perks(
+            [],
+            source_complete=False,
+            source_reason=(
+                "game_stats_capture_failed"
+                if game_stats_missing
+                else "game_stats_not_visible"
+            ),
+        )
+        return perks, [], game_stats_missing
+    if not tap_if_visible(
+        "buttons.perks:game_over",
+        screenshot=game_stats_screen,
+        retries=1,
+        action_guard_fn=action_guard_fn,
+    ):
+        return (
+            ocr_selected_perks(
+                [],
+                source_complete=False,
+                source_reason="perks_button_not_visible",
+            ),
+            [],
+            True,
+        )
+
+    perks_screen = _wait_for_visible(PERKS_INDICATOR, timeout=5.0)
+    if perks_screen is None:
+        current = capture_adb_screenshot()
+        restored = bool(current is not None and _game_stats_visible(current))
+        return (
+            ocr_selected_perks(
+                [],
+                source_complete=False,
+                source_reason="perks_panel_not_visible",
+            ),
+            [],
+            restored,
+        )
+
+    top = scroll_to_edge(
+        "gesture_targets.goto_top:perks",
+        source_label=PERKS_INDICATOR,
+        screenshot=perks_screen,
+        progress_region=PERKS_CONTENT_REGION,
+        max_swipes=8,
+        settle_s=0.8,
+        action_guard_fn=action_guard_fn,
+    )
+    frames = [top.screenshot] if top.screenshot is not None else []
+    try:
+        perks = ocr_selected_perks(
+            frames,
+            source_complete=top.success,
+            source_reason=f"newest_visible_prefix:{top.reason}",
+        )
+    except Exception as exc:
+        log(f"[BATTLE_PERKS] Top-prefix OCR failed: {exc}", "ERROR", console=True)
+        perks = ocr_selected_perks(
+            [],
+            source_complete=False,
+            source_reason=f"top_prefix_ocr_failed:{exc}",
+        )
+    perks = dict(perks)
+    quality = dict(perks.get("quality") or {})
+    quality.update(
+        {
+            "scope_complete": bool(top.success),
+            "inventory_complete": False,
+            "capture_scope": "newest_visible_prefix",
+        }
+    )
+    perks.update(
+        {
+            "source_method": "terminal_perks_top_prefix_ocr",
+            "capture_scope": "newest_visible_prefix",
+            "quality": quality,
+        }
+    )
+    log(
+        "[BATTLE_PERKS] Captured the newest terminal Perk prefix without "
+        "scrolling through the complete inventory",
+        "DEBUG",
+    )
+    restored = _close_game_over_perks(
+        action_guard_fn=action_guard_fn,
+    )
+    return perks, frames, restored
+
+
+def _close_game_over_perks(
+    *,
+    action_guard_fn: Optional[Callable[[], bool]],
+) -> bool:
+    """Close the owned terminal Perks panel and prove Game Stats is back."""
+
     restored = False
     for attempt in range(2):
         if not tap_if_visible(
@@ -671,7 +787,7 @@ def _capture_game_over_perks(
             f"verified close ({attempt + 2}/2)",
             "DEBUG",
         )
-    return perks, frames, restored
+    return restored
 
 
 def _resolve_game_over_perks(
@@ -679,7 +795,7 @@ def _resolve_game_over_perks(
     *,
     action_guard_fn: Optional[Callable[[], bool]] = None,
 ):
-    """Use a proven saved final inventory or retain the terminal UI route."""
+    """Use saved finality, bounded top-tail repair, or the full UI fallback."""
 
     monitoring = context.get("perk_save_monitoring")
     inventory = (
@@ -716,6 +832,40 @@ def _resolve_game_over_perks(
                 "INFO",
             )
             return dict(inventory), [], True
+
+    can_reconcile_top = bool(
+        isinstance(monitoring, Mapping)
+        and monitoring.get("context_status") == "bound"
+        and isinstance(monitoring.get("checkpoint"), Mapping)
+        and not monitoring.get("round_conflict_reason")
+    )
+    if can_reconcile_top:
+        terminal_ui, frames, restored = _capture_game_over_perk_tail(
+            action_guard_fn=action_guard_fn,
+        )
+        if not restored:
+            return terminal_ui, frames, restored
+        inventory, merge = merge_terminal_perk_tail(
+            monitoring,
+            terminal_ui,
+            top_bar_timeline=context.get("perk_selection_timeline"),
+            game_over_wave=context.get("last_wave"),
+        )
+        context["perk_terminal_merge"] = merge
+        if inventory is not None:
+            return inventory, frames, restored
+        terminal_ui = dict(terminal_ui)
+        quality = dict(terminal_ui.get("quality") or {})
+        quality["valid"] = False
+        quality["retain_source_images"] = True
+        warnings = list(quality.get("warnings") or [])
+        warnings.append(
+            "Terminal Perks top-prefix evidence could not reconcile with the "
+            f"retained exact saved prefix ({merge.get('reason') or 'unknown'})"
+        )
+        quality["warnings"] = warnings
+        terminal_ui["quality"] = quality
+        return terminal_ui, frames, restored
 
     terminal_ui, frames, restored = _capture_game_over_perks(
         action_guard_fn=action_guard_fn,

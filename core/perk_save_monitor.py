@@ -252,6 +252,25 @@ class PerkSaveMonitor:
             return None
         return copy.deepcopy(self._exhaustion)
 
+    def bound_checkpoint_evidence(
+        self,
+        context: Optional[PerkSaveMonitorContext],
+    ) -> Optional[dict[str, Any]]:
+        """Return the newest exact positive prefix for this bound activity.
+
+        A retained prefix remains valid historical evidence after a later read
+        failure.  Callers must not use this accessor to claim finality or the
+        absence of picks after the checkpoint.
+        """
+
+        if context is None or self._context != context:
+            return None
+        if self._checkpoint is None or self._identity is None:
+            return None
+        if self._checkpoint.get("active_round_identity") != self._identity:
+            return None
+        return copy.deepcopy(self._checkpoint)
+
     def terminal_evidence(
         self,
         *,
@@ -865,6 +884,384 @@ def merge_terminal_perk_evidence(
     return normalized, merge
 
 
+def merge_terminal_perk_tail(
+    monitoring: Mapping[str, Any],
+    terminal_top: Mapping[str, Any],
+    *,
+    top_bar_timeline: Optional[Mapping[str, Any]] = None,
+    game_over_wave: Optional[int] = None,
+) -> tuple[Optional[dict[str, Any]], dict[str, Any]]:
+    """Merge only the newest terminal rows with an exact saved prefix.
+
+    The top viewport is not a complete inventory.  It may prove new or moved
+    families before an unchanged saved-recency marker; every other visible or
+    scheduled change remains explicit uncertainty rather than being invented
+    as an exact pick.
+    """
+
+    base = {
+        "schema_version": PERK_TERMINAL_MERGE_SCHEMA_VERSION,
+        "source": "saved_prefix_plus_terminal_perks_top_prefix",
+        "status": "conflict",
+        "reason": "invalid_input",
+    }
+    if (
+        not isinstance(monitoring, Mapping)
+        or monitoring.get("schema_version") != PERK_SAVE_MONITOR_SCHEMA_VERSION
+    ):
+        return None, {**base, "reason": "monitoring_record_unavailable"}
+    checkpoint = monitoring.get("checkpoint")
+    if not isinstance(checkpoint, Mapping):
+        return None, {**base, "reason": "saved_prefix_unavailable"}
+    if monitoring.get("round_conflict_reason"):
+        return None, {
+            **base,
+            "reason": "saved_prefix_conflicted",
+            "saved_prefix": _prefix_provenance(checkpoint),
+        }
+    quality = (
+        terminal_top.get("quality")
+        if isinstance(terminal_top, Mapping)
+        else None
+    )
+    selected = (
+        terminal_top.get("selected")
+        if isinstance(terminal_top, Mapping)
+        else None
+    )
+    if (
+        terminal_top.get("capture_scope") != "newest_visible_prefix"
+        or terminal_top.get("order_semantics") != "latest_selected_first"
+        or not isinstance(quality, Mapping)
+        or quality.get("valid") is not True
+        or quality.get("scope_complete") is not True
+        or not isinstance(selected, Sequence)
+        or isinstance(selected, (str, bytes, bytearray))
+        or not selected
+    ):
+        return None, {
+            **base,
+            "reason": "terminal_top_prefix_incomplete",
+            "saved_prefix": _prefix_provenance(checkpoint),
+        }
+
+    terminal_rows: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for index, raw in enumerate(selected, start=1):
+        if not isinstance(raw, Mapping):
+            return None, {**base, "reason": "terminal_top_row_malformed"}
+        display = " ".join(str(raw.get("display_text") or "").split())
+        key = classify_perk_configuration_text(display)
+        if not key or key == "empty_slot" or key in seen_keys:
+            return None, {
+                **base,
+                "reason": "terminal_top_family_unresolved_or_duplicate",
+                "saved_prefix": _prefix_provenance(checkpoint),
+            }
+        seen_keys.add(key)
+        try:
+            confidence = float(raw.get("confidence"))
+        except (TypeError, ValueError):
+            return None, {**base, "reason": "terminal_top_confidence_invalid"}
+        if not math.isfinite(confidence) or not 0 <= confidence <= 100:
+            return None, {**base, "reason": "terminal_top_confidence_invalid"}
+        rank = raw.get("latest_selection_rank", index)
+        if rank != index:
+            return None, {**base, "reason": "terminal_top_rank_invalid"}
+        terminal_rows.append(
+            {
+                "perk_key": key,
+                "display_text": display,
+                "latest_selection_rank": index,
+                "instance_model": str(raw.get("instance_model") or "unknown"),
+                "confidence": confidence,
+            }
+        )
+
+    raw_picks = checkpoint.get("picks")
+    raw_levels = checkpoint.get("levels")
+    if (
+        not isinstance(raw_picks, Sequence)
+        or isinstance(raw_picks, (str, bytes, bytearray))
+        or not isinstance(raw_levels, Sequence)
+        or isinstance(raw_levels, (str, bytes, bytearray))
+    ):
+        return None, {**base, "reason": "saved_prefix_malformed"}
+    prefix_levels = {
+        str(level.get("perk_key")): int(level.get("level"))
+        for level in raw_levels
+        if isinstance(level, Mapping)
+        and isinstance(level.get("perk_key"), str)
+        and type(level.get("level")) is int
+        and level.get("level", 0) >= 1
+    }
+    saved_recency: list[str] = []
+    for raw_pick in reversed(raw_picks):
+        if not isinstance(raw_pick, Mapping):
+            return None, {**base, "reason": "saved_prefix_malformed"}
+        key = str(raw_pick.get("perk_key") or "")
+        if key and key not in saved_recency:
+            saved_recency.append(key)
+
+    terminal_keys = [row["perk_key"] for row in terminal_rows]
+    overlap_split = _terminal_top_overlap_split(
+        terminal_keys,
+        saved_recency,
+    )
+    if not saved_recency:
+        proved_tail_rows = terminal_rows
+    elif overlap_split is None:
+        # Families absent from the exact saved prefix are still positive tail
+        # evidence even when the visible viewport does not reach a marker.
+        proved_tail_rows = [
+            row for row in terminal_rows if row["perk_key"] not in prefix_levels
+        ]
+    else:
+        proved_tail_rows = terminal_rows[:overlap_split]
+
+    last_saved_wave = checkpoint.get("saved_wave")
+    if type(last_saved_wave) is not int:
+        return None, {**base, "reason": "saved_wave_unavailable"}
+    if game_over_wave is not None and (
+        type(game_over_wave) is not int or game_over_wave < last_saved_wave
+    ):
+        return None, {**base, "reason": "game_over_wave_conflicts_with_prefix"}
+    scheduled = _tail_scheduled_waves(
+        top_bar_timeline,
+        after_wave=last_saved_wave,
+        through_wave=game_over_wave,
+    )
+
+    warnings: list[str] = []
+    if overlap_split is None and saved_recency:
+        warnings.append(
+            "The newest terminal viewport did not reach an unchanged saved "
+            "recency marker; only families absent from the saved prefix were "
+            "proved as tail additions"
+        )
+    elif overlap_split == 0 and scheduled:
+        warnings.append(
+            "Passive selection boundaries followed the saved checkpoint but "
+            "terminal recency did not prove which existing family changed"
+        )
+
+    aggregates: list[dict[str, Any]] = []
+    ambiguous_rows: list[dict[str, Any]] = []
+    for row in proved_tail_rows:
+        key = row["perk_key"]
+        prior_level = prefix_levels.get(key, 0)
+        if row["instance_model"] == "single_instance" and prior_level > 0:
+            ambiguous_rows.append(copy.deepcopy(row))
+            continue
+        aggregates.append(
+            {
+                "perk_key": key,
+                "kind": (
+                    "aggregate_addition"
+                    if prior_level == 0
+                    else "aggregate_level_change"
+                ),
+                "level_before": prior_level,
+                "level_after": (
+                    1
+                    if row["instance_model"] == "single_instance"
+                    else None
+                ),
+                "net_level_change": (
+                    1
+                    if row["instance_model"] == "single_instance"
+                    and prior_level == 0
+                    else None
+                ),
+                "minimum_level_change": 1,
+                "latest_selection_rank": row["latest_selection_rank"],
+                "display_text": row["display_text"],
+            }
+        )
+    if ambiguous_rows:
+        warnings.append(
+            "One-time terminal rows already present in the saved prefix could "
+            "not be treated as later selections"
+        )
+
+    overlap_authoritative = bool(
+        overlap_split is not None
+        and not (overlap_split == 0 and scheduled)
+    )
+    unique_correspondence = bool(
+        overlap_authoritative
+        and aggregates
+        and not ambiguous_rows
+        and len(aggregates) == len(proved_tail_rows)
+        and len(scheduled) == len(aggregates)
+    )
+    if unique_correspondence:
+        chronological = list(reversed(aggregates))
+        for sequence, (aggregate, wave) in enumerate(
+            zip(chronological, scheduled),
+            start=len(raw_picks) + 1,
+        ):
+            aggregate.update(
+                {
+                    "level_after": int(aggregate["level_before"]) + 1,
+                    "net_level_change": 1,
+                    "sequence": sequence,
+                    "wave": wave,
+                    "order_status": "exact_unique_correspondence",
+                    "wave_status": "exact_passive_schedule_correspondence",
+                }
+            )
+    else:
+        for aggregate in aggregates:
+            aggregate.update(
+                {
+                    "sequence": None,
+                    "wave": None,
+                    "order_status": "latest_recency_only",
+                    "wave_status": "bounded_interval",
+                    "interval": {
+                        "after_saved_wave_exclusive": last_saved_wave,
+                        "before_game_over_wave_inclusive": game_over_wave,
+                    },
+                }
+            )
+        if aggregates:
+            warnings.append(
+                "Terminal top rows prove a tail change, but repeated families "
+                "or incomplete passive boundaries leave exact count/order "
+                "unresolved"
+            )
+
+    final_inventory_complete = bool(
+        overlap_authoritative
+        and not ambiguous_rows
+        and all(type(item.get("level_after")) is int for item in aggregates)
+    )
+    final_by_key = {
+        str(level.get("perk_key")): {
+            "perk_id": level.get("perk_id"),
+            "perk_key": str(level.get("perk_key")),
+            "saved_level": int(level.get("level")),
+            "final_level": (
+                int(level.get("level"))
+                if overlap_authoritative
+                else None
+            ),
+            "level_status": (
+                "exact_unchanged_after_saved_checkpoint"
+                if overlap_authoritative
+                else "at_least_exact_saved_checkpoint"
+            ),
+        }
+        for level in raw_levels
+        if isinstance(level, Mapping)
+        and isinstance(level.get("perk_key"), str)
+        and type(level.get("level")) is int
+    }
+    for aggregate in aggregates:
+        key = aggregate["perk_key"]
+        final_level = aggregate.get("level_after")
+        final_by_key[key] = {
+            "perk_id": final_by_key.get(key, {}).get("perk_id"),
+            "perk_key": key,
+            "saved_level": aggregate["level_before"],
+            "final_level": final_level,
+            "level_status": "exact" if type(final_level) is int else "unresolved",
+            "terminal_display_text": aggregate["display_text"],
+        }
+
+    unresolved_visible = [
+        copy.deepcopy(row)
+        for row in terminal_rows
+        if row not in proved_tail_rows
+        and (
+            overlap_split is None
+            or row["latest_selection_rank"] <= overlap_split
+        )
+    ] + ambiguous_rows
+    if unresolved_visible:
+        warnings.append(
+            "Some visible terminal rows remain recency evidence only and were "
+            "not converted into saved-tail selections"
+        )
+    monitoring_failure = monitoring.get("active_failure_reason")
+    if monitoring_failure:
+        warnings.append(
+            "A later save observation failed after the retained exact prefix: "
+            + str(monitoring_failure)
+        )
+
+    merge = {
+        **base,
+        "status": "complete",
+        "reason": "terminal_top_prefix_reconciled_without_full_inventory_scroll",
+        "saved_prefix": _prefix_provenance(checkpoint),
+        "terminal_top_prefix": copy.deepcopy(dict(terminal_top)),
+        "overlap_marker": (
+            copy.deepcopy(terminal_rows[overlap_split])
+            if overlap_split is not None and overlap_split < len(terminal_rows)
+            else None
+        ),
+        "scheduled_tail_waves": scheduled,
+        "tail_correspondence": (
+            "unique" if unique_correspondence else "interval_or_unresolved"
+        ),
+        "tail_aggregates": copy.deepcopy(aggregates),
+        "unresolved_visible_rows": unresolved_visible,
+        "unresolved_scheduled_boundaries": (
+            [] if overlap_authoritative else list(scheduled)
+        ),
+        "warnings": list(warnings),
+    }
+    normalized = {
+        "schema_version": PERK_FINAL_INVENTORY_SCHEMA_VERSION,
+        "source_method": "player_save_checkpoint_plus_terminal_top_prefix",
+        "status": "bounded_terminal_top_reconciliation",
+        "order_semantics": "saved_prefix_exact_oldest_first",
+        "exact_saved_prefix": copy.deepcopy(dict(checkpoint)),
+        "exact_saved_picks": copy.deepcopy(list(raw_picks)),
+        "final_inventory": list(final_by_key.values()),
+        "terminal_tail": {
+            "status": "top_prefix_reconciled",
+            "capture_scope": "newest_visible_prefix",
+            "aggregate_semantics": (
+                "collapsed_recency_rows_preserve_unresolved_repeat_counts"
+            ),
+            "aggregates": copy.deepcopy(aggregates),
+            "unresolved_visible_rows": unresolved_visible,
+            "unresolved_scheduled_boundaries": (
+                [] if overlap_authoritative else list(scheduled)
+            ),
+            "warnings": list(warnings),
+        },
+        "terminal_ui": copy.deepcopy(dict(terminal_top)),
+        "quality": {
+            "valid": True,
+            "source_complete": True,
+            "source_reason": "exact_saved_prefix_and_bounded_terminal_top_prefix",
+            "final_inventory_complete": final_inventory_complete,
+            "warnings": list(warnings),
+            "retain_source_images": False,
+        },
+    }
+    return normalized, merge
+
+
+def _terminal_top_overlap_split(
+    terminal_keys: Sequence[str],
+    saved_recency: Sequence[str],
+) -> Optional[int]:
+    """Find the earliest top prefix followed by unchanged saved recency."""
+
+    for split in range(len(terminal_keys)):
+        moved = set(terminal_keys[:split])
+        expected_suffix = [key for key in saved_recency if key not in moved]
+        observed_suffix = list(terminal_keys[split:])
+        if observed_suffix == expected_suffix[: len(observed_suffix)]:
+            return split
+    return None
+
+
 def _saved_final_inventory(monitoring: Mapping[str, Any]) -> dict[str, Any]:
     checkpoint = monitoring["checkpoint"]
     return {
@@ -1182,4 +1579,5 @@ __all__ = [
     "PerkSaveMonitor",
     "PerkSaveMonitorContext",
     "merge_terminal_perk_evidence",
+    "merge_terminal_perk_tail",
 ]

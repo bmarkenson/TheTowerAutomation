@@ -61,6 +61,58 @@ def _full(*perks: dict) -> dict:
     }
 
 
+def _saved_checkpoint(revision: int, saved_wave: int, *picks: tuple) -> dict:
+    normalized = []
+    levels = {}
+    for sequence, (wave, perk_id, perk_key, level_after) in enumerate(
+        picks,
+        start=1,
+    ):
+        normalized.append(
+            {
+                "sequence": sequence,
+                "saved_wave": wave,
+                "perk_id": perk_id,
+                "perk_key": perk_key,
+                "level_after": level_after,
+                "source": "exact_saved_pick",
+            }
+        )
+        levels[perk_id] = (perk_key, level_after)
+    return {
+        "schema_version": 1,
+        "mapping_id": "data-9-game-1101",
+        "audit_matrix_id": "data-9-game-1101-runtime-audit-v2",
+        "game_version": 1101,
+        "save_revision": revision,
+        "saved_wave": saved_wave,
+        "captured_at": datetime.fromtimestamp(
+            1_800_000_000 + revision,
+            tz=timezone.utc,
+        ).isoformat(),
+        "active_round_identity": {
+            "game_version": 1101,
+            "current_tier": 19,
+            "rounds_started_this_tier": 7,
+            "round_seed": 12345,
+            "fingerprint": hashlib.sha256(b"round").hexdigest(),
+        },
+        "complete": True,
+        "picked_count": len(normalized),
+        "order_semantics": "oldest_selected_first_exact_saved_order",
+        "picks": normalized,
+        "levels": [
+            {"perk_id": perk_id, "perk_key": key, "level": level}
+            for perk_id, (key, level) in sorted(levels.items())
+        ],
+        "prefix_fingerprint": hashlib.sha256(
+            repr(normalized).encode("utf-8")
+        ).hexdigest(),
+        "acceptance": "strict_prefix_extension",
+        "acquisition_type": "passive_stable_read",
+    }
+
+
 def _stabilize(
     tracker: PerkTimelineTracker,
     progress: PerkProgress,
@@ -69,6 +121,108 @@ def _stabilize(
 ):
     tracker.observe(progress, wave=wave)
     return tracker.observe(progress, wave=wave)
+
+
+def test_saved_prefix_replaces_panel_timeline_and_extends_exactly():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=False)
+    _stabilize(tracker, _progress(500, 540), wave=500)
+    assert tracker.pending is not None
+
+    first = _saved_checkpoint(
+        10,
+        520,
+        (100, 0, "max_health", 1),
+        (200, 1, "perk_wave_requirement", 1),
+        (300, 1, "perk_wave_requirement", 2),
+    )
+    assert tracker.record_saved_checkpoint(first) == "initial_saved_prefix"
+    assert tracker.pending is None
+    assert tracker.drain_mapping_evidence() == ()
+
+    extended = _saved_checkpoint(
+        11,
+        620,
+        (100, 0, "max_health", 1),
+        (200, 1, "perk_wave_requirement", 1),
+        (300, 1, "perk_wave_requirement", 2),
+        (540, 1, "perk_wave_requirement", 3),
+        (580, 2, "damage", 1),
+    )
+    assert tracker.record_saved_checkpoint(extended) == (
+        "strict_saved_prefix_extension"
+    )
+
+    snapshot = tracker.snapshot()
+    assert snapshot["source"] == "player_save_perk_prefix_with_passive_top_bar"
+    assert snapshot["baseline_status"] == "save_backed_mid_battle"
+    assert snapshot["pwr_maxed_observed"] is True
+    assert snapshot["save_backed_prefix"]["picked_count"] == 5
+    assert [
+        batch["selections"][0]["perk_key"]
+        for batch in snapshot["batches"]
+    ] == [
+        "max_health",
+        "perk_wave_requirement",
+        "perk_wave_requirement",
+        "perk_wave_requirement",
+        "damage",
+    ]
+    assert all(
+        batch["selection_model"] == "exact_saved_pick"
+        and batch["snapshot_mode"] == "player_save_checkpoint"
+        for batch in snapshot["batches"]
+    )
+    assert tracker.drain_mapping_evidence() == ()
+
+
+def test_passive_observation_never_opens_perks_for_a_pending_baseline():
+    tracker = PerkTimelineTracker(confirmation_frames=1)
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with (
+        patch(
+            "core.perk_timeline.safe_tap",
+            side_effect=AssertionError("passive monitoring must not tap"),
+        ),
+        patch(
+            "core.perk_timeline.swipe_now",
+            side_effect=AssertionError("passive monitoring must not swipe"),
+        ),
+    ):
+        observer.observe_passive(
+            running,
+            {"state": "RUNNING"},
+            wave=500,
+            progress_fn=lambda _frame: _progress(500, 540),
+        )
+
+    assert tracker.pending is not None
+    assert tracker.pending.kind == "baseline"
+
+
+def test_save_backed_timeline_checkpoint_restores_for_the_same_scope(tmp_path):
+    state_path = tmp_path / "perk-timeline.json"
+    observer = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: "same-save-backed-battle",
+    )
+    checkpoint = _saved_checkpoint(
+        12,
+        300,
+        (100, 0, "max_health", 1),
+        (200, 1, "damage", 1),
+    )
+    assert observer.observe_saved_checkpoint(checkpoint) == "initial_saved_prefix"
+
+    restarted = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: "same-save-backed-battle",
+    )
+
+    assert restarted.snapshot() == observer.snapshot()
+    assert restarted.snapshot()["save_backed_prefix"]["picked_count"] == 2
 
 
 def _mapping_request(*waves: int) -> PerkCaptureRequest:

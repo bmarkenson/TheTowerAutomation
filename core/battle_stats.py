@@ -1751,25 +1751,48 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
         and not isinstance(raw_batches, (str, bytes))
         else []
     )
-    lines = [
-        "",
-        "## Perk selection timeline",
-        "",
-        (
-            "Selections on the same row were observed as one simultaneous batch; "
-            "their internal order is intentionally unspecified."
-        ),
-        (
-            "Deferred post-PWR snapshots with complete boundary observations "
-            "use the selected list's "
-            "newest-first order to reconstruct one distinct change per "
-            "scheduled boundary. Ambiguous diffs remain interval aggregates "
-            "without per-wave attribution. UI or process visibility gaps scan "
-            "newest-first to the first unchanged row and never invent skipped "
-            "boundary waves."
-        ),
-        "",
-    ]
+    save_backed = timeline.get("source") in {
+        "player_save_perk_prefix_with_passive_top_bar",
+        "passive_top_bar_awaiting_player_save",
+    }
+    lines = ["", "## Perk selection timeline", ""]
+    if save_backed:
+        lines.extend(
+            [
+                (
+                    "Each completed row is an exact oldest-first player-save "
+                    "pick with its saved wave and level-after value. Passive "
+                    "top-bar observations request checkpoints but do not open "
+                    "the in-battle Perks panel."
+                ),
+                (
+                    "A pending boundary means the save has not yet serialized "
+                    "a later positive prefix; it is not interpreted as proof "
+                    "that no later pick exists."
+                ),
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                (
+                    "Selections on the same row were observed as one "
+                    "simultaneous batch; their internal order is intentionally "
+                    "unspecified."
+                ),
+                (
+                    "Deferred post-PWR snapshots with complete boundary "
+                    "observations use the selected list's newest-first order "
+                    "to reconstruct one distinct change per scheduled boundary. "
+                    "Ambiguous diffs remain interval aggregates without "
+                    "per-wave attribution. UI or process visibility gaps scan "
+                    "newest-first to the first unchanged row and never invent "
+                    "skipped boundary waves."
+                ),
+                "",
+            ]
+        )
     if batches:
         lines.extend(
             [
@@ -1859,12 +1882,23 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
             and len(pending_waves) > 1
         ):
             lines.append(
-                "- Pending panel observation spans scheduled waves "
+                (
+                    "- Pending save reconciliation spans scheduled waves "
+                    if save_backed
+                    else "- Pending panel observation spans scheduled waves "
+                )
                 + ", ".join(str(value) for value in pending_waves)
             )
         else:
             lines.append(
-                f"- Pending panel observation for scheduled wave {pending}"
+                (
+                    f"- Pending save reconciliation for scheduled wave {pending}"
+                    if save_backed
+                    else (
+                        "- Pending panel observation for scheduled wave "
+                        f"{pending}"
+                    )
+                )
             )
     warnings = timeline.get("warnings")
     if isinstance(warnings, Sequence) and not isinstance(warnings, (str, bytes)):

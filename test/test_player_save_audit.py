@@ -1838,16 +1838,17 @@ def test_app_forwards_mapping_window_reset_without_affecting_dispatch():
     collector.reset_perk_mapping_evidence.assert_called_once_with()
 
 
-def test_perk_mapping_evidence_is_drained_before_timeline_route_recapture():
+def test_perk_timeline_syncs_save_before_passive_observation_without_ui_route():
     source = inspect.getsource(App.run)
-    handle = source.index("perk_timeline_handled = self._perk_timeline().handle")
+    sync = source.index("self._sync_perk_timeline_save_checkpoint()")
+    observe = source.index("self._perk_timeline().observe_passive")
     forward = source.index(
         "self._observe_player_save_audit_perk_mapping_evidence()"
     )
-    route_recapture = source.index("if perk_timeline_handled:")
     visual_observer = source.index("activation_tracker = self._activation_tracker()")
 
-    assert handle < forward < route_recapture < visual_observer
+    assert sync < observe < forward < visual_observer
+    assert "perk_timeline_handled" not in source
 
 
 def test_receipt_write_or_decoder_failure_cannot_escape_into_normal_runtime(

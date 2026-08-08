@@ -25,7 +25,10 @@ from core.battle_perks import (
 )
 from core.input import safe_tap, swipe_now, tap_if_visible
 from core.label_tapper import is_visible
-from core.perk_configuration import classify_perk_configuration_text
+from core.perk_configuration import (
+    classify_perk_configuration_text,
+    perk_configuration_label,
+)
 from core.run_perk_selector import canonical_perk_family
 from core.scrolling import capture_scroll_to_edge, scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
@@ -54,7 +57,7 @@ PWR_FAMILY = "perk_wave_requirement"
 BOUNDARY_COVERAGE_COMPLETE = "complete"
 BOUNDARY_COVERAGE_VISIBILITY_GAP = "incomplete_visibility_gap"
 SELECTION_SCAN_MODE = "until_first_unchanged"
-PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION = 2
+PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION = 3
 PERKS_CLOSE_DESTINATIONS = {
     "RUNNING",
     "GAME_OVER",
@@ -257,6 +260,7 @@ class PerkTimelineTracker:
         self._batches: list[dict[str, Any]] = []
         self._selection_boundaries: list[dict[str, Any]] = []
         self._exhaustion: Optional[dict[str, Any]] = None
+        self._save_checkpoint: Optional[dict[str, Any]] = None
         self._mapping_evidence: list[dict[str, Any]] = []
         self._warnings: list[str] = []
         self._candidate_token: Optional[tuple[str, Optional[int]]] = None
@@ -421,6 +425,7 @@ class PerkTimelineTracker:
             "batches": copy.deepcopy(self._batches),
             "selection_boundaries": copy.deepcopy(self._selection_boundaries),
             "exhaustion": copy.deepcopy(self._exhaustion),
+            "save_checkpoint": copy.deepcopy(self._save_checkpoint),
             "warnings": list(self._warnings),
             "armed_next_wave": self._armed_next_wave,
             "pending": (
@@ -461,6 +466,7 @@ class PerkTimelineTracker:
         self._batches = restored["batches"]
         self._selection_boundaries = restored["selection_boundaries"]
         self._exhaustion = restored["exhaustion"]
+        self._save_checkpoint = restored["save_checkpoint"]
         self._mapping_evidence = []
         self._warnings = restored["warnings"]
         self._armed_next_wave = restored["armed_next_wave"]
@@ -468,7 +474,92 @@ class PerkTimelineTracker:
         self._last_completed_request = None
         self._candidate_token = None
         self._candidate_count = 0
+        if self._save_checkpoint is not None:
+            self._selected_by_family = _saved_selected_by_family(
+                self._save_checkpoint["picks"]
+            )
         return True
+
+    def record_saved_checkpoint(self, checkpoint: Mapping[str, Any]) -> str:
+        """Replace panel-derived state with one exact saved Perk prefix.
+
+        Saved picks are historical positive evidence.  An identical checkpoint
+        may advance provenance, while only a strict prefix extension may add
+        timeline entries.  This method never interprets a missing later pick as
+        proof that no later pick exists.
+        """
+
+        try:
+            candidate = _validated_saved_perk_checkpoint(checkpoint)
+        except (TypeError, ValueError):
+            return "rejected_saved_checkpoint"
+
+        previous = self._save_checkpoint
+        previous_picks = previous["picks"] if previous is not None else []
+        candidate_picks = candidate["picks"]
+        if previous is None:
+            new_picks = candidate_picks
+            disposition = "initial_saved_prefix"
+            # The exact saved sequence supersedes any same-process panel
+            # baseline or batches.  Passive top-bar boundaries and exhaustion
+            # remain useful independent evidence.
+            self._batches = []
+            self._mapping_evidence = []
+            self._selected_by_family = {}
+            self._snapshot_known = True
+            self._baseline_status = (
+                "save_backed_new_battle"
+                if self._fresh_battle
+                else "save_backed_mid_battle"
+            )
+        elif candidate_picks == previous_picks:
+            if (
+                candidate["saved_wave"] < previous["saved_wave"]
+                or _aware_datetime(candidate["captured_at"])
+                <= _aware_datetime(previous["captured_at"])
+            ):
+                return "ignored_lagging_saved_prefix"
+            new_picks = []
+            disposition = "unchanged_saved_prefix_observed_later"
+        elif (
+            len(candidate_picks) > len(previous_picks)
+            and candidate_picks[: len(previous_picks)] == previous_picks
+        ):
+            if (
+                candidate["saved_wave"] < previous["saved_wave"]
+                or _aware_datetime(candidate["captured_at"])
+                <= _aware_datetime(previous["captured_at"])
+            ):
+                return "rejected_saved_prefix_freshness"
+            new_picks = candidate_picks[len(previous_picks) :]
+            disposition = "strict_saved_prefix_extension"
+        else:
+            return "rejected_saved_prefix_conflict"
+
+        for pick in new_picks:
+            self._append_saved_pick(pick, checkpoint=candidate)
+        self._save_checkpoint = candidate
+        self._selected_by_family = _saved_selected_by_family(candidate_picks)
+        self._snapshot_known = True
+        pwr_level = next(
+            (
+                int(level["level"])
+                for level in candidate["levels"]
+                if level["perk_key"] == PWR_FAMILY
+            ),
+            0,
+        )
+        if previous is None:
+            self._pwr_maxed = pwr_level >= 3
+        elif pwr_level >= 3:
+            self._pwr_maxed = True
+
+        request = self._pending
+        if request is not None and (
+            request.kind == "baseline" or bool(new_picks)
+        ):
+            self._advance_after_capture(request)
+        return disposition
 
     def record_full_snapshot(
         self,
@@ -670,8 +761,12 @@ class PerkTimelineTracker:
         """Return a detached battle-record payload."""
 
         return {
-            "schema_version": 3,
-            "source": "top_bar_schedule_and_selected_perks_panel",
+            "schema_version": 4,
+            "source": (
+                "player_save_perk_prefix_with_passive_top_bar"
+                if self._save_checkpoint is not None
+                else "passive_top_bar_awaiting_player_save"
+            ),
             "batch_order_semantics": "selection_wave_order",
             "within_batch_order_semantics": "simultaneous_unordered",
             "deferred_post_pwr_order_semantics": (
@@ -685,6 +780,11 @@ class PerkTimelineTracker:
             "baseline_status": self._baseline_status,
             "pwr_maxed_observed": self._pwr_maxed,
             "batches": copy.deepcopy(self._batches),
+            "save_backed_prefix": (
+                _saved_checkpoint_provenance(self._save_checkpoint)
+                if self._save_checkpoint is not None
+                else None
+            ),
             "passive_top_bar": {
                 "selection_boundaries": copy.deepcopy(
                     self._selection_boundaries
@@ -706,6 +806,49 @@ class PerkTimelineTracker:
                 else None
             ),
         }
+
+    def _append_saved_pick(
+        self,
+        pick: Mapping[str, Any],
+        *,
+        checkpoint: Mapping[str, Any],
+    ) -> None:
+        """Append one exact oldest-first save pick without UI calibration."""
+
+        level_after = int(pick["level_after"])
+        label = perk_configuration_label(str(pick["perk_key"]))
+        display = f"{label} (level {level_after})"
+        selection = {
+            "family": str(pick["perk_key"]),
+            "perk_key": str(pick["perk_key"]),
+            "perk_id": int(pick["perk_id"]),
+            "display_text": display,
+            "color": "save_backed",
+            "instance_model": "save_backed_level",
+            "confidence": 100.0,
+            "change": "added" if level_after == 1 else "level_changed",
+            "level_after": level_after,
+            "saved_sequence": int(pick["sequence"]),
+            "source": "exact_saved_pick",
+        }
+        if level_after > 1:
+            selection["before_display_text"] = (
+                f"{label} (level {level_after - 1})"
+            )
+        self._batches.append(
+            {
+                "sequence": len(self._batches) + 1,
+                "scheduled_wave": int(pick["saved_wave"]),
+                "scheduled_waves": [int(pick["saved_wave"])],
+                "observed_wave": int(checkpoint["saved_wave"]),
+                "observed_wave_end": int(checkpoint["saved_wave"]),
+                "boundary_coverage": BOUNDARY_COVERAGE_COMPLETE,
+                "observed_at": str(checkpoint["captured_at"]),
+                "selection_model": "exact_saved_pick",
+                "snapshot_mode": "player_save_checkpoint",
+                "selections": [selection],
+            }
+        )
 
     def drain_mapping_evidence(self) -> tuple[dict[str, Any], ...]:
         """Return new privacy-safe calibration batches exactly once.
@@ -950,6 +1093,174 @@ def _capture_request_checkpoint(request: PerkCaptureRequest) -> dict[str, Any]:
     }
 
 
+def _validated_saved_perk_checkpoint(payload: Any) -> dict[str, Any]:
+    """Normalize the exact monitor checkpoint allowed into timeline state."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("saved Perk checkpoint must be a mapping")
+    if payload.get("schema_version") != 1 or payload.get("complete") is not True:
+        raise ValueError("saved Perk checkpoint is incomplete")
+    mapping_id = str(payload.get("mapping_id") or "").strip()
+    audit_matrix_id = str(payload.get("audit_matrix_id") or "").strip()
+    game_version = payload.get("game_version")
+    save_revision = payload.get("save_revision")
+    saved_wave = payload.get("saved_wave")
+    picked_count = payload.get("picked_count")
+    prefix_fingerprint = str(payload.get("prefix_fingerprint") or "")
+    captured_at = str(payload.get("captured_at") or "")
+    if (
+        not mapping_id
+        or not audit_matrix_id
+        or type(game_version) is not int
+        or game_version < 0
+        or type(save_revision) is not int
+        or save_revision < 0
+        or type(saved_wave) is not int
+        or saved_wave < 0
+        or type(picked_count) is not int
+        or picked_count < 0
+        or re.fullmatch(r"[0-9a-f]{64}", prefix_fingerprint) is None
+        or not _valid_aware_timestamp(captured_at)
+    ):
+        raise ValueError("saved Perk checkpoint provenance is invalid")
+    identity = _validated_active_round_identity(
+        payload.get("active_round_identity")
+    )
+    if identity["game_version"] != game_version:
+        raise ValueError("saved Perk checkpoint identity version changed")
+
+    raw_picks = payload.get("picks")
+    if (
+        not isinstance(raw_picks, Sequence)
+        or isinstance(raw_picks, (str, bytes, bytearray))
+        or len(raw_picks) != picked_count
+    ):
+        raise ValueError("saved Perk pick prefix is invalid")
+    picks: list[dict[str, Any]] = []
+    levels_by_id: dict[int, tuple[str, int]] = {}
+    ids_by_key: dict[str, int] = {}
+    prior_wave = -1
+    for sequence, raw in enumerate(raw_picks, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError("saved Perk pick is malformed")
+        pick_wave = raw.get("saved_wave")
+        perk_id = raw.get("perk_id")
+        perk_key = str(raw.get("perk_key") or "")
+        level_after = raw.get("level_after")
+        if (
+            raw.get("sequence") != sequence
+            or type(pick_wave) is not int
+            or pick_wave < prior_wave
+            or pick_wave > saved_wave
+            or type(perk_id) is not int
+            or perk_id < 0
+            or re.fullmatch(r"[a-z][a-z0-9_]{0,95}", perk_key) is None
+            or type(level_after) is not int
+            or level_after < 1
+        ):
+            raise ValueError("saved Perk pick is malformed")
+        previous = levels_by_id.get(perk_id)
+        if previous is not None and previous[0] != perk_key:
+            raise ValueError("saved Perk ID changed meaning")
+        previous_id = ids_by_key.get(perk_key)
+        if previous_id is not None and previous_id != perk_id:
+            raise ValueError("saved Perk key changed ID")
+        if level_after != (previous[1] if previous is not None else 0) + 1:
+            raise ValueError("saved Perk level is not monotonic")
+        levels_by_id[perk_id] = (perk_key, level_after)
+        ids_by_key[perk_key] = perk_id
+        prior_wave = pick_wave
+        picks.append(
+            {
+                "sequence": sequence,
+                "saved_wave": pick_wave,
+                "perk_id": perk_id,
+                "perk_key": perk_key,
+                "level_after": level_after,
+                "source": "exact_saved_pick",
+            }
+        )
+
+    raw_levels = payload.get("levels")
+    expected_levels = [
+        {"perk_id": perk_id, "perk_key": key, "level": level}
+        for perk_id, (key, level) in sorted(levels_by_id.items())
+    ]
+    normalized_levels = []
+    if isinstance(raw_levels, Sequence) and not isinstance(
+        raw_levels, (str, bytes, bytearray)
+    ):
+        normalized_levels = [
+            {
+                "perk_id": raw.get("perk_id"),
+                "perk_key": raw.get("perk_key"),
+                "level": raw.get("level"),
+            }
+            for raw in raw_levels
+            if isinstance(raw, Mapping)
+        ]
+    if normalized_levels != expected_levels:
+        raise ValueError("saved Perk levels disagree with the pick prefix")
+
+    return {
+        "schema_version": 1,
+        "mapping_id": mapping_id,
+        "audit_matrix_id": audit_matrix_id,
+        "game_version": game_version,
+        "save_revision": save_revision,
+        "saved_wave": saved_wave,
+        "captured_at": captured_at,
+        "active_round_identity": identity,
+        "complete": True,
+        "picked_count": picked_count,
+        "order_semantics": "oldest_selected_first_exact_saved_order",
+        "picks": picks,
+        "levels": expected_levels,
+        "prefix_fingerprint": prefix_fingerprint,
+        "acceptance": str(payload.get("acceptance") or "accepted"),
+        "acquisition_type": str(payload.get("acquisition_type") or "unknown"),
+    }
+
+
+def _saved_selected_by_family(
+    picks: Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    selected: dict[str, dict[str, Any]] = {}
+    for pick in picks:
+        perk_key = str(pick["perk_key"])
+        level_after = int(pick["level_after"])
+        selected[perk_key] = {
+            "family": perk_key,
+            "display_text": (
+                f"{perk_configuration_label(perk_key)} (level {level_after})"
+            ),
+            "color": "save_backed",
+            "instance_model": "save_backed_level",
+            "confidence": 100.0,
+            "perk_id": int(pick["perk_id"]),
+            "level_after": level_after,
+            "source": "exact_saved_pick",
+        }
+    return selected
+
+
+def _saved_checkpoint_provenance(
+    checkpoint: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "mapping_id": checkpoint.get("mapping_id"),
+        "game_version": checkpoint.get("game_version"),
+        "save_revision": checkpoint.get("save_revision"),
+        "saved_wave": checkpoint.get("saved_wave"),
+        "captured_at": checkpoint.get("captured_at"),
+        "picked_count": checkpoint.get("picked_count"),
+        "prefix_fingerprint": checkpoint.get("prefix_fingerprint"),
+        "active_round_identity": copy.deepcopy(
+            checkpoint.get("active_round_identity")
+        ),
+    }
+
+
 def _validated_tracker_checkpoint(payload: Mapping[str, Any]) -> dict[str, Any]:
     if payload.get("schema_version") != PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION:
         raise ValueError("unsupported tracker checkpoint schema")
@@ -961,6 +1272,8 @@ def _validated_tracker_checkpoint(payload: Mapping[str, Any]) -> dict[str, Any]:
         "new_battle_empty",
         "not_observed",
         "observed_mid_battle",
+        "save_backed_new_battle",
+        "save_backed_mid_battle",
     }:
         raise ValueError("invalid tracker baseline status")
     if baseline_status == "new_battle_empty" and not snapshot_known:
@@ -968,18 +1281,34 @@ def _validated_tracker_checkpoint(payload: Mapping[str, Any]) -> dict[str, Any]:
     if baseline_status == "not_observed" and snapshot_known:
         raise ValueError("unknown baseline cannot have a known snapshot")
 
+    raw_save_checkpoint = payload.get("save_checkpoint")
+    save_checkpoint = (
+        _validated_saved_perk_checkpoint(raw_save_checkpoint)
+        if raw_save_checkpoint is not None
+        else None
+    )
+    if baseline_status.startswith("save_backed_") and save_checkpoint is None:
+        raise ValueError("save-backed baseline lacks its exact checkpoint")
+    if save_checkpoint is not None and not snapshot_known:
+        raise ValueError("save-backed checkpoint lacks a known snapshot")
+
     selected_raw = payload.get("selected_by_family")
     if not isinstance(selected_raw, Mapping):
         raise ValueError("selected Perks checkpoint must be a mapping")
-    selected_by_family: dict[str, dict[str, Any]] = {}
-    for raw_family, raw_entry in selected_raw.items():
-        family = str(raw_family or "").strip()
-        if not family or not isinstance(raw_entry, Mapping):
-            raise ValueError("invalid selected Perk checkpoint entry")
-        entry = _timeline_entry(raw_entry)
-        if entry is None or entry["family"] != family:
-            raise ValueError("selected Perk checkpoint family mismatch")
-        selected_by_family[family] = entry
+    if save_checkpoint is not None:
+        selected_by_family = _saved_selected_by_family(
+            save_checkpoint["picks"]
+        )
+    else:
+        selected_by_family = {}
+        for raw_family, raw_entry in selected_raw.items():
+            family = str(raw_family or "").strip()
+            if not family or not isinstance(raw_entry, Mapping):
+                raise ValueError("invalid selected Perk checkpoint entry")
+            entry = _timeline_entry(raw_entry)
+            if entry is None or entry["family"] != family:
+                raise ValueError("selected Perk checkpoint family mismatch")
+            selected_by_family[family] = entry
 
     raw_batches = payload.get("batches")
     if (
@@ -1082,6 +1411,7 @@ def _validated_tracker_checkpoint(payload: Mapping[str, Any]) -> dict[str, Any]:
         "batches": batches,
         "selection_boundaries": selection_boundaries,
         "exhaustion": exhaustion,
+        "save_checkpoint": save_checkpoint,
         "warnings": warnings,
         "armed_next_wave": armed_next_wave,
         "pending": pending,
@@ -1118,13 +1448,23 @@ def _validated_active_round_identity(identity: Any) -> dict[str, Any]:
 
 
 def _valid_aware_timestamp(value: Any) -> bool:
-    if not isinstance(value, str):
+    try:
+        _aware_datetime(value)
+    except (TypeError, ValueError):
         return False
+    return True
+
+
+def _aware_datetime(value: Any) -> datetime:
+    if not isinstance(value, str):
+        raise TypeError("timestamp must be text")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    return parsed.tzinfo is not None
+    except ValueError as exc:
+        raise ValueError("timestamp is malformed") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp lacks timezone")
+    return parsed.astimezone(timezone.utc)
 
 
 def _validated_capture_request_checkpoint(
@@ -1332,6 +1672,41 @@ class PerkTimelineObserver:
 
         self._sync_persistence_scope(restore=True)
         return self.tracker.drain_mapping_evidence()
+
+    def observe_saved_checkpoint(self, checkpoint: Mapping[str, Any]) -> str:
+        """Persist one monitor-validated exact prefix on the App thread."""
+
+        self._sync_persistence_scope(restore=True)
+        disposition = self.tracker.record_saved_checkpoint(checkpoint)
+        if disposition not in {
+            "rejected_saved_checkpoint",
+            "rejected_saved_prefix_freshness",
+            "rejected_saved_prefix_conflict",
+            "ignored_lagging_saved_prefix",
+        }:
+            self._persist_state()
+        return disposition
+
+    def observe_passive(
+        self,
+        screenshot: Frame,
+        detection: Mapping[str, Any],
+        *,
+        wave: Optional[int],
+        progress_fn: Callable[[Optional[Frame]], PerkProgress] = (
+            lambda frame: measure_perk_progress(frame)
+        ),
+    ) -> None:
+        """Observe top-bar Perk progress while granting no panel input."""
+
+        self.handle(
+            screenshot,
+            detection,
+            wave=wave,
+            actions_allowed=False,
+            action_guard_fn=lambda: False,
+            progress_fn=progress_fn,
+        )
 
     def exhaustion_evidence(self) -> Optional[dict[str, Any]]:
         """Return persisted stable ``View Perks`` evidence, when available."""
