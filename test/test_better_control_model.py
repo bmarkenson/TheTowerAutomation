@@ -227,6 +227,213 @@ def test_terminal_home_continuation_never_authorizes_resume_battle():
     app._current_control_workflow_evidence.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        {
+            "request_id": "start-2",
+            "intent": "start_battle",
+            "status": "acknowledged",
+        },
+        {
+            "request_id": "start-1",
+            "intent": "attach_battle",
+            "status": "validating_save",
+        },
+        *[
+            {
+                "request_id": "start-1",
+                "intent": "start_battle",
+                "status": status,
+            }
+            for status in (
+                "awaiting_enable",
+                "action_dispatched",
+                "completed",
+                "rejected",
+                "interrupted",
+                "failed",
+                "cancelled",
+            )
+        ],
+    ],
+    ids=(
+        "replacement-request",
+        "replacement-intent",
+        "awaiting-enable",
+        "action-dispatched",
+        "completed",
+        "rejected",
+        "interrupted",
+        "failed",
+        "cancelled",
+    ),
+)
+def test_home_launch_barrier_rejects_changed_start_workflow(workflow):
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        battle_workflow=workflow,
+        manual_control=None,
+    )
+    app._runtime_action_guard = MagicMock(return_value=True)
+    app._awaiting_initial_battle_intent = MagicMock(return_value=False)
+
+    assert app._home_launch_authority_matches(
+        source="start_battle",
+        request_id="start-1",
+        home_control=HomeBattleControl.NEW_BATTLE,
+    ) is False
+
+
+def test_home_launch_barrier_accepts_only_current_exact_workflows():
+    app = App.__new__(App)
+    app._runtime_action_guard = MagicMock(return_value=True)
+    app._awaiting_initial_battle_intent = MagicMock(return_value=False)
+    app._supervisor = SimpleNamespace(
+        battle_workflow={
+            "request_id": "start-1",
+            "intent": "start_battle",
+            "status": "acknowledged",
+        },
+        manual_control=None,
+    )
+
+    assert app._home_launch_authority_matches(
+        source="start_battle",
+        request_id="start-1",
+        home_control=HomeBattleControl.NEW_BATTLE,
+    ) is True
+    app._awaiting_initial_battle_intent.return_value = True
+    assert app._home_launch_authority_matches(
+        source="start_battle",
+        request_id="start-1",
+        home_control=HomeBattleControl.NEW_BATTLE,
+    ) is False
+    app._awaiting_initial_battle_intent.return_value = False
+
+    app._supervisor.battle_workflow = {
+        "request_id": "attach-1",
+        "intent": "attach_battle",
+        "status": "validating_save",
+    }
+    assert app._home_launch_authority_matches(
+        source="attach_battle",
+        request_id="attach-1",
+        home_control=HomeBattleControl.RESUME_BATTLE,
+    ) is True
+    assert app._home_launch_authority_matches(
+        source="attach_battle",
+        request_id="attach-2",
+        home_control=HomeBattleControl.RESUME_BATTLE,
+    ) is False
+
+    app._supervisor.battle_workflow = None
+    app._supervisor.manual_control = {
+        "manual_control_id": "manual-1",
+        "status": "reconciling",
+    }
+    assert app._home_launch_authority_matches(
+        source="manual_return",
+        request_id="manual-1",
+        home_control=HomeBattleControl.RESUME_BATTLE,
+    ) is True
+    assert app._home_launch_authority_matches(
+        source="manual_return",
+        request_id="manual-2",
+        home_control=HomeBattleControl.RESUME_BATTLE,
+    ) is False
+    app._supervisor.manual_control["status"] = "completed"
+    assert app._home_launch_authority_matches(
+        source="manual_return",
+        request_id="manual-1",
+        home_control=HomeBattleControl.RESUME_BATTLE,
+    ) is False
+
+
+def test_home_launch_barrier_requires_current_lifecycle_authority():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        battle_workflow={
+            "request_id": "start-1",
+            "intent": "start_battle",
+            "status": "acknowledged",
+        },
+        manual_control=None,
+    )
+    app._runtime_action_guard = MagicMock(return_value=False)
+
+    assert app._home_launch_authority_matches(
+        source="start_battle",
+        request_id="start-1",
+        home_control=HomeBattleControl.NEW_BATTLE,
+    ) is False
+
+
+@pytest.mark.parametrize(
+    ("workflow", "manual"),
+    (
+        (
+            {
+                "request_id": "start-1",
+                "intent": "start_battle",
+                "status": "acknowledged",
+            },
+            None,
+        ),
+        (
+            None,
+            {
+                "manual_control_id": "manual-1",
+                "status": "reconciling",
+            },
+        ),
+    ),
+    ids=("battle-workflow", "manual-control"),
+)
+def test_terminal_home_launch_barrier_yields_to_new_operator_workflow(
+    workflow,
+    manual,
+):
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        battle_workflow=workflow,
+        manual_control=manual,
+    )
+    app._runtime_action_guard = MagicMock(return_value=True)
+    app._clear_terminal_home_continuation = MagicMock()
+    app._terminal_home_continuation_ready = MagicMock(return_value=True)
+
+    assert app._home_launch_authority_matches(
+        source="terminal_continuation",
+        request_id="",
+        home_control=HomeBattleControl.NEW_BATTLE,
+    ) is False
+    app._clear_terminal_home_continuation.assert_called_once()
+    app._terminal_home_continuation_ready.assert_not_called()
+
+
+def test_terminal_home_launch_barrier_clears_manual_claim_when_guard_denies():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        battle_workflow=None,
+        manual_control={
+            "manual_control_id": "manual-1",
+            "status": "reconciling",
+        },
+    )
+    app._runtime_action_guard = MagicMock(return_value=False)
+    app._clear_terminal_home_continuation = MagicMock()
+    app._terminal_home_continuation_ready = MagicMock(return_value=True)
+
+    assert app._home_launch_authority_matches(
+        source="terminal_continuation",
+        request_id="",
+        home_control=HomeBattleControl.NEW_BATTLE,
+    ) is False
+    app._clear_terminal_home_continuation.assert_called_once()
+    app._terminal_home_continuation_ready.assert_not_called()
+
+
 def _save_receipt(
     workflow_id: str,
     evidence: dict[str, object],

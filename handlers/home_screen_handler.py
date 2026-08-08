@@ -2,7 +2,7 @@
 
 import time
 from utils.logger import log, log_action_intent, log_result
-from core.input import TapVerification, safe_tap, tap_if_visible
+from core.input import ActionGuard, TapVerification, safe_tap, tap_if_visible
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HOME_BATTLE_CONTROL_REGION, detect_home_battle_control
 from core.ss_capture import capture_adb_screenshot
@@ -11,6 +11,8 @@ from core.state_detector import detect_state_and_overlays
 
 def _tap_verified_home_battle_control(
     required_control: HomeBattleControl | None = None,
+    *,
+    action_guard_fn: ActionGuard = None,
 ) -> bool:
     """OCR and tap Battle/Resume only on a verified home screen."""
 
@@ -56,13 +58,17 @@ def _tap_verified_home_battle_control(
                 and detect_home_battle_control(frame).control is evidence.control
             ),
         ),
+        action_guard_fn=action_guard_fn,
     )
 
 
-def tap_verified_new_battle() -> bool:
+def tap_verified_new_battle(*, action_guard_fn: ActionGuard = None) -> bool:
     """Tap only the ordinary Home NEW_BATTLE control on fresh evidence."""
 
-    return _tap_verified_home_battle_control(HomeBattleControl.NEW_BATTLE)
+    return _tap_verified_home_battle_control(
+        HomeBattleControl.NEW_BATTLE,
+        action_guard_fn=action_guard_fn,
+    )
 
 
 def handle_home_screen(
@@ -73,6 +79,7 @@ def handle_home_screen(
     operation_id: str | None = None,
     action_purpose: str | None = None,
     action_reason: str | None = None,
+    action_guard_fn: ActionGuard = None,
 ) -> bool:
     """
     Handle the HOME_SCREEN state by optionally starting a battle.
@@ -113,25 +120,32 @@ def handle_home_screen(
             )
         log("[HOME] Auto-start enabled — tapping 'Battle' button", "INFO")
         if require_new_battle:
-            launched = tap_verified_new_battle()
+            launched = tap_verified_new_battle(
+                action_guard_fn=action_guard_fn,
+            )
         elif require_resume_battle:
             launched = _tap_verified_home_battle_control(
-                HomeBattleControl.RESUME_BATTLE
+                HomeBattleControl.RESUME_BATTLE,
+                action_guard_fn=action_guard_fn,
             )
         elif tap_if_visible(
             "buttons.battle:home",
             retries=1,
             failure_log_level="DEBUG",
+            action_guard_fn=action_guard_fn,
         ):
             launched = True
         elif tap_if_visible(
             "buttons.resume_battle:home",
             retries=1,
             failure_log_level="DEBUG",
+            action_guard_fn=action_guard_fn,
         ):
             launched = True
         else:
-            launched = _tap_verified_home_battle_control()
+            launched = _tap_verified_home_battle_control(
+                action_guard_fn=action_guard_fn,
+            )
         if not launched:
             log(
                 "[HOME] Battle/Resume controls not verified; leaving handler",

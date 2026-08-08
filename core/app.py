@@ -4054,6 +4054,88 @@ class App:
             and transitioned.get("status") == "action_dispatched"
         )
 
+    def _home_launch_authority_matches(
+        self,
+        *,
+        source: str,
+        request_id: str,
+        home_control: HomeBattleControl,
+    ) -> bool:
+        """Revalidate the exact Home launch owner at the input boundary."""
+
+        runtime_authorized = self._runtime_action_guard(
+            action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+        )
+        workflow = self._supervisor.battle_workflow
+        workflow_active = bool(
+            isinstance(workflow, Mapping)
+            and workflow.get("status")
+            not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+        )
+        manual = self._supervisor.manual_control
+        manual_active = bool(
+            isinstance(manual, Mapping)
+            and manual.get("status")
+            not in MANUAL_CONTROL_TERMINAL_STATUSES
+        )
+
+        if source == "terminal_continuation":
+            if workflow_active or manual_active:
+                self._clear_terminal_home_continuation(
+                    "an explicit operator workflow superseded it before dispatch"
+                )
+                return False
+            continuation_ready = self._terminal_home_continuation_ready(
+                home_control=home_control
+            )
+            return bool(runtime_authorized and continuation_ready)
+        if not runtime_authorized:
+            return False
+        if source == "start_battle":
+            return bool(
+                request_id
+                and not manual_active
+                and workflow_active
+                and str(workflow.get("request_id") or "") == request_id
+                and workflow.get("intent") == "start_battle"
+                and workflow.get("status") in {"acknowledged", "ready"}
+                and not self._awaiting_initial_battle_intent()
+                and home_control is HomeBattleControl.NEW_BATTLE
+            )
+        if source == "attach_battle":
+            return bool(
+                request_id
+                and not manual_active
+                and workflow_active
+                and str(workflow.get("request_id") or "") == request_id
+                and workflow.get("intent") == "attach_battle"
+                and workflow.get("status") == "validating_save"
+                and home_control is HomeBattleControl.RESUME_BATTLE
+            )
+        if source == "manual_return":
+            return bool(
+                request_id
+                and not workflow_active
+                and manual_active
+                and str(manual.get("manual_control_id") or "") == request_id
+                and manual.get("status") == "reconciling"
+                and home_control is HomeBattleControl.RESUME_BATTLE
+            )
+        if source == "legacy_auto_start":
+            return bool(
+                not workflow_active
+                and not manual_active
+                and not getattr(
+                    self,
+                    "_operator_battle_intent_required",
+                    False,
+                )
+                and not self._awaiting_initial_battle_intent()
+                and self._auto_start_enabled
+                and AUTOMATION.mode is ExecMode.NEXT_BATTLE
+            )
+        return False
+
     def _complete_started_battle_workflow(self, battle_started: bool) -> bool:
         """Complete Start only after its dispatched launch becomes a run."""
 
@@ -11038,6 +11120,66 @@ class App:
                 not managed_home_control
                 and not awaiting_initial_battle_intent
             )
+            workflow_request_id = str(
+                (
+                    workflow.get("request_id")
+                    if isinstance(workflow, Mapping)
+                    else ""
+                )
+                or ""
+            )
+            manual_control_id = str(
+                (
+                    manual.get("manual_control_id")
+                    if isinstance(manual, Mapping)
+                    else ""
+                )
+                or ""
+            )
+            home_launch_source = None
+            home_launch_request_id = ""
+            if explicit_start:
+                home_launch_source = "start_battle"
+                home_launch_request_id = workflow_request_id
+            elif explicit_attach:
+                home_launch_source = "attach_battle"
+                home_launch_request_id = workflow_request_id
+            elif manual_return_resume:
+                home_launch_source = "manual_return"
+                home_launch_request_id = manual_control_id
+            elif terminal_continuation_authorized:
+                home_launch_source = "terminal_continuation"
+            elif legacy_home_launch_authorized:
+                home_launch_source = "legacy_auto_start"
+
+            def home_preflight_owner_still_current() -> bool:
+                if home_launch_source is None:
+                    return True
+                if self._home_launch_authority_matches(
+                    source=home_launch_source,
+                    request_id=home_launch_request_id,
+                    home_control=home_control,
+                ):
+                    return True
+                coordinator = getattr(
+                    self,
+                    "_player_save_preflight_coordinator",
+                    None,
+                )
+                carry = (
+                    coordinator.carry
+                    if coordinator is not None
+                    else None
+                )
+                if (
+                    carry is not None
+                    and carry.state is CarriedEvidenceState.PENDING_LAUNCH
+                ):
+                    coordinator.invalidate(
+                        "home_launch_authority_changed_during_preflight"
+                    )
+                return False
+
             validation_home_preflight_authorized = bool(
                 exclusive_request_pending
                 and not awaiting_initial_battle_intent
@@ -11116,6 +11258,8 @@ class App:
                 )
                 if save_preflight is not None and not save_preflight.ready:
                     return
+                if not home_preflight_owner_still_current():
+                    return
                 history_baseline = getattr(
                     self,
                     "_player_save_history_baseline_outcome",
@@ -11188,6 +11332,8 @@ class App:
                 )
                 if save_preflight is not None and not save_preflight.ready:
                     return
+                if not home_preflight_owner_still_current():
+                    return
                 history_baseline = getattr(
                     self,
                     "_player_save_history_baseline_outcome",
@@ -11208,6 +11354,8 @@ class App:
                     save_preflight=save_preflight,
                 )
                 if setup.interrupted:
+                    return
+                if not home_preflight_owner_still_current():
                     return
                 if not setup.complete:
                     check_id = setup.failed_check or "startup_setup"
@@ -11266,6 +11414,8 @@ class App:
                     )
                     if setup.interrupted:
                         return
+                    if not home_preflight_owner_still_current():
+                        return
                     if not setup.complete:
                         next_check = setup.failed_check or "startup_setup"
                         self._publish_gate_decision(
@@ -11323,20 +11473,6 @@ class App:
                 ),
             )
             if home_handler_enabled:
-                if terminal_continuation_authorized:
-                    terminal_continuation_authorized = (
-                        self._terminal_home_continuation_ready(
-                            home_control=home_control
-                        )
-                    )
-                if workflow_active:
-                    restart_enabled = explicit_start or explicit_attach
-                elif manual_return_resume:
-                    restart_enabled = True
-                elif terminal_continuation_authorized:
-                    restart_enabled = True
-                else:
-                    restart_enabled = legacy_home_launch_authorized
                 save_coordinator = getattr(
                     self,
                     "_player_save_preflight_coordinator",
@@ -11351,6 +11487,40 @@ class App:
                     carry is not None
                     and carry.state is CarriedEvidenceState.PENDING_LAUNCH
                 )
+                launch_authorized = False
+                if home_launch_source is not None:
+                    launch_authorized = self._home_launch_authority_matches(
+                        source=home_launch_source,
+                        request_id=home_launch_request_id,
+                        home_control=home_control,
+                    )
+                explicit_start = bool(
+                    launch_authorized
+                    and home_launch_source == "start_battle"
+                )
+                explicit_attach = bool(
+                    launch_authorized
+                    and home_launch_source == "attach_battle"
+                )
+                manual_return_resume = bool(
+                    launch_authorized
+                    and home_launch_source == "manual_return"
+                )
+                terminal_continuation_authorized = bool(
+                    launch_authorized
+                    and home_launch_source == "terminal_continuation"
+                )
+                legacy_home_launch_authorized = bool(
+                    launch_authorized
+                    and home_launch_source == "legacy_auto_start"
+                )
+                restart_enabled = bool(
+                    explicit_start
+                    or explicit_attach
+                    or manual_return_resume
+                    or terminal_continuation_authorized
+                    or legacy_home_launch_authorized
+                )
                 if (
                     carry is not None
                     and carry.state
@@ -11362,26 +11532,30 @@ class App:
                     save_coordinator.invalidate(
                         "unrelated_later_home_launch_boundary"
                     )
-                launch_authorized = True
-                if restart_enabled and (
-                    carry_pending or terminal_continuation_authorized
-                ):
-                    launch_authorized = self._runtime_action_guard(
-                        action_class=RuntimeActionClass.LIFECYCLE_ACTION,
-                    )
-                    if not launch_authorized:
-                        restart_enabled = False
+                launch_guard_state = {"allowed": launch_authorized}
+                launch_action_guard = None
+                if restart_enabled:
+
+                    def revalidate_home_launch() -> bool:
+                        allowed = self._home_launch_authority_matches(
+                            source=str(home_launch_source),
+                            request_id=home_launch_request_id,
+                            home_control=home_control,
+                        )
+                        launch_guard_state["allowed"] = allowed
+                        return allowed
+
+                    launch_action_guard = revalidate_home_launch
                 workflow_operation_id = None
                 workflow_action_purpose = None
                 workflow_action_reason = None
                 if explicit_start or explicit_attach:
-                    request_id = str(workflow.get("request_id") or "")
                     observation = self._current_control_workflow_evidence()
                     observation_id = str(
                         (observation or {}).get("observation_id") or "unknown"
                     )
                     workflow_operation_id = (
-                        f"{request_id}:{observation_id}:home_dispatch"
+                        f"{home_launch_request_id}:{observation_id}:home_dispatch"
                     )
                     if explicit_start:
                         workflow_action_purpose = "Starting a new battle"
@@ -11397,13 +11571,12 @@ class App:
                             "execute the validated exact Resume Battle intent"
                         )
                 elif manual_return_resume:
-                    manual_id = str(manual.get("manual_control_id") or "")
                     observation = self._current_control_workflow_evidence()
                     observation_id = str(
                         (observation or {}).get("observation_id") or "unknown"
                     )
                     workflow_operation_id = (
-                        f"{manual_id}:{observation_id}:return-resume"
+                        f"{home_launch_request_id}:{observation_id}:return-resume"
                     )
                     workflow_action_purpose = (
                         "Refreshing the manually controlled battle"
@@ -11439,6 +11612,7 @@ class App:
                         operation_id=workflow_operation_id,
                         action_purpose=workflow_action_purpose,
                         action_reason=workflow_action_reason,
+                        action_guard_fn=launch_action_guard,
                     )
                 elif explicit_start or terminal_continuation_authorized:
                     launched = handle_home_screen(
@@ -11447,16 +11621,25 @@ class App:
                         operation_id=workflow_operation_id,
                         action_purpose=workflow_action_purpose,
                         action_reason=workflow_action_reason,
+                        action_guard_fn=launch_action_guard,
                     )
                 elif carry_pending:
                     launched = handle_home_screen(
                         restart_enabled=restart_enabled,
                         require_new_battle=True,
+                        action_guard_fn=launch_action_guard,
                     )
                 else:
-                    launched = handle_home_screen(
-                        restart_enabled=restart_enabled
-                    )
+                    if launch_action_guard is None:
+                        launched = handle_home_screen(
+                            restart_enabled=restart_enabled
+                        )
+                    else:
+                        launched = handle_home_screen(
+                            restart_enabled=restart_enabled,
+                            action_guard_fn=launch_action_guard,
+                        )
+                launch_authorized = bool(launch_guard_state["allowed"])
                 if explicit_start or explicit_attach:
                     self._mark_operator_battle_action_dispatched(
                         bool(launched)

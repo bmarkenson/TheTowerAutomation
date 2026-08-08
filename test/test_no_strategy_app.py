@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 import numpy as np
 import pytest
@@ -461,7 +461,10 @@ def test_next_battle_mode_auto_starts_from_home():
     finally:
         AUTOMATION.mode = original_mode
 
-    home.assert_called_once_with(restart_enabled=True)
+    home.assert_called_once_with(
+        restart_enabled=True,
+        action_guard_fn=ANY,
+    )
 
 
 def test_managed_terminal_policy_does_not_start_from_idle_home():

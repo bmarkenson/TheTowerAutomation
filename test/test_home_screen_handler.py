@@ -27,6 +27,7 @@ def _screenshot():
 
 
 def test_verified_home_battle_ocr_fallback_taps_configured_control():
+    action_guard = lambda: True
     with (
         patch("handlers.home_screen_handler.capture_adb_screenshot", return_value=_screenshot()),
         patch(
@@ -44,13 +45,16 @@ def test_verified_home_battle_ocr_fallback_taps_configured_control():
         ),
         patch("handlers.home_screen_handler.safe_tap", return_value=True) as tap,
     ):
-        assert _tap_verified_home_battle_control()
+        assert _tap_verified_home_battle_control(
+            action_guard_fn=action_guard,
+        )
 
     tap.assert_called_once()
     target, = tap.call_args.args
     kwargs = tap.call_args.kwargs
     assert target == "buttons.battle_control:home"
     assert kwargs["dispatch"] == "now"
+    assert kwargs["action_guard_fn"] is action_guard
     verification = kwargs["verification"]
     assert isinstance(verification, TapVerification)
     assert verification.description == "home_battle_control:NEW_BATTLE"
