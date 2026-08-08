@@ -13,6 +13,7 @@ from core.home_perk_configuration import (
     _capture_ranked_frames,
     _capture_ranked_order_with_ocr_retries,
     _close_to_home,
+    _confirm_auto_pick_local_swap,
     _locate_auto_pick_key,
     _reacquire_auto_pick_move_context,
     _repair_auto_pick_order,
@@ -907,6 +908,137 @@ def test_auto_pick_local_reacquire_retries_one_ignored_previous_swipe():
         "gesture_targets.goto_previous:perks",
         "gesture_targets.goto_previous:perks",
     ]
+
+
+def test_auto_pick_local_reacquire_ignores_two_stable_swipes_before_predecessor():
+    current = np.full((1920, 1080, 3), 1, dtype=np.uint8)
+    previous_page = np.full((1920, 1080, 3), 2, dtype=np.uint8)
+    captures = iter((current, current, previous_page))
+    swipes = []
+
+    def rows(frame):
+        keys = (
+            ("coins_bonus", "chain_lightning_damage")
+            if int(frame[0, 0, 0]) == 1
+            else (
+                "inner_land_mines",
+                "coins_bonus",
+                "chain_lightning_damage",
+            )
+        )
+        return [_row(key, index) for index, key in enumerate(keys)]
+
+    frame, row, predecessor, following, at_top = (
+        _reacquire_auto_pick_move_context(
+            current,
+            "coins_bonus",
+            capture_fn=lambda: next(captures),
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda key: swipes.append(key) or True,
+            row_fn=rows,
+            sleep_fn=lambda _seconds: None,
+        )
+    )
+
+    assert frame is previous_page
+    assert row["key"] == "coins_bonus"
+    assert predecessor is not None
+    assert predecessor["key"] == "inner_land_mines"
+    assert following is not None
+    assert following["key"] == "chain_lightning_damage"
+    assert at_top is False
+    assert swipes == ["gesture_targets.goto_previous:perks"] * 3
+
+
+def test_auto_pick_swap_confirmation_does_not_promote_viewport_top():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    current, row, predecessor, following, at_top = (
+        _confirm_auto_pick_local_swap(
+            "coins_bonus",
+            {"key": "chain_lightning_damage"},
+            current=frame,
+            capture_fn=Mock(side_effect=AssertionError("fresh capture not needed")),
+            detector=lambda _frame: {"state": "PERKS"},
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=lambda _frame: [
+                _row("coins_bonus", 0),
+                _row("chain_lightning_damage", 1),
+            ],
+            sleep_fn=lambda _seconds: None,
+        )
+    )
+
+    assert current is frame
+    assert row["key"] == "coins_bonus"
+    assert predecessor is None
+    assert following is not None
+    assert following["key"] == "chain_lightning_damage"
+    assert at_top is False
+
+
+def test_auto_pick_local_predecessor_exhaustion_is_non_retryable():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    expected = [
+        "perk_wave_requirement",
+        "game_speed",
+        "death_wave_quantity",
+        "coins_bonus",
+    ]
+    observed = [
+        "perk_wave_requirement",
+        "game_speed",
+        "death_wave_quantity",
+        "max_health",
+    ]
+
+    with (
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration._locate_auto_pick_key",
+            return_value=(None, frame, _row("coins_bonus", 0)),
+        ),
+        patch(
+            "core.home_perk_configuration._reacquire_auto_pick_move_context",
+            side_effect=HomePerkConfigurationError(
+                "required predecessor boundary was not reached"
+            ),
+        ),
+        patch(
+            "core.home_perk_configuration._recapture_auto_pick_semantic_order",
+            return_value=(frame, list(observed)),
+        ) as recapture,
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+        ) as tap,
+    ):
+        with pytest.raises(
+            HomePerkConfigurationRepairExhausted,
+            match=(
+                "target=Coins Bonus; predecessor=Death Wave Quantity; "
+                "reason=required predecessor boundary"
+            ),
+        ):
+            _repair_auto_pick_order(
+                frame,
+                expected,
+                capture_fn=lambda: frame,
+                detector=lambda _frame: {"state": "PERKS"},
+                safe_tap_fn=lambda *_args, **_kwargs: True,
+                visible_fn=lambda *_args, **_kwargs: True,
+                swipe_fn=lambda _key: True,
+                row_fn=lambda _frame: [],
+                row_near_fn=lambda *_args, **_kwargs: None,
+                observed_keys=observed,
+                sleep_fn=lambda _seconds: None,
+            )
+
+    assert recapture.call_count == 2
+    tap.assert_not_called()
 
 
 def test_auto_pick_ocr_retry_rescans_locally_from_top_once():

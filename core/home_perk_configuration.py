@@ -945,7 +945,13 @@ def _repair_auto_pick_order(
                 )
             except HomePerkConfigurationError as exc:
                 if semantic_resyncs >= MAX_AUTO_PICK_SEMANTIC_RESYNCS:
-                    raise
+                    raise HomePerkConfigurationRepairExhausted(
+                        "Auto Pick local target context remained unavailable "
+                        "after bounded semantic recovery; "
+                        f"target={perk_configuration_label(key)}; "
+                        f"predecessor={perk_configuration_label(anchor_key)}; "
+                        f"reason={exc}"
+                    ) from exc
                 semantic_resyncs += 1
                 log(
                     "[HOME_PERKS] Auto Pick local target context was lost; "
@@ -964,6 +970,7 @@ def _repair_auto_pick_order(
                     row_fn=row_fn,
                     sleep_fn=sleep_fn,
                 )
+                desired_rank = 1
                 restart_from_semantic_order = True
                 break
 
@@ -997,7 +1004,7 @@ def _repair_auto_pick_order(
                 at_top=at_top,
             ):
                 if semantic_resyncs >= MAX_AUTO_PICK_SEMANTIC_RESYNCS:
-                    raise HomePerkConfigurationError(
+                    raise HomePerkConfigurationRepairExhausted(
                         "Auto Pick local row context remained inconsistent "
                         "with the authoritative ranked order"
                     )
@@ -1019,6 +1026,7 @@ def _repair_auto_pick_order(
                     row_fn=row_fn,
                     sleep_fn=sleep_fn,
                 )
+                desired_rank = 1
                 restart_from_semantic_order = True
                 break
 
@@ -1039,9 +1047,9 @@ def _repair_auto_pick_order(
             if anchor_key is None and at_top:
                 break
             if at_top:
-                raise HomePerkConfigurationError(
-                    f"{perk_configuration_label(key)} reached the top before "
-                    f"its guarded predecessor "
+                raise HomePerkConfigurationRepairExhausted(
+                    f"{perk_configuration_label(key)} appeared at a proven "
+                    "list top before its guarded predecessor "
                     f"{perk_configuration_label(anchor_key)}"
                 )
             if previous is None:
@@ -1313,7 +1321,7 @@ def _reacquire_auto_pick_move_context(
             return "auto_pick_move_context_visible"
         return None
 
-    capture = capture_scroll_to_edge(
+    capture = scroll_to_edge(
         "gesture_targets.goto_previous:perks",
         source_label=PERK_CONFIGURATION_INDICATOR,
         screenshot=current,
@@ -1326,16 +1334,13 @@ def _reacquire_auto_pick_move_context(
         sleep_fn=sleep_fn,
         stop_fn=context_stop,
     )
-    latest = capture.screenshots[-1] if capture.screenshots else current
+    latest = capture.screenshot if capture.screenshot is not None else current
     if capture.reason == "auto_pick_move_context_visible" and found_context:
         return latest, *found_context, False
-    if capture.success and capture.reason == "edge_reached":
-        context = _visible_auto_pick_move_context(latest, key, row_fn=row_fn)
-        if context is not None:
-            return latest, *context, True
     raise HomePerkConfigurationError(
         "Auto Pick local repair could not reacquire "
-        f"{perk_configuration_label(key)} while scrolling upward"
+        f"{perk_configuration_label(key)} with a visible predecessor while "
+        f"scrolling upward; reason={capture.reason}"
     )
 
 
@@ -1366,7 +1371,7 @@ def _confirm_auto_pick_local_swap(
             and context[2] is not None
             and perk_entries_match(displaced, context[2])
         ):
-            return current, *context, context[1] is None
+            return current, *context, False
         if attempt == 0:
             log(
                 "[HOME_PERKS] Auto Pick local swap was not settled on the "
