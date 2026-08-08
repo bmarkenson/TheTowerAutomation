@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping, Optional
 import numpy as np
 
 from core.auto_pick_perks import measure_auto_pick_perks
+from core.gc_module_loadout import gc_module_loadout_evidence_from_assignments
 from core.gc_preflight import (
     GcSessionPreflightEvidence,
     merge_ultimate_weapon_observations,
@@ -29,6 +30,7 @@ from core.poison_swamp_stun import (
     PoisonSwampStunResult,
     ensure_poison_swamp_stun,
 )
+from core.player_save import save_check_matches_requirement
 from core.run_controls import go_home_from_run
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -677,8 +679,9 @@ def run_read_only_gc_preflight(
     """Verify session requirements and return to the original battle.
 
     When ``stay_in_battle`` is true, the route never invokes the resumable game
-    Home path. Any Home-only Workshop preset check is reported as deferred
-    unless complete boundary evidence was already supplied.
+    Home path. Exact bound round-invariant save facts may replace their
+    redundant UI observations. Any unresolved Home-only Workshop preset check
+    is reported as deferred.
     """
 
     route_completed = False
@@ -839,6 +842,60 @@ def run_read_only_gc_preflight(
             else {}
         )
         consume_save = getattr(player_save_preflight, "consume", None)
+        accepted_sections: dict[str, dict[str, Any]] = {}
+        attached_module_boundary_evidence = None
+        if (
+            stay_in_battle
+            and not use_no_battle_evidence
+            and callable(consume_save)
+        ):
+            for section, check_id in (
+                ("workshop", "workshop_preset"),
+                ("bots", "bots_preset"),
+                ("guardians", "guardian_chips"),
+            ):
+                if check_id not in requirements:
+                    continue
+                carried_value = consume_save(check_id)
+                if carried_value is not None and save_check_matches_requirement(
+                    check_id,
+                    requirements[check_id],
+                    carried_value,
+                ):
+                    accepted_sections[section] = {
+                        "disposition": "save_match",
+                        "source": "bound_player_save_preflight",
+                    }
+
+            if module_mode != "preserve":
+                carried_modules = consume_save("modules")
+                if isinstance(carried_modules, Mapping):
+                    carried_module_evidence = (
+                        gc_module_loadout_evidence_from_assignments(
+                            module_requirements,
+                            carried_modules,
+                        )
+                    )
+                    if carried_module_evidence.fully_observed and (
+                        module_mode == "observe"
+                        or carried_module_evidence.valid
+                    ):
+                        attached_module_boundary_evidence = {
+                            **carried_module_evidence.as_dict(),
+                            "source": "bound_player_save_preflight",
+                            "status": (
+                                "save_observation"
+                                if module_mode == "observe"
+                                else "save_match"
+                            ),
+                            "disposition": (
+                                "save_observation"
+                                if module_mode == "observe"
+                                else "save_match"
+                            ),
+                            "checked": False,
+                            "reason": "round_invariant_attachment_observation",
+                        }
         carried_primaries = (
             consume_save("ultimate_weapon_primaries")
             if callable(consume_save)
@@ -1125,7 +1182,10 @@ def run_read_only_gc_preflight(
             return GcLivePreflightResult(status, reason, evidence)
 
         modules = None
-        if module_mode != "preserve":
+        if (
+            module_mode != "preserve"
+            and attached_module_boundary_evidence is None
+        ):
             _ensure_running_side_menu_open(
                 capture_fn=capture_fn,
                 detector=detector,
@@ -1154,124 +1214,110 @@ def run_read_only_gc_preflight(
                 sleep_fn=sleep_fn,
             )
 
-        _ensure_running_side_menu_open(
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.menu_event",
-            allowed_states={"RUNNING"},
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-        _wait_for(
-            state="EVENT",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.event:bots_tab",
-            allowed_states={"EVENT"},
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-        sleep_fn(0.5)
-        bots = _wait_for(
-            state="EVENT",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        bots = _ensure_event_bots_top(
-            bots,
-            capture_fn=capture_fn,
-            detector=detector,
-            event_swipe_fn=event_swipe_fn,
-            sleep_fn=sleep_fn,
-        )
-        _return_to_game_from_section(
-            state="EVENT",
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
+        bots = None
+        if "bots" not in accepted_sections:
+            _ensure_running_side_menu_open(
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.menu_event",
+                allowed_states={"RUNNING"},
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            _wait_for(
+                state="EVENT",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.event:bots_tab",
+                allowed_states={"EVENT"},
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            sleep_fn(0.5)
+            bots = _wait_for(
+                state="EVENT",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            bots = _ensure_event_bots_top(
+                bots,
+                capture_fn=capture_fn,
+                detector=detector,
+                event_swipe_fn=event_swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+            _return_to_game_from_section(
+                state="EVENT",
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
 
-        _ensure_running_side_menu_open(
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.menu_guild",
-            allowed_states={"RUNNING"},
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-        _wait_for(
-            state="GUILD",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.guild:guardian_tab",
-            allowed_states={"GUILD"},
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-        guardians = _wait_for(
-            state="GUILD",
-            secondary="GUILD_GUARDIAN_SCREEN",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _return_to_game_from_section(
-            state="GUILD",
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
+        guardians = None
+        if "guardians" not in accepted_sections:
+            _ensure_running_side_menu_open(
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.menu_guild",
+                allowed_states={"RUNNING"},
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            _wait_for(
+                state="GUILD",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.guild:guardian_tab",
+                allowed_states={"GUILD"},
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            guardians = _wait_for(
+                state="GUILD",
+                secondary="GUILD_GUARDIAN_SCREEN",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _return_to_game_from_section(
+                state="GUILD",
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
 
-        accepted_sections: dict[str, dict[str, Any]] = {}
         deferred_checks: tuple[str, ...] = ()
         workshop = None
         if stay_in_battle:
             # Attached validation must not leave the current battle merely to
             # inspect a Home-only preset. Consume exact save evidence only when
             # it is already bound to this active run; otherwise defer the check.
-            expected_workshop = str(
-                requirements.get("workshop_preset") or ""
-            ).strip()
-            carried_workshop = (
-                consume_save("workshop_preset")
-                if expected_workshop and callable(consume_save)
-                else None
-            )
-            if (
-                expected_workshop
-                and str(carried_workshop or "").strip()
-                == expected_workshop
-            ):
-                accepted_sections["workshop"] = {
-                    "disposition": "save_match",
-                    "source": "bound_player_save_preflight",
-                }
-            else:
+            if "workshop" not in accepted_sections:
                 deferred_checks = ("workshop_preset",)
         else:
             # A normal session preflight may inspect the Workshop preset through
@@ -1346,6 +1392,10 @@ def run_read_only_gc_preflight(
             validation_args["deferred_checks"] = deferred_checks
         if accepted_sections:
             validation_args["accepted_sections"] = accepted_sections
+        if attached_module_boundary_evidence is not None:
+            validation_args["module_boundary_evidence"] = (
+                attached_module_boundary_evidence
+            )
         waivers = requirements.get("_gate_waivers")
         if isinstance(waivers, Mapping) and waivers:
             validation_args["waivers"] = dict(waivers)

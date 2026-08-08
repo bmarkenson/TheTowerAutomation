@@ -15,8 +15,10 @@ from core.gc_preflight_navigation import (
     run_read_only_gc_preflight,
 )
 from core.home_battle import HomeBattleEvidence
+from core.player_save_temporal import BoundRunningAttachmentSaveEvidence
 from core.poison_swamp_stun import PoisonSwampStunState
 from core.upgrade_box_detector import UpgradeBox
+from test.player_save_temporal_fixtures import running_attachment_observations
 
 
 ULTIMATE_REQUIREMENTS = {
@@ -475,6 +477,189 @@ def test_attached_route_uses_bound_workshop_save_evidence_without_going_home():
         }
     }
     assert "deferred_checks" not in validated
+    assert "navigation.goto_workshop_home" not in ui.static_taps
+    assert "buttons.battle_control:home" not in ui.static_taps
+
+
+def test_attached_route_uses_all_bound_round_invariant_save_evidence():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    observed_modules = {
+        **MODULE_REQUIREMENTS,
+        "generator_primary": "Project Funding",
+    }
+    carried = {
+        "workshop_preset": "Tourney",
+        "bots_preset": "Amplify",
+        "guardian_chips": ["Scout", "Attack", "Ally"],
+        "modules": observed_modules,
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True, deferred_checks=())
+
+    result = run_read_only_gc_preflight(
+        {
+            "cards_deck": "Tournament",
+            "workshop_preset": "Tourney",
+            "bots_preset": "Amplify",
+            "guardian_chips": ["Attack", "Ally", "Scout"],
+            "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+            "loadout_policies": {"modules": "observe"},
+            "modules": MODULE_REQUIREMENTS,
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attached validation must stay in battle")
+        ),
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {
+            "left": boxes,
+            "right": [],
+        },
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.reason == "all requirements verified"
+    assert validated["accepted_sections"] == {
+        "workshop": {
+            "disposition": "save_match",
+            "source": "bound_player_save_preflight",
+        },
+        "bots": {
+            "disposition": "save_match",
+            "source": "bound_player_save_preflight",
+        },
+        "guardians": {
+            "disposition": "save_match",
+            "source": "bound_player_save_preflight",
+        },
+    }
+    module_boundary = validated["module_boundary_evidence"]
+    assert module_boundary["source"] == "bound_player_save_preflight"
+    assert module_boundary["disposition"] == "save_observation"
+    assert module_boundary["fully_observed"] is True
+    assert module_boundary["valid"] is False
+    assert "deferred_checks" not in validated
+    assert "navigation.Cards" in ui.visible_taps
+    assert ui.swipes
+    assert "navigation.menu_modules" not in ui.visible_taps
+    assert "navigation.menu_event" not in ui.visible_taps
+    assert "navigation.menu_guild" not in ui.visible_taps
+    assert "navigation.goto_workshop_home" not in ui.static_taps
+    assert "buttons.battle_control:home" not in ui.static_taps
+    for check_id in carried:
+        assert bound.consume(check_id) is None
+
+
+def test_attached_route_keeps_ui_fallback_for_invariant_mismatches():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    carried = {
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": {
+            **MODULE_REQUIREMENTS,
+            "generator_primary": "Project Funding",
+        },
+    }
+
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(
+            valid=True,
+            deferred_checks=("workshop_preset",),
+        )
+
+    result = run_read_only_gc_preflight(
+        {
+            "cards_deck": "Tournament",
+            "workshop_preset": "Tourney",
+            "bots_preset": "Amplify",
+            "guardian_chips": ["Attack", "Ally", "Scout"],
+            "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+            "modules": MODULE_REQUIREMENTS,
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attached validation must stay in battle")
+        ),
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {
+            "left": boxes,
+            "right": [],
+        },
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.reason == "active requirements verified; boundary checks deferred"
+    assert validated["deferred_checks"] == ("workshop_preset",)
+    assert "accepted_sections" not in validated
+    assert "module_boundary_evidence" not in validated
+    assert "navigation.menu_modules" in ui.visible_taps
+    assert "navigation.menu_event" in ui.visible_taps
+    assert "navigation.menu_guild" in ui.visible_taps
     assert "navigation.goto_workshop_home" not in ui.static_taps
     assert "buttons.battle_control:home" not in ui.static_taps
 

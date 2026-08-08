@@ -763,13 +763,18 @@ a later capture. Bot progression is neither projected into nor compared with
 the selected Bot preset. The resulting facts populate the existing
 `observed_run_configuration` actual loadout, never configured intent.
 
-The same typed attachment object supplies Tournament's existing in-battle
-Workshop evidence seam. Its one-use consumer accepts only a round-invariant
-fact and rechecks process, target generation, activity scope, and active-battle
-ownership at consumption time. A valid `Tourney` match therefore closes the
-Home-only deferral without a game-Home route, another Android lifecycle action,
-or another save read; missing, mismatched, or rebound evidence preserves the
-established explicit deferral.
+The same typed attachment object supplies Tournament's in-battle preflight
+with Workshop, selected Bot preset, equipped Guardians, and equipped Modules.
+Its one-use consumer accepts only round-invariant facts and rechecks process,
+target generation, activity scope, and active-battle ownership at every
+consumption. Exact Workshop, Bot, and Guardian matches omit their redundant UI
+sections. Complete Modules omit UI for an enforced match or an
+observation-only assignment; a mapped observation-only variation remains
+reported rather than becoming repair authority. Missing, mismatched, or
+rebound Bot, Guardian, or enforced Module evidence retains the established UI
+check, while unresolved Workshop preserves the explicit Home-only deferral.
+Cards and current-configuration facts remain ineligible. No path adds a
+game-Home route, another Android lifecycle action, or another save read.
 
 The normal Perk monitor consumes the same forced-attachment bundle, scheduled
 `passive_stable_read` bundles, and the lifecycle-issued natural terminal

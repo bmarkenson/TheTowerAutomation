@@ -328,6 +328,7 @@ class GcSessionPreflightEvidence:
     accepted_configuration_sections: Mapping[str, Mapping[str, Any]] = field(
         default_factory=dict
     )
+    module_source: str = "ui"
     auto_pick_perks_source: str = "ui"
     waivers: Mapping[str, Any] = field(default_factory=dict)
 
@@ -449,6 +450,7 @@ class GcSessionPreflightEvidence:
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
+        module_source = str(payload.pop("module_source", self.module_source))
         accepted_sections = payload.pop(
             "accepted_configuration_sections",
             {},
@@ -474,6 +476,7 @@ class GcSessionPreflightEvidence:
                 checked=True,
                 matches_expected=self.modules.valid,
                 blocking_valid=self.modules_blocking_valid,
+                source=module_source,
             )
         payload["auto_pick_perks"].update(
             required=self.auto_pick_perks_required,
@@ -985,6 +988,7 @@ def validate_gc_session_preflight_screens(
     if module_mode not in {"enforce", "observe", "preserve"}:
         raise ValueError(f"unsupported module policy {module_mode!r}")
     modules = None
+    module_source = "not_required"
     if module_mode != "preserve":
         if not isinstance(module_requirements, Mapping):
             raise ValueError(
@@ -992,15 +996,20 @@ def validate_gc_session_preflight_screens(
             )
         if "modules" in active_waivers:
             modules = None
+            module_source = "waived"
         elif module_boundary_evidence is not None:
             modules = gc_module_loadout_evidence_from_dict(
                 module_boundary_evidence
+            )
+            module_source = str(
+                module_boundary_evidence.get("source") or "boundary_evidence"
             )
         elif modules_screen is not None:
             modules = evaluate_gc_module_loadout(
                 modules_screen,
                 module_requirements,
             )
+            module_source = "ui"
         else:
             raise ValueError(
                 f"module policy {module_mode!r} requires screen or boundary evidence"
@@ -1019,6 +1028,7 @@ def validate_gc_session_preflight_screens(
         ),
         deferred_configuration_checks=normalized_deferred_checks,
         accepted_configuration_sections=active_accepted_sections,
+        module_source=module_source,
         auto_pick_perks_source=auto_pick_source,
         waivers=active_waivers,
     )
