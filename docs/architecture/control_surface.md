@@ -177,7 +177,7 @@ expiry attempt.
 
 ## Better Control Model
 
-Server revision 30 retains `better_control_model_v1` and
+Server revision 31 retains the revision-30 `better_control_model_v1` and
 `save_backed_setup_capture_v1` for additive compatibility and advertises
 `better_control_model_v2` plus `save_backed_setup_capture_v2`. The additive
 `control_model` status object
@@ -413,7 +413,7 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/strategy-authoring/history` | Newest-first immutable custom-Strategy lineage and revision summaries, including retired lineages, without expanded plans |
 | `GET` | `/api/v1/strategy-authoring/history/{id}` | One custom Strategy lineage and its ordered revision summaries |
 | `GET` | `/api/v1/strategy-authoring/history/{id}/{version}` | One retained revision's review-safe source, Base snapshot, resolution, fingerprints, audit identity, and validation state without its generated plan |
-| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, create an immutable custom Module preset, compare retained revisions, or review/confirm restore-as-new, without activation |
+| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, materialize a catalog-bound normalized preset copy, create an immutable custom Module preset, compare retained revisions, or review/confirm restore-as-new, without activation |
 | `GET` | `/api/v1/setup-capture` | Current runtime-issued capture status, availability, inactive captured-draft catalog, Module presets, and comparison Bases |
 | `POST` | `/api/v1/setup-capture` | Request a new forced-save capture, review a fingerprinted captured-versus-Base difference, save through the existing Module/Strategy owner, or cancel; never activate or publish |
 | `GET` | `/api/v1/setup-capture/drafts/{id}` | Reopen one immutable captured Strategy source in the ordinary authoring editor without selecting or activating it |
@@ -512,10 +512,11 @@ existing process API and its normal next-boundary or active-battle semantics.
 
 ## Sparse strategy authoring
 
-Server revision 25 preserves `strategy_authoring_v1`,
+Server revision 31 preserves `strategy_authoring_v1`,
 `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains `strategy_revision_history_v1`, and advertises
+`strategy_authoring_preset_local_copy_v1`. Revision 25 added
 `managed_custom_module_presets_v1` after revision 24 added
 `strategy_authoring_local_loadout_editors_v1`. The additive
 `/api/v1/strategy-authoring` endpoint implements the sparse Base/Strategy model
@@ -523,10 +524,10 @@ without changing `/api/v1/strategy-profiles`, `strategy_profile_catalog_v1`, or
 `strategy_profile_editor_v2`. Pre-authoring native clients therefore keep using
 their existing latest-only facade. The revision-23 authoring client retains its exact
 preset-only metadata path against the newer service. Revision-24 option and
-local-editor wire shapes remain unchanged. The revision-25 client requires the
+local-editor wire shapes remain unchanged. The revision-31 client requires the
 retained authoring, Strategy Gate, history, local-loadout, and managed Module
-preset capabilities and fails compatibility clearly against an older resident
-service.
+preset capabilities plus preset-local-copy materialization and fails
+compatibility clearly against an older resident service.
 
 The GET response carries the setting registry, normalized initial values,
 behavior-free specialized-editor metadata, safe editor catalogs, separate Base
@@ -543,6 +544,9 @@ their top-level revision-23 `preset` editor contract and add a schema-versioned
 Module slots/family candidates/uniqueness, complete Target membership/order,
 and the three server-normalized Orb text fields. A revision-23 client ignores
 that nested object; a local selector has no preset field for it to reinterpret.
+Each preset/local entry also carries the fingerprint of the exact preset
+catalog snapshot shown to the client. Revision-31 clients use that token only
+for the explicit server materialization operation; older clients ignore it.
 Unsupported Strategy families remain listed with a read-only reason. Existing
 schema-1 Farm publications are converted conservatively in memory and are not
 rewritten merely because the catalog was opened.
@@ -560,6 +564,19 @@ drafts, and validation-driven row reconstruction keeps those dormant values. A
 server-supplied initial value is used when an omitted setting or form is first
 materialized. The client does not implement a second normalizer or resolver.
 
+For Modules, Target Priority, and Orb Distance, **Edit a copy...** submits the
+exact selected preset and displayed catalog fingerprint to
+`materialize_loadout_preset`. Linux compares one current catalog snapshot and
+uses its ordinary definition-snapshot resolver and normalizer to return the
+complete local value. WPF validates the response identity and local-editor
+shape before atomically replacing the dormant local form and switching the row
+to **Profile-local definition**. A meaningful dormant local draft produces an
+explicit replace/retain/cancel prompt; cancel and every stale, unknown,
+unsupported, interrupted, or invalid response preserve both forms. Read-only
+bundled Strategies cannot edit a copy, while editable clones and custom
+Strategies can. Copying changes only the open draft: it does not publish,
+select, activate, queue, or apply a Strategy or preset.
+
 Bundled Module presets remain in immutable `config/loadouts/modules.yaml`.
 Custom presets use the server-owned, Git-ignored
 `config/loadouts/custom/modules` directory (or an injected disposable root)
@@ -571,18 +588,25 @@ paths.
 
 The WPF Module shared-preset form shows all eight authoritative slot
 assignments; it labels bundled presets read-only and custom presets immutable.
-**Create variant** can copy either origin and **Save as preset** submits the
-current metadata-driven local definition. Both are save-as-new: no overwrite,
-rename, deletion, or retirement exists. A successful create refreshes options
-incrementally, preserves every retained selection object, and explicitly moves
-the current row to the new preset while leaving Validate → Review → Publish
-pending. A failed create preserves the draft and selections. The controls are
-hidden without the managed capability.
+**Duplicate preset...** creates a new immutable exact-copy preset from either
+origin, while **Save as preset...** submits the current metadata-driven local
+definition. Both are save-as-new and remain distinct from **Edit a copy...**:
+no overwrite, rename, deletion, or retirement exists. A successful create
+refreshes options incrementally, preserves every retained selection object,
+and explicitly moves the current row to the new preset while leaving Validate
+→ Review → Publish pending. A failed create preserves the draft and
+selections. The controls are hidden without the managed capability. No Target
+Priority or Orb Distance custom-preset catalog is introduced.
 
 POST accepts `validate_base`, `publish_base`, `validate_strategy`,
 `publish_strategy`, `preview_rebase`, `retire_strategy`,
 `compare_strategy_revision`, `preview_restore_strategy`, and
-`publish_restore_strategy`, plus `create_module_preset`. The creation payload
+`publish_restore_strategy`, plus `materialize_loadout_preset` and
+`create_module_preset`. Materialization accepts exactly `setting_id`, `preset`,
+and `expected_catalog_fingerprint`; stale catalog state is HTTP 409, while an
+unknown preset or normalization rejection is HTTP 400. Success returns the
+normalized definition with `published: false` and never writes or changes
+control state. The creation payload
 contains a new safe ID, display name, and exactly one `{preset: id}` or
 `{local: definition}` source. Linux returns HTTP 400 structured validation or
 HTTP 409 collision errors without a partial file. Success returns the created
@@ -814,7 +838,8 @@ Process request examples:
   and Take Manual Control/Return Control controls. Their availability and
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
-  requires server revision 30 and capability `better_control_model_v2`;
+  was introduced in server revision 30; the current client requires revision
+  31 and capability `better_control_model_v2`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
 - Take Manual Control selects default minimal or opt-in full collection for a
   later save-confirmed manual Surrender without granting Surrender authority.
@@ -852,8 +877,13 @@ Process request examples:
   Linux remains normalization, resolution, review, history, and publication
   authority. This requires server revision 24 and capability
   `strategy_authoring_local_loadout_editors_v1`.
+- Explicit catalog-bound **Edit a copy...** for Modules, Target Priority, and
+  Orb Distance. Linux materializes and normalizes the exact selected preset;
+  meaningful dormant local drafts require replace/retain/cancel, and failures
+  preserve both forms. This requires server revision 31 and capability
+  `strategy_authoring_preset_local_copy_v1`.
 - Authoritative eight-slot Module preset previews plus immutable custom
-  **Create variant** and local **Save as preset** workflows. Linux owns the
+  **Duplicate preset** and local **Save as preset** workflows. Linux owns the
   merged catalog and validation; native refresh keeps retained selections and
   never bypasses ordinary draft review/publication. This requires server
   revision 25 and capability `managed_custom_module_presets_v1`.
