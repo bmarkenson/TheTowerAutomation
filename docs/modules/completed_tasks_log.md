@@ -49,11 +49,24 @@ canonical document linked by an entry for current behavior.
   that blocked Black Hole Duration, guarantees current save-mapped perk
   vocabulary coverage, keeps unknown-predecessor recovery local, and prevents
   an exhausted local Perk repair from replaying the complete Home setup.
-- The 107 focused tests and the complete isolated checkpoint passed; the latter
-  covered compilation, state definitions, clickmap integrity with zero errors
-  and the 44 established orphan candidates, and all 1,784 tests in 325.58
-  seconds. Production runtime, device, control, and deployment state were not
-  changed.
+- The initial 107 focused tests and complete isolated checkpoint passed; the
+  latter covered compilation, state definitions, clickmap integrity with zero
+  errors and the 44 established orphan candidates, and all 1,784 tests in
+  325.58 seconds.
+- Commit `6122503` was promoted under rollback tag
+  `production-before-20260808T041513Z-7bb0b6e`. PID `1292147` stopped cleanly;
+  replacement PID `1903959` acquired the exact `localhost:5555` owner/lock and
+  produced a fresh Home observation. The no-waiver retry then proved the
+  Black Hole/Chrono correction live before two ignored reverse swipes were
+  mistaken for the Auto Pick list top during the later Coins Bonus repair. The
+  coordinator Paused the resulting whole-Home retry, and PID `1903959`
+  acknowledged the action-free hold.
+- Fix-forward commit `f747515` makes a visible predecessor the required local
+  scroll boundary, removes viewport-top authority from swap confirmation,
+  restarts semantic plans at rank one, and types bounded exhaustion as
+  non-retryable. All 110 focused tests and the complete isolated checkpoint
+  passed, including all 1,787 tests in 336.81 seconds. Its production rollout
+  remained pending at this record boundary.
 
 ### 2026-08-07 recoverable superseded feature retirement
 

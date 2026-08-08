@@ -1173,17 +1173,20 @@ development-lease authority from warning text in `actions.log`.
   while the displaced tail leaves. The Home semantic vocabulary covers every
   perk ID in the current exact-version save mapping. A still-unrecognized local
   predecessor receives bounded fresh local OCR retries and cannot trigger a
-  futile ranked-prefix rescan; a recognized adjacency contradiction retains
-  the bounded semantic resynchronization path. Cached frames never authorize
-  an input. Final authoritative Ban and Auto Pick readbacks remain mandatory
-  and are reused by their callers. An unavailable perk, unresolved ambiguity,
-  or non-progress blocks New Battle. A locally exhausted Perk repair returns to
-  Home once and is marked non-retryable there; other recoverable Home setup
-  failures retain the complete fresh-Home retry policy. Persistent control is
-  synchronized before every Home setup tap or swipe. Pause holds the workflow
-  action-free, and Resume restores verified Home before a fresh setup pass. The
-  setup retains exact UI- or save-derived configuration evidence for session
-  preflight.
+  futile ranked-prefix rescan. Guarded predecessor reacquisition uses a
+  required semantic boundary: visually stable or ignored reverse swipes and a
+  target at the top of one OCR viewport do not prove the global list top. A
+  recognized adjacency contradiction retains the bounded semantic
+  resynchronization path, which restarts planning at rank one. Cached frames
+  never authorize an input. Final authoritative Ban and Auto Pick readbacks
+  remain mandatory and are reused by their callers. An unavailable perk,
+  unresolved ambiguity, or non-progress blocks New Battle. A locally exhausted
+  Perk repair returns to Home once and is marked non-retryable there; other
+  recoverable Home setup failures retain the complete fresh-Home retry policy.
+  Persistent control is synchronized before every Home setup tap or swipe.
+  Pause holds the workflow action-free, and Resume restores verified Home
+  before a fresh setup pass. The setup retains exact UI- or save-derived
+  configuration evidence for session preflight.
   Save-derived sections, including the exact current eight-slot Farm Module
   assignment, are accepted there only after their typed carry binds to the
   exact launched battle; supplied UI screens still override omission
