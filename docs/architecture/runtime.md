@@ -364,7 +364,14 @@ implemented navigation decision remains fail-closed: it requires exact
 process/scope/target/round binding, stable high-confidence `View Perks`
 exhaustion evidence, a nonempty complete checkpoint captured afterward whose
 saved wave includes the exhaustion wave, and a later bound natural Game Over
-clear. Otherwise the existing terminal Perks route runs unchanged.
+clear. Normal in-battle timeline collection now uses those exact monitor
+prefixes and never opens Perks: stable top-bar transitions merely request a
+coalesced passive checkpoint, including while action authority is Paused. If
+Game Over lacks finality but retains a bound non-conflicted prefix, terminal
+collection reads only the newest Perks viewport and merges the provable tail;
+ambiguous levels, repeat counts, order, or a missing saved-recency marker remain
+explicitly unresolved. Only absent, unbound, malformed, or round-conflicted
+prefix evidence takes the complete terminal Perks traversal.
 
 The same privacy boundary will expose additional active-round components only
 through exact-version manifests. In-battle Attack, Defense, and Utility levels
@@ -573,15 +580,18 @@ disabled or rejected optional component cannot erase a valid core receipt.
 Visual waves are explicitly approximate observations, never exact activation
 waves.
 
-The existing Perk timeline may also feed a stripped calibration batch after it
-has independently accepted a complete exact selection boundary. Display text,
-OCR output, colors, pixels, and restored timeline checkpoints never cross this
-queue. When a stable save is structurally complete but contains an unmapped
-numeric ID, a pure resolver groups save picks and UI selections by exact wave,
-cancels already mapped semantics, and applies singleton constraint propagation.
-It restores the semantic Perk projection only if every needed assignment is
-unique, uses an already allowlisted Perk family at at least 80% confidence, and
-successfully appends the calibration receipt. Multi-wave aggregates, visibility
+The legacy UI Perk timeline may feed a stripped calibration batch only after an
+explicit UI owner has independently accepted a complete exact selection
+boundary. Display text, OCR output, colors, pixels, restored checkpoints, and
+the normal save-backed timeline never cross this queue. When a stable save is
+structurally complete but contains an unmapped numeric ID, the pure resolver
+can group an explicitly supplied UI batch with save picks by exact wave, cancel
+already mapped semantics, and apply singleton constraint propagation. It
+restores the semantic projection only if every needed assignment is unique,
+uses an already allowlisted Perk family at at least 80% confidence, and
+successfully appends the calibration receipt. Ordinary passive monitoring does
+not open Perks to create such evidence; an unknown ID therefore remains
+unavailable and preserves terminal fallback. Multi-wave aggregates, visibility
 gaps, count differences, duplicate semantics, conflicting later evidence, and
 ambiguous assignments stay unavailable. The static exact-version manifest is
 never rewritten.

@@ -85,9 +85,10 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       consumes shared passive bundles; forced attachment and natural terminal
       bundles fan out to the same monitor without another pull. Saved picks are
       a monotonic same-round positive prefix, never proof that no later pick
-      exists. Open terminal Perks unless the bound exhaustion/final-prefix and
-      terminal-clear rules prove completeness; preserve compact Game Stats,
-      More Stats fallback, and every UI-owned lifecycle action.
+      exists. The initial deployed phase opened terminal Perks unless the bound
+      exhaustion/final-prefix and terminal-clear rules proved completeness;
+      compact Game Stats, More Stats fallback, and every UI-owned lifecycle
+      action remained intact.
       Implemented as a pure typed-bundle monitor plus a normal passive
       scheduler. The same immutable passive object reaches monitoring and the
       optional audit projector; forced attachment and natural terminal bundles
@@ -96,8 +97,8 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       clear are all required before terminal Perks navigation is omitted.
       Cleared fields never become inventory, `saveRevision` never establishes
       freshness, and malformed, failed, lagging, regressed, reordered,
-      conflicted, rebound, empty, or terminal-only evidence retains the exact
-      UI fallback. Focused regression passed 301 tests.
+      conflicted, rebound, empty, or terminal-only evidence retained that
+      phase's complete UI fallback. Focused regression passed 301 tests.
     - [x] Run the supported development checkpoint for the Perk phase and
       retain its result with the phase commit. Automated coverage includes
       one-read/many-projector identity, target/scope handoff rejection,
@@ -158,6 +159,16 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         and a later natural terminal clear prove completeness. No qualifying
         natural terminal boundary occurred during the deployment window, so
         every terminal UI fallback remains authoritative.
+      - [ ] Integrate and promote the
+        [completed passive timeline correction](../modules/completed_tasks_log.md#2026-08-08-passive-save-backed-perk-timeline-correction),
+        then observe an ordinary battle without creating or accelerating a
+        boundary. Confirm stable top-bar transitions produce passive
+        acquisition/timeline progress with no in-battle
+        `navigation.open_perks` input. At natural Game Over, confirm a proved
+        exhausted final prefix performs zero Perks navigation, or a nonfinal
+        bound prefix visits only the newest viewport and never dispatches
+        `gesture_targets.goto_next:perks`. Retain the record to confirm exact
+        saved picks and any terminal uncertainty are rendered separately.
   - [ ] Confirm the deployed direct-Retry repair on the next ordinary
     `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
     retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh

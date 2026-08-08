@@ -26,7 +26,6 @@ from core.battle_stats import (
 )
 from core.battle_perks import ocr_selected_perks
 from core.perk_save_monitor import (
-    merge_terminal_perk_evidence,
     merge_terminal_perk_tail,
 )
 from core.terminal_save_report import terminal_save_report_complete
@@ -870,38 +869,6 @@ def _resolve_game_over_perks(
     terminal_ui, frames, restored = _capture_game_over_perks(
         action_guard_fn=action_guard_fn,
     )
-    if not restored or not isinstance(monitoring, Mapping):
-        return terminal_ui, frames, restored
-    if (
-        monitoring.get("context_status") != "bound"
-        or not isinstance(monitoring.get("checkpoint"), Mapping)
-        or monitoring.get("active_failure_reason")
-        or monitoring.get("round_conflict_reason")
-    ):
-        return terminal_ui, frames, restored
-
-    inventory, merge = merge_terminal_perk_evidence(
-        monitoring,
-        terminal_ui,
-        top_bar_timeline=context.get("perk_selection_timeline"),
-        game_over_wave=context.get("last_wave"),
-    )
-    context["perk_terminal_merge"] = merge
-    if inventory is not None:
-        return inventory, frames, restored
-
-    if merge.get("reason") != "terminal_ui_incomplete":
-        terminal_ui = dict(terminal_ui)
-        quality = dict(terminal_ui.get("quality") or {})
-        quality["valid"] = False
-        quality["retain_source_images"] = True
-        warnings = list(quality.get("warnings") or [])
-        warnings.append(
-            "Terminal Perks evidence conflicted with the retained exact saved "
-            f"prefix ({merge.get('reason') or 'unknown conflict'})"
-        )
-        quality["warnings"] = warnings
-        terminal_ui["quality"] = quality
     return terminal_ui, frames, restored
 
 

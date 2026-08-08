@@ -39,6 +39,35 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 passive save-backed Perk timeline correction
+
+- Commit `39f4a4d` removes normal in-battle Perks-panel timeline navigation.
+  Stable top-bar transitions now request the existing shared passive save
+  scheduler, while forced attachment evidence seeds the same monitor-owned
+  exact prefix without reacquisition. App transfers detached worker evidence
+  to the persisted timeline only on the serialized main thread and only while
+  process, activity scope, target generation, and active-round identity still
+  match.
+- Each accepted timeline row retains exact oldest-first saved sequence, pick
+  wave, semantic ID/key, and level-after. A later acquisition failure cannot
+  erase that positive prefix, and a pending boundary never becomes negative
+  evidence. Normal save-backed rows do not masquerade as UI calibration
+  batches or open Perks to resolve an unknown ID.
+- Game Over now has three Perk evidence routes. Proven post-exhaustion finality
+  uses the exact saved inventory with no Perks navigation. A bound nonfinal
+  prefix inspects only the newest terminal viewport and merges tail rows when
+  saved recency and passive boundaries make that safe; repeated levels, counts,
+  order, and missing markers remain explicit uncertainty. A missing, unbound,
+  malformed, or round-conflicted prefix retains the complete terminal Perks
+  traversal. Optional data failure remains subordinate to Wait/Retry/Home.
+- The affected attachment, passive-scheduler, monitor, timeline, terminal, and
+  battle-record slice passed 507 tests. The supported checkpoint passed
+  compilation, state definitions, clickmap integrity with zero errors and the
+  established 44 orphan candidates, and all 1,979 tests in 351.18 seconds. No
+  live process, device, integration, promotion, or deployment action was
+  performed; ordinary-boundary production confirmation remains in the runtime
+  backlog.
+
 ### 2026-08-08 save-to-UI fallback contract repair
 
 - The combined candidate is based directly on completed Better Control tip
