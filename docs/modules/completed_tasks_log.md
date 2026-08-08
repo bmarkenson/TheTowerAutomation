@@ -39,6 +39,28 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 idle-Home gem authority
+
+- Commit `61a150f` closes the Better Control implementation gap that stranded a
+  visible five-gem reward while Automation was Enabled at Home awaiting an
+  explicit Start/Attach choice. The initial-intent hold now declares only the
+  typed `home_ad_gem` auxiliary allowance when no immediate battle workflow
+  exists. Every other collector plus Strategy, setup, navigation, and lifecycle
+  work remains blocked.
+- Global Pause, Stop, Take/Return Control, Setup Capture, interactive
+  development, an active Start/Attach workflow, or any second hold overrides
+  the exception. A fresh Home frame only schedules the attempt; the handler
+  obtains a new visible-button match and rechecks central typed authority at the
+  final safe-tap boundary. Runtime status exposes the hold-local and effective
+  collector allowlists under the existing `better_control_model_v2`
+  capability.
+- The focused API/authority/Home suites passed 212 tests and the broader
+  owner/caller slice passed 514. The exact commit passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan candidates, and all 2,010 tests in 337.45 seconds. No live/device or
+  Windows validation was performed, no Windows code changed, and production
+  promotion remains separate.
+
 ### 2026-08-08 recoverable runtime diagnostic reconciliation
 
 - Commit `101054f` selectively ports the two independent logging refinements
@@ -63,11 +85,10 @@ canonical document linked by an entry for current behavior.
   published fresh Home/New Battle evidence. No Start Battle intent, battle
   transition, incomplete-frame event, profile preflight, or device input was
   manufactured for the smoke test.
-- The smoke also confirmed a separate pre-existing Better Control gap:
-  `operator_workflow` currently excludes auxiliary gem collectors while idle
-  Home awaits explicit Start/Attach. The exact observed Home-ad-gem interval is
-  retained as active work in the runtime backlog; this diagnostic-only
-  deployment did not change that authority decision.
+- The smoke also confirmed the then-open Better Control gap in which
+  `operator_workflow` excluded auxiliary gem collectors while idle Home awaited
+  explicit Start/Attach. That diagnostic-only deployment did not change the
+  decision; the later `61a150f` outcome above closes it.
 
 ### 2026-08-08 Home launch-authority correction
 

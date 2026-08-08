@@ -783,13 +783,20 @@ stages:
       `3244540` acquired the held `localhost:5555` lock, acknowledged the exact
       restored Enable request, and published fresh Home/New Battle evidence.
       No Start Battle intent, battle transition, or device input was used.
-    - [ ] Decide and implement idle-Home auxiliary authority. Fresh production
-      evidence from 15:30:44 through 16:05:00 PDT showed Automation Enabled at
-      verified Home/New Battle with `HOME_AD_GEMS_AVAILABLE`, while the
-      `operator_workflow` hold awaiting explicit Start/Attach excluded every
-      auxiliary collector. Preserve explicit battle intent and manual-activity
-      yielding, but do not silently strand safe gem collection merely because
-      no battle workflow is active.
+    - [x] Commit `61a150f` implements the missing idle-Home auxiliary
+      authority. The initial Start/Attach wait may allow only the typed
+      `home_ad_gem` collector while Automation is Enabled and the current frame
+      is verified Home; explicit battle workflows, Pause/Stop, Take/Return
+      Control, Setup Capture, interactive development, or any second exclusive
+      hold remove that exception. The scheduling frame grants no tap authority:
+      the handler obtains a fresh visible-button match and rechecks the central
+      typed decision at the final input boundary. Runtime status exposes both
+      the hold-local allowance and the effective collector list while Strategy
+      and lifecycle authority remain denied. The affected owner/caller slice
+      passes 514 tests. The exact commit passes compilation, state definitions,
+      clickmap integrity with zero errors and the established 44 orphan
+      candidates, and all 2,010 tests in 337.45 seconds. No battle launch,
+      device input, live runtime, or Windows validation was used.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,
