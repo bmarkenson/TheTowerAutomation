@@ -69,10 +69,22 @@ canonical document linked by an entry for current behavior.
   Over/Tournament/repair slice passed 461 tests. Its complete supported
   checkpoint passed compilation, state definitions, clickmap integrity with
   zero errors and the established 44 orphan candidates, and all 1,985 tests in
-  459.15 seconds. The exact post-review checkpoint remains required before
-  deployment; no live/device action or native Windows validation was performed,
-  and natural safe terminal/Home and native Windows usability validation remain
-  in the Better Control backlog.
+  459.15 seconds.
+- Exact post-review candidate `9d7a541` then passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan candidates, and all 2,002 tests in 337.55 seconds. It was
+  fast-forwarded through `develop` and production `main`; rollback tag
+  `production-before-20260808T222617Z-e53c156` preserves the prior production
+  boundary.
+- The bounded production smoke replaced the control surface as PID `3203188`
+  and automation as PID `3203767`. Revision 30 reported connected exact target
+  `localhost:5555`; the replacement held its target lock, acknowledged the
+  exact Enable request, and continued publishing fresh Home/New Battle
+  observations. No Start Battle intent or battle input was issued, and the
+  runtime explicitly logged that it was staying Home. Native Windows usability,
+  a live policy-change-at-Home exercise, and a natural terminal-to-Home
+  continuation remain in the Better Control backlog rather than being
+  manufactured during deployment.
 
 ### 2026-08-08 save-to-UI fallback contract repair
 

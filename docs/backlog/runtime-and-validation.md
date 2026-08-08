@@ -757,8 +757,19 @@ stages:
       definitions, clickmap integrity with zero errors and the established 44
       orphan candidates, and all 1,985 tests in 459.15 seconds. Native Windows
       usability and natural safe terminal/Home validation remain pending.
-    - [ ] Run the complete supported checkpoint at the exact post-review tip
-      before promotion; no deployment or device action is claimed yet.
+    - [x] Exact post-review candidate `9d7a541` passed compilation,
+      state-definition validation, clickmap integrity with zero errors and the
+      established 44 orphan candidates, and all 2,002 tests in 337.55 seconds.
+      It was fast-forwarded through `develop` and production `main` behind
+      rollback tag `production-before-20260808T222617Z-e53c156`.
+    - [x] The bounded production smoke replaced the control surface as PID
+      `3203188` and automation as PID `3203767`. Revision 30 reported the exact
+      `localhost:5555` target connected, the replacement held its target lock,
+      and the exact Enable request was acknowledged while fresh observations
+      remained Home/New Battle. No Start Battle intent or battle input was
+      issued; the runtime explicitly logged that it was staying Home. Native
+      Windows usability, a live policy-change-at-Home exercise, and a natural
+      terminal-to-Home continuation remain pending rather than manufactured.
     - Coordination note: when `feature/launch-bound-home-preflight` is later
       reconciled, retain its independent screenshot/profile-log changes but
       drop its policy-derived ordinary Home auto-launch logic. The latter is
