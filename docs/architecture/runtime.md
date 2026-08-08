@@ -942,8 +942,9 @@ for continued battle retry.
   workflow exists, the initial Start/Attach wait grants only the typed
   `home_ad_gem` auxiliary collector; it does not grant Home navigation, setup,
   Strategy, or lifecycle authority. The handler requires a fresh visible
-  button match, rechecks typed authority at the final input boundary, verifies
-  dismissal, and never starts the in-battle floating-gem tapper.
+  button match, synchronizes current control and operator-workflow ownership,
+  rechecks typed authority at the final input boundary, verifies dismissal,
+  and never starts the in-battle floating-gem tapper.
 - Transient `UNKNOWN` observations preserve an owned, incomplete startup gate.
   Initialization completion depends on the strategy assertion, not merely the
   current primary screen.

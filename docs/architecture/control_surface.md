@@ -117,10 +117,12 @@ agnostic.
   legacy auto-start, and one-shot validation launch remain input-blocked. A
   freshly visible five-gem Home claim may run as the sole `home_ad_gem`
   auxiliary exception while Enabled and no immediate battle workflow exists.
-  It rechecks Pause and typed authority before input and grants no navigation,
-  setup, Strategy, Battle, or Resume Battle authority. A stale acknowledged
-  Start ledger cannot dispatch unless the current MissionManager also owns
-  that exact initial intent.
+  It synchronizes current control and operator-workflow ownership, then
+  rechecks Pause and typed authority before input; a Start/Attach request that
+  arrives after scheduling therefore cancels the claim. The exception grants
+  no navigation, setup, Strategy, Battle, or Resume Battle authority. A stale
+  acknowledged Start ledger cannot dispatch unless the current MissionManager
+  also owns that exact initial intent.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;

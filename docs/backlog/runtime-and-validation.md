@@ -783,19 +783,21 @@ stages:
       `3244540` acquired the held `localhost:5555` lock, acknowledged the exact
       restored Enable request, and published fresh Home/New Battle evidence.
       No Start Battle intent, battle transition, or device input was used.
-    - [x] Commit `61a150f` implements the missing idle-Home auxiliary
-      authority. The initial Start/Attach wait may allow only the typed
-      `home_ad_gem` collector while Automation is Enabled and the current frame
-      is verified Home; explicit battle workflows, Pause/Stop, Take/Return
+    - [x] Commits `61a150f` and `58380f4` implement the missing idle-Home
+      auxiliary authority. The initial Start/Attach wait may allow only the
+      typed `home_ad_gem` collector while Automation is Enabled and the current
+      frame is verified Home; explicit battle workflows, Pause/Stop, Take/Return
       Control, Setup Capture, interactive development, or any second exclusive
       hold remove that exception. The scheduling frame grants no tap authority:
-      the handler obtains a fresh visible-button match and rechecks the central
-      typed decision at the final input boundary. Runtime status exposes both
-      the hold-local allowance and the effective collector list while Strategy
-      and lifecycle authority remain denied. The affected owner/caller slice
-      passes 514 tests. The exact commit passes compilation, state definitions,
+      the handler obtains a fresh visible-button match, synchronizes current
+      control and operator ownership, and rechecks the central typed decision at
+      the final input boundary. A Start/Attach request arriving after scheduling
+      therefore cancels the claim. Runtime status exposes both the hold-local
+      allowance and the effective collector list while Strategy and lifecycle
+      authority remain denied. The affected owner/caller slice passes 515 tests.
+      Exact corrected candidate `58380f4` passes compilation, state definitions,
       clickmap integrity with zero errors and the established 44 orphan
-      candidates, and all 2,010 tests in 337.45 seconds. No battle launch,
+      candidates, and all 2,011 tests in 338.55 seconds. No battle launch,
       device input, live runtime, or Windows validation was used.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
