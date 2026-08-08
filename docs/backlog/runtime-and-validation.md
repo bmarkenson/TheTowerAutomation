@@ -565,10 +565,10 @@ stages:
       authoring catalog. A failed ready receipt retries from the process-local
       result without another serialization; normal Linux validation/publication
       remains separate.
-    - [ ] Windows package build/usability smoke and natural-boundary live game
+    - [ ] Windows runtime usability smoke and natural-boundary live game
       validation remain pending. The WPF project cross-builds on Linux and its
       82 native authoring/compatibility tests pass, but no Windows runtime or
-      live/device action is authorized or claimed by this checkpoint.
+      live/device action is claimed by this checkpoint.
       The supported development checkpoint passes all 1,904 tests in 335.03
       seconds, state-definition validation, and clickmap validation with zero
       errors and the established 44 orphan candidates.
@@ -595,6 +595,23 @@ stages:
       checkpoint passed all 1,924 tests in 330.30 seconds, state-definition
       validation, and clickmap validation with zero errors and the established
       44 orphan candidates.
+  - Production deployment checkpoint (2026-08-08):
+    - [x] Exact integration candidate `030ad4a` repeated the complete supported
+      checkpoint: all 1,924 tests passed in 329.79 seconds, state definitions
+      passed, and clickmap validation reported zero errors and the established
+      44 orphan candidates.
+    - [x] Production advanced from `08745f5` under rollback tag
+      `production-before-20260808T083546Z-08745f5`. Replacement control-surface
+      PID `2162885` served API revision 29, capabilities
+      `better_control_model_v2` and `save_backed_setup_capture_v1`, and the new
+      browser assets. The automation service remained STOPPED/inactive, its
+      target locks remained released, and no device input was sent.
+    - [x] The complete self-contained Windows package was atomically rebuilt at
+      `windows/TheTower.ControlSurface/publish/win-x64`, including both
+      `TheTower.ControlSurface.exe` and `TheTower.TunnelHost.exe`.
+    - [ ] Confirm the native Windows usability flow and the Better Control
+      transitions at natural Home, resumable/active-battle, manual-control, and
+      terminal boundaries before closing this outcome.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,
