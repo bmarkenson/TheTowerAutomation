@@ -115,8 +115,12 @@ agnostic.
   While the process is waiting for Start Battle or Attach to Battle, Home
   observation may continue but ordinary Home save/configuration preflight,
   legacy auto-start, and one-shot validation launch remain input-blocked. A
-  stale acknowledged Start ledger cannot dispatch unless the current
-  MissionManager also owns that exact initial intent.
+  freshly visible five-gem Home claim may run as the sole `home_ad_gem`
+  auxiliary exception while Enabled and no immediate battle workflow exists.
+  It rechecks Pause and typed authority before input and grants no navigation,
+  setup, Strategy, Battle, or Resume Battle authority. A stale acknowledged
+  Start ledger cannot dispatch unless the current MissionManager also owns
+  that exact initial intent.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;
@@ -213,7 +217,7 @@ or exactly acknowledged repeat is a visible no-op.
 | Stopped | unavailable/stopped | any | Start Automation | launch service Paused; await observation and battle intent |
 | Live | paused | Home New Battle | Start Battle | `requested` → `awaiting_enable`; explicit Enable revalidates and acknowledges normal new-run gates |
 | Live | enabled | Home New Battle | Start Battle | revalidate and acknowledge normal new-run gates |
-| Live | enabled | Home New or Home Resume with no exact immediate workflow grant | terminal-policy change, Enable, Strategy selection, or no additional request | observe and run independently safe Home collectors only; do not serialize ordinary Home preflight, run configuration setup, claim validation, recover Home, or dispatch a battle control |
+| Live | enabled | Home New or Home Resume with no exact immediate workflow grant | terminal-policy change, Enable, Strategy selection, or no additional request | observe and claim only a freshly visible five-gem Home reward through the typed `home_ad_gem` collector; do not serialize ordinary Home preflight, run configuration setup, claim validation, recover Home, dispatch a battle control, or run any other collector |
 | Live | enabled | Home New Battle with a terminal-bound continuation | no new request | revalidate the exact terminal-time state/policy request IDs, runtime, target generation, activity scope, and New Battle control; run normal new-run gates, dispatch exactly one verified New Battle, and consume the claim only after successful dispatch |
 | Live | enabled | verified Home control was tapped | acknowledged Start or ready resumable Attach | record `action_dispatched`; keep unrelated automation suppressed until the same battle is adopted, a definitive mismatch interrupts, or the 20-second launch window fails |
 | Live | paused | Home Resume Battle or active battle | Attach to Battle | `requested` → `awaiting_enable`; explicit Enable enters `validating_save` without adopting the battle |
@@ -458,8 +462,9 @@ memory only. The API deliberately sends no CORS permission.
 reports availability, active/inactive and stale state, age, owner match,
 strategy and battle scope, source/phase, failed check IDs, operator reason,
 activation/update times, Pause/Stop context, active exclusive holds, the four
-typed authority decisions, currently allowed auxiliary collectors, and any
-exclusive auxiliary route.
+typed authority decisions, any optional collector allowlist declared by a
+hold, currently allowed auxiliary collectors, and any exclusive auxiliary
+route.
 
 The adapter reads only the runtime-owned atomic snapshot. It rejects malformed
 or unsupported schemas, inactive publishers, expired timestamps, and PID/ADB
@@ -467,7 +472,9 @@ owners that do not match an active runtime lock. Missing or stale evidence is
 reported as unavailable/stale and cannot be promoted into action authority.
 Warning text in the action log is never parsed as gate state. Adding this
 field is backward compatible: earlier clients ignore it and retain every older
-endpoint and capability.
+endpoint and capability. `home_ad_gem` is an additive collector value and a
+conformance repair to the existing `better_control_model_v2` capability; it
+adds no command, endpoint, or client-side authority inference.
 
 ### Interactive development lease status
 

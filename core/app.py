@@ -4204,9 +4204,28 @@ class App:
                 ),
             )
         if self._awaiting_initial_battle_intent():
+            workflow = self._supervisor.battle_workflow
+            workflow_active = bool(
+                isinstance(workflow, Mapping)
+                and workflow.get("status")
+                in {
+                    "requested",
+                    "awaiting_enable",
+                    "acknowledged",
+                    "validating_save",
+                    "awaiting_configuration",
+                    "ready",
+                    "action_dispatched",
+                }
+            )
             return AuthorityHoldState(
                 AuthorityHold.OPERATOR_WORKFLOW,
                 "runtime is waiting for explicit Start Battle or Attach to Battle intent",
+                allowed_auxiliary_collectors=(
+                    ()
+                    if workflow_active
+                    else (AuxiliaryCollector.HOME_AD_GEM,)
+                ),
             )
         workflow = self._supervisor.battle_workflow
         if isinstance(workflow, Mapping) and workflow.get("status") in {
@@ -10185,15 +10204,23 @@ class App:
             # dispatching against the frame captured before that navigation.
             return
         if (
-            not operator_workflow_only
-            and new_state == "HOME_SCREEN"
+            new_state == "HOME_SCREEN"
             and "HOME_AD_GEMS_AVAILABLE" in overlays
             and self._handler_enabled("ad_gem")
+            and self._action_decision(
+                RuntimeActionClass.AUXILIARY_COLLECTION,
+                collector=AuxiliaryCollector.HOME_AD_GEM,
+            ).allowed
         ):
             # Collect before Home handling can start or resume a battle.  The
-            # handler revalidates the control against a fresh frame, so this
-            # overlay is scheduling evidence rather than tap authority.
-            handle_home_ad_gem()
+            # handler revalidates both the visible control and typed authority
+            # at the final dispatch boundary, so this overlay is scheduling
+            # evidence rather than tap authority.
+            handle_home_ad_gem(
+                action_guard_fn=self._auxiliary_action_guard(
+                    AuxiliaryCollector.HOME_AD_GEM
+                )
+            )
             return
 
         if (

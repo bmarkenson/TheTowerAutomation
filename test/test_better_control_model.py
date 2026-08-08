@@ -13,6 +13,8 @@ import pytest
 from automation.missions.manager import MissionManager
 from core.action_authority import (
     AuthorityHold,
+    AuthorityHoldState,
+    AuxiliaryCollector,
     RuntimeActionAuthority,
     RuntimeActionAuthorityPublisher,
     RuntimeActionClass,
@@ -1300,6 +1302,44 @@ def test_operator_startup_waits_for_matching_intent_and_enable(
     assert manager.maybe_run_start({"state": "RUNNING"}) is True
 
 
+@pytest.mark.parametrize("active_battle", (False, True))
+def test_idle_home_intent_hold_exposes_only_home_ad_gem(active_battle):
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        manual_control_error=False,
+        battle_workflow_error=False,
+        setup_capture_error=False,
+        setup_capture=None,
+        manual_control=None,
+        battle_workflow=None,
+    )
+    app._awaiting_initial_battle_intent = MagicMock(return_value=True)
+
+    hold = app._operator_workflow_authority_hold()
+
+    assert isinstance(hold, AuthorityHoldState)
+    assert hold.hold is AuthorityHold.OPERATOR_WORKFLOW
+    assert hold.allowed_auxiliary_collectors == (
+        AuxiliaryCollector.HOME_AD_GEM,
+    )
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=active_battle,
+        battle_scope="run-1",
+        primary_state="HOME_SCREEN",
+        holds=(hold,),
+    )
+    assert authority.decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.HOME_AD_GEM,
+    ).allowed is True
+    assert authority.decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.IN_BATTLE_AD_GEM,
+    ).allowed is False
+
+
 def test_start_dispatch_survives_preflight_scope_change_and_completes(
     tmp_path,
     monkeypatch,
@@ -1334,6 +1374,7 @@ def test_start_dispatch_survives_preflight_scope_change_and_completes(
     workflow_hold = app._operator_workflow_authority_hold()
     assert workflow_hold is not None
     assert workflow_hold.hold is AuthorityHold.OPERATOR_WORKFLOW
+    assert workflow_hold.allowed_auxiliary_collectors == ()
     app._update_action_authority(holds=(workflow_hold,))
     assert app._action_decision(
         RuntimeActionClass.STRATEGY_ACTION
@@ -2829,6 +2870,7 @@ def test_attach_stays_pending_before_battle_adoption(tmp_path, monkeypatch):
     hold = app._operator_workflow_authority_hold()
     assert hold is not None
     assert hold.hold.value == "operator_workflow"
+    assert hold.allowed_auxiliary_collectors == ()
 
 
 def test_validated_attach_completes_only_after_lifecycle_adoption(

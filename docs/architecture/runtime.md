@@ -938,8 +938,12 @@ for continued battle retry.
 - Lifecycle and guarded Home actions share one Home classifier. A handler must
   not infer a new run independently from navigation alone.
 - `HOME_AD_GEMS_AVAILABLE` schedules the five-gem Home claim before Home can
-  start or resume a battle. The handler requires a fresh visible button match,
-  verifies dismissal, and never starts the in-battle floating-gem tapper.
+  start or resume a battle. When Automation is Enabled and no immediate battle
+  workflow exists, the initial Start/Attach wait grants only the typed
+  `home_ad_gem` auxiliary collector; it does not grant Home navigation, setup,
+  Strategy, or lifecycle authority. The handler requires a fresh visible
+  button match, rechecks typed authority at the final input boundary, verifies
+  dismissal, and never starts the in-battle floating-gem tapper.
 - Transient `UNKNOWN` observations preserve an owned, incomplete startup gate.
   Initialization completion depends on the strategy assertion, not merely the
   current primary screen.
@@ -1005,9 +1009,19 @@ routed through an input guard.
 | --- | --- | --- | --- | --- |
 | Normal | Always continues | Existing screen, handler, and scheduler policy | Existing strategy policy | Existing lifecycle policy |
 | Global Pause or Stop | Continues | Blocked | Blocked | Blocked |
+| Enabled initial Start/Attach wait at fresh Home | Continues | Only the visible `home_ad_gem` claim | Blocked | Blocked |
 | Running-battle Strategy Gate | Continues | Only the explicit safe allowlist | Blocked | Blocked |
 | Continuity, initialization, validation, or exclusive screen hold | Continues | Blocked | Matching bounded owner only | Matching bounded owner only |
 | `external_development` hold | Continues | Blocked | Blocked for every owner | Blocked for every owner |
+
+An exclusive hold may carry an explicit collector allowlist. Global Pause,
+Stop, and shutdown still precede that list, and every simultaneous hold must
+allow the same collector. The only initial-intent exception is
+`home_ad_gem`, granted while there is no active Start/Attach workflow and used
+only from a freshly detected Home frame. A requested or acknowledged battle
+workflow, Take/Return Control, Setup Capture, interactive development, or any
+second exclusive owner removes that exception. It cannot authorize Battle,
+Resume Battle, configuration, recovery, or another collector.
 
 `external_development` is the one intentionally suppressive hold. Unlike
 initialization, preflight, continuity, and exclusive-validation ownership, it
@@ -1071,12 +1085,13 @@ boundary handler can take ownership.
 ownership, observation time, runtime-active flag, staleness threshold, active
 gate and run scope, current battle-active/scope evidence, strategy,
 source/phase, failed checks, reason, activation and update times,
-Pause/Stop/hold context, all four authority decisions, currently allowed
-collectors, any auxiliary-route lease, and the separate interactive-development
-runtime acknowledgement when applicable. The control surface accepts the
-channel only while its timestamp is fresh, `runtime_active` is true, and its
-PID/target owner matches the active runtime lock. It never derives gate or
-development-lease authority from warning text in `actions.log`.
+Pause/Stop/hold context, an optional collector allowlist on a hold, all four
+authority decisions, currently allowed collectors, any auxiliary-route lease,
+and the separate interactive-development runtime acknowledgement when
+applicable. The control surface accepts the channel only while its timestamp
+is fresh, `runtime_active` is true, and its PID/target owner matches the active
+runtime lock. It never derives gate or development-lease authority from
+warning text in `actions.log`.
 
 - Direct ADB capture accepts supported native `1080x1920` and `720x1280`
   framebuffers, records the source geometry, and normalizes them to the

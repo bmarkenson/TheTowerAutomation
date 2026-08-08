@@ -325,7 +325,7 @@ def _collect_visible_ad_gem(
     return False
 
 
-def handle_home_ad_gem() -> bool:
+def handle_home_ad_gem(*, action_guard_fn: ActionGuard = None) -> bool:
     """Collect the visible five-gem control from an actionable Home screen."""
 
     label = "buttons.claim_ad_gem:home"
@@ -337,7 +337,10 @@ def handle_home_ad_gem() -> bool:
     # Home cannot host the in-battle floating gem.  Ensure a prior bounded
     # tapper is winding down and never start a new one from this path.
     stop_blind_gem_tapper()
-    collected = _collect_visible_ad_gem(label, action_guard_fn=None)
+    collected = _collect_visible_ad_gem(
+        label,
+        action_guard_fn=action_guard_fn,
+    )
     log_result(
         (
             "Home ad-gem collection complete — reward collected"
