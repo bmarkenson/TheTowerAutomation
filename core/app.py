@@ -4409,8 +4409,17 @@ class App:
 
     def _current_player_save_attachment_context(
         self,
+        *,
+        transition_source_activity_scope_id: Optional[str] = None,
     ) -> PlayerSaveAttachmentContext:
-        """Return exact process/scope authority for a RUNNING attachment."""
+        """Return exact process/scope authority for a RUNNING attachment.
+
+        A continuity comparison can durably replace the activity scope before
+        the next captured frame publishes that new scope. During that single
+        recapture boundary, accept only the source scope carried by the same
+        forced-save claim; every other owner, target, generation, or scope
+        mismatch still fails closed.
+        """
 
         session = self._adb_target_session
         if session is None:
@@ -4440,13 +4449,29 @@ class App:
             raise RuntimeError(
                 "player-save attachment battle identity is not active"
             )
-        if reconciliation_owner is not None and (
-            current.get("activity_scope_run_id") != scope_id
-            or current.get("target_generation") != target.generation
-        ):
-            raise RuntimeError(
-                "player-save attachment workflow binding changed"
+        if reconciliation_owner is not None:
+            observed_scope_id = (
+                str(current.get("activity_scope_run_id") or "")
+                if isinstance(current, Mapping)
+                else ""
             )
+            source_scope_id = str(
+                transition_source_activity_scope_id or ""
+            ).strip()
+            scope_matches = observed_scope_id == scope_id
+            expected_transition = bool(
+                source_scope_id
+                and source_scope_id != scope_id
+                and observed_scope_id == source_scope_id
+            )
+            if (
+                not (scope_matches or expected_transition)
+                or not isinstance(current, Mapping)
+                or current.get("target_generation") != target.generation
+            ):
+                raise RuntimeError(
+                    "player-save attachment workflow binding changed"
+                )
         runtime_session_id = str(
             self._player_save_runtime_session_id or ""
         )
@@ -6509,6 +6534,21 @@ class App:
             None,
         )
         attachment_context = None
+        transition_source_scope_id = ""
+        if isinstance(
+            attachment_temporal_binding,
+            RunningAttachmentTemporalBinding,
+        ):
+            transition_source_scope_id = (
+                attachment_temporal_binding.source_activity_scope_id
+            )
+        elif isinstance(
+            save_observations,
+            RunningAttachmentSaveObservations,
+        ):
+            transition_source_scope_id = (
+                save_observations.binding.source_activity_scope_id
+            )
         if (
             isinstance(save_observations, RunningAttachmentSaveObservations)
             or isinstance(
@@ -6525,7 +6565,17 @@ class App:
                     self._current_player_save_attachment_context()
                 )
             except Exception:
-                attachment_context = None
+                if transition_source_scope_id:
+                    try:
+                        attachment_context = (
+                            self._current_player_save_attachment_context(
+                                transition_source_activity_scope_id=(
+                                    transition_source_scope_id
+                                )
+                            )
+                        )
+                    except Exception:
+                        attachment_context = None
         if (
             isinstance(save_observations, RunningAttachmentSaveObservations)
             and not save_observations.matches_context(attachment_context)

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 
@@ -415,6 +415,47 @@ def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():
     assert cards["value"] == {"label": "Farm"}
     assert cards["source"] == "guarded_active_attachment_player_save"
     assert "Applied guarded attachment save" in logged.call_args.args[0]
+
+
+def test_activity_continuity_accepts_expected_scope_transition_before_recapture():
+    app = App.__new__(App)
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = None
+    app._no_strategy_observer = NoStrategyRunObserver()
+    app._no_strategy_observation_active = True
+    app._exclusive_validation_ownership_hold = False
+    observations = running_attachment_observations(
+        {"cards_deck": {"value": "Farm"}},
+        source_scope_id="scope-before-continuity",
+        final_scope_id="scope-after-continuity",
+    )
+    final_context = PlayerSaveAttachmentContext(
+        runtime_session_id="runtime-1",
+        activity_scope_id="scope-after-continuity",
+        target="private-target",
+        target_generation=3,
+        active_battle_observed=True,
+    )
+    app._current_player_save_attachment_context = MagicMock(
+        side_effect=[
+            RuntimeError("observation still names the source scope"),
+            final_context,
+        ]
+    )
+
+    app._apply_activity_continuity_outcome(
+        SimpleNamespace(running_attachment_observations=observations)
+    )
+
+    assert app._current_player_save_attachment_context.call_args_list == [
+        call(),
+        call(
+            transition_source_activity_scope_id="scope-before-continuity"
+        ),
+    ]
+    cards = app._no_strategy_observer.snapshot()["fields"]["cards_deck"]
+    assert cards["status"] == "observed"
+    assert cards["value"] == {"label": "Farm"}
 
 
 def test_attachment_bundle_reaches_perk_monitor_without_profile_facts():
