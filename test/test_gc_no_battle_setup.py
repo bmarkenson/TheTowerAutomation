@@ -1420,6 +1420,44 @@ def test_home_preflight_logs_a_one_run_waiver_disposition():
     )
 
 
+def test_home_preflight_logs_profile_skip_as_expected_policy():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+    }
+    waiver = {
+        "check_id": "perk_bans",
+        "label": "Perk Bans",
+        "source": "strategy_profile",
+        "scope": "every_run",
+        "reason": "permanently skipped by the selected strategy profile",
+    }
+
+    with patch("core.gc_no_battle_setup.log") as emit:
+        result = _run(
+            router,
+            requirements,
+            waivers={
+                "perk_bans": waiver,
+                "perk_auto_pick_order": {
+                    **waiver,
+                    "check_id": "perk_auto_pick_order",
+                    "label": "Auto Pick priority",
+                },
+            },
+        )
+
+    assert result.complete
+    assert call(
+        "[HOME_PREFLIGHT] Perk Bans skipped; expected=not enforced by "
+        "selected strategy profile; observed=permanently skipped by the "
+        "selected strategy profile",
+        "INFO",
+    ) in emit.call_args_list
+
+
 def test_guardian_replacement_reacquires_after_empty_slot_settles():
     state = {"phase": "equipped"}
     sleeps = []
