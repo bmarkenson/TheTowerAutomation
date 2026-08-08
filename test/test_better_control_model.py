@@ -422,6 +422,50 @@ def _publish_runtime_observation(
     }
 
 
+def test_attachment_context_allows_one_expected_scope_rebind(monkeypatch):
+    app = App.__new__(App)
+    session = MagicMock()
+    session.snapshot.return_value = SimpleNamespace(
+        owned=True,
+        target="localhost:5555",
+        generation=7,
+    )
+    app._adb_target_session = session
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.active_battle_observed.return_value = True
+    app._player_save_runtime_session_id = "save-runtime-1"
+    app._current_control_workflow_evidence = lambda: _evidence(
+        game_state="active_battle",
+        scope="scope-before-continuity",
+    )
+    app._running_save_reconciliation_owner = (
+        lambda: AuthorityHold.OPERATOR_WORKFLOW
+    )
+    monkeypatch.setattr(
+        "core.app.get_activity_scope",
+        lambda: {"run_id": "scope-after-continuity"},
+    )
+
+    with pytest.raises(RuntimeError, match="workflow binding changed"):
+        app._current_player_save_attachment_context()
+    with pytest.raises(RuntimeError, match="workflow binding changed"):
+        app._current_player_save_attachment_context(
+            transition_source_activity_scope_id="unrelated-scope"
+        )
+
+    context = app._current_player_save_attachment_context(
+        transition_source_activity_scope_id="scope-before-continuity"
+    )
+
+    assert context == PlayerSaveAttachmentContext(
+        runtime_session_id="save-runtime-1",
+        activity_scope_id="scope-after-continuity",
+        target="localhost:5555",
+        target_generation=7,
+        active_battle_observed=True,
+    )
+
+
 def test_observed_game_dimensions_do_not_infer_a_workflow():
     assert (
         observed_game_state(
