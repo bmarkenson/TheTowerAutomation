@@ -39,6 +39,22 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 Home Perk repair resilience
+
+- Commit `a5825db` replaces Ban Perks' single-frame, multi-action plan with a
+  bounded one-action reconciliation loop over consecutive stable Selected
+  snapshots. It removes extras before additions, enforces capacity, verifies
+  semantic progress, and reuses the authoritative final readback.
+- The same change adds the missing Chrono Field Duration Home semantic mapping
+  that blocked Black Hole Duration, guarantees current save-mapped perk
+  vocabulary coverage, keeps unknown-predecessor recovery local, and prevents
+  an exhausted local Perk repair from replaying the complete Home setup.
+- The 107 focused tests and the complete isolated checkpoint passed; the latter
+  covered compilation, state definitions, clickmap integrity with zero errors
+  and the 44 established orphan candidates, and all 1,784 tests in 325.58
+  seconds. Production runtime, device, control, and deployment state were not
+  changed.
+
 ### 2026-08-07 recoverable superseded feature retirement
 
 - `c23fe67` splits feature retirement into integrated and explicitly
