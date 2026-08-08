@@ -498,12 +498,58 @@ def _ultimate_weapon_editor(initial_value: Any) -> Mapping[str, Any]:
     }
 
 
+def _loadout_preset_definitions(
+    setting_id: str,
+    *,
+    module_preset_definitions: Optional[Mapping[str, Any]] = None,
+    catalog_path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Load one current shared catalog without normalizing its definitions."""
+
+    if setting_id not in _LOADOUT_PRESET_PATHS:
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} has no loadout-definition contract"
+        )
+    if setting_id == "modules" and module_preset_definitions is not None:
+        if not module_preset_definitions:
+            raise StrategyAuthoringError("modules preset catalog requires presets")
+        return copy.deepcopy(dict(module_preset_definitions))
+
+    path = catalog_path or _LOADOUT_PRESET_PATHS[setting_id]
+    catalog = _load_yaml_mapping(path, f"{setting_id} preset catalog")
+    if catalog.get("schema_version") != 1:
+        raise StrategyAuthoringError(
+            f"{setting_id} preset catalog has an unsupported schema"
+        )
+    presets = catalog.get("presets")
+    if not isinstance(presets, Mapping) or not presets:
+        raise StrategyAuthoringError(
+            f"{setting_id} preset catalog requires presets"
+        )
+    return copy.deepcopy(dict(presets))
+
+
+def _loadout_preset_catalog_fingerprint(
+    setting_id: str,
+    presets: Mapping[str, Any],
+) -> str:
+    """Fingerprint the exact catalog snapshot offered to an authoring client."""
+
+    return fingerprint_document(
+        {
+            "schema_version": 1,
+            "setting_id": setting_id,
+            "presets": copy.deepcopy(dict(presets)),
+        }
+    )
+
+
 def _preset_editor(path: Path, setting_id: str) -> EditorMetadataFactory:
     def metadata(initial_value: Any) -> Mapping[str, Any]:
-        catalog = _load_yaml_mapping(path, f"{setting_id} preset catalog")
-        presets = catalog.get("presets")
-        if not isinstance(presets, Mapping) or not presets:
-            raise ValueError(f"{setting_id} preset catalog requires presets")
+        presets = _loadout_preset_definitions(
+            setting_id,
+            catalog_path=path,
+        )
         options = [
             _editor_option(identifier, _title_identifier(identifier))
             for identifier in presets
@@ -514,6 +560,10 @@ def _preset_editor(path: Path, setting_id: str) -> EditorMetadataFactory:
             "fixed": len(options) == 1,
             "help_text": "Choices come from the current server preset catalog.",
             "preserve_unknown_fields": False,
+            "preset_catalog_fingerprint": _loadout_preset_catalog_fingerprint(
+                setting_id,
+                presets,
+            ),
             "fields": [
                 {
                     "key": "preset",
@@ -551,6 +601,7 @@ def _merge_module_preset_editor_metadata(
     ):
         raise ValueError("merged Module preset catalog is incomplete")
     options: list[dict[str, Any]] = []
+    definitions: dict[str, Any] = {}
     seen: set[str] = set()
     for item in items:
         if not isinstance(item, Mapping):
@@ -560,6 +611,7 @@ def _merge_module_preset_editor_metadata(
         if not identifier or not display_name or identifier in seen:
             raise ValueError("merged Module preset IDs and names must be unique")
         options.append(_editor_option(identifier, display_name))
+        definitions[identifier] = copy.deepcopy(item.get("definition"))
         seen.add(identifier)
     fields[0]["options"] = options
     fields[0]["fixed"] = len(options) == 1
@@ -567,6 +619,10 @@ def _merge_module_preset_editor_metadata(
     if module_preset_catalog.get("id") != MODULE_PRESET_CATALOG_ID:
         raise ValueError("merged Module preset catalog has the wrong identity")
     editor["preset_catalog"] = MODULE_PRESET_CATALOG_ID
+    editor["preset_catalog_fingerprint"] = _loadout_preset_catalog_fingerprint(
+        "modules",
+        definitions,
+    )
     return editor
 
 
@@ -1448,6 +1504,7 @@ def _validate_editor_metadata(
         "server_normalized_text",
         "local_editor",
         "preset_catalog",
+        "preset_catalog_fingerprint",
     }
     unknown_top = sorted(set(raw_metadata) - allowed_top_fields)
     if unknown_top:
@@ -1485,6 +1542,19 @@ def _validate_editor_metadata(
         raise ValueError("initial_value is not in canonical normalized form")
     if "local_editor" in metadata and definition.editor_type != "preset":
         raise ValueError("local_editor metadata is supported only for preset editors")
+    if "local_editor" in metadata:
+        catalog_fingerprint = str(
+            metadata.get("preset_catalog_fingerprint") or ""
+        ).strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", catalog_fingerprint):
+            raise ValueError(
+                "preset/local editor metadata requires a catalog fingerprint"
+            )
+        metadata["preset_catalog_fingerprint"] = catalog_fingerprint
+    elif "preset_catalog_fingerprint" in metadata:
+        raise ValueError(
+            "preset_catalog_fingerprint requires a preset editor with a local editor"
+        )
     if "preset_catalog" in metadata:
         preset_catalog = str(metadata.get("preset_catalog") or "").strip()
         if definition.editor_type != "preset" or "local_editor" not in metadata:
@@ -2127,6 +2197,7 @@ def _current_definition_snapshot(
     selector: Mapping[str, Any],
     *,
     module_preset_definitions: Optional[Mapping[str, Any]] = None,
+    preset_definitions: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Resolve one source selector against the current shared catalogs."""
 
@@ -2136,18 +2207,14 @@ def _current_definition_snapshot(
         )
     if set(selector) == {"preset"}:
         preset = str(selector["preset"])
-        if setting_id == "modules" and module_preset_definitions is not None:
-            presets: object = module_preset_definitions
-        else:
-            catalog = _load_yaml_mapping(
-                _LOADOUT_PRESET_PATHS[setting_id],
-                f"{setting_id} preset catalog",
+        presets: object = (
+            copy.deepcopy(dict(preset_definitions))
+            if preset_definitions is not None
+            else _loadout_preset_definitions(
+                setting_id,
+                module_preset_definitions=module_preset_definitions,
             )
-            if catalog.get("schema_version") != 1:
-                raise StrategyAuthoringError(
-                    f"{setting_id} preset catalog has an unsupported schema"
-                )
-            presets = catalog.get("presets")
+        )
         if not isinstance(presets, Mapping) or preset not in presets:
             raise StrategyAuthoringError(
                 f"unknown {setting_id} preset {preset!r}"
@@ -2183,6 +2250,63 @@ def _current_definition_snapshot(
             definition
         )
     return {**payload, "fingerprint": fingerprint_document(payload)}
+
+
+def materialize_loadout_preset(
+    setting_id: object,
+    preset_id: object,
+    expected_catalog_fingerprint: object,
+    *,
+    module_preset_definitions: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Return one exact current preset as a normalized profile-local definition.
+
+    The optimistic catalog fingerprint binds the request to the choices the
+    client actually displayed. The returned definition comes from the same
+    snapshot and the same normalizer used by ordinary authoring resolution.
+    """
+
+    normalized_setting_id = str(setting_id or "").strip()
+    if normalized_setting_id not in _LOADOUT_PRESET_PATHS:
+        raise StrategyAuthoringError(
+            "setting_id must be one of: modules, orb_distance, target_priority"
+        )
+    normalized_preset_id = str(preset_id or "").strip()
+    if not normalized_preset_id:
+        raise StrategyAuthoringError("preset must be a non-empty id")
+    expected_fingerprint = str(expected_catalog_fingerprint or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_fingerprint):
+        raise StrategyAuthoringError(
+            "expected_catalog_fingerprint must be a SHA-256 fingerprint"
+        )
+
+    presets = _loadout_preset_definitions(
+        normalized_setting_id,
+        module_preset_definitions=module_preset_definitions,
+    )
+    current_fingerprint = _loadout_preset_catalog_fingerprint(
+        normalized_setting_id,
+        presets,
+    )
+    if current_fingerprint != expected_fingerprint:
+        raise StrategyAuthoringConflictError(
+            f"{normalized_setting_id} preset catalog changed after it was opened; "
+            "reload before editing a copy"
+        )
+
+    snapshot = _current_definition_snapshot(
+        normalized_setting_id,
+        {"preset": normalized_preset_id},
+        preset_definitions=presets,
+    )
+    return {
+        "schema_version": LOADOUT_DEFINITION_SCHEMA_VERSION,
+        "setting_id": normalized_setting_id,
+        "preset": normalized_preset_id,
+        "catalog_fingerprint": current_fingerprint,
+        "definition": copy.deepcopy(snapshot["definition"]),
+        "definition_fingerprint": snapshot["fingerprint"],
+    }
 
 
 def _current_orb_range_relationships(
@@ -3659,6 +3783,7 @@ __all__ = [
     "farm_source_from_resolution",
     "fingerprint_document",
     "legacy_farm_source_to_strategy_source",
+    "materialize_loadout_preset",
     "normalize_base_source",
     "normalize_strategy_source",
     "preview_strategy_rebase",

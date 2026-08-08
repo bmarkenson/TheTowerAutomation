@@ -333,7 +333,9 @@ public sealed class StrategyAuthoringViewModelTests
         string kind)
     {
         var definition = LocalDefinition(kind);
-        var row = ManagedRow(definition);
+        var row = ManagedRow(
+            definition,
+            kind == "modules" ? ModuleCatalog() : null);
         var presetForm = row.DefinitionForms[0];
         var localForm = row.DefinitionForms[1];
 
@@ -387,6 +389,227 @@ public sealed class StrategyAuthoringViewModelTests
         AssertJson(localDraft, reopened.BuildDirective()?.Value);
         reopened.SelectedDefinitionForm = reopened.DefinitionForms[0];
         AssertJson(definition.InitialValue, reopened.BuildDirective()?.Value);
+    }
+
+    [Theory]
+    [MemberData(nameof(LocalEditorKinds))]
+    public void EditCopyRequestsExactSelectedPresetAndAppliesLinuxDefinition(
+        string kind)
+    {
+        var definition = LocalDefinition(kind);
+        var row = ManagedRow(
+            definition,
+            kind == "modules" ? ModuleCatalog() : null);
+        row.SelectedPreset = row.PresetOptions[1];
+        var selected = row.SelectedPreset;
+        var request = row.BuildEditPresetCopyRequest();
+        var copiedDefinition = MaterializedDefinition(definition, kind);
+
+        Assert.Equal("materialize_loadout_preset", request.Operation);
+        Assert.Equal(kind, request.SettingId);
+        Assert.Equal("shared_two", request.Preset);
+        Assert.Equal(definition.Editor.PresetCatalogFingerprint,
+            request.ExpectedCatalogFingerprint);
+        Assert.True(row.IsPresetDefinitionSelected);
+
+        row.ApplyMaterializedPresetCopy(
+            Materialization(definition, "shared_two", copiedDefinition));
+
+        Assert.Same(selected, row.SelectedPreset);
+        Assert.True(row.IsLocalDefinitionSelected);
+        Assert.True(row.HasMeaningfulDormantLocalDraft);
+        Assert.True(row.Dirty);
+        var directive = Assert.IsType<StrategyAuthoringDirective>(row.BuildDirective());
+        Assert.Equal("enforce", directive.Policy);
+        AssertJson(
+            copiedDefinition,
+            directive.Value?.GetProperty("local"));
+
+        if (kind == "modules")
+        {
+            var saved = row.BuildSaveModulePresetRequest(
+                "edited_local_copy",
+                "Edited Local Copy");
+            AssertJson(copiedDefinition, saved.Source.Local);
+            Assert.Null(saved.Source.Preset);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(LocalEditorKinds))]
+    public void DormantLocalDraftReplaceRetainAndCancelPathsAreExplicit(
+        string kind)
+    {
+        var definition = LocalDefinition(kind);
+
+        AuthoringSettingRowViewModel ExistingDraftRow()
+        {
+            var candidate = ManagedRow(definition);
+            candidate.SelectedDefinitionForm = candidate.DefinitionForms[1];
+            MutateLocalDefinition(candidate, kind);
+            candidate.SelectedDefinitionForm = candidate.DefinitionForms[0];
+            candidate.SelectedPreset = candidate.PresetOptions[1];
+            return candidate;
+        }
+
+        var cancelled = ExistingDraftRow();
+        var cancelledPreset = cancelled.SelectedPreset;
+        var cancelledDraft = cancelled.CaptureDormantValue().LocalValue;
+        _ = cancelled.BuildEditPresetCopyRequest();
+        Assert.Same(cancelledPreset, cancelled.SelectedPreset);
+        Assert.True(cancelled.IsPresetDefinitionSelected);
+        AssertJson(cancelledDraft, cancelled.CaptureDormantValue().LocalValue);
+
+        var retained = ExistingDraftRow();
+        var retainedDraft = retained.CaptureDormantValue().LocalValue;
+        Assert.True(retained.HasMeaningfulDormantLocalDraft);
+        retained.RetainDormantLocalDraft();
+        Assert.True(retained.IsLocalDefinitionSelected);
+        AssertJson(
+            retainedDraft,
+            retained.BuildDirective()?.Value?.GetProperty("local"));
+
+        var replaced = ExistingDraftRow();
+        var replacement = MaterializedDefinition(definition, kind);
+        replaced.ApplyMaterializedPresetCopy(
+            Materialization(definition, "shared_two", replacement));
+        Assert.True(replaced.IsLocalDefinitionSelected);
+        AssertJson(
+            replacement,
+            replaced.BuildDirective()?.Value?.GetProperty("local"));
+    }
+
+    [Theory]
+    [MemberData(nameof(LocalEditorKinds))]
+    public void RejectedOrInterruptedPresetCopyLeavesBothDraftFormsIntact(
+        string kind)
+    {
+        var definition = LocalDefinition(kind);
+        var row = ManagedRow(definition);
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        MutateLocalDefinition(row, kind);
+        row.SelectedDefinitionForm = row.DefinitionForms[0];
+        row.SelectedPreset = row.PresetOptions[1];
+        var selected = row.SelectedPreset;
+        var presetDirective = row.BuildDirective()?.Value;
+        var localDraft = row.CaptureDormantValue().LocalValue;
+
+        // A request that is interrupted or fails before a response is applied
+        // is deliberately side-effect free.
+        _ = row.BuildEditPresetCopyRequest();
+        Assert.Same(selected, row.SelectedPreset);
+        AssertJson(presetDirective, row.BuildDirective()?.Value);
+        AssertJson(localDraft, row.CaptureDormantValue().LocalValue);
+
+        var validDefinition = MaterializedDefinition(definition, kind);
+        var rejected = new[]
+        {
+            Materialization(
+                definition,
+                "shared_two",
+                validDefinition,
+                settingId: "wrong_setting"),
+            Materialization(definition, "wrong_preset", validDefinition),
+            Materialization(
+                definition,
+                "shared_two",
+                validDefinition,
+                catalogFingerprint: new string('c', 64)),
+            Materialization(
+                definition,
+                "shared_two",
+                Element(new Dictionary<string, string> { ["invalid"] = "value" })),
+        };
+        foreach (var materialization in rejected)
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                row.ApplyMaterializedPresetCopy(materialization));
+            Assert.Same(selected, row.SelectedPreset);
+            Assert.True(row.IsPresetDefinitionSelected);
+            AssertJson(presetDirective, row.BuildDirective()?.Value);
+            AssertJson(localDraft, row.CaptureDormantValue().LocalValue);
+        }
+    }
+
+    [Fact]
+    public void PresetCopyRequiresEditableEntityAndCapabilityWhileDuplicateStaysDistinct()
+    {
+        var definition = LocalDefinition("modules");
+        var catalog = ModuleCatalog();
+        var readOnly = Row(
+            definition,
+            isBase: false,
+            entityEditable: false,
+            modulePresetCatalog: catalog);
+        var editable = ManagedRow(LocalDefinition("modules"), catalog);
+
+        Assert.False(readOnly.CanEditPresetCopy);
+        Assert.True(readOnly.CanDuplicateModulePreset);
+        Assert.True(editable.CanEditPresetCopy);
+        Assert.Equal(
+            "create_module_preset",
+            readOnly.BuildDuplicateModulePresetRequest(
+                "immutable_duplicate",
+                "Immutable Duplicate").Operation);
+        Assert.Equal(
+            "materialize_loadout_preset",
+            editable.BuildEditPresetCopyRequest().Operation);
+
+        var missingCapability = Capabilities();
+        missingCapability.PresetLocalCopy = false;
+        var unsupported = Row(
+            LocalDefinition("target_priority"),
+            isBase: false,
+            capabilities: missingCapability);
+        unsupported.SelectedSourceState = State(unsupported, "override_enforce");
+        var selected = unsupported.SelectedPreset;
+        var directive = unsupported.BuildDirective()?.Value;
+
+        Assert.False(unsupported.PresetLocalCopyVisible);
+        Assert.False(unsupported.CanEditPresetCopy);
+        Assert.Throws<InvalidOperationException>(() =>
+            unsupported.BuildEditPresetCopyRequest());
+        Assert.Same(selected, unsupported.SelectedPreset);
+        AssertJson(directive, unsupported.BuildDirective()?.Value);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void PresetCopyAvailabilityFollowsIncludeOverrideObserveAndIgnore(
+        bool isBase)
+    {
+        var definition = LocalDefinition("orb_distance");
+        var row = Row(definition, isBase);
+        Assert.False(row.CanEditPresetCopy);
+
+        row.SelectedSourceState = State(
+            row,
+            isBase ? "included_enforce" : "override_enforce");
+        Assert.True(row.CanEditPresetCopy);
+        row.SelectedSourceState = State(
+            row,
+            isBase ? "included_observe" : "override_observe");
+        Assert.True(row.CanEditPresetCopy);
+        row.SelectedPreset = row.PresetOptions[1];
+        row.ApplyMaterializedPresetCopy(
+            Materialization(
+                definition,
+                "shared_two",
+                MaterializedDefinition(definition, "orb_distance")));
+        Assert.Equal("observe", row.BuildDirective()?.Policy);
+        Assert.True(row.IsLocalDefinitionSelected);
+        row.SelectedDefinitionForm = row.DefinitionForms[0];
+
+        if (isBase)
+        {
+            row.SelectedSourceState = State(row, "not_included");
+        }
+        else
+        {
+            row.SelectedSourceState = State(row, "ignore");
+        }
+        Assert.False(row.CanEditPresetCopy);
     }
 
     [Fact]
@@ -519,11 +742,11 @@ public sealed class StrategyAuthoringViewModelTests
         row.SelectedPreset = row.PresetOptions[1];
 
         Assert.Equal(
-            "Custom preset • immutable; changes save as a new variant",
+            "Custom preset • immutable; duplicate or edit a local copy",
             row.ModulePresetLifecycleDisplay);
         Assert.Equal(
             "shared_two",
-            row.BuildCreateModuleVariantRequest(
+            row.BuildDuplicateModulePresetRequest(
                 "custom_variant",
                 "Custom Variant").Source.Preset);
     }
@@ -533,7 +756,7 @@ public sealed class StrategyAuthoringViewModelTests
     {
         var row = ManagedRow(LocalDefinition("modules"), ModuleCatalog());
         var selectedBefore = row.SelectedPreset;
-        var variant = row.BuildCreateModuleVariantRequest(
+        var variant = row.BuildDuplicateModulePresetRequest(
             "shared_variant",
             "Shared Variant");
         var variantJson = JsonSerializer.Serialize(variant);
@@ -622,16 +845,16 @@ public sealed class StrategyAuthoringViewModelTests
 
         Assert.True(row.ShowsModulePresetPreview);
         Assert.False(row.ModulePresetManagementVisible);
-        Assert.False(row.CanCreateModuleVariant);
+        Assert.False(row.CanDuplicateModulePreset);
         Assert.False(row.CanSaveModulePreset);
         Assert.Throws<InvalidOperationException>(() =>
-            row.BuildCreateModuleVariantRequest("blocked_variant", "Blocked"));
+            row.BuildDuplicateModulePresetRequest("blocked_variant", "Blocked"));
         Assert.Same(selected, row.SelectedPreset);
         AssertJson(directive, row.BuildDirective()?.Value);
     }
 
     [Fact]
-    public void VariantCreationIsAvailableFromAReadOnlySelectedPreset()
+    public void PresetDuplicationIsAvailableFromAReadOnlySelectedPreset()
     {
         var definition = LocalDefinition("modules");
         var catalog = ModuleCatalog();
@@ -642,11 +865,11 @@ public sealed class StrategyAuthoringViewModelTests
             modulePresetCatalog: catalog);
         var selected = row.SelectedPreset;
 
-        Assert.True(row.CanCreateModuleVariant);
+        Assert.True(row.CanDuplicateModulePreset);
         Assert.False(row.CanSelectCreatedModulePreset);
         Assert.Equal(
             "shared_one",
-            row.BuildCreateModuleVariantRequest(
+            row.BuildDuplicateModulePresetRequest(
                 "read_only_variant",
                 "Read-only Variant").Source.Preset);
 
@@ -689,6 +912,34 @@ public sealed class StrategyAuthoringViewModelTests
         Assert.False(reopened.PublicationActivatesStrategy);
         Assert.Equal("shared_three", reopened.Preset?.Id);
         Assert.Equal(3, reopened.Catalog?.ModulePresets.Items.Count);
+    }
+
+    [Fact]
+    public void PresetMaterializationResponseRoundTripsWithoutPublication()
+    {
+        var definition = LocalDefinition("target_priority");
+        var response = new StrategyAuthoringMutationResponse
+        {
+            Operation = "materialize_loadout_preset",
+            Valid = true,
+            Published = false,
+            PublicationActivatesStrategy = false,
+            Materialization = Materialization(
+                definition,
+                "shared_two",
+                MaterializedDefinition(definition, "target_priority")),
+        };
+
+        var reopened = JsonSerializer.Deserialize<StrategyAuthoringMutationResponse>(
+            JsonSerializer.Serialize(response));
+
+        Assert.NotNull(reopened?.Materialization);
+        Assert.True(reopened!.Valid);
+        Assert.False(reopened.Published);
+        Assert.False(reopened.PublicationActivatesStrategy);
+        Assert.Equal("target_priority", reopened.Materialization!.SettingId);
+        Assert.Equal("shared_two", reopened.Materialization.Preset);
+        Assert.Equal(10, reopened.Materialization.Definition.GetArrayLength());
     }
 
     [Fact]
@@ -979,7 +1230,8 @@ public sealed class StrategyAuthoringViewModelTests
     private static StrategyAuthoringCapabilities Capabilities() => new()
     {
         ManagedCustomModulePresets = true,
-        Operations = ["create_module_preset"],
+        PresetLocalCopy = true,
+        Operations = ["create_module_preset", "materialize_loadout_preset"],
         BaseSourceStates =
         [
             new() { Id = "not_included", DisplayName = "Not included" },
@@ -1134,6 +1386,7 @@ public sealed class StrategyAuthoringViewModelTests
                 ]),
         };
         definition.Editor.ValueKind = "object";
+        definition.Editor.PresetCatalogFingerprint = new string('a', 64);
         definition.Editor.LocalEditor = kind switch
         {
             "modules" => ModuleLocalMetadata(),
@@ -1281,6 +1534,55 @@ public sealed class StrategyAuthoringViewModelTests
             Slots = slots,
         };
     }
+
+    private static JsonElement MaterializedDefinition(
+        StrategySettingDefinition definition,
+        string kind)
+    {
+        var local = Assert.IsType<StrategyEditorMetadata>(
+            definition.Editor.LocalEditor);
+        return kind switch
+        {
+            "modules" => Element(
+                local.InitialValue!.Value.EnumerateObject().ToDictionary(
+                    property => property.Name,
+                    property => property.Name == local.Fields[0].Key
+                        ? local.Fields[0].Options.Single(option =>
+                            option.Value.GetString()?.EndsWith(
+                                "3",
+                                StringComparison.Ordinal) == true).Value.GetString()!
+                        : property.Value.GetString()!,
+                    StringComparer.Ordinal)),
+            "target_priority" => Element(
+                local.InitialValue!.Value.EnumerateArray()
+                    .Select(item => item.GetString()!)
+                    .Reverse()
+                    .ToArray()),
+            "orb_distance" => Element(new Dictionary<string, string>
+            {
+                ["range_basis"] = "98.38m",
+                ["extra"] = "87.16m",
+                ["workshop"] = "80.37m",
+            }),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+    }
+
+    private static LoadoutPresetMaterialization Materialization(
+        StrategySettingDefinition definition,
+        string preset,
+        JsonElement materializedDefinition,
+        string? settingId = null,
+        string? catalogFingerprint = null) => new()
+        {
+            SchemaVersion = 1,
+            SettingId = settingId ?? definition.Id,
+            Preset = preset,
+            CatalogFingerprint = catalogFingerprint
+                ?? definition.Editor.PresetCatalogFingerprint,
+            Definition = materializedDefinition.Clone(),
+            DefinitionFingerprint = new string('b', 64),
+        };
 
     private static void MutateLocalDefinition(
         AuthoringSettingRowViewModel row,

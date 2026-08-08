@@ -1285,7 +1285,119 @@ public partial class StrategyProfilesWindow : Window
         }
     }
 
-    private async void CreateModuleVariant_Click(
+    private async void EditPresetCopy_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext
+            is AuthoringSettingRowViewModel row)
+        {
+            await EditPresetCopyAsync(row);
+        }
+    }
+
+    private async Task EditPresetCopyAsync(AuthoringSettingRowViewModel row)
+    {
+        if (_busy || !row.CanEditPresetCopy)
+        {
+            ShowFailure(
+                "Editing a preset copy is unavailable for the current row. "
+                + "The selected preset and local draft were not changed.");
+            return;
+        }
+
+        if (row.HasMeaningfulDormantLocalDraft)
+        {
+            var decision = MessageBox.Show(
+                this,
+                $"{row.DisplayName} already has a dormant profile-local draft.\n\n"
+                    + $"Yes — replace it with an exact normalized copy of {row.SelectedPresetDisplayName}.\n"
+                    + "No — retain the dormant local draft and switch to it.\n"
+                    + "Cancel — keep the selected preset and every draft unchanged.",
+                "Replace profile-local draft?",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Warning);
+            if (decision == MessageBoxResult.Cancel)
+            {
+                StatusText.Text =
+                    "Edit a copy cancelled; the selected preset and local draft are unchanged.";
+                StatusText.Foreground = (Brush)FindResource("MutedBrush");
+                return;
+            }
+            if (decision == MessageBoxResult.No)
+            {
+                row.RetainDormantLocalDraft();
+                StatusText.Text =
+                    $"Retained the existing {row.DisplayName} profile-local draft. "
+                    + "Validate → Review → Publish is still required; no Strategy or preset was saved, published, selected, activated, queued, or applied.";
+                StatusText.Foreground = new SolidColorBrush(
+                    Color.FromRgb(101, 230, 166));
+                ValidationSummaryText.Text =
+                    "The row now uses its retained profile-local definition. Validate before review and publication.";
+                ValidationSummaryText.Foreground = new SolidColorBrush(
+                    Color.FromRgb(241, 191, 91));
+                return;
+            }
+        }
+
+        LoadoutPresetMaterializationRequest request;
+        try
+        {
+            request = row.BuildEditPresetCopyRequest();
+        }
+        catch (Exception exc)
+        {
+            ShowFailure(
+                $"Preset copy was not created: {exc.Message} The selected preset "
+                + "and local draft are unchanged.");
+            return;
+        }
+
+        SetBusy(true, $"Materializing {row.SelectedPresetDisplayName} on Linux...");
+        try
+        {
+            using var cancellation = new CancellationTokenSource(
+                TimeSpan.FromSeconds(120));
+            var response = await _api.PostStrategyAuthoringAsync(
+                request,
+                cancellation.Token);
+            if (!string.Equals(
+                    response.Operation,
+                    request.Operation,
+                    StringComparison.Ordinal)
+                || !response.Valid
+                || response.Published
+                || response.PublicationActivatesStrategy
+                || response.Materialization is null)
+            {
+                throw new InvalidOperationException(
+                    "Linux did not confirm an unpublished normalized preset copy.");
+            }
+            row.ApplyMaterializedPresetCopy(response.Materialization);
+            StatusText.Text =
+                $"Copied {row.SelectedPresetDisplayName} into the {row.DisplayName} "
+                + "profile-local editor. Validate → Review → Publish is still required; "
+                + "no Strategy or preset was saved, published, selected, activated, queued, or applied.";
+            StatusText.Foreground = new SolidColorBrush(
+                Color.FromRgb(101, 230, 166));
+            ValidationSummaryText.Text =
+                "The row now uses the Linux-normalized local copy. Validate before review and publication.";
+            ValidationSummaryText.Foreground = new SolidColorBrush(
+                Color.FromRgb(241, 191, 91));
+        }
+        catch (Exception exc)
+        {
+            ShowFailure(
+                $"Preset copy was not created: {exc.Message} The selected preset "
+                + "and local draft are unchanged; nothing was published or activated.");
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async void DuplicateModulePreset_Click(
         object sender,
         RoutedEventArgs e)
     {
@@ -1315,7 +1427,7 @@ public partial class StrategyProfilesWindow : Window
             || _catalog is null
             || (fromLocalDefinition
                 ? !row.CanSaveModulePreset
-                : !row.CanCreateModuleVariant))
+                : !row.CanDuplicateModulePreset))
         {
             ShowFailure(
                 "Managed Module preset creation is unavailable for the current editor selection.");
@@ -1341,10 +1453,10 @@ public partial class StrategyProfilesWindow : Window
         }
         else if (row.SelectedModulePreset is { } selected)
         {
-            suggestedId = SuggestedId($"{selected.Id}_variant", existingIds);
-            suggestedName = $"{selected.DisplayName} Variant";
+            suggestedId = SuggestedId($"{selected.Id}_copy", existingIds);
+            suggestedName = $"{selected.DisplayName} Copy";
             explanation =
-                $"Create a new immutable custom variant of {selected.DisplayName}. The source preset remains read-only.";
+                $"Duplicate {selected.DisplayName} as a new immutable exact-copy preset. The source preset remains read-only; use Edit a copy to create an editable profile-local definition.";
         }
         else
         {
@@ -1379,7 +1491,7 @@ public partial class StrategyProfilesWindow : Window
                 ? row.BuildSaveModulePresetRequest(
                     dialog.PresetId,
                     dialog.PresetDisplayName)
-                : row.BuildCreateModuleVariantRequest(
+                : row.BuildDuplicateModulePresetRequest(
                     dialog.PresetId,
                     dialog.PresetDisplayName);
         }
@@ -1495,6 +1607,7 @@ public partial class StrategyProfilesWindow : Window
     private void SetBusy(bool busy, string? message = null)
     {
         _busy = busy;
+        EditorPanel.IsEnabled = !busy && _draftSource is not null;
         BasesList.IsEnabled = !busy;
         StrategiesList.IsEnabled = !busy;
         CapturedDraftsList.IsEnabled = !busy;
