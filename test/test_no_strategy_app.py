@@ -13,13 +13,13 @@ from core.no_strategy_inventory import (
 )
 from core.no_strategy_observer import NoStrategyRunObserver
 from core.no_strategy_post_run import NoStrategyPostRunError, NoStrategyPostRunPaused
-from core.player_save_history import PlayerSaveAttachmentContext
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
     PlayerSaveTargetBinding,
 )
+from core.player_save_history import PlayerSaveAttachmentContext
 from core.run_state import AUTOMATION, ExecMode
 from test.player_save_temporal_fixtures import (
     running_attachment_observations,

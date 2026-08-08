@@ -914,9 +914,15 @@ manufacturing a structured value.
 
 Pause continues to block every inventory input. An interrupted pass resumes
 from a known read-only screen or restores verified Home before retrying its
-stage. Game Over `WAIT` must first receive an actionable direction; No Strategy
-then overrides `NEXT_BATTLE`'s direct Retry route to Home so a new battle
-cannot start before its Home-only evidence is attached.
+stage. If an optional capture or configuration stage remains incomplete, the
+runtime persists the partial observation with explicit unresolved fields and
+releases verified Home to normal terminal policy instead of holding automation
+indefinitely. Only the exact route back to Home may remain pending, and an
+explicit `WAIT` still holds its requested boundary. Game Over `WAIT` must first
+receive an actionable direction; No Strategy overrides `NEXT_BATTLE`'s direct
+Retry route to Home so its bounded Home-only work has an opportunity to run
+before the next battle, without making successful completion a prerequisite
+for continued battle retry.
 
 ## State and battle lifecycle
 
@@ -1035,6 +1041,18 @@ sufficient: all existing badge, rollover, claim-limit, Sunday-hold, eligibility,
 cooldown, and scheduler rules still decide whether a collector is due. A
 collector cannot navigate to Home or cross a battle boundary merely to collect.
 Home ad gems retain ordinary Home handling outside this running-battle gate.
+
+Minimum continuity is deliberate. Recoverable setup-capture, data-collection,
+configuration-validation, and repair-record failures do not manufacture a
+global Pause. A running-battle contradiction or mismatch uses the Strategy
+Gate so safe gem collection continues, and natural Game Over releases that
+gate before terminal handling. Game Over statistics collection is best effort;
+the selected Retry/Home route is still attempted and a failed terminal tap is
+retried from fresh terminal evidence with action authority unchanged.
+Tournament Results dismissal follows the same retry rule. Explicit Pause,
+Take Manual Control, Stop, changed workflow ownership, and inability to prove
+restoration after an attempted lifecycle transition remain fail-closed
+boundaries.
 
 Daily Gem and mission collectors claim an exclusive auxiliary-route lease from
 a freshly detected same-battle `RUNNING` frame before their first input. While

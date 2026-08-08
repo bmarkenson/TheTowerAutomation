@@ -63,8 +63,9 @@ adoption does not authorize Surrender. If a Strategy later reports a problem
 that can only be fixed between battles, automation may Surrender only when the
 runtime offers **Surrender this battle and repair setup** and the operator
 selects that exact one-shot option. It records the nonrepresentative result,
-returns to verified Home, and Pauses; correcting setup and starting another
-battle are separate choices.
+returns to verified Home, and lets ordinary Home repair and the separately
+selected future-battle policy continue. The one-shot permission does not
+select a later battle or grant Surrender authority beyond that exact repair.
 
 ## Take and return manual control
 
@@ -114,10 +115,14 @@ An exact or forward-compatible save revision may supply only the checks named
 by its resolved mapping's explicit compatibility allowlist; every other field
 stays unresolved. An unsupported or structurally incompatible revision, a
 missing runtime projection, or incomplete round identity reports Capture as
-`unavailable`, opens no configuration UI, and remains Paused after a dispatched
-serialization. Fresh save evidence that positively contradicts the requested
-Home/active boundary reports `failed` and also remains Paused. Retry only after
-the reported mapping or boundary condition has changed.
+`unavailable` and opens no configuration UI. When the guarded refresh has
+proved source restoration, that outcome preserves the prior action-authority
+state. Fresh active/resumable evidence that contradicts the requested battle
+reports `failed` and enters a Strategy Gate so observation and safe gem
+collectors continue. A proved Home New contradiction, or an attempted
+lifecycle transition whose source restoration cannot be proved, reports
+`failed` and persists Automation Paused. Review the reported boundary before
+requesting another capture.
 
 There is one deliberate no-input path for manual changes: if Return Control
 already forced an exact active-battle save and then Paused on a trusted mismatch,
@@ -138,10 +143,12 @@ accepts its own just-printed review automatically. A collision requires a new
 ID unless the Strategy draft embeds the exact evidence proving recovery of a
 previous atomic-create receipt failure.
 
-If the runtime completed serialization but could not write the ready receipt,
-it Pauses and retries only that atomic receipt from its exact process-local
-claim. It does not background the game again. A post-background acquisition or
-round contradiction also leaves Automation Paused and failed; an orphaned
+If the runtime completed serialization but could not write the ready or
+terminal receipt, it retries only that atomic receipt from its exact
+process-local result. It does not background the game again or change action
+authority. Reopening `saved`, `cancelled`, `unavailable`, `interrupted`, or
+`failed` shows that terminal result without issuing input. Use the separate
+**Try capture again** action to request a new serialization. An orphaned
 `capturing` ledger after process loss is not replay authority.
 
 ## Switch the live ADB target

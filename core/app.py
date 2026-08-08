@@ -9486,8 +9486,7 @@ class App:
             self._tournament_results_captured = False
         if (
             not operator_workflow_only
-            and
-            self._handler_enabled("daily_gem")
+            and self._handler_enabled("daily_gem")
             and self._handle_daily_gem_if_due(new_state, overlays)
         ):
             # The handler navigates through Store and may return to a different
@@ -9495,8 +9494,7 @@ class App:
             return
         if (
             not operator_workflow_only
-            and
-            self._handler_enabled("mission_rewards")
+            and self._handler_enabled("mission_rewards")
             and self._handle_mission_rewards_if_due(new_state, img, overlays)
         ):
             # The handler traverses several panels and restores RUNNING. Avoid
@@ -9504,8 +9502,7 @@ class App:
             return
         if (
             not operator_workflow_only
-            and
-            new_state == "HOME_SCREEN"
+            and new_state == "HOME_SCREEN"
             and "HOME_AD_GEMS_AVAILABLE" in overlays
             and self._handler_enabled("ad_gem")
         ):
@@ -9958,8 +9955,7 @@ class App:
                 capture_stats=(
                     not isinstance(pending_terminal_route, Mapping)
                     and repair_terminal_failure_reason is None
-                    and
-                    not repair_in_progress
+                    and not repair_in_progress
                     and (
                         (
                             manual_return
@@ -10024,7 +10020,11 @@ class App:
                         if isinstance(terminal_outcome, dict)
                         else None
                     ),
-                    "saved" if isinstance(terminal_outcome, dict) else "unavailable",
+                    (
+                        "saved"
+                        if isinstance(terminal_outcome, dict)
+                        else "unavailable"
+                    ),
                 )
             completed_record = terminal_outcome.record
             if (

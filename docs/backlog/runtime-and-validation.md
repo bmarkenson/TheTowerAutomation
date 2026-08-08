@@ -624,7 +624,9 @@ stages:
     - [x] Unsupported/incompatible mappings, absent runtime projection, and
       incomplete round identity report Capture `unavailable` without entering
       authoring or UI fallback. A proved opposite round fact remains `failed`.
-      Every post-background outcome persists Automation Paused.
+      Every post-background outcome persisted Automation Paused at this
+      checkpoint; revision 30's failure-continuity checkpoint below supersedes
+      that over-broad authority outcome.
     - [x] Enable at Home cannot inherit ordinary Home serialization/setup,
       legacy auto-start, or one-shot Tournament-validation launch while the
       initial Start Battle/Attach to Battle intent is unresolved. Stale
@@ -643,6 +645,41 @@ stages:
     - [ ] Confirm the native Windows usability flow and the Better Control
       transitions at natural Home, resumable/active-battle, manual-control, and
       terminal boundaries before closing this outcome.
+  - Failure-continuity checkpoint (2026-08-08, feature branch after merging
+    production `d6f6bb7`):
+    - [x] Merge commit `c10c9f8` incorporates production's corrected typed
+      attachment adoption (`e39a785`) without adding a competing save-scope
+      implementation. Exact PID, target/generation, activity-scope,
+      active-round, and source-restoration checks remain authoritative.
+    - [x] Commit `e7dfb51` advances the server to revision 30, retains
+      `save_backed_setup_capture_v1`, and adds
+      `save_backed_setup_capture_v2`. Capture terminal receipts now distinguish
+      preserved, continuity-gated, safety-paused, and already-paused authority;
+      reopening a terminal result is inspect-only and **Try capture again** is
+      separate explicit intent.
+    - [x] Source-restored mapping/projection/acquisition failures preserve the
+      prior authority. An active/resumable battle contradiction uses a Strategy
+      Gate so observation and allowlisted gem collection continue. A proved
+      Home New contradiction or inability to prove source restoration after
+      attempted lifecycle input still Pauses. Atomic ready/terminal receipt
+      retry retains the exact process-local result without repeating
+      serialization or changing authority.
+    - [x] Game Over data collection is best effort and cannot suppress the
+      selected Home/Retry route. Failed Game Over and Tournament Results
+      navigation stays pending for fresh-evidence retry without global Pause.
+      No Strategy persists partial/unresolved evidence and releases verified
+      Home; configuration-repair failure remains gated/degraded, and an
+      explicitly authorized repair Surrender returns to ordinary Home repair
+      and future policy without an implicit Pause.
+    - [x] The merged affected Python suite passes 385 tests and all 83 native
+      authoring/compatibility tests pass on Linux. NuGet's read-only
+      vulnerability-cache warning does not affect build or test execution.
+    - [x] The complete supported development checkpoint passed compilation,
+      state-definition validation, clickmap validation with zero errors and the
+      established 44 orphan candidates, and all 1,962 tests in 340.57 seconds.
+    - [ ] Native Windows usability and natural Home/active/terminal boundary
+      validation remain pending; no live/device behavior is claimed by this
+      checkpoint.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

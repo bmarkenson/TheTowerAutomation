@@ -322,10 +322,11 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 29 preserves `strategy_authoring_v1`,
+server revision 30 preserves `strategy_authoring_v1`,
 `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains `strategy_revision_history_v1`, and adds
+`save_backed_setup_capture_v2` while retaining
 `save_backed_setup_capture_v1`; revision 25 added
 `managed_custom_module_presets_v1` after revision 24 added
 `strategy_authoring_local_loadout_editors_v1`. It provides separate **Bases**
@@ -350,10 +351,15 @@ not effective setup changes. Paused capture reports that refresh is blocked and
 does not use cached evidence. If active-battle Return Control already Paused on
 a trusted mismatch after its own exact forced save, the same button may review
 that retained process-local acquisition without new device input. Saving still
-leaves Return Control Paused and unresolved. A ready-receipt write failure
-Pauses and retries only the retained receipt; it never performs a second
-serialization. The native capture button remains disabled when revision or
-capability compatibility fails, even if a stale payload says `ready`.
+leaves Return Control Paused and unresolved. With source restoration proved,
+an unavailable capture preserves prior action authority; an active-battle
+identity contradiction raises a Strategy Gate, while an unsafe source return
+or proved Home New contradiction persists Pause. Ready/terminal receipt-write
+failure retries only the retained result without a second serialization or an
+authority change. Opening a terminal capture is inspect-only; select **Try
+capture again** to request another refresh. The native capture button remains
+disabled when revision or capability compatibility fails, even if a stale
+payload says `ready`.
 
 Settings are grouped by the server registry. **Show active only** keeps the
 normal view compact, while **Show all settings** exposes omitted settings.
@@ -711,8 +717,8 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Better Control Model build requires revision 29,
-`better_control_model_v2`, `save_backed_setup_capture_v1`,
+current Better Control Model build requires revision 30,
+`better_control_model_v2`, `save_backed_setup_capture_v2`,
 `terminal_dispositions_v2`,
 `managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`, and

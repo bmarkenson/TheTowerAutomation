@@ -82,7 +82,7 @@ def handle_game_over(
     battle_id: Optional[str] = None,
 ):
     """
-    Handle the GAME OVER flow: capture stats, close stats, and retry or pause.
+    Handle the GAME OVER flow: collect best-effort stats and follow its route.
 
     Workflow:
       1) Capture the initial Game Stats dialog in memory.
@@ -102,7 +102,8 @@ def handle_game_over(
          STOPPED control.
 
     Returns:
-        The structured battle record when capture succeeds, otherwise ``None``.
+        A typed outcome separating optional record collection from terminal
+        route completion.
 
     Side effects:
         [adb] Captures screenshots in memory.
@@ -1064,7 +1065,7 @@ def _abort_handler(
         session_id (str): Session identifier used for artifact naming.
 
     Returns:
-        None
+        A pending-retry outcome retaining any record already captured.
 
     Side effects:
         [adb][cv2][fs][log] Capture & persist debug screenshot; emit error.

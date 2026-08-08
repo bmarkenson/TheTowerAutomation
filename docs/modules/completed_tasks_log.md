@@ -39,6 +39,38 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 Better Control failure continuity
+
+- Commit `e7dfb51` makes recoverable setup-capture, terminal-data,
+  No Strategy post-run, Tournament dismissal, and configuration-repair
+  failures preserve minimum automation continuity instead of manufacturing an
+  indefinite Pause. A running-battle conflict uses the Strategy Gate so
+  observation and explicitly safe gem collectors remain available; Game Over
+  and Tournament terminal routes retry from fresh evidence with the selected
+  policy and action authority unchanged.
+- Control-surface revision 30 retains both version-1 capabilities and adds
+  `save_backed_setup_capture_v2`. Capture receipts expose typed authority
+  outcomes, terminal results reopen without hidden input, and a separate
+  **Try capture again** action owns any new serialization. Source-restored
+  mapping/projection/acquisition failures preserve prior authority; unproven
+  source restoration and proved Home New contradictions still Pause safely.
+- No Strategy now retains partial observations and explicit unresolved fields
+  before releasing verified Home. An operator-authorized configuration-repair
+  Surrender still remains exact and one-shot, but verified Home returns to
+  normal repair and the independently selected terminal policy without an
+  implicit Pause. Explicit Pause, Take Manual Control, Stop, and ambiguous
+  input ownership remain zero-input boundaries.
+- Merge commit `c10c9f8` incorporates production's typed attachment fix
+  `e39a785` and deployment record `d6f6bb7`; this stage does not replace or
+  duplicate the separately owned save-scope implementation.
+- The affected Python suite passed 385 tests and all 83 native
+  authoring/compatibility tests passed on Linux. The complete supported
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan candidates, and all 1,962 tests in
+  340.57 seconds. No live/device or Windows runtime action was performed;
+  native Windows usability and natural-boundary validation remain in the
+  Better Control backlog.
+
 ### 2026-08-08 player-save revision compatibility deployment
 
 - Commits `9ce79b9` and `b292779` add exact `data-9-game-1101` support for

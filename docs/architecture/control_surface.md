@@ -177,9 +177,10 @@ expiry attempt.
 
 ## Better Control Model
 
-Server revision 29 retains `better_control_model_v1` for additive compatibility
-and advertises `better_control_model_v2` plus
-`save_backed_setup_capture_v1`. The additive `control_model` status object
+Server revision 30 retains `better_control_model_v1` and
+`save_backed_setup_capture_v1` for additive compatibility and advertises
+`better_control_model_v2` plus `save_backed_setup_capture_v2`. The additive
+`control_model` status object
 keeps five dimensions independent:
 
 | Dimension | Values and authority |
@@ -223,13 +224,17 @@ or exactly acknowledged repeat is a visible no-op.
 | Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; ordinary input remains unavailable until a new forced save (or a bound natural Game Over save) reconciles identity and active Strategy configuration |
 | Live | reconciling Return | Home New refresh is blocked, incomplete, or loses its post-background binding | no additional request | persist Automation Paused and terminalize that Return as failed/interrupted; do not repeat lifecycle input or open configuration UI |
 | Live | enabled, adopted active battle | active battle | apply selected Strategy to this battle | adopt only after explicit selection; preserve battle identity and defer new-run/Home-only gates; Surrender remains unauthorized |
-| Live | enabled, adopted active battle | repair-only mismatch | choose **Surrender this battle and repair setup** in the runtime gate | grant one exact-battle, exact-reason Surrender; write the nonrepresentative disposition before verified Home, Pause there, and do not start another battle |
+| Live | enabled, adopted active battle | repair-only mismatch | choose **Surrender this battle and repair setup** in the runtime gate | grant one exact-battle, exact-reason Surrender; write the nonrepresentative disposition before verified Home, then let normal Home repair and the separately selected future-battle policy continue without an implicit Pause |
 | Live | enabled | Home New, Home Resume, or active battle with exact binding | Capture current setup as… | force a new save, present captured and unresolved fields for review, then save a new inactive Module preset or Strategy draft without selecting, queueing, publishing, or applying it |
 | Live | paused, Return awaiting trusted-mismatch review | same exact active battle with its process-local forced acquisition retained | Capture current setup as… | project the Return acquisition without new input, label that provenance explicitly, and leave Return Control Paused and unresolved after any capture save |
 | Live | capture owns a forced refresh | compatible exact/forward save revision | no additional request | use only the resolved mapping's explicit compatibility allowlist; preserve every other setup field as unresolved |
-| Live | capture owns a forced refresh | unsupported/incompatible mapping, missing runtime projection, or incomplete round identity | no additional request | report `unavailable`, open no configuration UI, and remain Paused after dispatched serialization; a proved opposite round fact is instead `failed` |
-| Live | capture owns or completed a forced refresh | ready-ledger write fails or post-background save/round binding contradicts the request | no additional request | retain the exact process-local ready result and retry only its atomic receipt, or terminalize the contradiction Paused; never serialize a second time to recover the write |
-| Live | either | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result, use the verified dismissal route, and preserve the independent next-battle policy |
+| Live | capture owns a forced refresh | source restored, but mapping/projection/acquisition is unavailable or round identity is incomplete | no additional request | report `unavailable`, open no configuration UI, and preserve the prior action-authority state |
+| Live | capture owns a forced refresh | fresh active/resumable evidence contradicts the requested battle identity | no additional request | report `failed` and enter a running-battle Strategy Gate so observation and safe gem collectors continue while strategy/lifecycle input yields |
+| Live | capture owns a forced refresh | fresh Home New evidence contradicts the requested boundary, or an attempted lifecycle transition cannot prove source restoration | no additional request | report `failed` and persist Automation Paused because the safe input source is unproven |
+| Live | capture owns or completed a forced refresh | ready/terminal ledger write fails | no additional request | retain the exact process-local result and retry only its atomic receipt without changing action authority or serializing again |
+| Live | capture has a terminal result | `saved`, `cancelled`, `unavailable`, `interrupted`, or `failed` | reopen Capture | inspect the prior result only; a new serialization requires the separate explicit **Try capture again** action |
+| Live | enabled | Game Over | selected future terminal policy | collect terminal data best effort, then follow Retry/Home; if the route fails, retain it for a fresh-evidence retry without changing authority |
+| Live | enabled | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result and use the verified dismissal route; failure retries from fresh evidence without changing authority or the independent next-battle policy |
 | Live/stopped | already satisfied | any | repeated Pause, Enable, Start Automation, Stop Automation, terminal policy, or Take Manual Control where defined | return a visible no-op instead of fabricating a transition |
 
 An intent requested under Pause is pending, not acknowledged action authority.
@@ -240,10 +245,10 @@ pauses input.
 
 At Tournament Results, `WAIT` is satisfied by retaining the screen. Continue
 automatically and Return/stay Home first preserve the result, then use the
-verified OK-to-Home dismissal owner; a failed dismissal requests Automation
-Paused and retains the selected future policy. Continue still does not mean
-that dismissal itself starts a battle: the next verified Home boundary owns
-that separate future policy.
+verified OK-to-Home dismissal owner. A failed dismissal retains the selected
+future policy and retries from fresh terminal evidence without changing action
+authority. Continue still does not mean that dismissal itself starts a battle:
+the next verified Home boundary owns that separate future policy.
 
 The API retains `resume` as a deprecated alias for `enable` and the old
 directive-only `stop` for internal coordination compatibility. The latter sets
@@ -807,8 +812,8 @@ Process request examples:
   and Take Manual Control/Return Control controls. Their availability and
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
-  requires server revision 29 and capability `better_control_model_v2`;
-  save-backed capture additionally requires `save_backed_setup_capture_v1`.
+  requires server revision 30 and capability `better_control_model_v2`;
+  save-backed capture additionally requires `save_backed_setup_capture_v2`.
 - Take Manual Control selects default minimal or opt-in full collection for a
   later save-confirmed manual Surrender without granting Surrender authority.
   **Capture current setup as…** shows fresh-save captured values, unresolved
@@ -987,6 +992,9 @@ These are the next useful additions, in approximate priority order:
    more write operations.
 
 Repository implementation of save-backed Attach/Return reconciliation and
-**Capture current setup as…** is included in revision 29. The Better Control
-Model backlog retains the unperformed Windows usability and natural-boundary
-live validation; those checks are not implied by the repository checkpoint.
+**Capture current setup as…** is included in revision 29. Revision 30 adds the
+typed capture authority outcome, inspect-without-retry terminal presentation,
+and separate explicit retry action under `save_backed_setup_capture_v2`. The
+Better Control Model backlog retains the unperformed Windows usability and
+natural-boundary live validation; those checks are not implied by the
+repository checkpoint.

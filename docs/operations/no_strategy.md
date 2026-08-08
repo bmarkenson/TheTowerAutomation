@@ -74,7 +74,10 @@ for its post-run sequence:
    Retain any required Perks pages under
    `logs/battle_observations/<battle-id>/perk_configuration/`.
 
-Normal Home/start handling remains held until completion. Uncertain OCR stays
-raw/pending; failure retries the bounded read-only stage rather than releasing
-a new battle. Architecture and evidence fields are in
+Uncertain OCR stays raw/pending. If an optional read or persistence stage still
+fails after its bounded attempt, the runtime preserves the partial observation
+with explicit unresolved evidence and releases verified Home to the selected
+terminal policy; it does not Pause or hold all future battles indefinitely.
+Only restoration to verified Home may remain pending, and explicit `WAIT`
+continues to hold by operator choice. Architecture and evidence fields are in
 [`architecture/runtime.md`](../architecture/runtime.md#no-strategy-observation-profile).

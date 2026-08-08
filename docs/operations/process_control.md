@@ -39,22 +39,29 @@ Automation always launches Paused and waits for explicit battle intent.
 Start Battle is accepted only with fresh verified Home `NEW_BATTLE` evidence;
 Attach to Battle requires fresh Home `RESUME_BATTLE` or active-battle evidence.
 Unavailable, stale, and mismatched requests fail without substituting the
-other route. Attach currently remains input-blocked at `validating_save` until
-the separately owned save-freshness integration is complete.
+other route. Attach remains input-blocked at `validating_save` until one
+guarded exact-target serialization proves source restoration, active-round
+identity, and the final owner/activity scope. It then adopts the battle for
+observation only; applying a Strategy is a separate explicit action.
 
 Take Manual Control first requests an indefinite Pause and becomes active only
 after runtime acknowledgement. Return Control remains Paused; explicit Enable
-starts an exclusive reconciliation hold. That reconciliation likewise remains
-pending in this feature stage and must not be treated as returned authority.
+starts an exclusive reconciliation hold. A newly forced save, or the exact
+bound natural Game Over save, must reconcile battle identity and relevant
+configuration before ordinary input returns. A trusted mismatch remains
+Paused for explicit operator review; cached evidence cannot satisfy Return.
 
 `NEXT_BATTLE`, `WAIT`, and `HOME` are terminal dispositions. `NEXT_BATTLE`
 uses the next authorized Retry/Battle/Resume path after terminal capture;
 `WAIT` holds Game Over or Home; `HOME` goes Home and suppresses automatic
 Battle/Resume input. Pause blocks terminal navigation and Stop exits without a
-terminal tap. A Game Over navigation failure Pauses action authority without
-rewriting the selected policy. Tournament Results currently satisfies `WAIT`
-by retaining the screen; `NEXT_BATTLE` and `HOME` remain visibly pending until
-a verified dismissal route exists. Legacy `RETRY` normalizes to `NEXT_BATTLE`.
+terminal tap. Game Over statistics and record enrichment are best effort; the
+selected terminal route is still attempted. A failed route tap stays pending
+for a fresh-evidence retry without changing action authority or the selected
+policy. Tournament Results satisfies `WAIT` by retaining the screen;
+`NEXT_BATTLE` and `HOME` persist the result and retry the verified dismissal
+route under the same authority-preserving rule. Legacy `RETRY` normalizes to
+`NEXT_BATTLE`.
 
 A persistent game-speed target is independent of Pause. Acknowledged values
 `x0.0`–`x6.0` are exact; `max`/`x6.3` means maximum available. It persists

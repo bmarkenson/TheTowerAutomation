@@ -516,14 +516,16 @@ they do not acquire a new catalog dependency from custom preset authoring.
 
 ### Save-backed setup capture
 
-Server revision 29 adds `save_backed_setup_capture_v1`. **Capture current setup
-as…** does not define another loadout format: one runtime-owned
-`forced_serialization` bundle is projected through the existing Farm setting
-registry, setting normalizers, local loadout selectors, and Module preset
-store. Normally Capture requests that serialization itself. If an active-battle
-Return Control has already persisted an exact forced-save receipt and Paused on
-a trusted Strategy mismatch, Capture may instead consume that same process-local
-typed acquisition. The ledger labels this as
+Server revision 29 added `save_backed_setup_capture_v1`. Server revision 30
+retains it and adds `save_backed_setup_capture_v2`, whose terminal receipts
+carry the typed action-authority outcome and require a separate explicit retry.
+**Capture current setup as…** does not define another loadout format: one
+runtime-owned `forced_serialization` bundle is projected through the existing
+Farm setting registry, setting normalizers, local loadout selectors, and
+Module preset store. Normally Capture requests that serialization itself. If
+an active-battle Return Control has already persisted an exact forced-save
+receipt and Paused on a trusted Strategy mismatch, Capture may instead consume
+that same process-local typed acquisition. The ledger labels this as
 `retained_return_control_refresh`; it performs no new device input, does not
 resolve Return Control, and cannot be reconstructed from the durable receipt.
 Only complete observations authorized by the resolved mapping's explicit
@@ -537,6 +539,18 @@ It also fingerprints bounded capture-origin metadata: a newly requested
 refresh remains distinguishable from a process-local Return Control reuse after
 the mutable workflow ledger moves on. That origin is review provenance only
 and cannot replay the acquisition or grant action authority.
+
+If the guarded refresh restores its source, mapping, projection, acquisition,
+or incomplete identity failures are reported without changing the operator's
+prior action-authority state. A fresh active/resumable battle contradiction
+enters a running-battle Strategy Gate: observation and explicitly safe gem
+collectors may continue, while Strategy and lifecycle input yield. A proved
+Home New contradiction, or an attempted lifecycle transition whose source
+restoration cannot be proved, persists Pause because the input owner is no
+longer safe. Ready or terminal receipt-write failure retains the exact
+process-local result for atomic-write retry without another serialization or
+authority change. Reopening a terminal capture is inspect-only; **Try capture
+again** is the separate operator intent that may request another refresh.
 
 Saving a Module loadout calls the ordinary immutable custom Module preset
 owner. It is save-as-new: an existing ID is a conflict even if its visible
@@ -646,10 +660,11 @@ The actionable sequence is tracked in the
 
 All four original slices, the immutable-history/safe-fallback slice, managed
 custom Module preset creation, and save-backed setup capture are implemented.
-Server revision 29 retains
+Server revision 30 retains
 `strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`, and
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains revision-23 `strategy_revision_history_v1`, and adds
+`save_backed_setup_capture_v2` while retaining revision-29
 `save_backed_setup_capture_v1`; revision 25 added
 `managed_custom_module_presets_v1` after revision 24 added
 `strategy_authoring_local_loadout_editors_v1`. The original profile endpoint
