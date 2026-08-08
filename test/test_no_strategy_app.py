@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import numpy as np
+import pytest
 
 from automation.missions.base import MissionContext
 from core.app import App
@@ -32,6 +33,7 @@ def _app_without_strategy():
     app._mission_mgr.strategy = None
     app._mission_mgr.ctx = MissionContext(data={"mission_vars": {}})
     app._mission_mgr.session_preflight_repair_in_progress.return_value = False
+    app._mission_mgr.active_battle_observed.return_value = True
     app._fast_game_over = True
     app._last_wave_value = 2470
     app._last_wave_conf = 99.0
@@ -409,6 +411,42 @@ def test_automatic_in_battle_inventory_is_exclusive_and_runs_once():
     assert repeated is False
     inventory.assert_called_once()
     assert app._no_strategy_inventory_complete is True
+
+
+@pytest.mark.parametrize(
+    "state",
+    (
+        "CARDS",
+        "PERKS",
+        "MODULES",
+        "EVENT",
+        "GUILD",
+        "TARGET_PRIORITY",
+        "DAMAGE_ADJUSTER",
+    ),
+)
+def test_released_no_strategy_inventory_never_claims_operator_submenu(state):
+    app = _app_without_strategy()
+    app._release_no_strategy_post_run()
+    app._mission_mgr.active_battle_observed.return_value = False
+
+    with patch("core.app.run_no_strategy_in_battle_inventory") as inventory:
+        handled = app._handle_no_strategy_in_battle_inventory({"state": state})
+
+    assert handled is False
+    inventory.assert_not_called()
+
+
+def test_no_strategy_inventory_requires_running_to_grant_a_new_route():
+    app = _app_without_strategy()
+
+    with patch("core.app.run_no_strategy_in_battle_inventory") as inventory:
+        handled = app._handle_no_strategy_in_battle_inventory(
+            {"state": "PERKS"}
+        )
+
+    assert handled is False
+    inventory.assert_not_called()
 
 
 def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():

@@ -130,7 +130,6 @@ from core.tournament_conditions import (
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
-    RECOVERABLE_INVENTORY_STATES,
     run_no_strategy_in_battle_inventory,
 )
 from core.no_strategy_observer import NoStrategyRunObserver
@@ -9261,8 +9260,29 @@ class App:
             return False
         if getattr(self, "_no_strategy_inventory_complete", False):
             return False
+        if not getattr(self, "_no_strategy_observation_active", False):
+            return False
+        active_battle_observed = getattr(
+            getattr(self, "_mission_mgr", None),
+            "active_battle_observed",
+            None,
+        )
+        if not callable(active_battle_observed):
+            return False
+        try:
+            active_battle = active_battle_observed()
+        except Exception:
+            return False
+        if active_battle is not True:
+            return False
         state = str(detection.get("state") or "UNKNOWN")
-        if state not in RECOVERABLE_INVENTORY_STATES:
+        # This dispatcher grants a new synchronous inventory route.  Its
+        # internal owner may traverse Cards, Perks, and the other supported
+        # panels, but an arbitrary panel observed by the main loop is not
+        # proof that automation opened it.  Requiring fresh RUNNING here keeps
+        # operator navigation at Home or in a live battle from being mistaken
+        # for cleanup authority.
+        if state != "RUNNING":
             return False
         if self._supervisor.is_paused:
             return False
