@@ -15,6 +15,21 @@ card-preset records, including the distinction between its stored base slot
 count and the effective preset width. The same exact mapping now includes the
 validated Legend Tournament condition generator.
 
+Game `28.3.2` introduced exact save identity `dataVersion: 9` and
+`versionNumber: 1101`. The separate `data-9-game-1101` mapping is an
+audit-only candidate: its per-check validation allowlist is empty and its
+runtime projection is deliberately absent, so configuration, active-round,
+Perk, History/report, and Tournament authority all retain their existing UI
+fallbacks. A stable two-read inspection found the same `SaveLoad+PlayerData`
+root, all 739 prior fields, unchanged required array lengths, and exactly two
+additional integer fields: `enemiesKilledThisWave` and
+`enemiesSpawnedThisWave`. Both counters remain in the `unknown` raw-field
+disposition until their reset, update, and UI semantics are calibrated. The
+12 profile-progression components passed their structural contracts and remain
+observation-only. The prior semantic lookup tables are copied only to produce
+candidate comparisons; none is promoted for version 1101 without
+same-version cross-channel evidence.
+
 Live cross-channel calibration on game `28.3.1` confirmed that
 `versionNumber: 1073` is the installed application's `versionCode`. At one
 verified new-battle Home boundary, stable save reads agreed with authoritative

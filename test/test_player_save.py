@@ -38,6 +38,11 @@ VERSION_MAPPING = json.loads(
         encoding="utf-8"
     )
 )
+VERSION_1101_MAPPING = json.loads(
+    (ROOT / "config/player_save_versions/data_9_game_1101.json").read_text(
+        encoding="utf-8"
+    )
+)
 CLIPBOARD_REPORT_PATH = ROOT / "test/fixtures/battle_report_clipboard.txt"
 PERK_ID_CALIBRATION_PATH = (
     ROOT / "test/fixtures/player_save_perk_id_calibration_v1073.json"
@@ -72,6 +77,59 @@ def test_raw_field_manifest_is_complete_disjoint_and_canonical():
         for spec in fields.values()
     }
     assert progression_sources <= set(names)
+
+
+def test_v1101_raw_field_manifest_is_complete_audit_only_extension():
+    manifest = VERSION_1101_MAPPING["raw_field_manifest"]
+    old_names = set(_raw_field_manifest_names(VERSION_MAPPING))
+    names = _raw_field_manifest_names(VERSION_1101_MAPPING)
+
+    _validate_raw_field_manifest(VERSION_1101_MAPPING, source="v1101 test mapping")
+
+    assert VERSION_1101_MAPPING["mapping_id"] == "data-9-game-1101"
+    assert VERSION_1101_MAPPING["maturity"] == "candidate"
+    assert VERSION_1101_MAPPING["validated_checks"] == []
+    assert "runtime_save" not in VERSION_1101_MAPPING
+    assert VERSION_1101_MAPPING["identity"] == {
+        "data_version": 9,
+        "game_version": 1101,
+        "root_class": "SaveLoad+PlayerData",
+    }
+    assert manifest["audit_id"] == "V1101-RAW-001"
+    assert manifest["field_count"] == len(names) == 741
+    assert manifest["field_name_sha256"] == _raw_field_name_sha256(names)
+    assert set(names) - old_names == {
+        "enemiesKilledThisWave",
+        "enemiesSpawnedThisWave",
+    }
+    assert old_names <= set(names)
+    assert {
+        "enemiesKilledThisWave",
+        "enemiesSpawnedThisWave",
+    } <= set(manifest["dispositions"]["unknown"])
+
+    unchanged_semantic_sections = {
+        "auto_pick_order",
+        "card_recharge_modes",
+        "cards",
+        "free_upgrade_lock_fields",
+        "guardian_chip_ids",
+        "guardian_chips",
+        "module_loadout",
+        "perk_bans",
+        "perk_ids",
+        "presets",
+        "required_array_lengths",
+        "required_fields",
+        "target_priority_ids",
+        "ultimate_weapon_names",
+        "unmapped_checks",
+        "validated_free_upgrade_lock_set",
+    }
+    assert all(
+        VERSION_1101_MAPPING[key] == VERSION_MAPPING[key]
+        for key in unchanged_semantic_sections
+    )
 
 
 def test_raw_field_manifest_rejects_invalid_categories():
@@ -293,6 +351,22 @@ def _decoded_save() -> dict:
     return payload
 
 
+def _decoded_save_v1101() -> dict:
+    previous = _decoded_save()
+    payload = {
+        field_name: previous.get(field_name)
+        for field_name in _raw_field_manifest_names(VERSION_1101_MAPPING)
+    }
+    payload.update(
+        {
+            "versionNumber": 1101,
+            "enemiesKilledThisWave": 17,
+            "enemiesSpawnedThisWave": 19,
+        }
+    )
+    return payload
+
+
 def _bot_preset(
     *,
     levels: list[int] | None = None,
@@ -395,6 +469,65 @@ def _snapshot(monkeypatch, decoded: dict | None = None):
         gzip.compress(b"synthetic-nrbf"),
         source_name="/private/path/playerInfo.dat",
         captured_at=CAPTURED_AT,
+    )
+
+
+def _snapshot_v1101(monkeypatch, decoded: dict | None = None):
+    monkeypatch.setattr(
+        nrbf,
+        "loads",
+        lambda _raw: decoded or _decoded_save_v1101(),
+    )
+    return decode_player_save_bytes(
+        gzip.compress(b"synthetic-nrbf-v1101"),
+        source_name="/private/path/playerInfo.dat",
+        captured_at=CAPTURED_AT,
+    )
+
+
+def test_v1101_decode_is_shape_valid_but_keeps_ui_and_runtime_fallbacks(
+    monkeypatch,
+):
+    snapshot = _snapshot_v1101(monkeypatch)
+
+    assert snapshot.mapping_id == "data-9-game-1101"
+    assert snapshot.mapping_maturity == "candidate"
+    assert snapshot.validated_checks == ()
+    assert snapshot.shape_valid
+    assert snapshot.runtime_save is None
+    assert snapshot.profile_progression["status"] == "complete"
+    assert snapshot.profile_progression["identity"] == {
+        "data_version": 9,
+        "game_version": 1101,
+        "save_revision": 1234,
+        "mapping_id": "data-9-game-1101",
+        "audit_matrix_id": "data-9-game-1101-profile-progression-v1",
+    }
+    assert snapshot.checks["cards_deck"].value == "Farm"
+    assert snapshot.checks["perk_auto_pick_order"].complete
+    assert snapshot.checks["tournament_conditions"].status == "unmapped"
+    assert snapshot.checks["tournament_conditions"].reason == (
+        "tournament_mapping_config_changed"
+    )
+    assert any(
+        "runtime mapping is unavailable" in warning
+        for warning in snapshot.warnings
+    )
+
+    plan = reconcile_requirements(
+        snapshot,
+        {"cards_deck": "Farm"},
+        freshness_verified=True,
+    )
+    assert plan["checks"]["cards_deck"]["disposition"] == "ui_required"
+    assert plan["checks"]["cards_deck"]["reason"] == "mapping_candidate_audit"
+    assert not plan["checks"]["cards_deck"]["save_evidence_authoritative"]
+
+    decoded = _decoded_save_v1101()
+    decoded["enemiesKilledThisWave"] = "must-not-publish-v1101-wave-counter"
+    redacted = _snapshot_v1101(monkeypatch, decoded)
+    assert "must-not-publish-v1101-wave-counter" not in json.dumps(
+        redacted.as_dict()
     )
 
 

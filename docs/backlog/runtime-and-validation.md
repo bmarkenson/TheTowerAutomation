@@ -8,13 +8,32 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
 
 ## Current validation gates
 
-- [ ] Cross-validate the `data-9-game-1073` player-save mapping against fresh
-  UI inventory from the same version, and add a new exact candidate mapping if
-  the current game reports a different identity. Execute the complete
+- [ ] Cross-validate each current exact player-save mapping against fresh UI
+  inventory from the same version, and add a new exact candidate whenever the
+  game reports a different identity. Execute the complete
   [versioned audit matrix and rollout sequence](../architecture/player_save.md#versioned-audit-matrix-data-9-game-1073--revision-4).
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for unknown versions, shape changes,
   stale data, mismatches, and unmapped settings.
+  - [x] **Version 1101 structural candidate — `feature/player-save-version-update`.**
+    Add `data-9-game-1101` for game `28.3.2` after a stable exact-target read
+    proved the unchanged root, retention of all 739 version-1073 fields,
+    unchanged required arrays, and two added integer counters:
+    `enemiesKilledThisWave` and `enemiesSpawnedThisWave`. Classify both as
+    unknown, keep the validation allowlist empty, omit runtime authority, and
+    preserve UI fallback for every configuration and runtime consumer. All 12
+    profile-progression components are structurally complete and remain
+    observation-only; synthetic and live candidate decoding prove the
+    741-field manifest and zero save-authoritative reconciliation decisions.
+    The supported checkpoint passed compilation, state-definition validation,
+    clickmap integrity with zero errors and the 44 established orphan
+    candidates, and all 1,926 tests in 340.68 seconds.
+  - [ ] Cross-validate version 1101 configuration values at a verified Home
+    serialization boundary, then separately validate its active-round, Perk,
+    History/report, and Tournament components before adding any per-check
+    allowlist entry or runtime projection. Calibrate the two new per-wave enemy
+    counters independently if they gain a consumer; otherwise leave them
+    unpublished.
   - [ ] Complete implementation and ordinary-boundary validation of the
     [typed acquisition and temporal-authority contract](../architecture/player_save.md#acquisition-provenance-and-temporal-authority)
     through one outcome coordinator and sequential stacked feature branches.

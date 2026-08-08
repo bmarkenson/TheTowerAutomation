@@ -1,0 +1,1556 @@
+{
+  "schema_version": 1,
+  "mapping_id": "data-9-game-1101",
+  "maturity": "candidate",
+  "validated_checks": [],
+  "identity": {
+    "data_version": 9,
+    "game_version": 1101,
+    "root_class": "SaveLoad+PlayerData"
+  },
+  "raw_field_manifest": {
+    "schema_version": 1,
+    "audit_id": "V1101-RAW-001",
+    "root_class": "SaveLoad+PlayerData",
+    "field_count": 741,
+    "field_name_sha256": "33286a5121ecbb3cf67ac41aebad2fb5b4a1d58ff9259313b4c6ce6d53ea21cd",
+    "dispositions": {
+      "structural": [
+        "__class__",
+        "battleHistory",
+        "currentTier",
+        "currentWave",
+        "dataVersion",
+        "perkLevel",
+        "perksPicked",
+        "perksPickedCount",
+        "roundActiveBool",
+        "roundSeed",
+        "roundsStartedThisTier",
+        "saveRevision",
+        "versionNumber"
+      ],
+      "automation_gating": [
+        "assistModuleSlots",
+        "autoPickOrder",
+        "autoPickPerk",
+        "bannedPerksIndex",
+        "botPresetName",
+        "currentBotPreset",
+        "currentPreset",
+        "currentWorkshopPreset",
+        "demonModeAutomateToggle",
+        "firstPerkIndex",
+        "guardianChipSlot",
+        "guardianSlotsUnlocked",
+        "leagueID",
+        "moduleEquipped",
+        "nukeAutomateToggle",
+        "poisonSwampStunOff",
+        "presetName",
+        "slotPresetCardAssignedBool",
+        "slotsUnlocked",
+        "spotlightSmartMissilesOff",
+        "targetPriorityList",
+        "tournamentCheckedNumber",
+        "tournamentNumber",
+        "tournamentRecords",
+        "tourneyConditionsSeed",
+        "ultimateWeaponOn",
+        "ultimateWeaponUnlocked",
+        "upgradesDefenseLockedFreeUpgrades",
+        "upgradesLockedFreeUpgrades",
+        "upgradesUtilityLockedFreeUpgrades",
+        "workshopPresetName"
+      ],
+      "profile_observation": [
+        "amplifyBotLevelCooldownSelected",
+        "amplifyBotPresets",
+        "backgroundUnlocked",
+        "botBotLevelCooldownSelected",
+        "botBotPresets",
+        "cardLevel",
+        "cardMasteryUnlocked",
+        "cardUnlocked",
+        "diceBackgrounds",
+        "diceTowers",
+        "disableAdsUnlockedBool",
+        "enhancementDefenseLevel",
+        "enhancementDefenseTierUnlocked",
+        "enhancementLevel",
+        "enhancementTierUnlocked",
+        "enhancementUtilityLevel",
+        "enhancementUtilityTierUnlocked",
+        "epicPackUnlockedBool",
+        "eventBoostsBoughtTotal",
+        "flameBotLevelCooldownSelected",
+        "flameBotPresets",
+        "goldenBotLevelCooldownSelected",
+        "goldenBotPresets",
+        "guardianChipLevel",
+        "guardianChipUnlocked",
+        "guardianUnlocked",
+        "harmonyNodesUnlocked",
+        "labLevel",
+        "labsUnlocked",
+        "menuUnlocked",
+        "powerNodesLevel",
+        "powerNodesMaxLevel",
+        "powerNodesUnlocked",
+        "profileRelics",
+        "relicsUnlocked",
+        "researchLevel",
+        "slotPresetCardInt",
+        "starterPackUnlockedBool",
+        "synchronicityLevel",
+        "synchronicityUnlocked",
+        "thunderBotLevelCooldownSelected",
+        "thunderBotPresets",
+        "totalSkinsBought",
+        "towerUnlocked",
+        "ultimateWeaponLevel",
+        "ultimateWeaponPlusLevel",
+        "ultimateWeaponPlusOn",
+        "ultimateWeaponPlusUnlocked",
+        "upgradeWorkshopDefenseLevel",
+        "upgradeWorkshopLevel",
+        "upgradeWorkshopUtilityLevel"
+      ],
+      "private": [
+        "bits",
+        "bucketID",
+        "cash",
+        "cells",
+        "claimedPurchases",
+        "claimedWebstoreGifts",
+        "coins",
+        "currencyLogs",
+        "fakeUserName",
+        "gems",
+        "inventory",
+        "keys",
+        "lastGuildID",
+        "mails",
+        "mailsDownloadedId",
+        "medals",
+        "moduleArmorShards",
+        "moduleCannonShards",
+        "moduleCoreShards",
+        "moduleGeneratorShards",
+        "moduleRecords",
+        "moduleRerollCurrency",
+        "moduleTickets",
+        "nexusCreatorCode",
+        "nexusCreatorSupportDate",
+        "playfabID",
+        "purchasedStoneSales",
+        "purchasesThisCycle",
+        "sessionID",
+        "stones",
+        "tickets",
+        "tokens",
+        "unverifiedTransactions",
+        "userName"
+      ],
+      "ignored_with_reason": [
+        {
+          "reason": "Presentation-only audio, VFX, frame-rate, and hit-text preferences are not used by save-backed automation or analysis.",
+          "fields": [
+            "blackHoleVFX",
+            "brighterSpotlight",
+            "chronoFieldVFX",
+            "cinematicMode",
+            "deathWaveVFX",
+            "framerate",
+            "hitTextBasic",
+            "hitTextBlackHole",
+            "hitTextBlock",
+            "hitTextBoss",
+            "hitTextCash",
+            "hitTextChainLightning",
+            "hitTextCoins",
+            "hitTextDeathWave",
+            "hitTextDeathray",
+            "hitTextElectrons",
+            "hitTextEliteCells",
+            "hitTextElites",
+            "hitTextFast",
+            "hitTextFlameBot",
+            "hitTextFleets",
+            "hitTextGuardian",
+            "hitTextILM",
+            "hitTextLandmines",
+            "hitTextModules",
+            "hitTextOrbs",
+            "hitTextPlasmaCannon",
+            "hitTextPoisonSwamp",
+            "hitTextProjectiles",
+            "hitTextProtector",
+            "hitTextRanged",
+            "hitTextRendArmor",
+            "hitTextShards",
+            "hitTextSmartMissiles",
+            "hitTextTank",
+            "hitTextThorns",
+            "innerLandMinesVFX",
+            "isHitTextEnabled",
+            "musicMutedBool",
+            "poisonSwampVFX",
+            "showCinematicGems",
+            "soundMutedBool",
+            "ultimateWeaponVFXEnabled"
+          ]
+        },
+        {
+          "reason": "Tutorial, first-open, popup, and rating-prompt bookkeeping has no current save-backed automation or analysis consumer.",
+          "fields": [
+            "battleConditionsFirstTimeBool",
+            "battleHistoryFirstTimeOpen",
+            "blackFridayFirstPopup",
+            "cardFirstOpenBool",
+            "cardTapAndHoldTip",
+            "dailyMissionFirstOpenBool",
+            "dissonanceInfoShownOnce",
+            "eventFirstOpen",
+            "hasSeenAccountLinkReminderPanel",
+            "hasSeenBookmarkWebstorePopup",
+            "hasSeenGuildChatDisclaimer",
+            "hasSeenWebshopPopup",
+            "hasViewedTechTree",
+            "labFirstTimeOpenBool",
+            "moduleInfoPanelShowedOnce",
+            "nameChangedFirstTimeBool",
+            "overheatFirstTimeBool",
+            "presetHoldTipShowed",
+            "rateGameAdvancedBool",
+            "rateGameBetaBool",
+            "rateGameOptedOutBool",
+            "rateGameRequestInt",
+            "seenGoldBoxInfoPopup",
+            "themesOpenAtLeastOnce",
+            "ultimateIntroFirstTimeBool",
+            "workshopIntroFirstTimeBool"
+          ]
+        }
+      ],
+      "unknown": [
+        "adCoinBonusExpirationTime",
+        "adGemsClaimedToday",
+        "adRewardClaimedBool",
+        "adTicketGiven",
+        "adsWatched5",
+        "adsWatched50",
+        "adsWatchedTotal",
+        "armorAutoRerollSubstats",
+        "armorShardsPurchasedThisSeason",
+        "armorSubstatBans",
+        "assistModulesAvailable",
+        "assistModulesBetaStonesRefund",
+        "attackBuyMultiplier",
+        "attemptWaitingToRegister",
+        "autoSavePause",
+        "avatarId",
+        "backgroundPurchaseDate",
+        "bannedFromChangingName",
+        "barrageQuantity",
+        "battlePassActive",
+        "bitsPurchasedThisSeason",
+        "blackHoleCoins",
+        "blackHoleCoinsThisRound",
+        "botsActive",
+        "botsActivePresets",
+        "botsCooldownTimers",
+        "botsLevel",
+        "botsLevelPresets",
+        "botsLevelSelectionPresets",
+        "botsUnlocked",
+        "botsUnlockedPresets",
+        "boxClaimed",
+        "cannonAutoRerollSubstats",
+        "cannonShardsPurchasedThisSeason",
+        "cannonSubstatBans",
+        "cardActive",
+        "cardCount",
+        "cardMasteryHasSeenNotification",
+        "cardPanelOpenCount",
+        "cardRegistries",
+        "cardsBoughtTotal",
+        "cashEarnedFromInterestThisRound",
+        "cashEarnedThisRound",
+        "cashEarnedThisWave",
+        "cellsEarnedThisRound",
+        "cellsPurchasedThisSeason",
+        "chainThunderBlockedThisRound",
+        "cheaterBool",
+        "cheaterBoolManual",
+        "chronoFieldBlockedThisRound",
+        "claimedTournaments",
+        "cloudInviteSent",
+        "coinsBonusTotalCoinsThisRound",
+        "coinsBonusUpgradeCoinsThisRound",
+        "coinsEarnedCPWThisRound",
+        "coinsEarnedFromAdBonusThisRound",
+        "coinsEarnedThisRound",
+        "coinsEarnedThisRoundWithoutFetch",
+        "coinsEarnedThisWave",
+        "coinsEarnedWaveSkipThisRound",
+        "commonModulesObtained",
+        "completedLabs",
+        "completedMissionsThisWeek",
+        "completedMissionsTotal",
+        "coreAutoRerollSubstats",
+        "coreShardsPurchasedThisSeason",
+        "coreSubstatBans",
+        "counterEALS",
+        "counterEHLS",
+        "critCoinCoinsThisRound",
+        "currencyEarnedThisCycle",
+        "currencySpentThisCycle",
+        "currentMissions",
+        "dailyMissionShardTypeSelection",
+        "dailyMissionsUnlocked",
+        "damageAdjustmentLog",
+        "damageByDeathRayThisRound",
+        "damageByDroppedLandMineThisRound",
+        "damageByElectrons",
+        "damageByOrbsThisRound",
+        "damageByProjectilesThisRound",
+        "damageByRenderArmorThisRound",
+        "damageByThornThisRound",
+        "damageDealtThisRound",
+        "damageDecayPenalty",
+        "damageDecayWavesUntilDecay",
+        "damageGainedFromBerserkerThisRound",
+        "damageTakenThisRound",
+        "damageTakenWallThisRound",
+        "damageTakenWhileBerskerActiveThisRound",
+        "daysLogged",
+        "deathDefyThisRound",
+        "deathWaveCoinsThisRound",
+        "deathWaveHealthGainThisWave",
+        "deathwaveDamageRemaining",
+        "defenseAbsoluteBlockedThisRound",
+        "defenseBuyMultiplier",
+        "defensePercentBlockedThisRound",
+        "demonModeLingeringTimeoutWave",
+        "demonModeOffCooldown",
+        "demonModeUsedThisRound",
+        "demonModeWavesUntilRefresh",
+        "demonModesUsedThisRound",
+        "demonTimer",
+        "dev_ResetGuardianChip",
+        "dissonanceActive",
+        "dissonanceCoinBoost",
+        "dissonanceDamageBoost",
+        "dissonanceHealthBoost",
+        "dissonanceSelected",
+        "dissonanceUltDamageBoost",
+        "dissonantBoostDisplay",
+        "droppedLandMinesSpawnedThisRound",
+        "eLSDecayAmount",
+        "eLSDecayWasActiveLastWave",
+        "eLSDecayWavesUntilDecay",
+        "emailLinked",
+        "enemiesDestroyedByBlackHoleThisRound",
+        "enemiesDestroyedByChainLightningThisRound",
+        "enemiesDestroyedByDeathPenaltyThisRound",
+        "enemiesDestroyedByDeathRayThisRound",
+        "enemiesDestroyedByDroppedLandMineThisRound",
+        "enemiesDestroyedByFlameBotThisRound",
+        "enemiesDestroyedByInnerLandMinesThisRound",
+        "enemiesDestroyedByOtherThisRound",
+        "enemiesDestroyedByPoisonSwampThisRound",
+        "enemiesDestroyedByProjectilesThisRound",
+        "enemiesDestroyedBySmartMissilesThisRound",
+        "enemiesDestroyedByThornThisRound",
+        "enemiesDestroyedInAmplifyBotThisRound",
+        "enemiesDestroyedInBlackholeThisRound",
+        "enemiesDestroyedInGoldenBotThisRound",
+        "enemiesDestroyedInGoldenTowerThisRound",
+        "enemiesDestroyedInOrbsThisRound",
+        "enemiesDestroyedInSpotlightThisRound",
+        "enemiesDestryoedByOrbsThisRound",
+        "enemiesHitByAttackChipThisRound",
+        "enemiesHitByBlackHoleThisRound",
+        "enemiesHitByChainLightningThisRound",
+        "enemiesHitByChronoFieldThisRound",
+        "enemiesHitByDeathRayThisRound",
+        "enemiesHitByFlameBotThisRound",
+        "enemiesHitByInnerLandMinesThisRound",
+        "enemiesHitByLandMineThisRound",
+        "enemiesHitByOrbitalAugmentThisRound",
+        "enemiesHitByPoisonSwampThisRound",
+        "enemiesHitByProjectilesThisRound",
+        "enemiesHitBySmartMissilesThisRound",
+        "enemiesHitByThornsThisRound",
+        "enemiesHitByThunderBotThisRound",
+        "enemiesKilledThisWave",
+        "enemiesSpawnedThisWave",
+        "enemyAttackLevelSkips",
+        "enemyHealthLevelSkips",
+        "energyShieldHitsAbsorbedThisRound",
+        "enhancementBuyMultiplier",
+        "epicModulesObtained",
+        "epicPackLastAdvertisedDate",
+        "event80Compensation",
+        "eventBoostAdvertisedCount",
+        "eventBoostEventNumbers",
+        "eventBoostLastAdvertisedDate",
+        "eventGemsPurchased",
+        "eventLastLoginTime",
+        "eventLastResearchTime",
+        "eventMailMedalsSent",
+        "eventRecords",
+        "eventShardsPurchased",
+        "eventStonesPurchased",
+        "favoriteLabs",
+        "favoriteLabsPositionPrevious",
+        "favoriteLabsPrevious",
+        "fetchCommonModuleRewards",
+        "fetchGemRewards",
+        "fetchMedalRewards",
+        "fetchRareModuleRewards",
+        "firstTradeOffPerkIndex",
+        "flameBotBlockedThisRound",
+        "freeAttackUpgradesThisRound",
+        "freeBotRespecs",
+        "freeDefenseUpgradesThisRound",
+        "freeTicketGiven",
+        "freeUtilityUpgradesThisRound",
+        "gameSpeedMemory",
+        "gameStartedDate",
+        "gameplayTimeThisRound",
+        "gemBlockLastClaimedDate",
+        "gemBlockLastClaimedWave",
+        "gemBlocksThisRound",
+        "gemPurchaseCount1",
+        "gemPurchaseCount2",
+        "gemPurchaseCount3",
+        "gemPurchaseCount4",
+        "gemPurchaseCount5",
+        "gemPurchaseCount6",
+        "gemSpendWarning",
+        "gemsEarnedFromGemBlocks",
+        "gemsPurchasedThisSeason",
+        "generatorAutoRerollSubstats",
+        "generatorShardsPurchasedThisSeason",
+        "generatorSubstatBans",
+        "goldenTowerCashThisRound",
+        "goldenTowerCoinsThisRound",
+        "goldenTowerPlusCoinsThisRound",
+        "guardianCooldownTimers",
+        "guardianRespecAvailable",
+        "guardianSkinIndex",
+        "guardianSkinUnlocked",
+        "guildChestClaimedWeek",
+        "hasAcceptedGDPR",
+        "hasCalculatedAssistModulesBetaStonesRefund",
+        "hasCompletedFirstUWRun",
+        "hasForceRespecAssistModulesAfterBeta",
+        "hasReceivedAccountLinkRewards",
+        "healthDecayPenalty",
+        "healthDecayWavesUntilDecay",
+        "healthFromDeathWaveMaxed",
+        "healthFromDeathWaveThisRound",
+        "hideCompletedResearches",
+        "highestCPMThisRound",
+        "highestCellsEarnedThisTier",
+        "highestCoinsEarnedThisTier",
+        "highestLeague",
+        "highestWaveBool",
+        "highestWavePerTierThisCycle",
+        "highestWaveThisTier",
+        "hitThisWave",
+        "innerOrbDistance",
+        "isFirstPurchase",
+        "isIntroSprintCancelled",
+        "isTestingHeat",
+        "isWallDestroyed",
+        "labActiveBool",
+        "labQueueToggle",
+        "labResearchInt",
+        "labSpeedUpEndTime",
+        "labSpeedUpQueueMultiplierSelection",
+        "labSpeedUpQueueTimeSelection",
+        "labSpeedUpQueueToggle",
+        "labSpeedUpRemainingSeconds",
+        "labSpeedUpSpeed",
+        "labSpeedUpStartTime",
+        "largestGoldenComboThisRound",
+        "largestILMChargeThisRound",
+        "largestSmartMissileStackThisRound",
+        "largestWaveSkipThisRound",
+        "lastAttempt",
+        "lastCloudSaveTime",
+        "lastEventNumber",
+        "lastGemAdClaimedDate",
+        "lastGemAdSmallClaimedDate",
+        "lastGemAdSmallResetDate",
+        "lastGuildSeason",
+        "lastRateGameRequestDate",
+        "lastStonePackOfferOpened",
+        "lastWaveResumedFrom",
+        "magicOrbBlockedThisRound",
+        "magneticHookEliteCounter",
+        "magneticHookFleetsCounter",
+        "medalsSpentOnBetaBotPreset",
+        "menuPurchaseDate",
+        "migratedBotDataToV28",
+        "milestonesPremiumUnlocked",
+        "milestonesRewardClaimed",
+        "milestonesRewardPremiumClaimed",
+        "missileBarrageAutomateToggle",
+        "missileBarrageOffCooldown",
+        "missileBarrageUsedThisRound",
+        "missileBarrageWavesUntilRefresh",
+        "missions",
+        "moduleArmorShardsLifetime",
+        "moduleAutoShatter",
+        "moduleAutoShatterRare",
+        "moduleCannonShardsLifetime",
+        "moduleCoreShardsLifetime",
+        "moduleFreeTicketsGiven",
+        "moduleGeneratorShardsLifetime",
+        "modulePity",
+        "moduleRandom",
+        "moduleRarePity",
+        "moduleRerollCurrencyLifetime",
+        "moduleUpgradeBuyMultiplier",
+        "moreEliteWavesUntilActive",
+        "moreFleetWavesUntilActive",
+        "mostCellsFromWaveSkipThisRound",
+        "mostCoinsFromGoldenComboThisRound",
+        "mostCoinsFromWaveSkipThisRound",
+        "mustUpdateDisplayName",
+        "newsReadId",
+        "nextGemAdClaimDate",
+        "nextTimeForMissions",
+        "nukeOffCooldown",
+        "nukeSlowTimeoutWave",
+        "nukeUsedThisRound",
+        "nukeWavesUntilRefresh",
+        "nukesUsedThisRound",
+        "orbCoinsThisRound",
+        "orbHitsThisRound",
+        "pauseBattleInsideMenus",
+        "playTime",
+        "playerOptedToSaveResume",
+        "playing",
+        "presetEnhancementDefenseLevel",
+        "presetEnhancementDefenseTierUnlocked",
+        "presetEnhancementLevel",
+        "presetEnhancementTierUnlocked",
+        "presetEnhancementUtilityLevel",
+        "presetEnhancementUtilityTierUnlocked",
+        "presetTotalCoinsSpentAttackEnhancements",
+        "presetTotalCoinsSpentDefenseEnhancements",
+        "presetTotalCoinsSpentEnhancements",
+        "presetTotalCoinsSpentUtilityEnhancements",
+        "presetTotalCoinsSpentWorkshop",
+        "presetUpgradeDefenseTierUnlocked",
+        "presetUpgradeTierUnlocked",
+        "presetUpgradeUtilityTierUnlocked",
+        "presetUpgradeWorkshopDefenseLevel",
+        "presetUpgradeWorkshopLevel",
+        "presetUpgradeWorkshopUtilityLevel",
+        "primordialCollapseBlockedThisRound",
+        "profileBannerPurchaseDate",
+        "profileBannerUnlocked",
+        "profileChanged",
+        "projectFundingMultiplier",
+        "projectilesFiredThisRound",
+        "protectorsActive",
+        "randomOption",
+        "rangeLevelSelected",
+        "rareModulesObtained",
+        "rarityAutoRerollAllowed",
+        "realTimeThisRound",
+        "recoveryPackagesRegenThisRound",
+        "recoveryPackagesThisRound",
+        "relicsUnlockedThisEvent",
+        "repairChipGrantedViaBeta",
+        "rerollCurrencyEarnedThisRound",
+        "researchCompleteDate",
+        "researchNewState",
+        "researchPercentComplete",
+        "researchesComplete",
+        "resumeMiniBossSeed",
+        "resumeRoundBossAlive",
+        "resumeRoundCount",
+        "resumingRoundBool",
+        "roundTime",
+        "savedWorkshopOrbDistance",
+        "secondWindAngelWingsTimeoutWave",
+        "secondWindThisRound",
+        "secondWindTimer",
+        "secondWindWavesUntilRefresh",
+        "secondWindsUsedThisRound",
+        "selectedBackground",
+        "selectedMenu",
+        "selectedMissions",
+        "selectedProfileBanner",
+        "selectedTower",
+        "shieldTimer",
+        "shockwaveSizeLevelSelected",
+        "showOfflinePopup",
+        "showRangeOfRangedEnemy",
+        "songEndOption",
+        "spotlightCoins",
+        "spotlightCoinsThisRound",
+        "starterPackLastAdvertisedDate",
+        "stoneSpendWarning",
+        "stonesPurchaseCount1",
+        "stonesPurchaseCount2",
+        "stonesSpentOnBetaSynchronicity",
+        "synchronicityBots",
+        "synchronicityPresets",
+        "targetPriority",
+        "tempTier",
+        "tempWave",
+        "themeBackground",
+        "themeTower",
+        "ticketsBoughtThisTournament",
+        "ticketsThisTournament",
+        "tier2Unlock",
+        "tier3Unlock",
+        "tierBeforeTournament",
+        "toggleAutoRestartBattle",
+        "totalArmorShardsByGuardianThisRound",
+        "totalBitsEarned",
+        "totalBitsSpent",
+        "totalBotRespecsCurrentEvent",
+        "totalCannonShardsByGuardianThisRound",
+        "totalCashEarned",
+        "totalCashEarnedFromInterest",
+        "totalCatchesByGuardian",
+        "totalCatchesByGuardianThisRound",
+        "totalCellsEarned",
+        "totalCellsEarned_v2",
+        "totalCellsSpent",
+        "totalCellsSpent_v2",
+        "totalCoinsByBot",
+        "totalCoinsByBotThisRound",
+        "totalCoinsByGuardian",
+        "totalCoinsEarned",
+        "totalCoinsEarnedFromAdBonus",
+        "totalCoinsEarnedFromKills",
+        "totalCoinsEarnedFromMine",
+        "totalCoinsEarnedFromWaves",
+        "totalCoinsFetchedByGuardianThisRound",
+        "totalCoinsSpentAttackEnhancements",
+        "totalCoinsSpentDefenseEnhancements",
+        "totalCoinsSpentEnhancements",
+        "totalCoinsSpentOnResearch",
+        "totalCoinsSpentUtilityEnhancements",
+        "totalCoinsSpentWorkshop",
+        "totalCoinsStolenByGuardianThisRound",
+        "totalCommonModulesByGuardianThisRound",
+        "totalCoreShardsByGuardianThisRound",
+        "totalDamageByBlackHole",
+        "totalDamageByBlackHoleThisRound",
+        "totalDamageByBot",
+        "totalDamageByBotThisRound",
+        "totalDamageByChainLightning",
+        "totalDamageByChainLightningThisRound",
+        "totalDamageByDeathWave",
+        "totalDamageByDeathWaveThisRound",
+        "totalDamageByDroppedLandMines",
+        "totalDamageByGuardian",
+        "totalDamageByGuardianThisRound",
+        "totalDamageByInnerLandMinesThisRound",
+        "totalDamageByLandMines",
+        "totalDamageBySmartMissiles",
+        "totalDamageBySmartMissilesThisRound",
+        "totalDamageBySwamp",
+        "totalDamageBySwampThisRound",
+        "totalDamageByThorn",
+        "totalDamageDealt",
+        "totalDeathDefyCount",
+        "totalDroppedLandMinesSpawned",
+        "totalEnemiesDestroyed",
+        "totalEnemiesDestroyedBoss",
+        "totalEnemiesDestroyedBossThisRound",
+        "totalEnemiesDestroyedByBlackHole",
+        "totalEnemiesDestroyedByChainLightning",
+        "totalEnemiesDestroyedByDeathPenalty",
+        "totalEnemiesDestroyedByDeathRay",
+        "totalEnemiesDestroyedByDroppedLandMines",
+        "totalEnemiesDestroyedByFlameBot",
+        "totalEnemiesDestroyedByInnerLandMines",
+        "totalEnemiesDestroyedByOther",
+        "totalEnemiesDestroyedByPoisonSwamp",
+        "totalEnemiesDestroyedByProjectiles",
+        "totalEnemiesDestroyedBySmartMissiles",
+        "totalEnemiesDestroyedByThorn",
+        "totalEnemiesDestroyedCommandersThisRound",
+        "totalEnemiesDestroyedElitesThisRound",
+        "totalEnemiesDestroyedFast",
+        "totalEnemiesDestroyedFastThisRound",
+        "totalEnemiesDestroyedNormal",
+        "totalEnemiesDestroyedNormalThisRound",
+        "totalEnemiesDestroyedOverchargesThisRound",
+        "totalEnemiesDestroyedProtector",
+        "totalEnemiesDestroyedProtectorThisRound",
+        "totalEnemiesDestroyedRanged",
+        "totalEnemiesDestroyedRangedThisRound",
+        "totalEnemiesDestroyedRaysThisRound",
+        "totalEnemiesDestroyedSaboteursThisRound",
+        "totalEnemiesDestroyedScattersThisRound",
+        "totalEnemiesDestroyedTank",
+        "totalEnemiesDestroyedTankThisRound",
+        "totalEnemiesDestroyedThisRound",
+        "totalEnemiesDestroyedVampiresThisRound",
+        "totalEnemiesDestryoedByOrbs",
+        "totalEnemiesTaggedByDeathwaveThisRound",
+        "totalFreeAttackUpgrades",
+        "totalFreeDefenseUpgrades",
+        "totalFreeUtilityUpgrades",
+        "totalGemsBought",
+        "totalGemsByGuardianThisRound",
+        "totalGemsEarned",
+        "totalGemsEarnedFromTapjoy",
+        "totalGemsSpentOnModules",
+        "totalGeneratorShardsByGuardianThisRound",
+        "totalKeysEarned",
+        "totalKeysSpent",
+        "totalLifestealAbsorbed",
+        "totalMedalsByGuardianThisRound",
+        "totalMedalsCurrentEvent",
+        "totalMedalsEarned",
+        "totalMedalsSpent",
+        "totalMedalsSpentCurrentEvent",
+        "totalMergesDone",
+        "totalModulesShattered",
+        "totalParticipatedEvents",
+        "totalRareModulesByGuardianThisRound",
+        "totalRerollShardsByGuardianThisRound",
+        "totalStonesBought",
+        "totalStonesEarned",
+        "totalStonesEarnedPreMigration",
+        "totalStonesSpent",
+        "totalStunsByBot",
+        "totalStunsByBotThisRound",
+        "totalSummonedByGuardianThisRound",
+        "totalTokensEarned",
+        "totalTokensSpent",
+        "totalUpgradesBought",
+        "totalWavesCompleted",
+        "totalWavesSkipped",
+        "totalWorkshopUpgradesBought",
+        "tournamentClaimed",
+        "tournamentHeatViewed",
+        "tournamentJoined",
+        "tournamentMissionGiven",
+        "towerHealth",
+        "towerHealthRegenThisRound",
+        "towerMaxHealthFromDeathWave",
+        "towerPurchaseDate",
+        "trackAvailable",
+        "trackToggledOn",
+        "ultimateToggleCount",
+        "ultimateWeaponCooldown",
+        "ultimateWeaponUnlockedIndex",
+        "ultimateWeaponsSystemUnlocked",
+        "upgradeAttackTierEverUnlocked",
+        "upgradeDefenseLevel",
+        "upgradeDefenseTierEverUnlocked",
+        "upgradeDefenseTierUnlocked",
+        "upgradeLevel",
+        "upgradeTierUnlocked",
+        "upgradeUtilityLevel",
+        "upgradeUtilityTierEverUnlocked",
+        "upgradeUtilityTierUnlocked",
+        "usingCloudSaveV2",
+        "utilityBuyMultiplier",
+        "wallHealth",
+        "wallHealthRegenThisRound",
+        "wave100PostedTiers",
+        "wave20",
+        "wave40",
+        "wave60",
+        "waveMilestonePostedEvents",
+        "wavesSkippedThisRound",
+        "weaponChoice1Index",
+        "weaponChoice2Index",
+        "weaponChoice3Index",
+        "weekMonday",
+        "workshopBuyMultiplier",
+        "workshopOrbDistance",
+        "wrappedStats"
+      ]
+    }
+  },
+  "required_fields": [
+    "saveRevision",
+    "roundActiveBool",
+    "currentTier",
+    "currentWave",
+    "roundSeed",
+    "roundsStartedThisTier",
+    "perkLevel",
+    "perksPickedCount",
+    "perksPicked",
+    "battleHistory",
+    "presetName",
+    "workshopPresetName",
+    "botPresetName",
+    "currentPreset",
+    "currentWorkshopPreset",
+    "currentBotPreset",
+    "demonModeAutomateToggle",
+    "nukeAutomateToggle",
+    "slotsUnlocked",
+    "autoPickPerk",
+    "bannedPerksIndex",
+    "autoPickOrder",
+    "firstPerkIndex",
+    "targetPriorityList",
+    "ultimateWeaponUnlocked",
+    "ultimateWeaponOn",
+    "guardianChipSlot",
+    "tourneyConditionsSeed",
+    "tournamentNumber",
+    "tournamentCheckedNumber",
+    "tournamentRecords",
+    "leagueID"
+  ],
+  "required_array_lengths": {
+    "roundsStartedThisTier": 40,
+    "perkLevel": 50,
+    "researchLevel": 250,
+    "upgradeWorkshopLevel": 20,
+    "upgradeWorkshopDefenseLevel": 20,
+    "upgradeWorkshopUtilityLevel": 20,
+    "enhancementLevel": 20,
+    "enhancementDefenseLevel": 20,
+    "enhancementUtilityLevel": 20,
+    "cardLevel": 40,
+    "cardUnlocked": 40,
+    "slotPresetCardInt": 140,
+    "slotPresetCardAssignedBool": 140,
+    "presetName": 5,
+    "workshopPresetName": 5,
+    "botPresetName": 3,
+    "ultimateWeaponUnlocked": 9,
+    "ultimateWeaponOn": 9,
+    "ultimateWeaponLevel": 27,
+    "guardianChipUnlocked": 10,
+    "guardianChipLevel": 30
+  },
+  "presets": {
+    "cards_deck": {
+      "names_field": "presetName",
+      "active_field": "currentPreset"
+    },
+    "workshop_preset": {
+      "names_field": "workshopPresetName",
+      "active_field": "currentWorkshopPreset"
+    },
+    "bots_preset": {
+      "names_field": "botPresetName",
+      "active_field": "currentBotPreset"
+    }
+  },
+  "cards": {
+    "base_slots_field": "slotsUnlocked",
+    "preset_count": 5,
+    "slots_per_preset": 28,
+    "assigned_field": "slotPresetCardAssignedBool"
+  },
+  "card_recharge_modes": {
+    "Demon Mode": {
+      "field": "demonModeAutomateToggle",
+      "true_value": "auto_reactivate",
+      "false_value": "ready_after_recharge"
+    },
+    "Nuke": {
+      "field": "nukeAutomateToggle",
+      "true_value": "auto_reactivate",
+      "false_value": "ready_after_recharge"
+    }
+  },
+  "auto_pick_order": {
+    "ranked_count": 18,
+    "unranked_count": 16,
+    "total_count": 34,
+    "tail_semantics": "unranked_perk_inventory_not_priority"
+  },
+  "perk_bans": {
+    "slot_count": 8,
+    "empty_id": -1
+  },
+  "perk_ids": {
+    "0": "max_health",
+    "1": "damage",
+    "2": "health_regen",
+    "3": "coins_bonus",
+    "4": "bounce_shot",
+    "5": "interest",
+    "6": "land_mine_damage",
+    "7": "orbs",
+    "8": "free_upgrade_chance",
+    "9": "defense_percent",
+    "10": "perk_wave_requirement",
+    "11": "unlock_random_ultimate_weapon",
+    "12": "game_speed",
+    "13": "cash_bonus",
+    "14": "defense_absolute",
+    "20": "smart_missiles",
+    "21": "swamp_radius",
+    "22": "death_wave_quantity",
+    "23": "inner_land_mines",
+    "24": "golden_tower_bonus",
+    "25": "chain_lightning_damage",
+    "26": "chrono_field_duration",
+    "27": "black_hole_duration",
+    "28": "spotlight_damage",
+    "40": "tower_damage_boss_health_tradeoff",
+    "41": "coin_tradeoff",
+    "42": "enemy_health_tradeoff",
+    "43": "enemies_damage_tradeoff",
+    "44": "ranged_distance_tradeoff",
+    "45": "enemy_speed_tradeoff",
+    "46": "cash_tradeoff",
+    "47": "health_regen_tradeoff",
+    "48": "boss_health_tradeoff",
+    "49": "lifesteal_knockback_tradeoff"
+  },
+  "target_priority_ids": {
+    "0": "Closest (Default)",
+    "1": "Basic",
+    "2": "Fast",
+    "3": "Tank",
+    "4": "Ranged",
+    "5": "Boss",
+    "6": "In Spotlight",
+    "7": "Protector",
+    "8": "Elites",
+    "9": "Fleets"
+  },
+  "module_loadout": {
+    "assist_slot_class": "AssistModuleSlot",
+    "primary": [
+      {
+        "array_index": 0,
+        "slot_key": "cannon_primary",
+        "family": "cannon",
+        "role": "primary",
+        "values": [
+          {
+            "info_index": 45,
+            "name": "Amplifying Strike"
+          }
+        ]
+      },
+      {
+        "array_index": 1,
+        "slot_key": "armor_primary",
+        "family": "armor",
+        "role": "primary",
+        "values": [
+          {
+            "info_index": 46,
+            "name": "Orbital Augment"
+          },
+          {
+            "info_index": 20,
+            "name": "Anti-Cube Portal"
+          }
+        ]
+      },
+      {
+        "array_index": 2,
+        "slot_key": "generator_primary",
+        "family": "generator",
+        "role": "primary",
+        "values": [
+          {
+            "info_index": 27,
+            "name": "Black Hole Digestor"
+          },
+          {
+            "info_index": 43,
+            "name": "Project Funding"
+          }
+        ]
+      },
+      {
+        "array_index": 3,
+        "slot_key": "core_primary",
+        "family": "core",
+        "role": "primary",
+        "values": [
+          {
+            "info_index": 37,
+            "name": "Multiverse Nexus"
+          },
+          {
+            "info_index": 38,
+            "name": "Dimension Core"
+          }
+        ]
+      }
+    ],
+    "assist": [
+      {
+        "type": 0,
+        "slot_key": "cannon_assist",
+        "family": "cannon",
+        "role": "assist",
+        "values": [
+          {
+            "info_index": 9,
+            "name": "Being Annihilator"
+          }
+        ]
+      },
+      {
+        "type": 1,
+        "slot_key": "armor_assist",
+        "family": "armor",
+        "role": "assist",
+        "values": [
+          {
+            "info_index": 20,
+            "name": "Anti-Cube Portal"
+          },
+          {
+            "info_index": 19,
+            "name": "Space Displacer"
+          }
+        ]
+      },
+      {
+        "type": 2,
+        "slot_key": "generator_assist",
+        "family": "generator",
+        "role": "assist",
+        "values": [
+          {
+            "info_index": 30,
+            "name": "Singularity Harness"
+          }
+        ]
+      },
+      {
+        "type": 3,
+        "slot_key": "core_assist",
+        "family": "core",
+        "role": "assist",
+        "values": [
+          {
+            "info_index": 38,
+            "name": "Dimension Core"
+          },
+          {
+            "info_index": 39,
+            "name": "Harmony Conductor"
+          }
+        ]
+      }
+    ]
+  },
+  "guardian_chip_ids": {
+    "0": "Bounty",
+    "2": "Attack",
+    "5": "Ally",
+    "6": "Fetch",
+    "7": "Summon",
+    "8": "Scout"
+  },
+  "guardian_chips": {
+    "slot_count": 3
+  },
+  "ultimate_weapon_names": [
+    "Chain Lightning",
+    "Smart Missiles",
+    "Death Wave",
+    "Chrono Field",
+    "Inner Land Mines",
+    "Golden Tower",
+    "Poison Swamp",
+    "Black Hole",
+    "Spotlight"
+  ],
+  "free_upgrade_lock_fields": {
+    "upgradesLockedFreeUpgrades": [
+      "Damage",
+      "Attack Speed",
+      "Critical Chance",
+      "Critical Factor",
+      "Range",
+      "Damage / Meter",
+      "Multishot Chance",
+      "Multishot Targets",
+      "Rapid Fire Chance",
+      "Rapid Fire Duration",
+      "Bounce Shot Chance",
+      "Bounce Shot Targets",
+      "Bounce Shot Range",
+      "Super Critical Chance",
+      "Super Critical Multiplier",
+      "Rend Armor Chance",
+      "Rend Armor Multiplier",
+      null,
+      null,
+      null
+    ],
+    "upgradesDefenseLockedFreeUpgrades": [
+      "Health",
+      "Health Regen",
+      "Defense Percent",
+      "Defense Absolute",
+      "Thorn Damage",
+      "Lifesteal",
+      "Knockback Chance",
+      "Knockback Force",
+      "Orb Speed",
+      "Orbs",
+      "Shockwave Size",
+      "Shockwave Frequency",
+      "Land Mine Chance",
+      "Land Mine Damage",
+      "Land Mine Radius",
+      "Death Defy",
+      "Wall Health",
+      "Wall Rebuild",
+      null,
+      null
+    ],
+    "upgradesUtilityLockedFreeUpgrades": [
+      "Cash Bonus",
+      "Cash / Wave",
+      "Coins / Kill Bonus",
+      "Coins / Wave",
+      "Free Attack Upgrade",
+      "Free Defense Upgrade",
+      "Free Utility Upgrade",
+      "Interest / Wave",
+      "Recovery Amount",
+      "Max Recovery",
+      "Package Chance",
+      "Enemy Attack Level Skip",
+      "Enemy Health Level Skip",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "validated_free_upgrade_lock_set": [
+    "Shockwave Size",
+    "Bounce Shot Targets",
+    "Bounce Shot Range"
+  ],
+  "tournament_conditions": {
+    "mapping_id": "data-9-game-1101-tournament-conditions-v1",
+    "seed_field": "tourneyConditionsSeed",
+    "active_number_field": "tournamentNumber",
+    "checked_number_field": "tournamentCheckedNumber",
+    "records_field": "tournamentRecords",
+    "league_field": "leagueID",
+    "validated_league_ids": [
+      5
+    ]
+  },
+  "profile_progression": {
+    "schema_version": 1,
+    "audit_matrix_id": "data-9-game-1101-profile-progression-v1",
+    "component_validation": {
+      "account_bonuses": {
+        "audit_id": "V1101-PROFILE-007",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "bots": {
+        "audit_id": "V1101-PROFILE-005",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "cards": {
+        "audit_id": "V1101-PROFILE-001",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "enhancements": {
+        "audit_id": "V1101-PROFILE-002",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "guardian": {
+        "audit_id": "V1101-PROFILE-005",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "harmony": {
+        "audit_id": "V1101-PROFILE-005",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "modules": {
+        "audit_id": "V1101-PROFILE-006",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "relics": {
+        "audit_id": "V1101-PROFILE-007",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "research": {
+        "audit_id": "V1101-PROFILE-003",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "themes": {
+        "audit_id": "V1101-PROFILE-007",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "ultimate_weapons": {
+        "audit_id": "V1101-PROFILE-004",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      },
+      "workshop": {
+        "audit_id": "V1101-PROFILE-002",
+        "evidence_level": "structural",
+        "provenance": "Exact version-1101 source fields and component shapes; unmapped indices, formulas, caps, and effective values remain unpublished."
+      }
+    },
+    "components": {
+      "account_bonuses": {
+        "disable_ads_unlocked": {
+          "source": "disableAdsUnlockedBool",
+          "kind": "boolean"
+        },
+        "epic_pack_unlocked": {
+          "source": "epicPackUnlockedBool",
+          "kind": "boolean"
+        },
+        "event_boosts_bought_total": {
+          "source": "eventBoostsBoughtTotal",
+          "kind": "integer"
+        },
+        "starter_pack_unlocked": {
+          "source": "starterPackUnlockedBool",
+          "kind": "boolean"
+        }
+      },
+      "bots": {
+        "amplify_cooldown_lab_level_selected": {
+          "source": "amplifyBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "amplify_presets": {
+          "source": "amplifyBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        },
+        "bot_bot_cooldown_lab_level_selected": {
+          "source": "botBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "bot_bot_presets": {
+          "source": "botBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        },
+        "current_preset": {
+          "source": "currentBotPreset",
+          "kind": "integer"
+        },
+        "flame_cooldown_lab_level_selected": {
+          "source": "flameBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "flame_presets": {
+          "source": "flameBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        },
+        "golden_cooldown_lab_level_selected": {
+          "source": "goldenBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "golden_presets": {
+          "source": "goldenBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        },
+        "preset_names": {
+          "source": "botPresetName",
+          "kind": "string_vector",
+          "length": 3
+        },
+        "thunder_cooldown_lab_level_selected": {
+          "source": "thunderBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "thunder_presets": {
+          "source": "thunderBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        }
+      },
+      "cards": {
+        "assigned_slots": {
+          "source": "slotPresetCardAssignedBool",
+          "kind": "boolean_vector",
+          "length": 140
+        },
+        "current_preset": {
+          "source": "currentPreset",
+          "kind": "integer"
+        },
+        "levels": {
+          "source": "cardLevel",
+          "kind": "integer_vector",
+          "length": 40
+        },
+        "mastery_unlocked": {
+          "source": "cardMasteryUnlocked",
+          "kind": "boolean_vector",
+          "length": 40
+        },
+        "preset_slots": {
+          "source": "slotPresetCardInt",
+          "kind": "integer_vector",
+          "length": 140
+        },
+        "slots_unlocked": {
+          "source": "slotsUnlocked",
+          "kind": "integer"
+        },
+        "unlocked": {
+          "source": "cardUnlocked",
+          "kind": "boolean_vector",
+          "length": 40
+        }
+      },
+      "enhancements": {
+        "attack_levels": {
+          "source": "enhancementLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "attack_tiers_unlocked": {
+          "source": "enhancementTierUnlocked",
+          "kind": "boolean_vector",
+          "length": 20
+        },
+        "defense_levels": {
+          "source": "enhancementDefenseLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "defense_tiers_unlocked": {
+          "source": "enhancementDefenseTierUnlocked",
+          "kind": "boolean_vector",
+          "length": 20
+        },
+        "utility_levels": {
+          "source": "enhancementUtilityLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "utility_tiers_unlocked": {
+          "source": "enhancementUtilityTierUnlocked",
+          "kind": "boolean_vector",
+          "length": 20
+        }
+      },
+      "guardian": {
+        "chip_levels": {
+          "source": "guardianChipLevel",
+          "kind": "integer_vector",
+          "length": 30
+        },
+        "chip_slots": {
+          "source": "guardianChipSlot",
+          "kind": "integer_vector",
+          "length": 3
+        },
+        "chips_unlocked": {
+          "source": "guardianChipUnlocked",
+          "kind": "boolean_vector",
+          "length": 10
+        },
+        "slots_unlocked": {
+          "source": "guardianSlotsUnlocked",
+          "kind": "integer"
+        },
+        "unlocked": {
+          "source": "guardianUnlocked",
+          "kind": "boolean"
+        }
+      },
+      "harmony": {
+        "harmony_nodes_unlocked": {
+          "source": "harmonyNodesUnlocked",
+          "kind": "boolean_vector",
+          "length": 48
+        },
+        "power_node_levels": {
+          "source": "powerNodesLevel",
+          "kind": "integer_vector",
+          "length": 46
+        },
+        "power_node_max_levels": {
+          "source": "powerNodesMaxLevel",
+          "kind": "integer_vector",
+          "length": 46
+        },
+        "power_nodes_unlocked": {
+          "source": "powerNodesUnlocked",
+          "kind": "boolean_vector",
+          "length": 46
+        },
+        "synchronicity_level": {
+          "source": "synchronicityLevel",
+          "kind": "integer"
+        },
+        "synchronicity_unlocked": {
+          "source": "synchronicityUnlocked",
+          "kind": "boolean"
+        }
+      },
+      "modules": {
+        "assist_slots": {
+          "source": "assistModuleSlots",
+          "kind": "assist_module_slots",
+          "length": 4
+        },
+        "primary_slots": {
+          "source": "moduleEquipped",
+          "kind": "module_items",
+          "length": 4
+        }
+      },
+      "relics": {
+        "profile_slots": {
+          "source": "profileRelics",
+          "kind": "integer_vector",
+          "length": 5
+        },
+        "unlocked": {
+          "source": "relicsUnlocked",
+          "kind": "integer_vector",
+          "length": 305
+        }
+      },
+      "research": {
+        "lab_levels": {
+          "source": "labLevel",
+          "kind": "integer_vector",
+          "length": 5
+        },
+        "levels": {
+          "source": "researchLevel",
+          "kind": "integer_vector",
+          "length": 250
+        },
+        "labs_unlocked": {
+          "source": "labsUnlocked",
+          "kind": "integer"
+        }
+      },
+      "themes": {
+        "background_dice": {
+          "source": "diceBackgrounds",
+          "kind": "boolean_vector",
+          "length": 100
+        },
+        "background_unlocked": {
+          "source": "backgroundUnlocked",
+          "kind": "boolean_vector",
+          "length": 100
+        },
+        "menu_unlocked": {
+          "source": "menuUnlocked",
+          "kind": "boolean_vector",
+          "length": 100
+        },
+        "total_skins_bought": {
+          "source": "totalSkinsBought",
+          "kind": "integer"
+        },
+        "tower_dice": {
+          "source": "diceTowers",
+          "kind": "boolean_vector",
+          "length": 100
+        },
+        "tower_unlocked": {
+          "source": "towerUnlocked",
+          "kind": "boolean_vector",
+          "length": 100
+        }
+      },
+      "ultimate_weapons": {
+        "levels": {
+          "source": "ultimateWeaponLevel",
+          "kind": "integer_vector",
+          "length": 27
+        },
+        "plus_levels": {
+          "source": "ultimateWeaponPlusLevel",
+          "kind": "integer_vector",
+          "length": 9
+        },
+        "plus_on": {
+          "source": "ultimateWeaponPlusOn",
+          "kind": "boolean_vector",
+          "length": 9
+        },
+        "plus_unlocked": {
+          "source": "ultimateWeaponPlusUnlocked",
+          "kind": "boolean_vector",
+          "length": 9
+        },
+        "primary_on": {
+          "source": "ultimateWeaponOn",
+          "kind": "boolean_vector",
+          "length": 9
+        },
+        "unlocked": {
+          "source": "ultimateWeaponUnlocked",
+          "kind": "boolean_vector",
+          "length": 9
+        }
+      },
+      "workshop": {
+        "attack_levels": {
+          "source": "upgradeWorkshopLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "current_preset": {
+          "source": "currentWorkshopPreset",
+          "kind": "integer"
+        },
+        "defense_levels": {
+          "source": "upgradeWorkshopDefenseLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "preset_names": {
+          "source": "workshopPresetName",
+          "kind": "string_vector",
+          "length": 5
+        },
+        "utility_levels": {
+          "source": "upgradeWorkshopUtilityLevel",
+          "kind": "integer_vector",
+          "length": 20
+        }
+      }
+    }
+  },
+  "unmapped_checks": {
+    "damage_slider": "No authoritative current Damage Slider field has been mapped.",
+    "orb_distance": "The raw orb-distance fields need unit and selected-preset calibration."
+  }
+}
