@@ -3475,16 +3475,81 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
         "round_active",
         "active_fingerprint",
         "acquisition_present",
+        "snapshot_kind",
+        "expected_status",
         "reason_fragment",
     ),
     (
-        ("active_battle", False, None, True, "round identity"),
-        ("home_new_battle", True, "a" * 64, True, "round identity"),
+        (
+            "active_battle",
+            False,
+            None,
+            True,
+            "runtime",
+            "failed",
+            "round identity contradicts",
+        ),
+        (
+            "home_new_battle",
+            True,
+            "a" * 64,
+            True,
+            "runtime",
+            "failed",
+            "round identity contradicts",
+        ),
+        (
+            "active_battle",
+            True,
+            None,
+            True,
+            "runtime",
+            "unavailable",
+            "did not prove an active battle identity",
+        ),
+        (
+            "home_new_battle",
+            None,
+            None,
+            True,
+            "runtime",
+            "unavailable",
+            "did not prove an inactive round",
+        ),
+        (
+            "home_new_battle",
+            False,
+            None,
+            True,
+            "unsupported",
+            "unavailable",
+            "save version is unsupported",
+        ),
+        (
+            "home_new_battle",
+            False,
+            None,
+            True,
+            "incompatible",
+            "unavailable",
+            "structurally incompatible",
+        ),
+        (
+            "home_new_battle",
+            False,
+            None,
+            True,
+            "runtime_projection_unavailable",
+            "unavailable",
+            "no usable runtime projection",
+        ),
         (
             "active_battle",
             True,
             "a" * 64,
             False,
+            "runtime",
+            "failed",
             "no stable current save",
         ),
     ),
@@ -3496,6 +3561,8 @@ def test_runtime_setup_capture_failure_pauses_after_background(
     round_active,
     active_fingerprint,
     acquisition_present,
+    snapshot_kind,
+    expected_status,
     reason_fragment,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
@@ -3522,23 +3589,46 @@ def test_runtime_setup_capture_failure_pauses_after_background(
         captured_at=captured,
         acquisition_completed_at=captured + timedelta(milliseconds=1),
         transport_stable=True,
-        snapshot=SimpleNamespace(
-            runtime_save=SimpleNamespace(
-                round_active=round_active,
-                active_round_identity=(
-                    SimpleNamespace(fingerprint=active_fingerprint)
-                    if active_fingerprint
+        snapshot=(
+            SimpleNamespace(
+                runtime_save=SimpleNamespace(
+                    round_active=round_active,
+                    active_round_identity=(
+                        SimpleNamespace(fingerprint=active_fingerprint)
+                        if active_fingerprint
+                        else None
+                    ),
+                )
+            )
+            if snapshot_kind == "runtime"
+            else SimpleNamespace(
+                runtime_save=None,
+                mapping_id=(
+                    "data-9-game-audit-only"
+                    if snapshot_kind == "runtime_projection_unavailable"
                     else None
+                ),
+                mapping_resolution=(
+                    "incompatible_revision"
+                    if snapshot_kind == "incompatible"
+                    else "exact"
+                    if snapshot_kind == "runtime_projection_unavailable"
+                    else "unsupported"
+                ),
+                shape_valid=(
+                    snapshot_kind == "runtime_projection_unavailable"
                 ),
             )
         ),
     )
+    serializer_calls = []
 
     class FakeSerializer:
         def __init__(self, **_kwargs):
             pass
 
         def acquire(self, **_kwargs):
+            serializer_calls.append("serialize")
             return SimpleNamespace(
                 status=GuardedSerializationStatus.COMPLETE,
                 background_dispatched=True,
@@ -3546,6 +3636,12 @@ def test_runtime_setup_capture_failure_pauses_after_background(
             )
 
     monkeypatch.setattr("core.app.GuardedPlayerSaveSerializer", FakeSerializer)
+    project = MagicMock(
+        side_effect=AssertionError(
+            "failure evidence must not reach setup authoring projection"
+        )
+    )
+    monkeypatch.setattr("core.app.project_forced_save_setup", project)
     app = App.__new__(App)
     app._supervisor = supervisor
     app._mission_mgr = MissionManager(None, None)
@@ -3563,9 +3659,12 @@ def test_runtime_setup_capture_failure_pauses_after_background(
     assert app._sync_setup_capture(object()) is True
 
     result = supervisor.setup_capture
-    assert result["status"] == "failed"
+    assert result["status"] == expected_status
     assert reason_fragment in result["reason"]
+    assert "Automation remains Paused" in result["reason"]
     assert supervisor.is_paused is True
+    assert serializer_calls == ["serialize"]
+    project.assert_not_called()
 
 
 def test_runtime_setup_capture_reports_pause_without_using_cached_evidence(

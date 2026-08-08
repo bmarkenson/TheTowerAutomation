@@ -1,9 +1,10 @@
 """Project one forced player-save acquisition into existing authoring owners.
 
 This module deliberately defines no loadout or Strategy schema.  It selects
-only exact-version, validated save observations and runs every selected value
-through :mod:`core.strategy_authoring`'s existing setting normalizer.  Values
-that cannot be represented by that owner remain explicit unresolved evidence.
+only observations authorized by the resolved mapping's explicit validation or
+compatibility allowlist and runs every selected value through
+:mod:`core.strategy_authoring`'s existing setting normalizer.  Values that
+cannot be represented by that owner remain explicit unresolved evidence.
 """
 
 from __future__ import annotations
@@ -125,7 +126,7 @@ def project_forced_save_setup(
         if mapping_maturity != "validated" and check_id not in validated:
             return (
                 None,
-                "save check is outside the exact mapping validation allowlist",
+                "save check is outside the resolved mapping validation allowlist",
                 "unresolved",
             )
         if evidence is None:
@@ -152,7 +153,7 @@ def project_forced_save_setup(
         if not save_observation_supports_requirement(check_id, value, evidence):
             return (
                 value,
-                "observed value is outside the exact save mapping's validated requirement authority",
+                "observed value is outside the resolved save mapping's validated requirement authority",
                 "unsupported_authoring_value",
             )
         if check_id == "free_upgrade_locks":

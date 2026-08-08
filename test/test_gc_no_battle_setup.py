@@ -1891,6 +1891,152 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     manager.on_home.assert_called_once_with()
 
 
+@pytest.mark.parametrize(
+    "requirements",
+    ({}, REQUIREMENTS),
+    ids=("baseline-only", "configured-setup"),
+)
+@pytest.mark.parametrize(
+    ("home_control", "battle_workflow"),
+    (
+        (HomeBattleControl.NEW_BATTLE, None),
+        (
+            HomeBattleControl.NEW_BATTLE,
+            {"intent": "start_battle", "status": "acknowledged"},
+        ),
+        (HomeBattleControl.RESUME_BATTLE, None),
+    ),
+    ids=("new-no-workflow", "new-stale-acknowledged-start", "resume-no-workflow"),
+)
+def test_operator_intent_wait_blocks_home_preflight_setup_and_launch(
+    requirements,
+    home_control,
+    battle_workflow,
+):
+    frame = object()
+    manager = Mock()
+    manager.awaiting_initial_battle_intent.return_value = True
+    manager.no_battle_setup_requirements.return_value = requirements
+    coordinator = Mock()
+    coordinator.carry = None
+    app = App.__new__(App)
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._supervisor = SimpleNamespace(
+        manual_control=None,
+        battle_workflow=battle_workflow,
+    )
+    app._handle_home_return_reconciliation = Mock(return_value=False)
+    app._handler_enabled = Mock(side_effect=lambda name: name == "home")
+    app._runtime_policy = Mock(
+        return_value={"player_save_preflight": "save_first"}
+    )
+    app._exclusive_validation_definition = Mock(return_value=None)
+    app._maybe_start_exclusive_validation = Mock(return_value=True)
+    app._report_home_policy = Mock()
+    app._activity_scope_has_history_baseline = Mock(return_value=False)
+    app._player_save_preflight_coordinator = coordinator
+    app._player_save_preflight_activity_scope_id = None
+    app._player_save_preflight_result = None
+    app._player_save_history_baseline_outcome = None
+
+    with (
+        patch("core.app.get_activity_scope", return_value={"run_id": "scope-1"}),
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                home_control,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup") as run_setup,
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states(
+            "HOME_SCREEN",
+            set(),
+            frame,
+            operator_workflow_only=True,
+        )
+
+    coordinator.acquire.assert_not_called()
+    run_setup.assert_not_called()
+    handle_home.assert_called_once_with(restart_enabled=False)
+    manager.mark_no_battle_setup_complete.assert_not_called()
+
+
+def test_pending_exclusive_validation_does_not_replace_start_battle_intent():
+    frame = object()
+    manager = Mock()
+    manager.awaiting_initial_battle_intent.return_value = True
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"cards_deck": "Tournament"},
+    )
+    app = App.__new__(App)
+    app._auto_start_enabled = False
+    app._mission_mgr = manager
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._supervisor = SimpleNamespace(
+        manual_control=None,
+        battle_workflow=None,
+    )
+    app._handle_home_return_reconciliation = Mock(return_value=False)
+    app._handler_enabled = Mock(return_value=False)
+    app._runtime_policy = Mock(
+        return_value={
+            "home_preflight": True,
+            "player_save_preflight": "disabled",
+        }
+    )
+    validation = {"id": "tournament-validation"}
+    app._exclusive_validation_definition = Mock(return_value=validation)
+    app._prepare_exclusive_validation_home_request = Mock(return_value=True)
+    app._claim_proactive_gate_waivers = Mock()
+    app._startup_gate_waivers = {}
+    app._acquire_player_save_home_preflight = Mock(return_value=None)
+    app._run_home_setup_attempts = Mock(return_value=setup)
+    app._maybe_start_exclusive_validation = Mock(return_value=False)
+    app._report_home_policy = Mock()
+    app._player_save_preflight_coordinator = None
+    app._player_save_preflight_activity_scope_id = None
+    app._player_save_preflight_result = None
+    app._player_save_history_baseline_outcome = None
+
+    with (
+        patch("core.app.get_activity_scope", return_value={"run_id": "scope-1"}),
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+    ):
+        app._handle_primary_states(
+            "HOME_SCREEN",
+            set(),
+            frame,
+            operator_workflow_only=True,
+        )
+
+    app._acquire_player_save_home_preflight.assert_not_called()
+    app._run_home_setup_attempts.assert_not_called()
+    app._maybe_start_exclusive_validation.assert_not_called()
+    manager.mark_no_battle_setup_complete.assert_not_called()
+
+
 def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
     frame = object()
     manager = Mock()

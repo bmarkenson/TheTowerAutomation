@@ -2056,45 +2056,106 @@ class App:
     def _setup_capture_workflow_binding(
         acquisition: PlayerSaveAcquisitionBundle,
         evidence: Mapping[str, Any],
-    ) -> Optional[dict[str, Any]]:
-        """Bind a capture to the exact Home or active-round save evidence."""
+    ) -> Tuple[
+        Optional[dict[str, Any]],
+        Optional[str],
+        Optional[str],
+    ]:
+        """Bind a capture or classify why fresh save evidence cannot bind it."""
 
         snapshot = acquisition.snapshot
         runtime = getattr(snapshot, "runtime_save", None)
         game_state = str(evidence.get("game_state") or "")
         if runtime is None:
-            return None
+            resolution = str(
+                getattr(snapshot, "mapping_resolution", None) or "unsupported"
+            ).strip()
+            mapping_id = str(getattr(snapshot, "mapping_id", None) or "").strip()
+            if resolution == "incompatible_revision" or (
+                mapping_id and getattr(snapshot, "shape_valid", None) is not True
+            ):
+                reason = (
+                    "the forced-save evidence is structurally incompatible with "
+                    "the available setup-capture mapping"
+                )
+            elif not mapping_id or resolution == "unsupported":
+                reason = (
+                    "the forced-save version is unsupported for setup capture"
+                )
+            else:
+                reason = (
+                    "the forced-save evidence has no usable runtime projection for "
+                    "setup capture"
+                )
+            return None, "unavailable", f"{reason}; no UI fallback was opened"
         active_identity = getattr(runtime, "active_round_identity", None)
+        round_active = getattr(runtime, "round_active", None)
         if game_state in {"active_battle", "home_resume_battle"}:
             fingerprint = str(
                 getattr(active_identity, "fingerprint", None) or ""
             ).strip()
-            if getattr(runtime, "round_active", None) is not True or not fingerprint:
-                return None
+            if round_active is False:
+                return (
+                    None,
+                    "failed",
+                    "save round identity contradicts the requested active or "
+                    "resumable battle boundary",
+                )
+            if round_active is not True or not fingerprint:
+                return (
+                    None,
+                    "unavailable",
+                    "the forced-save evidence did not prove an active battle identity; "
+                    "no UI fallback was opened",
+                )
         elif game_state == "home_new_battle":
-            if getattr(runtime, "round_active", None) is not False:
-                return None
+            if round_active is True:
+                return (
+                    None,
+                    "failed",
+                    "save round identity contradicts the requested new-run Home "
+                    "boundary",
+                )
+            if round_active is not False:
+                return (
+                    None,
+                    "unavailable",
+                    "the forced-save evidence did not prove an inactive round at the "
+                    "new-run Home boundary; no UI fallback was opened",
+                )
             fingerprint = None
         else:
-            return None
+            return (
+                None,
+                "unavailable",
+                "the requested setup-capture game boundary is unavailable",
+            )
         scope_id = str(evidence.get("activity_scope_run_id") or "").strip()
         if not scope_id or acquisition.binding is None:
-            return None
-        return {
-            "schema_version": 1,
-            "game_state": game_state,
-            "runtime_session_fingerprint": hashlib.sha256(
-                (
-                    "thetower-setup-capture-runtime-v1\0"
-                    f"{evidence.get('runtime_id')}"
-                ).encode("utf-8")
-            ).hexdigest(),
-            "activity_scope_fingerprint": hashlib.sha256(
-                f"thetower-setup-capture-scope-v1\0{scope_id}".encode("utf-8")
-            ).hexdigest(),
-            "target_generation_fingerprint": acquisition.binding.fingerprint,
-            "active_round_identity_fingerprint": fingerprint,
-        }
+            return (
+                None,
+                "unavailable",
+                "the exact runtime scope or target binding is unavailable",
+            )
+        return (
+            {
+                "schema_version": 1,
+                "game_state": game_state,
+                "runtime_session_fingerprint": hashlib.sha256(
+                    (
+                        "thetower-setup-capture-runtime-v1\0"
+                        f"{evidence.get('runtime_id')}"
+                    ).encode("utf-8")
+                ).hexdigest(),
+                "activity_scope_fingerprint": hashlib.sha256(
+                    f"thetower-setup-capture-scope-v1\0{scope_id}".encode("utf-8")
+                ).hexdigest(),
+                "target_generation_fingerprint": acquisition.binding.fingerprint,
+                "active_round_identity_fingerprint": fingerprint,
+            },
+            None,
+            None,
+        )
 
     def _setup_capture_context_matches(
         self,
@@ -2428,16 +2489,17 @@ class App:
                 ),
             )
             return True
-        workflow_binding = self._setup_capture_workflow_binding(
-            acquisition,
-            requested,
+        workflow_binding, binding_status, binding_reason = (
+            self._setup_capture_workflow_binding(acquisition, requested)
         )
         if workflow_binding is None:
-            if background_dispatched or retained_return_source:
+            remains_paused = background_dispatched or retained_return_source
+            if remains_paused:
                 self._supervisor.persist_state("PAUSED")
             finish(
-                "failed",
-                "save round identity does not match the requested Home or active-battle boundary; Automation remains Paused",
+                binding_status or "unavailable",
+                str(binding_reason or "setup-capture save binding is unavailable")
+                + ("; Automation remains Paused" if remains_paused else ""),
             )
             return True
         try:
@@ -9504,6 +9566,8 @@ class App:
                     exclusive_validation
                 )
             )
+            awaiting_initial_battle_intent = self._awaiting_initial_battle_intent()
+            home_preflight_authorized = not awaiting_initial_battle_intent
             home_control = detect_home_battle_control(img).control
             requirements = self._mission_mgr.no_battle_setup_requirements()
             scope = get_activity_scope()
@@ -9532,7 +9596,8 @@ class App:
                 )
             )
             baseline_only_preflight = bool(
-                home_control is HomeBattleControl.NEW_BATTLE
+                home_preflight_authorized
+                and home_control is HomeBattleControl.NEW_BATTLE
                 and not requirements
                 and preflight_mode == "save_first"
                 and getattr(
@@ -9595,6 +9660,7 @@ class App:
                     return
             if (
                 (self._auto_start_enabled or home_preflight_enabled)
+                and home_preflight_authorized
                 and home_control is HomeBattleControl.NEW_BATTLE
                 and requirements
                 and (
@@ -9759,8 +9825,11 @@ class App:
                         "INFO",
                     )
                     return
-            if self._maybe_start_exclusive_validation(
-                home_control=home_control,
+            if (
+                not awaiting_initial_battle_intent
+                and self._maybe_start_exclusive_validation(
+                    home_control=home_control,
+                )
             ):
                 return
             self._report_home_policy(
@@ -9785,6 +9854,7 @@ class App:
                 )
                 explicit_start = bool(
                     workflow_active
+                    and not awaiting_initial_battle_intent
                     and workflow.get("intent") == "start_battle"
                     and workflow.get("status") in {"acknowledged", "ready"}
                 )
@@ -9803,6 +9873,8 @@ class App:
                     restart_enabled = explicit_start or explicit_attach
                 elif manual_return_resume:
                     restart_enabled = True
+                elif awaiting_initial_battle_intent:
+                    restart_enabled = False
                 else:
                     restart_enabled = bool(
                         self._auto_start_enabled

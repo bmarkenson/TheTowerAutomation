@@ -12,6 +12,8 @@ import nrbf
 import pytest
 
 from core.adb_utils import read_device_file
+from core.app import App
+from core.control_model import validate_setup_capture_preview
 from core.player_save import (
     PLAYER_SAVE_DEVICE_PATH,
     PlayerSaveError,
@@ -24,6 +26,13 @@ from core.player_save import (
     pull_player_save_bytes,
     reconcile_requirements,
 )
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+)
+from core.player_save_setup_capture import project_forced_save_setup
 from core.profile_progression import (
     ProfileProgressionError,
     diff_profile_progression,
@@ -606,6 +615,65 @@ def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     assert "must-not-publish-v1101-wave-counter" not in json.dumps(
         redacted.as_dict()
     )
+
+
+def test_v1101_compatible_snapshot_projects_setup_capture_allowlist(monkeypatch):
+    snapshot = _snapshot_v1101(monkeypatch)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="captured",
+        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        acquisition_started_at=CAPTURED_AT - timedelta(milliseconds=1),
+        captured_at=CAPTURED_AT,
+        acquisition_completed_at=CAPTURED_AT + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=snapshot,
+    )
+
+    preview = project_forced_save_setup(acquisition)
+
+    assert preview["mapping_id"] == "data-9-game-1101"
+    assert preview["mapping_maturity"] == "candidate"
+    assert preview["settings"]["cards_deck"] == "Farm"
+    assert set(preview["captured_check_ids"]) == (
+        set(snapshot.validated_checks) - {"perk_first_choice"}
+    )
+    assert "tournament_conditions" not in preview["captured_check_ids"]
+    assert any(
+        item["setting_id"] == "perk_first_choice"
+        and item["status"] == "observed_not_authorable"
+        for item in preview["unresolved"]
+    )
+    assert preview["saving_activates_strategy"] is False
+    assert preview["publication_activates_strategy"] is False
+
+    workflow_binding, binding_status, binding_reason = (
+        App._setup_capture_workflow_binding(
+            acquisition,
+            {
+                "game_state": "active_battle",
+                "runtime_id": "runtime-v1101",
+                "activity_scope_run_id": "scope-v1101",
+            },
+        )
+    )
+    assert workflow_binding is not None
+    assert binding_status is None
+    assert binding_reason is None
+    assert workflow_binding["active_round_identity_fingerprint"] == (
+        snapshot.runtime_save.active_round_identity.fingerprint
+    )
+    preview["workflow_binding"] = workflow_binding
+    preview["capture_origin"] = {
+        "schema_version": 1,
+        "acquisition_source": "new_setup_capture_refresh",
+        "source_manual_control_fingerprint": None,
+    }
+    validated_preview = validate_setup_capture_preview(preview)
+    assert validated_preview is not None
+    assert validated_preview["mapping_id"] == "data-9-game-1101"
+    assert validated_preview["workflow_binding"] == workflow_binding
 
 
 def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
