@@ -226,6 +226,69 @@ def test_forced_save_capture_reuses_authoring_normalizers_and_preserves_unresolv
     assert "private-target" not in str(capture)
 
 
+def test_chrono_auto_pick_order_is_captured_diffed_and_saved_as_managed_source(
+    tmp_path,
+):
+    checks = _checks()
+    captured_order = ["chrono_field_duration", "damage"]
+    checks["perk_auto_pick_order"] = _evidence(
+        "perk_auto_pick_order",
+        captured_order,
+    )
+    capture = _runtime_bound_capture(_acquisition(checks=checks))
+
+    assert capture["settings"]["perk_auto_pick_order"] == captured_order
+    assert not any(
+        item["setting_id"] == "perk_auto_pick_order"
+        for item in capture["unresolved"]
+    )
+    store = StrategyProfileStore(
+        profile_directory=tmp_path / "profiles",
+        base_directory=tmp_path / "bases",
+    )
+    store.publish_base(
+        {
+            "id": "chrono_base",
+            "display_name": "Chrono Base",
+            "family": "farm",
+            "settings": {
+                "perk_auto_pick_order": {
+                    "policy": "enforce",
+                    "value": list(reversed(captured_order)),
+                }
+            },
+        }
+    )
+    reviewed = store.review_captured_strategy_draft(
+        capture,
+        strategy_id="captured_chrono",
+        display_name="Captured Chrono",
+        tier=19,
+        base={"id": "chrono_base", "revision": 1},
+        expected_capture_fingerprint=fingerprint_document(capture),
+    )
+    assert any(
+        item["setting_id"] == "perk_auto_pick_order"
+        for item in reviewed["captured_vs_base"]["changed"]
+    )
+    saved = store.save_captured_strategy_draft(
+        capture,
+        strategy_id="captured_chrono",
+        display_name="Captured Chrono",
+        tier=19,
+        base={"id": "chrono_base", "revision": 1},
+        expected_capture_fingerprint=fingerprint_document(capture),
+        expected_review_fingerprint=reviewed["review_fingerprint"],
+    )
+
+    assert saved["source"]["settings"]["perk_auto_pick_order"] == {
+        "policy": "enforce",
+        "value": captured_order,
+    }
+    assert saved["review"]["saving_activates_strategy"] is False
+    assert "captured_chrono" not in store.strategy_ids()
+
+
 def test_capture_preserves_values_the_existing_farm_schema_cannot_represent():
     checks = _checks()
     checks["auto_pick_perks"] = _evidence(

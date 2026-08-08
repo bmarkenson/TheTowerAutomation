@@ -308,20 +308,15 @@ def run_gc_no_battle_setup(
     def require_action() -> None:
         if action_guard_fn is None:
             return
-        control_blocked = False
-        while not action_guard_fn():
-            if not control_blocked:
-                log(
-                    "[GC_NO_BATTLE] Pause/stop blocked Home setup input; "
-                    "waiting without cleanup actions",
-                    "INFO",
-                    console=True,
-                )
-            control_blocked = True
-            sleep_fn(0.25)
-        if control_blocked:
+        if not action_guard_fn():
+            log(
+                "[GC_NO_BATTLE] Pause, Stop, or an authority handoff blocked "
+                "Home setup input; yielding without cleanup actions",
+                "INFO",
+                console=True,
+            )
             raise _SetupControlInterrupted(
-                "Home setup input was interrupted by persistent control"
+                "Home setup input yielded after action authority changed"
             )
 
     def guarded_safe_tap(*args, **kwargs):
@@ -1413,18 +1408,10 @@ def run_gc_no_battle_setup(
             invalidate_snapshot("home_setup_control_interrupted", current_check)
         update_save_preflight_evidence()
         log(
-            "[GC_NO_BATTLE] Home setup control interruption ended; "
-            "restoring verified Home before a fresh retry",
+            "[GC_NO_BATTLE] Home setup yielded to the main observation loop; "
+            "a later same-owner Enable may restore verified Home",
             "INFO",
             console=True,
-        )
-        _recover_home(
-            capture_fn,
-            detector,
-            detect_home_control_fn,
-            safe_tap_fn,
-            tap_visible_fn,
-            sleep_fn,
         )
         return _finish_gc_no_battle_setup(
             GcNoBattleSetupResult(
@@ -2301,9 +2288,11 @@ def _recover_home(
     safe_tap_fn,
     tap_visible_fn,
     sleep_fn,
-) -> None:
+    *,
+    initial_frame=None,
+) -> bool:
     try:
-        frame = capture_fn()
+        frame = initial_frame if initial_frame is not None else capture_fn()
         if _is_not_enough_medals_dialog(frame):
             if not safe_tap_fn(
                 NOT_ENOUGH_MEDALS_OK,
@@ -2316,18 +2305,19 @@ def _recover_home(
                     verifier=_is_not_enough_medals_dialog,
                 ),
             ):
-                return
+                return False
             sleep_fn(0.8)
             frame = capture_fn()
         if detector(frame).get("state") == "HOME_SCREEN":
-            return
+            _require_no_battle_home(frame, detector, detect_home_control_fn)
+            return True
         if detector(frame).get("state") == "PERKS":
             if not tap_visible_fn(
                 "buttons.close:perks",
                 screenshot=frame,
                 retries=1,
             ):
-                return
+                return False
             home = _wait_for(
                 state="HOME_SCREEN",
                 capture_fn=capture_fn,
@@ -2339,8 +2329,8 @@ def _recover_home(
                 detector,
                 detect_home_control_fn,
             )
-            return
-        _return_home(
+            return True
+        home = _return_home(
             frame,
             capture_fn,
             detector,
@@ -2349,8 +2339,52 @@ def _recover_home(
             tap_visible_fn,
             sleep_fn,
         )
+        return bool(home is not None)
     except Exception:
-        pass
+        return False
+
+
+def recover_gc_no_battle_setup_home(
+    *,
+    screenshot=None,
+    capture_fn: Callable[[], Any] = capture_adb_screenshot,
+    detector: Callable[[Any], Mapping[str, Any]] = detect_state_and_overlays,
+    detect_home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
+    safe_tap_fn: Callable[..., bool] = safe_tap,
+    tap_visible_fn: Callable[..., bool] = tap_if_visible,
+    action_guard_fn: Callable[[], bool] | None = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Restore verified no-battle Home under one newly revalidated owner.
+
+    The synchronous setup route never calls this after authority is denied.
+    Its coordinator may call it from a later observation heartbeat only after
+    proving that the original workflow still owns input.
+    """
+
+    def require_action() -> None:
+        if action_guard_fn is not None and not action_guard_fn():
+            raise _SetupControlInterrupted(
+                "Home recovery yielded after action authority changed"
+            )
+
+    def guarded_safe_tap(*args, **kwargs):
+        require_action()
+        return safe_tap_fn(*args, **kwargs)
+
+    def guarded_visible_tap(*args, **kwargs):
+        require_action()
+        return tap_visible_fn(*args, **kwargs)
+
+    return _recover_home(
+        capture_fn,
+        detector,
+        detect_home_control_fn,
+        guarded_safe_tap,
+        guarded_visible_tap,
+        sleep_fn,
+        initial_frame=screenshot,
+    )
 
 
 def _is_not_enough_medals_dialog(
@@ -2381,5 +2415,6 @@ def _is_not_enough_medals_dialog(
 __all__ = [
     "GcNoBattleSetupResult",
     "GcNoBattleSetupStatus",
+    "recover_gc_no_battle_setup_home",
     "run_gc_no_battle_setup",
 ]

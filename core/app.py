@@ -142,6 +142,7 @@ from core.no_strategy_post_run import (
 from core.run_perk_selector import RunScopedPerkSelector
 from core.gc_no_battle_setup import (
     GcNoBattleSetupStatus,
+    recover_gc_no_battle_setup_home,
     run_gc_no_battle_setup,
 )
 from core.game_speed import GameSpeedGuard
@@ -1835,7 +1836,8 @@ class App:
                         result="Return Control reconciliation started",
                     )
             if (
-                status == "awaiting_configuration"
+                status
+                in {"awaiting_configuration", "awaiting_manual_correction"}
                 and not self._supervisor.is_paused
                 and manual.get("refresh_status")
                 == "configuration_retry_after_enable"
@@ -4658,6 +4660,37 @@ class App:
             )
             if not setup.complete:
                 self._supervisor.persist_state("PAUSED")
+                if setup.interrupted:
+                    return True
+                failed_check = str(
+                    setup.failed_check or "startup_setup"
+                )
+                configuration = self._return_configuration_report(
+                    receipt,
+                    check_sets,
+                    stage="manual_correction_required",
+                )
+                configuration.update(
+                    {
+                        "failed_check": failed_check,
+                        "failure_reason": str(setup.reason),
+                        "retryable_from_home": bool(
+                            getattr(setup, "retryable_from_home", True)
+                        ),
+                    }
+                )
+                self._supervisor.transition_manual_control(
+                    workflow_id,
+                    "awaiting_manual_correction",
+                    detail=(
+                        f"Home configuration stopped at {failed_check}: "
+                        f"{setup.reason}; make the reported manual correction "
+                        "before explicitly enabling another fresh save check"
+                    ),
+                    refresh_status="manual_correction_required",
+                    save_receipt=receipt,
+                    configuration=configuration,
+                )
                 return True
             setup_evidence = dict(setup.evidence)
             setup_evidence["player_save_preflight"] = result.as_dict()
@@ -6859,6 +6892,11 @@ class App:
                         holds=(operator_workflow_hold,),
                     )
                     self._publish_action_authority()
+                if self._advance_pending_home_setup_recovery(img):
+                    # Recovery may have navigated from a setup sub-screen. A
+                    # fresh frame must establish verified Home before setup or
+                    # any other handler runs again.
+                    continue
 
                 # This passive sidecar sees exact Home NEW_BATTLE before any
                 # later setup or Home handler can dispatch an action. It never
@@ -7755,6 +7793,239 @@ class App:
         time.sleep(2)
         return None
 
+    def _defer_home_setup_recovery(self) -> None:
+        """Retain one yielded Home route only for its exact current owner."""
+
+        owner = getattr(self, "_active_action_authority_owner", None)
+        owner_value = owner.value if isinstance(owner, AuthorityHold) else owner
+        owner_value = str(owner_value or "").strip() or None
+        supervisor = getattr(self, "_supervisor", None)
+        workflow_id = None
+        if supervisor is not None and owner_value == AuthorityHold.OPERATOR_WORKFLOW.value:
+            workflow = supervisor.battle_workflow
+            if isinstance(workflow, Mapping):
+                workflow_id = str(workflow.get("request_id") or "").strip()
+        elif (
+            supervisor is not None
+            and owner_value == AuthorityHold.MANUAL_CONTROL_RETURN.value
+        ):
+            manual = supervisor.manual_control
+            if isinstance(manual, Mapping):
+                workflow_id = str(
+                    manual.get("manual_control_id") or ""
+                ).strip()
+        try:
+            evidence = self._current_control_workflow_evidence() or {}
+        except Exception:
+            evidence = {}
+        if not all(
+            evidence.get(field) is not None
+            for field in (
+                "runtime_id",
+                "pid",
+                "adb_target",
+                "target_generation",
+                "activity_scope_run_id",
+            )
+        ):
+            self._pending_home_setup_recovery = None
+            log(
+                "[GC_NO_BATTLE] Yielded Home setup has no exact recovery "
+                "binding; later cleanup input is unavailable",
+                "WARN",
+            )
+            return
+        self._pending_home_setup_recovery = {
+            "operation_id": new_operation_id(),
+            "owner": owner_value,
+            "workflow_id": workflow_id,
+            "runtime_id": evidence.get("runtime_id"),
+            "pid": evidence.get("pid"),
+            "adb_target": evidence.get("adb_target"),
+            "target_generation": evidence.get("target_generation"),
+            "activity_scope_run_id": evidence.get("activity_scope_run_id"),
+        }
+
+    def _home_setup_recovery_owner_matches(
+        self,
+        pending: Mapping[str, object],
+        current: Mapping[str, object],
+    ) -> bool:
+        """Reject a yielded cleanup after any workflow or binding change."""
+
+        for field in (
+            "runtime_id",
+            "pid",
+            "adb_target",
+            "target_generation",
+            "activity_scope_run_id",
+        ):
+            expected = pending.get(field)
+            if expected is not None and current.get(field) != expected:
+                return False
+        owner_value = str(pending.get("owner") or "")
+        workflow_id = str(pending.get("workflow_id") or "")
+        if owner_value == AuthorityHold.OPERATOR_WORKFLOW.value:
+            workflow = self._supervisor.battle_workflow
+            return bool(
+                workflow_id
+                and isinstance(workflow, Mapping)
+                and workflow.get("request_id") == workflow_id
+                and workflow.get("status")
+                not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            )
+        if owner_value == AuthorityHold.MANUAL_CONTROL_RETURN.value:
+            manual = self._supervisor.manual_control
+            return bool(
+                workflow_id
+                and isinstance(manual, Mapping)
+                and manual.get("manual_control_id") == workflow_id
+                and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+            )
+        if owner_value:
+            hold = self._operator_workflow_authority_hold()
+            return bool(hold is not None and hold.hold.value == owner_value)
+        workflow = self._supervisor.battle_workflow
+        manual = self._supervisor.manual_control
+        return bool(
+            not (
+                isinstance(workflow, Mapping)
+                and workflow.get("status")
+                not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            )
+            and not (
+                isinstance(manual, Mapping)
+                and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+            )
+        )
+
+    def _advance_pending_home_setup_recovery(
+        self,
+        screenshot: Frame,
+    ) -> bool:
+        """Recover a yielded Home route on a later same-owner Enabled frame."""
+
+        pending = getattr(self, "_pending_home_setup_recovery", None)
+        if not isinstance(pending, Mapping):
+            return False
+        current = self._current_control_workflow_evidence()
+        owner_matches = bool(
+            isinstance(current, Mapping)
+            and self._home_setup_recovery_owner_matches(pending, current)
+        )
+        if not owner_matches:
+            self._pending_home_setup_recovery = None
+            log(
+                "[GC_NO_BATTLE] Discarded yielded Home recovery after its "
+                "runtime, scope, or workflow owner changed",
+                "INFO",
+            )
+            return False
+        if self._supervisor.control_state != "RUNNING":
+            return False
+        if current.get("game_state") in {
+            "active_battle",
+            "home_resume_battle",
+            "game_over",
+            "tournament_results",
+        }:
+            self._pending_home_setup_recovery = None
+            log(
+                "[GC_NO_BATTLE] Discarded yielded Home recovery at an "
+                f"incompatible {current.get('game_state')} boundary",
+                "WARN",
+            )
+            return False
+        owner_value = str(pending.get("owner") or "")
+        try:
+            owner = AuthorityHold(owner_value) if owner_value else None
+        except ValueError:
+            self._pending_home_setup_recovery = None
+            return False
+
+        def action_allowed() -> bool:
+            return bool(
+                self._runtime_action_guard(owner=owner)
+                and self._runtime_action_guard(
+                    action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                    owner=owner,
+                )
+                and self._home_setup_recovery_owner_matches(pending, current)
+            )
+
+        if not action_allowed():
+            return False
+        operation_id = str(pending.get("operation_id") or new_operation_id())
+        log_action_intent(
+            "Restoring verified Home after a yielded setup",
+            reason=(
+                "the same explicit workflow owner was Enabled on a later "
+                "observation heartbeat"
+            ),
+            detail=(
+                "[GC_NO_BATTLE_RECOVERY] owner="
+                f"{owner_value or 'automation'} workflow_id="
+                f"{pending.get('workflow_id') or 'none'}"
+            ),
+            operation_id=operation_id,
+        )
+        recovered = recover_gc_no_battle_setup_home(
+            screenshot=screenshot,
+            action_guard_fn=action_allowed,
+        )
+        recovery_failed = bool(
+            not recovered
+            and self._supervisor.control_state == "RUNNING"
+            and self._home_setup_recovery_owner_matches(pending, current)
+        )
+        result_status = (
+            "completed"
+            if recovered
+            else "failed"
+            if recovery_failed
+            else "interrupted"
+        )
+        log_result(
+            (
+                "Verified no-battle Home restored; setup will restart from "
+                "fresh evidence"
+                if recovered
+                else "Home recovery failed safely; Automation Paused"
+                if recovery_failed
+                else "Home recovery yielded without granting further input"
+            ),
+            detail=(
+                "[GC_NO_BATTLE_RECOVERY] result="
+                f"{result_status}"
+            ),
+            operation_id=operation_id,
+        )
+        if recovered:
+            self._pending_home_setup_recovery = None
+        elif recovery_failed:
+            self._pending_home_setup_recovery = None
+            self._supervisor.persist_state("PAUSED")
+            failure_reason = (
+                "verified Home recovery failed after the same workflow was "
+                "explicitly Enabled; no further cleanup input is authorized"
+            )
+            workflow_id = str(pending.get("workflow_id") or "")
+            if owner is AuthorityHold.OPERATOR_WORKFLOW and workflow_id:
+                self._supervisor.transition_battle_workflow(
+                    workflow_id,
+                    "failed",
+                    reason=failure_reason,
+                    acknowledgement=current,
+                )
+            elif owner is AuthorityHold.MANUAL_CONTROL_RETURN and workflow_id:
+                self._supervisor.transition_manual_control(
+                    workflow_id,
+                    "failed",
+                    detail=failure_reason,
+                    refresh_status="home_recovery_failed",
+                )
+        return True
+
     def _run_home_setup_attempts(
         self,
         requirements: Mapping[str, Any],
@@ -7804,9 +8075,11 @@ class App:
                             record_ui_verification
                         )
             setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
+            if setup.interrupted:
+                self._defer_home_setup_recovery()
+                return setup
             if (
                 setup.complete
-                or setup.interrupted
                 or (
                     getattr(setup, "status", None)
                     is not GcNoBattleSetupStatus.FAILED

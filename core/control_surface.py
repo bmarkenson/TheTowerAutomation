@@ -1618,6 +1618,7 @@ class ControlSurfaceService:
                         "return_requested",
                         "awaiting_enable",
                         "awaiting_configuration",
+                        "awaiting_manual_correction",
                     }:
                         raise ControlSurfaceRequestError(
                             "Use Return Control before enabling automated actions",
@@ -1629,9 +1630,10 @@ class ControlSurfaceService:
                         manual_control = dict(manual)
                         audit = "Automation Enable is already pending acknowledgement"
                     else:
-                        retrying_configuration = (
-                            manual.get("status") == "awaiting_configuration"
-                        )
+                        retrying_configuration = manual.get("status") in {
+                            "awaiting_configuration",
+                            "awaiting_manual_correction",
+                        }
                         manual_control = (
                             self.control_store.enable_after_return_control(
                                 str(manual.get("manual_control_id") or ""),
@@ -4071,6 +4073,7 @@ class ControlSurfaceService:
                     "return_requested",
                     "awaiting_enable",
                     "awaiting_configuration",
+                    "awaiting_manual_correction",
                 }
             )
         )
@@ -4093,9 +4096,19 @@ class ControlSurfaceService:
             "return_requested",
             "awaiting_enable",
             "awaiting_configuration",
+            "awaiting_manual_correction",
         }:
             enable_code = "return_control_required"
             enable_reason = "Use Return Control before enabling automated actions"
+        elif (
+            isinstance(manual, Mapping)
+            and manual.get("status") == "awaiting_manual_correction"
+        ):
+            enable_code = "available"
+            enable_reason = (
+                "after making the reported manual correction, explicitly "
+                "Enable to request a new forced save check"
+            )
         else:
             enable_code = "available"
             enable_reason = "explicitly permit guarded actions"

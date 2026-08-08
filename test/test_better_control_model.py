@@ -27,6 +27,10 @@ from core.control_model import (
     observed_game_state,
     validate_workflow_evidence,
 )
+from core.gc_no_battle_setup import (
+    GcNoBattleSetupResult,
+    GcNoBattleSetupStatus,
+)
 from core.player_save import PlayerSaveSnapshot, SaveCheckEvidence
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
@@ -1189,6 +1193,110 @@ def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
     assert acquisitions == [result]
 
 
+def test_home_return_reports_nonretryable_setup_for_manual_correction(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="home_new_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=evidence, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = SimpleNamespace(
+        session_preflight_requirements=lambda: {
+            "perk_auto_pick_order": ["chrono_field_duration"]
+        }
+    )
+    app._startup_gate_waivers = {}
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    context = object()
+    app._current_player_save_preflight_context = lambda: context
+    captured = datetime.now(timezone.utc)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="captured",
+        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        acquisition_started_at=captured - timedelta(milliseconds=1),
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=SimpleNamespace(),
+    )
+    result = SimpleNamespace(
+        ready=True,
+        acquisition=acquisition,
+        context=context,
+        decisions={
+            "perk_auto_pick_order": {
+                "disposition": "ui_required",
+                "reason": "current order needs UI validation",
+            }
+        },
+    )
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.FAILED,
+        "Auto Pick repair made no stable progress",
+        failed_check="perk_auto_pick_order",
+        retryable_from_home=False,
+    )
+    app._run_home_setup_attempts = MagicMock(return_value=setup)
+
+    assert app._complete_home_return_reconciliation(
+        result,
+        screenshot=object(),
+    ) is True
+
+    blocked = supervisor.manual_control
+    assert blocked["status"] == "awaiting_manual_correction"
+    assert blocked["refresh_status"] == "manual_correction_required"
+    assert blocked["configuration"]["failed_check"] == (
+        "perk_auto_pick_order"
+    )
+    assert blocked["configuration"]["retryable_from_home"] is False
+    assert "made no stable progress" in blocked["detail"]
+    assert blocked["save_receipt"]["acquisition"]["type"] == (
+        "forced_serialization"
+    )
+    assert supervisor.is_paused is True
+    app._run_home_setup_attempts.assert_called_once()
+    assert app._complete_home_return_reconciliation(
+        result,
+        screenshot=object(),
+    ) is False
+    app._run_home_setup_attempts.assert_called_once()
+
+
 def test_post_serialization_interruption_terminates_attach_and_pauses(
     tmp_path,
     monkeypatch,
@@ -1455,8 +1563,13 @@ def test_capture_reviews_manual_changes_from_exact_retained_return_save(
     assert supervisor.is_paused is True
 
 
-def test_api_enable_retries_awaiting_configuration_with_fresh_save_boundary(
+@pytest.mark.parametrize(
+    "pending_status",
+    ["awaiting_configuration", "awaiting_manual_correction"],
+)
+def test_api_enable_retries_configuration_with_fresh_save_boundary(
     tmp_path,
+    pending_status,
 ):
     service = ControlSurfaceService(repository_root=tmp_path)
     evidence = _evidence(game_state="active_battle")
@@ -1483,16 +1596,106 @@ def test_api_enable_retries_awaiting_configuration_with_fresh_save_boundary(
         "awaiting_configuration",
         refresh_status="trusted_mismatch_paused",
     )
+    if pending_status == "awaiting_manual_correction":
+        service.control_store.transition_manual_control(
+            manual["manual_control_id"],
+            "awaiting_manual_correction",
+            detail="make the reported manual correction",
+            refresh_status="manual_correction_required",
+        )
     service.control_store.set_state("PAUSED", source="test")
     _publish_runtime_observation(service, evidence, paused=True)
 
+    availability = service.status()["control_model"]["actions"]["enable"]
     response = service.apply_control({"action": "enable"})
 
     retried = service.control_store.status()["manual_control"]
+    assert availability["available"] is True
+    if pending_status == "awaiting_manual_correction":
+        assert "manual correction" in availability["reason"]
     assert response["request"]["accepted"] is True
-    assert retried["status"] == "awaiting_configuration"
+    assert retried["status"] == pending_status
     assert retried["refresh_status"] == "configuration_retry_after_enable"
     assert service.control_store.status()["state"] == "RUNNING"
+
+
+def test_manual_correction_enable_discards_prior_claim_before_new_home_save(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="home_new_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=evidence, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "awaiting_configuration",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "awaiting_manual_correction",
+        detail="make the reported manual correction",
+        refresh_status="manual_correction_required",
+    )
+    store.set_state("PAUSED", source="test")
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._manual_return_reconciliation_claims = {
+        manual["manual_control_id"]: {"stale": "typed claim"}
+    }
+    app._manual_return_configuration_authorized_id = None
+    app._log_operator_workflow_result = lambda *_args, **_kwargs: None
+
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+
+    assert supervisor.manual_control["status"] == "reconciling"
+    assert app._manual_return_reconciliation_claims == {}
+    assert app._manual_return_configuration_authorized_id == (
+        manual["manual_control_id"]
+    )
+    acquisition = MagicMock(return_value=None)
+    app._acquire_player_save_home_preflight = acquisition
+    app._run_home_setup_attempts = lambda *_args, **_kwargs: pytest.fail(
+        "UI cannot run before the new save acquisition"
+    )
+
+    assert app._handle_home_return_reconciliation(screenshot=object()) is True
+    acquisition.assert_called_once()
+    assert supervisor.manual_control["status"] == "failed"
 
 
 def test_running_return_save_match_completes_without_using_queued_strategy(

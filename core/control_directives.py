@@ -875,13 +875,20 @@ class ControlDirectiveStore:
             "awaiting_enable": {"reconciling", "interrupted", "failed"},
             "reconciling": {
                 "awaiting_configuration",
+                "awaiting_manual_correction",
                 "completed",
                 "interrupted",
                 "failed",
             },
             "awaiting_configuration": {
+                "awaiting_manual_correction",
                 "reconciling",
                 "completed",
+                "interrupted",
+                "failed",
+            },
+            "awaiting_manual_correction": {
+                "reconciling",
                 "interrupted",
                 "failed",
             },
@@ -964,6 +971,7 @@ class ControlDirectiveStore:
                 "return_requested",
                 "awaiting_enable",
                 "awaiting_configuration",
+                "awaiting_manual_correction",
             }:
                 raise ValueError(
                     "Use Return Control before enabling automated actions"
@@ -975,13 +983,15 @@ class ControlDirectiveStore:
             ):
                 return data
             timestamp = _timestamp_at(now)
-            retrying_configuration = (
-                manual["status"] == "awaiting_configuration"
-            )
+            retrying_configuration = manual["status"] in {
+                "awaiting_configuration",
+                "awaiting_manual_correction",
+            }
+            retry_status = str(manual["status"])
             manual.update(
                 {
                     "status": (
-                        "awaiting_configuration"
+                        retry_status
                         if retrying_configuration
                         else "awaiting_enable"
                     ),

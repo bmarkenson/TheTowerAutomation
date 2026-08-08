@@ -79,6 +79,7 @@ MANUAL_CONTROL_STATUSES = frozenset(
         "awaiting_enable",
         "reconciling",
         "awaiting_configuration",
+        "awaiting_manual_correction",
         "completed",
         "interrupted",
         "failed",

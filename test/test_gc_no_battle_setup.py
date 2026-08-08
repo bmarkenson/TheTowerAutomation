@@ -4,8 +4,10 @@ from unittest.mock import Mock, call, patch
 
 import cv2
 import numpy as np
+import pytest
 
 from automation.strategies import get_strategy
+from core.action_authority import AuthorityHold
 from core.app import HOME_SETUP_MAX_ATTEMPTS, App
 from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
@@ -15,6 +17,7 @@ from core.gc_no_battle_setup import (
     GcNoBattleSetupStatus,
     _is_not_enough_medals_dialog,
     _replace_guardian_chip,
+    recover_gc_no_battle_setup_home,
     run_gc_no_battle_setup,
 )
 from core.gc_module_loadout import ModuleLoadoutCorrectionError
@@ -1074,21 +1077,37 @@ def test_no_battle_setup_allows_waived_boundary_mismatch():
     assert result.evidence["configuration"]["blocking_valid"] is True
 
 
-def test_no_battle_setup_blocks_inputs_during_pause_then_restores_home():
+def test_no_battle_setup_yields_at_first_denied_input_without_cleanup():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
-    guard_results = iter([True, False, False, True, True])
-
-    def action_guard():
-        return next(guard_results, True)
+    action_guard = Mock(side_effect=[True, False])
 
     result = _run(router, action_guard_fn=action_guard)
 
     assert result.status is GcNoBattleSetupStatus.INTERRUPTED
+    assert router.state == "cards"
+    assert router.static_actions == ["navigation.goto_cards_home"]
+    assert router.visible_actions == []
+    assert action_guard.call_count == 2
+
+
+def test_later_authorized_heartbeat_restores_verified_home():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    router.state = "cards"
+
+    recovered = recover_gc_no_battle_setup_home(
+        screenshot="cards",
+        capture_fn=router.capture,
+        detector=router.detect,
+        detect_home_control_fn=router.home_control,
+        safe_tap_fn=router.static_tap,
+        tap_visible_fn=router.visible_tap,
+        action_guard_fn=lambda: True,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert recovered is True
     assert router.state == "home"
-    assert router.static_actions == [
-        "navigation.goto_cards_home",
-        "navigation.goto_home",
-    ]
+    assert router.static_actions == ["navigation.goto_home"]
 
 
 def test_no_battle_setup_applies_strategy_owned_perk_configuration():
@@ -2325,9 +2344,15 @@ def test_app_blocks_battle_start_when_no_battle_setup_fails():
     manager.on_home.assert_not_called()
 
 
-def test_app_does_not_restart_home_setup_after_local_repair_exhaustion():
+def test_start_workflow_does_not_retry_or_recover_exhausted_home_repair():
     frame = object()
     app = App.__new__(App)
+    app._active_action_authority_owner = AuthorityHold.OPERATOR_WORKFLOW
+    app._supervisor = Mock()
+    app._supervisor.battle_workflow = {
+        "request_id": "start-1",
+        "status": "acknowledged",
+    }
     app._runtime_action_guard = Mock(return_value=True)
     app._capture_frame = Mock()
     setup = GcNoBattleSetupResult(
@@ -2349,6 +2374,7 @@ def test_app_does_not_restart_home_setup_after_local_repair_exhaustion():
     assert result is setup
     run_setup.assert_called_once()
     app._capture_frame.assert_not_called()
+    assert getattr(app, "_pending_home_setup_recovery", None) is None
 
 
 def test_app_retries_transient_home_setup_failure_before_starting_battle():
@@ -2453,6 +2479,161 @@ def test_app_does_not_publish_gate_or_start_after_control_interruption():
     manager.mark_no_battle_setup_complete.assert_not_called()
     handle_home.assert_not_called()
     manager.on_home.assert_not_called()
+
+
+@pytest.mark.parametrize("control_state", ["PAUSED", "STOPPED"])
+def test_yielded_home_recovery_sends_no_input_while_not_enabled(
+    control_state,
+):
+    app = App.__new__(App)
+    supervisor = Mock()
+    supervisor.control_state = control_state
+    supervisor.battle_workflow = {
+        "request_id": "start-1",
+        "status": "acknowledged",
+    }
+    supervisor.manual_control = None
+    app._supervisor = supervisor
+    app._active_action_authority_owner = AuthorityHold.OPERATOR_WORKFLOW
+    evidence = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "game_state": "unknown",
+    }
+    app._current_control_workflow_evidence = lambda: dict(evidence)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._defer_home_setup_recovery()
+
+    with patch(
+        "core.app.recover_gc_no_battle_setup_home"
+    ) as recover_home:
+        assert app._advance_pending_home_setup_recovery(object()) is False
+
+    recover_home.assert_not_called()
+    assert app._pending_home_setup_recovery is not None
+    app._runtime_action_guard.assert_not_called()
+
+
+def test_take_manual_control_discards_yielded_start_recovery_without_input():
+    app = App.__new__(App)
+    supervisor = Mock()
+    supervisor.control_state = "PAUSED"
+    supervisor.battle_workflow = {
+        "request_id": "start-1",
+        "status": "acknowledged",
+    }
+    supervisor.manual_control = None
+    app._supervisor = supervisor
+    app._active_action_authority_owner = AuthorityHold.OPERATOR_WORKFLOW
+    evidence = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "game_state": "unknown",
+    }
+    app._current_control_workflow_evidence = lambda: dict(evidence)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._defer_home_setup_recovery()
+    supervisor.battle_workflow = {
+        "request_id": "start-1",
+        "status": "interrupted",
+    }
+    supervisor.manual_control = {
+        "manual_control_id": "manual-1",
+        "status": "active",
+    }
+
+    with patch(
+        "core.app.recover_gc_no_battle_setup_home"
+    ) as recover_home:
+        assert app._advance_pending_home_setup_recovery(object()) is False
+
+    recover_home.assert_not_called()
+    assert app._pending_home_setup_recovery is None
+    app._runtime_action_guard.assert_not_called()
+
+
+def test_same_owner_enable_recovers_home_on_a_later_heartbeat():
+    app = App.__new__(App)
+    supervisor = Mock()
+    supervisor.control_state = "PAUSED"
+    supervisor.battle_workflow = {
+        "request_id": "start-1",
+        "status": "acknowledged",
+    }
+    supervisor.manual_control = None
+    app._supervisor = supervisor
+    app._active_action_authority_owner = AuthorityHold.OPERATOR_WORKFLOW
+    evidence = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "game_state": "unknown",
+    }
+    app._current_control_workflow_evidence = lambda: dict(evidence)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._defer_home_setup_recovery()
+    supervisor.control_state = "RUNNING"
+
+    with (
+        patch(
+            "core.app.recover_gc_no_battle_setup_home",
+            return_value=True,
+        ) as recover_home,
+        patch("core.app.log_action_intent"),
+        patch("core.app.log_result"),
+    ):
+        assert app._advance_pending_home_setup_recovery(object()) is True
+
+    recover_home.assert_called_once()
+    assert recover_home.call_args.kwargs["action_guard_fn"]() is True
+    assert app._pending_home_setup_recovery is None
+
+
+def test_failed_enabled_home_recovery_pauses_and_terminalizes_once():
+    app = App.__new__(App)
+    supervisor = Mock()
+    supervisor.control_state = "RUNNING"
+    supervisor.battle_workflow = {
+        "request_id": "start-1",
+        "status": "acknowledged",
+    }
+    supervisor.manual_control = None
+    app._supervisor = supervisor
+    app._active_action_authority_owner = AuthorityHold.OPERATOR_WORKFLOW
+    evidence = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "game_state": "unknown",
+    }
+    app._current_control_workflow_evidence = lambda: dict(evidence)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._defer_home_setup_recovery()
+
+    with (
+        patch(
+            "core.app.recover_gc_no_battle_setup_home",
+            return_value=False,
+        ) as recover_home,
+        patch("core.app.log_action_intent"),
+        patch("core.app.log_result"),
+    ):
+        assert app._advance_pending_home_setup_recovery(object()) is True
+
+    recover_home.assert_called_once()
+    supervisor.persist_state.assert_called_once_with("PAUSED")
+    supervisor.transition_battle_workflow.assert_called_once()
+    assert app._pending_home_setup_recovery is None
 
 
 def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
