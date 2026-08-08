@@ -1,5 +1,5 @@
 import copy
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +25,14 @@ from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
 )
 from core.home_battle import HomeBattleEvidence
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    PlayerSaveBoundaryKind,
+    PlayerSaveNaturalBoundary,
+    PlayerSaveTargetBinding,
+)
 from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.run_state import AUTOMATION, RunState
 from core.status_report import StatusReporter
@@ -71,6 +79,40 @@ def _free_upgrade_lock_boundary_evidence():
 def _bind_terminal_context(app: App, scope_id: str = "test-run") -> None:
     app._current_run_scope_id = lambda: scope_id
     app._observed_active_battle_scope_id = scope_id
+
+
+def _repair_authority() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "runtime_id": "runtime-1",
+        "pid": 1234,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "game_state": "active_battle",
+    }
+
+
+def _repair_terminal_acquisition() -> PlayerSaveAcquisitionBundle:
+    started = datetime.now(timezone.utc)
+    captured = started + timedelta(milliseconds=1)
+    return PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.NATURAL_BOUNDARY,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="save_acquired",
+        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        acquisition_started_at=started,
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=SimpleNamespace(),
+        boundary=PlayerSaveNaturalBoundary(
+            kind=PlayerSaveBoundaryKind.GAME_OVER,
+            observed_at=started,
+            runtime_session_id="save-runtime-1",
+            activity_scope_id="scope-1",
+        ),
+    )
 
 
 class _RunCountingStrategy(BaseStrategy):
@@ -333,7 +375,7 @@ class RunBoundaryTests(unittest.TestCase):
         self.assertIs(manager.strategy, strategy)
         self.assertTrue(manager.ctx.data["startup_gates_deferred"])
         self.assertFalse(manager.run_initialization_pending())
-        self.assertFalse(manager.session_preflight_pending())
+        self.assertTrue(manager.session_preflight_pending())
         self.assertEqual(
             mv["gc_session_preflight_evidence"]["free_upgrade_locks"]["status"],
             "unavailable_deferred",
@@ -1182,7 +1224,10 @@ class DeferredStartupGateTests(unittest.TestCase):
         mv["gc_session_preflight_restart_available"] = True
 
         self.assertTrue(manager.session_preflight_restart_available())
-        self.assertTrue(manager.authorize_session_preflight_restart())
+        authority = _repair_authority()
+        self.assertTrue(
+            manager.authorize_session_preflight_restart(authority)
+        )
         self.assertFalse(mv["gc_session_preflight_blocked"])
         self.assertTrue(mv["gc_session_preflight_repair_required"])
         self.assertFalse(mv["gc_session_preflight_restart_available"])
@@ -2255,7 +2300,7 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(manager.session_preflight_terminally_blocked())
 
         mv["gc_session_preflight_repair_required"] = True
-        self.assertFalse(manager.session_preflight_terminally_blocked())
+        self.assertTrue(manager.session_preflight_terminally_blocked())
 
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = True
@@ -2364,7 +2409,7 @@ class GcFarmProfileTests(unittest.TestCase):
         app._accept_pending_terminal_history_handoff.assert_called_once_with()
         manager.on_game_over.assert_called_once_with()
 
-    def test_home_repair_game_over_skips_surrendered_battle_capture(self):
+    def test_home_repair_records_surrender_before_returning_home(self):
         strategy = get_strategy("farm_t18")
         manager = MagicMock()
         manager.strategy = strategy
@@ -2379,6 +2424,12 @@ class GcFarmProfileTests(unittest.TestCase):
             }
         )
         manager.session_preflight_repair_in_progress.return_value = True
+        manager.session_preflight_repair_grant.return_value = {
+            **_repair_authority(),
+            "request_id": "repair-1",
+            "check_id": "cards_deck",
+            "reason": "Cards deck does not match",
+        }
         app = App.__new__(App)
         app._mission_mgr = manager
         app._fast_game_over = False
@@ -2391,15 +2442,46 @@ class GcFarmProfileTests(unittest.TestCase):
         app._strategy_boundary_confirmed = False
         app._handle_daily_gem_if_due = MagicMock(return_value=False)
         app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        app._player_save_runtime_session_id = "save-runtime-1"
+        terminal_evidence = {
+            **_repair_authority(),
+            "game_state": "game_over",
+            "observation_id": "runtime-1:terminal",
+        }
+        app._current_control_workflow_evidence = lambda: terminal_evidence
+        acquisition = _repair_terminal_acquisition()
+        terminal_context = {"terminal_save_report": {}}
+        app._terminal_battle_bundle = MagicMock(
+            return_value=(terminal_context, acquisition)
+        )
+        events = []
+        app._persist_minimal_surrender_record = MagicMock(
+            side_effect=lambda *_args, **_kwargs: (
+                events.append("record")
+                or {"battle_id": "Battle20260807T200000-0700"}
+            )
+        )
         _bind_terminal_context(app)
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
-        with patch("core.app.handle_game_over") as game_over:
+        with patch(
+            "core.app.return_home_from_game_over",
+            side_effect=lambda **_kwargs: events.append("home") or True,
+        ) as return_home:
             app._handle_primary_states("GAME_OVER", set(), frame)
 
-        self.assertFalse(game_over.call_args.kwargs["capture_stats"])
-        self.assertTrue(
-            game_over.call_args.kwargs["return_home_after_battle"]
+        return_home.assert_called_once()
+        self.assertEqual(events, ["record", "home"])
+        app._persist_minimal_surrender_record.assert_called_once_with(
+            terminal_context,
+            acquisition,
+            initiator="automation_config_repair",
+            disposition_provenance={
+                "acquisition": acquisition.redacted_provenance(),
+                "repair_request_id": "repair-1",
+                "check_id": "cards_deck",
+                "reason": "Cards deck does not match",
+            },
         )
         manager.on_game_over.assert_called_once_with()
 
@@ -2790,11 +2872,14 @@ class GcFarmProfileTests(unittest.TestCase):
         app._auto_start_enabled = True
         app._session_preflight_repair_denial_logged = False
         app._mission_mgr = manager
+        app._supervisor = MagicMock()
+        authority = _repair_authority()
+        app._current_control_workflow_evidence = lambda: authority
 
         with patch("core.app.surrender_run", return_value=True) as surrender:
             app._attempt_session_preflight_repair({"state": "RUNNING"})
 
-        manager.begin_session_preflight_repair.assert_called_once_with()
+        manager.begin_session_preflight_repair.assert_called_once_with(authority)
         surrender.assert_called_once_with(
             action_guard=app._session_preflight_repair_action_guard
         )
@@ -2807,6 +2892,9 @@ class GcFarmProfileTests(unittest.TestCase):
         app._auto_start_enabled = True
         app._session_preflight_repair_denial_logged = False
         app._mission_mgr = manager
+        app._supervisor = MagicMock()
+        authority = _repair_authority()
+        app._current_control_workflow_evidence = lambda: authority
 
         with patch("core.app.surrender_run", return_value=False):
             app._attempt_session_preflight_repair({"state": "RUNNING"})

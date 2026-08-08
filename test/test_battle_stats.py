@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 import numpy as np
+import pytest
 
 from core.battle_stats import (
     attach_observed_run_configuration,
@@ -12,7 +13,9 @@ from core.battle_stats import (
     build_battle_record,
     build_battle_record_from_clipboard,
     build_battle_record_from_player_save,
+    build_minimal_battle_record_from_player_save,
     format_tower_number,
+    included_in_default_history,
     parse_more_stats_clipboard,
     parse_duration_seconds,
     parse_tower_number,
@@ -1194,6 +1197,96 @@ def test_player_save_report_keeps_compact_game_stats_as_optional_augmentation():
         warning.startswith("Optional Game Stats fields unavailable")
         for warning in record["quality"]["warnings"]
     )
+
+
+def test_manual_surrender_minimal_record_uses_save_only_and_excludes_analytics():
+    report = _terminal_save_report()
+    report["completed_entry"]["identity"]["killed_by"] = "Surrender"
+    for section in report["completed_entry"]["more_stats"]["sections"]:
+        for row in section["rows"]:
+            if row["key"] == "killed_by":
+                row["value"] = "Surrender"
+                row["enum_id"] = 99
+
+    record = build_minimal_battle_record_from_player_save(
+        report,
+        battle_id="BattleManualSurrender",
+        runtime_context={"terminal_state": "GAME_OVER"},
+    )
+
+    assert record["game_stats"]["raw_text"] == ""
+    assert record["more_stats"]["source_method"] == (
+        "player_save_battle_history"
+    )
+    assert record["report_disposition"] == {
+        "schema_version": 1,
+        "outcome": "surrendered",
+        "initiator": "operator_manual_control",
+        "collection": "minimal_save_backed",
+        "representative": False,
+        "analytics": "excluded",
+        "history": "excluded_by_default",
+        "reason": "manual surrender confirmed before optional UI enrichment",
+        "provenance": {
+            "mapping_id": "data-9-game-1073",
+            "capture": report["capture"],
+            "run_binding": {},
+            "history_transition": report["history_transition"],
+        },
+    }
+
+
+def test_nonrepresentative_surrender_record_is_idempotent_and_collision_safe(
+    tmp_path,
+):
+    report = _terminal_save_report()
+    report["completed_entry"]["identity"]["killed_by"] = "Surrender"
+    record = build_minimal_battle_record_from_player_save(
+        report,
+        battle_id="BattleManualSurrender",
+    )
+
+    json_path, markdown_path = persist_battle_record(
+        record,
+        records_dir=tmp_path,
+    )
+    markdown_path.unlink()
+    repeated_json, repeated_markdown = persist_battle_record(
+        record,
+        records_dir=tmp_path,
+    )
+
+    assert repeated_json == json_path
+    assert repeated_markdown == markdown_path
+    assert repeated_markdown.exists()
+    assert included_in_default_history(record) is False
+
+    collision = dict(record)
+    collision["report_disposition"] = {
+        **record["report_disposition"],
+        "collection": "full_terminal_ui",
+    }
+    with pytest.raises(FileExistsError, match="non-representative"):
+        persist_battle_record(collision, records_dir=tmp_path)
+
+
+def test_previous_wave_ignores_newer_nonrepresentative_surrender(tmp_path):
+    representative = _record()
+    persist_battle_record(representative, records_dir=tmp_path)
+    surrender = _record()
+    surrender["battle_id"] = "Battle20260715T130000-0700"
+    surrender["captured_at"] = "2026-07-15T13:00:00-07:00"
+    surrender["more_stats"]["sections"][0]["rows"][0]["value"] = 9999
+    surrender["report_disposition"] = {
+        "schema_version": 1,
+        "outcome": "surrendered",
+        "representative": False,
+        "analytics": "excluded",
+        "history": "excluded_by_default",
+    }
+    persist_battle_record(surrender, records_dir=tmp_path)
+
+    assert get_previous_run_wave(records_dir=str(tmp_path)) == 2000
 
 
 def test_unbound_terminal_record_is_valid_but_warns_about_omitted_run_evidence():

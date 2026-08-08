@@ -111,14 +111,26 @@ class FakeManager:
             raise AutomationProcessError(
                 "Completely stop automation before changing startup gates"
             )
-        if policy not in {"auto", "auto_validate", "immediate", "next_run"}:
+        if policy not in {
+            "operator",
+            "auto",
+            "auto_validate",
+            "immediate",
+            "next_run",
+        }:
             raise AutomationProcessError("invalid startup gate policy")
         self.startup_gate_policy = policy
         return self.status()
 
     def persist_startup_gate_policy(self, policy):
         self.calls.append(f"persist_startup_gate_policy:{policy}")
-        if policy not in {"auto", "auto_validate", "immediate", "next_run"}:
+        if policy not in {
+            "operator",
+            "auto",
+            "auto_validate",
+            "immediate",
+            "next_run",
+        }:
             raise AutomationProcessError("invalid startup gate policy")
         self.startup_gate_policy = policy
         return self.status()
@@ -639,7 +651,7 @@ def test_systemd_manager_rejects_non_unit_names(name):
         SystemdAutomationManager(name)
 
 
-def test_start_running_crosses_new_process_boundary_paused(tmp_path):
+def test_start_automation_crosses_new_process_boundary_paused(tmp_path):
     manager = FakeManager()
     connection_manager = FakePersistentAdbConnectionManager()
     service = _service(tmp_path, manager, connection_manager)
@@ -648,20 +660,38 @@ def test_start_running_crosses_new_process_boundary_paused(tmp_path):
         or pytest.fail("service was not paused before process start")
     )
 
-    response = service.apply_process_action(
-        {"action": "start", "run_state": "RUNNING"}
-    )
+    response = service.apply_process_action({"action": "start"})
 
-    assert manager.calls == ["set_startup_gate_policy:auto_validate", "start"]
+    assert manager.calls == ["set_startup_gate_policy:operator", "start"]
     assert connection_manager.calls == [("localhost:5555", True)]
-    assert service.control_store.read()["state"] == "RUNNING"
+    assert service.control_store.read()["state"] == "PAUSED"
     assert response["process_service"]["active"]
     assert response["request"] == {
         "accepted": True,
         "action": "start",
-        "startup_gate_policy": "auto_validate",
+        "disposition": "completed",
+        "action_authority": "paused",
     }
     assert response["adb_connection"]["state"] == "device"
+
+
+def test_repeated_process_start_and_stop_are_visible_no_ops(tmp_path):
+    live_manager = FakeManager(active=True)
+    live_service = _service(tmp_path / "live", live_manager)
+
+    started = live_service.apply_process_action({"action": "start"})
+
+    assert started["request"]["disposition"] == "no_op"
+    assert started["request"]["action_authority"] == "unknown"
+    assert live_manager.calls == []
+
+    stopped_manager = FakeManager(active=False)
+    stopped_service = _service(tmp_path / "stopped", stopped_manager)
+
+    stopped = stopped_service.apply_process_action({"action": "stop"})
+
+    assert stopped["request"]["disposition"] == "no_op"
+    assert stopped_manager.calls == []
 
 
 def test_start_rejects_an_installed_runtime_that_still_owns_reconnects(tmp_path):
@@ -672,7 +702,7 @@ def test_start_rejects_an_installed_runtime_that_still_owns_reconnects(tmp_path)
 
     with pytest.raises(ControlSurfaceRequestError) as exc_info:
         _service(tmp_path, manager, connection_manager).apply_process_action(
-            {"action": "start", "run_state": "PAUSED"}
+            {"action": "start"}
         )
 
     assert exc_info.value.status == 503
@@ -681,29 +711,21 @@ def test_start_rejects_an_installed_runtime_that_still_owns_reconnects(tmp_path)
     assert connection_manager.calls == []
 
 
-def test_start_can_attach_current_battle_and_persists_policy_before_start(tmp_path):
+def test_start_rejects_obsolete_authority_and_attachment_parameters(tmp_path):
     manager = FakeManager()
     service = _service(tmp_path, manager)
-    manager.on_start = lambda: (
-        manager.startup_gate_policy == "next_run"
-        or pytest.fail("startup gate policy was not persisted before start")
-    )
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        service.apply_process_action(
+            {
+                "action": "start",
+                "run_state": "RUNNING",
+                "startup_gate_policy": "next_run",
+            }
+        )
 
-    response = service.apply_process_action(
-        {
-            "action": "start",
-            "run_state": "RUNNING",
-            "startup_gate_policy": "next_run",
-        }
-    )
-
-    assert manager.calls == ["set_startup_gate_policy:next_run", "start"]
-    assert response["process_service"]["startup_gate_policy"] == "next_run"
-    assert response["request"] == {
-        "accepted": True,
-        "action": "start",
-        "startup_gate_policy": "next_run",
-    }
+    assert exc_info.value.status == 409
+    assert exc_info.value.code == "obsolete_start_parameters"
+    assert manager.calls == []
 
 
 def test_start_persists_selected_strategy_before_process_reaches_home(tmp_path):
@@ -721,14 +743,12 @@ def test_start_persists_selected_strategy_before_process_reaches_home(tmp_path):
     response = service.apply_process_action(
         {
             "action": "start",
-            "run_state": "RUNNING",
-            "startup_gate_policy": "immediate",
             "strategy": "farm_t19",
         }
     )
 
     assert manager.calls == [
-        "set_startup_gate_policy:immediate",
+        "set_startup_gate_policy:operator",
         "set_strategy:farm_t19",
         "start",
     ]
@@ -736,46 +756,44 @@ def test_start_persists_selected_strategy_before_process_reaches_home(tmp_path):
     assert response["request"] == {
         "accepted": True,
         "action": "start",
-        "startup_gate_policy": "immediate",
+        "disposition": "completed",
+        "action_authority": "paused",
         "strategy": "farm_t19",
     }
 
 
-def test_start_with_saved_tournament_creates_fresh_validation_request(tmp_path):
+def test_start_with_saved_tournament_does_not_authorize_a_battle(tmp_path):
     manager = FakeManager()
     manager.strategy = "tournament"
     service = _service(tmp_path, manager)
 
-    service.apply_process_action({"action": "start", "run_state": "PAUSED"})
+    service.apply_process_action({"action": "start"})
     first = service.control_store.status()["exclusive_validation"]
-    first_request_id = first["current_request_id"]
-    assert first["receipts"][first_request_id]["status"] == "pending"
+    assert first["current_request_id"] is None
+    assert first["receipts"] == {}
 
     service.apply_process_action({"action": "stop"})
-    service.apply_process_action({"action": "start", "run_state": "PAUSED"})
+    service.apply_process_action({"action": "start"})
     second = service.control_store.status()["exclusive_validation"]
-    second_request_id = second["current_request_id"]
-
-    assert second_request_id != first_request_id
-    assert second["receipts"][second_request_id]["status"] == "pending"
+    assert second["current_request_id"] is None
+    assert second["receipts"] == {}
     assert manager.calls == [
-        "set_startup_gate_policy:auto_validate",
+        "set_startup_gate_policy:operator",
         "start",
         "stop",
-        "set_startup_gate_policy:auto_validate",
+        "set_startup_gate_policy:operator",
         "start",
     ]
 
 
-@pytest.mark.parametrize("policy", ["", "later", 1, True])
-def test_start_rejects_invalid_startup_gate_policy(tmp_path, policy):
+@pytest.mark.parametrize("policy", ["", "later", "auto_validate", 1, True])
+def test_start_rejects_any_client_selected_startup_gate_policy(tmp_path, policy):
     manager = FakeManager()
 
     with pytest.raises(ControlSurfaceRequestError):
         _service(tmp_path, manager).apply_process_action(
             {
                 "action": "start",
-                "run_state": "RUNNING",
                 "startup_gate_policy": policy,
             }
         )
@@ -791,7 +809,6 @@ def test_start_rejects_invalid_selected_strategy(tmp_path, strategy):
         _service(tmp_path, manager).apply_process_action(
             {
                 "action": "start",
-                "run_state": "RUNNING",
                 "strategy": strategy,
             }
         )
@@ -809,7 +826,6 @@ def test_start_rejects_selected_strategy_when_process_is_already_active(tmp_path
         _service(tmp_path, manager).apply_process_action(
             {
                 "action": "start",
-                "run_state": "RUNNING",
                 "strategy": "farm_t19",
             }
         )
@@ -822,7 +838,7 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     manager = FakeManager()
     connection_manager = FakePersistentAdbConnectionManager()
     service = _service(tmp_path, manager, connection_manager)
-    service.apply_process_action({"action": "start", "run_state": "PAUSED"})
+    service.apply_process_action({"action": "start"})
     assert service.control_store.read()["state"] == "PAUSED"
     connection_manager.calls.clear()
 
@@ -837,7 +853,7 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     response = service.apply_process_action({"action": "stop"})
 
     assert manager.calls == [
-        "set_startup_gate_policy:auto_validate",
+        "set_startup_gate_policy:operator",
         "start",
         "stop",
     ]
@@ -846,134 +862,17 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     assert response["process_service"]["active"] is False
 
 
-def test_attached_restart_pauses_replaces_and_restores_running_intent(tmp_path):
-    manager = FakeManager(active=True)
-    connection_manager = FakePersistentAdbConnectionManager()
-    service = _service(tmp_path, manager, connection_manager)
-    service.control_store.set_state("RUNNING", source="test")
-    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
-    acknowledgements: list[str] = []
-    pause_checks: list[tuple[int, int]] = []
-    replacement_checks: list[tuple[int, int]] = []
-    service._wait_for_attached_restart_pause = (
-        lambda *, previous_pid, log_offset: pause_checks.append(
-            (previous_pid, log_offset)
-        )
-        or {}
-    )
-    service._wait_for_state_acknowledgement = lambda expected: (
-        acknowledgements.append(expected) or {}
-    )
-    service._wait_for_replacement_runtime = (
-        lambda *, replacement_pid, log_offset: replacement_checks.append(
-            (replacement_pid, log_offset)
-        )
-        or {}
-    )
-    manager.on_stop = lambda: (
-        service.control_store.read()["state"] == "PAUSED"
-        or pytest.fail("attached restart stopped before persisting PAUSED")
-    )
-    manager.on_start = lambda: (
-        manager.startup_gate_policy == "next_run"
-        and service.control_store.read()["state"] == "PAUSED"
-        or pytest.fail("replacement did not cross its boundary paused/attached")
-    )
-
-    with lock_path.open("r", encoding="utf-8") as lock_handle:
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        response = service.apply_process_action({"action": "restart_attached"})
-
-    assert manager.calls == [
-        "stop",
-        "set_startup_gate_policy:next_run",
-        "start",
-        "persist_startup_gate_policy:auto_validate",
-    ]
-    assert connection_manager.calls == [("localhost:5555", True)]
-    assert len(pause_checks) == 1
-    assert pause_checks[0][0] == manager.pid - 1
-    assert pause_checks[0][1] > 0
-    assert acknowledgements == ["RUNNING"]
-    assert len(replacement_checks) == 1
-    assert replacement_checks[0][0] == manager.pid
-    assert replacement_checks[0][1] > 0
-    assert manager.startup_gate_policy == "auto_validate"
-    assert service.control_store.read()["state"] == "RUNNING"
-    assert response["request"] == {
-        "accepted": True,
-        "action": "restart_attached",
-        "disposition": "active_battle_reloaded",
-        "previous_pid": manager.pid - 1,
-        "replacement_pid": manager.pid,
-        "restored_state": "RUNNING",
-        "startup_gate_policy": "next_run",
-    }
-
-
-def test_attached_restart_failure_restores_policy_and_leaves_pause(tmp_path):
-    manager = FakeManager(active=True, fail_start=True)
-    service = _service(tmp_path, manager)
-    service.control_store.set_state("RUNNING", source="test")
-    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
-    service._wait_for_attached_restart_pause = (
-        lambda *, previous_pid, log_offset: {}
-    )
-
-    with lock_path.open("r", encoding="utf-8") as lock_handle:
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        with pytest.raises(ControlSurfaceRequestError) as exc_info:
-            service.apply_process_action({"action": "restart_attached"})
-
-    assert exc_info.value.status == 503
-    assert manager.calls == [
-        "stop",
-        "set_startup_gate_policy:next_run",
-        "start",
-        "set_startup_gate_policy:auto_validate",
-    ]
-    assert manager.startup_gate_policy == "auto_validate"
-    assert service.control_store.read()["state"] == "PAUSED"
-
-
-def test_attached_restart_restores_unexpired_timed_pause(tmp_path):
-    manager = FakeManager(active=True)
-    service = _service(tmp_path, manager)
-    resume_at = time.time() + 600
-    service.control_store.set_state(
-        "PAUSED",
-        resume_at=resume_at,
-        source="test",
-    )
-    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
-    service._wait_for_attached_restart_pause = (
-        lambda *, previous_pid, log_offset: {}
-    )
-    service._wait_for_replacement_runtime = (
-        lambda *, replacement_pid, log_offset: {}
-    )
-
-    with lock_path.open("r", encoding="utf-8") as lock_handle:
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        response = service.apply_process_action({"action": "restart_attached"})
-
-    control = service.control_store.read()
-    assert control["state"] == "PAUSED"
-    assert control["resume_at"] == resume_at
-    assert response["request"]["restored_state"] == "PAUSED"
-
-
-def test_attached_restart_rejects_missing_matching_runtime_owner(tmp_path):
+def test_attached_restart_requires_explicit_stop_start_and_attach(tmp_path):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
     service.control_store.set_state("RUNNING", source="test")
-    _write_running_runtime_evidence(tmp_path, pid=manager.pid)
 
     with pytest.raises(ControlSurfaceRequestError) as exc_info:
         service.apply_process_action({"action": "restart_attached"})
 
     assert exc_info.value.status == 409
-    assert "ADB lock owner" in str(exc_info.value)
+    assert exc_info.value.code == "explicit_attach_required"
+    assert "explicit Attach to Battle" in str(exc_info.value)
     assert manager.calls == []
 
 
@@ -982,12 +881,17 @@ def test_attached_restart_readiness_verifies_fresh_owner_control_and_status(
 ):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
-    service.control_store.set_state("PAUSED", source="attached-restart")
+    control = service.control_store.set_state(
+        "PAUSED",
+        source="attached-restart",
+    )
+    state_request_id = control["state_request_id"]
     lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
     timestamp = datetime.now().astimezone().replace(microsecond=0)
     timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
     service.action_log.write_text(
-        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file\n"
+        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file "
+        f"request_id={state_request_id}\n"
         f"[STATUS {timestamp_text}] State=RUNNING/PAUSED | "
         "Wave=123 | Coins/min=1.0T\n",
         encoding="utf-8",
@@ -1007,13 +911,18 @@ def test_attached_restart_readiness_verifies_fresh_owner_control_and_status(
 def test_replacement_readiness_verifies_attached_policy_and_first_status(tmp_path):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
-    service.control_store.set_state("PAUSED", source="attached-restart")
+    control = service.control_store.set_state(
+        "PAUSED",
+        source="attached-restart",
+    )
+    state_request_id = control["state_request_id"]
     lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
     timestamp = datetime.now().astimezone().replace(microsecond=0)
     timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
     service.action_log.write_text(
         f"[INFO {timestamp_text}] [RUN_INIT] Startup gate policy=next_run\n"
-        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file\n"
+        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file "
+        f"request_id={state_request_id}\n"
         f"[STATUS {timestamp_text}] State=RUNNING/PAUSED | "
         "Wave=123 | Coins/min=1.0T\n",
         encoding="utf-8",
@@ -1033,12 +942,17 @@ def test_replacement_readiness_verifies_attached_policy_and_first_status(tmp_pat
 def test_attached_restart_pause_rejects_fresh_nonrunning_observation(tmp_path):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
-    service.control_store.set_state("PAUSED", source="attached-restart")
+    control = service.control_store.set_state(
+        "PAUSED",
+        source="attached-restart",
+    )
+    state_request_id = control["state_request_id"]
     lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
     timestamp = datetime.now().astimezone().replace(microsecond=0)
     timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
     service.action_log.write_text(
-        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file\n"
+        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file "
+        f"request_id={state_request_id}\n"
         f"[STATUS {timestamp_text}] State=HOME_SCREEN/PAUSED | "
         "Wave=— | Coins/min=—\n",
         encoding="utf-8",
@@ -1058,7 +972,7 @@ def test_start_failure_falls_back_to_stopped_intent(tmp_path):
     service = _service(tmp_path, manager)
 
     with pytest.raises(ControlSurfaceRequestError) as exc_info:
-        service.apply_process_action({"action": "start", "run_state": "RUNNING"})
+        service.apply_process_action({"action": "start"})
 
     assert exc_info.value.status == 503
     assert service.control_store.read()["state"] == "STOPPED"
@@ -1095,12 +1009,15 @@ def test_control_surface_requests_live_adb_handoff_only_after_pause_ack(tmp_path
     connection_manager = FakePersistentAdbConnectionManager()
     service = _service(tmp_path, manager, connection_manager)
     service.apply_control({"action": "pause"})
-    requested_at = service.control_store.read()["state_updated_at"]
+    control = service.control_store.read()
+    requested_at = control["state_updated_at"]
+    state_request_id = control["state_request_id"]
     timestamp = datetime.fromisoformat(requested_at).strftime("%Y-%m-%d %H:%M:%S")
     service.action_log.parent.mkdir(parents=True, exist_ok=True)
     with service.action_log.open("a", encoding="utf-8") as handle:
         handle.write(
-            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file\n"
+            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file "
+            f"request_id={state_request_id}\n"
         )
 
     response = service.apply_process_action(
@@ -1117,12 +1034,15 @@ def test_control_surface_rejects_live_handoff_under_timed_pause(tmp_path):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
     service.apply_control({"action": "pause", "minutes": 15})
-    requested_at = service.control_store.read()["state_updated_at"]
+    control = service.control_store.read()
+    requested_at = control["state_updated_at"]
+    state_request_id = control["state_request_id"]
     timestamp = datetime.fromisoformat(requested_at).strftime("%Y-%m-%d %H:%M:%S")
     service.action_log.parent.mkdir(parents=True, exist_ok=True)
     with service.action_log.open("a", encoding="utf-8") as handle:
         handle.write(
-            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file\n"
+            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file "
+            f"request_id={state_request_id}\n"
         )
 
     with pytest.raises(ControlSurfaceRequestError, match="Indefinitely pause"):
@@ -1165,24 +1085,20 @@ def test_control_surface_saves_or_queues_strategy_by_process_state(tmp_path):
         "disposition": "queued",
     }
 
-    response = service.apply_process_action(
-        {
-            "action": "set_strategy",
-            "strategy": "farm_t19",
-            "apply_to_active_run": True,
-        }
-    )
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        service.apply_process_action(
+            {
+                "action": "set_strategy",
+                "strategy": "farm_t19",
+                "apply_to_active_run": True,
+            }
+        )
 
-    assert manager.calls[-1] == "persist_strategy:farm_t19"
+    assert exc_info.value.code == "fresh_observation_unavailable"
+    assert manager.calls[-1] == "persist_strategy:farm_t18"
     control = service.control_store.status()
-    assert control["strategy"] == "farm_t19"
-    assert control["strategy_apply_mode"] == "active_battle"
-    assert response["request"] == {
-        "accepted": True,
-        "action": "set_strategy",
-        "strategy": "farm_t19",
-        "disposition": "active_battle_requested",
-    }
+    assert control["strategy"] == "farm_t18"
+    assert control["strategy_apply_mode"] == "next_boundary"
 
 
 def test_control_surface_rejects_active_battle_adoption_without_runtime(tmp_path):

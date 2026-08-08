@@ -476,6 +476,12 @@ def test_active_attachment_forces_serialization_and_restores_same_running_source
     assert result.metadata["acquisition"]["type"] == "forced_serialization"
     observations = result.running_attachment_observations
     assert observations is None  # the default snapshot has no profile facts
+    temporal = result.running_attachment_temporal_binding
+    assert temporal is not None
+    assert temporal.activity_scope_id is None
+    assert temporal.active_round_identity_fingerprint == (
+        "active-round-fingerprint"
+    )
     assert result.running_attachment_context == _attachment_context()
     assert result.acquisition is not None
     assert calls == {
@@ -668,6 +674,8 @@ def test_active_attachment_control_loss_while_backgrounded_cannot_restore():
     assert result.reason.endswith(
         "control_authority_interrupted_before_foreground"
     )
+    assert result.background_dispatched is True
+    assert result.operator_workflow_interrupted is True
     assert lifecycle == ["background"]
 
 
@@ -818,6 +826,82 @@ def test_active_attachment_conflicting_active_round_identity_blocks_fallback():
     assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
     assert not result.safe_ui_fallback
     assert result.reason == "active_round_identity_conflicted_after_restore"
+    assert result.background_dispatched is True
+    assert result.operator_workflow_interrupted is True
+
+
+def test_active_attachment_keeps_identity_when_fact_projection_fails(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "core.player_save_history.running_attachment_observations_from_acquisition",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("unsupported optional fact")
+        ),
+    )
+
+    result = _read_active(
+        _reader(
+            attachment_context_fn=_attachment_context,
+            background_fn=lambda _target: True,
+            foreground_fn=lambda _target: True,
+        )
+    )
+
+    assert result.complete
+    assert result.running_attachment_temporal_binding is not None
+    assert result.running_attachment_observations is None
+    assert result.operator_workflow_interrupted is False
+
+
+def test_active_attachment_identity_projection_failure_interrupts_workflow(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "core.player_save_history.running_attachment_temporal_binding_from_acquisition",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("identity projection failed")
+        ),
+    )
+
+    result = _read_active(
+        _reader(
+            attachment_context_fn=_attachment_context,
+            background_fn=lambda _target: True,
+            foreground_fn=lambda _target: True,
+        )
+    )
+
+    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
+    assert result.reason == (
+        "active_attachment_temporal_projection_unavailable"
+    )
+    assert result.background_dispatched is True
+    assert result.operator_workflow_interrupted is True
+
+
+def test_active_attachment_missing_identity_projection_interrupts_workflow(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "core.player_save_history.running_attachment_temporal_binding_from_acquisition",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = _read_active(
+        _reader(
+            attachment_context_fn=_attachment_context,
+            background_fn=lambda _target: True,
+            foreground_fn=lambda _target: True,
+        )
+    )
+
+    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
+    assert result.reason == (
+        "active_attachment_temporal_projection_unavailable"
+    )
+    assert result.background_dispatched is True
+    assert result.operator_workflow_interrupted is True
 
 
 def test_acquisition_failure_allows_ui_only_after_source_binding_is_restored():

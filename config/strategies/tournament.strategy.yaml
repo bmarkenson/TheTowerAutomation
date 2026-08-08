@@ -11,7 +11,6 @@ runtime_policy:
   - game_over
   - game_speed
   auto_return: false
-  game_over_mode: wait
   home_preflight: true
   session_preflight_on_attach: true
   exclusive_validation:
@@ -330,7 +329,6 @@ run_configuration:
     - game_over
     - game_speed
     auto_return: false
-    game_over_mode: wait
     home_preflight: true
     session_preflight_on_attach: true
     exclusive_validation:

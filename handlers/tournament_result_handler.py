@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 import time
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 import cv2
 import numpy as np
@@ -15,9 +15,12 @@ from core.battle_stats import (
     more_stats_from_terminal_save_report,
     parse_more_stats_clipboard,
 )
-from core.input import tap_if_visible
+from core.battle_lifecycle import HomeBattleControl
+from core.home_battle import detect_home_battle_control
+from core.input import TapVerification, safe_tap, tap_if_visible
 from core.label_tapper import is_visible
 from core.ss_capture import capture_adb_screenshot
+from core.state_detector import detect_state_and_overlays
 from core.tournament_results import (
     attach_tournament_conditions,
     build_tournament_result,
@@ -34,6 +37,8 @@ from utils.logger import log
 
 
 Frame = np.ndarray
+TOURNAMENT_OK_REGION = (350, 1360, 380, 230)
+TOURNAMENT_OK_POINT = (540, 1475)
 
 
 def handle_tournament_results(
@@ -41,6 +46,7 @@ def handle_tournament_results(
     *,
     battle_context: Optional[Mapping[str, Any]] = None,
     captured_at: Optional[datetime] = None,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
 ) -> Optional[dict[str, Any]]:
     """Persist summary and Round Stats, then restore Tournament Stats.
 
@@ -136,10 +142,15 @@ def handle_tournament_results(
             f"({detailed_reason}); using verified More Stats fallback",
             "INFO",
         )
+    detail_tap_kwargs: dict[str, Any] = {
+        "screenshot": summary,
+        "retries": 1,
+    }
+    if action_guard_fn is not None:
+        detail_tap_kwargs["action_guard_fn"] = action_guard_fn
     if detailed_stats is None and tap_if_visible(
         "buttons.more_stats:tournament",
-        screenshot=summary,
-        retries=1,
+        **detail_tap_kwargs,
     ):
         time.sleep(1.2)
         detailed_frame = capture_adb_screenshot()
@@ -156,20 +167,26 @@ def handle_tournament_results(
                 screenshot=close_frame,
             ):
                 detailed_reason += ":close_guard_failed"
-            elif not tap_if_visible(
-                "buttons.close:more_stats",
-                screenshot=close_frame,
-                retries=1,
-            ):
-                detailed_reason += ":close_failed"
             else:
-                time.sleep(1.0)
-                restored = capture_adb_screenshot()
-                if restored is None or not is_visible(
-                    "indicators.tournament_stats",
-                    screenshot=restored,
+                close_tap_kwargs: dict[str, Any] = {
+                    "screenshot": close_frame,
+                    "retries": 1,
+                }
+                if action_guard_fn is not None:
+                    close_tap_kwargs["action_guard_fn"] = action_guard_fn
+                if not tap_if_visible(
+                    "buttons.close:more_stats",
+                    **close_tap_kwargs,
                 ):
-                    detailed_reason += ":summary_not_restored"
+                    detailed_reason += ":close_failed"
+                else:
+                    time.sleep(1.0)
+                    restored = capture_adb_screenshot()
+                    if restored is None or not is_visible(
+                        "indicators.tournament_stats",
+                        screenshot=restored,
+                    ):
+                        detailed_reason += ":summary_not_restored"
 
     try:
         record = build_tournament_result(
@@ -202,6 +219,84 @@ def handle_tournament_results(
     if record["quality"]["retain_source_images"]:
         _retain_evidence(result_id, summary, detailed_frame)
     return record
+
+
+def dismiss_tournament_results_to_home(
+    *,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+    timeout_s: float = 8.0,
+    capture_fn: Callable[[], Optional[Frame]] = capture_adb_screenshot,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Dismiss the exact Tournament ``OK`` target and verify New Battle Home."""
+
+    frame = capture_fn()
+    if not _tournament_ok_visible(frame):
+        log(
+            "[TOURNAMENT_RESULTS] Verified Tournament OK target is unavailable",
+            "ERROR",
+            console=True,
+        )
+        return False
+    verification = TapVerification(
+        screenshot=frame,
+        target_region=TOURNAMENT_OK_REGION,
+        description="Tournament Results OK button",
+        verifier=_tournament_ok_visible,
+    )
+    if not safe_tap(
+        TOURNAMENT_OK_POINT,
+        screenshot=frame,
+        verification=verification,
+        log_label="buttons.ok:tournament_results",
+        action_guard_fn=action_guard_fn,
+    ):
+        return False
+
+    deadline = time.monotonic() + max(0.0, float(timeout_s))
+    while time.monotonic() <= deadline:
+        current = capture_fn()
+        if current is not None:
+            detection = detect_state_and_overlays(current)
+            if (
+                str(detection.get("state") or "").upper()
+                in {"HOME", "HOME_SCREEN"}
+                and detect_home_battle_control(current).control
+                is HomeBattleControl.NEW_BATTLE
+            ):
+                return True
+        sleep_fn(0.5)
+    return False
+
+
+def _tournament_ok_visible(frame: Optional[Frame]) -> bool:
+    """Verify the bounded green OK artwork on a Tournament Stats dialog."""
+
+    if frame is None or frame.ndim != 3:
+        return False
+    if not is_visible("indicators.tournament_stats", screenshot=frame):
+        return False
+    x, y, width, height = TOURNAMENT_OK_REGION
+    if frame.shape[1] < x + width or frame.shape[0] < y + height:
+        return False
+    crop = frame[y : y + height, x : x + width]
+    blue, green, red = cv2.split(crop)
+    green_pixels = (
+        (green >= 140)
+        & (green.astype(np.float32) >= red.astype(np.float32) * 1.15)
+        & (green.astype(np.float32) >= blue.astype(np.float32) * 1.15)
+    )
+    bright_pixels = (red >= 180) & (green >= 180) & (blue >= 180)
+    rows, columns = np.where(green_pixels)
+    return bool(
+        len(columns) >= 1500
+        and len(rows) >= 1500
+        and int(bright_pixels.sum()) >= 500
+        and int(columns.max() - columns.min()) >= 250
+        and int(rows.max() - rows.min()) >= 120
+    )
+
+
 def _copy_detailed_report(frame: Frame) -> tuple[Optional[str], str]:
     """Copy and structurally validate the visible Round Stats report."""
 
@@ -245,4 +340,7 @@ def _retain_evidence(
             cv2.imwrite(str(evidence_dir / f"{result_id}_{suffix}.png"), frame)
 
 
-__all__ = ["handle_tournament_results"]
+__all__ = [
+    "dismiss_tournament_results_to_home",
+    "handle_tournament_results",
+]

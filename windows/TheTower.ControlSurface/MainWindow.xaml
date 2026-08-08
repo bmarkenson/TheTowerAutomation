@@ -234,7 +234,7 @@
             <TextBlock x:Name="ObservedSpeedText" Text="-" FontSize="17" FontWeight="Bold" />
           </StackPanel>
           <StackPanel ToolTip="What automation should do when the current battle ends.">
-            <TextBlock Text="AFTER GAME OVER" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+            <TextBlock Text="WHEN THIS BATTLE ENDS" Foreground="{StaticResource MutedBrush}" FontSize="10" />
             <TextBlock x:Name="ModeText" Text="-" FontSize="17" FontWeight="Bold" />
           </StackPanel>
           <StackPanel>
@@ -379,11 +379,31 @@
                            FontWeight="Bold"
                            Margin="4" />
                 <UniformGrid Columns="2">
-                  <Button x:Name="PauseButton" Content="Paused" Tag="pause" Click="Control_Click" />
-                  <Button x:Name="ResumeButton" Content="Running" Tag="resume" Click="Control_Click" />
-                  <Button Content="Pause 15 min" Tag="pause:15" Click="Control_Click" />
-                  <Button Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
+                  <Button x:Name="PauseButton" Content="Automation Paused" Tag="pause" Click="Control_Click" />
+                  <Button x:Name="ResumeButton" Content="Automation Enabled" Tag="enable" Click="Control_Click" />
+                  <Button x:Name="Pause15Button" Content="Pause 15 min" Tag="pause:15" Click="Control_Click" />
+                  <Button x:Name="Pause30Button" Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
                 </UniformGrid>
+                <TextBlock Text="Paused means zero automated device input; observation can continue. Enabled permits guarded actions and does not assert the game is Running."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,6" />
+                <UniformGrid Columns="2">
+                  <Button x:Name="TakeManualControlButton" Content="Take Manual Control" Tag="take_manual_control" Click="Control_Click" />
+                  <Button x:Name="ReturnControlButton" Content="Return Control" Tag="return_control" Click="Control_Click" />
+                </UniformGrid>
+                <TextBlock x:Name="ManualControlText"
+                           Text="Automation retains control."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,4" />
+                <TextBlock Text="IF THIS MANUAL BATTLE IS SURRENDERED" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,4,4,0" />
+                <ComboBox x:Name="ManualSurrenderCollectionBox" Margin="4" ToolTip="This collection choice never authorizes automation to Surrender.">
+                  <ComboBoxItem Content="Exclude stats (minimal save-backed record)" Tag="minimal" IsSelected="True" />
+                  <ComboBoxItem Content="Collect normal terminal stats" Tag="full" />
+                </ComboBox>
                 <TextBlock Text="GAME SPEED" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
                 <ComboBox x:Name="GameSpeedTargetBox"
                           SelectionChanged="GameSpeedTargetBox_SelectionChanged"
@@ -423,20 +443,47 @@
                            FontSize="10"
                            Visibility="Collapsed"
                            Margin="6,0,6,4" />
-                <TextBlock Text="AFTER GAME OVER" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
+                <TextBlock Text="WHEN THIS BATTLE ENDS" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
                 <UniformGrid Columns="3">
                   <Button x:Name="NextBattleModeButton"
-                          Content="Next Battle"
+                          Content="Continue automatically"
                           Tag="NEXT_BATTLE"
-                          ToolTip="Start or resume a battle at the next authorized opportunity."
+                          ToolTip="Future terminal policy; this is not an immediate battle action."
                           Click="Mode_Click" />
                   <Button x:Name="WaitModeButton" Content="Wait" Tag="WAIT" Click="Mode_Click" />
                   <Button x:Name="HomeModeButton"
-                          Content="Stay Home"
+                          Content="Return / stay Home"
                           Tag="HOME"
                           ToolTip="Return Home after Game Over and do not automatically start or resume a battle."
                           Click="Mode_Click" />
                 </UniformGrid>
+                <TextBlock Text="This policy applies after the current battle ends."
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,4" />
+                <TextBlock Text="BATTLE WORKFLOW" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
+                <UniformGrid Columns="2">
+                  <Button x:Name="StartBattleButton" Content="Start Battle" Tag="start_battle" Click="Control_Click" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                  <Button x:Name="AttachBattleButton" Content="Attach to Battle" Tag="attach_battle" Click="Control_Click" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                </UniformGrid>
+                <TextBlock x:Name="BattleWorkflowText"
+                           Text="Waiting for fresh game-boundary evidence."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,4" />
+                <TextBlock Text="SAVE-BACKED AUTHORING" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
+                <Button x:Name="CaptureSetupButton"
+                        Content="Capture current setup as…"
+                        Click="CaptureSetup_Click"
+                        IsEnabled="False"
+                        ToolTipService.ShowOnDisabled="True" />
+                <TextBlock x:Name="CaptureSetupText"
+                           Text="Waiting for an exact runtime-owned boundary."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,4" />
                 <TextBlock Text="STRATEGY" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
                 <ComboBox x:Name="StrategySelectionBox"
                           SelectionChanged="StrategySelectionBox_SelectionChanged"
@@ -543,41 +590,19 @@
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"
                            Margin="6,0,6,8" />
-                <TextBlock Text="IF A BATTLE IS ALREADY RUNNING"
+                <TextBlock Text="PROCESS LIFECYCLE"
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"
                            FontWeight="Bold"
                            Margin="6,4,6,2" />
-                <RadioButton x:Name="ValidateAttachedBattleRadio"
-                             GroupName="AttachedBattleChecks"
-                             Content="Validate current battle if attached"
-                             Click="StartupGatePolicy_Click"
-                             IsChecked="True"
-                             Foreground="#EDF2F7"
-                             Margin="8,4,6,2" />
-                <RadioButton x:Name="SkipAttachedBattleChecksRadio"
-                             GroupName="AttachedBattleChecks"
-                             Content="Skip checks for current battle"
-                             Click="StartupGatePolicy_Click"
-                             Foreground="#EDF2F7"
-                             Margin="8,4,6,2" />
-                <TextBlock Text="Attachment is automatic. Validation is read-only; a setup mismatch asks before restarting. At Home, normal pre-battle checks always run."
+                <TextBlock Text="Start Automation launches only the managed process and leaves automated input Paused. Choose Start Battle or Attach to Battle separately on Controls."
                            TextWrapping="Wrap"
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"
                            Margin="8,2,6,4" />
-                <UniformGrid Columns="2" Margin="0,6,0,0">
-                  <Button x:Name="StartPausedButton" Content="Start paused" Tag="start:PAUSED" Click="Process_Click" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                  <Button x:Name="StartRunningButton" Content="Start running" Tag="start:RUNNING" Click="Process_Click" Style="{StaticResource SuccessButton}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                </UniformGrid>
+                <Button x:Name="StartAutomationButton" Content="Start Automation" Tag="start" Click="Process_Click" Style="{StaticResource SuccessButton}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Margin="4,6,4,0" />
               </StackPanel>
               <StackPanel Grid.Row="3" Margin="0,10,0,0">
-                <Button x:Name="ReloadAutomationButton"
-                        Content="Reload automation for current battle"
-                        Click="ReloadAutomation_Click"
-                        Style="{StaticResource PrimaryButton}"
-                        IsEnabled="False"
-                        ToolTip="Safely replace the process, attach to the current battle, verify readiness, and restore its control state." />
                 <Button x:Name="CompleteStopButton"
                         Content="Completely stop automation"
                         Tag="stop"
@@ -588,7 +613,7 @@
                         ToolTip="Persist STOPPED, then stop the fixed Linux automation service." />
               </StackPanel>
               <TextBlock Grid.Row="4"
-                         Text="Start uses the strategy selected on Controls and automatically detects whether it is joining a battle. Detailed evidence is on Details."
+                         Text="Process lifecycle, action authority, observed game state, strategy scope, and terminal policy are independent. Detailed evidence is on Details."
                          TextWrapping="Wrap"
                          VerticalAlignment="Bottom"
                          Foreground="{StaticResource MutedBrush}"

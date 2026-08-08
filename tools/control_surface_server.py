@@ -83,6 +83,7 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             "/api/v1/control",
             "/api/v1/process",
             "/api/v1/strategy-authoring",
+            "/api/v1/setup-capture",
             "/api/v1/strategy-profiles",
             "/api/v1/host-performance",
             "/api/v1/interactive-development-lease",
@@ -124,6 +125,8 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 response = self.server.service.apply_strategy_profile(payload)
             elif parsed.path == "/api/v1/strategy-authoring":
                 response = self.server.service.apply_strategy_authoring(payload)
+            elif parsed.path == "/api/v1/setup-capture":
+                response = self.server.service.apply_setup_capture(payload)
             elif parsed.path == "/api/v1/interactive-development-lease":
                 response = (
                     self.server.service.apply_interactive_development_lease(
@@ -186,6 +189,21 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 payload = self.server.service.strategy_profiles()
             elif path == "/api/v1/strategy-authoring":
                 payload = self.server.service.strategy_authoring()
+            elif path == "/api/v1/setup-capture":
+                payload = self.server.service.setup_capture()
+            elif path.startswith("/api/v1/setup-capture/drafts/"):
+                strategy_id = unquote(
+                    path.removeprefix("/api/v1/setup-capture/drafts/")
+                )
+                if not strategy_id or "/" in strategy_id:
+                    self._json_error(
+                        HTTPStatus.NOT_FOUND,
+                        "Captured draft endpoint not found",
+                    )
+                    return
+                payload = self.server.service.captured_setup_draft(
+                    strategy_id
+                )
             elif path == "/api/v1/strategy-authoring/history":
                 payload = self.server.service.strategy_history()
             elif path.startswith("/api/v1/strategy-authoring/history/"):
@@ -229,6 +247,10 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             "/": ("index.html", "text/html; charset=utf-8"),
             "/index.html": ("index.html", "text/html; charset=utf-8"),
             "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+            "/client_model.js": (
+                "client_model.js",
+                "text/javascript; charset=utf-8",
+            ),
             "/styles.css": ("styles.css", "text/css; charset=utf-8"),
         }
         asset = routes.get(path)

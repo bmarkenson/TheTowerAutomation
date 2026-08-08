@@ -490,11 +490,13 @@ stages:
   action authority, and perform no Retry, Surrender, or other recovery input,
   as recorded in
   [open issue dossier](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
-- [ ] Make `STOPPED` interrupt an in-progress Home setup without another device
+- [x] Make `STOPPED` interrupt an in-progress Home setup without another device
   input, as recorded in
   [open issue dossier](../issues/open-2026.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
-  Preserve the current Pause behavior, but let Stop unwind the guarded route
-  and release the runtime lock without requiring `KeyboardInterrupt`.
+  Pause, Stop, and Take Manual Control now yield the synchronous route at its
+  first denied input without cleanup. Observation and acknowledgement resume
+  on the next heartbeat; only a later same-owner Enable can attempt one bounded
+  Home restoration, while Stop or changed workflow ownership discards it.
 - [ ] Detect likely manual player activity and automatically yield tap authority.
   - Treat unexpected Go Home/manual navigation during an active run as operator
     activity rather than an error to undo immediately.
@@ -502,6 +504,152 @@ stages:
   - After a configurable static grace period, warn before offering or performing
     a guarded return to the running battle.
   - Make the grace period interruptible and extendable through CLI/GUI controls.
+
+- [ ] **Better Control Model:** redesign the operator controls around
+  independent process lifecycle, automation action authority, observed
+  game/battle state, Strategy scope, and terminal policy. Do not use one
+  **Paused/Running** or **Next Battle** choice to imply more than one of those
+  dimensions.
+  - Implementation checkpoint (2026-08-07, feature branch):
+    - [x] Linux status/API/runtime plus native, browser, and CLI clients expose
+      the five independent dimensions under server revision 29 and capabilities
+      `better_control_model_v2` and `save_backed_setup_capture_v1`, while
+      retaining additive `better_control_model_v1`. Start/Stop Automation,
+      exact Start Battle,
+      exact Attach to Battle, future terminal policy, and Take/Return Control
+      have durable requested/acknowledged/error state. State and terminal-policy
+      acknowledgements are correlated by exact request identity rather than
+      same-value timestamps. Stale, mismatched,
+      unavailable, busy, pending, rejected, interrupted, acknowledged, and
+      no-op paths have repository regressions.
+    - [x] Managed Start launches Paused with no implicit battle workflow.
+      Start Battle revalidates exact runtime/target/scope/Home New Battle
+      evidence and enters normal new-run gates. Home does not toggle action
+      authority, and active-battle → Home Resume Battle activity yields through
+      an indefinite manual-control Pause rather than competing for input.
+      Verified Home input is recorded as `action_dispatched` and remains under
+      an exclusive workflow hold until battle adoption, interruption, or a
+      bounded failure.
+    - [x] Tournament Results capture retains `WAIT`; Continue and Home use the
+      verified OK-to-Home dismissal owner after persisting the result, Pause on
+      failed navigation, and keep dismissal separate from the future
+      next-battle policy.
+    - [x] Attach and Return consume production's typed player-save acquisition
+      paradigm. Active/resumable paths use one guarded exact-target forced
+      serialization, mandatory active-round identity, final activity-scope
+      binding, and process-local typed claims. Home New Return uses the normal
+      Home serialization; Game Over Return uses the bound natural acquisition.
+      Cached/passive reads cannot satisfy a current-save claim, save receipts
+      precede any allowlisted unresolved-field UI fallback, and a loss after
+      backgrounding terminates the exact workflow with Automation Paused.
+      Home New Return also terminalizes a blocked or incomplete refresh once,
+      rather than repeating lifecycle input on a later heartbeat.
+      Attach becomes observation-only before any later explicit active-battle
+      Strategy adoption. Adoption grants no Surrender authority.
+    - [x] Take/Return Control includes manual Surrender disposition without a
+      Surrender button: minimal save-backed excluded recording is the default,
+      with explicit opt-in to full terminal collection. Strategy repair can
+      Surrender only through the exact one-shot runtime gate option; it records
+      the nonrepresentative outcome before verified Home, Pauses, and does not
+      start another battle.
+    - [x] **Capture current setup as…** performs a guarded fresh serialization,
+      projects through existing Strategy/local-loadout/Module-preset owners,
+      preserves unresolved fields, requires a fingerprinted captured-versus-
+      Base review for Strategy drafts, and saves only new inactive artifacts.
+      A trusted-mismatch active-battle Return can expose its exact retained
+      forced acquisition to Capture without another input; that path remains
+      Paused and does not resolve Return Control.
+      The optional Base is comparison-only. Captured Strategy source is durable
+      and reopenable with its own fingerprinted origin, semantic difference,
+      and unresolved review through Linux API, two-step CLI, and the native
+      authoring catalog. A failed ready receipt retries from the process-local
+      result without another serialization; normal Linux validation/publication
+      remains separate.
+    - [ ] Windows package build/usability smoke and natural-boundary live game
+      validation remain pending. The WPF project cross-builds on Linux and its
+      82 native authoring/compatibility tests pass, but no Windows runtime or
+      live/device action is authorized or claimed by this checkpoint.
+      The supported development checkpoint passes all 1,904 tests in 335.03
+      seconds, state-definition validation, and clickmap validation with zero
+      errors and the established 44 orphan candidates.
+  - Integration hardening checkpoint (2026-08-08, feature branch after merging
+    production `08745f5`):
+    - [x] Home setup yields immediately on Pause, Stop, or Take Manual Control
+      instead of waiting inside the input guard. No cleanup input occurs at the
+      denied boundary. A process-local pending recovery is exact-owner,
+      runtime, target-generation, and activity-scope bound; one later Enable
+      may restore Home, while owner/binding change discards it and a failed
+      enabled recovery Pauses and terminalizes without repetition.
+    - [x] Home Return preserves a bounded nonretryable Perk-repair outcome as
+      `awaiting_manual_correction`, including the failed check, reason,
+      retryability, and forced-save receipt. It does not serialize or open UI
+      again until explicit Enable after the operator's correction; that retry
+      discards the former private claim and requests a new save.
+    - [x] Setup Capture consumes production's complete Perk vocabulary;
+      `chrono_field_duration` is covered by a captured, semantic-diffed,
+      saveable, nonactivating Strategy-draft regression.
+    - [x] Focused Better Control/Home/Save/Capture validation passed 217 tests;
+      the broader affected slice passed 479 tests; all 82 native
+      authoring/compatibility tests passed; and Linux cross-publishing produced
+      both self-contained Windows executables. The supported development
+      checkpoint passed all 1,924 tests in 330.30 seconds, state-definition
+      validation, and clickmap validation with zero errors and the established
+      44 orphan candidates.
+  - Begin with a command/transition matrix covering stopped and live services;
+    acknowledged automation paused and enabled; Home New Battle and Resume
+    Battle, active battle, Game Over, and Tournament Results; and current,
+    pending, and startup-default Strategies. Make illegal, unavailable, pending,
+    and no-op requests visibly distinct. Preserve directive/acknowledgement and
+    owner/freshness checks rather than deriving authority from GUI state.
+  - Separate **Start automation** and **Stop automation** from the battle
+    workflow. Provide explicit **Start battle** intent only at a verified new-run
+    Home boundary and explicit **Attach to battle** intent only for a verified
+    active or resumable battle. Starting a new battle runs its normal gates;
+    attachment preserves the existing battle identity and validates from fresh
+    save evidence before opening UI, with UI fallback only for unresolved
+    allowlisted fields. Reject a mismatched intent without silently choosing the
+    other workflow.
+  - Present post-terminal behavior separately as **When this battle ends** (or
+    equally unambiguous final wording): continue automatically, wait at the
+    terminal boundary, or return/stay Home. The existing `NEXT_BATTLE`, `WAIT`,
+    and `HOME` values may remain a compatible runtime representation, but an
+    immediate battle command must not be labelled as that future policy.
+  - Rename or qualify the current control labels so automation **Paused** means
+    zero automated device input while observation may continue, and automation
+    **Enabled** means the runtime may exercise its guarded action authority; it
+    does not assert that the game itself is in `RUNNING`. Home does not
+    implicitly require either state. Document which passive observations,
+    explicit operator-approved maintenance requests, and automatic actions are
+    allowed in every state.
+  - Add a first-class **Take manual control** / **Return control** workflow.
+    Taking control must obtain and acknowledge an indefinite automation Pause
+    before inviting manual game changes. Returning control must refresh
+    observation, reconcile the same/new battle boundary and relevant
+    configuration, and resume only by explicit operator intent. Unexpected
+    manual activity while automation is enabled must yield through the existing
+    manual-activity safety outcome rather than competing for input. Manual run
+    termination must use the report-disposition outcome in the agreed sequence
+    below without turning that declaration into Surrender authority.
+  - Audit every path that claims to read a *new* or *current* save. Such a path
+    must invoke the approved serialization/refresh operation, bind stable reads
+    to the exact target and battle/session evidence, and report when Pause or
+    another authority boundary prevents refresh. A cached save may be consumed
+    only under an explicit age/identity contract and must never be described as
+    newly requested. Add regressions for attachment and return-from-manual-control
+    so save validation precedes any configuration UI fallback.
+  - Offer a save-backed **Capture current setup as...** authoring workflow so
+    manual loadout changes can become a named managed preset or custom Strategy
+    draft without hand-editing Strategy source. Inventory and extend the existing
+    preset/local editor owners instead of creating a parallel loadout schema;
+    retain unresolved fields explicitly, show the captured-versus-base diff,
+    validate through normal Linux authority, and never select, activate, or
+    apply the result merely because it was saved.
+  - Version any changed API model with a named capability and update native,
+    browser, CLI, architecture, and operator guidance together. Follow the
+    [action-log contract](../action_log_contract.md) for each resulting input
+    workflow. Cover the transition matrix with server and client regressions,
+    then run a Windows usability smoke; live game validation must use natural
+    safe boundaries and must never Surrender an operator-owned battle.
 - [ ] Finish the remaining native Windows GUI control-surface work described in
   [`../architecture/control_surface.md`](../architecture/control_surface.md).
   - [ ] Run the disposable-catalog Windows runtime smoke for Base and Strategy
@@ -596,6 +744,22 @@ evidence.
      newest-record page.
 9. [ ] Define and implement report disposition for short, interrupted,
    configuration-repair, surrendered, and manually aborted battles.
+   - Prefer evidence-based inference. A causally bound terminal save whose
+     mapped `killedBy` value is `Surrender` identifies a surrendered run;
+     runtime-owned validation or repair receipts must distinguish their own
+     Surrenders from an operator action. Manual-control state or an unexpected
+     terminal screen alone is not sufficient evidence of Surrender.
+   - Offer an optional exact-run declaration such as **I ended this run
+     manually — exclude it from analytics** before or after the terminal
+     boundary. It records operator intent and may satisfy otherwise ambiguous
+     attribution, but sends no game input, grants no Surrender authority, is
+     consumed by only the bound activity/run, and fails closed rather than
+     applying to a later battle.
+   - When surrender or manual-abort disposition is known before full terminal
+     collection, require the fresh save/boundary evidence needed to identify
+     the completed run, retain a minimal durable record and provenance, and
+     skip stats UI plus optional enrichment. A later declaration reclassifies
+     only the exact completed record; it never deletes evidence.
    - Classify these outcomes first and exclude non-representative runs from the
      normal history and analytics by default without erasing evidence.
    - If operator use still requires permanent discard, expose only a confirmed,

@@ -17,6 +17,7 @@ import uuid
 
 import yaml
 
+from core.control_model import validate_setup_capture_preview
 from core.gate_decisions import (
     PROFILE_SKIPPABLE_CHECKS,
     STARTUP_GATE_CHECK_LABELS,
@@ -33,8 +34,13 @@ from core.module_presets import (
     ModulePresetStore,
     module_preset_definitions,
 )
+from core.player_save_setup_capture import (
+    SetupCaptureError,
+    strategy_source_from_capture,
+)
 from core.strategy_authoring import (
     AUTHORING_SCHEMA_VERSION,
+    FARM_SETTING_REGISTRY,
     LEGACY_AUTHORING_SCHEMA_VERSION,
     StrategyAuthoringConflictError,
     StrategyAuthoringError,
@@ -111,6 +117,8 @@ STRATEGY_HISTORY_API_SCHEMA_VERSION = 1
 STRATEGY_TRANSACTION_SCHEMA_VERSION = 1
 STRATEGY_HISTORY_DIRECTORY_NAME = "history"
 STRATEGY_TRANSACTION_DIRECTORY_NAME = "transactions"
+CAPTURED_STRATEGY_DRAFT_SCHEMA_VERSION = 1
+CAPTURED_STRATEGY_DRAFT_DIRECTORY_NAME = "captured_drafts"
 STRATEGY_PUBLICATION_ORIGINS = frozenset(
     {
         "authoring_publication",
@@ -133,6 +141,9 @@ _TRANSACTION_FILENAME_RE = re.compile(
 _TRANSACTION_STAGE_FILENAME_RE = re.compile(
     r"\.(?P<id>[a-z][a-z0-9_]{2,47})\."
     r"(?:revision\.stage|latest\.stage|previous)\.yaml"
+)
+_CAPTURED_DRAFT_FILENAME_RE = re.compile(
+    r"(?P<id>[a-z][a-z0-9_]{2,47})\.captured-strategy-draft\.yaml"
 )
 _RESERVED_STRATEGY_IDS = frozenset(
     {*BUILTIN_STRATEGY_IDS, *LEGACY_STRATEGY_ALIASES}
@@ -362,6 +373,386 @@ class StrategyProfileStore:
             definition,
         )
 
+    def review_captured_strategy_draft(
+        self,
+        capture: object,
+        *,
+        strategy_id: object,
+        display_name: object,
+        tier: object,
+        base: object = None,
+        expected_capture_fingerprint: object = None,
+    ) -> dict[str, Any]:
+        """Return a fingerprinted capture-versus-Base review without writing."""
+
+        safe_capture = validate_setup_capture_preview(capture)
+        if safe_capture is None:
+            raise StrategyProfileError(
+                "Capture preview lacks exact runtime-issued forced-save evidence"
+            )
+        capture_fingerprint = fingerprint_document(safe_capture)
+        expected = str(expected_capture_fingerprint or "").strip()
+        if not expected:
+            raise StrategyProfileConflictError(
+                "Exact reviewed capture fingerprint is required"
+            )
+        if expected != capture_fingerprint:
+            raise StrategyProfileConflictError(
+                "Capture preview changed after review; refresh it before saving"
+            )
+        try:
+            proposed = strategy_source_from_capture(
+                safe_capture,
+                strategy_id=strategy_id,
+                display_name=display_name,
+                tier=tier,
+                base=base,
+            )
+        except SetupCaptureError as exc:
+            raise StrategyProfileError(str(exc)) from exc
+        review_base = _copy_optional_mapping(proposed.get("base"))
+        # A captured draft must not make unresolved save fields appear to be
+        # captured merely because an optional comparison Base has values for
+        # them.  Retain that Base as review context; pinning it remains an
+        # explicit ordinary authoring decision after unresolved rows are read.
+        source = _copy_mapping(proposed)
+        source.pop("base", None)
+        identifier = source["id"]
+        if identifier in _RESERVED_STRATEGY_IDS:
+            raise StrategyProfileError(
+                f"{identifier!r} is a bundled or reserved strategy name"
+            )
+        validation = self.validate_authoring_strategy(source)
+        source = _copy_mapping(validation["source"])
+        if isinstance(review_base, Mapping):
+            publication = self.base_store.load(
+                review_base.get("id"), review_base.get("revision")
+            )
+            captured_vs_base = _diff_captured_strategy_resolutions(
+                base_publication_resolution(publication),
+                validation["resolution"],
+            )
+        else:
+            captured_vs_base = _copy_mapping(
+                validation["review"]["effective_changes"]
+            )
+        review: dict[str, Any] = {
+            "schema_version": CAPTURED_STRATEGY_DRAFT_SCHEMA_VERSION,
+            "kind": "captured_strategy_draft_review",
+            "capture_fingerprint": capture_fingerprint,
+            "source": source,
+            "source_fingerprint": validation["fingerprints"][
+                "source_fingerprint"
+            ],
+            "resolution": _copy_mapping(validation["resolution"]),
+            "captured_vs_base": {
+                "base": _copy_optional_mapping(review_base),
+                **captured_vs_base,
+            },
+            "unresolved": _copy_sequence_of_mappings(
+                safe_capture.get("unresolved")
+            ),
+            "validation": _copy_mapping(validation["review"]),
+            "fingerprints": _copy_mapping(validation["fingerprints"]),
+            "saving_activates_strategy": False,
+            "publication_activates_strategy": False,
+        }
+        review["review_fingerprint"] = fingerprint_document(review)
+        return review
+
+    def save_captured_strategy_draft(
+        self,
+        capture: object,
+        *,
+        strategy_id: object,
+        display_name: object,
+        tier: object,
+        base: object = None,
+        expected_capture_fingerprint: object = None,
+        expected_review_fingerprint: object = None,
+    ) -> dict[str, Any]:
+        """Atomically save one reviewed capture without publishing it."""
+
+        review = self.review_captured_strategy_draft(
+            capture,
+            strategy_id=strategy_id,
+            display_name=display_name,
+            tier=tier,
+            base=base,
+            expected_capture_fingerprint=expected_capture_fingerprint,
+        )
+        reviewed_fingerprint = str(expected_review_fingerprint or "").strip()
+        if not reviewed_fingerprint:
+            raise StrategyProfileConflictError(
+                "Exact captured-versus-Base review fingerprint is required"
+            )
+        if reviewed_fingerprint != review["review_fingerprint"]:
+            raise StrategyProfileConflictError(
+                "Captured-versus-Base review changed; review it again before saving"
+            )
+        safe_capture = _copy_mapping(capture)
+        source = _copy_mapping(review["source"])
+        identifier = source["id"]
+        capture_fingerprint = str(review["capture_fingerprint"])
+        saved_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        payload: dict[str, Any] = {
+            "schema_version": CAPTURED_STRATEGY_DRAFT_SCHEMA_VERSION,
+            "kind": "captured_strategy_draft",
+            "id": identifier,
+            "saved_at": saved_at,
+            "source": source,
+            "source_fingerprint": review["source_fingerprint"],
+            "capture": safe_capture,
+            "capture_fingerprint": capture_fingerprint,
+            "review": {
+                "captured_vs_base": _copy_mapping(
+                    review["captured_vs_base"]
+                ),
+                "unresolved": _copy_sequence_of_mappings(review["unresolved"]),
+                "validation": _copy_mapping(review["validation"]),
+                "review_fingerprint": review["review_fingerprint"],
+                "saving_activates_strategy": False,
+                "publication_activates_strategy": False,
+            },
+            "fingerprints": _copy_mapping(review["fingerprints"]),
+        }
+        payload["draft_fingerprint"] = fingerprint_document(payload)
+
+        with self._publish_lock:
+            with self._catalog_write_lock():
+                if _profile_path(self.profile_directory, identifier).exists():
+                    raise StrategyProfileConflictError(
+                        f"Strategy {identifier!r} is already published; choose a new draft ID"
+                    )
+                directory = self._captured_draft_directory()
+                self._prepare_captured_draft_directory(directory)
+                path = self._captured_draft_path(identifier)
+                if path.exists() or path.is_symlink():
+                    raise StrategyProfileConflictError(
+                        f"Captured Strategy draft {identifier!r} already exists"
+                    )
+                try:
+                    _atomic_create_immutable(
+                        directory,
+                        path,
+                        payload,
+                        description="captured Strategy draft",
+                    )
+                except StrategyAuthoringConflictError as exc:
+                    raise StrategyProfileConflictError(str(exc)) from exc
+                except StrategyAuthoringError as exc:
+                    raise StrategyProfileError(str(exc)) from exc
+                return self._load_captured_strategy_draft(path, identifier)
+
+    def captured_strategy_draft(
+        self,
+        strategy_id: object,
+    ) -> dict[str, Any]:
+        """Load one immutable captured draft without publishing or selecting it."""
+
+        identifier = _draft_identifier({"id": strategy_id})
+        if identifier in _RESERVED_STRATEGY_IDS:
+            raise StrategyProfileError(
+                f"{identifier!r} is a bundled or reserved strategy name"
+            )
+        return self._load_captured_strategy_draft(
+            self._captured_draft_path(identifier),
+            identifier,
+        )
+
+    def captured_strategy_draft_catalog(self) -> dict[str, Any]:
+        """Return path-free summaries for immutable captured drafts."""
+
+        directory = self._captured_draft_directory()
+        if not directory.exists():
+            return {
+                "schema_version": CAPTURED_STRATEGY_DRAFT_SCHEMA_VERSION,
+                "items": [],
+                "errors": [],
+            }
+        if directory.is_symlink() or not directory.is_dir():
+            return {
+                "schema_version": CAPTURED_STRATEGY_DRAFT_SCHEMA_VERSION,
+                "items": [],
+                "errors": [
+                    {
+                        "id": "captured_drafts",
+                        "error": "Captured Strategy draft directory is invalid",
+                    }
+                ],
+            }
+        items: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        for path in sorted(directory.glob("*.captured-strategy-draft.yaml")):
+            match = _CAPTURED_DRAFT_FILENAME_RE.fullmatch(path.name)
+            if match is None:
+                errors.append(
+                    {
+                        "id": "invalid_filename",
+                        "error": (
+                            "Captured Strategy draft filename is invalid: "
+                            f"{path.name}"
+                        ),
+                    }
+                )
+                continue
+            identifier = match.group("id")
+            try:
+                draft = self._load_captured_strategy_draft(path, identifier)
+                source = draft["source"]
+                items.append(
+                    {
+                        "id": identifier,
+                        "display_name": source["display_name"],
+                        "tier": source["tier"],
+                        "saved_at": draft["saved_at"],
+                        "draft_fingerprint": draft["draft_fingerprint"],
+                        "capture_fingerprint": draft["capture_fingerprint"],
+                        "acquisition_source": draft["capture"][
+                            "capture_origin"
+                        ]["acquisition_source"],
+                        "unresolved_count": len(
+                            draft["review"]["unresolved"]
+                        ),
+                        "published": False,
+                        "selected": False,
+                        "queued": False,
+                    }
+                )
+            except StrategyProfileError as exc:
+                errors.append({"id": identifier, "error": str(exc)})
+        return {
+            "schema_version": CAPTURED_STRATEGY_DRAFT_SCHEMA_VERSION,
+            "items": items,
+            "errors": errors,
+        }
+
+    def _captured_draft_directory(self) -> Path:
+        return self.profile_directory / CAPTURED_STRATEGY_DRAFT_DIRECTORY_NAME
+
+    def _captured_draft_path(self, identifier: str) -> Path:
+        return self._captured_draft_directory() / (
+            f"{identifier}.captured-strategy-draft.yaml"
+        )
+
+    @staticmethod
+    def _prepare_captured_draft_directory(directory: Path) -> None:
+        try:
+            if directory.is_symlink() or (
+                directory.exists() and not directory.is_dir()
+            ):
+                raise StrategyProfileConflictError(
+                    "Captured Strategy draft directory is not a regular directory"
+                )
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except StrategyProfileError:
+            raise
+        except OSError as exc:
+            raise StrategyProfileError(
+                f"Unable to prepare captured Strategy draft directory: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _load_captured_strategy_draft(
+        path: Path,
+        expected_id: str,
+    ) -> dict[str, Any]:
+        raw = _load_yaml_mapping_limited_profile(
+            path,
+            f"captured Strategy draft {expected_id!r}",
+        )
+        if (
+            set(raw)
+            != {
+                "schema_version",
+                "kind",
+                "id",
+                "saved_at",
+                "source",
+                "source_fingerprint",
+                "capture",
+                "capture_fingerprint",
+                "review",
+                "fingerprints",
+                "draft_fingerprint",
+            }
+            or
+            raw.get("schema_version")
+            != CAPTURED_STRATEGY_DRAFT_SCHEMA_VERSION
+            or raw.get("kind") != "captured_strategy_draft"
+            or raw.get("id") != expected_id
+        ):
+            raise StrategyProfileError(
+                f"Captured Strategy draft {expected_id!r} has invalid identity"
+            )
+        try:
+            source = normalize_strategy_source(raw.get("source"))
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(str(exc)) from exc
+        if source.get("id") != expected_id or source != raw.get("source"):
+            raise StrategyProfileError(
+                f"Captured Strategy draft {expected_id!r} has noncanonical source"
+            )
+        capture = raw.get("capture")
+        review = raw.get("review")
+        fingerprints = raw.get("fingerprints")
+        try:
+            saved_at = datetime.fromisoformat(str(raw.get("saved_at") or ""))
+        except ValueError:
+            saved_at = None
+        if not all(
+            isinstance(value, Mapping)
+            for value in (capture, review, fingerprints)
+        ) or saved_at is None or saved_at.tzinfo is None:
+            raise StrategyProfileError(
+                f"Captured Strategy draft {expected_id!r} is incomplete"
+            )
+        normalized_capture = validate_setup_capture_preview(capture)
+        if normalized_capture is None or normalized_capture != capture:
+            raise StrategyProfileError(
+                f"Captured Strategy draft {expected_id!r} has invalid save evidence"
+            )
+        if (
+            set(review)
+            != {
+                "captured_vs_base",
+                "unresolved",
+                "validation",
+                "review_fingerprint",
+                "saving_activates_strategy",
+                "publication_activates_strategy",
+            }
+            or not isinstance(review.get("captured_vs_base"), Mapping)
+            or not isinstance(review.get("unresolved"), list)
+            or not isinstance(review.get("validation"), Mapping)
+            or review.get("unresolved") != normalized_capture["unresolved"]
+            or review.get("saving_activates_strategy") is not False
+            or review.get("publication_activates_strategy") is not False
+            or not re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(review.get("review_fingerprint") or ""),
+            )
+        ):
+            raise StrategyProfileError(
+                f"Captured Strategy draft {expected_id!r} has invalid review evidence"
+            )
+        if raw.get("source_fingerprint") != fingerprint_document(source):
+            raise StrategyProfileError(
+                f"Captured Strategy draft {expected_id!r} source fingerprint disagrees"
+            )
+        if raw.get("capture_fingerprint") != fingerprint_document(capture):
+            raise StrategyProfileError(
+                f"Captured Strategy draft {expected_id!r} capture fingerprint disagrees"
+            )
+        draft_fingerprint = str(raw.get("draft_fingerprint") or "")
+        unsigned = dict(raw)
+        unsigned.pop("draft_fingerprint", None)
+        if draft_fingerprint != fingerprint_document(unsigned):
+            raise StrategyProfileError(
+                f"Captured Strategy draft {expected_id!r} fingerprint disagrees"
+            )
+        return _copy_mapping(raw)
+
     def _module_preset_definitions(self) -> dict[str, dict[str, str]]:
         return module_preset_definitions(self.module_preset_store.catalog())
 
@@ -371,6 +762,7 @@ class StrategyProfileStore:
         module_preset_catalog = self.module_preset_store.catalog()
         history_errors = self._prepare_history()
         base_catalog = self.base_store.catalog()
+        captured_drafts = self.captured_strategy_draft_catalog()
         legacy_catalog = self.catalog(
             _history_prepared=True,
             _module_preset_catalog=module_preset_catalog,
@@ -400,6 +792,9 @@ class StrategyProfileStore:
         ] + [
             {"catalog": "module_presets", **error}
             for error in module_preset_catalog["errors"]
+        ] + [
+            {"catalog": "captured_drafts", **error}
+            for error in captured_drafts["errors"]
         ]
         return {
             "schema_version": STRATEGY_AUTHORING_API_SCHEMA_VERSION,
@@ -453,6 +848,7 @@ class StrategyProfileStore:
                 "restore_as_new": True,
                 "profile_local_loadout_editors": True,
                 "managed_custom_module_presets": True,
+                "save_backed_setup_capture": True,
             },
             "editor_options": {
                 "presets": legacy_catalog["presets"],
@@ -474,6 +870,7 @@ class StrategyProfileStore:
                 for item in base_catalog["items"]
             ],
             "module_presets": module_preset_catalog,
+            "captured_drafts": captured_drafts,
             "catalog_errors": catalog_errors,
         }
 
@@ -3917,10 +4314,108 @@ def _base_state_fingerprint(
     )
 
 
+def _capture_semantic_value(setting_id: str, value: object) -> object:
+    """Canonicalize only authoring values whose runtime order is irrelevant."""
+
+    copied = json.loads(json.dumps(value, ensure_ascii=False))
+    if setting_id in {"guardian_chips", "perk_bans"} and isinstance(
+        copied,
+        list,
+    ):
+        return sorted(copied)
+    return copied
+
+
+def _capture_effective_resolution_view(
+    setting_id: str,
+    entry: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compare captured setup semantics without selector representation noise."""
+
+    result = {
+        key: _capture_semantic_value(setting_id, entry.get(key))
+        for key in ("state", "policy")
+        if key in entry
+    }
+    snapshot = entry.get("definition_snapshot")
+    if isinstance(snapshot, Mapping) and "definition" in snapshot:
+        # ``preset`` versus ``local`` and its fingerprint are provenance.  The
+        # existing owner embeds the normalized definition that actually drives
+        # runtime behavior, which is the setup value a capture review means.
+        result["definition"] = _capture_semantic_value(
+            setting_id,
+            snapshot.get("definition"),
+        )
+    elif "value" in entry:
+        result["value"] = _capture_semantic_value(
+            setting_id,
+            entry.get("value"),
+        )
+    return result
+
+
+def _diff_captured_strategy_resolutions(
+    before_resolution: object,
+    after_resolution: object,
+) -> dict[str, Any]:
+    """Compare captured-versus-Base values using runtime-equivalent semantics."""
+
+    if not isinstance(before_resolution, Mapping) or not isinstance(
+        after_resolution,
+        Mapping,
+    ):
+        raise StrategyProfileError("Capture comparison resolution is invalid")
+    before_settings = before_resolution.get("settings")
+    after_settings = after_resolution.get("settings")
+    if not isinstance(before_settings, Mapping) or not isinstance(
+        after_settings,
+        Mapping,
+    ):
+        raise StrategyProfileError("Capture comparison settings are invalid")
+    changed: list[dict[str, Any]] = []
+    provenance_changed: list[dict[str, Any]] = []
+    for setting_id, definition in FARM_SETTING_REGISTRY.items():
+        before_entry = before_settings.get(setting_id)
+        after_entry = after_settings.get(setting_id)
+        if not isinstance(before_entry, Mapping) or not isinstance(
+            after_entry,
+            Mapping,
+        ):
+            raise StrategyProfileError(
+                f"Capture comparison lacks setting {setting_id!r}"
+            )
+        item = {
+            "setting_id": setting_id,
+            "display_name": definition.display_name,
+            "before": _copy_mapping(before_entry),
+            "after": _copy_mapping(after_entry),
+        }
+        if _capture_effective_resolution_view(
+            setting_id,
+            before_entry,
+        ) != _capture_effective_resolution_view(setting_id, after_entry):
+            changed.append(item)
+        elif before_entry != after_entry:
+            provenance_changed.append(item)
+    return {
+        "changed": changed,
+        "provenance_changed": provenance_changed,
+        "change_count": len(changed),
+    }
+
+
 def _copy_mapping(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {}
     return json.loads(json.dumps(value, ensure_ascii=False))
+
+
+def _copy_sequence_of_mappings(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, Mapping) for item in value
+    ):
+        raise StrategyProfileError("Capture unresolved review must be an array")
+    return [_copy_mapping(item) for item in value]
 
 
 def _normalize_farm_setup(raw: object) -> dict[str, Any]:

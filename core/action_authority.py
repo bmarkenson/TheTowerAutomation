@@ -69,6 +69,9 @@ class AuthorityHold(str, Enum):
     EXCLUSIVE_VALIDATION = "exclusive_validation"
     EXCLUSIVE_OWNERSHIP = "exclusive_ownership"
     EXTERNAL_DEVELOPMENT = "external_development"
+    OPERATOR_WORKFLOW = "operator_workflow"
+    MANUAL_CONTROL_RETURN = "manual_control_return"
+    SETUP_CAPTURE = "setup_capture"
 
 
 class StrategyGateExitEvent(str, Enum):
@@ -906,6 +909,7 @@ class RuntimeActionAuthorityPublisher:
         interactive_development_lease: Optional[
             Mapping[str, object]
         ] = None,
+        control_model: Optional[Mapping[str, object]] = None,
     ) -> bool:
         published_owner = dict(self.owner)
         if owner is not None:
@@ -926,6 +930,11 @@ class RuntimeActionAuthorityPublisher:
             "interactive_development_lease": (
                 dict(interactive_development_lease)
                 if isinstance(interactive_development_lease, Mapping)
+                else None
+            ),
+            "control_model": (
+                dict(control_model)
+                if isinstance(control_model, Mapping)
                 else None
             ),
             **snapshot.as_dict(),

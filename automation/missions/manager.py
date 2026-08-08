@@ -24,6 +24,42 @@ RESTORED_SESSION_PREFLIGHT_REPORT_KEY = (
 )
 
 
+def _normalized_repair_authority(
+    value: object,
+) -> Optional[dict[str, object]]:
+    """Return the stable exact-battle fields for a one-shot repair grant."""
+
+    if not isinstance(value, Mapping):
+        return None
+    text_fields = {
+        field: str(value.get(field) or "").strip()
+        for field in (
+            "runtime_id",
+            "adb_target",
+            "activity_scope_run_id",
+        )
+    }
+    pid = value.get("pid")
+    target_generation = value.get("target_generation")
+    if (
+        any(not item for item in text_fields.values())
+        or type(pid) is not int
+        or pid < 1
+        or type(target_generation) is not int
+        or target_generation < 1
+        or str(value.get("game_state") or "").strip().lower()
+        != "active_battle"
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        **text_fields,
+        "pid": pid,
+        "target_generation": target_generation,
+        "game_state": "active_battle",
+    }
+
+
 def _validated_complete_session_preflight_report(
     raw: object,
 ) -> Optional[dict[str, object]]:
@@ -110,6 +146,7 @@ class MissionManager:
         defer_startup_gates_until_next_run: bool = False,
         validate_attached_battle: bool = False,
         skip_attached_checks: bool = False,
+        await_initial_battle_intent: bool = False,
         action_guard_fn: Optional[Callable[[], bool]] = None,
     ):
         self.mission = mission
@@ -121,6 +158,9 @@ class MissionManager:
         self._startup_gates_deferred = bool(defer_startup_gates_until_next_run)
         self._validate_initial_attachment = bool(validate_attached_battle)
         self._skip_initial_attachment_checks = bool(skip_attached_checks)
+        self._await_initial_battle_intent = bool(await_initial_battle_intent)
+        self._authorized_initial_battle_intent: Optional[str] = None
+        self._authorized_battle_workflow_request_id: Optional[str] = None
         self._action_guard_fn = action_guard_fn
         self._new_battle_home_observed = False
         self._exclusive_validation_prepared_request_id: Optional[str] = None
@@ -148,6 +188,9 @@ class MissionManager:
             "exclusive_validation_battle"
         ] = False
         self.ctx.data["startup_gates_deferred"] = self._startup_gates_deferred
+        self.ctx.data["awaiting_initial_battle_intent"] = (
+            self._await_initial_battle_intent
+        )
         self._clear_attached_check_state()
         if self._startup_gates_deferred:
             self._record_deferred_free_upgrade_lock_evidence()
@@ -160,6 +203,9 @@ class MissionManager:
         control = detection.get("home_battle_control", "UNKNOWN")
         normalized_state = str(state or "UNKNOWN").upper()
         parsed_control = HomeBattleControl.parse(control)
+        if self._await_initial_battle_intent:
+            self._last_state = state
+            return False
         new_battle_home = bool(
             normalized_state in {"HOME", "HOME_SCREEN"}
             and parsed_control is HomeBattleControl.NEW_BATTLE
@@ -210,6 +256,8 @@ class MissionManager:
                 "INFO",
                 console=True,
             )
+            self._authorized_initial_battle_intent = None
+            self._authorized_battle_workflow_request_id = None
         if battle_started:
             self._clear_restored_session_preflight_report()
             self._arm_startup_gates()
@@ -222,8 +270,89 @@ class MissionManager:
                     self._mission_was_complete = False
             if self.strategy:
                 self.strategy.on_run_start(self.ctx)
+            self._authorized_initial_battle_intent = None
+            self._authorized_battle_workflow_request_id = None
         self._last_state = state
         return battle_started
+
+    def awaiting_initial_battle_intent(self) -> bool:
+        """Return whether the runtime has no operator-selected first workflow."""
+
+        return self._await_initial_battle_intent
+
+    def authorize_initial_battle_intent(
+        self,
+        intent: str,
+        *,
+        request_id: Optional[str] = None,
+        observation_only: bool = False,
+    ) -> bool:
+        """Select semantics for one not-yet-adopted battle boundary."""
+
+        normalized = str(intent or "").strip().lower()
+        if normalized not in {"start_battle", "attach_battle"}:
+            raise ValueError(
+                "Initial battle intent must be start_battle or attach_battle"
+            )
+        if self._battle_lifecycle.active_battle_observed:
+            return False
+        self._authorized_initial_battle_intent = normalized
+        self._authorized_battle_workflow_request_id = (
+            str(request_id).strip() if request_id else None
+        )
+        self._await_initial_battle_intent = False
+        self.ctx.data["awaiting_initial_battle_intent"] = False
+        if normalized == "attach_battle":
+            if observation_only:
+                # Attachment establishes identity only.  The process startup
+                # Strategy remains durable in the control store and may be
+                # adopted later only through an explicit active-battle request.
+                self._replace_strategy(None)
+            self._startup_gates_deferred = True
+            self._validate_initial_attachment = True
+            self._skip_initial_attachment_checks = False
+            self._battle_lifecycle.adopt_initial_battle = True
+            self.ctx.data["startup_gates_deferred"] = True
+            self._record_deferred_free_upgrade_lock_evidence()
+        else:
+            self._startup_gates_deferred = False
+            self._validate_initial_attachment = False
+            self._skip_initial_attachment_checks = False
+            self._battle_lifecycle.adopt_initial_battle = False
+            self.ctx.data["startup_gates_deferred"] = False
+            self._clear_attached_check_state()
+        return True
+
+    def revoke_initial_battle_intent(
+        self,
+        intent: str,
+        *,
+        request_id: Optional[str] = None,
+    ) -> bool:
+        """Restore the operator wait if an authorized boundary changes first."""
+
+        normalized = str(intent or "").strip().lower()
+        if (
+            self._authorized_initial_battle_intent != normalized
+            or (
+                request_id is not None
+                and self._authorized_battle_workflow_request_id
+                != str(request_id).strip()
+            )
+            or self._battle_lifecycle.active_battle_observed
+        ):
+            return False
+        self._authorized_initial_battle_intent = None
+        self._authorized_battle_workflow_request_id = None
+        self._await_initial_battle_intent = True
+        self.ctx.data["awaiting_initial_battle_intent"] = True
+        self._startup_gates_deferred = False
+        self._validate_initial_attachment = False
+        self._skip_initial_attachment_checks = False
+        self._battle_lifecycle.adopt_initial_battle = False
+        self.ctx.data["startup_gates_deferred"] = False
+        self._clear_attached_check_state()
+        return True
 
     def active_battle_observed(self) -> bool:
         """Return the lifecycle-owned same-battle precondition."""
@@ -253,6 +382,7 @@ class MissionManager:
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["attached_validation_requested"] = False
         mv["gc_session_preflight_restart_available"] = False
+        mv.pop("gc_session_preflight_repair_authority", None)
 
     def _session_preflight_identity(self) -> Optional[tuple[str, str]]:
         if not self.strategy or not self.strategy.requires_session_preflight():
@@ -512,6 +642,7 @@ class MissionManager:
             self._reset_session_preflight_repair_attempts()
         mv["gc_session_preflight_waivers"] = {}
         mv["gc_session_preflight_failed_checks"] = []
+        mv.pop("gc_session_preflight_repair_authority", None)
         self.set_exclusive_validation_battle(False)
 
     def replace_strategy_at_boundary(
@@ -539,7 +670,16 @@ class MissionManager:
         self.ctx.data["startup_gates_deferred"] = True
         self._battle_lifecycle.active_battle_observed = True
         self._battle_lifecycle.adopt_initial_battle = False
+        self._await_initial_battle_intent = False
+        self.ctx.data["awaiting_initial_battle_intent"] = False
+        self._authorized_initial_battle_intent = None
+        self._authorized_battle_workflow_request_id = None
         self._record_deferred_free_upgrade_lock_evidence()
+        if strategy is not None and strategy.requires_session_preflight():
+            self.ctx.data["attached_validation_requested"] = True
+            self.ctx.data.setdefault("mission_vars", {})[
+                "attached_validation_requested"
+            ] = True
 
     def _replace_strategy(self, strategy: Optional[BaseStrategy]) -> None:
         """Replace strategy-owned variables without choosing boundary policy."""
@@ -666,17 +806,56 @@ class MissionManager:
             and mv.get("gc_session_preflight_restart_available")
         )
 
-    def authorize_session_preflight_restart(self) -> bool:
+    def authorize_session_preflight_restart(
+        self,
+        repair_authority: Mapping[str, object],
+        *,
+        request_id: str = "",
+        check_id: str = "",
+        reason: str = "",
+    ) -> bool:
         """Convert a confirmed attached mismatch into the guarded repair path."""
 
-        if not self.session_preflight_restart_available():
+        normalized_authority = _normalized_repair_authority(repair_authority)
+        if (
+            not self.session_preflight_restart_available()
+            or normalized_authority is None
+        ):
             return False
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = True
         mv["gc_session_preflight_repair_in_progress"] = False
         mv["gc_session_preflight_restart_available"] = False
+        mv["gc_session_preflight_repair_authority"] = {
+            **normalized_authority,
+            "request_id": str(request_id or "").strip(),
+            "check_id": str(check_id or "").strip(),
+            "reason": str(reason or "").strip(),
+        }
         return True
+
+    def session_preflight_repair_grant(self) -> Optional[dict[str, object]]:
+        """Return the current one-shot grant as evidence, never as new authority."""
+
+        raw = self.ctx.data.setdefault("mission_vars", {}).get(
+            "gc_session_preflight_repair_authority"
+        )
+        return copy.deepcopy(dict(raw)) if isinstance(raw, Mapping) else None
+
+    def session_preflight_repair_authorized_for(
+        self,
+        current_authority: Mapping[str, object],
+    ) -> bool:
+        """Revalidate the exact battle/reason grant before repair input."""
+
+        expected = _normalized_repair_authority(
+            self.ctx.data.setdefault("mission_vars", {}).get(
+                "gc_session_preflight_repair_authority"
+            )
+        )
+        current = _normalized_repair_authority(current_authority)
+        return bool(expected is not None and current == expected)
 
     def session_preflight_repair_in_progress(self) -> bool:
         """Return whether this process surrendered a run for preflight repair."""
@@ -690,7 +869,6 @@ class MissionManager:
         mv = self.ctx.data.setdefault("mission_vars", {})
         return bool(
             mv.get("gc_session_preflight_blocked")
-            and not mv.get("gc_session_preflight_repair_required")
             and not mv.get("gc_session_preflight_repair_in_progress")
         )
 
@@ -725,6 +903,7 @@ class MissionManager:
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
         mv["gc_session_preflight_restart_available"] = False
+        mv.pop("gc_session_preflight_repair_authority", None)
         mv["gc_session_preflight_failed_checks"] = []
         self._reset_session_preflight_repair_attempts()
 
@@ -738,8 +917,40 @@ class MissionManager:
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
         mv["gc_session_preflight_restart_available"] = False
+        mv.pop("gc_session_preflight_repair_authority", None)
         mv["gc_session_preflight_failed_checks"] = []
         self._reset_session_preflight_repair_attempts()
+
+    def begin_manual_return_reconciliation(self) -> bool:
+        """Re-arm only active-battle checks after Return Control.
+
+        This deliberately leaves startup initialization and the current battle
+        identity untouched.  A prior session receipt is report evidence for an
+        earlier configuration and cannot short-circuit the fresh Return check.
+        """
+
+        if (
+            not self._battle_lifecycle.active_battle_observed
+            or self.strategy is None
+            or not self.strategy.requires_session_preflight()
+        ):
+            return False
+        self.ctx.data["manual_return_reconciliation_active"] = True
+        self.ctx.data["attached_session_preflight_reused"] = False
+        self.ctx.data["attached_validation_requested"] = True
+        self.ctx.data.setdefault("mission_vars", {})[
+            "attached_validation_requested"
+        ] = True
+        self._session_preflight_receipt_key = None
+        self._session_preflight_receipt_warning_key = None
+        self._clear_restored_session_preflight_report()
+        self.retry_session_preflight()
+        return True
+
+    def finish_manual_return_reconciliation(self) -> None:
+        """Release the narrow Return-only validation routing flag."""
+
+        self.ctx.data["manual_return_reconciliation_active"] = False
 
     def _reset_session_preflight_repair_attempts(self) -> None:
         """Discard consecutive mismatch evidence after a policy boundary."""
@@ -748,12 +959,19 @@ class MissionManager:
         mv["gc_session_preflight_repair_attempts"] = 0
         mv["gc_session_preflight_repair_failure_key"] = ""
 
-    def begin_session_preflight_repair(self) -> bool:
+    def begin_session_preflight_repair(
+        self,
+        current_authority: Mapping[str, object],
+    ) -> bool:
         """Claim the one guarded surrender transition for a repair request."""
 
         mv = self.ctx.data.setdefault("mission_vars", {})
-        if not mv.get("gc_session_preflight_repair_required") or mv.get(
-            "gc_session_preflight_repair_in_progress"
+        if (
+            not mv.get("gc_session_preflight_repair_required")
+            or mv.get("gc_session_preflight_repair_in_progress")
+            or not self.session_preflight_repair_authorized_for(
+                current_authority
+            )
         ):
             return False
         mv["gc_session_preflight_repair_in_progress"] = True
@@ -768,6 +986,7 @@ class MissionManager:
         mv["gc_session_preflight_restart_available"] = False
         mv["gc_session_preflight_blocked"] = True
         mv["gc_session_preflight_last_reason"] = str(reason)
+        mv.pop("gc_session_preflight_repair_authority", None)
 
     def no_battle_setup_requirements(self) -> Dict[str, Any]:
         """Return profile settings still needing a verified no-battle pass."""

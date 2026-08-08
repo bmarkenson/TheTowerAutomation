@@ -620,6 +620,29 @@ one bundle out to profile progression, structural History, completed-report,
 Perk-window, audit, and Tournament-condition projectors; all existing
 consumer-specific UI fallback and blocking classes remain intact.
 
+### Better Control freshness consumers
+
+The Better Control Model never turns a recent or byte-stable pull into a claim
+that a save was newly requested. Its current-save consumers use these exact
+boundaries:
+
+| Workflow | Acquisition and binding | Failure/authority result |
+| --- | --- | --- |
+| Active or resumable **Attach to Battle** | After exact intent and explicit Enable where needed, the guarded serializer backgrounds the verified active battle, acquires one stable `forced_serialization` bundle for the exact target generation, restores `RUNNING`, validates process/session/source activity scope and active-round identity, then lets Activity Continuity bind the final persisted scope. | Before-background loss is unavailable/pending with no input. Any restoration, temporal-identity, owner, or authority loss after backgrounding interrupts/fails that exact workflow and leaves Automation Paused. Optional allowlisted fact projection may be absent, but required round identity may not. |
+| **Return Control** from active or Home Resume | Return first refreshes passive observation while the acknowledged indefinite Pause remains authoritative. A later explicit Enable grants only the guarded Return hold; Home Resume is restored to the same battle, then the running attachment serializer and exact binding above are used. | Ordinary input stays blocked. Trusted mismatches Pause for operator review; only genuinely unresolved allowlisted checks may enter the existing UI verifier, and only after the forced-save receipt is durable. Another explicit Enable requests a new serialization rather than reusing the former bundle. |
+| **Return Control** at Home New | The existing Home preflight owner requests a new forced serialization and proves the save reports no active round for the same target and activity scope. | A mismatch remains Paused. UI fallback is limited to unresolved allowlisted configuration checks after the forced-save receipt. Blocked, incomplete, or post-background binding loss terminalizes the exact Return once; later heartbeats do not repeat serialization. A bounded UI repair that exhausts instead publishes `awaiting_manual_correction` with its failed check/reason and retained receipt; only explicit Enable after the manual change requests another fresh save. Pause/Stop/authority change yields before cleanup, and a later Home restore requires the same original owner. |
+| **Return Control** at Game Over, including manual Surrender | The lifecycle-issued current-process `natural_boundary` bundle binds exact target generation, activity scope, terminal observation, structural History transition, and mapped cause. | Missing or conflicting evidence performs no terminal UI input and keeps Return blocked/Paused. Tournament Results and unknown evidence are not advertised as Return boundaries. |
+| **Capture current setup as…** | One guarded `forced_serialization` at verified Home New, Home Resume, or active battle produces a redacted provenance receipt plus runtime/scope/target-generation/active-round binding. The preview is derived from that in-memory bundle only. An active-battle Return Control that has Paused on a trusted mismatch may pass its still-retained exact typed acquisition to Capture, labelled `retained_return_control_refresh`; that path requests no second serialization and cannot be recovered from the receipt alone. | Ordinary Automation Paused reports `automation_paused`; it never substitutes cached evidence. Exact retained Return evidence remains Paused, does not resolve Return, and is interrupted if its process/scope/target/battle binding is gone. Loss after backgrounding fails a new capture and leaves Automation Paused. A failed ready-ledger write retains the exact process-local preview, Pauses, and retries only the atomic receipt; a restarted/orphaned `capturing` ledger fails closed without another serialization. Saving uses the immutable preview fingerprint and performs no device input. |
+| Ordinary continuity/audit/monitor reads | `passive_stable_read` remains explicitly passive and may be shared by multiple projectors as one immutable in-memory bundle. | It may retain permitted positive temporal facts, but cannot satisfy Attach, Return, capture, negative current-configuration, or completeness claims. |
+| Offline import | The command's explicit operator assertion remains outside runtime authority. | It cannot issue a Better Control receipt or become process-local workflow evidence. |
+
+The exact running Attach/Return claim is process-local and is not reconstructed
+from redacted ledger fields after restart. A saved receipt describes what was
+proved; it is not a reusable snapshot handle. Configuration UI always consumes
+the retained typed acquisition and rechecks the live context first. If the
+context or private claim is gone, the workflow stops safely instead of opening
+UI from ledger or cached data.
+
 The terminal History projector now proves the structural append or capped
 rollover once, independently of completed-report semantics. A successful
 projection is retained as a bounded, redacted, one-use activity-scope handoff

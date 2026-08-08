@@ -105,6 +105,20 @@ def make_battle_id(captured_at: Optional[datetime] = None) -> str:
     return "Battle" + when.strftime("%Y%m%dT%H%M%S%z")
 
 
+def included_in_default_history(record: Mapping[str, Any]) -> bool:
+    """Return whether a record belongs in representative history/analytics."""
+
+    disposition = record.get("report_disposition")
+    if not isinstance(disposition, Mapping):
+        return True
+    return not (
+        disposition.get("representative") is False
+        or str(disposition.get("analytics") or "").lower() == "excluded"
+        or str(disposition.get("history") or "").lower()
+        == "excluded_by_default"
+    )
+
+
 def parse_tower_number(raw: str) -> Optional[Decimal]:
     """Parse The Tower's case-sensitive compact-number notation."""
 
@@ -715,6 +729,79 @@ def build_battle_record_from_player_save(
     )
 
 
+def build_minimal_battle_record_from_player_save(
+    terminal_report: Mapping[str, Any],
+    *,
+    battle_id: Optional[str] = None,
+    captured_at: Optional[datetime] = None,
+    strategy_name: Optional[str] = None,
+    run_configuration: Optional[Mapping[str, Any]] = None,
+    runtime_context: Optional[Mapping[str, Any]] = None,
+    initiator: str = "operator_manual_control",
+    disposition_provenance: Optional[Mapping[str, Any]] = None,
+    disposition_reason: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build a durable save-only record without opening terminal stats UI."""
+
+    when = captured_at or datetime.now().astimezone()
+    more_stats = more_stats_from_terminal_save_report(terminal_report)
+    completed = terminal_report.get("completed_entry")
+    identity = (
+        completed.get("identity")
+        if isinstance(completed, Mapping)
+        else None
+    )
+    killed_by = str(
+        identity.get("killed_by")
+        if isinstance(identity, Mapping)
+        else ""
+    ).strip()
+    if killed_by.lower() != "surrender":
+        raise ValueError("minimal terminal record requires confirmed Surrender")
+    record = _assemble_battle_record(
+        {"raw_text": "", "confidence": 0.0, "fields": {}},
+        more_stats,
+        battle_id=battle_id or make_battle_id(when),
+        captured_at=when,
+        strategy_name=strategy_name,
+        run_configuration=run_configuration,
+        runtime_context=runtime_context,
+    )
+    normalized_initiator = str(
+        initiator or "operator_manual_control"
+    ).strip()
+    record["report_disposition"] = {
+        "schema_version": 1,
+        "outcome": "surrendered",
+        "initiator": normalized_initiator,
+        "collection": "minimal_save_backed",
+        "representative": False,
+        "analytics": "excluded",
+        "history": "excluded_by_default",
+        "reason": str(
+            disposition_reason
+            or (
+                "configuration-repair surrender retained without terminal UI"
+                if normalized_initiator == "automation_config_repair"
+                else "manual surrender confirmed before optional UI enrichment"
+            )
+        ),
+        "provenance": copy.deepcopy(
+            dict(disposition_provenance)
+            if isinstance(disposition_provenance, Mapping)
+            else {
+                "mapping_id": terminal_report.get("mapping_id"),
+                "capture": dict(terminal_report.get("capture") or {}),
+                "run_binding": dict(terminal_report.get("run_binding") or {}),
+                "history_transition": dict(
+                    terminal_report.get("history_transition") or {}
+                ),
+            }
+        ),
+    }
+    return record
+
+
 def _assemble_battle_record(
     game_stats: dict[str, Any],
     more_stats: dict[str, Any],
@@ -1125,6 +1212,39 @@ def persist_battle_record(
     battle_id = str(payload["battle_id"])
     json_path = directory / f"{battle_id}.json"
     markdown_path = directory / f"{battle_id}.md"
+    if json_path.exists():
+        try:
+            existing = json.loads(json_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"existing battle record {battle_id} is unreadable"
+            ) from exc
+        existing_disposition = (
+            existing.get("report_disposition")
+            if isinstance(existing, Mapping)
+            else None
+        )
+        new_disposition = payload.get("report_disposition")
+        if not included_in_default_history(payload) or (
+            isinstance(existing, Mapping)
+            and not included_in_default_history(existing)
+        ):
+            if not (
+                isinstance(existing, Mapping)
+                and isinstance(existing_disposition, Mapping)
+                and isinstance(new_disposition, Mapping)
+                and existing_disposition == new_disposition
+            ):
+                raise FileExistsError(
+                    f"non-representative battle id collision for {battle_id}"
+                )
+            if not markdown_path.exists():
+                _atomic_write(markdown_path, render_battle_markdown(existing))
+            if isinstance(record, dict) and "profile_progression_delta" in existing:
+                record["profile_progression_delta"] = copy.deepcopy(
+                    existing["profile_progression_delta"]
+                )
+            return json_path, markdown_path
     _atomic_write(json_path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     _atomic_write(markdown_path, render_battle_markdown(payload))
     if isinstance(record, dict) and "profile_progression_delta" in payload:

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 import yaml
 
 from automation.missions.base import MissionContext
@@ -66,7 +67,6 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
             "game_speed",
         ],
         "auto_return": False,
-        "game_over_mode": "wait",
         "home_preflight": True,
         "session_preflight_on_attach": True,
         "exclusive_validation": {
@@ -656,7 +656,13 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
     start_tapper.assert_not_called()
 
 
-def test_tournament_main_loop_collects_ad_gem_after_attached_gate_releases():
+@pytest.mark.parametrize(
+    "terminal_policy",
+    [ExecMode.NEXT_BATTLE, ExecMode.WAIT, ExecMode.HOME],
+)
+def test_tournament_main_loop_preserves_policy_after_attached_gate_releases(
+    terminal_policy,
+):
     strategy = get_strategy("tournament")
     assert strategy is not None
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
@@ -711,6 +717,7 @@ def test_tournament_main_loop_collects_ad_gem_after_attached_gate_releases():
     previous_mode = AUTOMATION.mode
 
     try:
+        AUTOMATION.mode = terminal_policy
         with (
             patch("core.app.threading.Thread"),
             patch(
@@ -728,6 +735,7 @@ def test_tournament_main_loop_collects_ad_gem_after_attached_gate_releases():
             patch("core.app.time.sleep"),
         ):
             app.run()
+        assert AUTOMATION.mode is terminal_policy
     finally:
         AUTOMATION.mode = previous_mode
 
@@ -761,7 +769,13 @@ def test_tournament_running_handler_checks_guarded_rewards_before_visible_ad_gem
     assert callable(ad_gem.call_args.kwargs["floating_action_guard_fn"])
 
 
-def test_tournament_game_over_waits_and_records_profile_evidence():
+@pytest.mark.parametrize(
+    "terminal_policy",
+    [ExecMode.NEXT_BATTLE, ExecMode.WAIT, ExecMode.HOME],
+)
+def test_tournament_game_over_preserves_terminal_policy_and_profile_evidence(
+    terminal_policy,
+):
     strategy = get_strategy("tournament")
     assert strategy is not None
     manager = MagicMock()
@@ -783,13 +797,15 @@ def test_tournament_game_over_waits_and_records_profile_evidence():
     previous_mode = AUTOMATION.mode
 
     try:
+        AUTOMATION.mode = terminal_policy
         with patch("core.app.handle_game_over") as game_over:
             app._handle_primary_states("GAME_OVER", set(), frame)
+        assert AUTOMATION.mode is terminal_policy
     finally:
         AUTOMATION.mode = previous_mode
 
     kwargs = game_over.call_args.kwargs
-    app._supervisor.persist_mode.assert_called_once_with("WAIT")
+    app._supervisor.persist_mode.assert_not_called()
     assert kwargs["capture_stats"] is True
     assert kwargs["battle_context"]["run_configuration"]["profile"] == "tournament"
     assert kwargs["battle_context"]["session_preflight_evidence"] == {
@@ -800,7 +816,13 @@ def test_tournament_game_over_waits_and_records_profile_evidence():
     app._status_reporter.reset_coin_rate_samples.assert_called_once_with()
 
 
-def test_tournament_results_are_recorded_once_without_dismissing_dialog():
+@pytest.mark.parametrize(
+    "terminal_policy",
+    [ExecMode.NEXT_BATTLE, ExecMode.WAIT, ExecMode.HOME],
+)
+def test_tournament_results_are_recorded_once_without_changing_policy(
+    terminal_policy,
+):
     strategy = get_strategy("tournament")
     assert strategy is not None
     manager = MagicMock()
@@ -817,19 +839,30 @@ def test_tournament_results_are_recorded_once_without_dismissing_dialog():
     _bind_terminal_context(app)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
-    with (
-        patch(
-            "core.app.handle_tournament_results",
-            return_value={"tournament_id": "Tournament20260718"},
-        ) as tournament_results,
-        patch("core.app.handle_game_over") as normal_game_over,
-        patch("core.app.log_action_intent") as action_log,
-        patch("core.app.log_result") as result_log,
-    ):
-        app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
-        app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+    previous_mode = AUTOMATION.mode
+    try:
+        AUTOMATION.mode = terminal_policy
+        with (
+            patch(
+                "core.app.handle_tournament_results",
+                return_value={"tournament_id": "Tournament20260718"},
+            ) as tournament_results,
+            patch(
+                "core.app.dismiss_tournament_results_to_home",
+                return_value=True,
+            ) as dismiss_results,
+            patch("core.app.handle_game_over") as normal_game_over,
+            patch("core.app.log_action_intent") as action_log,
+            patch("core.app.log_result") as result_log,
+        ):
+            app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+            if terminal_policy is ExecMode.WAIT:
+                app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+        assert AUTOMATION.mode is terminal_policy
+    finally:
+        AUTOMATION.mode = previous_mode
 
-    app._supervisor.persist_mode.assert_called_once_with("WAIT")
+    app._supervisor.persist_mode.assert_not_called()
     tournament_results.assert_called_once()
     assert tournament_results.call_args.args == (frame,)
     assert (
@@ -844,18 +877,36 @@ def test_tournament_results_are_recorded_once_without_dismissing_dialog():
     action_log.assert_called_once()
     operation_id = action_log.call_args.kwargs["operation_id"]
     assert action_log.call_args.args == ("Capturing the finished Tournament",)
-    result_log.assert_called_once_with(
-        "Tournament finished — result saved; automation is waiting on the "
-        "Tournament Results screen (mode WAIT)",
-        detail=(
-            "[TOURNAMENT_RESULTS] result=completed "
-            "tournament_id=Tournament20260718 next_mode=WAIT"
-        ),
-        operation_id=operation_id,
-    )
+    if terminal_policy is ExecMode.WAIT:
+        dismiss_results.assert_not_called()
+        result_log.assert_called_once_with(
+            "Tournament finished — result saved; Tournament Results remains "
+            "visible under the explicit wait policy",
+            detail=(
+                "[TOURNAMENT_RESULTS] result=completed "
+                "tournament_id=Tournament20260718 "
+                "terminal_policy=WAIT screen=retained"
+            ),
+            operation_id=operation_id,
+        )
+    else:
+        dismiss_results.assert_called_once()
+        result_log.assert_called_once_with(
+            "Tournament result saved and verified Home reached; the selected "
+            "future battle policy remains separate",
+            detail=(
+                "[TOURNAMENT_RESULTS] result=completed "
+                f"terminal_policy={terminal_policy.value} "
+                "screen=home_new_battle"
+            ),
+            operation_id=operation_id,
+        )
 
 
-def test_tournament_result_capture_failure_reports_wait_and_retry():
+@pytest.mark.parametrize("terminal_policy", [ExecMode.NEXT_BATTLE, ExecMode.HOME])
+def test_tournament_dismissal_failure_pauses_without_changing_policy(
+    terminal_policy,
+):
     strategy = get_strategy("tournament")
     assert strategy is not None
     manager = MagicMock()
@@ -872,22 +923,90 @@ def test_tournament_result_capture_failure_reports_wait_and_retry():
     _bind_terminal_context(app)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
-    with (
-        patch("core.app.handle_tournament_results", return_value=None),
-        patch("core.app.log_action_intent") as action_log,
-        patch("core.app.log_result") as result_log,
-    ):
-        app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+    previous_mode = AUTOMATION.mode
+    try:
+        AUTOMATION.mode = terminal_policy
+        with (
+            patch(
+                "core.app.handle_tournament_results",
+                return_value={"tournament_id": "Tournament20260718"},
+            ),
+            patch(
+                "core.app.dismiss_tournament_results_to_home",
+                return_value=False,
+            ),
+            patch("core.app.log_action_intent") as action_log,
+            patch("core.app.log_result") as result_log,
+        ):
+            app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+        assert AUTOMATION.mode is terminal_policy
+    finally:
+        AUTOMATION.mode = previous_mode
 
     operation_id = action_log.call_args.kwargs["operation_id"]
+    app._supervisor.persist_state.assert_called_once_with("PAUSED")
     result_log.assert_called_once_with(
-        "Tournament result capture failed — automation remains on the "
-        "Tournament Results screen in WAIT and will retry",
+        "Tournament result was saved, but verified Home was not reached; "
+        "Automation Paused",
         detail=(
-            "[TOURNAMENT_RESULTS] result=failed next_mode=WAIT retry=true"
+            "[TOURNAMENT_RESULTS] result=failed "
+            f"terminal_policy={terminal_policy.value} screen=retained "
+            "action_authority=PAUSED"
         ),
         operation_id=operation_id,
     )
+
+
+@pytest.mark.parametrize(
+    "terminal_policy",
+    [ExecMode.NEXT_BATTLE, ExecMode.WAIT, ExecMode.HOME],
+)
+def test_tournament_result_capture_failure_preserves_policy_and_retries(
+    terminal_policy,
+):
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx = MissionContext(data={"mission_vars": {}})
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = MagicMock()
+    app._status_reporter = MagicMock()
+    app._status_reporter.coin_rate_samples = []
+    app._last_wave_value = 2028
+    app._last_wave_conf = 99.0
+    app._tournament_results_captured = False
+    _bind_terminal_context(app)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    previous_mode = AUTOMATION.mode
+    try:
+        AUTOMATION.mode = terminal_policy
+        with (
+            patch(
+                "core.app.handle_tournament_results", return_value=None
+            ) as tournament_results,
+            patch("core.app.log_action_intent") as action_log,
+            patch("core.app.log_result") as result_log,
+        ):
+            app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+        assert AUTOMATION.mode is terminal_policy
+    finally:
+        AUTOMATION.mode = previous_mode
+
+    operation_id = action_log.call_args.kwargs["operation_id"]
+    result_log.assert_called_once_with(
+        "Tournament result capture failed — Tournament Results remains visible "
+        f"(policy {terminal_policy.value} preserved) and capture will retry",
+        detail=(
+            "[TOURNAMENT_RESULTS] result=failed "
+            f"terminal_policy={terminal_policy.value} screen=retained retry=true"
+        ),
+        operation_id=operation_id,
+    )
+    app._supervisor.persist_mode.assert_not_called()
+    tournament_results.assert_called_once()
     manager.on_game_over.assert_not_called()
     app._status_reporter.reset_coin_rate_samples.assert_not_called()
     assert app._tournament_results_captured is False

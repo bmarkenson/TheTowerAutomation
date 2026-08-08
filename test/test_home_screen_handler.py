@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pytest
 
 from core.input import TapVerification
 from core.matcher import get_match
@@ -120,6 +121,74 @@ def test_validation_new_battle_tap_refuses_resume_control():
         assert not tap_verified_new_battle()
 
     tap.assert_not_called()
+
+
+def test_explicit_attach_refuses_a_new_battle_control():
+    with (
+        patch(
+            "handlers.home_screen_handler.capture_adb_screenshot",
+            return_value=_screenshot(),
+        ),
+        patch(
+            "handlers.home_screen_handler.detect_state_and_overlays",
+            return_value={"state": "HOME_SCREEN"},
+        ),
+        patch(
+            "handlers.home_screen_handler.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "ocr",
+                96.0,
+                "BATTLE",
+            ),
+        ),
+        patch("handlers.home_screen_handler.safe_tap") as tap,
+        patch("handlers.home_screen_handler.time.sleep"),
+    ):
+        assert not handle_home_screen(
+            restart_enabled=True,
+            require_resume_battle=True,
+        )
+
+    tap.assert_not_called()
+
+
+def test_home_handler_rejects_conflicting_explicit_intents():
+    with pytest.raises(ValueError, match="both"):
+        handle_home_screen(
+            restart_enabled=True,
+            require_new_battle=True,
+            require_resume_battle=True,
+        )
+
+
+def test_explicit_home_dispatch_emits_one_correlated_action_result_pair():
+    with (
+        patch(
+            "handlers.home_screen_handler.tap_verified_new_battle",
+            return_value=True,
+        ),
+        patch("handlers.home_screen_handler.log_action_intent") as action,
+        patch("handlers.home_screen_handler.log_result") as result,
+        patch("handlers.home_screen_handler.time.sleep"),
+    ):
+        assert handle_home_screen(
+            restart_enabled=True,
+            require_new_battle=True,
+            operation_id="workflow-1:observation-1:home_dispatch",
+            action_purpose="Starting a new battle",
+            action_reason="the exact operator intent passed normal gates",
+        ) is True
+
+    action.assert_called_once_with(
+        "Starting a new battle",
+        reason="the exact operator intent passed normal gates",
+        operation_id="workflow-1:observation-1:home_dispatch",
+    )
+    result.assert_called_once_with(
+        "Verified Home battle control dispatched",
+        operation_id="workflow-1:observation-1:home_dispatch",
+    )
 
 
 def test_resume_battle_ocr_tolerates_button_border_artifacts():

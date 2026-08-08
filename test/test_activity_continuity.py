@@ -1252,6 +1252,8 @@ def test_blocked_active_attachment_save_never_opens_history_ui(
         return PlayerSaveHistoryReadResult(
             PlayerSaveHistoryReadStatus.BLOCKED,
             "active_attachment_restored_source_boundary_unverified",
+            background_dispatched=True,
+            operator_workflow_interrupted=True,
         )
 
     coordinator = ActivityContinuityCoordinator(
@@ -1271,6 +1273,9 @@ def test_blocked_active_attachment_save_never_opens_history_ui(
     assert len(save_reads) == 1
     assert save_reads[0]["serialize_active_attachment"] is True
     assert ui_reads == []
+    assert outcome.operator_workflow_interruption_reason == (
+        "active_attachment_restored_source_boundary_unverified"
+    )
 
 
 def test_unchanged_retry_save_tail_polls_passively_without_history_ui(

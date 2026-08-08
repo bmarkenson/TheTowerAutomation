@@ -6,40 +6,127 @@ belong to [`deploy/systemd/README.md`](../../deploy/systemd/README.md); native
 client operation belongs to the
 [`Windows README`](../../windows/TheTower.ControlSurface/README.md).
 
+## Start or stop automation
+
+**Start Automation** and **Stop Automation** change only the fixed managed
+process lifecycle. Start launches the service with Automation Paused and no
+battle workflow selected. Wait for fresh live observation, then choose a
+separate available **Start Battle** or **Attach to Battle** action. Do not
+interpret a live process as enabled input or a stopped process as a terminal
+policy.
+
+**Start Battle** is available only from fresh, owner-matched Home **New
+Battle** evidence. If requested while Paused it remains `awaiting_enable`;
+explicit **Enable Automation** revalidates the same runtime, target, activity
+scope, and boundary before normal new-run gates receive action authority.
+Once the verified Home control is tapped, status reports `action_dispatched`;
+the workflow continues to suppress unrelated input until lifecycle adoption or
+a visible interrupted/failed result.
+If Pause, Stop, or Take Manual Control arrives during a Home configuration
+route, setup yields at the first denied input and performs no cleanup action.
+Observation and acknowledgement continue. A later Enable restores Home only
+when the original workflow still owns the exact runtime, target, and activity
+scope; otherwise that pending recovery is discarded.
+
+Stopping interrupts unfinished battle and manual-control workflows. Repeating
+an already satisfied Start or Stop is reported as a no-op. The old attached
+reload and Start-time attachment-policy controls are retired: after a process
+replacement, inspect fresh observation and issue a new exact battle intent.
+
 ## Attach to a current battle
 
-Before managed Start, choose **Validate current battle if attached** or **Skip
-checks for current battle**. Fresh active-battle or Home **Resume Battle**
-evidence creates the attachment. A matching completed session receipt may be
-reused only with unchanged Current-run identity and Strategy check fingerprint;
-missing or unreadable continuity, a changed battle, or changed checks reruns or
-defers them.
+**Attach to Battle** is available only from fresh active-battle or Home
+**Resume Battle** evidence. It never starts a new battle as a fallback and does
+not adopt the observed battle merely because the intent was accepted. The
+runtime first revalidates the exact PID, ADB target/generation, activity scope,
+and observed boundary.
 
-Attachment checks are read-only unless the profile explicitly declares a
-guarded battle-only `run_when_attached` action. They never select Home presets,
-equip loadouts, leave through Home, restart, or acquire Surrender authority.
-Home-only evidence unavailable from a bound save remains explicitly deferred.
-Attachment ends at Game Over, Tournament Results, or verified Home
-`NEW_BATTLE`, where ordinary gates rearm.
+The runtime remains input-blocked in `validating_save` while it performs one
+guarded exact-target serialization, restores the source, binds active-round
+identity to the final activity scope, and writes the typed receipt. `ready`
+means the existing battle is validated for observation-only attachment; it
+does not select a Strategy. Lifecycle adoption then completes the attachment.
+An unusable save, changed owner/scope, or restoration failure never falls back
+to an unvalidated attach; a post-background loss leaves Automation Paused.
 
-## Reload automation for the current battle
+To monitor and collect without changing the battle, leave the active Strategy
+as **No Strategy** after attachment. To apply the selected Strategy, use the
+separate **Switch this battle** action only after attachment completes. That
+adoption does not authorize Surrender. If a Strategy later reports a problem
+that can only be fixed between battles, automation may Surrender only when the
+runtime offers **Surrender this battle and repair setup** and the operator
+selects that exact one-shot option. It records the nonrepresentative result,
+returns to verified Home, and Pauses; correcting setup and starting another
+battle are separate choices.
 
-For a checked-in Python update, prefer the guarded control-surface reload over
-raw Stop/Start or `systemctl restart`:
+## Take and return manual control
 
-1. Persist indefinite Pause and wait for the current runtime acknowledgement.
-2. Require that same PID/lock owner to publish a fresh post-request `RUNNING`
-   observation while actions remain blocked.
-3. Stop the fixed automation unit; launch one replacement with
-   `startup_gates=next_run`; immediately restore the configured future policy.
-4. Require a distinct systemd `MainPID`, matching held target lock, attached-
-   policy startup evidence, Pause consumption, and first fresh observation.
-5. Restore the prior `RUNNING`, indefinite Pause, or unexpired timed Pause.
+**Take Manual Control** first requests and waits for an acknowledged indefinite
+Pause. Observation may continue, but automated device input is zero. Choose how
+a later manual Surrender should be handled at that boundary:
 
-An initial precondition failure changes nothing. Any failure after Pause
-preparation leaves control Paused. Reload does not fabricate completed gates;
-attachment suppression ends at the next authoritative boundary, and process-
-local samples restart as “since attachment.”
+- **Exclude manual Surrender stats** (default) detects the terminal from the
+  bound natural save, writes a minimal nonrepresentative/excluded record, and
+  skips terminal collection UI.
+- **Collect manual Surrender stats** opts into the ordinary terminal collection
+  path after save-backed cause confirmation.
+
+Neither choice tells automation to Surrender, and there is no manual Surrender
+command to announce in advance.
+
+**Return Control** refreshes passive observation while Pause remains in force.
+It is available only at exact-bound Home New, Home Resume, active battle, or
+Game Over evidence; Tournament Results, unknown state, or missing target/scope
+binding is visibly unavailable. Explicit **Enable Automation** then authorizes
+only reconciliation: a newly forced save (or the bound Game Over natural save)
+must reconcile battle identity and the active Strategy's configuration before
+ordinary input returns. A trusted mismatch Pauses for operator review, and only
+unresolved allowlisted checks may open their existing verifier after the save
+receipt. Do not use Enable as a shortcut around Return.
+If a Home New refresh is blocked, incomplete, or loses its binding after
+backgrounding, Return becomes failed/interrupted and Automation remains Paused.
+Do not retry by repeatedly selecting Enable; start a new explicit Return only
+after reviewing the reported boundary.
+If the forced save succeeds but the bounded Home UI repair exhausts instead,
+Return reports `awaiting_manual_correction` with the failed check and exact
+reason. Make the reported manual change while Pause remains acknowledged, then
+select Enable once. That explicit retry discards the former process-local claim
+and requests a new serialization before any UI validation; it never reuses the
+old receipt or retries from a heartbeat.
+
+## Capture a manually changed setup
+
+At verified Home New, Home Resume, or active battle, with Automation Enabled
+and no competing workflow, choose **Capture current setup as…**. The runtime
+briefly performs its guarded serialization and presents representable values,
+unresolved fields, and an optional comparison Base. Automation Paused cannot
+perform this lifecycle refresh; the UI reports that outcome and never consumes
+a cached save.
+
+There is one deliberate no-input path for manual changes: if Return Control
+already forced an exact active-battle save and then Paused on a trusted mismatch,
+**Capture current setup as…** may review that retained process-local acquisition.
+The UI identifies it as Return Control evidence. It requests no second refresh,
+does not use a durable receipt as replay authority, and saving the result does
+not resolve Return Control or resume automation.
+
+Save either a new immutable managed Module preset or a custom Strategy draft.
+The Base is comparison-only, unresolved fields remain explicit, and saving
+does not publish, select, queue, activate, or apply anything. Captured Strategy
+drafts remain in the Strategy authoring catalog and can be reopened later for
+the ordinary Linux Validate → Review → Publish flow. Reopening shows that
+draft's stored origin, captured-versus-Base difference, and unresolved rows.
+The CLI requires `capture-setup review-strategy ...` followed by a separate
+`capture-setup save-strategy ... --review-fingerprint <sha256>`; it never
+accepts its own just-printed review automatically. A collision requires a new
+ID unless the Strategy draft embeds the exact evidence proving recovery of a
+previous atomic-create receipt failure.
+
+If the runtime completed serialization but could not write the ready receipt,
+it Pauses and retries only that atomic receipt from its exact process-local
+claim. It does not background the game again. A post-background acquisition or
+round contradiction also leaves Automation Paused and failed; an orphaned
+`capturing` ledger after process loss is not replay authority.
 
 ## Switch the live ADB target
 
@@ -48,7 +135,8 @@ local samples restart as “since attachment.”
 2. Move the emulator, enter the new exact localhost port, and select Switch.
 3. Require the new target lock, `device` transport, supported fresh frame, and
    runtime handoff acknowledgement before the old lock is released.
-4. Verify the fresh screen and Resume only when appropriate.
+4. Verify the fresh screen and select **Automation Enabled** only when
+   appropriate.
 
 A failed handoff remains Paused and retains the old runtime target while the
 control service may continue bounded registration retries for the saved next-

@@ -40,6 +40,11 @@ from core.control_directives import (
     normalize_game_speed_target,
     normalize_interactive_development_lease,
 )
+from core.control_model import (
+    validate_battle_workflow,
+    validate_manual_control,
+    validate_setup_capture,
+)
 from core.strategy_profiles import is_configurable_strategy
 from utils.logger import log, log_action_intent, log_result
 from core.run_state import AUTOMATION
@@ -89,6 +94,27 @@ class AutomationSupervisor:
                 initial_directives.get("interactive_development_lease")
             )
         )
+        self._battle_workflow = validate_battle_workflow(
+            initial_directives.get("battle_workflow")
+        )
+        self._battle_workflow_error = bool(
+            initial_directives.get("battle_workflow") is not None
+            and self._battle_workflow is None
+        )
+        self._manual_control = validate_manual_control(
+            initial_directives.get("manual_control")
+        )
+        self._manual_control_error = bool(
+            initial_directives.get("manual_control") is not None
+            and self._manual_control is None
+        )
+        self._setup_capture = validate_setup_capture(
+            initial_directives.get("setup_capture")
+        )
+        self._setup_capture_error = bool(
+            initial_directives.get("setup_capture") is not None
+            and self._setup_capture is None
+        )
         self._runtime_id = uuid4().hex
         self.auto_return_secs = max(0, int(auto_return_secs))
         self.auto_return_enabled = bool(auto_return_enabled)
@@ -104,6 +130,7 @@ class AutomationSupervisor:
         self._last_applied_state: Optional[str] = None
         self._last_state_directive_revision: object = None
         self._last_applied_mode: Optional[str] = None
+        self._last_mode_directive_revision: object = None
         self._last_applied_game_speed_target: Optional[float] = None
         self._last_game_speed_target_revision: object = None
         self._pause_resume_at: Optional[float] = None
@@ -111,6 +138,7 @@ class AutomationSupervisor:
         self._last_applied_adb_request: Optional[Tuple[int, object]] = None
         self._last_deferred_adb_request: Optional[Tuple[int, object]] = None
         self._next_adb_handoff_attempt_at = 0.0
+        self._unexpected_manual_yield_emergency = False
 
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
@@ -181,12 +209,54 @@ class AutomationSupervisor:
         )
 
     @property
+    def battle_workflow(self) -> Optional[Dict[str, object]]:
+        """Return the latest validated explicit battle workflow directive."""
+
+        return deepcopy(self._battle_workflow) if self._battle_workflow else None
+
+    @property
+    def manual_control(self) -> Optional[Dict[str, object]]:
+        """Return the latest validated Take/Return Control directive."""
+
+        return deepcopy(self._manual_control) if self._manual_control else None
+
+    @property
+    def setup_capture(self) -> Optional[Dict[str, object]]:
+        """Return the latest validated save-backed setup capture directive."""
+
+        return deepcopy(self._setup_capture) if self._setup_capture else None
+
+    @property
+    def battle_workflow_error(self) -> bool:
+        """Return whether a raw battle workflow exists but is malformed."""
+
+        return bool(self._battle_workflow_error)
+
+    @property
+    def manual_control_error(self) -> bool:
+        """Return whether a raw manual-control handoff exists but is malformed."""
+
+        return bool(self._manual_control_error)
+
+    @property
+    def setup_capture_error(self) -> bool:
+        """Return whether a raw setup capture exists but is malformed."""
+
+        return bool(self._setup_capture_error)
+
+    @property
     def control_state(self) -> str:
         """Return the currently applied operator run-state value."""
 
         state = getattr(AUTOMATION, "state", None)
         value = getattr(state, "value", state)
         return str(value or "UNKNOWN").strip().upper()
+
+    @property
+    def unexpected_manual_yield_emergency(self) -> bool:
+        """Return whether a failed durable yield is enforcing local Pause."""
+
+        return bool(self._unexpected_manual_yield_emergency)
 
     def apply_control(self) -> bool:
         """Apply directives and report whether tracked control intent changed."""
@@ -204,6 +274,20 @@ class AutomationSupervisor:
                 and state_revision != self._last_state_directive_revision
             )
             self._last_state_directive_revision = state_revision
+            mode_revision = (
+                directives.get("mode_request_id")
+                or directives.get("mode_updated_at")
+                or (
+                    directives.get("updated_at")
+                    if "mode" in directives
+                    else None
+                )
+            )
+            mode_directive_changed = bool(
+                mode_revision is not None
+                and mode_revision != self._last_mode_directive_revision
+            )
+            self._last_mode_directive_revision = mode_revision
             game_speed_target_revision = (
                 directives.get("game_speed_target_request_id")
                 or directives.get("game_speed_target_updated_at")
@@ -220,7 +304,9 @@ class AutomationSupervisor:
             )
             self._last_game_speed_target_revision = game_speed_target_revision
             control_directive_changed = (
-                state_directive_changed or game_speed_target_changed
+                state_directive_changed
+                or mode_directive_changed
+                or game_speed_target_changed
             )
             self._strategy_request = self._parse_strategy_request(directives)
             self._gate_decision = self._parse_gate_decision(directives)
@@ -235,11 +321,39 @@ class AutomationSupervisor:
                     directives.get("interactive_development_lease")
                 )
             )
+            self._battle_workflow = validate_battle_workflow(
+                directives.get("battle_workflow")
+            )
+            self._battle_workflow_error = bool(
+                directives.get("battle_workflow") is not None
+                and self._battle_workflow is None
+            )
+            self._manual_control = validate_manual_control(
+                directives.get("manual_control")
+            )
+            self._manual_control_error = bool(
+                directives.get("manual_control") is not None
+                and self._manual_control is None
+            )
+            self._setup_capture = validate_setup_capture(
+                directives.get("setup_capture")
+            )
+            self._setup_capture_error = bool(
+                directives.get("setup_capture") is not None
+                and self._setup_capture is None
+            )
+            if self._unexpected_manual_yield_emergency and self._manual_control:
+                self._unexpected_manual_yield_emergency = False
             self._apply_state(
                 directives.get("state"),
                 acknowledge_unchanged=state_directive_changed,
+                request_id=directives.get("state_request_id"),
             )
-            self._apply_mode(directives.get("mode"))
+            self._apply_mode(
+                directives.get("mode"),
+                acknowledge_unchanged=mode_directive_changed,
+                request_id=directives.get("mode_request_id"),
+            )
             self._apply_game_speed_target(
                 directives.get("game_speed_target"),
                 acknowledge_unchanged=game_speed_target_changed,
@@ -249,6 +363,9 @@ class AutomationSupervisor:
                 directives.get("adb_port"),
                 directives.get("adb_port_updated_at"),
             )
+
+        if self._unexpected_manual_yield_emergency:
+            self._apply_state("PAUSED")
 
         self._auto_resume_if_needed()
         return control_directive_changed
@@ -360,6 +477,7 @@ class AutomationSupervisor:
         expected: object,
         options,
         blocking: bool = True,
+        repair_authority: Optional[Mapping[str, object]] = None,
     ) -> Optional[Dict[str, object]]:
         try:
             directive = self._control_store.publish_gate_decision(
@@ -370,6 +488,7 @@ class AutomationSupervisor:
                 expected=expected,
                 options=options,
                 blocking=blocking,
+                repair_authority=repair_authority,
             )
         except (ControlDirectiveError, ValueError) as exc:
             log(f"[GATE_DECISION] Failed publishing request: {exc}", "WARN")
@@ -816,25 +935,140 @@ class AutomationSupervisor:
                 f"expected one of {sorted(_ALLOWED_STATES)}"
             )
         try:
-            self._control_store.set_state(normalized, source="runtime")
+            saved = self._control_store.set_state(
+                normalized,
+                source="runtime",
+            )
         except ControlDirectiveError as exc:
             log(f"[CTRL] Failed writing control file: {exc}", "WARN")
             return False
         self._last_applied_state = None
-        self._apply_state(normalized)
+        request_id = saved.get("state_request_id")
+        self._last_state_directive_revision = request_id
+        self._apply_state(normalized, request_id=request_id)
         return True
+
+    def transition_battle_workflow(
+        self,
+        request_id: str,
+        status: str,
+        **details: object,
+    ) -> Optional[Dict[str, object]]:
+        """Persist a runtime-owned explicit battle-workflow result."""
+
+        try:
+            workflow = self._control_store.transition_battle_workflow(
+                request_id,
+                status,
+                **details,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[BATTLE_WORKFLOW] Failed recording transition: {exc}", "WARN")
+            return None
+        self._battle_workflow = dict(workflow) if workflow else None
+        return dict(workflow) if workflow else None
+
+    def transition_manual_control(
+        self,
+        manual_control_id: str,
+        status: str,
+        **details: object,
+    ) -> Optional[Dict[str, object]]:
+        """Persist a runtime-owned Take/Return Control result."""
+
+        try:
+            manual = self._control_store.transition_manual_control(
+                manual_control_id,
+                status,
+                **details,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[MANUAL_CONTROL] Failed recording transition: {exc}", "WARN")
+            return None
+        self._manual_control = dict(manual) if manual else None
+        return dict(manual) if manual else None
+
+    def transition_setup_capture(
+        self,
+        request_id: str,
+        status: str,
+        **details: object,
+    ) -> Optional[Dict[str, object]]:
+        """Persist one runtime-owned setup-capture transition."""
+
+        try:
+            capture = self._control_store.transition_setup_capture(
+                request_id,
+                status,
+                **details,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[SETUP_CAPTURE] Failed recording transition: {exc}", "WARN")
+            return None
+        self._setup_capture = dict(capture) if capture else None
+        return dict(capture) if capture else None
+
+    def record_manual_terminal_evidence(
+        self,
+        manual_control_id: str,
+        evidence: Mapping[str, object],
+    ) -> Optional[Dict[str, object]]:
+        """Persist passive exact-run terminal evidence for Manual Control."""
+
+        try:
+            manual = self._control_store.record_manual_terminal_evidence(
+                manual_control_id,
+                evidence,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                f"[MANUAL_CONTROL] Failed recording terminal evidence: {exc}",
+                "WARN",
+            )
+            return None
+        self._manual_control = dict(manual) if manual else None
+        return dict(manual) if manual else None
+
+    def yield_to_unexpected_manual_activity(
+        self,
+        evidence: Mapping[str, object],
+    ) -> Optional[Dict[str, object]]:
+        """Atomically Pause when passive evidence shows unexpected manual input."""
+
+        try:
+            manual = self._control_store.request_manual_control(
+                evidence=evidence,
+                reason="unexpected_manual_activity",
+                source="runtime-manual-yield",
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                f"[MANUAL_CONTROL] Could not yield after manual activity: {exc}",
+                "WARN",
+            )
+            self._unexpected_manual_yield_emergency = True
+            self._last_applied_state = None
+            self._apply_state("PAUSED")
+            return None
+        self._manual_control = dict(manual)
+        self._unexpected_manual_yield_emergency = False
+        self._last_applied_state = None
+        self._apply_state("PAUSED")
+        return dict(manual)
 
     def persist_mode(self, mode: str) -> bool:
         """Persist and apply a runtime-owned terminal mode transition."""
 
         normalized = normalize_automation_mode(mode)
         try:
-            self._control_store.set_mode(normalized, source="runtime")
+            saved = self._control_store.set_mode(normalized, source="runtime")
         except ControlDirectiveError as exc:
             log(f"[CTRL] Failed writing control file: {exc}", "WARN")
             return False
         self._last_applied_mode = None
-        self._apply_mode(normalized)
+        request_id = saved.get("mode_request_id")
+        self._last_mode_directive_revision = request_id
+        self._apply_mode(normalized, request_id=request_id)
         return True
 
     def format_state(self, ui_state: str) -> str:
@@ -1175,16 +1409,23 @@ class AutomationSupervisor:
         state: object,
         *,
         acknowledge_unchanged: bool = False,
+        request_id: object = None,
     ) -> None:
         if not isinstance(state, str) or not state:
             return
         normalized = state.upper()
         if normalized not in _ALLOWED_STATES:
             return
+        request_suffix = (
+            f" request_id={str(request_id).strip()}"
+            if str(request_id or "").strip()
+            else ""
+        )
         if normalized == self._last_applied_state:
             if acknowledge_unchanged:
                 log(
-                    f"[CTRL] State set to {normalized} via control file",
+                    f"[CTRL] State set to {normalized} via control file"
+                    f"{request_suffix}",
                     "INFO",
                     console=True,
                 )
@@ -1192,7 +1433,8 @@ class AutomationSupervisor:
         try:
             AUTOMATION.state = normalized
             log(
-                f"[CTRL] State set to {normalized} via control file",
+                f"[CTRL] State set to {normalized} via control file"
+                f"{request_suffix}",
                 "INFO",
                 console=True,
             )
@@ -1200,19 +1442,38 @@ class AutomationSupervisor:
         except Exception as exc:
             log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
 
-    def _apply_mode(self, mode: object) -> None:
+    def _apply_mode(
+        self,
+        mode: object,
+        *,
+        acknowledge_unchanged: bool = False,
+        request_id: object = None,
+    ) -> None:
         if not isinstance(mode, str) or not mode:
             return
         try:
             normalized = normalize_automation_mode(mode)
         except ValueError:
             return
+        request_suffix = (
+            f" request_id={str(request_id).strip()}"
+            if str(request_id or "").strip()
+            else ""
+        )
         if normalized == self._last_applied_mode:
+            if acknowledge_unchanged:
+                log(
+                    f"[CTRL] Mode set to {normalized} via control file"
+                    f"{request_suffix}",
+                    "INFO",
+                    console=True,
+                )
             return
         try:
             AUTOMATION.mode = normalized
             log(
-                f"[CTRL] Mode set to {normalized} via control file",
+                f"[CTRL] Mode set to {normalized} via control file"
+                f"{request_suffix}",
                 "INFO",
                 console=True,
             )
@@ -1355,7 +1616,9 @@ class AutomationSupervisor:
             self._sync_pause_deadline(directives)
             return
 
-        self._apply_state("RUNNING")
+        request_id = resumed.get("state_request_id")
+        self._last_state_directive_revision = request_id
+        self._apply_state("RUNNING", request_id=request_id)
         self._pause_resume_at = None
         log(
             "[CTRL] Timed pause expired; persisted State=RUNNING",

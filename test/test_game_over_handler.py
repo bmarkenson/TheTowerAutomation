@@ -297,7 +297,9 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
 
 
 def test_game_over_abort_emits_failed_terminal_result():
+    original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
     AUTOMATION.mode = ExecMode.HOME
     try:
         with (
@@ -310,13 +312,17 @@ def test_game_over_abort_emits_failed_terminal_result():
         ):
             handle_game_over(capture_stats=False)
     finally:
+        assert AUTOMATION.state is RunState.PAUSED
+        assert AUTOMATION.mode is ExecMode.HOME
+        AUTOMATION.state = original_state
         AUTOMATION.mode = original_mode
 
     result_log.assert_called_once_with(
         "Finished-battle handling failed — Go Home from Game Stats did not complete",
         detail=(
             "[GAME_OVER] result=failed session=test "
-            "failed_step=Go Home from Game Stats next_mode=WAIT"
+            "failed_step=Go Home from Game Stats terminal_policy=HOME "
+            "action_authority=PAUSED"
         ),
     )
 
@@ -608,6 +614,11 @@ def test_capture_failure_is_recorded_without_stranding_game_over_navigation():
     perks = {"quality": {"valid": True, "warnings": []}}
     original_mode = AUTOMATION.mode
     AUTOMATION.mode = ExecMode.HOME
+    disposition = {
+        "outcome": "surrendered",
+        "collection": "full_terminal_ui",
+        "representative": False,
+    }
     try:
         with (
             patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
@@ -628,13 +639,17 @@ def test_capture_failure_is_recorded_without_stranding_game_over_navigation():
             patch("handlers.game_over_handler._save_battle_stats_record") as save_record,
             patch("handlers.game_over_handler.time.sleep"),
         ):
-            handle_game_over(capture_stats=True)
+            handle_game_over(
+                capture_stats=True,
+                report_disposition=disposition,
+            )
     finally:
         AUTOMATION.mode = original_mode
 
     capture_scroll.assert_not_called()
     assert save_record.call_args.kwargs["source_complete"] is False
     assert save_record.call_args.kwargs["source_reason"] == "top_max_swipes_exceeded"
+    assert save_record.call_args.kwargs["report_disposition"] == disposition
     assert [call.args[0] for call in tap.call_args_list] == [
         "buttons.more_stats:game_over",
         "buttons.close:more_stats",
@@ -662,6 +677,11 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
     }
     original_mode = AUTOMATION.mode
     AUTOMATION.mode = ExecMode.HOME
+    disposition = {
+        "outcome": "surrendered",
+        "collection": "full_terminal_ui",
+        "representative": False,
+    }
     try:
         with (
             patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
@@ -678,13 +698,17 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
             patch("handlers.game_over_handler._persist_battle_stats_record") as persist,
             patch("handlers.game_over_handler.time.sleep"),
         ):
-            result = handle_game_over(capture_stats=True)
+            result = handle_game_over(
+                capture_stats=True,
+                report_disposition=disposition,
+            )
     finally:
         AUTOMATION.mode = original_mode
 
     scroll.assert_not_called()
     assert result is record
     assert record["perks"] == perks
+    assert record["report_disposition"] == disposition
     assert persist.call_args.kwargs["perks_frames"] == [frame]
     assert [call.args[0] for call in tap.call_args_list] == [
         "buttons.more_stats:game_over",
@@ -714,6 +738,11 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
     }
     original_mode = AUTOMATION.mode
     AUTOMATION.mode = ExecMode.HOME
+    disposition = {
+        "outcome": "surrendered",
+        "collection": "full_terminal_ui",
+        "representative": False,
+    }
     try:
         with (
             patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
@@ -740,12 +769,14 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
                     "terminal_state": "GAME_OVER",
                     "terminal_save_report": _complete_terminal_save_report(),
                 },
+                report_disposition=disposition,
             )
     finally:
         AUTOMATION.mode = original_mode
 
     assert result is record
     assert record["perks"] == perks
+    assert record["report_disposition"] == disposition
     assert build.call_args.kwargs["strategy_name"] == "farm_t19"
     assert "terminal_save_report" not in build.call_args.kwargs["runtime_context"]
     persist.assert_called_once()

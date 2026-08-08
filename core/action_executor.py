@@ -630,14 +630,23 @@ def execute_actions(
                 if waivers:
                     effective_requirements["_gate_waivers"] = waivers
                 preflight_kwargs: Dict[str, Any] = {}
+                attached_context = bool(
+                    ctx.data.get("startup_gates_deferred") is True
+                )
+                manual_return_context = bool(
+                    ctx.data.get("manual_return_reconciliation_active") is True
+                )
                 attached_route = bool(
-                    act.get("stay_in_battle_when_attached") is True
-                    and ctx.data.get("startup_gates_deferred") is True
+                    (
+                        act.get("stay_in_battle_when_attached") is True
+                        and attached_context
+                    )
+                    or manual_return_context
                 )
                 if mv is not None:
                     save_coordinator = (
                         ctx.data.get("player_save_attachment_evidence")
-                        if attached_route
+                        if attached_context or manual_return_context
                         else ctx.data.get("player_save_preflight_coordinator")
                     )
                     setup_evidence = mv.get("gc_no_battle_setup_evidence")

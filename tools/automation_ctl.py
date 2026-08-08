@@ -6,11 +6,22 @@ Small CLI to control automation state/mode via a JSON control file
 consumed by main.py (default: logs/automation_ctl.json).
 
 Commands:
-  - pause                 → state=PAUSED until an explicit resume
+  - pause                 → state=PAUSED until an explicit Enable
   - pause --minutes N     → state=PAUSED until its persisted deadline
-  - resume                → state=RUNNING
-  - stop                  → state=STOPPED
-  - mode <next-battle|wait|home> → set the terminal disposition
+  - enable                → explicitly permit guarded automation actions
+  - start-battle          → request only a verified new-run Home workflow
+  - attach-battle         → request only a verified active/resumable workflow
+  - take-manual-control [minimal|full]
+                          → Pause and choose manual-Surrender collection
+  - return-control        → request paused observation reconciliation
+  - capture-setup         → request a fresh save-backed setup preview
+  - capture-setup status|cancel
+  - capture-setup save-modules <id> [display name]
+  - capture-setup review-strategy <id> <tier> [display name]
+  - capture-setup save-strategy <id> <tier> [display name]
+      --review-fingerprint <sha256>
+  - capture-setup draft <id> → reopen a durable captured Strategy source
+  - when-battle-ends <continue|wait|home> → set future terminal policy
   - game-speed <target>   → enforce x0.0..x6.0, or x6.3/max available
   - gate                  → prompt for a pending startup-gate decision
   - gate <choice>         → resolve it non-interactively by choice id
@@ -18,8 +29,6 @@ Commands:
   - configure-run         → interactively stage one-run check skips
   - configure-run skip <check>
   - configure-run default <check>
-  - set state <S>         → explicitly set state (RUNNING|PAUSED|STOPPED)
-  - set mode  <M>         → explicitly set mode  (NEXT_BATTLE|WAIT|HOME)
   - status                → print current file contents (or defaults)
 
 Writes atomically (tmp + os.replace) and preserves unspecified fields.
@@ -33,7 +42,6 @@ import json
 import math
 from pathlib import Path
 import sys
-import time
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -42,40 +50,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
-    VALID_STATES,
-    normalize_automation_mode,
     normalize_game_speed_target,
 )
 from core.gate_decisions import (
     prompt_for_gate_decision,
     startup_gate_context_for_strategy,
 )
+from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
 
 
 DEFAULT_CTRL_PATH = "logs/automation_ctl.json"
-
-
-def _set_state(path: str, state: str, *, resume_at: float | None = None) -> None:
-    s = state.upper()
-    if s not in VALID_STATES:
-        raise SystemExit(f"Invalid state: {state}. Use one of {sorted(VALID_STATES)}")
-    try:
-        ControlDirectiveStore(path).set_state(s, resume_at=resume_at, source="cli")
-    except ControlDirectiveError as exc:
-        raise SystemExit(f"Unable to update automation control: {exc}") from exc
-    print(f"[OK] State set to {s} @ {path}")
-
-
-def _set_mode(path: str, mode: str) -> None:
-    try:
-        normalized = normalize_automation_mode(mode)
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
-    try:
-        ControlDirectiveStore(path).set_mode(normalized, source="cli")
-    except ControlDirectiveError as exc:
-        raise SystemExit(f"Unable to update automation control: {exc}") from exc
-    print(f"[OK] Mode set to {normalized} @ {path}")
 
 
 def _set_game_speed_target(path: str, target: str) -> None:
@@ -93,6 +77,193 @@ def _set_game_speed_target(path: str, target: str) -> None:
     except ControlDirectiveError as exc:
         raise SystemExit(f"Unable to update automation control: {exc}") from exc
     print(f"[OK] Game speed target set to x{normalized:.1f} @ {path}")
+
+
+def _better_control_service(path: str) -> ControlSurfaceService:
+    """Use the same fresh-owner validation as browser and native clients."""
+
+    control_path = Path(path)
+    parent = control_path.parent
+    return ControlSurfaceService(
+        repository_root=PROJECT_ROOT,
+        control_file=control_path,
+        action_log=parent / "actions.log",
+        strategy_action_gate_file=parent / "strategy_action_gate.json",
+    )
+
+
+def _apply_better_control(path: str, action: str, **values: object) -> None:
+    try:
+        response = _better_control_service(path).apply_control(
+            {"action": action, **values}
+        )
+    except ControlSurfaceRequestError as exc:
+        code = f" [{exc.code}]" if exc.code else ""
+        raise SystemExit(f"{action} unavailable{code}: {exc}") from exc
+    request = response.get("request") or {}
+    model = response.get("control_model") or {}
+    workflow = (
+        model.get("battle_workflow")
+        if action in {"start_battle", "attach_battle"}
+        else model.get("manual_control")
+        if action in {"take_manual_control", "return_control"}
+        else {}
+    ) or {}
+    disposition = str(request.get("disposition") or "requested")
+    status = str(workflow.get("status") or "pending")
+    collection = (
+        f"; manual Surrender collection={workflow.get('surrender_collection')}"
+        if action == "take_manual_control"
+        and workflow.get("surrender_collection")
+        else ""
+    )
+    print(
+        f"[OK] {action}: {disposition}; runtime status={status}"
+        f"{collection} @ {path}"
+    )
+
+
+def _capture_base(value: str | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    identifier, separator, revision_text = value.strip().partition("@")
+    if not separator or not identifier or not revision_text.isdigit():
+        raise SystemExit("--base must use <base-id>@<revision>")
+    return {"id": identifier, "revision": int(revision_text)}
+
+
+def _print_capture_preview(capture: dict[str, object]) -> None:
+    preview = capture.get("preview") or {}
+    acquisition_source = str(capture.get("acquisition_source") or "unknown")
+    print(f"Evidence source: {acquisition_source}")
+    print("Captured values:")
+    print(json.dumps(preview.get("settings") or {}, indent=2, sort_keys=True))
+    print("Unresolved values:")
+    print(json.dumps(preview.get("unresolved") or [], indent=2, sort_keys=True))
+
+
+def _capture_setup(
+    path: str,
+    command: list[str],
+    *,
+    base_ref: str | None = None,
+    review_fingerprint: str | None = None,
+) -> None:
+    """Use only the Linux runtime-issued capture preview and save authority."""
+
+    service = _better_control_service(path)
+    try:
+        current = service.setup_capture()
+        capture = current.get("capture") or {}
+        if not command:
+            response = service.apply_setup_capture({"operation": "request"})
+        elif command == ["status"]:
+            print(json.dumps(current, indent=2))
+            return
+        elif command == ["cancel"]:
+            request_id = str(capture.get("request_id") or "")
+            if not request_id:
+                raise SystemExit("No current setup capture to cancel")
+            response = service.apply_setup_capture(
+                {"operation": "cancel", "request_id": request_id}
+            )
+        elif command[0:1] == ["draft"] and len(command) == 2:
+            print(
+                json.dumps(
+                    service.captured_setup_draft(command[1]),
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+        elif command[0] == "save-modules" and len(command) >= 2:
+            request_id = str(capture.get("request_id") or "")
+            fingerprint = str(capture.get("preview_fingerprint") or "")
+            if capture.get("status") != "ready" or not fingerprint:
+                raise SystemExit("Setup capture is not ready for review and saving")
+            identifier = command[1]
+            display_name = " ".join(command[2:]).strip() or None
+            _print_capture_preview(capture)
+            response = service.apply_setup_capture(
+                {
+                    "operation": "save",
+                    "request_id": request_id,
+                    "expected_preview_fingerprint": fingerprint,
+                    "kind": "module_preset",
+                    "id": identifier,
+                    "display_name": display_name,
+                }
+            )
+        elif command[0] in {"review-strategy", "save-strategy"} and len(command) >= 3:
+            request_id = str(capture.get("request_id") or "")
+            fingerprint = str(capture.get("preview_fingerprint") or "")
+            if capture.get("status") != "ready" or not fingerprint:
+                raise SystemExit("Setup capture is not ready for review and saving")
+            try:
+                tier = int(command[2])
+            except ValueError as exc:
+                raise SystemExit("Captured Strategy tier must be an integer") from exc
+            identifier = command[1]
+            display_name = " ".join(command[3:]).strip() or None
+            base = _capture_base(base_ref)
+            _print_capture_preview(capture)
+            review_request = {
+                "operation": "review",
+                "request_id": request_id,
+                "expected_preview_fingerprint": fingerprint,
+                "kind": "strategy_draft",
+                "id": identifier,
+                "display_name": display_name,
+                "tier": tier,
+            }
+            if base is not None:
+                review_request["base"] = base
+            if command[0] == "review-strategy":
+                reviewed = service.apply_setup_capture(review_request)
+                review = reviewed["review"]
+                print("Captured-versus-Base review:")
+                print(json.dumps(review, indent=2, sort_keys=True))
+                response = reviewed
+            else:
+                reviewed_fingerprint = str(
+                    review_fingerprint or ""
+                ).strip().lower()
+                if (
+                    len(reviewed_fingerprint) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in reviewed_fingerprint
+                    )
+                ):
+                    raise SystemExit(
+                        "save-strategy requires --review-fingerprint from a "
+                        "prior review-strategy command"
+                    )
+                save_request = {
+                    **review_request,
+                    "operation": "save",
+                    "expected_review_fingerprint": reviewed_fingerprint,
+                }
+                response = service.apply_setup_capture(save_request)
+        else:
+            raise SystemExit(
+                "Use capture-setup, capture-setup status, capture-setup cancel, "
+                "capture-setup save-modules <id> [display name], or "
+                "capture-setup review-strategy <id> <tier> [display name], or "
+                "capture-setup save-strategy <id> <tier> [display name] "
+                "--review-fingerprint <sha256>, or "
+                "capture-setup draft <id>"
+            )
+    except ControlSurfaceRequestError as exc:
+        code = f" [{exc.code}]" if exc.code else ""
+        raise SystemExit(f"capture-setup unavailable{code}: {exc}") from exc
+    request = response.get("request") or {}
+    capture = response.get("capture") or {}
+    print(
+        "[OK] capture-setup: "
+        f"{request.get('disposition') or 'requested'}; "
+        f"runtime status={capture.get('status') or 'pending'} @ {path}"
+    )
 
 
 def _request_force_continue(path: str) -> None:
@@ -209,16 +380,19 @@ def _configure_run(path: str, command: list[str]) -> None:
 
 def main(argv=None):
     p = argparse.ArgumentParser(
-        description="Automation state and terminal-disposition controller"
+        description="Better Control Model authority and workflow controller"
     )
     p.add_argument(
         "command",
         nargs="+",
         help=(
-            "pause | resume | stop | mode <m> | gate [choice] | "
+            "pause | enable | start-battle | attach-battle | "
+            "take-manual-control [minimal|full] | return-control | "
+            "capture-setup [status|cancel|save-modules|save-strategy ...] | "
+            "when-battle-ends <continue|wait|home> | gate [choice] | "
             "game-speed <0.0..6.0|6.3|max> | "
             "force-continue | configure-run [skip|default <check>] | "
-            "set state <s> | set mode <m> | status"
+            "status"
         ),
     )
     p.add_argument(
@@ -228,6 +402,21 @@ def main(argv=None):
         metavar="N",
         help="Optional positive duration for the pause command",
     )
+    p.add_argument(
+        "--base",
+        default=None,
+        metavar="ID@REVISION",
+        help="Optional comparison Base for captured Strategy review",
+    )
+    p.add_argument(
+        "--review-fingerprint",
+        default=None,
+        metavar="SHA256",
+        help=(
+            "Fingerprint printed by a prior capture-setup review-strategy; "
+            "required by capture-setup save-strategy"
+        ),
+    )
     p.add_argument("--control-file", dest="ctrl", default=DEFAULT_CTRL_PATH, help=f"Control file path (default: {DEFAULT_CTRL_PATH})")
     args = p.parse_args(argv)
 
@@ -235,23 +424,65 @@ def main(argv=None):
     ctrl = args.ctrl
 
     if cmd[0] == "pause" and len(cmd) == 1:
-        resume_at = None
         if args.minutes is not None:
             if not math.isfinite(args.minutes) or args.minutes <= 0:
                 p.error("--minutes must be a positive number")
-            resume_at = time.time() + (args.minutes * 60)
-        _set_state(ctrl, "PAUSED", resume_at=resume_at)
+            _apply_better_control(ctrl, "pause", minutes=args.minutes)
+        else:
+            _apply_better_control(ctrl, "pause")
         return 0
     if args.minutes is not None:
         p.error("--minutes is only valid with the pause command")
-    if cmd[0] == "resume" and len(cmd) == 1:
-        _set_state(ctrl, "RUNNING")
+    if args.base is not None and cmd[0] != "capture-setup":
+        p.error("--base is only valid with capture-setup")
+    if args.review_fingerprint is not None and cmd[0] != "capture-setup":
+        p.error("--review-fingerprint is only valid with capture-setup")
+    if args.review_fingerprint is not None and cmd[:2] != [
+        "capture-setup",
+        "save-strategy",
+    ]:
+        p.error(
+            "--review-fingerprint is only valid with capture-setup save-strategy"
+        )
+    if cmd[0] == "enable" and len(cmd) == 1:
+        _apply_better_control(ctrl, "enable")
         return 0
-    if cmd[0] == "stop" and len(cmd) == 1:
-        _set_state(ctrl, "STOPPED")
+    if cmd[0] == "start-battle" and len(cmd) == 1:
+        _apply_better_control(ctrl, "start_battle")
         return 0
-    if cmd[0] == "mode" and len(cmd) == 2:
-        _set_mode(ctrl, cmd[1])
+    if cmd[0] == "attach-battle" and len(cmd) == 1:
+        _apply_better_control(ctrl, "attach_battle")
+        return 0
+    if cmd[0] == "take-manual-control" and len(cmd) in {1, 2}:
+        collection = cmd[1].strip().lower() if len(cmd) == 2 else "minimal"
+        if collection not in {"minimal", "full"}:
+            p.error("take-manual-control collection must be minimal or full")
+        _apply_better_control(
+            ctrl,
+            "take_manual_control",
+            manual_surrender_collection=collection,
+        )
+        return 0
+    if cmd[0] == "return-control" and len(cmd) == 1:
+        _apply_better_control(ctrl, "return_control")
+        return 0
+    if cmd[0] == "capture-setup":
+        _capture_setup(
+            ctrl,
+            cmd[1:],
+            base_ref=args.base,
+            review_fingerprint=args.review_fingerprint,
+        )
+        return 0
+    if cmd[0] == "when-battle-ends" and len(cmd) == 2:
+        aliases = {
+            "continue": "NEXT_BATTLE",
+            "continue-automatically": "NEXT_BATTLE",
+            "wait": "WAIT",
+            "home": "HOME",
+        }
+        policy = aliases.get(cmd[1].strip().lower(), cmd[1])
+        _apply_better_control(ctrl, "terminal_policy", policy=policy)
         return 0
     if cmd[0] == "game-speed" and len(cmd) == 2:
         _set_game_speed_target(ctrl, cmd[1])
@@ -264,12 +495,6 @@ def main(argv=None):
         return 0
     if cmd[0] == "configure-run":
         _configure_run(ctrl, cmd[1:])
-        return 0
-    if cmd[0] == "set" and len(cmd) == 3 and cmd[1] == "state":
-        _set_state(ctrl, cmd[2])
-        return 0
-    if cmd[0] == "set" and len(cmd) == 3 and cmd[1] == "mode":
-        _set_mode(ctrl, cmd[2])
         return 0
     if cmd[0] == "status" and len(cmd) == 1:
         try:

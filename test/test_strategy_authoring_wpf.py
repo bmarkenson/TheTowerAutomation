@@ -294,7 +294,9 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 27" in compatibility
+    assert "MinimumServerRevision = 29" in compatibility
+    assert '"better_control_model_v2"' in compatibility
+    assert '"save_backed_setup_capture_v1"' in compatibility
     assert '"managed_custom_module_presets_v1"' in compatibility
     assert '"strategy_authoring_local_loadout_editors_v1"' in compatibility
     assert '"strategy_revision_history_v1"' in compatibility

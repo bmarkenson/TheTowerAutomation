@@ -75,6 +75,17 @@ def _terminal_gate_app() -> App:
     app._current_run_scope_id = Mock(return_value="run-1")
     app._pending_auxiliary_cleanup = None
     app._config = SimpleNamespace(strategy_name="farm_t18")
+    app._current_control_workflow_evidence = Mock(
+        return_value={
+            "schema_version": 1,
+            "runtime_id": "runtime-1",
+            "pid": 1234,
+            "adb_target": "localhost:5555",
+            "target_generation": 7,
+            "activity_scope_run_id": "run-1",
+            "game_state": "active_battle",
+        }
+    )
     return app
 
 
@@ -515,6 +526,10 @@ def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
                 "value": "",
             },
         }
+        if action == "repair_restart":
+            directive["repair_authority"] = (
+                app._current_control_workflow_evidence()
+            )
 
         assert app._apply_gate_decision(
             directive,

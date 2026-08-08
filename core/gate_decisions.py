@@ -234,10 +234,11 @@ def build_gate_decision_options(
         options.append(
             {
                 "id": "restart_and_repair",
-                "label": "Restart battle and repair setup",
+                "label": "Surrender this battle and repair setup",
                 "description": (
-                    "End this battle through the guarded repair route, correct "
-                    "the Home-only strategy setup, and validate the new battle."
+                    "Explicitly authorize one guarded Surrender for this exact "
+                    "battle and reason, return Home, and Pause. Correcting the "
+                    "setup and starting another battle require separate authority."
                 ),
                 "action": "repair_restart",
                 "kind": "standard",

@@ -15,6 +15,10 @@ public partial class StrategyProfilesWindow : Window
     {
         PropertyNameCaseInsensitive = true,
     };
+    private static readonly JsonSerializerOptions PrettyJson = new()
+    {
+        WriteIndented = true,
+    };
 
     private readonly ControlSurfaceApi _api;
     private readonly ObservableCollection<AuthoringSettingRowViewModel> _rows = [];
@@ -32,11 +36,25 @@ public partial class StrategyProfilesWindow : Window
     private bool _busy;
     private bool _loading;
     private bool _changingSelection;
+    private StrategyAuthoringSource? _initialCapturedSource;
+    private StrategyAuthoringResolution? _initialCapturedResolution;
 
     public StrategyProfilesWindow(ControlSurfaceApi api)
+        : this(api, null, null)
+    {
+    }
+
+    public StrategyProfilesWindow(
+        ControlSurfaceApi api,
+        StrategyAuthoringSource? initialCapturedSource,
+        StrategyAuthoringResolution? initialCapturedResolution)
     {
         InitializeComponent();
         _api = api;
+        _initialCapturedSource = initialCapturedSource is null
+            ? null
+            : CloneSource(initialCapturedSource);
+        _initialCapturedResolution = initialCapturedResolution;
         _settingsView = CollectionViewSource.GetDefaultView(_rows);
         _settingsView.GroupDescriptions.Add(
             new PropertyGroupDescription(nameof(AuthoringSettingRowViewModel.Section)));
@@ -63,6 +81,14 @@ public partial class StrategyProfilesWindow : Window
                 await _api.GetStrategyAuthoringAsync(cancellation.Token),
                 selectKind,
                 selectId);
+            if (_initialCapturedSource is not null)
+            {
+                BeginCapturedStrategyDraft(
+                    _initialCapturedSource,
+                    _initialCapturedResolution);
+                _initialCapturedSource = null;
+                _initialCapturedResolution = null;
+            }
         }
         catch (Exception exc)
         {
@@ -85,8 +111,10 @@ public partial class StrategyProfilesWindow : Window
         {
             BasesList.ItemsSource = catalog.Bases.Items;
             StrategiesList.ItemsSource = catalog.Strategies.Items;
+            CapturedDraftsList.ItemsSource = catalog.CapturedDrafts.Items;
             BasesList.SelectedItem = null;
             StrategiesList.SelectedItem = null;
+            CapturedDraftsList.SelectedItem = null;
             if (string.Equals(selectKind, "base", StringComparison.Ordinal))
             {
                 BasesList.SelectedItem = catalog.Bases.Items.FirstOrDefault(
@@ -121,7 +149,8 @@ public partial class StrategyProfilesWindow : Window
         var errorCount = catalog.CatalogErrors.Count;
         StatusText.Text = errorCount == 0
             ? $"Loaded {catalog.Bases.Items.Count} Base(s) and "
-                + $"{catalog.Strategies.Items.Count} Strategy item(s)."
+                + $"{catalog.Strategies.Items.Count} Strategy item(s), plus "
+                + $"{catalog.CapturedDrafts.Items.Count} captured draft(s)."
             : $"Loaded the available catalog; {errorCount} invalid publication(s) "
                 + "remain excluded and preserved for review: "
                 + string.Join(
@@ -144,6 +173,7 @@ public partial class StrategyProfilesWindow : Window
         }
         _changingSelection = true;
         StrategiesList.SelectedItem = null;
+        CapturedDraftsList.SelectedItem = null;
         _changingSelection = false;
         SelectBase(selected);
     }
@@ -159,8 +189,44 @@ public partial class StrategyProfilesWindow : Window
         }
         _changingSelection = true;
         BasesList.SelectedItem = null;
+        CapturedDraftsList.SelectedItem = null;
         _changingSelection = false;
         SelectStrategy(selected);
+    }
+
+    private async void CapturedDraftsList_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_changingSelection
+            || CapturedDraftsList.SelectedItem is not CapturedStrategyDraftSummary selected)
+        {
+            return;
+        }
+        _changingSelection = true;
+        BasesList.SelectedItem = null;
+        StrategiesList.SelectedItem = null;
+        _changingSelection = false;
+        SetBusy(true, $"Opening captured draft {selected.Id}...");
+        try
+        {
+            using var cancellation = new CancellationTokenSource(
+                TimeSpan.FromSeconds(20));
+            var response = await _api.GetCapturedStrategyDraftAsync(
+                selected.Id,
+                cancellation.Token);
+            BeginCapturedStrategyDraft(response.Draft);
+            StatusText.Text = $"Opened captured draft {selected.Id}. It remains "
+                + "unpublished and inactive until the normal reviewed publication flow completes.";
+        }
+        catch (Exception exc)
+        {
+            ShowFailure(exc.Message);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     private void SelectBase(StrategyBaseItem item)
@@ -230,6 +296,8 @@ public partial class StrategyProfilesWindow : Window
         string help)
     {
         _loading = true;
+        CapturedDraftEvidencePanel.Visibility = Visibility.Collapsed;
+        CapturedDraftEvidenceText.Text = "";
         try
         {
             _draftSource = source;
@@ -590,6 +658,76 @@ public partial class StrategyProfilesWindow : Window
         RefreshStrategyLifecycleButtons();
         EntityIdBox.Focus();
         EntityIdBox.SelectAll();
+    }
+
+    private void BeginCapturedStrategyDraft(
+        StrategyAuthoringSource source,
+        StrategyAuthoringResolution? resolution)
+    {
+        _selectedBase = null;
+        _selectedStrategy = null;
+        _isBase = false;
+        _isNew = true;
+        _expectedFingerprint = null;
+        _reviewedRebaseFingerprint = null;
+        _baseUpdate = null;
+        _publishedBasePin = null;
+        BeginSource(
+            CloneSource(source),
+            resolution,
+            editable: true,
+            help: "This save-backed captured source is an unpublished draft. "
+                + "The capture window displayed its evidence and unresolved "
+                + "rows before opening this editor. Use ordinary Linux "
+                + "validation and publication here. Opening it did not "
+                + "select, activate, queue, or apply it.");
+        EditorTitle.Text = "Captured Strategy draft";
+        ShowBaseUpdate(null, false);
+        CloneButton.IsEnabled = false;
+        RefreshStrategyLifecycleButtons();
+    }
+
+    private void BeginCapturedStrategyDraft(CapturedStrategyDraftDocument draft)
+    {
+        _selectedBase = null;
+        _selectedStrategy = null;
+        _isBase = false;
+        _isNew = true;
+        _expectedFingerprint = null;
+        _reviewedRebaseFingerprint = null;
+        _baseUpdate = null;
+        _publishedBasePin = null;
+        BeginSource(
+            CloneSource(draft.Source),
+            null,
+            editable: true,
+            help: "This save-backed captured source is an unpublished draft. "
+                + "Its immutable capture origin, captured-versus-Base review, "
+                + "and unresolved rows are shown below. Use ordinary Linux "
+                + "validation and publication here. Opening it "
+                + "did not select, activate, queue, or apply it.");
+        var origin = draft.Capture.CaptureOrigin.AcquisitionSource
+            == "retained_return_control_refresh"
+            ? "Exact retained Return Control forced save; no new device input"
+            : "New setup-capture forced save";
+        CapturedDraftEvidenceText.Text =
+            $"Saved: {draft.SavedAt ?? "-"}\n"
+            + $"Evidence source: {origin}\n"
+            + $"Captured: {draft.Capture.CapturedAt ?? "-"} · "
+            + $"{draft.Capture.MappingId} · {draft.Capture.MappingMaturity}\n\n"
+            + "Captured-versus-Base review:\n"
+            + JsonSerializer.Serialize(
+                draft.Review.CapturedVsBase,
+                PrettyJson)
+            + "\n\nExplicit unresolved fields:\n"
+            + JsonSerializer.Serialize(
+                draft.Review.Unresolved,
+                PrettyJson);
+        CapturedDraftEvidencePanel.Visibility = Visibility.Visible;
+        EditorTitle.Text = "Captured Strategy draft";
+        ShowBaseUpdate(null, false);
+        CloneButton.IsEnabled = false;
+        RefreshStrategyLifecycleButtons();
     }
 
     private async void Validate_Click(object sender, RoutedEventArgs e) =>
@@ -1359,6 +1497,7 @@ public partial class StrategyProfilesWindow : Window
         _busy = busy;
         BasesList.IsEnabled = !busy;
         StrategiesList.IsEnabled = !busy;
+        CapturedDraftsList.IsEnabled = !busy;
         NewBaseButton.IsEnabled = !busy;
         NewStrategyButton.IsEnabled = !busy;
         CloneButton.IsEnabled = !busy

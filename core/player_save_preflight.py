@@ -25,7 +25,10 @@ from core.player_save import (
     pull_player_save_bytes,
     reconcile_acquired_requirements,
 )
-from core.player_save_acquisition import StablePlayerSaveAcquirer
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    StablePlayerSaveAcquirer,
+)
 from core.player_save_history import history_metadata_from_acquisition
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
@@ -227,6 +230,16 @@ class PlayerSavePreflightResult:
         compare=False,
     )
     carry: Optional[CarriedPlayerSaveEvidence] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    acquisition: Optional[PlayerSaveAcquisitionBundle] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    context: Optional[PlayerSavePreflightContext] = field(
         default=None,
         repr=False,
         compare=False,
@@ -461,6 +474,9 @@ class PlayerSavePreflightCoordinator:
             source_label="the verified New Battle boundary",
             initial_frame=initial_frame,
         )
+        provenance["background_dispatched"] = bool(
+            serialized.background_dispatched
+        )
         if serialized.background_dispatched:
             provenance["serialization"] = "background_dispatched"
         if serialized.status is GuardedSerializationStatus.BLOCKED:
@@ -505,6 +521,7 @@ class PlayerSavePreflightCoordinator:
                 provenance,
                 operation_id,
                 history_tail=_history_ui_decision(acquisition_reason),
+                acquisition=acquisition,
             )
 
         provenance["source_fingerprint"] = _redacted(
@@ -573,6 +590,8 @@ class PlayerSavePreflightCoordinator:
             history_tail=history_tail,
             history_scope_id=context.activity_scope_id,
             carry=carry,
+            acquisition=acquisition,
+            context=context,
         )
 
     def invalidate(
@@ -800,6 +819,8 @@ class PlayerSavePreflightCoordinator:
         history_tail: Optional[Mapping[str, Any]] = None,
         history_scope_id: Optional[str] = None,
         carry: Optional[CarriedPlayerSaveEvidence] = None,
+        acquisition: Optional[PlayerSaveAcquisitionBundle] = None,
+        context: Optional[PlayerSavePreflightContext] = None,
     ) -> PlayerSavePreflightResult:
         accepted = sorted(
             check_id
@@ -826,6 +847,8 @@ class PlayerSavePreflightCoordinator:
             dict(history_tail or _history_ui_decision(reason)),
             history_scope_id=history_scope_id,
             carry=carry,
+            acquisition=acquisition,
+            context=context,
         )
         for check_id, decision in sorted(decisions.items()):
             log(
