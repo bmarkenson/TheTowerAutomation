@@ -187,6 +187,58 @@ def test_home_ad_gem_final_guard_blocks_input_after_authority_loss():
     assert "result=no_op" in result_log.call_args.kwargs["detail"]
 
 
+def test_home_ad_gem_guard_rejects_new_battle_workflow_before_input():
+    app = App.__new__(App)
+    hold = AuthorityHoldState(
+        AuthorityHold.OPERATOR_WORKFLOW,
+        "runtime is waiting for explicit Start Battle or Attach to Battle intent",
+        allowed_auxiliary_collectors=(AuxiliaryCollector.HOME_AD_GEM,),
+    )
+    supervisor = Mock()
+    supervisor.is_paused = False
+    supervisor.manual_control_error = False
+    supervisor.battle_workflow_error = False
+    supervisor.setup_capture_error = False
+    supervisor.setup_capture = None
+    supervisor.manual_control = None
+    supervisor.battle_workflow = None
+
+    def apply_control():
+        supervisor.battle_workflow = {
+            "request_id": "start-1",
+            "intent": "start_battle",
+            "status": "requested",
+        }
+        return True
+
+    supervisor.apply_control.side_effect = apply_control
+    app._supervisor = supervisor
+    app._status_reporter = Mock()
+    app._mission_mgr = Mock()
+    app._mission_mgr.awaiting_initial_battle_intent.return_value = True
+    app._authority_holds = (hold,)
+    app._authority_battle_active = False
+    app._authority_primary_state = "HOME_SCREEN"
+    app._action_authority = RuntimeActionAuthority()
+    app._action_authority.update_context(
+        global_pause=False,
+        active_battle=False,
+        battle_scope="run-1",
+        primary_state="HOME_SCREEN",
+        holds=(hold,),
+    )
+    app._current_run_scope_id = Mock(return_value="run-1")
+
+    guard = app._auxiliary_action_guard(AuxiliaryCollector.HOME_AD_GEM)
+
+    assert guard() is False
+    app._status_reporter.request_immediate_report.assert_called_once_with()
+    snapshot = app._action_authority.snapshot()
+    assert snapshot.holds[0].hold is AuthorityHold.OPERATOR_WORKFLOW
+    assert snapshot.holds[0].allowed_auxiliary_collectors == ()
+    assert snapshot.allowed_auxiliary_collectors == ()
+
+
 def test_home_ad_gem_disappearance_before_action_fails_closed():
     with (
         patch.object(ad_gems, "is_visible", return_value=False),

@@ -9352,6 +9352,22 @@ class App:
         except Exception as exc:
             log(f"[NO_STRATEGY] Passive observation failed: {exc}", "WARN")
 
+    def _home_gem_authority_holds(self) -> tuple[AuthorityHoldState, ...]:
+        """Refresh operator ownership without discarding unrelated holds."""
+
+        operator_holds = {
+            AuthorityHold.OPERATOR_WORKFLOW,
+            AuthorityHold.MANUAL_CONTROL_RETURN,
+            AuthorityHold.SETUP_CAPTURE,
+        }
+        current = tuple(
+            hold
+            for hold in getattr(self, "_authority_holds", ())
+            if hold.hold not in operator_holds
+        )
+        refreshed = self._operator_workflow_authority_hold()
+        return current + ((refreshed,) if refreshed is not None else ())
+
     def _runtime_action_guard(
         self,
         *,
@@ -9365,7 +9381,14 @@ class App:
 
         if self._supervisor.apply_control():
             self._status_reporter.request_immediate_report()
+        refreshed_holds = (
+            self._home_gem_authority_holds()
+            if action_class is RuntimeActionClass.AUXILIARY_COLLECTION
+            and collector is AuxiliaryCollector.HOME_AD_GEM
+            else None
+        )
         self._update_action_authority(
+            holds=refreshed_holds,
             observed_battle_scope=observed_battle_scope
         )
         effective_owner = owner or getattr(
