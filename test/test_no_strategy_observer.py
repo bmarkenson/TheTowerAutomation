@@ -329,9 +329,11 @@ def test_round_invariant_save_facts_feed_actual_loadout_with_temporal_provenance
     observations = running_attachment_observations(
         {
             "workshop_preset": "Attack Disso",
+            "free_upgrade_locks": ["Shockwave Size", "Bounce Shot Range"],
             "guardian_chips": ["Fetch", "Summon", "Scout"],
             "bots_preset": "Farm",
             "modules": {"cannon_primary": "Amplifying Strike"},
+            "perk_auto_pick_order": ["game_speed", "damage"],
             "cards_deck": "Farm",
             "bots_progression": {"medals_spent": 42},
         }
@@ -342,9 +344,11 @@ def test_round_invariant_save_facts_feed_actual_loadout_with_temporal_provenance
 
     for field in (
         "workshop_preset",
+        "free_upgrade_locks",
         "guardian_chips",
         "bots_preset",
         "modules",
+        "perk_auto_pick_order",
     ):
         assert fields[field]["status"] == "observed"
         assert fields[field]["provenance"]["temporal"][

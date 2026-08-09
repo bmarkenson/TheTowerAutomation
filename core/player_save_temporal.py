@@ -34,9 +34,11 @@ class PlayerSaveTemporalClass(str, Enum):
 ROUND_INVARIANT_ATTACHMENT_CHECKS = frozenset(
     {
         "workshop_preset",
+        "free_upgrade_locks",
         "guardian_chips",
         "bots_preset",
         "modules",
+        "perk_auto_pick_order",
     }
 )
 POINT_IN_TIME_ATTACHMENT_CHECKS = frozenset({"cards_deck"})
@@ -247,16 +249,29 @@ class RunningAttachmentSaveObservations:
 
 @dataclass
 class BoundRunningAttachmentSaveEvidence:
-    """One-use consumer view that rechecks scope/target at consumption time."""
+    """One-use consumer view that rechecks scope/target at consumption time.
+
+    The forced attachment save is a current, exact-bound observation for every
+    complete projected fact.  Temporal class controls how a later mismatch is
+    handled; it does not make a parsed fact ineligible for this one attachment
+    preflight.
+    """
 
     observations: RunningAttachmentSaveObservations
     context_fn: Callable[[], Any] = field(repr=False)
     _consumed: set[str] = field(default_factory=set, init=False, repr=False)
     _invalidated: bool = field(default=False, init=False, repr=False)
 
-    def consume(self, check_id: str) -> Any:
+    @property
+    def is_running_attachment(self) -> bool:
+        return True
+
+    def _current_fact(
+        self,
+        check_id: str,
+    ) -> Optional[RunningAttachmentSaveFact]:
         normalized = str(check_id or "").strip()
-        if self._invalidated or normalized in self._consumed:
+        if self._invalidated:
             return None
         try:
             context = self.context_fn()
@@ -266,11 +281,31 @@ class BoundRunningAttachmentSaveEvidence:
         if not self.observations.matches_context(context):
             self._invalidated = True
             return None
-        fact = self.observations.fact(normalized)
-        if (
-            fact is None
-            or fact.temporal_class is not PlayerSaveTemporalClass.ROUND_INVARIANT
-        ):
+        return self.observations.fact(normalized)
+
+    def temporal_class(
+        self,
+        check_id: str,
+    ) -> Optional[PlayerSaveTemporalClass]:
+        """Return the current exact-bound fact class without consuming it."""
+
+        fact = self._current_fact(check_id)
+        return fact.temporal_class if fact is not None else None
+
+    def mismatch_is_report_only(self, check_id: str) -> bool:
+        """Whether this active battle makes the saved mismatch immutable."""
+
+        return (
+            self.temporal_class(check_id)
+            is PlayerSaveTemporalClass.ROUND_INVARIANT
+        )
+
+    def consume(self, check_id: str) -> Any:
+        normalized = str(check_id or "").strip()
+        if normalized in self._consumed:
+            return None
+        fact = self._current_fact(normalized)
+        if fact is None:
             return None
         self._consumed.add(normalized)
         return fact.copied_value()

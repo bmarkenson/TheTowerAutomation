@@ -155,6 +155,14 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         Upgrade locks, Auto Pick, Target Priority, and Ultimate Weapon checks
         without opening their UI; any unsupported or changed check must fall
         back independently.
+      - [ ] Confirm one replacement-process attachment with a complete mapped
+        forced save opens no Cards, Workshop, Bots, Guardians, Modules, Free
+        Upgrade-lock, Perk-configuration, Target Priority, Auto Pick, or
+        Ultimate Weapon UI. Also confirm authoritative Module, Free Upgrade-lock,
+        and Perk Auto Pick-order mismatches are each logged once and continue
+        without configuration UI or Home-repair authority, while an
+        intentionally unparseable Module fact uses Modules UI and applies the
+        same report-only result when that fallback is fully observed.
       - [ ] Confirm Tournament Results → Home reuses its valid terminal handoff
         without reacquisition.
       - [ ] Confirm one natural-terminal bundle fans out without duplicate
