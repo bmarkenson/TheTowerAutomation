@@ -60,35 +60,40 @@ The repository uses linked Git worktrees, not separate repositories:
 /home/brianm/dev/python/TheTower
     main                      production checkout and systemd working path
 
-/home/brianm/dev/python/TheTower-worktrees/dev
-    develop                   integration checkout
-
 /home/brianm/dev/python/TheTower-worktrees/workers/<task>
     feature/<task>            one bounded worker checkout per task
+
+/home/brianm/dev/python/TheTower-worktrees/integration/<outcome>
+    integration/<outcome>     temporary combined candidate, only when needed
 ```
 
-`main` is production, `develop` is integration, and feature branches are
-temporary. Workers commit only their owned feature changes. The explicitly
-assigned integration owner for a coherent outcome reviews and integrates them
-into `develop`, runs the combined gate there, and promotes an exact validated
-`develop` commit to `main` only by fast-forward.
+`main` is production and the only permanent branch and checkout required by the
+workflow. Feature branches are temporary, and workers commit only their owned
+feature changes. A clean feature tip is the normal candidate for one coherent
+outcome. Only when two or more reviewed feature tips intentionally ship
+together does the explicitly assigned outcome coordinator create a temporary
+integration branch, resolve their combined state, and use its tip as the
+candidate. The promotion owner promotes exact validated commit `D` to `main`
+only by fast-forward.
 
-Production is never switched to `develop` or a feature branch. Existing
-operator or parallel changes are preserved. A non-clean production checkout
-blocks promotion but does not block unrelated feature or integration work.
-There is no need to fingerprint or attest a worker's complete source tree for
-emulator access. Branch, HEAD, and an ordinary dirty summary are sufficient
-diagnostic context in a handoff or lease log.
+Production is never switched to a feature or integration branch. Existing
+operator or parallel changes are preserved. A non-clean production checkout or
+candidate blocks that promotion but does not block unrelated feature or
+integration work. There is no need to fingerprint or attest a worker's
+complete source tree for emulator access. Branch, HEAD, and an ordinary dirty
+summary are sufficient diagnostic context in a handoff or lease log.
 
 ### Staging, promotion, and rollback
 
-`develop` is the project's only standing staging layer. It provides a clean
-integration point, its own Python environment, the complete non-live
-checkpoint, retained-frame testing, and a place to identify one exact release
-candidate. A permanent `staging` branch, another long-lived checkout, or a
-second staging runtime would not provide meaningful live isolation: there is
-only one emulator, so a second runtime would still have to displace production
-to test it. A temporary clean checkout may be created for a specific
+The project has no standing staging branch. The selected candidate worktree
+provides its own Python environment, the complete non-live checkpoint,
+retained-frame testing, and one exact release-candidate commit. A feature
+worktree supplies that boundary directly for a single-feature outcome; a
+temporary integration worktree supplies it only for an intentionally combined
+outcome. A permanent `develop` or `staging` branch, another long-lived checkout,
+or a second staging runtime would not provide meaningful live isolation: there
+is only one emulator, so a second runtime would still have to displace
+production to test it. A temporary clean checkout may be created for a specific
 reproducibility test, but it is not another promotion stage and receives no
 special emulator authority.
 
@@ -99,23 +104,24 @@ development.
 
 The normal release path is deliberately direct:
 
-1. integrate reviewed feature commits into `develop` and run the combined
-   non-live gate there;
-2. record the exact current production commit `M` and candidate commit `D`,
-   require `M` to be an ancestor of `D`, and require the production checkout to
-   have no unresolved local work;
-3. create a uniquely named pre-deployment tag at `M` so the prior source is
-   easy to identify;
-4. stop each affected long-lived service before changing any file it may import
-   or read, then fast-forward the production checkout—while it remains on
-   `main`—to exact commit `D`;
+1. select a clean feature tip, or create a temporary integration branch for an
+   intentionally combined outcome, and run the complete non-live gate at exact
+   candidate commit `D` in that worktree;
+2. record exact current production commit `M`, require `M` to be an ancestor of
+   `D`, and require the production and candidate checkouts to have no unresolved
+   local work;
+3. review the complete `M..D` history and aggregate diff, then create a uniquely
+   named pre-deployment tag at `M` so the prior source is easy to identify;
+4. recheck that neither ref moved, stop each affected long-lived service before
+   changing any file it may import or read, then fast-forward the production
+   checkout—while it remains on `main`—to exact commit `D`;
 5. update production dependencies only when their tracked inputs changed,
    restart each affected service, and perform a bounded production smoke test;
    and
-6. if the smoke test fails, stop the affected service, create a normal rollback
-   commit that reverses the reviewed `M..D` range, restore any separately
-   changed environment or installed unit, restart, and bring the rollback back
-   into `develop` before another promotion.
+6. if the smoke test fails, stop the affected service, create and validate a
+   normal rollback or fix-forward on a temporary recovery feature branch from
+   current `main`, fast-forward production to that exact candidate, restore any
+   separately changed environment or installed unit, and repeat the smoke test.
 
 Documentation-only promotion does not require a runtime stop. Dependency,
 persistent-state format, and installed-systemd-unit changes require an explicit
@@ -137,7 +143,8 @@ units never use a development environment.
 
 ### Retained Phase-0 results
 
-The Phase-0 prototype on `develop` established several worthwhile contracts:
+The earlier Phase-0 prototype in the former standing `develop` checkout
+established several worthwhile contracts:
 
 - exact interpreter and direct dependency declarations are tracked;
 - runtime and development dependency closures are pinned;
@@ -450,7 +457,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | `main`, `develop`, feature worktrees, assigned integration ownership, and fast-forward promotion | No independent repository per worker; no source attestation |
+| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, assigned promotion ownership, and exact fast-forward promotion | No standing `develop`/staging branch, independent repository per worker, or source attestation |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |
@@ -532,8 +539,9 @@ The useful regression seams are correspondingly small:
   unacknowledged leases and logs every attempted input;
 - uncertain input is not automatically repeated;
 - release requires a fresh observation before production removes its hold; and
-- the assigned integration owner integrates worker commits into `develop` and
-  promotes only an exact clean validated fast-forward candidate.
+- a single feature tip is the normal candidate, an assigned coordinator uses a
+  temporary integration branch only for a combined outcome, and the promotion
+  owner promotes only an exact clean validated fast-forward candidate.
 
 These tests protect the project from realistic accidents without turning a
 hobby automation repository into a same-user security system.

@@ -16,9 +16,11 @@ changes this model.
   supported bootstrap in `docs/new_thread.md` and must never execute, copy,
   link, or mutate production's environment. Run project Python and tests only
   through the selected `.venv/bin/python`.
-- `main` is production, `develop` is integration, and implementation belongs on
-  feature branches. Only the operator or an explicitly assigned integration
-  owner updates `develop` or promotes to `main` through the
+- `main` is production and implementation belongs on temporary feature
+  branches. A clean feature tip is the normal promotion candidate; use a
+  temporary integration branch only when several reviewed feature tips must
+  ship together. Only the operator or an explicitly assigned promotion owner
+  updates `main` through the
   [production procedure](docs/operations/production_promotion.md).
 - Treat unrelated tracked and untracked changes as another participant's work.
   Do not overwrite, delete, stage, or incorporate them. Recheck status and each
