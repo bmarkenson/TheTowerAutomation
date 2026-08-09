@@ -1678,6 +1678,49 @@ def test_native_overview_uses_contextual_exact_action_slots_and_compact_status()
     assert 'new { action = tag }' in native_code
 
 
+def test_native_status_uses_only_published_dashboard_metrics():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'JsonPropertyName("server_time")' in native_models
+    assert 'JsonPropertyName("current_run")' in native_models
+    assert 'JsonPropertyName("started_at")' in native_models
+    assert 'x:Name="RunElapsedMetricPanel"' in native_xaml
+    assert 'x:Name="RunElapsedText"' in native_xaml
+    assert 'x:Name="WaveMetricPanel" Visibility="Collapsed"' in native_xaml
+    assert (
+        'x:Name="CoinsMinuteMetricPanel" Visibility="Collapsed"'
+        in native_xaml
+    )
+    assert "FormatRunElapsed(" in native_code
+    assert "status.ServerTime" in native_code
+    assert "RunElapsedMetricPanel.Visibility = processActive" in native_code
+    assert 'GameState: "active_battle"' in native_code
+
+    for unsupported_field in (
+        "ExpectedRunDurationText",
+        "PeakCoinsMinuteText",
+        "RecoveryCountdownText",
+        "ReturnNowButton",
+        "ExtendRecoveryButton",
+        "CancelRecoveryButton",
+    ):
+        assert unsupported_field not in native_xaml
+        assert unsupported_field not in native_code
+
+
 def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")

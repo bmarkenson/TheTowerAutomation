@@ -226,6 +226,15 @@ its separately displayed active endpoint until explicit Start/Restart adopts a
 changed default. The optional bearer token remains memory-only and is never
 written to either settings file.
 
+The status band shows run elapsed only when a managed process and a valid
+current activity scope are both present. It calculates that value from the
+scope's published start and the same response's Linux server timestamp, not
+from Activity prose or the Windows clock. Wave and Coins/min disappear outside
+a fresh active-battle observation. No expected duration, Peak Coins/min,
+requirement comparison, recovery countdown, or Return/Extend/Cancel recovery
+control is synthesized before a versioned status field and guarded runtime
+directive own it.
+
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
 tunnel, and the ADB reverse-forward SSH tunnel. Selecting the group opens

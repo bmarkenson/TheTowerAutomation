@@ -1149,7 +1149,7 @@ can change as operator use supplies better evidence.
       3. [x] Compact Overview actions and helper copy through contextual
          presentation while preserving every requested/acknowledged and
          exact-workflow distinction.
-      4. [ ] Add only those reserved status/alert fields whose authoritative
+      4. [x] Add only those reserved status/alert fields whose authoritative
          server models and runtime directives exist; leave absent capabilities
          absent rather than synthesizing them in the client.
       5. [ ] Cross-build and run focused native/static regressions, then perform
@@ -1202,5 +1202,18 @@ can change as operator use supplies better evidence.
       integrity, and all 2,053 Python tests. Windows visual, interaction,
       scaling, and preferred/minimum-size no-scroll validation remain open
       under slice 5.
+    - **2026-08-09 slice-four checkpoint.** The status band now models the
+      already-published atomic Linux server timestamp and combines it only with
+      the authoritative current activity-scope start to show run elapsed while
+      the managed process is active. Wave and Coins/min collapse unless a fresh
+      active-battle observation owns their values. The audit found no owned
+      expected-duration, Peak Coins/min, expected-versus-observed requirement,
+      or recovery-countdown fields and no guarded Return/Extend/Cancel recovery
+      directives, so those reserved slots remain absent. The WPF project
+      cross-builds; 73 focused Python/static tests, all 97 native authoring
+      tests, and all 18 tunnel-host lifecycle tests pass. The repository
+      checkpoint passes compile, state-definition/clickmap integrity, and all
+      2,054 Python tests. Windows runtime validation remains the only open
+      redesign slice.
     - Defer drag-to-reorder, floating panes, and extensive per-card hiding until
       operator use of the redesigned pages demonstrates a concrete need.

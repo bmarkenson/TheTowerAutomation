@@ -910,6 +910,13 @@ Process request examples:
   configuration labels current, pending-next/startup, and locally selected
   Strategy separately; the latest completed battle remains useful as a compact
   one-line summary when its detail is collapsed.
+- The global status derives run elapsed only from the published current-run
+  activity-scope start and the atomic server timestamp. Wave and Coins/min are
+  absent outside a fresh active-battle observation instead of presenting stale
+  values or placeholder dashes. Expected duration, active Peak Coins/min,
+  expected-versus-observed requirement detail, recovery countdowns, and
+  Return/Extend/Cancel recovery actions remain absent until their owning
+  runtime status fields and guarded directives exist.
 - Persistent indefinite and timed Pause, explicit Automation Enabled, and
   requested-versus-acknowledged state. The text defines Paused as zero
   automated input while observation continues and does not describe Enabled

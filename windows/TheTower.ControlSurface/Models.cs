@@ -14,6 +14,9 @@ public sealed class StatusResponse
     [JsonPropertyName("capabilities")]
     public List<string> Capabilities { get; set; } = [];
 
+    [JsonPropertyName("server_time")]
+    public string? ServerTime { get; set; }
+
     [JsonPropertyName("healthy")]
     public bool Healthy { get; set; }
 

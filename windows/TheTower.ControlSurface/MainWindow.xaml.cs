@@ -2511,7 +2511,7 @@ public partial class MainWindow : Window
         var observedGameSpeed = status.Observation?.GameSpeed;
         ObservedSpeedText.Text = observedGameSpeed is double observed
             ? $"x{observed:F1}"
-            : "-";
+            : "Not observed";
         var exactSpeedReached = observedGameSpeed is double exactObserved
             && Math.Abs(exactObserved - _gameSpeedTarget) <= 0.06;
         var maximumSpeedReached = observedGameSpeed is double maximumObserved
@@ -2591,6 +2591,31 @@ public partial class MainWindow : Window
         ProcessPidText.Text = processPid?.ToString(CultureInfo.InvariantCulture) ?? "-";
         var lifecycleAvailable = service?.Available == true;
         var processActive = service?.Active == true || status.Runtime.Active;
+        var battleObservationActive = status.Observation is { Stale: false }
+            && (status.ControlModel?.Observation is
+                    { Available: true, GameState: "active_battle" }
+                || (status.ControlModel is null
+                    && string.Equals(
+                        status.Observation.StateLabel,
+                        "RUNNING",
+                        StringComparison.OrdinalIgnoreCase)));
+        WaveMetricPanel.Visibility = processActive
+            && battleObservationActive
+            && status.Observation?.Wave is not null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        CoinsMinuteMetricPanel.Visibility = processActive
+            && battleObservationActive
+            && !string.IsNullOrWhiteSpace(status.Observation?.CoinsPerMinute)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        var runElapsed = FormatRunElapsed(
+            status.CurrentRun,
+            status.ServerTime);
+        RunElapsedText.Text = runElapsed ?? "";
+        RunElapsedMetricPanel.Visibility = processActive && runElapsed is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         ProcessStateText.Text = processActive
             ? "Running"
             : lifecycleAvailable
@@ -3942,6 +3967,22 @@ public partial class MainWindow : Window
             : seconds < 3600
                 ? $"{seconds / 60}m"
                 : $"{seconds / 3600}h {seconds % 3600 / 60}m";
+    }
+
+    private static string? FormatRunElapsed(
+        CurrentRunStatus? currentRun,
+        string? serverTime)
+    {
+        if (!DateTimeOffset.TryParse(currentRun?.StartedAt, out var startedAt)
+            || !DateTimeOffset.TryParse(serverTime, out var observedAt)
+            || observedAt < startedAt)
+        {
+            return null;
+        }
+        var seconds = (int)Math.Min(
+            Math.Floor((observedAt - startedAt).TotalSeconds),
+            int.MaxValue);
+        return FormatAge(seconds);
     }
 
     private static string FormatPercent(double? value) =>

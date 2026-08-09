@@ -170,11 +170,12 @@
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="0.8*" />
-            <ColumnDefinition Width="1.2*" />
-            <ColumnDefinition Width="1.1*" />
-            <ColumnDefinition Width="1.2*" />
-            <ColumnDefinition Width="1.2*" />
+            <ColumnDefinition Width="0.75*" />
+            <ColumnDefinition Width="1.15*" />
+            <ColumnDefinition Width="1*" />
+            <ColumnDefinition Width="1.15*" />
+            <ColumnDefinition Width="0.6*" />
+            <ColumnDefinition Width="0.6*" />
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Row="0" Grid.Column="0" Margin="2,0,12,7">
             <TextBlock Text="PROCESS" Foreground="{StaticResource MutedBrush}" FontSize="9" />
@@ -193,27 +194,35 @@
             <TextBlock Text="STRATEGY SCOPE" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="StrategyScopeText" Text="-" FontSize="16" FontWeight="Bold" TextWrapping="Wrap" />
           </StackPanel>
-          <StackPanel Grid.Row="0" Grid.Column="4" Margin="2,0,0,7" ToolTip="What automation should do when the current battle ends.">
+          <StackPanel Grid.Row="0" Grid.Column="4" Grid.ColumnSpan="2" Margin="2,0,0,7" ToolTip="What automation should do when the current battle ends.">
             <TextBlock Text="WHEN THIS BATTLE ENDS" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="ModeText" Text="-" FontSize="16" FontWeight="Bold" TextWrapping="Wrap" />
           </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="0" Margin="2,0,12,0">
+          <StackPanel Grid.Row="1" Grid.Column="0" x:Name="WaveMetricPanel" Visibility="Collapsed" Margin="2,0,12,0">
             <TextBlock Text="WAVE" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="WaveText" Text="-" FontSize="15" FontWeight="Bold" />
           </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="1" Margin="2,0,12,0">
+          <StackPanel Grid.Row="1" Grid.Column="1" x:Name="CoinsMinuteMetricPanel" Visibility="Collapsed" Margin="2,0,12,0">
             <TextBlock Text="COINS / MIN" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="CoinsMinuteText" Text="-" FontSize="15" FontWeight="Bold" />
           </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="2" Margin="2,0,12,0">
+          <StackPanel Grid.Row="1" Grid.Column="2"
+                      x:Name="RunElapsedMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,0,12,0"
+                      ToolTip="Elapsed time in the current authoritative activity scope, calculated from the atomic server timestamp.">
+            <TextBlock Text="RUN ELAPSED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="RunElapsedText" Text="-" FontSize="15" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.Column="3" Margin="2,0,12,0">
             <TextBlock Text="TARGET SPEED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="TargetSpeedText" Text="-" FontSize="15" FontWeight="Bold" />
           </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="3" Margin="2,0,12,0" ToolTip="Speed read directly from the latest periodic game screenshot.">
+          <StackPanel Grid.Row="1" Grid.Column="4" Margin="2,0,12,0" ToolTip="Speed read directly from the latest periodic game screenshot.">
             <TextBlock Text="OBSERVED SPEED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="ObservedSpeedText" Text="-" FontSize="15" FontWeight="Bold" />
           </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="4" Margin="2,0,0,0">
+          <StackPanel Grid.Row="1" Grid.Column="5" Margin="2,0,0,0">
             <TextBlock Text="HEARTBEAT" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="HeartbeatText" Text="-" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
           </StackPanel>
