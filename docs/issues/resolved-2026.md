@@ -16,39 +16,62 @@ and actionable work lives in
   returned to the start of the weekly chest bar even though the visible earlier
   milestones already showed collection checkmarks.
 - **Symptom:** When no glowing weekly chest was present in the entry frame, the
-  handler always sent bounded leftward-normalization gestures before searching
-  right. A frame that already proved every unlocked chest was collected was
-  treated the same as an ambiguous retained viewport.
+  handler restarted a bounded left-to-right traversal. This also happened on a
+  post-claim recheck and on later badge probes whose unchanged weekly progress
+  had already been reviewed.
 - **Evidence:** Static inspection found that
   `_find_weekly_mission_chest()` recognized only the claimable chest template
   before unconditionally calling `scroll_to_edge()`. The retained claimed
   `20/35` frame contains four distinct checkmarks and no claim target; its
-  paired claimable frame has the same progress, three checkmarks, and the
-  glowing fourth chest. The retained `35/35` frame exposes only five of seven
-  unlocked milestones, providing the partial-viewport negative case.
-- **Safety response:** Diagnosis and implementation used retained frames in an
-  isolated feature worktree. No production process, device input, runtime
-  reload, or live-state claim was made.
-- **Cause:** The earlier offscreen-weekly-chest repair correctly normalized the
-  track whenever the claim template was absent, but it had no positive terminal
-  state for an already-claimed unlocked prefix. Consequently even decisive
-  checkmark evidence fell through to the conservative full traversal.
-- **Resolution:** Commit `3747659` measures exact `completed N/35` progress and
-  distinct green checkmarks before normalization. When authoritative progress
-  and the visual count prove that every unlocked five-mission milestone is
-  checked, the search completes as an ordinary no-reward result with zero
-  swipes. The visible claim target is still checked first. Low-confidence,
-  cropped, unexpected-total, incomplete, and partial-viewport evidence retains
-  the original bounded normalize-and-search fallback.
-- **Regression:** `test/test_mission_reward_handler.py` exercises the retained
-  claimed, claimable, and partial-viewport frames; low-confidence and
-  unexpected-total rejection; zero-swipe completion; and continued offscreen
-  discovery from incomplete evidence.
-- **Validation:** The focused mission-reward and scrolling suites passed 52
-  tests. The supported isolated checkpoint passed compilation, state-definition
-  validation, clickmap integrity with zero errors and the established 44 orphan
-  notices, and all 2,058 tests in 400.07 seconds.
-- **Fixed by:** `3747659`.
+  paired claimable frame has the same progress, three checks, and the glowing
+  fourth chest. Historical production logs from 2026-08-07 show an offscreen
+  chest found after a complete left-to-right scan and then a six-swipe rewind
+  and repeat traversal immediately after that chest was claimed. A rollout
+  observation on 2026-08-09 exposed the other important case: the unchanged
+  `35/35` track reopened at its right edge with visible claimed milestones
+  `(15, 20, 25, 30, 35)` and repeated the same six gestures.
+- **Safety response:** A shifted sequence ending at `35` was not treated as
+  proof about hidden earlier milestones. The collector retains its bounded full
+  traversal on the first ambiguous view and records reusable coverage only
+  after reaching both edges without finding a claim target. Visible targets
+  still win before every shortcut.
+- **Cause:** The earlier offscreen-chest repair was intentionally stateless. It
+  had neither milestone-label evidence to distinguish a real prefix beginning
+  at `5`, nor route-local knowledge that the current claim loop had just scanned
+  everything to the left, nor cycle-scoped knowledge that unchanged unlocked
+  progress had already received a complete review.
+- **Resolution:** Commit `3747659` added authoritative `completed N/35` OCR and
+  distinct-check counting for the fully visible all-claimed case. Commit
+  `7707b69` OCRs the milestone under every visible check and searches right
+  immediately only for an exact contiguous prefix `(5, 10, ...)`; gaps,
+  shifted windows, incomplete OCR, and low confidence still normalize first.
+  Commit `c43293d` carries explicit left-search coverage through the current
+  claim loop and retains a completed whole-track review in process for the same
+  unlocked-chest count and Monday-00:00-UTC cycle. A visible claim, a changed
+  unlock count, a weekly reset, uncertain progress, failure to prove the left
+  edge, or anything other than a confirmed right-edge miss invalidates or
+  bypasses the retained review.
+- **Regression:** `test/test_mission_reward_handler.py` exercises retained
+  claimed, claimable, and partial-viewport frames; exact prefix acceptance;
+  shifted and gapped rejection; post-claim rightward continuation; unchanged
+  progress reuse; progress and cycle invalidation; action-guard propagation;
+  and the original offscreen discovery fallback.
+- **Validation:** The final mission/action-authority and App-focused suites
+  passed 69 and 139 tests. The complete supported checkpoint passed twice at
+  exact commit `c43293d`: compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,063 tests.
+  The first production pass from a fresh process conservatively traversed the
+  shifted `35/35` viewport once, found no target, and recorded complete coverage
+  through milestone `35` for unchanged-progress reuse. The next naturally
+  scheduled production probe observed the same progress, returned
+  `weekly_progress_already_reviewed` with zero swipes, and emitted no weekly
+  track navigation input.
+- **Deployment:** Production was fast-forwarded to `c43293d` after rollback tag
+  `production-before-20260809T190132Z-7707b69` was created. The managed runtime
+  reattached to the same active battle through save-backed continuity, passed
+  session preflight, and returned to steady state. No Windows package input
+  changed.
+- **Fixed by:** `3747659`, `7707b69`, and `c43293d`.
 
 ### Perk top-bar OCR ignored the independent battle-wave observation
 
