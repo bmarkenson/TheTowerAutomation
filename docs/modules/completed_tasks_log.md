@@ -39,6 +39,34 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 save-backed new-battle carry lifecycle
+
+- Commit `f74f94e` separates transient control state from evidence failure.
+  `WAIT` now remains only the next-terminal policy, a launch attempt with no
+  dispatch stays pending, and an unstable first `RUNNING` frame defers binding.
+  Pause suspends unconsumed carry for fresh save or UI evidence, while Stop,
+  competing ownership, or a changed transition identity discards only that
+  carrier rather than quarantining its source snapshot.
+- A complete natural Game Over acquisition may now supply configuration facts
+  to its exact direct-Retry successor without another save read. Acceptance
+  requires the same runtime, bound predecessor activity scope, exact target and
+  generation, a distinct verified Retry scope, and an inactive runtime
+  projection when one exists. Any missing or changed binding leaves Retry
+  complete and routes configuration checks through their guarded UI paths.
+- Exact bound new-battle evidence now suppresses redundant in-battle Cards,
+  Workshop, Bots, Guardians, Modules, Free Upgrade Locks, Auto Pick, Target
+  Priority, and Ultimate Weapon checks. Unsupported, incomplete, or changed
+  evidence falls back per check and preserves unrelated carry. Only an
+  authoritative save/UI contradiction quarantines every remaining decision
+  from the trusted snapshot.
+- The final focused save/preflight/control/navigation suite passed 285 tests;
+  its adjacent terminal, initialization, continuity, and save suite passed 286.
+  The complete supported checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and all 2,050 tests in 346.29 seconds. Production and integration were still
+  at `080fc17`, already contained by the feature, when this candidate was
+  frozen; live validation and promotion had not yet been performed.
+
 ### 2026-08-08 current-battle Perks control-surface view
 
 - Commit `8b9f1ee` adds a compact read-only presentation beside the existing
