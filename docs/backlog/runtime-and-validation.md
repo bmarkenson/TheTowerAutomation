@@ -733,6 +733,98 @@ stages:
       09:33:44, observed the overlay removed at 09:33:53, and completed its
       bounded floating-gem scan at 09:33:57. No Surrender or test battle
       boundary was used.
+  - Home launch-authority correction checkpoint (2026-08-08, feature branch):
+    - [x] Commit `b36f878` requires fresh `RUNNING`, an active No Strategy
+      observation, and lifecycle-owned active-battle evidence before granting
+      a new inventory route. A completed run can no longer reclaim or close an
+      operator-opened Cards, Perks, Modules, Event, Guild, Target Priority, or
+      Damage Adjuster panel from Home.
+    - [x] Commit `fad29e3` removes managed idle-Home serialization, setup,
+      recovery, and Battle/Resume dispatch derived only from Automation
+      Enabled, Strategy selection, prior lifecycle state, or `NEXT_BATTLE`.
+      Explicit Start still runs normal gates. Ordinary Continue still retries
+      directly at Game Over.
+    - [x] No Strategy post-run, an authorized configuration-repair return, and
+      Tournament Results dismissal can carry one process-local Home
+      continuation only when Continue was selected for that exact terminal.
+      The claim binds runtime/PID, target generation, activity scope, and the
+      state/mode request identities, accepts only New Battle, and is consumed
+      only after verified dispatch. Policy/authority cycles, manual/workflow
+      supersession, Resume Battle, binding change, process replacement, and
+      unexpected manual activity invalidate it. A policy change at Home or
+      after a retained terminal never creates immediate launch authority.
+    - [x] The affected Home/control/No Strategy/Game Over/Tournament/repair
+      slice passes 461 tests. Existing API and browser/native/CLI wording
+      already described terminal policy as future-only; runtime status now
+      also exposes the separate pending Home continuation without granting
+      replay authority.
+    - [x] Promotion review found and commit `a9b7269` closes the remaining
+      post-preflight race: save/setup, pre-handler, and final verified-tap
+      boundaries all require the same Start/Attach/Return request identity and
+      typed lifecycle authority. Replacement requests cannot inherit setup or
+      carried-save launch evidence; terminal claims clear when manual/control
+      ownership supersedes them. The revised affected slice passes 478 tests.
+    - [x] The pre-barrier candidate passed compilation, state
+      definitions, clickmap integrity with zero errors and the established 44
+      orphan candidates, and all 1,985 tests in 459.15 seconds. Native Windows
+      usability and natural safe terminal/Home validation remain pending.
+    - [x] Exact post-review candidate `9d7a541` passed compilation,
+      state-definition validation, clickmap integrity with zero errors and the
+      established 44 orphan candidates, and all 2,002 tests in 337.55 seconds.
+      It was fast-forwarded through `develop` and production `main` behind
+      rollback tag `production-before-20260808T222617Z-e53c156`.
+    - [x] The bounded production smoke replaced the control surface as PID
+      `3203188` and automation as PID `3203767`. Revision 30 reported the exact
+      `localhost:5555` target connected, the replacement held its target lock,
+      and the exact Enable request was acknowledged while fresh observations
+      remained Home/New Battle. No Start Battle intent or battle input was
+      issued; the runtime explicitly logged that it was staying Home. Native
+      Windows usability, a live policy-change-at-Home exercise, and a natural
+      terminal-to-Home continuation remain pending rather than manufactured.
+    - [x] Follow-up commit `101054f` selectively reconciles the independent
+      screenshot and profile-policy logging from
+      `feature/launch-bound-home-preflight`. It does not merge that branch's
+      superseded policy-derived ordinary Home auto-launch. The affected owner
+      and caller slice passes 148 tests; the complete supported checkpoint
+      passes compilation, state definitions, clickmap integrity with zero
+      errors and the established 44 orphan candidates, and all 2,003 tests in
+      338.67 seconds.
+    - [x] Production was fast-forwarded to `101054f` behind rollback tag
+      `production-before-20260808T230345Z-c9f60e2`. Replacement automation PID
+      `3244540` acquired the held `localhost:5555` lock, acknowledged the exact
+      restored Enable request, and published fresh Home/New Battle evidence.
+      No Start Battle intent, battle transition, or device input was used.
+    - [x] Commits `61a150f` and `58380f4` implement the missing idle-Home
+      auxiliary authority. The initial Start/Attach wait may allow only the
+      typed `home_ad_gem` collector while Automation is Enabled and the current
+      frame is verified Home; explicit battle workflows, Pause/Stop, Take/Return
+      Control, Setup Capture, interactive development, or any second exclusive
+      hold remove that exception. The scheduling frame grants no tap authority:
+      the handler obtains a fresh visible-button match, synchronizes current
+      control and operator ownership, and rechecks the central typed decision at
+      the final input boundary. A Start/Attach request arriving after scheduling
+      therefore cancels the claim. Runtime status exposes both the hold-local
+      allowance and the effective collector list while Strategy and lifecycle
+      authority remain denied. The affected owner/caller slice passes 515 tests.
+      Exact corrected candidate `58380f4` passes compilation, state definitions,
+      clickmap integrity with zero errors and the established 44 orphan
+      candidates, and all 2,011 tests in 338.55 seconds. No battle launch,
+      device input, live runtime, or Windows validation was used.
+    - [x] Exact promotion candidate `066e167` repeated the complete supported
+      checkpoint: compilation and state definitions passed, clickmap integrity
+      reported zero errors and the established 44 orphan candidates, and all
+      2,011 tests passed in 343.11 seconds. Production advanced from `36497dc`
+      behind rollback tag
+      `production-before-20260809T000743Z-36497dc`.
+    - [x] The bounded production smoke cleanly stopped PID `3244540`, released
+      its exact `localhost:5555` lock, and started replacement PID `3334597`
+      Paused. The replacement acquired that lock, published fresh Home/New
+      Battle evidence, acknowledged the exact Pause and restored Enable
+      requests, and exposed `home_ad_gem` as its sole effective auxiliary
+      collector while Strategy and lifecycle actions remained blocked. It then
+      collected the already-visible five-gem Home reward and stayed Home; no
+      Start Battle intent, battle transition, Surrender, or manufactured test
+      boundary was used. Native Windows usability remains pending.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

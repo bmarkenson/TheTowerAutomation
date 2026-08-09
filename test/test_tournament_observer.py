@@ -836,6 +836,18 @@ def test_tournament_results_are_recorded_once_without_changing_policy(
     app._last_wave_value = 2028
     app._last_wave_conf = 99.0
     app._tournament_results_captured = False
+    continuation = {
+        "schema_version": 1,
+        "source": "tournament_results",
+    }
+    app._build_terminal_home_continuation_claim = MagicMock(
+        return_value=(
+            continuation
+            if terminal_policy is ExecMode.NEXT_BATTLE
+            else None
+        )
+    )
+    app._commit_terminal_home_continuation = MagicMock(return_value=True)
     _bind_terminal_context(app)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
@@ -872,6 +884,9 @@ def test_tournament_results_are_recorded_once_without_changing_policy(
         == "tournament"
     )
     normal_game_over.assert_not_called()
+    app._build_terminal_home_continuation_claim.assert_called_once_with(
+        source="tournament_results"
+    )
     manager.on_game_over.assert_called_once_with()
     app._status_reporter.reset_coin_rate_samples.assert_called_once_with()
     action_log.assert_called_once()
@@ -879,6 +894,7 @@ def test_tournament_results_are_recorded_once_without_changing_policy(
     assert action_log.call_args.args == ("Capturing the finished Tournament",)
     if terminal_policy is ExecMode.WAIT:
         dismiss_results.assert_not_called()
+        app._commit_terminal_home_continuation.assert_not_called()
         result_log.assert_called_once_with(
             "Tournament finished — result saved; Tournament Results remains "
             "visible under the explicit wait policy",
@@ -891,6 +907,11 @@ def test_tournament_results_are_recorded_once_without_changing_policy(
         )
     else:
         dismiss_results.assert_called_once()
+        app._commit_terminal_home_continuation.assert_called_once_with(
+            continuation
+            if terminal_policy is ExecMode.NEXT_BATTLE
+            else None
+        )
         result_log.assert_called_once_with(
             "Tournament result saved and verified Home reached; the selected "
             "future battle policy remains separate",
@@ -920,6 +941,13 @@ def test_tournament_dismissal_failure_retries_without_changing_authority(
     app._last_wave_value = 2028
     app._last_wave_conf = 99.0
     app._tournament_results_captured = False
+    app._build_terminal_home_continuation_claim = MagicMock(
+        return_value={
+            "schema_version": 1,
+            "source": "tournament_results",
+        }
+    )
+    app._commit_terminal_home_continuation = MagicMock(return_value=True)
     _bind_terminal_context(app)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
@@ -945,6 +973,7 @@ def test_tournament_dismissal_failure_retries_without_changing_authority(
 
     operation_id = action_log.call_args.kwargs["operation_id"]
     app._supervisor.persist_state.assert_not_called()
+    app._commit_terminal_home_continuation.assert_not_called()
     result_log.assert_called_once_with(
         "Tournament result was saved, but verified Home was not reached; "
         "the same terminal route will retry without changing Automation authority",
@@ -955,6 +984,52 @@ def test_tournament_dismissal_failure_retries_without_changing_authority(
         ),
         operation_id=operation_id,
     )
+
+
+def test_changing_wait_to_next_after_tournament_end_does_not_create_launch():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx = MissionContext(data={"mission_vars": {}})
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = MagicMock()
+    app._status_reporter = MagicMock()
+    app._status_reporter.coin_rate_samples = []
+    app._last_wave_value = 2028
+    app._last_wave_conf = 99.0
+    app._tournament_results_captured = False
+    app._build_terminal_home_continuation_claim = MagicMock(return_value=None)
+    app._commit_terminal_home_continuation = MagicMock(return_value=False)
+    _bind_terminal_context(app)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    previous_mode = AUTOMATION.mode
+
+    try:
+        with (
+            patch(
+                "core.app.handle_tournament_results",
+                return_value={"tournament_id": "Tournament20260718"},
+            ),
+            patch(
+                "core.app.dismiss_tournament_results_to_home",
+                return_value=True,
+            ) as dismiss_results,
+        ):
+            AUTOMATION.mode = ExecMode.WAIT
+            app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+            AUTOMATION.mode = ExecMode.NEXT_BATTLE
+            app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+    finally:
+        AUTOMATION.mode = previous_mode
+
+    app._build_terminal_home_continuation_claim.assert_called_once_with(
+        source="tournament_results"
+    )
+    assert dismiss_results.call_count == 1
+    assert callable(dismiss_results.call_args.kwargs["action_guard_fn"])
+    app._commit_terminal_home_continuation.assert_called_once_with(None)
 
 
 @pytest.mark.parametrize(

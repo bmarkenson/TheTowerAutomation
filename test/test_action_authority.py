@@ -27,10 +27,11 @@ def _set_running_context(
     state: str = "RUNNING",
     scope: str = "run-1",
     stopped: bool = False,
+    active_battle: bool = True,
 ) -> None:
     authority.update_context(
         global_pause=paused,
-        active_battle=True,
+        active_battle=active_battle,
         battle_scope=scope,
         primary_state=state,
         holds=holds,
@@ -163,6 +164,104 @@ def test_complete_normal_pause_and_strategy_gate_authority_matrix():
     assert not snapshot.lifecycle_action_authority.allowed
 
 
+def test_initial_battle_intent_hold_allows_only_fresh_home_ad_gem():
+    authority = RuntimeActionAuthority()
+    hold = AuthorityHoldState(
+        AuthorityHold.OPERATOR_WORKFLOW,
+        "runtime is waiting for explicit Start Battle or Attach to Battle intent",
+        allowed_auxiliary_collectors=(AuxiliaryCollector.HOME_AD_GEM,),
+    )
+    _set_running_context(
+        authority,
+        state="HOME_SCREEN",
+        active_battle=False,
+        holds=(hold,),
+    )
+
+    decision = authority.decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.HOME_AD_GEM,
+    )
+    assert decision.allowed is True
+    for collector in AuxiliaryCollector:
+        if collector is AuxiliaryCollector.HOME_AD_GEM:
+            continue
+        assert authority.decision(
+            RuntimeActionClass.AUXILIARY_COLLECTION,
+            collector=collector,
+        ).allowed is False
+    assert authority.decision(RuntimeActionClass.STRATEGY_ACTION).allowed is False
+    assert authority.decision(RuntimeActionClass.LIFECYCLE_ACTION).allowed is False
+
+    snapshot = authority.snapshot(now=1_700_000_001)
+    assert snapshot.allowed_auxiliary_collectors == (
+        AuxiliaryCollector.HOME_AD_GEM,
+    )
+    assert snapshot.auxiliary_collection_authority.allowed is True
+    assert snapshot.as_dict()["holds"] == [
+        {
+            "hold": "operator_workflow",
+            "reason": (
+                "runtime is waiting for explicit Start Battle or Attach to "
+                "Battle intent"
+            ),
+            "allowed_auxiliary_collectors": ["home_ad_gem"],
+        }
+    ]
+
+    _set_running_context(
+        authority,
+        paused=True,
+        state="HOME_SCREEN",
+        active_battle=False,
+        holds=(hold,),
+    )
+    paused = authority.decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.HOME_AD_GEM,
+    )
+    assert paused.allowed is False
+    assert "global Pause" in paused.reason
+
+    _set_running_context(
+        authority,
+        state="RUNNING",
+        holds=(hold,),
+    )
+    wrong_screen = authority.decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.HOME_AD_GEM,
+    )
+    assert wrong_screen.allowed is False
+    assert "Home frame" in wrong_screen.reason
+
+
+def test_home_ad_gem_allowance_does_not_bypass_another_hold():
+    authority = RuntimeActionAuthority()
+    waiting = AuthorityHoldState(
+        AuthorityHold.OPERATOR_WORKFLOW,
+        "runtime is waiting for explicit battle intent",
+        allowed_auxiliary_collectors=(AuxiliaryCollector.HOME_AD_GEM,),
+    )
+    manual = AuthorityHoldState(
+        AuthorityHold.MANUAL_CONTROL_RETURN,
+        "manual control owns input",
+    )
+    _set_running_context(
+        authority,
+        state="HOME_SCREEN",
+        active_battle=False,
+        holds=(waiting, manual),
+    )
+
+    decision = authority.decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.HOME_AD_GEM,
+    )
+    assert decision.allowed is False
+    assert "operator_workflow, manual_control_return" in decision.reason
+
+
 @pytest.mark.parametrize(
     "hold",
     tuple(
@@ -178,7 +277,7 @@ def test_exclusive_holds_precede_gate_and_block_all_auxiliary_collection(hold):
     _activate_gate(authority)
 
     assert authority.decision(RuntimeActionClass.OBSERVATION).allowed
-    for collector in STRATEGY_GATE_AUXILIARY_ALLOWLIST:
+    for collector in AuxiliaryCollector:
         assert not authority.decision(
             RuntimeActionClass.AUXILIARY_COLLECTION,
             collector=collector,
@@ -226,7 +325,7 @@ def test_external_development_hold_is_suppressive_without_owner_bypass():
     _set_running_context(authority, holds=(hold,))
 
     assert authority.decision(RuntimeActionClass.OBSERVATION).allowed
-    for collector in STRATEGY_GATE_AUXILIARY_ALLOWLIST:
+    for collector in AuxiliaryCollector:
         assert not authority.decision(
             RuntimeActionClass.AUXILIARY_COLLECTION,
             collector=collector,

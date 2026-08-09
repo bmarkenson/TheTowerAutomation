@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 import struct
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import cv2
 import numpy as np
@@ -61,15 +61,30 @@ def test_png_capture_retries_incomplete_frame_and_returns_fresh_complete_frame()
     complete_ok, complete_png = cv2.imencode(".png", complete)
     assert incomplete_ok and complete_ok
 
-    with patch(
-        "core.ss_capture.screencap_png",
-        side_effect=[incomplete_png.tobytes(), complete_png.tobytes()],
-    ) as capture:
+    with (
+        patch(
+            "core.ss_capture.screencap_png",
+            side_effect=[incomplete_png.tobytes(), complete_png.tobytes()],
+        ) as capture,
+        patch("core.ss_capture.log") as runtime_log,
+    ):
         frame = capture_adb_screenshot()
 
     assert frame is not None
     assert np.array_equal(frame, complete)
     assert capture.call_count == 2
+    assert runtime_log.call_args_list == [
+        call(
+            "[ADB] Incomplete PNG screenshot (1/2); retrying with a fresh "
+            "capture",
+            "DEBUG",
+        ),
+        call(
+            "[ADB] PNG screenshot capture recovered on attempt 2/2 after "
+            "rejecting an incomplete frame",
+            "DEBUG",
+        ),
+    ]
 
 
 def test_png_capture_normalizes_720p_and_records_input_geometry():
@@ -100,14 +115,28 @@ def test_png_capture_returns_none_when_fresh_retry_is_also_incomplete():
     encoded_ok, encoded = cv2.imencode(".png", incomplete)
     assert encoded_ok
 
-    with patch(
-        "core.ss_capture.screencap_png",
-        return_value=encoded.tobytes(),
-    ) as capture:
+    with (
+        patch(
+            "core.ss_capture.screencap_png",
+            return_value=encoded.tobytes(),
+        ) as capture,
+        patch("core.ss_capture.log") as runtime_log,
+    ):
         frame = capture_adb_screenshot()
 
     assert frame is None
     assert capture.call_count == 2
+    assert runtime_log.call_args_list == [
+        call(
+            "[ADB] Incomplete PNG screenshot (1/2); retrying with a fresh "
+            "capture",
+            "DEBUG",
+        ),
+        call(
+            "[ADB] Incomplete PNG screenshot (2/2); capture rejected",
+            "WARN",
+        ),
+    ]
 
 
 def test_png_capture_reports_connected_malformed_data():
@@ -423,11 +452,24 @@ def test_raw_capture_retries_incomplete_frame_before_returning_evidence():
             "core.ss_capture._decode_raw_screencap",
             side_effect=[incomplete, complete],
         ),
+        patch("core.ss_capture.log") as runtime_log,
     ):
         frame = capture_adb_raw_screenshot()
 
     assert frame is complete
     assert capture.call_count == 2
+    assert runtime_log.call_args_list == [
+        call(
+            "[ADB] Incomplete raw screenshot (1/2); retrying with a fresh "
+            "capture",
+            "DEBUG",
+        ),
+        call(
+            "[ADB] raw screenshot capture recovered on attempt 2/2 after "
+            "rejecting an incomplete frame",
+            "DEBUG",
+        ),
+    ]
 
 
 def test_raw_capture_normalizes_720p_and_records_input_geometry():

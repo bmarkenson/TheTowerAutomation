@@ -1,6 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, call, patch
+from unittest.mock import ANY, Mock, call, patch
 
 import cv2
 import numpy as np
@@ -1420,6 +1420,44 @@ def test_home_preflight_logs_a_one_run_waiver_disposition():
     )
 
 
+def test_home_preflight_logs_profile_skip_as_expected_policy():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+    }
+    waiver = {
+        "check_id": "perk_bans",
+        "label": "Perk Bans",
+        "source": "strategy_profile",
+        "scope": "every_run",
+        "reason": "permanently skipped by the selected strategy profile",
+    }
+
+    with patch("core.gc_no_battle_setup.log") as emit:
+        result = _run(
+            router,
+            requirements,
+            waivers={
+                "perk_bans": waiver,
+                "perk_auto_pick_order": {
+                    **waiver,
+                    "check_id": "perk_auto_pick_order",
+                    "label": "Auto Pick priority",
+                },
+            },
+        )
+
+    assert result.complete
+    assert call(
+        "[HOME_PREFLIGHT] Perk Bans skipped; expected=not enforced by "
+        "selected strategy profile; observed=permanently skipped by the "
+        "selected strategy profile",
+        "INFO",
+    ) in emit.call_args_list
+
+
 def test_guardian_replacement_reacquires_after_empty_slot_settles():
     state = {"phase": "equipped"}
     sleeps = []
@@ -1850,8 +1888,11 @@ def test_guardian_replacement_templates_require_known_visible_loadout():
 def test_app_runs_no_battle_setup_before_starting_profile_battle():
     frame = object()
     manager = Mock()
+    manager.strategy = None
+    manager.awaiting_initial_battle_intent.return_value = False
     manager.no_battle_setup_requirements.return_value = REQUIREMENTS
     app = App.__new__(App)
+    app._operator_battle_intent_required = True
     app._auto_start_enabled = True
     app._mission_mgr = manager
     app._fast_game_over = False
@@ -1859,6 +1900,17 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     app._last_wave_conf = -1.0
     app._status_reporter = Mock()
     app._supervisor = Mock()
+    app._supervisor.battle_workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "acknowledged",
+    }
+    app._supervisor.manual_control = None
+    app._runtime_action_guard = Mock(return_value=True)
+    app._current_control_workflow_evidence = Mock(
+        return_value={"observation_id": "runtime-1:home"}
+    )
+    app._report_home_policy = Mock()
     app._handle_daily_gem_if_due = Mock(return_value=False)
     app._handle_mission_rewards_if_due = Mock(return_value=False)
     setup = GcNoBattleSetupResult(
@@ -1887,8 +1939,250 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
         action_guard_fn=app._runtime_action_guard,
     )
     manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
-    handle_home.assert_called_once_with(restart_enabled=True)
+    handle_home.assert_called_once_with(
+        restart_enabled=True,
+        require_new_battle=True,
+        operation_id="start-1:runtime-1:home:home_dispatch",
+        action_purpose="Starting a new battle",
+        action_reason=(
+            "execute the exact verified New Battle intent after normal "
+            "new-run gates"
+        ),
+        action_guard_fn=ANY,
+    )
     manager.on_home.assert_called_once_with()
+
+
+def test_home_setup_does_not_transfer_launch_to_a_replacement_start_request():
+    frame = object()
+    manager = Mock()
+    manager.strategy = None
+    manager.awaiting_initial_battle_intent.return_value = False
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    supervisor = SimpleNamespace(
+        battle_workflow={
+            "request_id": "start-1",
+            "intent": "start_battle",
+            "status": "acknowledged",
+        },
+        manual_control=None,
+        gate_decision=None,
+    )
+    app = App.__new__(App)
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._runtime_action_guard = Mock(return_value=True)
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"cards_deck": "Farm"},
+    )
+
+    def replace_request(*_args, **_kwargs):
+        supervisor.battle_workflow = {
+            "request_id": "start-2",
+            "intent": "start_battle",
+            "status": "acknowledged",
+        }
+        return setup
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup", side_effect=replace_request),
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    manager.mark_no_battle_setup_complete.assert_not_called()
+    handle_home.assert_not_called()
+
+
+def test_home_dispatch_guard_rechecks_request_after_completed_setup():
+    frame = object()
+    manager = Mock()
+    manager.strategy = None
+    manager.awaiting_initial_battle_intent.return_value = False
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    supervisor = SimpleNamespace(
+        battle_workflow={
+            "request_id": "start-1",
+            "intent": "start_battle",
+            "status": "acknowledged",
+        },
+        manual_control=None,
+        gate_decision=None,
+    )
+    app = App.__new__(App)
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._runtime_action_guard = Mock(return_value=True)
+    app._report_home_policy = Mock()
+    app._current_control_workflow_evidence = Mock(
+        return_value={"observation_id": "runtime-1:home"}
+    )
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"cards_deck": "Farm"},
+    )
+
+    def replace_at_dispatch(**kwargs):
+        supervisor.battle_workflow = {
+            "request_id": "start-2",
+            "intent": "start_battle",
+            "status": "acknowledged",
+        }
+        assert kwargs["action_guard_fn"]() is False
+        return False
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup", return_value=setup),
+        patch(
+            "core.app.handle_home_screen",
+            side_effect=replace_at_dispatch,
+        ) as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
+    assert handle_home.call_args.kwargs["restart_enabled"] is True
+    manager.on_home.assert_called_once_with()
+
+
+def test_legacy_home_setup_rechecks_terminal_policy_before_dispatch():
+    frame = object()
+    manager = Mock()
+    manager.strategy = None
+    manager.awaiting_initial_battle_intent.return_value = False
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    app = App.__new__(App)
+    app._operator_battle_intent_required = False
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = SimpleNamespace(
+        battle_workflow=None,
+        manual_control=None,
+        gate_decision=None,
+    )
+    app._runtime_action_guard = Mock(return_value=True)
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"cards_deck": "Farm"},
+    )
+    original_mode = AUTOMATION.mode
+
+    def change_policy(*_args, **_kwargs):
+        AUTOMATION.mode = ExecMode.HOME
+        return setup
+
+    try:
+        AUTOMATION.mode = ExecMode.NEXT_BATTLE
+        with (
+            patch(
+                "core.app.detect_home_battle_control",
+                return_value=HomeBattleEvidence(
+                    HomeBattleControl.NEW_BATTLE,
+                    "test",
+                    100.0,
+                ),
+            ),
+            patch("core.app.run_gc_no_battle_setup", side_effect=change_policy),
+            patch("core.app.handle_home_screen") as handle_home,
+        ):
+            app._handle_primary_states("HOME_SCREEN", set(), frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    manager.mark_no_battle_setup_complete.assert_not_called()
+    handle_home.assert_not_called()
+
+
+def test_managed_idle_home_policy_grants_no_save_setup_or_battle_input():
+    frame = object()
+    manager = Mock()
+    manager.strategy = None
+    manager.awaiting_initial_battle_intent.return_value = False
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    coordinator = Mock()
+    coordinator.carry = None
+    app = App.__new__(App)
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = SimpleNamespace(
+        manual_control=None,
+        battle_workflow=None,
+    )
+    app._handle_home_return_reconciliation = Mock(return_value=False)
+    app._handler_enabled = Mock(side_effect=lambda name: name == "home")
+    app._runtime_policy = Mock(
+        return_value={"player_save_preflight": "save_first"}
+    )
+    app._exclusive_validation_definition = Mock(return_value=None)
+    app._maybe_start_exclusive_validation = Mock(return_value=False)
+    app._report_home_policy = Mock()
+    app._acquire_player_save_home_preflight = Mock()
+    app._run_home_setup_attempts = Mock()
+    app._activity_scope_has_history_baseline = Mock(return_value=False)
+    app._player_save_preflight_coordinator = coordinator
+    app._player_save_preflight_activity_scope_id = None
+    app._player_save_preflight_result = None
+    app._player_save_history_baseline_outcome = None
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    try:
+        with (
+            patch(
+                "core.app.get_activity_scope",
+                return_value={"run_id": "scope-1"},
+            ),
+            patch(
+                "core.app.detect_home_battle_control",
+                return_value=HomeBattleEvidence(
+                    HomeBattleControl.NEW_BATTLE,
+                    "test",
+                    100.0,
+                ),
+            ),
+            patch("core.app.run_gc_no_battle_setup") as run_setup,
+            patch("core.app.handle_home_screen") as handle_home,
+        ):
+            app._handle_primary_states("HOME_SCREEN", set(), frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    app._acquire_player_save_home_preflight.assert_not_called()
+    app._run_home_setup_attempts.assert_not_called()
+    coordinator.acquire.assert_not_called()
+    run_setup.assert_not_called()
+    handle_home.assert_called_once_with(restart_enabled=False)
 
 
 @pytest.mark.parametrize(
@@ -2113,6 +2407,7 @@ def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         require_new_battle=True,
+        action_guard_fn=ANY,
     )
     coordinator.mark_runtime_launch.assert_called_once_with(
         control=HomeBattleControl.NEW_BATTLE,
@@ -2461,6 +2756,7 @@ def test_app_blocks_battle_start_when_no_battle_setup_fails():
     app._last_wave_conf = -1.0
     app._status_reporter = Mock()
     app._supervisor = Mock()
+    app._runtime_action_guard = Mock(return_value=True)
     app._capture_frame = Mock(return_value=frame)
     app._handle_daily_gem_if_due = Mock(return_value=False)
     app._handle_mission_rewards_if_due = Mock(return_value=False)
@@ -2536,6 +2832,7 @@ def test_app_retries_transient_home_setup_failure_before_starting_battle():
     app._last_wave_conf = -1.0
     app._status_reporter = Mock()
     app._supervisor = Mock()
+    app._runtime_action_guard = Mock(return_value=True)
     app._capture_frame = Mock(return_value=retry_frame)
     app._publish_gate_decision = Mock()
     app._handle_daily_gem_if_due = Mock(return_value=False)
@@ -2584,7 +2881,10 @@ def test_app_retries_transient_home_setup_failure_before_starting_battle():
     manager.mark_no_battle_setup_complete.assert_called_once_with(
         completed.evidence
     )
-    handle_home.assert_called_once_with(restart_enabled=True)
+    handle_home.assert_called_once_with(
+        restart_enabled=True,
+        action_guard_fn=ANY,
+    )
 
 
 def test_app_does_not_publish_gate_or_start_after_control_interruption():
@@ -2826,6 +3126,7 @@ def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
     app._auto_start_enabled = True
     app._mission_mgr = manager
     app._supervisor = supervisor
+    app._runtime_action_guard = Mock(return_value=True)
     app._gate_decision_prompt = lambda _decision: "flame"
     app._gate_prompted_request_id = None
     app._startup_gate_waivers = {}
@@ -2910,7 +3211,10 @@ def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
         "gate-1",
         completion_reason="waived bots_preset for this run",
     )
-    handle_home.assert_called_once_with(restart_enabled=True)
+    handle_home.assert_called_once_with(
+        restart_enabled=True,
+        action_guard_fn=ANY,
+    )
     manager.on_home.assert_called_once_with()
 
 
@@ -2934,6 +3238,7 @@ def test_app_claims_optional_configured_skip_before_home_setup():
     app._auto_start_enabled = True
     app._mission_mgr = manager
     app._supervisor = supervisor
+    app._runtime_action_guard = Mock(return_value=True)
     app._startup_gate_waivers = {}
     app._fast_game_over = False
     app._last_wave_value = None
@@ -2982,7 +3287,10 @@ def test_app_claims_optional_configured_skip_before_home_setup():
         setup.evidence,
         waivers={"bots_preset": waiver},
     )
-    handle_home.assert_called_once_with(restart_enabled=True)
+    handle_home.assert_called_once_with(
+        restart_enabled=True,
+        action_guard_fn=ANY,
+    )
 
 
 def test_app_claims_optional_session_only_skip_for_active_run():

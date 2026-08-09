@@ -67,7 +67,124 @@ canonical document linked by an entry for current behavior.
   live process, device, integration, promotion, or deployment action was
   performed; ordinary-boundary production confirmation remains in the runtime
   backlog.
+- The combined candidate then merged deployed idle-Home gem authority through
+  production tip `f809815` without a source-code conflict. The merged Perk,
+  Home-gem, authority, and control-surface owner/caller slice passed 413 tests;
+  the complete supported checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and all 2,022 tests in 338.73 seconds. This integration performed no live,
+  device, promotion, or deployment action.
 
+### 2026-08-08 idle-Home gem authority
+
+- Commits `61a150f` and `58380f4` close the Better Control implementation gap
+  that stranded a visible five-gem reward while Automation was Enabled at Home
+  awaiting an explicit Start/Attach choice. The initial-intent hold now declares
+  only the typed `home_ad_gem` auxiliary allowance when no immediate battle
+  workflow exists. Every other collector plus Strategy, setup, navigation, and
+  lifecycle work remains blocked.
+- Global Pause, Stop, Take/Return Control, Setup Capture, interactive
+  development, an active Start/Attach workflow, or any second hold overrides
+  the exception. A fresh Home frame only schedules the attempt; the handler
+  obtains a new visible-button match, synchronizes current control and operator
+  ownership, and rechecks central typed authority at the final safe-tap
+  boundary. A newly arrived Start/Attach request therefore cancels the claim.
+  Runtime status exposes the hold-local and effective collector allowlists
+  under the existing `better_control_model_v2` capability.
+- The final focused authority/Home/control-model suites passed 234 tests and the
+  broader owner/caller slice passed 515. Exact corrected candidate `58380f4`
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan candidates, and all 2,011 tests in 338.55
+  seconds. Exact promotion candidate `066e167` repeated that complete
+  checkpoint with all 2,011 tests passing in 343.11 seconds.
+- Production advanced from `36497dc` behind rollback tag
+  `production-before-20260809T000743Z-36497dc`. Automation PID `3244540`
+  stopped cleanly and released its `localhost:5555` lock; replacement PID
+  `3334597` started Paused, acquired the lock, published fresh Home/New Battle
+  evidence, and acknowledged the exact Pause and restored Enable requests.
+  Runtime status exposed `home_ad_gem` as the sole allowed auxiliary collector
+  while Strategy and lifecycle action authority remained blocked.
+- The replacement naturally claimed the already-visible five-gem Home reward,
+  recorded the verified tap and successful result, observed the overlay
+  disappear, and stayed Home without a Start Battle intent or battle
+  transition. No Surrender or manufactured test boundary was used. No Windows
+  code changed; native Windows usability remains pending.
+
+### 2026-08-08 recoverable runtime diagnostic reconciliation
+
+- Commit `101054f` selectively ports the two independent logging refinements
+  from stale mixed commit `e0fff88`. Permanent `strategy_profile` / `every_run`
+  skips now render as expected `INFO` policy with their actual reason, while
+  operator-selected one-run waivers retain `WARN` visibility. None of the
+  superseded policy-derived ordinary Home auto-launch code was merged.
+- A first incomplete raw or PNG screenshot remains rejected and retried, but
+  that in-budget event and a successful second capture now remain `DEBUG`
+  diagnostics. Two consecutive incomplete frames still reject the capture and
+  emit the operator-facing `WARN`; screenshot action authority is unchanged.
+  The August 8 recurrence analysis is retained under `ISSUE-2026-022`, whose
+  compositor/transport source remains unresolved.
+- The focused owner suites passed 96 tests and the broader owner/caller slice
+  passed 148. The exact candidate passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan
+  candidates, and all 2,003 tests in 338.67 seconds.
+- Production was fast-forwarded to `101054f` behind rollback tag
+  `production-before-20260808T230345Z-c9f60e2`. Automation stopped cleanly at
+  Home without input; replacement PID `3244540` acquired the held
+  `localhost:5555` lock, acknowledged the exact restored Enable request, and
+  published fresh Home/New Battle evidence. No Start Battle intent, battle
+  transition, incomplete-frame event, profile preflight, or device input was
+  manufactured for the smoke test.
+- The smoke also confirmed the then-open Better Control gap in which
+  `operator_workflow` excluded auxiliary gem collectors while idle Home awaited
+  explicit Start/Attach. That diagnostic-only deployment did not change the
+  decision; the later `61a150f`/`58380f4` outcome above closes it.
+
+### 2026-08-08 Home launch-authority correction
+
+- Commit `b36f878` prevents a stale No Strategy inventory pass from reclaiming
+  an operator-opened Home panel. A route now requires fresh `RUNNING`, the
+  active No Strategy observation, and lifecycle-owned evidence for that exact
+  battle; Paused or later-observed Cards, Perks, Modules, Event, Guild, Target
+  Priority, and Damage Adjuster panels grant no cleanup or navigation input.
+- Commit `fad29e3` separates future terminal policy from managed Home launch
+  authority. Automation Enabled, Strategy selection, prior lifecycle state,
+  or selecting Continue at Home no longer runs setup, repairs navigation, or
+  taps Battle/Resume. Explicit Start still runs normal new-run gates, and an
+  ordinary Game Over under Continue still owns its direct Retry control.
+- A terminal workflow that must return Home can carry one process-local,
+  one-shot continuation only when Continue was already selected for that exact
+  terminal boundary. The claim binds runtime/PID, target generation, activity
+  scope, and state/policy request identities; it accepts only fresh New Battle
+  and is invalidated by authority/policy changes, manual or workflow
+  supersession, Resume Battle, binding changes, process replacement, or
+  unexpected manual activity.
+- Promotion-review commit `a9b7269` adds the final temporal barrier omitted by
+  the first checkpoint. Save/setup completion, pre-handler dispatch, and the
+  final verified tap all revalidate the original Start, Attach, or Return
+  request identity and typed lifecycle authority. Replacement requests cannot
+  inherit the prior setup or carried-save launch; manual/control supersession
+  also clears a pending terminal continuation. The revised affected suite
+  passed 478 tests.
+- Before that promotion review, the affected Home/control/No Strategy/Game
+  Over/Tournament/repair slice passed 461 tests. Its complete supported
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan candidates, and all 1,985 tests in
+  459.15 seconds.
+- Exact post-review candidate `9d7a541` then passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan candidates, and all 2,002 tests in 337.55 seconds. It was
+  fast-forwarded through `develop` and production `main`; rollback tag
+  `production-before-20260808T222617Z-e53c156` preserves the prior production
+  boundary.
+- The bounded production smoke replaced the control surface as PID `3203188`
+  and automation as PID `3203767`. Revision 30 reported connected exact target
+  `localhost:5555`; the replacement held its target lock, acknowledged the
+  exact Enable request, and continued publishing fresh Home/New Battle
+  observations. No Start Battle intent or battle input was issued, and the
+  runtime explicitly logged that it was staying Home. Native Windows usability,
+  a live policy-change-at-Home exercise, and a natural terminal-to-Home
+  continuation remain in the Better Control backlog rather than being
+  manufactured during deployment.
 ### 2026-08-08 save-to-UI fallback contract repair
 
 - The combined candidate is based directly on completed Better Control tip

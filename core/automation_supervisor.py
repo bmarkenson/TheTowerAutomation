@@ -253,6 +253,19 @@ class AutomationSupervisor:
         return str(value or "UNKNOWN").strip().upper()
 
     @property
+    def control_request_identity(self) -> Dict[str, object]:
+        """Return the exact state and terminal-policy directives in force."""
+
+        return {
+            "state_request_id": deepcopy(
+                self._last_state_directive_revision
+            ),
+            "mode_request_id": deepcopy(
+                self._last_mode_directive_revision
+            ),
+        }
+
+    @property
     def unexpected_manual_yield_emergency(self) -> bool:
         """Return whether a failed durable yield is enforcing local Pause."""
 

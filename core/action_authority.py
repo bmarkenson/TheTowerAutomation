@@ -38,8 +38,9 @@ class RuntimeActionClass(str, Enum):
 
 
 class AuxiliaryCollector(str, Enum):
-    """Independently reviewed collectors that a Strategy Gate may allow."""
+    """Independently reviewed collectors with typed runtime authority."""
 
+    HOME_AD_GEM = "home_ad_gem"
     IN_BATTLE_AD_GEM = "in_battle_ad_gem"
     FLOATING_GEM_SCAN = "floating_gem_scan"
     DAILY_GEM_STORE = "daily_gem_store"
@@ -90,6 +91,7 @@ class StrategyGateExitEvent(str, Enum):
 class AuthorityHoldState:
     hold: AuthorityHold
     reason: str
+    allowed_auxiliary_collectors: tuple[AuxiliaryCollector, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -219,7 +221,20 @@ class RuntimeActionAuthoritySnapshot:
             "runtime_battle_scope": self.runtime_battle_scope,
             "primary_state": self.primary_state,
             "holds": [
-                {"hold": item.hold.value, "reason": item.reason}
+                {
+                    "hold": item.hold.value,
+                    "reason": item.reason,
+                    **(
+                        {
+                            "allowed_auxiliary_collectors": [
+                                collector.value
+                                for collector in item.allowed_auxiliary_collectors
+                            ]
+                        }
+                        if item.allowed_auxiliary_collectors
+                        else {}
+                    ),
+                }
                 for item in self.holds
             ],
             "observation_authority": self.observation_authority.as_dict(),
@@ -456,6 +471,33 @@ class RuntimeActionAuthority:
         *,
         owner: Optional[str],
     ) -> Optional[ActionAuthorityDecision]:
+        unconditional = self._unconditional_input_denial(
+            action_class,
+            owner=owner,
+        )
+        if unconditional is not None:
+            return unconditional
+        context = self._context
+        if context.holds and not self._matching_hold_owner(owner):
+            descriptions = ", ".join(
+                item.hold.value for item in context.holds
+            )
+            return ActionAuthorityDecision(
+                action_class,
+                False,
+                f"exclusive runtime ownership is held by {descriptions}",
+                owner=owner,
+            )
+        return None
+
+    def _unconditional_input_denial(
+        self,
+        action_class: RuntimeActionClass,
+        *,
+        owner: Optional[str],
+    ) -> Optional[ActionAuthorityDecision]:
+        """Return the Pause/Stop/shutdown denial that no hold may bypass."""
+
         context = self._context
         if context.shutting_down:
             return ActionAuthorityDecision(
@@ -478,16 +520,6 @@ class RuntimeActionAuthority:
                 "global Pause blocks every handler and input action",
                 owner=owner,
             )
-        if context.holds and not self._matching_hold_owner(owner):
-            descriptions = ", ".join(
-                item.hold.value for item in context.holds
-            )
-            return ActionAuthorityDecision(
-                action_class,
-                False,
-                f"exclusive runtime ownership is held by {descriptions}",
-                owner=owner,
-            )
         return None
 
     def _auxiliary_decision(
@@ -498,15 +530,20 @@ class RuntimeActionAuthority:
         route_id: Optional[str],
         ignore_route: bool = False,
     ) -> ActionAuthorityDecision:
-        denial = self._base_input_denial(
+        denial = self._unconditional_input_denial(
             RuntimeActionClass.AUXILIARY_COLLECTION,
             owner=owner,
         )
         if denial is not None:
             return replace(denial, collector=collector)
-        if self._context.holds:
+        context = self._context
+        holds_allow_collector = bool(context.holds) and all(
+            collector in hold.allowed_auxiliary_collectors
+            for hold in context.holds
+        )
+        if context.holds and not holds_allow_collector:
             descriptions = ", ".join(
-                item.hold.value for item in self._context.holds
+                item.hold.value for item in context.holds
             )
             return ActionAuthorityDecision(
                 RuntimeActionClass.AUXILIARY_COLLECTION,
@@ -515,7 +552,6 @@ class RuntimeActionAuthority:
                 collector=collector,
                 owner=owner,
             )
-        context = self._context
         gate = self._gate
         route = self._route
         if gate is not None and not context.active_battle:
@@ -547,6 +583,17 @@ class RuntimeActionAuthority:
                 RuntimeActionClass.AUXILIARY_COLLECTION,
                 False,
                 "the collector requires a freshly observed RUNNING battle frame",
+                collector=collector,
+                owner=owner,
+            )
+        if (
+            collector is AuxiliaryCollector.HOME_AD_GEM
+            and context.primary_state not in {"HOME", "HOME_SCREEN"}
+        ):
+            return ActionAuthorityDecision(
+                RuntimeActionClass.AUXILIARY_COLLECTION,
+                False,
+                "the collector requires a freshly observed Home frame",
                 collector=collector,
                 owner=owner,
             )
@@ -826,7 +873,7 @@ class RuntimeActionAuthority:
             lifecycle = self.decision(RuntimeActionClass.LIFECYCLE_ACTION)
             allowed_collectors = tuple(
                 collector
-                for collector in STRATEGY_GATE_AUXILIARY_ALLOWLIST
+                for collector in AuxiliaryCollector
                 if self.decision(
                     RuntimeActionClass.AUXILIARY_COLLECTION,
                     collector=collector,

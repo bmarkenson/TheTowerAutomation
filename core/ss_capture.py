@@ -141,6 +141,7 @@ def capture_adb_raw_screenshot() -> Optional[Frame]:
                 device_id=device_id,
             )
             if image is not None:
+                _log_incomplete_capture_recovery("raw", attempt)
                 return image
             _log_incomplete_capture("raw", attempt)
         return None
@@ -185,6 +186,7 @@ def capture_adb_screenshot_result(
             native_height, native_width = img.shape[:2]
             img = normalize_device_screenshot(img, device_id=device_id)
             if img is not None:
+                _log_incomplete_capture_recovery("PNG", attempt)
                 return ScreenshotCaptureResult(
                     img,
                     captured_at=captured_at,
@@ -240,12 +242,25 @@ def capture_adb_screenshot() -> Optional[Frame]:
 def _log_incomplete_capture(source: str, attempt: int) -> None:
     if attempt < INCOMPLETE_CAPTURE_ATTEMPTS:
         outcome = "retrying with a fresh capture"
+        level = "DEBUG"
     else:
         outcome = "capture rejected"
+        level = "WARN"
     log(
         f"[ADB] Incomplete {source} screenshot "
         f"({attempt}/{INCOMPLETE_CAPTURE_ATTEMPTS}); {outcome}",
-        "WARN",
+        level,
+    )
+
+
+def _log_incomplete_capture_recovery(source: str, attempt: int) -> None:
+    if attempt <= 1:
+        return
+    log(
+        f"[ADB] {source} screenshot capture recovered on attempt "
+        f"{attempt}/{INCOMPLETE_CAPTURE_ATTEMPTS} after rejecting an "
+        "incomplete frame",
+        "DEBUG",
     )
 
 

@@ -2449,6 +2449,14 @@ class GcFarmProfileTests(unittest.TestCase):
             "observation_id": "runtime-1:terminal",
         }
         app._current_control_workflow_evidence = lambda: terminal_evidence
+        continuation = {
+            "schema_version": 1,
+            "source": "session_preflight_repair",
+        }
+        app._build_terminal_home_continuation_claim = MagicMock(
+            return_value=continuation
+        )
+        app._commit_terminal_home_continuation = MagicMock(return_value=True)
         acquisition = _repair_terminal_acquisition()
         terminal_context = {"terminal_save_report": {}}
         app._terminal_battle_bundle = MagicMock(
@@ -2485,6 +2493,13 @@ class GcFarmProfileTests(unittest.TestCase):
         )
         manager.on_game_over.assert_called_once_with()
         app._supervisor.persist_state.assert_not_called()
+        app._build_terminal_home_continuation_claim.assert_called_once_with(
+            source="session_preflight_repair",
+            evidence=terminal_evidence,
+        )
+        app._commit_terminal_home_continuation.assert_called_once_with(
+            continuation
+        )
 
     def test_repair_record_failure_routes_terminal_without_global_pause(self):
         strategy = get_strategy("farm_t18")

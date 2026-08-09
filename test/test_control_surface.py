@@ -15,6 +15,7 @@ import pytest
 from core.action_authority import (
     AuthorityHold,
     AuthorityHoldState,
+    AuxiliaryCollector,
     RuntimeActionAuthority,
     RuntimeActionAuthorityPublisher,
 )
@@ -400,6 +401,66 @@ def test_status_serializes_fresh_runtime_owned_strategy_gate(tmp_path):
     assert "in_battle_ad_gem" in published["allowed_auxiliary_collectors"]
     assert "daily_gem_store" in published["allowed_auxiliary_collectors"]
     assert status["control"]["state"] == "RUNNING"
+
+
+def test_status_exposes_idle_home_collector_without_battle_authority(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    lock_handle = _fresh_runtime_lock(tmp_path, state="HOME_SCREEN")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=False,
+        battle_scope="run-home",
+        primary_state="HOME_SCREEN",
+        holds=(
+            AuthorityHoldState(
+                AuthorityHold.OPERATOR_WORKFLOW,
+                (
+                    "runtime is waiting for explicit Start Battle or Attach "
+                    "to Battle intent"
+                ),
+                allowed_auxiliary_collectors=(
+                    AuxiliaryCollector.HOME_AD_GEM,
+                ),
+            ),
+        ),
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner={
+            "runtime_id": "runtime-home",
+            "pid": os.getpid(),
+            "adb_target": "localhost:5555",
+        },
+        stale_after_seconds=30,
+    )
+    assert publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+    )
+    try:
+        published = _service(tmp_path).status(now=now.timestamp())[
+            "strategy_action_gate"
+        ]
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+    assert published["available"] is True
+    assert published["auxiliary_collection_authority"]["allowed"] is True
+    assert published["allowed_auxiliary_collectors"] == ["home_ad_gem"]
+    assert published["strategy_action_authority"]["allowed"] is False
+    assert published["lifecycle_action_authority"]["allowed"] is False
+    assert published["holds"] == [
+        {
+            "hold": "operator_workflow",
+            "reason": (
+                "runtime is waiting for explicit Start Battle or Attach to "
+                "Battle intent"
+            ),
+            "allowed_auxiliary_collectors": ["home_ad_gem"],
+        }
+    ]
 
 
 def test_strategy_gate_status_rejects_stale_inactive_or_wrong_owner_snapshot(

@@ -4376,8 +4376,24 @@ class ControlSurfaceService:
             "home_behavior": {
                 "meaning": (
                     "Home observation does not change automation action authority. "
-                    "Starting or resuming requires a matching explicit battle intent."
-                )
+                    "Starting or resuming requires a matching explicit battle "
+                    "intent; the only automatic Home start is an exact, "
+                    "unconsumed continuation from a completed terminal route."
+                ),
+                "explicit_intent_required": bool(
+                    runtime_lifecycle.get("explicit_home_intent_required")
+                    is True
+                ),
+                "terminal_continuation": (
+                    dict(runtime_lifecycle["terminal_home_continuation"])
+                    if isinstance(
+                        runtime_lifecycle.get(
+                            "terminal_home_continuation"
+                        ),
+                        Mapping,
+                    )
+                    else {"pending": False}
+                ),
             },
             "battle_workflow": workflow,
             "manual_control": manual,

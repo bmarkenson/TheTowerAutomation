@@ -1481,17 +1481,32 @@ def _log_home_preflight_evidence(
         reason = str(check_evidence.get("reason") or "").strip()
         if status == "waived":
             waiver = check_evidence.get("waiver")
-            if isinstance(waiver, Mapping):
+            profile_skip = bool(
+                isinstance(waiver, Mapping)
+                and waiver.get("source") == "strategy_profile"
+                and waiver.get("scope") == "every_run"
+            )
+            if profile_skip:
+                expected_value = "not enforced by selected strategy profile"
+                observed = (
+                    waiver.get("reason")
+                    or "permanently skipped by the selected strategy profile"
+                )
+                disposition = "skipped"
+                level = "INFO"
+            elif isinstance(waiver, Mapping):
                 observed = (
                     waiver.get("label")
                     or waiver.get("value")
                     or waiver.get("reason")
                     or "configured one-run waiver"
                 )
+                disposition = "waived"
+                level = "WARN"
             else:
                 observed = waiver or "configured one-run waiver"
-            disposition = "waived"
-            level = "WARN"
+                disposition = "waived"
+                level = "WARN"
         elif reason in {
             "battle_only_control",
             "no_supported_home_controls_required",
