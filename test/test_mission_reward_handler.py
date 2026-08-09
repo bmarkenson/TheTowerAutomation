@@ -19,6 +19,7 @@ from core.mission_reward_scheduler import (
     FAILURE_RETRY_SECONDS,
     MissionRewardScheduler,
     PROBE_COOLDOWN_SECONDS,
+    WeeklyChestReviewState,
     daily_mission_claims_allowed,
     seconds_until_daily_mission_release,
 )
@@ -40,12 +41,34 @@ def _load(name: str):
     return image
 
 
-def _weekly_found(frame, *, swipes: int = 0) -> ScrollResult:
-    return ScrollResult(True, frame, swipes, "target_visible")
+def _weekly_found(
+    frame,
+    *,
+    swipes: int = 0,
+    left_search_complete: bool = False,
+) -> rewards.WeeklyChestSearchResult:
+    return rewards.WeeklyChestSearchResult(
+        True,
+        frame,
+        swipes,
+        "target_visible",
+        left_search_complete,
+    )
 
 
-def _weekly_absent(frame, *, swipes: int = 0) -> ScrollResult:
-    return ScrollResult(False, frame, swipes, "edge_before_target")
+def _weekly_absent(
+    frame,
+    *,
+    swipes: int = 0,
+    left_search_complete: bool = False,
+) -> rewards.WeeklyChestSearchResult:
+    return rewards.WeeklyChestSearchResult(
+        False,
+        frame,
+        swipes,
+        "edge_before_target",
+        left_search_complete,
+    )
 
 
 def test_authority_loss_before_reward_navigation_retains_cleanup_ownership():
@@ -229,20 +252,27 @@ def test_weekly_track_evidence_requires_every_unlocked_chest_checkmark():
     assert (claimed.completed, claimed.total) == (20, 35)
     assert claimed.confidence >= 60.0
     assert claimed.checkmarks == 4
+    assert claimed.claimed_milestones == (5, 10, 15, 20)
     assert claimed.unlocked_chests == 4
     assert claimed.all_unlocked_claimed
+    assert not claimed.visible_claimed_prefix
 
     assert (available.completed, available.total) == (20, 35)
     assert available.checkmarks == 3
+    assert available.claimed_milestones == (5, 10, 15)
     assert not available.all_unlocked_claimed
+    assert available.visible_claimed_prefix
 
     assert (partially_visible.completed, partially_visible.total) == (35, 35)
     assert partially_visible.checkmarks == 5
+    assert partially_visible.claimed_milestones == (5, 10, 15, 20, 25)
     assert partially_visible.unlocked_chests == 7
     assert not partially_visible.all_unlocked_claimed
+    assert partially_visible.visible_claimed_prefix
 
     assert unknown.unlocked_chests is None
     assert not unknown.all_unlocked_claimed
+    assert not unknown.visible_claimed_prefix
     assert not rewards.WeeklyMissionTrackEvidence(
         20,
         35,
@@ -255,6 +285,22 @@ def test_weekly_track_evidence_requires_every_unlocked_chest_checkmark():
         4,
         99.0,
     ).all_unlocked_claimed
+    assert not rewards.WeeklyMissionTrackEvidence(
+        35,
+        35,
+        3,
+        99.0,
+        "completed 35/35",
+        (5, 15, 20),
+    ).visible_claimed_prefix
+    assert not rewards.WeeklyMissionTrackEvidence(
+        35,
+        35,
+        3,
+        99.0,
+        "completed 35/35",
+        (10, 15, 20),
+    ).visible_claimed_prefix
 
 
 def test_daily_mission_capacity_ocr_distinguishes_full_from_partial():
@@ -360,7 +406,13 @@ def test_weekly_chest_search_normalizes_then_finds_offscreen_target():
     ):
         result = rewards._find_weekly_mission_chest(initial)
 
-    assert result == ScrollResult(True, found, 5, "target_visible")
+    assert result == rewards.WeeklyChestSearchResult(
+        True,
+        found,
+        5,
+        "target_visible",
+        True,
+    )
     to_edge.assert_called_once_with(
         "gesture_targets.goto_first:weekly_mission_chests",
         source_label="indicators.daily_missions",
@@ -397,6 +449,131 @@ def test_weekly_chest_search_skips_rewind_for_fully_claimed_visible_track():
     assert result.reason == "all_unlocked_claimed"
     to_edge.assert_not_called()
     until_visible.assert_not_called()
+
+
+def test_weekly_chest_search_starts_right_for_visible_claimed_prefix():
+    initial = _load("daily_missions_full_20260719.png")
+    final = np.zeros((2, 2, 3), dtype=np.uint8)
+    searched = ScrollResult(False, final, 3, "edge_before_target")
+    action_guard = Mock(return_value=True)
+
+    with (
+        patch.object(rewards, "scroll_to_edge") as to_edge,
+        patch.object(
+            rewards,
+            "scroll_until_visible",
+            return_value=searched,
+        ) as until_visible,
+    ):
+        result = rewards._find_weekly_mission_chest(
+            initial,
+            action_guard_fn=action_guard,
+        )
+
+    assert result == rewards.WeeklyChestSearchResult(
+        False,
+        final,
+        3,
+        "edge_before_target",
+        True,
+    )
+    to_edge.assert_not_called()
+    until_visible.assert_called_once_with(
+        "gesture_targets.goto_next:weekly_mission_chests",
+        source_label="indicators.daily_missions",
+        target_label=rewards.WEEKLY_MISSION_CHEST,
+        screenshot=initial,
+        progress_region=rewards.WEEKLY_MISSION_CHEST_REGION,
+        max_swipes=8,
+        settle_s=0.8,
+        stable_threshold=2.0,
+        action_guard_fn=action_guard,
+    )
+
+
+def test_weekly_chest_search_skips_repeat_scan_for_unchanged_reviewed_progress():
+    initial = np.zeros((2, 2, 3), dtype=np.uint8)
+    review_state = WeeklyChestReviewState()
+    review_state.mark_reviewed(7)
+    shifted_claimed_suffix = rewards.WeeklyMissionTrackEvidence(
+        35,
+        35,
+        5,
+        95.0,
+        "completed 35/35",
+        (15, 20, 25, 30, 35),
+    )
+
+    with (
+        patch.object(rewards, "is_visible", return_value=False),
+        patch.object(
+            rewards,
+            "_measure_weekly_mission_track",
+            return_value=shifted_claimed_suffix,
+        ),
+        patch.object(rewards, "scroll_to_edge") as to_edge,
+        patch.object(rewards, "scroll_until_visible") as until_visible,
+    ):
+        result = rewards._find_weekly_mission_chest(
+            initial,
+            review_state=review_state,
+        )
+
+    assert result == rewards.WeeklyChestSearchResult(
+        False,
+        initial,
+        0,
+        "weekly_progress_already_reviewed",
+        True,
+    )
+    to_edge.assert_not_called()
+    until_visible.assert_not_called()
+
+
+def test_weekly_chest_search_retains_complete_scan_for_same_unlock_level():
+    initial = np.zeros((2, 2, 3), dtype=np.uint8)
+    left_edge = np.ones((2, 2, 3), dtype=np.uint8)
+    right_edge = np.full((2, 2, 3), 2, dtype=np.uint8)
+    review_state = WeeklyChestReviewState()
+
+    with (
+        patch.object(rewards, "is_visible", side_effect=[False, False]),
+        patch.object(
+            rewards,
+            "_measure_weekly_mission_track",
+            return_value=rewards.WeeklyMissionTrackEvidence(
+                35,
+                35,
+                5,
+                95.0,
+                "completed 35/35",
+                (15, 20, 25, 30, 35),
+            ),
+        ),
+        patch.object(
+            rewards,
+            "scroll_to_edge",
+            return_value=ScrollResult(True, left_edge, 3, "edge_reached"),
+        ),
+        patch.object(
+            rewards,
+            "scroll_until_visible",
+            return_value=ScrollResult(
+                False,
+                right_edge,
+                3,
+                "edge_before_target",
+            ),
+        ),
+    ):
+        result = rewards._find_weekly_mission_chest(
+            initial,
+            review_state=review_state,
+        )
+
+    assert not result.success
+    assert result.left_search_complete
+    assert review_state.covers(7)
 
 
 def test_event_missions_tab_navigation_is_visible_from_retained_bots_tab():
@@ -557,6 +734,20 @@ def test_scheduler_cooldown_does_not_straddle_weekly_reset():
     scheduler.mark_completed(now=100.0, wall_now=before_reset)
     assert not scheduler.should_attempt(alert_visible=True, now=109.9)
     assert scheduler.should_attempt(alert_visible=True, now=110.0)
+
+
+def test_weekly_chest_review_state_expires_on_progress_or_cycle_change():
+    state = WeeklyChestReviewState()
+    sunday = datetime(2026, 8, 9, 23, 59, 59, tzinfo=timezone.utc)
+    monday = datetime(2026, 8, 10, 0, 0, 0, tzinfo=timezone.utc)
+
+    state.mark_reviewed(6, now=sunday)
+    assert state.covers(6, now=sunday)
+    assert not state.covers(7, now=sunday)
+    assert not state.covers(6, now=sunday)
+
+    state.mark_reviewed(7, now=sunday)
+    assert not state.covers(7, now=monday)
 
 
 def test_daily_claim_loop_drains_missions_before_searching_for_chests():
@@ -793,10 +984,14 @@ def test_daily_claim_uses_fresh_frame_found_by_offscreen_weekly_search():
             rewards,
             "_find_weekly_mission_chest",
             side_effect=[
-                _weekly_found(found, swipes=3),
+                _weekly_found(
+                    found,
+                    swipes=3,
+                    left_search_complete=True,
+                ),
                 _weekly_absent(after_chest, swipes=5),
             ],
-        ),
+        ) as find_weekly,
         patch.object(rewards, "is_visible", return_value=False),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(rewards, "_dismiss_reward_reveal", return_value=after_chest),
@@ -806,12 +1001,17 @@ def test_daily_claim_uses_fresh_frame_found_by_offscreen_weekly_search():
     assert success
     assert claimed == 1
     tap.assert_called_once_with(rewards.WEEKLY_MISSION_CHEST, screenshot=found)
+    assert find_weekly.call_args_list[1].kwargs == {
+        "action_guard_fn": None,
+        "left_search_complete": True,
+    }
 
 
 def test_app_dispatches_alert_probe_and_records_success():
     app = App.__new__(App)
     app._mission_reward_scheduler = Mock()
     app._mission_reward_scheduler.should_attempt.return_value = True
+    app._weekly_chest_review_state = WeeklyChestReviewState()
     app._event_mission_tracker = Mock()
     app._blind_tapper_suspended = False
     app._authority_battle_active = True
@@ -847,6 +1047,10 @@ def test_app_dispatches_alert_probe_and_records_success():
     assert (
         handler_kwargs["event_inventory_callback"]
         == app._event_mission_tracker.record_inventory
+    )
+    assert (
+        handler_kwargs["weekly_review_state"]
+        is app._weekly_chest_review_state
     )
     assert callable(handler_kwargs["action_guard_fn"])
     assert callable(handler_kwargs["route_state_callback"])
@@ -939,6 +1143,7 @@ def test_home_reward_handler_uses_direct_navigation_and_does_not_close_menu():
     daily = np.ones((2, 2, 3), dtype=np.uint8)
     event = np.full((2, 2, 3), 2, dtype=np.uint8)
     badges = MenuRewardBadges(True, True, False)
+    weekly_review_state = WeeklyChestReviewState()
 
     with (
         patch.object(rewards, "_reward_source_state", return_value="HOME_SCREEN"),
@@ -946,14 +1151,21 @@ def test_home_reward_handler_uses_direct_navigation_and_does_not_close_menu():
         patch.object(rewards, "measure_home_reward_badges", return_value=badges),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(rewards, "_wait_for_state", side_effect=[daily, event]),
-        patch.object(rewards, "_claim_daily_rewards", return_value=(True, 1)),
+        patch.object(
+            rewards,
+            "_claim_daily_rewards",
+            return_value=(True, 1),
+        ) as claim_daily,
         patch.object(rewards, "_claim_event_rewards", return_value=(True, 0)),
         patch.object(rewards, "_return_to_reward_hub", return_value=home),
         patch.object(rewards, "_close_menu") as close_menu,
         patch.object(rewards, "log_action_intent") as action_intent,
         patch.object(rewards, "log_result") as result_log,
     ):
-        result = rewards.handle_mission_rewards(home)
+        result = rewards.handle_mission_rewards(
+            home,
+            weekly_review_state=weekly_review_state,
+        )
 
     assert result == MissionRewardResult.CLAIMED
     action_intent.assert_called_once_with(
@@ -967,6 +1179,11 @@ def test_home_reward_handler_uses_direct_navigation_and_does_not_close_menu():
         "navigation.home_daily_missions",
         "navigation.home_event",
     ]
+    claim_daily.assert_called_once_with(
+        daily,
+        claim_missions=True,
+        weekly_review_state=weekly_review_state,
+    )
     close_menu.assert_not_called()
     result_log.assert_called_once_with(
         "Mission reward review complete — claimed 1 reward",

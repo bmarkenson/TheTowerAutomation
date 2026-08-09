@@ -166,6 +166,7 @@ from core.menu_reward_badges import (
 )
 from core.mission_reward_scheduler import (
     MissionRewardScheduler,
+    WeeklyChestReviewState,
     daily_mission_claims_allowed,
 )
 from core.run_state import AUTOMATION, ExecMode, RunState
@@ -449,6 +450,7 @@ class App:
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
         self._mission_reward_scheduler = MissionRewardScheduler()
+        self._weekly_chest_review_state = WeeklyChestReviewState()
         event_mission_state = (
             Path(config.control_file).parent / "event_mission_tracker.json"
         )
@@ -12014,6 +12016,14 @@ class App:
             self._blind_tapper_suspended = True
         wall_now = datetime.now(timezone.utc)
         claim_daily_missions = daily_mission_claims_allowed(wall_now)
+        weekly_review_kwargs = {}
+        weekly_review_state = getattr(
+            self,
+            "_weekly_chest_review_state",
+            None,
+        )
+        if weekly_review_state is not None:
+            weekly_review_kwargs["weekly_review_state"] = weekly_review_state
         lease = None
         if new_state == "RUNNING":
             lease = self._begin_auxiliary_route(
@@ -12041,6 +12051,7 @@ class App:
                 route_state_callback=self._auxiliary_route_state_callback(
                     lease
                 ),
+                **weekly_review_kwargs,
             )
         else:
             result = handle_mission_rewards(
@@ -12049,6 +12060,7 @@ class App:
                 event_inventory_callback=(
                     self._event_mission_tracker.record_inventory
                 ),
+                **weekly_review_kwargs,
             )
         if result == MissionRewardResult.FAILED:
             self._mission_reward_scheduler.mark_failed(wall_now=wall_now)

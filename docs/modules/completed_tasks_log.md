@@ -39,41 +39,53 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
-### 2026-08-09 terminal View Perks reattachment repair
+### 2026-08-09 weekly-chest scan coverage reuse
 
-- Commit `41fc1fd` makes the in-battle Perks opener match its invariant right
-  frame, covering both numeric progress and the terminal `View Perks` state.
-  This unblocks the Auto Pick Perks check when an attached-session preflight
-  has no reusable current-battle evidence. It does not add periodic mid-battle
-  preflight; the observed check followed a process restart and reattachment.
-- Retained active-wave, dynamic-progress, and completed-opener frames are
-  positive regressions. Home and pre-battle Perks configuration are explicit
-  negatives, preserving the 0.90 safe-tap boundary.
-- The combined focused slice passed 215 tests. The supported isolated
-  checkpoint passed compilation, state definitions, clickmap integrity with
-  zero errors and the established 44 orphan notices, and all 2,061 tests in
-  374.38 seconds. The issue record is
-  [`ISSUE-2026-036`](../issues/resolved-2026.md#reattached-battle-stalled-on-the-terminal-view-perks-opener).
-
-### 2026-08-09 claimed weekly-chest rewind shortcut
-
-- Commit `3747659` prevents the Daily Missions collector from normalizing the
-  weekly-chest track to its left edge when the entry frame already proves every
-  unlocked milestone chest is claimed. The proof combines authoritative
-  `completed N/35` OCR with one distinct green checkmark for each unlocked
-  five-mission milestone; a visible claim target still wins first.
-- Cropped frames, low-confidence OCR, an unexpected weekly total, missing or
-  partially visible checkmarks, and any incomplete claimed count retain the
-  existing bounded left-edge normalization and rightward search. The earlier
-  offscreen-chest repair therefore remains the conservative fallback.
-- Retained claimed, claimable, and partial-viewport Daily Missions frames cover
-  positive and negative evidence. The focused mission-reward and scrolling
-  suites passed 52 tests. The supported isolated checkpoint passed
-  compilation, state definitions, clickmap integrity with zero errors and the
-  established 44 orphan notices, and all 2,058 tests in 400.07 seconds. No
-  production process, device interaction, or live validation was required.
-  Incident history is recorded in
+- Commits `3747659`, `7707b69`, and `c43293d` remove redundant weekly-track
+  rewinds in three evidence-backed cases: all unlocked checks are visible, an
+  exact OCRed claimed prefix begins at milestone `5`, or the current route has
+  already completed the left-side search. A whole-track miss is also retained
+  in process for later probes at the same unlock level and UTC weekly cycle.
+- A claim target is always checked first. Shifted or gapped check sequences,
+  incomplete or low-confidence OCR, changed progress, a weekly reset, a claim,
+  an unproved left edge, and an incomplete right search all invalidate or bypass
+  reuse and preserve the bounded normalize-and-search fallback.
+- Retained image and mocked state regressions cover the visual cases,
+  post-claim continuation, repeated-probe reuse, progress/reset invalidation,
+  action authority, and the original offscreen discovery path. Focused suites
+  passed 69 and 139 tests; two complete checkpoints at final runtime commit
+  `c43293d` each passed all 2,063 tests, compilation, state definitions, and
+  clickmap integrity with zero errors and the established 44 orphan notices.
+- Production was tagged at `7707b69`, fast-forwarded to `c43293d`, save-attached
+  to the same active battle, and returned to steady state after session
+  preflight. Its first fresh-process mission pass performed the one required
+  conservative traversal of the shifted `35/35` viewport and retained complete
+  coverage through milestone `35`. The next naturally scheduled probe reused
+  that coverage with `weekly_progress_already_reviewed`, zero swipes, and no
+  weekly-track navigation input. Incident history is recorded in
   [`ISSUE-2026-035`](../issues/resolved-2026.md#weekly-mission-collector-rewound-an-already-claimed-track).
+
+### 2026-08-09 completed-state Perks opener
+
+- Commit `41fc1fd` teaches `navigation.open_perks` to recognize the completed
+  solid `View Perks` state as well as the numeric in-progress state by using the
+  stable outer frame border. This unblocks the Auto Pick Perks check when an
+  attached-session preflight has no reusable current-battle evidence; it does
+  not add periodic mid-battle preflight.
+- The retained completed-state frame scores above `0.999`, and historical
+  numeric-progress positives remain above `0.993`. Home and the pre-battle
+  Perks configuration screen are explicit negative regressions preserving the
+  0.90 safe-tap boundary; retained Daily Missions and Game Over frames also
+  remain below threshold.
+- Focused navigation and tap-safety coverage passed 85 tests, and the complete
+  checkpoint passed all 2,059 tests. Two later post-deployment attachment
+  preflights verified the completed-state opener before guarded input and
+  completed successfully. After merging the later weekly-chest promotions,
+  the combined Perks/preflight/timeline/mission slice passed 288 tests and the
+  exact merged candidate passed all 2,065 tests in 347.55 seconds, compilation,
+  state definitions, and clickmap integrity with zero errors. The defect and
+  follow-up validation are recorded in
+  [`ISSUE-2026-036`](../issues/resolved-2026.md#reattached-battle-stalled-on-the-terminal-view-perks-opener).
 
 ### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
 
