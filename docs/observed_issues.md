@@ -177,12 +177,14 @@ current runtime state.
 
 **Stable ID:** `ISSUE-2026-010` · **Lifecycle:** `repair_awaiting_confirmation`
 
-- Native selection lacked accepted/current/pending
-  feedback; preserve unsent choices and keep queue/adopt actions explicit and
-  boundary-aware.
+- Native selection lacked accepted/current/pending feedback, and a later
+  same-ID publication was incorrectly treated as the definition already
+  loaded; preserve unsent choices and keep queue/adopt actions explicit,
+  definition-aware, and boundary-aware.
 - Load the [dossier](issues/open-2026.md#native-strategy-selection-did-not-report-acceptance-or-live-disposition)
-  for native strategy confirmation or recurrence. Next: verify the dropdown,
-  queue/adopt feedback, and Pause preservation on Windows; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
+  for native strategy confirmation or recurrence. Next: verify same-ID
+  publication/reload, the dropdown's explicit activation actions, queue/adopt
+  feedback, and Pause preservation on Windows; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
 
 ### Windows client could not identify or reload a stale Linux control service
 

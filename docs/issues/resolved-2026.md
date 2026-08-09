@@ -47,11 +47,12 @@ and actionable work lives in
   next-wave form, contaminated current-wave form, a schedule already passed by
   the independent wave, unreconciled parsing, and persistent irrecoverable
   retry behavior.
-- **Validation:** The focused Perk timeline suite passed 43 tests, and the
-  Perk/save/terminal slice passed 109 tests. The supported checkpoint passed
-  compilation, state-definition validation, clickmap integrity with zero
-  errors and the established 44 orphan candidates, and all 2,053 tests in
-  357.35 seconds. No live rollout or post-fix device validation was performed.
+- **Validation:** The focused Perk timeline suite passed 43 tests. After
+  merging current `develop`, the combined Perk/save/terminal/run-initialization
+  slice passed 222 tests, and the supported checkpoint passed compilation,
+  state-definition validation, clickmap integrity with zero errors and the
+  established 44 orphan candidates, and all 2,056 tests in 350.51 seconds. No
+  live rollout or post-fix device validation was performed.
 - **Fixed by:** `105fd78`.
 
 ### Perk repair trusted transient Ban reads and local viewport edges

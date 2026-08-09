@@ -433,6 +433,141 @@ class RunBoundaryTests(unittest.TestCase):
         self.assertIsNone(app._pending_strategy_request)
         self.assertEqual(app._startup_gate_waivers, {})
 
+    def test_app_reloads_changed_definition_for_same_strategy_id_at_boundary(self):
+        app = App.__new__(App)
+        current_strategy = SimpleNamespace(
+            name="farm_t18",
+            config={"meta": {"name": "farm_t18", "version": 1}},
+        )
+        updated_strategy = SimpleNamespace(
+            name="farm_t18",
+            config={"meta": {"name": "farm_t18", "version": 2}},
+        )
+        app._mission_mgr = MagicMock()
+        app._mission_mgr.strategy = current_strategy
+        app._supervisor = MagicMock()
+        app._supervisor.strategy_request = (
+            "farm_t18",
+            "request-new",
+            "next_boundary",
+        )
+        app._config = SimpleNamespace(strategy_name="farm_t18")
+        app._last_strategy_request = (
+            "farm_t18",
+            "request-old",
+            "next_boundary",
+        )
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+        app._startup_gate_waivers = {}
+
+        with (
+            patch(
+                "core.app.get_strategy",
+                side_effect=[updated_strategy, updated_strategy],
+            ) as load_strategy,
+            patch("core.app.log"),
+        ):
+            app._observe_strategy_request()
+            self.assertEqual(
+                app._pending_strategy_request,
+                ("farm_t18", "request-new", "next_boundary"),
+            )
+            app._process_strategy_boundary(
+                {
+                    "state": "HOME_SCREEN",
+                    "home_battle_control": "NEW_BATTLE",
+                }
+            )
+
+        self.assertEqual(load_strategy.call_count, 2)
+        app._mission_mgr.replace_strategy_at_boundary.assert_called_once_with(
+            updated_strategy
+        )
+        self.assertEqual(app._config.strategy_name, "farm_t18")
+        self.assertIsNone(app._pending_strategy_request)
+
+    def test_app_same_strategy_id_and_definition_remains_a_no_op(self):
+        app = App.__new__(App)
+        current_strategy = SimpleNamespace(
+            name="farm_t18",
+            config={"meta": {"name": "farm_t18", "version": 2}},
+        )
+        matching_strategy = SimpleNamespace(
+            name="farm_t18",
+            config={"meta": {"name": "farm_t18", "version": 2}},
+        )
+        app._mission_mgr = MagicMock()
+        app._mission_mgr.strategy = current_strategy
+        app._supervisor = MagicMock()
+        app._supervisor.strategy_request = (
+            "farm_t18",
+            "request-new",
+            "next_boundary",
+        )
+        app._config = SimpleNamespace(strategy_name="farm_t18")
+        app._last_strategy_request = (
+            "farm_t18",
+            "request-old",
+            "next_boundary",
+        )
+        app._pending_strategy_request = (
+            "tournament",
+            "request-pending",
+            "next_boundary",
+        )
+
+        with (
+            patch("core.app.get_strategy", return_value=matching_strategy),
+            patch("core.app.log") as mock_log,
+        ):
+            app._observe_strategy_request()
+
+        self.assertIsNone(app._pending_strategy_request)
+        app._mission_mgr.replace_strategy_at_boundary.assert_not_called()
+        app._mission_mgr.adopt_strategy_for_active_battle.assert_not_called()
+        mock_log.assert_called_once_with(
+            "[CTRL] Strategy set to farm_t18 via control file",
+            "INFO",
+            console=True,
+        )
+
+    def test_app_does_not_ack_same_strategy_when_definition_cannot_load(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._mission_mgr.strategy = SimpleNamespace(
+            name="farm_t18",
+            config={"meta": {"name": "farm_t18", "version": 1}},
+        )
+        app._supervisor = MagicMock()
+        app._supervisor.strategy_request = (
+            "farm_t18",
+            "request-new",
+            "next_boundary",
+        )
+        app._last_strategy_request = (
+            "farm_t18",
+            "request-old",
+            "next_boundary",
+        )
+        app._pending_strategy_request = None
+
+        with (
+            patch("core.app.get_strategy", side_effect=ValueError("invalid plan")),
+            patch("core.app.log") as mock_log,
+        ):
+            app._observe_strategy_request()
+
+        self.assertEqual(
+            app._pending_strategy_request,
+            ("farm_t18", "request-new", "next_boundary"),
+        )
+        mock_log.assert_called_once_with(
+            "[CTRL] Strategy farm_t18 queued for the next run boundary",
+            "INFO",
+            console=True,
+        )
+
     def test_app_adopts_requested_strategy_at_resumable_home(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()

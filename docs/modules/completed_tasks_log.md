@@ -52,15 +52,41 @@ canonical document linked by an entry for current behavior.
   without changing save-backed Perk identity, ordering, level, or exact saved
   pick-wave authority. It also rejects a top-bar schedule whose displayed next
   wave has already been passed by the independent observation.
-- The focused timeline suite passed 43 tests and the Perk/save/terminal slice
-  passed 109 tests. The supported checkpoint passed compilation, state
-  definitions, clickmap integrity with zero errors and the established 44
-  orphan candidates, and all 2,053 tests in 357.35 seconds. Diagnosis used one
-  bounded read-only capture; no production reload, deployment, or device input
-  was performed. The current contract is in the
+- The focused timeline suite passed 43 tests. After merging current `develop`,
+  the combined Perk/save/terminal/run-initialization slice passed 222 tests,
+  and the supported checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and all 2,056 tests in 350.51 seconds. Diagnosis used one bounded read-only
+  capture; no production reload, deployment, or device input was performed.
+  The current contract is in the
   [player-save architecture](../architecture/player_save.md#temporal-classes-and-merge-rules),
   with the incident evidence in
   [`ISSUE-2026-034`](../issues/resolved-2026.md#perk-top-bar-ocr-ignored-the-independent-battle-wave-observation).
+
+### 2026-08-09 same-ID Strategy revision reload
+
+- Commit `e5ef4e6` makes a fresh Strategy request compare the complete latest
+  resolved definition with the definition already loaded by the runtime.
+  Matching stable IDs are now acknowledged as a no-op only when those
+  definitions also match. A changed or temporarily unreadable same-ID
+  publication remains pending for the existing guarded boundary application
+  or active-battle adoption path.
+- This repairs the observed path in which `farm_t19_ad_assist` version 2
+  declared Astral Deliverance, but the runtime cleared Start Battle's fresh
+  request solely because version 1 had the same ID. The old definition then
+  retained Being Annihilator and its matching preflight fingerprint. Start
+  Battle already creates a new Strategy request identity; verified Home
+  `NEW_BATTLE` installs the changed definition before run initialization and
+  setup checks.
+- Identical-definition selection still cancels a different pending request
+  without resetting strategy variables, cooldowns, gates, or waivers. Failed
+  definition resolution never emits the successful Strategy acknowledgement
+  and is retried by the existing boundary application.
+- The focused control, boundary, and Tournament slice passed 295 tests. The
+  supported isolated checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors, and all 2,038 tests in 353.42 seconds.
+  No production process, device input, battle transition, or live reload was
+  used for this repository repair.
 
 ### 2026-08-09 control-surface backlog pruning
 
