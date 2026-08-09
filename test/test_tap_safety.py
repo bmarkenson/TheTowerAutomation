@@ -209,3 +209,18 @@ def test_target_priority_template_rejects_home_screen():
 
     with pytest.raises(ValueError, match="failed threshold"):
         get_label_match("navigation.target_priority", screenshot=screenshot)
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    (
+        "home_screen_no_reward_badges_20260714.png",
+        "ui_state_20260714/no_battle_perks_configuration_20260719.png",
+    ),
+)
+def test_open_perks_template_rejects_non_battle_screens(fixture):
+    screenshot = cv2.imread(str(ROOT / "test" / "fixtures" / fixture))
+    assert screenshot is not None
+
+    with pytest.raises(ValueError, match="failed threshold"):
+        get_label_match("navigation.open_perks", screenshot=screenshot)

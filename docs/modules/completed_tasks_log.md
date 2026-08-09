@@ -39,6 +39,22 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 terminal View Perks reattachment repair
+
+- Commit `41fc1fd` makes the in-battle Perks opener match its invariant right
+  frame, covering both numeric progress and the terminal `View Perks` state.
+  This unblocks the Auto Pick Perks check when an attached-session preflight
+  has no reusable current-battle evidence. It does not add periodic mid-battle
+  preflight; the observed check followed a process restart and reattachment.
+- Retained active-wave, dynamic-progress, and completed-opener frames are
+  positive regressions. Home and pre-battle Perks configuration are explicit
+  negatives, preserving the 0.90 safe-tap boundary.
+- The combined focused slice passed 215 tests. The supported isolated
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan notices, and all 2,061 tests in
+  374.38 seconds. The issue record is
+  [`ISSUE-2026-036`](../issues/resolved-2026.md#reattached-battle-stalled-on-the-terminal-view-perks-opener).
+
 ### 2026-08-09 claimed weekly-chest rewind shortcut
 
 - Commit `3747659` prevents the Daily Missions collector from normalizing the

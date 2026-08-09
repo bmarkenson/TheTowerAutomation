@@ -8,6 +8,47 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Reattached battle stalled on the terminal View Perks opener
+
+**Stable ID:** `ISSUE-2026-036` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 after automation restarted and attached to an
+  already-running Tier 19 battle whose Perk choices were exhausted.
+- **Symptom:** Attached-session preflight needed to verify Auto Pick Perks from
+  the UI because it had no reusable current-battle evidence for that check.
+  The top-bar control had changed from numeric Perk progress to `View Perks`,
+  so `navigation.open_perks` repeatedly failed its 0.90 safe-tap match and the
+  exclusive preflight could not advance. The failed match sent no input.
+- **Evidence:** The action log placed process exit, restart, battle attachment,
+  strategy adoption, and preflight in that order. A bounded exact-target frame
+  retained as `test/fixtures/open_perks_complete_20260809.png` showed the
+  terminal control. Its former template scored about 0.59, while save-backed
+  observations showed the active battle and completed Perk progression were
+  otherwise healthy.
+- **Safety response:** Diagnosis used read-only runtime evidence and one bounded
+  exact-target capture. No Pause change, navigation, Exit, Surrender, battle
+  transition, restart, or other device input was sent for the repair.
+- **Cause:** The safe-tap template covered the numeric-progress form of the
+  in-battle Perks opener but not its terminal `View Perks` form. Reattachment
+  correctly invokes exclusive session preflight; the defect was the incomplete
+  target authority used by that preflight, not ordinary mid-battle validation.
+- **Resolution:** Commit `41fc1fd` replaces the dynamic 20x70 crop with the
+  invariant 12x60 right frame of the same in-battle opener. Numeric progress
+  and terminal forms now share one target-specific match while the preflight's
+  existing `RUNNING` state guard remains in force.
+- **Regression:** `test/test_tap_safety.py` requires the opener to match an
+  ordinary active-wave frame, a dynamic-progress frame, and the terminal
+  retained frame. It also requires rejection of Home and the pre-battle Perks
+  configuration screen.
+- **Validation:** Both label-compatible grayscale/zero-padding and detector
+  color/default-padding probes accepted all three positive frames above 0.90
+  and rejected both non-battle frames below 0.90. The combined preflight,
+  clickmap, tap-safety, template, and initialization slice passed 215 tests.
+  The supported isolated checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,061 tests in 374.38 seconds.
+- **Fixed by:** `41fc1fd`.
+
 ### Weekly Mission collector rewound an already-claimed track
 
 **Stable ID:** `ISSUE-2026-035` · **Lifecycle:** `resolved`
