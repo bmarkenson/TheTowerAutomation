@@ -163,6 +163,12 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         without configuration UI or Home-repair authority, while an
         intentionally unparseable Module fact uses Modules UI and applies the
         same report-only result when that fallback is fully observed.
+        - [x] The 2026-08-09
+          [production smoke](../modules/completed_tasks_log.md#2026-08-09-save-backed-attached-session-preflight)
+          confirmed per-fact suppression for every projectable requirement and
+          the bounded Modules fallback for an unprojectable assist-module fact.
+          Free Upgrade locks deferred without blocking. This intentionally did
+          not claim the remaining complete-save or mismatch cases above.
       - [ ] Confirm Tournament Results → Home reuses its valid terminal handoff
         without reacquisition.
       - [ ] Confirm one natural-terminal bundle fans out without duplicate

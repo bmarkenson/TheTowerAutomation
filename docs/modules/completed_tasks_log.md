@@ -39,6 +39,39 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 save-backed attached-session preflight
+
+- Commit `2a303ba` lets an exact-bound forced attachment save satisfy every
+  supported active-session requirement it can project. UI verification is now
+  a per-fact fallback for missing, incomplete, or unparseable save evidence;
+  round-invariant Workshop, Bot, Guardian, Module, Free Upgrade-lock, Perk Ban,
+  First Perk, and Perk Auto Pick-order mismatches are report-only during a
+  battle, while existing guarded repairs remain available for mutable settings.
+- The candidate was rebased over production commit `3d25fc2`, including the
+  completed-state Perks opener follow-up, with no overlapping or superseding
+  runtime change. The exact candidate passed the supported checkpoint with all
+  2,075 tests. Its first production smoke safely blocked when a profile-waived
+  Perk Bans mismatch was still admitted to attachment reconciliation.
+- Fix `4b9e7b0` applies profile waivers before save reconciliation and
+  defensively excludes them from attachment validity. It also classifies Perk
+  Bans and First Perk Choice as round-invariant. Focused and affected suites
+  passed 62 and 224 tests; the complete checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,076 tests in 336.92 seconds.
+- Production advanced to `4b9e7b0` behind rollback tag
+  `production-before-20260809T223713Z-2a303ba`. Replacement automation PID
+  `804073` acquired the exact `localhost:5555` lock, completed guarded
+  same-battle attachment from mapping `data-9-game-1101`, adopted
+  `farm_t19_ad_assist`, and completed one attached-session preflight before
+  entering steady state with no Strategy Action Gate.
+- The smoke used bound save evidence for Cards, Workshop, Bots, Guardians,
+  Auto Pick, Card Recharge, Perk order, First Perk, and Ultimate Weapons. The
+  profile-waived Perk Bans check was absent from reconciliation. Modules alone
+  used its existing UI fallback because assist-module IDs were not projectable;
+  Free Upgrade locks were explicitly deferred because no authoritative
+  no-battle boundary fact was available. No Surrender, Home exit, Retry, new
+  battle, or Windows-package publication occurred.
+
 ### 2026-08-09 weekly-chest scan coverage reuse
 
 - Commits `3747659`, `7707b69`, and `c43293d` remove redundant weekly-track
