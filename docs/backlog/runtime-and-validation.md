@@ -1143,7 +1143,7 @@ can change as operator use supplies better evidence.
          scrolling, persist a stable string page ID, map or safely ignore the
          legacy sidebar/splitter settings, and update current architecture and
          operator guidance in the same slice.
-      2. [ ] Separate stable Preferences from System operations, add explicit
+      2. [x] Separate stable Preferences from System operations, add explicit
          ADB draft/applied presentation, and preserve the existing validated
          apply/rollback contract.
       3. [ ] Compact Overview actions and helper copy through contextual
@@ -1172,5 +1172,20 @@ can change as operator use supplies better evidence.
       visual, mouse/keyboard, 100%/125% scaling, preferred/minimum-size
       no-scroll, and passive-CPU validation remain open under slice 5 and are
       not inferred from the cross-build.
+    - **2026-08-09 slice-two checkpoint.** Stable API URL, memory-only token,
+      SSH/forwarding defaults, startup host sampling, and dashboard reset now
+      live in a validated modal Preferences surface. Saving updates local and
+      tunnel-host defaults without starting or restarting a tunnel; System
+      keeps desired/active transport operations visible. The managed ADB
+      control separately presents configured next-start, requested/
+      acknowledged, active-runtime, and dirty local-draft targets. Polling
+      preserves invalid or ineligible drafts until Revert or successful apply,
+      and the existing Linux process endpoint remains the sole validated
+      apply/rollback authority. The WPF project cross-builds; 71 focused
+      Python/static tests, all 97 native authoring tests, and all 18 tunnel-host
+      lifecycle tests pass. The repository checkpoint passes compile,
+      state-definition/clickmap integrity, and all 2,052 Python tests. Windows
+      modal focus, keyboard/access-key, scaling, and visual validation remain
+      open under slice 5.
     - Defer drag-to-reorder, floating panes, and extensive per-card hiding until
       operator use of the redesigned pages demonstrates a concrete need.

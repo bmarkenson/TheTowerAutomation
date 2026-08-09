@@ -95,7 +95,8 @@ BlueStacks listener through a configurable Linux loopback port:
 -R 127.0.0.1:<linux-adb-port>:127.0.0.1:<windows-bluestacks-port>
 ```
 
-Enter the Linux destination as an SSH config alias, host, or `user@host`.
+In **Preferences**, enter the Linux destination as an SSH config alias, host,
+or `user@host`.
 Leave the API ports at 8787 unless the Linux API is configured differently.
 The Windows BlueStacks and Linux ADB ports are separate saved settings that
 both default to 5555. Keep them equal for one PC, or assign each PC a distinct
@@ -210,10 +211,13 @@ independent refresh and scroll behavior. System divides infrastructure into
 runtime target; API/SSH transport and tunnel host; then optional prior-screen,
 runtime, and host-performance evidence. These pages may use their own fallback
 scrollbar when the supported minimum window cannot contain the bounded form.
-The **Preferences > Connection and device settings...** shortcut currently
-opens System > Connections; a separately bounded stable-preferences surface and
-explicit ADB draft/applied presentation remain the next redesign slice. The
-optional bearer token remains memory-only.
+**Preferences** opens a bounded modal for the API URL, optional bearer token,
+SSH destination, API/ADB forwarding defaults, startup sampling choice, and
+dashboard-layout reset. Save validates and records defaults without starting,
+stopping, or restarting automation or either SSH tunnel. A running tunnel keeps
+its separately displayed active endpoint until explicit Start/Restart adopts a
+changed default. The optional bearer token remains memory-only and is never
+written to either settings file.
 
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
@@ -747,13 +751,16 @@ ADB-port, UTC, and fresh current-run correlation. This requires server revision
 13 and capabilities `host_performance_telemetry_v1` and
 `host_performance_gpu_v1`.
 
-The Process Lifecycle panel also shows the managed localhost ADB port. While
-automation is stopped, **Save** stores the value on Linux for the next managed
-start. While a live runtime has acknowledged indefinite **Pause**, the same
-control becomes **Switch** and hands the existing process to the new target
-without recreating its startup/session gates. Wait for target acknowledgement
-before resuming; a failed connection or capture leaves the runtime paused on
-its former target.
+**System > Services** shows the managed localhost ADB target as four distinct
+values: configured next start, requested/acknowledged directive, active
+runtime, and local draft. While automation is stopped, **Save for next start**
+stores a valid changed draft on Linux. While a live runtime has acknowledged
+indefinite **Pause**, **Switch live runtime** hands the existing process to the
+new target without recreating its startup/session gates. Polling does not
+replace a dirty draft; invalid or currently ineligible input remains visible
+until **Revert** or a successful apply. Wait for target acknowledgement before
+resuming; the existing validated API rollback leaves the runtime paused on its
+former target after a failed connection or capture.
 
 Attachment is never automatic. **Start Automation** changes only the managed
 process lifecycle and leaves action authority Paused. After a fresh
@@ -768,10 +775,12 @@ not part of revision 29.
 
 The managed runtime ADB port, bundled strategy, and startup-gate policy share
 the Linux environment file while remaining independent settings. **System >
-Services** selects the Linux runtime target. **System > Connections** configures
-the Windows BlueStacks and Linux ADB-forward transport ports. Normally the
-managed runtime port matches the Linux ADB-forward port, but changing either
-setting does not silently rewrite the other or alter the API tunnel.
+Services** selects the Linux runtime target. **Preferences** configures the
+Windows BlueStacks and Linux ADB-forward transport defaults, while **System >
+Connections** shows those defaults beside desired and active tunnel state.
+Normally the managed runtime port matches the Linux ADB-forward port, but
+changing either setting does not silently rewrite the other or alter the API
+tunnel.
 
 The companion reports API SSH state independently of the GUI's HTTP probe. If
 OpenSSH remains alive but that probe fails, the application header keeps API

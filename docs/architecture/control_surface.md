@@ -894,11 +894,13 @@ Process request examples:
 - The native operational window uses full-width **Overview**, **Activity**,
   **Perks**, and **System** pages instead of a permanently narrow control
   sidebar. Overview keeps current control and run-configuration decisions
-  together, while service/tunnel operations, connection fields, host
-  telemetry, and runtime evidence live under bounded System subpages. The
-  application header groups four separately labelled Linux service, HTTP, API
-  SSH, and ADB SSH signals and routes routine navigation through **View**,
-  **Tools**, and **Preferences** menus.
+  together, while service/tunnel operations, host telemetry, and runtime
+  evidence live under bounded System subpages. Stable API/SSH/forwarding and
+  local-sampling defaults live in a modal **Preferences** surface; saving them
+  never starts, stops, or restarts automation or a tunnel. The application
+  header groups four separately labelled Linux service, HTTP, API SSH, and ADB
+  SSH signals and routes routine navigation through **View**, **Tools**, and
+  **Preferences** menus.
 - Persistent indefinite and timed Pause, explicit Automation Enabled, and
   requested-versus-acknowledged state. The text defines Paused as zero
   automated input while observation continues and does not describe Enabled
@@ -1004,9 +1006,14 @@ Process request examples:
   observed speed for mid-run analysis. This requires server revision 16 and
   capability `observed_game_speed`.
 - Persistent ADB-port selection for the next managed start, plus live handoff
-  while the runtime has acknowledged `PAUSED`. The API accepts only an integer
-  TCP port; the runtime keeps Pause and its former target if new-target
-  connection or screenshot validation fails.
+  while the runtime has acknowledged indefinite `PAUSED`. **System >
+  Services** shows configured next-start, requested/acknowledged, active
+  runtime, and local-draft targets separately. Polling never replaces a dirty
+  draft; an invalid or ineligible draft remains visible until explicit
+  **Revert** or a successful apply. The existing Linux API remains the only
+  apply authority and accepts only an integer TCP port; its validated handoff
+  keeps Pause and the former target if new-target connection or screenshot
+  validation fails.
 - Validated strategy selection (`farm_t18`, `farm_t19`,
   `tournament`, or `none`). A stopped selection is saved for the next start;
   an active selection is queued for a confirmed run boundary by default. The

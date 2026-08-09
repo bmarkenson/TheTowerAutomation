@@ -71,6 +71,16 @@ public partial class MainWindow : Window
     private bool _apiTunnelActionInFlight;
     private bool _adbTunnelRestartInFlight;
     private bool _adbForwardStarting;
+    private string _apiToken = "";
+    private bool _updatingAdbPortDraft;
+    private bool _adbPortDraftDirty;
+    private bool _adbPortRequestInFlight;
+    private int? _configuredAdbPort;
+    private int? _requestedAdbPort;
+    private string? _activeAdbTarget;
+    private bool _adbLifecycleAvailable;
+    private bool _adbProcessActive;
+    private bool _adbPausedAndAcknowledged;
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
         = new Dictionary<string, StartupGateWaiverStatus>();
@@ -88,17 +98,10 @@ public partial class MainWindow : Window
         CurrentPerksGrid.ItemsSource = _currentBattlePerks;
 
         _settings = SettingsStore.Load();
-        BaseUrlBox.Text = _settings.BaseUrl;
-        SshDestinationBox.Text = _settings.SshDestination;
-        LocalTunnelPortBox.Text = _settings.LocalTunnelPort.ToString(CultureInfo.InvariantCulture);
-        RemoteApiPortBox.Text = _settings.RemoteApiPort.ToString(CultureInfo.InvariantCulture);
-        WindowsBlueStacksAdbPortBox.Text =
-            _settings.WindowsBlueStacksAdbPort.ToString(CultureInfo.InvariantCulture);
-        LinuxAdbForwardPortBox.Text =
-            _settings.LinuxAdbForwardPort.ToString(CultureInfo.InvariantCulture);
+        RenderConnectionPreferences();
         WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
         RestoreMainWindowLayout();
-        _api.Configure(_settings.BaseUrl, "");
+        _api.Configure(_settings.BaseUrl, _apiToken);
         _hostPerformance = new HostPerformanceTracker(_api);
         _hostPerformance.SetSamplingEnabled(
             _settings.HostPerformanceSamplingEnabled);
@@ -165,10 +168,109 @@ public partial class MainWindow : Window
     private void ShowSystem_Click(object sender, RoutedEventArgs e) =>
         SelectPage(SidebarTabs, SystemPageId);
 
-    private void ShowSetup_Click(object sender, RoutedEventArgs e)
+    private void ShowConnections_Click(object sender, RoutedEventArgs e)
     {
         SelectPage(SidebarTabs, SystemPageId);
         SelectPage(SystemTabs, ConnectionsSystemPageId);
+    }
+
+    private async void ShowPreferences_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new PreferencesWindow(_settings, _apiToken)
+        {
+            Owner = this,
+        };
+        if (dialog.ShowDialog() != true || dialog.Result is null)
+        {
+            return;
+        }
+
+        await ApplyPreferencesAsync(
+            dialog.Result,
+            dialog.ResetLayoutRequested);
+    }
+
+    private async Task ApplyPreferencesAsync(
+        PreferencesResult preferences,
+        bool resetLayout)
+    {
+        var apiChanged = !string.Equals(
+                _settings.BaseUrl,
+                preferences.BaseUrl,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                _apiToken,
+                preferences.InMemoryToken,
+                StringComparison.Ordinal);
+        var destinationChanged = !string.Equals(
+            _settings.SshDestination,
+            preferences.TunnelConfiguration.SshDestination,
+            StringComparison.OrdinalIgnoreCase);
+
+        _settings.BaseUrl = preferences.BaseUrl;
+        _apiToken = preferences.InMemoryToken;
+        _settings.SshDestination =
+            preferences.TunnelConfiguration.SshDestination;
+        _settings.LocalTunnelPort =
+            preferences.TunnelConfiguration.LocalApiPort;
+        _settings.RemoteApiPort =
+            preferences.TunnelConfiguration.RemoteApiPort;
+        _settings.WindowsBlueStacksAdbPort =
+            preferences.TunnelConfiguration.WindowsBlueStacksAdbPort;
+        _settings.LinuxAdbForwardPort =
+            preferences.TunnelConfiguration.LinuxAdbPort;
+        _settings.HostPerformanceSamplingEnabled =
+            preferences.HostPerformanceSamplingEnabled;
+        _api.Configure(_settings.BaseUrl, _apiToken);
+        _hostPerformance.SetSamplingEnabled(
+            _settings.HostPerformanceSamplingEnabled);
+        if (resetLayout)
+        {
+            _settings.MainWindowLayout = new MainWindowLayoutSettings();
+            RestoreMainWindowLayout();
+        }
+        SaveSettingsBestEffort();
+        RenderConnectionPreferences();
+        RefreshWindowsAdbListenerStatus();
+
+        if (apiChanged)
+        {
+            SetHttpConnectionStatus(
+                "Not checked — preferences changed",
+                new SolidColorBrush(Color.FromRgb(241, 191, 91)),
+                "Use Connect now to probe the saved API URL with the current in-memory token.");
+        }
+        if (destinationChanged)
+        {
+            SetUnqueriedControlSurfaceServiceState(
+                "Service state has not been queried for this SSH destination.");
+        }
+
+        if (_tunnelHostSnapshot is not null
+            && _tunnelHostProtocolMismatch is null
+            && TunnelHostConfigurationValidator.IsValidDestination(
+                _settings.SshDestination))
+        {
+            try
+            {
+                var snapshot = await _tunnelHost.SendAsync(
+                    new TunnelHostRequest
+                    {
+                        Command = TunnelHostCommand.Configure,
+                        Configuration = BuildTunnelHostConfiguration(),
+                    },
+                    CancellationToken.None);
+                RenderTunnelHostSnapshot(snapshot);
+                await RefreshControlSurfaceServiceStatusAsync(force: true);
+            }
+            catch (Exception exc)
+            {
+                LastErrorText.Text =
+                    $"Preferences were saved locally, but the tunnel host could not accept them: {exc.Message}";
+            }
+        }
+        UpdateControlSurfaceServiceControls();
+        UpdateControlSurfaceCompatibility();
     }
 
     private void SidebarTabs_SelectionChanged(
@@ -336,7 +438,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            _api.Configure(BaseUrlBox.Text, TokenBox.Password);
+            _api.Configure(_settings.BaseUrl, _apiToken);
             SaveSettings();
             await Task.WhenAll(
                 RefreshStatusAsync(force: true),
@@ -359,7 +461,7 @@ public partial class MainWindow : Window
                 CancellationToken.None);
             if (string.IsNullOrWhiteSpace(snapshot.Configuration.SshDestination)
                 && TunnelHostConfigurationValidator.IsValidDestination(
-                    SshDestinationBox.Text))
+                    _settings.SshDestination))
             {
                 snapshot = await _tunnelHost.SendAsync(
                     new TunnelHostRequest
@@ -422,38 +524,47 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private TunnelHostConfiguration BuildTunnelHostConfiguration() => new()
-    {
-        SshDestination = SshDestinationBox.Text.Trim(),
-        LocalApiPort = ParsePort(
-            LocalTunnelPortBox.Text,
-            "Local tunnel port"),
-        RemoteApiPort = ParsePort(
-            RemoteApiPortBox.Text,
-            "Remote API port"),
-        WindowsBlueStacksAdbPort = ParsePort(
-            WindowsBlueStacksAdbPortBox.Text,
-            "Windows BlueStacks ADB port"),
-        LinuxAdbPort = ParsePort(
-            LinuxAdbForwardPortBox.Text,
-            "Linux ADB port"),
-    };
+    private TunnelHostConfiguration BuildTunnelHostConfiguration() =>
+        TunnelHostConfigurationValidator.Validate(new TunnelHostConfiguration
+        {
+            SshDestination = _settings.SshDestination,
+            LocalApiPort = _settings.LocalTunnelPort,
+            RemoteApiPort = _settings.RemoteApiPort,
+            WindowsBlueStacksAdbPort =
+                _settings.WindowsBlueStacksAdbPort,
+            LinuxAdbPort = _settings.LinuxAdbForwardPort,
+        });
 
     private void ApplyTunnelHostConfiguration(
         TunnelHostConfiguration configuration)
     {
-        SshDestinationBox.Text = configuration.SshDestination;
-        LocalTunnelPortBox.Text = configuration.LocalApiPort.ToString(
-            CultureInfo.InvariantCulture);
-        RemoteApiPortBox.Text = configuration.RemoteApiPort.ToString(
-            CultureInfo.InvariantCulture);
-        WindowsBlueStacksAdbPortBox.Text =
-            configuration.WindowsBlueStacksAdbPort.ToString(
-                CultureInfo.InvariantCulture);
-        LinuxAdbForwardPortBox.Text = configuration.LinuxAdbPort.ToString(
-            CultureInfo.InvariantCulture);
-        BaseUrlBox.Text = $"http://127.0.0.1:{configuration.LocalApiPort}";
-        _api.Configure(BaseUrlBox.Text, TokenBox.Password);
+        _settings.SshDestination = configuration.SshDestination;
+        _settings.LocalTunnelPort = configuration.LocalApiPort;
+        _settings.RemoteApiPort = configuration.RemoteApiPort;
+        _settings.WindowsBlueStacksAdbPort =
+            configuration.WindowsBlueStacksAdbPort;
+        _settings.LinuxAdbForwardPort = configuration.LinuxAdbPort;
+        _settings.BaseUrl = $"http://127.0.0.1:{configuration.LocalApiPort}";
+        _api.Configure(_settings.BaseUrl, _apiToken);
+        RenderConnectionPreferences();
+    }
+
+    private void RenderConnectionPreferences()
+    {
+        ConfiguredApiUrlText.Text = _settings.BaseUrl;
+        TokenStateText.Text = string.IsNullOrWhiteSpace(_apiToken)
+            ? "None (normal loopback route)"
+            : "Present for this app session (never saved)";
+        ConfiguredSshDestinationText.Text = string.IsNullOrWhiteSpace(
+            _settings.SshDestination)
+                ? "Not configured"
+                : _settings.SshDestination;
+        ConfiguredApiForwardText.Text =
+            $"127.0.0.1:{_settings.LocalTunnelPort} → Linux "
+            + $"127.0.0.1:{_settings.RemoteApiPort}";
+        ConfiguredAdbForwardText.Text =
+            $"Linux 127.0.0.1:{_settings.LinuxAdbForwardPort} → Windows "
+            + $"127.0.0.1:{_settings.WindowsBlueStacksAdbPort}";
     }
 
     private void RenderTunnelHostSnapshot(TunnelHostSnapshot snapshot)
@@ -590,16 +701,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SshDestinationBox_TextChanged(
-        object sender,
-        TextChangedEventArgs e)
-    {
-        SetUnqueriedControlSurfaceServiceState(
-            "Service state has not been queried for this SSH destination.");
-        UpdateControlSurfaceServiceControls();
-        UpdateControlSurfaceCompatibility();
-    }
-
     private async void ToggleControlSurfaceService_Click(
         object sender,
         RoutedEventArgs e)
@@ -622,7 +723,7 @@ public partial class MainWindow : Window
     private async Task ChangeControlSurfaceServiceAsync(
         LinuxApiServiceAction action)
     {
-        var destination = SshDestinationBox.Text.Trim();
+        var destination = _settings.SshDestination.Trim();
         if (!TunnelHostConfigurationValidator.IsValidDestination(destination))
         {
             ShowError(new InvalidOperationException(
@@ -811,7 +912,7 @@ public partial class MainWindow : Window
             new CancellationTokenSource(TimeSpan.FromSeconds(12));
         try
         {
-            var destination = SshDestinationBox.Text.Trim();
+            var destination = _settings.SshDestination.Trim();
             if (!TunnelHostConfigurationValidator.IsValidDestination(destination))
             {
                 _controlSurfaceServiceState = null;
@@ -819,7 +920,7 @@ public partial class MainWindow : Window
                 LinuxApiServiceStatusText.Foreground =
                     new SolidColorBrush(Color.FromRgb(241, 191, 91));
                 LinuxApiServiceStatusText.ToolTip =
-                    "Enter a valid Linux SSH destination in Connection setup.";
+                    "Enter a valid Linux SSH destination in Preferences.";
                 return;
             }
             var snapshot = await _tunnelHost.SendAsync(
@@ -896,7 +997,7 @@ public partial class MainWindow : Window
     private void UpdateControlSurfaceServiceControls()
     {
         var destinationValid = TunnelHostConfigurationValidator.IsValidDestination(
-            SshDestinationBox.Text);
+            _settings.SshDestination);
         var hostAvailable = _tunnelHostSnapshot is not null
             && _tunnelHostProtocolMismatch is null;
         var stableState = _controlSurfaceServiceState is not null
@@ -919,7 +1020,7 @@ public partial class MainWindow : Window
             && !_controlSurfaceServiceActionInFlight;
         RestartControlSurfaceTopButton.ToolTip = destinationValid
             ? "Restart only the fixed Linux control API service; automation and SSH tunnels are unchanged."
-            : "Enter a valid Linux SSH destination in Connection setup.";
+            : "Enter a valid Linux SSH destination in Preferences.";
     }
 
     private async void StartTunnel_Click(object sender, RoutedEventArgs e)
@@ -971,9 +1072,10 @@ public partial class MainWindow : Window
                 CancellationToken.None);
             RenderTunnelHostSnapshot(snapshot);
 
-            BaseUrlBox.Text =
+            _settings.BaseUrl =
                 $"http://127.0.0.1:{configuration.LocalApiPort}";
-            _api.Configure(BaseUrlBox.Text, TokenBox.Password);
+            _api.Configure(_settings.BaseUrl, _apiToken);
+            RenderConnectionPreferences();
 
             using var probeCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(12));
             var status = await _api.GetStatusAsync(probeCancellation.Token);
@@ -1073,9 +1175,10 @@ public partial class MainWindow : Window
                 },
                 CancellationToken.None);
             RenderTunnelHostSnapshot(snapshot);
-            BaseUrlBox.Text =
+            _settings.BaseUrl =
                 $"http://127.0.0.1:{configuration.LocalApiPort}";
-            _api.Configure(BaseUrlBox.Text, TokenBox.Password);
+            _api.Configure(_settings.BaseUrl, _apiToken);
+            RenderConnectionPreferences();
             SaveSettings();
             await RefreshStatusAsync(force: true);
         }
@@ -1115,9 +1218,6 @@ public partial class MainWindow : Window
             StartAdbForwardButton.IsEnabled = false;
             StopAdbForwardButton.IsEnabled = false;
             var configuration = BuildTunnelHostConfiguration();
-            SaveAdbForwardSettings(
-                configuration.WindowsBlueStacksAdbPort,
-                configuration.LinuxAdbPort);
             RenderTunnelHostSnapshot(await _tunnelHost.SendAsync(
                 new TunnelHostRequest
                 {
@@ -1203,10 +1303,7 @@ public partial class MainWindow : Window
         try
         {
             var configuration = BuildTunnelHostConfiguration();
-            var windowsPort = configuration.WindowsBlueStacksAdbPort;
             var linuxPort = configuration.LinuxAdbPort;
-            SaveAdbForwardSettings(windowsPort, linuxPort);
-            SetAdbForwardInputsEnabled(false);
             RefreshWindowsAdbListenerStatus();
             AdbForwardStatusText.Text =
                 $"Starting reverse forward on Linux loopback port {linuxPort}...";
@@ -1228,7 +1325,6 @@ public partial class MainWindow : Window
         }
         catch (ArgumentException exc)
         {
-            SetAdbForwardInputsEnabled(true);
             StartAdbForwardButton.IsEnabled = true;
             StopAdbForwardButton.IsEnabled = false;
             AdbForwardStatusText.Text = exc.Message;
@@ -1323,7 +1419,6 @@ public partial class MainWindow : Window
         StopAdbForwardButton.IsEnabled = !_adbForwardStarting
             && !_adbTunnelRestartInFlight
             && state.Desired;
-        SetAdbForwardInputsEnabled(!state.Desired || canRetry);
     }
 
     private (string Summary, Brush Color) TunnelStatePresentation(
@@ -1395,12 +1490,8 @@ public partial class MainWindow : Window
 
     private void RefreshWindowsAdbListenerStatus()
     {
-        if (!int.TryParse(
-                WindowsBlueStacksAdbPortBox.Text.Trim(),
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out var port)
-            || port is < 1 or > 65535)
+        var port = _settings.WindowsBlueStacksAdbPort;
+        if (port is < 1 or > 65535)
         {
             WindowsAdbListenerStatusText.Text =
                 "Enter a Windows BlueStacks ADB port between 1 and 65535.";
@@ -1428,22 +1519,6 @@ public partial class MainWindow : Window
             WindowsAdbListenerStatusText.Foreground =
                 new SolidColorBrush(Color.FromRgb(255, 113, 135));
         }
-    }
-
-    private void WindowsBlueStacksAdbPortBox_TextChanged(
-        object sender,
-        TextChangedEventArgs e)
-    {
-        if (IsLoaded)
-        {
-            RefreshWindowsAdbListenerStatus();
-        }
-    }
-
-    private void SetAdbForwardInputsEnabled(bool enabled)
-    {
-        WindowsBlueStacksAdbPortBox.IsEnabled = enabled;
-        LinuxAdbForwardPortBox.IsEnabled = enabled;
     }
 
     private static bool IsWindowsLoopbackPortListening(int port) =>
@@ -1853,14 +1928,43 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AdbPortBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!IsLoaded || _updatingAdbPortDraft)
+        {
+            return;
+        }
+        _adbPortDraftDirty = !TryParsePort(
+                AdbPortBox.Text,
+                out var draftPort)
+            || _configuredAdbPort is null
+            || draftPort != _configuredAdbPort.Value;
+        UpdateAdbPortDraftControls();
+    }
+
+    private void RevertAdbPortDraft_Click(object sender, RoutedEventArgs e)
+    {
+        var target = _configuredAdbPort ?? _requestedAdbPort;
+        SetAdbPortDraftText(target);
+        _adbPortDraftDirty = false;
+        UpdateAdbPortDraftControls();
+    }
+
     private async void SetAdbPort_Click(object sender, RoutedEventArgs e)
     {
+        if (_adbPortRequestInFlight)
+        {
+            return;
+        }
+        _adbPortRequestInFlight = true;
+        UpdateAdbPortDraftControls();
         try
         {
             var adbPort = ParsePort(AdbPortBox.Text, "ADB port");
             var response = await _api.PostProcessAsync(
                 new { action = "set_adb_port", adb_port = adbPort },
                 CancellationToken.None);
+            _adbPortDraftDirty = false;
             RenderStatus(response);
             await RefreshActivityAsync(force: true);
         }
@@ -1869,6 +1973,98 @@ public partial class MainWindow : Window
             ShowError(exc);
             await RefreshStatusAsync(force: true);
         }
+        finally
+        {
+            _adbPortRequestInFlight = false;
+            UpdateAdbPortDraftControls();
+        }
+    }
+
+    private void SetAdbPortDraftText(int? port)
+    {
+        _updatingAdbPortDraft = true;
+        try
+        {
+            AdbPortBox.Text = port?.ToString(CultureInfo.InvariantCulture) ?? "";
+        }
+        finally
+        {
+            _updatingAdbPortDraft = false;
+        }
+    }
+
+    private void UpdateAdbPortDraftControls()
+    {
+        var valid = TryParsePort(AdbPortBox.Text, out var draftPort);
+        if (_adbPortDraftDirty
+            && valid
+            && _configuredAdbPort == draftPort)
+        {
+            _adbPortDraftDirty = false;
+        }
+        var applyEligible = _adbLifecycleAvailable
+            && (!_adbProcessActive || _adbPausedAndAcknowledged);
+        SetAdbPortButton.Content = _adbProcessActive
+            ? "Switch live runtime"
+            : "Save for next start";
+        SetAdbPortButton.IsEnabled = _adbPortDraftDirty
+            && valid
+            && applyEligible
+            && !_adbPortRequestInFlight;
+        RevertAdbPortButton.IsEnabled = _adbPortDraftDirty
+            && !_adbPortRequestInFlight;
+
+        if (_adbPortRequestInFlight)
+        {
+            AdbDraftStateText.Text = _adbProcessActive
+                ? "Applying the validated live handoff request…"
+                : "Saving the validated next-start target…";
+            AdbDraftStateText.Foreground =
+                new SolidColorBrush(Color.FromRgb(241, 191, 91));
+            return;
+        }
+        if (!valid)
+        {
+            AdbDraftStateText.Text = _adbPortDraftDirty
+                ? "Draft retained locally; enter a TCP port from 1 through 65535."
+                : "Waiting for a configured ADB target.";
+            AdbDraftStateText.Foreground = _adbPortDraftDirty
+                ? new SolidColorBrush(Color.FromRgb(255, 113, 135))
+                : (Brush)FindResource("MutedBrush");
+            return;
+        }
+        if (!_adbPortDraftDirty && _configuredAdbPort is null)
+        {
+            AdbDraftStateText.Text =
+                "Configured target is unavailable; this local value has not been changed.";
+            AdbDraftStateText.Foreground = (Brush)FindResource("MutedBrush");
+            return;
+        }
+        if (!_adbPortDraftDirty)
+        {
+            AdbDraftStateText.Text =
+                "Local draft matches the configured next-start target.";
+            AdbDraftStateText.Foreground = (Brush)FindResource("MutedBrush");
+            return;
+        }
+        if (!_adbLifecycleAvailable)
+        {
+            AdbDraftStateText.Text =
+                "Draft retained locally; process lifecycle control is unavailable.";
+        }
+        else if (_adbProcessActive && !_adbPausedAndAcknowledged)
+        {
+            AdbDraftStateText.Text =
+                "Draft retained locally; indefinitely Pause and wait for runtime acknowledgement before applying it.";
+        }
+        else
+        {
+            AdbDraftStateText.Text = _adbProcessActive
+                ? "Unsaved local draft; Switch live runtime performs the guarded handoff and keeps automation Paused."
+                : "Unsaved local draft; Save for next start records it without starting automation.";
+        }
+        AdbDraftStateText.Foreground =
+            new SolidColorBrush(Color.FromRgb(241, 191, 91));
     }
 
     private async Task RefreshStatusAsync(bool force = false)
@@ -2472,18 +2668,50 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(new Action(async () =>
                 await ShowGateDecisionAsync(pendingGate)));
         }
-        SetAdbPortButton.IsEnabled = lifecycleAvailable
-            && (!processActive || pausedAndAcknowledged);
-        SetAdbPortButton.Content = processActive ? "Switch" : "Save";
+        var adbTargetPending = processActive
+            && status.Control.AdbPort is not null
+            && status.Acknowledgements.AdbTarget is not
+                { AcknowledgesCurrent: true };
+        _configuredAdbPort = service?.AdbPort;
+        _requestedAdbPort = status.Control.AdbPort;
+        _activeAdbTarget = processActive && runtime?.Active == true
+            ? runtime.Target
+            : null;
+        _adbLifecycleAvailable = lifecycleAvailable;
+        _adbProcessActive = processActive;
+        _adbPausedAndAcknowledged = pausedAndAcknowledged;
+        ConfiguredAdbTargetText.Text = service?.AdbTarget
+            ?? (_configuredAdbPort is int configuredPort
+                ? $"localhost:{configuredPort}"
+                : "Unavailable");
+        RequestedAdbTargetText.Text = _requestedAdbPort is not int requestedPort
+            ? "No separate request"
+            : !processActive
+                ? $"localhost:{requestedPort} · saved"
+                : adbTargetPending
+                    ? $"localhost:{requestedPort} · awaiting runtime"
+                    : $"localhost:{requestedPort} · acknowledged";
+        ActiveAdbTargetText.Text = !processActive
+            ? "No active runtime"
+            : string.IsNullOrWhiteSpace(_activeAdbTarget)
+                ? "Awaiting runtime evidence"
+                : _activeAdbTarget;
         AdbPortHelpText.Text = !processActive
-            ? "The ADB port is saved for the next automation start."
+            ? "Applying a valid draft changes only the configured target for the next managed start."
             : pausedAndAcknowledged
-                ? "Switches the live runtime in place; it remains paused and does not rerun startup gates."
+                ? "A valid draft may hand off the live runtime in place; it remains Paused and does not rerun startup gates."
                 : "Indefinitely pause automation and wait for its acknowledgement before switching the live ADB port.";
-        if (!AdbPortBox.IsKeyboardFocusWithin && service?.AdbPort is not null)
+        if (_adbPortDraftDirty
+            && TryParsePort(AdbPortBox.Text, out var currentDraft)
+            && _configuredAdbPort == currentDraft)
         {
-            AdbPortBox.Text = service.AdbPort.Value.ToString(CultureInfo.InvariantCulture);
+            _adbPortDraftDirty = false;
         }
+        if (!_adbPortDraftDirty && _configuredAdbPort is not null)
+        {
+            SetAdbPortDraftText(_configuredAdbPort);
+        }
+        UpdateAdbPortDraftControls();
         var statePending = processActive
             && status.Acknowledgements.State is not { AcknowledgesCurrent: true };
         var modePending = processActive
@@ -2491,9 +2719,6 @@ public partial class MainWindow : Window
         var gameSpeedTargetPending = processActive
             && status.Acknowledgements.GameSpeedTarget is not
                 { AcknowledgesCurrent: true };
-        var adbTargetPending = processActive
-            && status.Control.AdbPort is not null
-            && status.Acknowledgements.AdbTarget is not { AcknowledgesCurrent: true };
         SetSelectionStyle(
             PauseButton,
             string.Equals(status.Control.State, "PAUSED", StringComparison.OrdinalIgnoreCase),
@@ -3339,7 +3564,7 @@ public partial class MainWindow : Window
             : "Save startup default";
         QueueStrategyButton.ToolTip = _strategyProcessActive
             ? "Keep this battle unchanged and apply the selection at the next confirmed battle boundary."
-            : "Remember this strategy without starting automation. The Process-tab Start buttons already use the current selection.";
+            : "Remember this strategy without starting automation. System > Services Start Automation already uses the current selection.";
         Grid.SetColumnSpan(
             QueueStrategyButton,
             _strategyProcessActive ? 1 : 2);
@@ -3398,7 +3623,7 @@ public partial class MainWindow : Window
         }
 
         var destinationValid = TunnelHostConfigurationValidator.IsValidDestination(
-            SshDestinationBox.Text);
+            _settings.SshDestination);
         var hostAvailable = _tunnelHostSnapshot is not null
             && _tunnelHostProtocolMismatch is null;
         CompatibilityBanner.Visibility = Visibility.Visible;
@@ -3432,7 +3657,7 @@ public partial class MainWindow : Window
             ? incompatibility
                 + " Click Restart Linux API service below."
             : incompatibility
-                + " Enter the Linux SSH destination above to enable "
+                + " Enter the Linux SSH destination in Preferences to enable "
                 + "Restart Linux API service, or run "
                 + "'systemctl --user restart thetower-control-surface.service' "
                 + "on Linux. If this warning remains, update the Linux checkout "
@@ -3778,37 +4003,23 @@ public partial class MainWindow : Window
 
     private static int ParsePort(string value, string label)
     {
-        if (!int.TryParse(value.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var port)
-            || port is < 1 or > 65535)
+        if (!TryParsePort(value, out var port))
         {
             throw new ArgumentException($"{label} must be between 1 and 65535.");
         }
         return port;
     }
 
+    private static bool TryParsePort(string value, out int port) =>
+        int.TryParse(
+            value.Trim(),
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out port)
+        && port is >= 1 and <= 65535;
+
     private void SaveSettings()
     {
-        var localPort = ParsePort(LocalTunnelPortBox.Text, "Local tunnel port");
-        var remotePort = ParsePort(RemoteApiPortBox.Text, "Remote API port");
-        _settings.BaseUrl = BaseUrlBox.Text.Trim();
-        _settings.SshDestination = SshDestinationBox.Text.Trim();
-        _settings.LocalTunnelPort = localPort;
-        _settings.RemoteApiPort = remotePort;
-        SettingsStore.Save(_settings);
-    }
-
-    private void SaveAdbForwardSettings(int windowsPort, int linuxPort)
-    {
-        var destination = SshDestinationBox.Text.Trim();
-        if (!TunnelHostConfigurationValidator.IsValidDestination(destination))
-        {
-            throw new ArgumentException(
-                "SSH destination must be a host, SSH alias, or user@host using "
-                + "only letters, numbers, '.', '_', and '-'.");
-        }
-        _settings.SshDestination = destination;
-        _settings.WindowsBlueStacksAdbPort = windowsPort;
-        _settings.LinuxAdbForwardPort = linuxPort;
         SettingsStore.Save(_settings);
     }
 

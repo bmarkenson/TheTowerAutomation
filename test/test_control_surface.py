@@ -1564,6 +1564,67 @@ def test_native_dashboard_uses_stable_full_width_pages_and_bounded_system_views(
     assert 'public string SystemPage { get; set; } = "";' in native_models
 
 
+def test_native_preferences_are_bounded_and_adb_drafts_survive_status_polling():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    preferences_xaml = (native_root / "PreferencesWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    preferences_code = (native_root / "PreferencesWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Title="Preferences"' in preferences_xaml
+    assert 'Text="CONTROL API"' in preferences_xaml
+    assert 'Text="SSH AND FORWARDING DEFAULTS"' in preferences_xaml
+    assert 'Text="PRESENTATION AND LOCAL SAMPLING"' in preferences_xaml
+    for field in (
+        "BaseUrlBox",
+        "TokenBox",
+        "SshDestinationBox",
+        "LocalTunnelPortBox",
+        "RemoteApiPortBox",
+        "WindowsBlueStacksAdbPortBox",
+        "LinuxAdbForwardPortBox",
+    ):
+        assert f'x:Name="{field}"' in preferences_xaml
+        assert f'x:Name="{field}"' not in native_xaml
+    assert "PreferencesResult" in preferences_code
+    assert "requireDestination: false" in preferences_code
+    assert "public string Token" not in native_models
+    assert 'private string _apiToken = "";' in native_code
+    assert "Command = TunnelHostCommand.Configure" in native_code
+    assert "Preferences changes saved defaults only." in native_xaml
+
+    for target_field in (
+        "ConfiguredAdbTargetText",
+        "RequestedAdbTargetText",
+        "ActiveAdbTargetText",
+        "AdbDraftStateText",
+        "RevertAdbPortButton",
+    ):
+        assert f'x:Name="{target_field}"' in native_xaml
+    assert 'TextChanged="AdbPortBox_TextChanged"' in native_xaml
+    assert 'Click="RevertAdbPortDraft_Click"' in native_xaml
+    assert "_adbPortDraftDirty" in native_code
+    assert "if (!_adbPortDraftDirty && _configuredAdbPort is not null)" in native_code
+    assert "Draft retained locally" in native_code
+    assert "!AdbPortBox.IsKeyboardFocusWithin" not in native_code
+    assert 'new { action = "set_adb_port", adb_port = adbPort }' in native_code
+
+
 def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")

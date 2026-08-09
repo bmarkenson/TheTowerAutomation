@@ -78,9 +78,7 @@
                       Click="CaptureSetup_Click"
                       IsEnabled="False" />
           </MenuItem>
-          <MenuItem Header="_Preferences">
-            <MenuItem Header="Connection and device settings…" Click="ShowSetup_Click" />
-          </MenuItem>
+          <MenuItem Header="_Preferences" Click="ShowPreferences_Click" />
         </Menu>
       </Grid>
     </Border>
@@ -764,7 +762,10 @@
                     BorderThickness="0"
                     Margin="0,8,0,0">
           <TabItem Header="Services" Tag="services">
-            <Grid Margin="0,8,0,0">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Margin="0,8,0,0">
+              <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
@@ -792,16 +793,60 @@
                       <TextBlock x:Name="ProcessPidText" Text="-" FontSize="15" FontWeight="Bold" />
                     </StackPanel>
                   </Grid>
-                  <Grid Margin="4,4,4,6">
+                  <UniformGrid Columns="3" Margin="4,4,4,5">
+                    <StackPanel Margin="0,0,8,0">
+                      <TextBlock Text="CONFIGURED NEXT START" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                      <TextBlock x:Name="ConfiguredAdbTargetText"
+                                 Text="-"
+                                 FontWeight="SemiBold"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,0">
+                      <TextBlock Text="REQUESTED / ACK" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                      <TextBlock x:Name="RequestedAdbTargetText"
+                                 Text="-"
+                                 FontWeight="SemiBold"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel>
+                      <TextBlock Text="ACTIVE RUNTIME" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                      <TextBlock x:Name="ActiveAdbTargetText"
+                                 Text="No active runtime"
+                                 FontWeight="SemiBold"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                  </UniformGrid>
+                  <TextBlock Text="LOCAL DRAFT"
+                             Foreground="{StaticResource MutedBrush}"
+                             FontSize="9"
+                             Margin="4,7,4,0" />
+                  <Grid Margin="4,0,4,3">
                     <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="Auto" />
                       <ColumnDefinition Width="*" />
                       <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="ADB port" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,8,0" />
-                    <TextBox Grid.Column="1" x:Name="AdbPortBox" MinWidth="70" VerticalAlignment="Center" />
-                    <Button Grid.Column="2" x:Name="SetAdbPortButton" Content="Save" Click="SetAdbPort_Click" IsEnabled="False" />
+                    <TextBox x:Name="AdbPortBox"
+                             MinWidth="70"
+                             VerticalAlignment="Center"
+                             TextChanged="AdbPortBox_TextChanged" />
+                    <Button Grid.Column="1"
+                            x:Name="RevertAdbPortButton"
+                            Content="Revert"
+                            Click="RevertAdbPortDraft_Click"
+                            IsEnabled="False" />
+                    <Button Grid.Column="2"
+                            x:Name="SetAdbPortButton"
+                            Content="Save for next start"
+                            Click="SetAdbPort_Click"
+                            IsEnabled="False" />
                   </Grid>
+                  <TextBlock x:Name="AdbDraftStateText"
+                             Text="Waiting for configured ADB target."
+                             TextWrapping="Wrap"
+                             Foreground="{StaticResource MutedBrush}"
+                             FontSize="10"
+                             Margin="6,0,6,2" />
                   <TextBlock x:Name="AdbPortHelpText"
                              Text="Pause automation before switching a live ADB port."
                              TextWrapping="Wrap"
@@ -880,8 +925,8 @@
                       </ContextMenu>
                     </Button.ContextMenu>
                   </Button>
-                  <Button Content="Open connection settings…"
-                          Click="ShowSetup_Click"
+                  <Button Content="Open connection status…"
+                          Click="ShowConnections_Click"
                           Margin="4,12,4,4" />
                   <TextBlock Text="The grouped header retains separate Linux service, HTTP, API SSH, and ADB SSH health. Open Connections for complete tunnel detail."
                              TextWrapping="Wrap"
@@ -890,7 +935,8 @@
                              Margin="6,4,6,0" />
                 </StackPanel>
               </Border>
-            </Grid>
+              </Grid>
+            </ScrollViewer>
           </TabItem>
 
           <TabItem Header="Connections" Tag="connections">
@@ -906,58 +952,52 @@
                         Style="{StaticResource DashboardCard}"
                         Margin="0,0,4,0">
                   <StackPanel>
-                    <TextBlock Text="CONNECTION PREFERENCES"
+                    <TextBlock Text="CONFIGURED CONNECTION DEFAULTS"
                                Foreground="#62D5FF"
                                FontSize="10"
                                FontWeight="Bold"
                                Margin="4,0,4,7" />
-                    <TextBlock Text="API URL" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="4,2" />
-                    <TextBox x:Name="BaseUrlBox" />
-                    <TextBlock Text="Token (optional)"
-                               Foreground="{StaticResource MutedBrush}"
-                               FontSize="10"
-                               Margin="4,8,4,2"
-                               ToolTip="Only for an authenticated API endpoint. The token is held in memory and is never saved." />
-                    <PasswordBox x:Name="TokenBox"
-                                 ToolTip="Optional in-memory bearer token; never saved." />
-                    <Button Content="Connect"
-                            Style="{StaticResource PrimaryButton}"
-                            Click="Connect_Click"
-                            Margin="4,8,4,10" />
-
-                    <TextBlock Text="SSH DESTINATION"
-                               Foreground="{StaticResource MutedBrush}"
-                               FontSize="10"
-                               FontWeight="Bold"
-                               Margin="4,8,4,2" />
-                    <TextBlock Text="Linux destination (host, alias, or user@host)"
-                               Foreground="{StaticResource MutedBrush}"
-                               FontSize="10"
-                               Margin="4,2" />
-                    <TextBox x:Name="SshDestinationBox" TextChanged="SshDestinationBox_TextChanged" />
-                    <UniformGrid Columns="2" Margin="0,5,0,0">
-                      <StackPanel Margin="4">
-                        <TextBlock Text="Local API port" Foreground="{StaticResource MutedBrush}" FontSize="10" />
-                        <TextBox x:Name="LocalTunnelPortBox" />
-                      </StackPanel>
-                      <StackPanel Margin="4">
-                        <TextBlock Text="Remote API port" Foreground="{StaticResource MutedBrush}" FontSize="10" />
-                        <TextBox x:Name="RemoteApiPortBox" />
-                      </StackPanel>
-                    </UniformGrid>
+                    <TextBlock Text="API URL" Foreground="{StaticResource MutedBrush}" FontSize="9" Margin="4,2,4,0" />
+                    <TextBlock x:Name="ConfiguredApiUrlText"
+                               Text="http://127.0.0.1:8787"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Margin="4,0,4,7" />
+                    <TextBlock Text="TOKEN" Foreground="{StaticResource MutedBrush}" FontSize="9" Margin="4,2,4,0" />
+                    <TextBlock x:Name="TokenStateText"
+                               Text="None (normal loopback route)"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Margin="4,0,4,7" />
+                    <TextBlock Text="SSH DESTINATION" Foreground="{StaticResource MutedBrush}" FontSize="9" Margin="4,2,4,0" />
+                    <TextBlock x:Name="ConfiguredSshDestinationText"
+                               Text="Not configured"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Margin="4,0,4,7" />
+                    <TextBlock Text="API FORWARD DEFAULT" Foreground="{StaticResource MutedBrush}" FontSize="9" Margin="4,2,4,0" />
+                    <TextBlock x:Name="ConfiguredApiForwardText"
+                               Text="127.0.0.1:8787 → Linux 127.0.0.1:8787"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Margin="4,0,4,7" />
+                    <TextBlock Text="ADB FORWARD DEFAULT" Foreground="{StaticResource MutedBrush}" FontSize="9" Margin="4,2,4,0" />
+                    <TextBlock x:Name="ConfiguredAdbForwardText"
+                               Text="Linux 127.0.0.1:5555 → Windows 127.0.0.1:5555"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Margin="4,0,4,9" />
                     <UniformGrid Columns="2">
-                      <StackPanel Margin="4">
-                        <TextBlock Text="Windows BlueStacks ADB port" Foreground="{StaticResource MutedBrush}" FontSize="10" />
-                        <TextBox x:Name="WindowsBlueStacksAdbPortBox"
-                                 TextChanged="WindowsBlueStacksAdbPortBox_TextChanged"
-                                 ToolTip="The Windows-local TCP listener exposed by BlueStacks." />
-                      </StackPanel>
-                      <StackPanel Margin="4">
-                        <TextBlock Text="Linux ADB port" Foreground="{StaticResource MutedBrush}" FontSize="10" />
-                        <TextBox x:Name="LinuxAdbForwardPortBox"
-                                 ToolTip="The per-PC port opened only on Linux loopback." />
-                      </StackPanel>
+                      <Button Content="Preferences…" Click="ShowPreferences_Click" />
+                      <Button Content="Connect now"
+                              Style="{StaticResource PrimaryButton}"
+                              Click="Connect_Click" />
                     </UniformGrid>
+                    <TextBlock Text="Preferences changes saved defaults only. The tunnel panels show their independently desired and active endpoints; use an explicit Start or Restart to adopt changed forwarding defaults."
+                               Foreground="{StaticResource MutedBrush}"
+                               FontSize="10"
+                               TextWrapping="Wrap"
+                               Margin="6,5,6,0" />
                   </StackPanel>
                 </Border>
 
