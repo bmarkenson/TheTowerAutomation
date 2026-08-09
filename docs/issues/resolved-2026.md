@@ -8,6 +8,52 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Perk top-bar OCR ignored the independent battle-wave observation
+
+**Stable ID:** `ISSUE-2026-034` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 during an active Tier 19 Farm battle after the
+  save-backed Perk timeline was deployed.
+- **Symptom:** The passive top-bar reader repeatedly rejected schedules such as
+  raw `3089)/773124` and `31227/°3124`, even though the independent battle wave
+  and later clean frames established the real pairs as `3089 / 3124` and
+  `3122 / 3124`. The current run accumulated 57 rejected observations and two
+  three-frame warning streaks; both streaks recovered, every schedule boundary
+  through 3124 was still recorded, and exact saved Perk picks remained valid.
+- **Evidence:** Fresh read-only preflight correlated the active PID, target,
+  acknowledgement, observation, action log, and persisted timeline. One
+  bounded exact-target capture showed clean `3133 / 3206`; the unchanged OCR
+  crop and Tesseract settings read that frame correctly. The failures were
+  therefore intermittent separator/token contamination rather than a
+  persistent geometry mismatch.
+- **Safety response:** The existing 250-wave lead guard rejected the corrupt
+  values without opening Perks or sending input. Diagnosis sent no Pause,
+  restart, navigation, Exit, or Surrender action, and production was not
+  changed.
+- **Cause:** The observer already received the separately detected battle wave
+  but used it only as recorded metadata. Schedule validity and transition
+  gating still trusted the top bar's OCR current-wave token. The animated
+  separator could also join one or two extra leading digits to the OCR
+  next-wave token.
+- **Resolution:** Commit `105fd78` makes the independent battle wave the
+  current-wave authority for numeric top-bar schedules. It prefers the full OCR
+  next-wave token, then permits only the longest minimally trimmed suffix after
+  removing at most two leading artifact digits when that suffix satisfies the
+  same 250-wave lead. Split, substituted, trailing, more heavily prefixed, or
+  still-implausible values remain invalid read-only retries. Two stable
+  observations are still required, and save-backed Perk identity, ordering,
+  levels, and pick waves are unchanged.
+- **Regression:** `test/test_perk_timeline.py` covers the reported prefixed
+  next-wave form, contaminated current-wave form, a schedule already passed by
+  the independent wave, unreconciled parsing, and persistent irrecoverable
+  retry behavior.
+- **Validation:** The focused Perk timeline suite passed 43 tests, and the
+  Perk/save/terminal slice passed 109 tests. The supported checkpoint passed
+  compilation, state-definition validation, clickmap integrity with zero
+  errors and the established 44 orphan candidates, and all 2,053 tests in
+  357.35 seconds. No live rollout or post-fix device validation was performed.
+- **Fixed by:** `105fd78`.
+
 ### Perk repair trusted transient Ban reads and local viewport edges
 
 **Stable ID:** `ISSUE-2026-033` · **Lifecycle:** `resolved`

@@ -39,6 +39,29 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
+
+- Commit `105fd78` makes the independent battle-wave observation authoritative
+  for the top bar's current wave. A full OCR next-wave token must remain within
+  the existing 250-wave lead; if separator noise prefixes one or two digits,
+  only the longest minimally trimmed suffix satisfying the same bound is
+  accepted. Split, substituted, trailing, more heavily prefixed, and otherwise
+  implausible values remain read-only retries, and two stable observations are
+  still required.
+- The change repairs the retained `3089)/773124` and `31227/°3124` patterns
+  without changing save-backed Perk identity, ordering, level, or exact saved
+  pick-wave authority. It also rejects a top-bar schedule whose displayed next
+  wave has already been passed by the independent observation.
+- The focused timeline suite passed 43 tests and the Perk/save/terminal slice
+  passed 109 tests. The supported checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan candidates, and all 2,053 tests in 357.35 seconds. Diagnosis used one
+  bounded read-only capture; no production reload, deployment, or device input
+  was performed. The current contract is in the
+  [player-save architecture](../architecture/player_save.md#temporal-classes-and-merge-rules),
+  with the incident evidence in
+  [`ISSUE-2026-034`](../issues/resolved-2026.md#perk-top-bar-ocr-ignored-the-independent-battle-wave-observation).
+
 ### 2026-08-09 control-surface backlog pruning
 
 - Documentation-only commit `889121e` removes drag/reorder/floating-pane
