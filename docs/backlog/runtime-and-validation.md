@@ -1282,5 +1282,33 @@ can change as operator use supplies better evidence.
       integrity, and all 2,058 Python tests. Windows visual, mouse/keyboard,
       scaling, process-state, failure/retry, and same-ID publication validation
       remain open under slice 6; no live runtime or device action was performed.
+    - **2026-08-09 production publication checkpoint.** Exact candidate
+      `b2d282f` passed the supported checkpoint with all 2,081 tests, all 120
+      portable native authoring/coordinator tests, all 18 tunnel-host tests,
+      the Release WPF cross-build, and `git diff --check`. Production advanced
+      from `9d45ff2` behind rollback tag
+      `production-before-20260809T233246Z-9d45ff2`. The aggregate production
+      delta contained only native dashboard inputs, documentation, and tests,
+      so automation and the Linux control-surface service were not restarted.
+      The bounded post-promotion check kept automation PID `804073` RUNNING on
+      its existing `localhost:5555` target with fresh observation, acknowledged
+      control and Strategy, and no Strategy Gate.
+    - The complete Windows package was published from `b2d282f` at 16:33 PDT.
+      `TheTower.ControlSurface.exe` is 72,385,088 bytes with SHA-256
+      `3bb666175f7e0b1b5d731f30c92cee8b71581a3979bfc00f49bd018d69e4d0f4`;
+      `TheTower.TunnelHost.exe` is 35,172,103 bytes with SHA-256
+      `e23aada8aa3992bbc866fcebd3ec2a22d043902e088f2a4cb78abdba0ff63c68`.
+      Rollback slot 1 retains the complete `5f93cba` package: 72,363,007-byte
+      GUI `c13e709f307d32f979dc9fff300cfcfb467133ac2602fce584582f36ed3abe72`
+      and 35,172,117-byte host
+      `387a2d5d620b8ced392b2d00dc2628a5a1e8333af866d074b6b3f5ac8286221d`.
+      Slot 2 retains the complete `3acb45a` package: 72,358,911-byte GUI
+      `934c529b9e2772667e5d821ff847dce4b7e4ac439af20986aa331eed313c8e8d`
+      and 35,172,086-byte host
+      `aaf4c2de9b3b1b3ed41b3c136e29c238005e823580423201c412d79b523352ca`.
+      All six files independently identify as nonempty Windows x64 PE
+      executables. Cross-publication does not execute WPF; the complete
+      Windows visual, interaction, scaling, process-state, failure/retry, and
+      same-ID publication acceptance in slice 6 remains pending.
     - Defer drag-to-reorder, floating panes, and extensive per-card hiding until
       operator use of the redesigned pages demonstrates a concrete need.
