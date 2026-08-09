@@ -968,11 +968,24 @@ can change as operator use supplies better evidence.
      countdown or Pause block in the runtime snapshot and GUI.
    - Add return-now, extend, and cancel only as explicit runtime directives
      with freshness and ownership checks.
-6. [ ] Verify boundary-aware Strategy changes on Windows: immediate accepted-
-   request feedback, current/pending display, selection retention, pending
-   replacement/cancellation, stale-server warning and explicit reload,
-   active-battle adoption, and an acknowledged paused Workshop application
-   without changing Pause. Track confirmation in
+6. [ ] Verify boundary-aware Strategy changes on Windows. During an active
+   process, one genuine dropdown selection must submit the existing normal
+   next-boundary `set_strategy` request exactly once; polling and other
+   programmatic selection changes must submit nothing. Accepted requests clear
+   dirty state, while rejection or transport failure retains the visible dirty
+   choice and exposes one retry affordance without enabling request storms.
+   Selecting Current must replace a different pending Strategy, while an
+   already-current selection with no pending request and an already-queued
+   next-boundary selection remain no-ops. **Switch this battle** remains a
+   separate explicit fresh-evidence active-adoption request. A stopped process
+   still uses the visible selection on Start and persists a startup default only
+   through the separate save action. Successful Strategy publication and
+   restore-as-new must automatically follow with the same next-boundary request,
+   including for a same-ID revision; Base publication does not. Confirm
+   immediate sending/accepted/queued/failed feedback, current/pending display,
+   dirty/failed selection retention across polling, stale-server warning and
+   explicit reload, active-battle adoption, and an acknowledged paused Workshop
+   application without changing Pause. Track confirmation in
    [`ISSUE-2026-010`](../issues/open-2026.md#native-strategy-selection-did-not-report-acceptance-or-live-disposition)
    and
    [`ISSUE-2026-011`](../issues/open-2026.md#windows-client-could-not-identify-or-reload-a-stale-linux-control-service).
@@ -1065,9 +1078,15 @@ can change as operator use supplies better evidence.
         Surrender collection policy appears only when manual control makes it
         relevant and never grants Surrender authority.
       - A run-configuration card keeps selected/current/pending Strategy
-        distinct, retains explicit next-battle versus active-battle adoption,
-        and shows target/observed speed and future terminal policy without
-        turning any of them into an immediate Start/Resume action.
+        distinct. During an active process, a genuine dropdown selection itself
+        commits the normal next-boundary request; **Switch this battle** remains
+        a separate explicit active-adoption action. A stopped process retains
+        explicit startup-default persistence. Successful Strategy publication
+        or restore-as-new automatically follows with the normal next-boundary
+        request, including when its stable ID equals Current, but never switches
+        the current battle. Show target/observed speed and future terminal
+        policy without turning any of them into an immediate Start/Resume
+        action.
       - **Configure next run**, save-backed **Capture current setup as...**,
         Strategy Profiles, and Battle History remain discoverable through the
         relevant field or **Tools**, but their separate dialogs are not
@@ -1119,8 +1138,11 @@ can change as operator use supplies better evidence.
       overlap, rely on clipped text, or wrap top-level navigation into multiple
       rows at the supported widths. Preserve unsent edits across polling;
       periodic refresh must not steal focus, close a popup, replace a dirty
-      draft, reset list position, or delay Activity. Communicate selection,
-      pending, warning, and error with text/shape in addition to color. Keep
+      draft, overwrite a failed/retryable Strategy selection, reset list
+      position, or delay Activity. Programmatic Strategy option/selection
+      reconciliation must never synthesize user intent or submit a request.
+      Communicate selection, pending, warning, and error with text/shape in
+      addition to color. Keep
       keyboard navigation, visible focus, access keys, disabled-action reasons,
       and logical tab order. Persist the selected page and valid window
       placement, migrating or safely ignoring the superseded sidebar/splitter
@@ -1152,7 +1174,14 @@ can change as operator use supplies better evidence.
       4. [x] Add only those reserved status/alert fields whose authoritative
          server models and runtime directives exist; leave absent capabilities
          absent rather than synthesizing them in the client.
-      5. [ ] Cross-build and run focused native/static regressions, then perform
+      5. [ ] Make active-process Strategy selection commit the normal
+         next-boundary request exactly once, retain only a failure-time retry,
+         and keep active-battle adoption explicit. Preserve stopped-process and
+         polling behavior. Follow each successful Strategy publication or
+         restore-as-new with the same normal next-boundary request, forcing the
+         same-ID definition-aware path without adding a revision-specific
+         runtime payload or changing Base publication.
+      6. [ ] Cross-build and run focused native/static regressions, then perform
          Windows keyboard/mouse and visual smoke at minimum, preferred,
          default, and maximized sizes, including 100% and 125% display scaling.
          Verify no ordinary Overview scroll, collision, truncated primary
@@ -1160,6 +1189,8 @@ can change as operator use supplies better evidence.
          passive CPU regression. Re-run the outstanding Better Control,
          Strategy, incompatibility-banner, Token, and History-input usability
          checks at natural safe boundaries without manufacturing a battle.
+         Confirm the optional Token guidance and Setup placement remain clear
+         for the normal blank-token loopback SSH route.
     - **2026-08-08 slice-one checkpoint.** The feature worktree now uses the
       full-width four-page shell, bounded System subpages, compact four-signal
       health group, responsive two-row status, menu routes, hidden-Activity
