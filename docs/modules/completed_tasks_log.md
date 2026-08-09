@@ -39,6 +39,32 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 managed new-battle save carry correction
+
+- Production diagnosis found that the Home save preflight had accepted the
+  configured Auto Pick, Ultimate Weapon, Cards, Workshop, Bot, Guardian, and
+  Module facts, but their complete one-time carry was rejected at the first
+  `RUNNING` frame. The just-completed Start workflow had retired from the
+  supervisor while its exclusive hold remained in the central authority
+  snapshot, so a generic lifecycle check misclassified that exact boundary as
+  unrelated ownership and forced every in-battle UI fallback.
+- Commit `b93c11f` attributes only the immediate carry binding to the exact
+  Start workflow that successfully crossed into the new battle. The existing
+  coordinator still requires the matching context, dispatched runtime-owned
+  New Battle launch, first stable `RUNNING` observation, and Enabled control.
+  WAIT, Pause, Stop, another authority owner, or a replacement operator
+  workflow continues to reject the complete carry.
+- The bound coordinator now reaches the existing in-battle consumers, which
+  omit redundant Auto Pick and Ultimate Weapon panels and reuse the accepted
+  Home evidence for Cards, Workshop, Bots, Guardians, Modules, and the other
+  allowlisted checks. Rejections now log the individual boundary predicates,
+  resulting carry state, and safe reason code without private continuity data.
+- The focused owner/caller slice passed 496 tests. The exact feature candidate
+  then passed compilation, state definitions, clickmap integrity with zero
+  errors and the established 44 orphan candidates, and all 2,025 tests in
+  367.41 seconds. No integration, promotion, deployment, or device input was
+  performed by this feature result.
+
 ### 2026-08-08 passive save-backed Perk timeline correction
 
 - Commit `39f4a4d` removes normal in-battle Perks-panel timeline navigation.
