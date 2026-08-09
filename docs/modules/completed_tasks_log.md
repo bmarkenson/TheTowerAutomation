@@ -64,6 +64,65 @@ canonical document linked by an entry for current behavior.
   No production process, device input, battle transition, or live reload was
   used for this repository repair.
 
+### 2026-08-09 control-surface backlog pruning
+
+- Documentation-only commit `889121e` removes drag/reorder/floating-pane
+  customization, an embedded current screenshot, a permanent PresentMon
+  provider, native custom-YAML selection, multiple simultaneous ADB targets,
+  and expanded multi-user security from the active control-surface roadmap.
+- Atomic runtime status, automatic recovery and its eventual controls,
+  comparisons/trends, notifications, existing host telemetry, and the Windows
+  validation backlog remain active. A concrete performance anomaly may still
+  use one bounded issue-specific frame-timing trace; it does not establish a
+  permanent sampler, spool, or dashboard feature.
+- Current-reference inspection found no remaining active roadmap references to
+  the retired ideas outside immutable history. `git diff --check` passed; this
+  outcome changes documentation only and requires no Windows package
+  publication or service restart.
+
+### 2026-08-08 save-backed new-battle carry lifecycle
+
+- Commit `f74f94e` separates transient control state from evidence failure.
+  `WAIT` now remains only the next-terminal policy, a launch attempt with no
+  dispatch stays pending, and an unstable first `RUNNING` frame defers binding.
+  Pause suspends unconsumed carry for fresh save or UI evidence, while Stop,
+  competing ownership, or a changed transition identity discards only that
+  carrier rather than quarantining its source snapshot.
+- A complete natural Game Over acquisition may now supply configuration facts
+  to its exact direct-Retry successor without another save read. Acceptance
+  requires the same runtime, bound predecessor activity scope, exact target and
+  generation, a distinct verified Retry scope, and an inactive runtime
+  projection when one exists. Any missing or changed binding leaves Retry
+  complete and routes configuration checks through their guarded UI paths.
+- Exact bound new-battle evidence now suppresses redundant in-battle Cards,
+  Workshop, Bots, Guardians, Modules, Free Upgrade Locks, Auto Pick, Target
+  Priority, and Ultimate Weapon checks. Unsupported, incomplete, or changed
+  evidence falls back per check and preserves unrelated carry. Only an
+  authoritative save/UI contradiction quarantines every remaining decision
+  from the trusted snapshot.
+- The final focused save/preflight/control/navigation suite passed 285 tests;
+  its adjacent terminal, initialization, continuity, and save suite passed 286.
+  The complete supported checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and all 2,050 tests in 346.29 seconds. Production and integration were still
+  at `080fc17`, already contained by the feature, when this candidate was
+  frozen. Exact committed `develop` candidate `29cc5c2` repeated the complete
+  checkpoint with all 2,050 tests passing in 344.45 seconds.
+- Production advanced from `080fc17` behind rollback tag
+  `production-before-20260809T075154Z-080fc17`. Because the changed player-save
+  owner is imported by both long-lived Python services, the control surface
+  restarted as PID `3915031`; replacement automation PID `3915418` acquired the
+  exact `localhost:5555` lock and completed a guarded same-battle attachment
+  from its fresh forced-save continuity receipt.
+- The replacement adopted `farm_t19_ad_assist`, completed its requested session
+  preflight, and published fresh `RUNNING / NEXT_BATTLE` evidence without an
+  action gate at wave 2022. No Surrender, Game Over, game-Home, Retry, or battle
+  transition was issued. The attachment smoke remained a distinct temporal
+  boundary: it reused bound save evidence for Bots, Guardians, and Workshop,
+  while Cards, Modules, Auto Pick, and Ultimate Weapons used their established
+  attachment UI paths. Natural Home-launch and direct-Retry confirmation of the
+  new zero-UI carry remains in the runtime validation backlog.
+
 ### 2026-08-08 current-battle Perks control-surface view
 
 - Commit `8b9f1ee` adds a compact read-only presentation beside the existing

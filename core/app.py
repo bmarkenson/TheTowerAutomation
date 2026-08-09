@@ -4218,6 +4218,119 @@ class App:
         )
         return completed is not None and completed.get("status") == "completed"
 
+    def _bind_started_battle_player_save_preflight(
+        self,
+        *,
+        battle_started: bool,
+        stable_running: bool,
+    ) -> bool:
+        """Bind carried save facts across an exact observed battle transition."""
+
+        coordinator = getattr(
+            self,
+            "_player_save_preflight_coordinator",
+            None,
+        )
+        if coordinator is None:
+            return False
+        carry = coordinator.carry
+        if carry is None:
+            return False
+        if AUTOMATION.state is RunState.STOPPED:
+            coordinator.discard_carry("automation_stopped_before_running_bind")
+            return False
+        if AUTOMATION.state is not RunState.RUNNING:
+            coordinator.suspend_carry("pause_requires_fresh_running_evidence")
+            return False
+        if self._operator_workflow_authority_hold() is not None:
+            coordinator.discard_carry("competing_workflow_at_running_boundary")
+            return False
+
+        # Binding is observation, not input authority. In particular, WAIT is
+        # only the policy for the next terminal screen, and initialization or
+        # session-preflight holds are expected consumers of this evidence.
+        bound = coordinator.bind_running(
+            battle_started=battle_started,
+            stable_running=stable_running,
+            continuity_verified=True,
+        )
+        if bound:
+            self._mission_mgr.ctx.data[
+                "player_save_preflight_coordinator"
+            ] = coordinator
+        return bool(bound)
+
+    def _stage_direct_retry_player_save_preflight(
+        self,
+        acquisition: Optional[PlayerSaveAcquisitionBundle],
+        *,
+        source_activity_scope_id: str,
+        retry_scope: Mapping[str, Any],
+    ) -> bool:
+        """Bind one natural terminal save to its verified Retry successor."""
+
+        coordinator = getattr(
+            self,
+            "_player_save_preflight_coordinator",
+            None,
+        )
+        successor_scope_id = str(retry_scope.get("run_id") or "").strip()
+        if (
+            coordinator is None
+            or not successor_scope_id
+            or str(retry_scope.get("reason") or "") != "game_over_retry"
+        ):
+            if coordinator is not None:
+                coordinator.discard_carry(
+                    "direct_retry_successor_scope_unverified"
+                )
+            self._mission_mgr.ctx.data.pop(
+                "player_save_preflight_coordinator",
+                None,
+            )
+            return False
+        self._player_save_preflight_session_id = new_operation_id()
+        try:
+            strategy = self._mission_mgr.strategy
+            requirements = (
+                strategy.session_preflight_requirements()
+                if strategy is not None
+                else {}
+            )
+            if not isinstance(requirements, Mapping):
+                requirements = {}
+            result = coordinator.stage_direct_retry(
+                acquisition,
+                requirements,
+                source_activity_scope_id=source_activity_scope_id,
+                mode=self._runtime_policy().get(
+                    "player_save_preflight",
+                    "save_first",
+                ),
+            )
+        except Exception:
+            coordinator.discard_carry("direct_retry_save_staging_failed")
+            self._mission_mgr.ctx.data.pop(
+                "player_save_preflight_coordinator",
+                None,
+            )
+            log(
+                "[PLAYER_SAVE_PREFLIGHT] Direct-Retry evidence staging failed; "
+                "the verified Retry remains complete and configuration checks "
+                "will use their guarded UI fallbacks",
+                "ERROR",
+            )
+            return False
+        self._player_save_preflight_result = result
+        self._player_save_preflight_activity_scope_id = successor_scope_id
+        if result.carry is None:
+            self._mission_mgr.ctx.data.pop(
+                "player_save_preflight_coordinator",
+                None,
+            )
+            return False
+        return True
+
     def _operator_workflow_authority_hold(
         self,
     ) -> Optional[AuthorityHoldState]:
@@ -8041,32 +8154,40 @@ class App:
                     self._steady_run_entry_pending = False
                     if game_speed_guard is not None:
                         game_speed_guard.reset_battle()
-                    save_coordinator = getattr(
-                        self,
-                        "_player_save_preflight_coordinator",
-                        None,
+                save_coordinator = getattr(
+                    self,
+                    "_player_save_preflight_coordinator",
+                    None,
+                )
+                save_carry = (
+                    save_coordinator.carry
+                    if save_coordinator is not None
+                    else None
+                )
+                if (
+                    is_paused
+                    and save_carry is not None
+                    and save_carry.state
+                    not in {
+                        CarriedEvidenceState.SUSPENDED,
+                        CarriedEvidenceState.INVALIDATED,
+                        CarriedEvidenceState.CONSUMED,
+                    }
+                ):
+                    save_coordinator.suspend_carry(
+                        "pause_requires_fresh_running_evidence"
                     )
-                    if save_coordinator is not None:
-                        carry_action_authorized = bool(
-                            AUTOMATION.mode is not ExecMode.WAIT
-                            and self._runtime_action_guard(
-                                action_class=(
-                                    RuntimeActionClass.LIFECYCLE_ACTION
-                                )
-                            )
-                        )
-                        bound = save_coordinator.bind_running(
-                            battle_started=True,
-                            stable_running=(
-                                str(detection.get("state") or "").upper()
-                                == "RUNNING"
-                            ),
-                            action_authorized=carry_action_authorized,
-                        )
-                        if bound:
-                            self._mission_mgr.ctx.data[
-                                "player_save_preflight_coordinator"
-                            ] = save_coordinator
+                if battle_started is True or (
+                    save_carry is not None
+                    and save_carry.state is CarriedEvidenceState.LAUNCH_DISPATCHED
+                ):
+                    self._bind_started_battle_player_save_preflight(
+                        battle_started=battle_started is True,
+                        stable_running=(
+                            str(detection.get("state") or "").upper()
+                            == "RUNNING"
+                        ),
+                    )
                 self._complete_ready_attachment_after_adoption()
                 continuity_pending = False
                 activity_continuity = getattr(
@@ -10634,6 +10755,40 @@ class App:
                 retry_scope = start_retry_activity_scope()
                 if isinstance(retry_scope, Mapping):
                     self._accept_pending_terminal_history_handoff()
+                    run_binding = (
+                        terminal_battle_context.get("run_binding")
+                        if isinstance(terminal_battle_context, Mapping)
+                        else None
+                    )
+                    source_scope_id = (
+                        str(run_binding.get("activity_scope_run_id") or "")
+                        if isinstance(run_binding, Mapping)
+                        and run_binding.get("status") == "bound"
+                        else ""
+                    )
+                    staged_retry_save = False
+                    if not manual_return and source_scope_id:
+                        staged_retry_save = (
+                            self._stage_direct_retry_player_save_preflight(
+                                terminal_acquisition,
+                                source_activity_scope_id=source_scope_id,
+                                retry_scope=retry_scope,
+                            )
+                        )
+                    if not staged_retry_save:
+                        coordinator = getattr(
+                            self,
+                            "_player_save_preflight_coordinator",
+                            None,
+                        )
+                        if coordinator is not None:
+                            coordinator.discard_carry(
+                                "direct_retry_source_boundary_unverified"
+                            )
+                        self._mission_mgr.ctx.data.pop(
+                            "player_save_preflight_coordinator",
+                            None,
+                        )
 
             terminal_acquisition = None
             if save_backed_manual_return:
@@ -11309,7 +11464,7 @@ class App:
                     carry is not None
                     and carry.state is CarriedEvidenceState.PENDING_LAUNCH
                 ):
-                    coordinator.invalidate(
+                    coordinator.discard_carry(
                         "home_launch_authority_changed_during_preflight"
                     )
                 return False
@@ -11663,7 +11818,7 @@ class App:
                         CarriedEvidenceState.BOUND_RUNNING,
                     }
                 ):
-                    save_coordinator.invalidate(
+                    save_coordinator.discard_carry(
                         "unrelated_later_home_launch_boundary"
                     )
                 launch_guard_state = {"allowed": launch_authorized}
@@ -11787,9 +11942,13 @@ class App:
                             action_authorized=launch_authorized,
                             dispatched=bool(launched),
                         )
-                    else:
-                        save_coordinator.invalidate(
-                            "wait_pause_stop_or_manual_launch_boundary"
+                    elif AUTOMATION.state is RunState.PAUSED:
+                        save_coordinator.suspend_carry(
+                            "pause_requires_fresh_home_evidence"
+                        )
+                    elif AUTOMATION.state is RunState.STOPPED:
+                        save_coordinator.discard_carry(
+                            "automation_stopped_before_home_launch"
                         )
                 if not operator_workflow_only:
                     self._mission_mgr.on_home()
@@ -11802,8 +11961,12 @@ class App:
                 if (
                     save_coordinator is not None
                     and save_coordinator.carry is not None
+                    and save_coordinator.carry.state
+                    is not CarriedEvidenceState.PENDING_LAUNCH
                 ):
-                    save_coordinator.invalidate("home_handler_disabled")
+                    save_coordinator.discard_carry(
+                        "home_handler_disabled_after_launch"
+                    )
 
         if (
             "AD_GEMS_AVAILABLE" in overlays

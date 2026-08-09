@@ -202,23 +202,37 @@ facts do not map rarity, levels, stars, effects, substats, inventory semantics,
 GUIDs, or private record values. Orb Distance and Damage Slider remain
 UI-authoritative.
 
-Session-only accepted decisions become typed, single-use carry for exactly the
-next runtime-owned `NEW_BATTLE` launch and its first stable `RUNNING` boundary. The
-current carry covers Auto Pick enabled `true`, a complete exact ten-ID Target
-Priority order, an exact enforced Farm Module assignment or a complete
-observation-only mapped Tournament assignment, the all-nine-primary-on
-aggregate, Spotlight-Missiles-on, Poison Swamp Stun, and exact Home sections
-needed by the later consistency check. The version-1073
-Target Priority map is `0=Closest (Default)`, `1=Basic`, `2=Fast`, `3=Tank`,
-`4=Ranged`, `5=Boss`, `6=In Spotlight`, `7=Protector`, `8=Elites`, and
-`9=Fleets`; complete membership, uniqueness, and ordered policy comparison
-remain mandatory. Runtime/preflight/activity identity, target generation,
-strategy and configuration fingerprint, action/control authority, launch dispatch, and
-first-RUNNING transition must all remain unchanged. Restart, attachment,
-unrelated Retry, manual/ambiguous launch, WAIT/Pause/Stop, target/configuration
-change, a requirement change after acquisition, a save/UI contradiction, or a
-later battle rejects every carried decision. A verified independent Home or
-in-battle configuration repair does not reject unrelated carry.
+Session-only accepted decisions become typed, single-use carry across either
+the exact next runtime-owned Home `NEW_BATTLE` launch or the exact same-process
+successor of one natural Game Over -> direct Retry transition. The current
+carry covers Cards, Workshop, Bot and Guardian selections, Free Upgrade locks,
+Modules, Auto Pick enabled `true`, a complete exact ten-ID Target Priority
+order, the all-nine-primary-on aggregate, Spotlight-Missiles-on, Poison Swamp
+Stun, and the other exact Home sections used by the later consistency check.
+The version-1073 Target Priority map is `0=Closest (Default)`, `1=Basic`,
+`2=Fast`, `3=Tank`, `4=Ranged`, `5=Boss`, `6=In Spotlight`, `7=Protector`,
+`8=Elites`, and `9=Fleets`; complete membership, uniqueness, and ordered policy
+comparison remain mandatory.
+
+Home carry requires the same runtime/preflight/activity identity, target
+generation, strategy/configuration fingerprint, exact `NEW_BATTLE` control,
+and a verified authorized dispatch. No dispatch leaves it pending. An unstable
+first `RUNNING` frame defers binding until a later stable frame from the same
+transition. Binding is observation, not input, so initialization holds and the
+`WAIT` terminal policy do not reject it. Direct Retry instead requires a typed
+complete natural Game Over acquisition naming the same runtime, predecessor
+activity scope, target, and generation, plus an inactive terminal save; it is
+staged only after the verified Retry tap creates the successor scope and needs
+no second save read.
+
+Pause still blocks every input and suspends unconsumed carry so later checks
+need fresh save or UI evidence, but it does not quarantine the underlying
+snapshot. Stop/process restart, attachment or competing workflow, manual or
+ambiguous launch, target/context/configuration change, a wrong transition, or
+a later unrelated battle discards that transition's carry. A changed
+requirement routes only that check to UI; unsupported or incomplete evidence
+already does the same. WAIT by itself does neither. A verified independent Home
+or in-battle repair likewise preserves unrelated carry.
 
 A pre-action snapshot never confirms the result of an input. The reconciliation
 plan is frozen before setup input as independent accepted matches/observations,
@@ -230,11 +244,14 @@ reclassified as save-confirmed, and is not added to save carry. Unrelated
 accepted decisions and carry survive verified Cards, Target Priority, Poison
 Swamp Stun, Damage Slider, Orb Distance, and other independent UI-only repairs.
 
-Global acquisition, serialization, freshness, version/structure, ownership,
-Home-boundary, context, control, launch/binding, and requirement-continuity
-failures still invalidate the complete snapshot. So does authoritative UI that
-contradicts a `save_match`, or UI that already matches a trusted saved mismatch
-before this coordinator repaired it. Final consistency may combine unchanged
+Acquisition, serialization, freshness, version/structure, ownership, and safe
+source-restoration failures retain their established whole-boundary block or
+all-check UI fallback. After a trusted snapshot exists, a failed transition
+binding discards applicability without claiming that the snapshot is corrupt,
+and a requirement-specific failure downgrades only that check. Authoritative
+UI that contradicts a `save_match`, or UI that already matches a trusted saved
+mismatch before this coordinator repaired it, is different: it quarantines the
+whole snapshot and fails closed. Final consistency may combine unchanged
 sections proven by accepted save evidence with repaired/inspected sections
 proven by current UI evidence. A supplied UI screen is always evaluated;
 missing screenshots are accepted only for the exact section/component carrying

@@ -150,7 +150,11 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         rejection was recorded.
       - [ ] Confirm valid Game Over → Home and Game Over → direct Retry each
         perform zero second save acquisition and zero Battle History
-        navigation.
+        navigation. On direct Retry, also confirm the same terminal bundle
+        supplies supported Cards, Workshop, Bots, Guardians, Modules, Free
+        Upgrade locks, Auto Pick, Target Priority, and Ultimate Weapon checks
+        without opening their UI; any unsupported or changed check must fall
+        back independently.
       - [ ] Confirm Tournament Results → Home reuses its valid terminal handoff
         without reacquisition.
       - [ ] Confirm one natural-terminal bundle fans out without duplicate
@@ -1009,9 +1013,7 @@ evidence.
      audited exact-record operation through the versioned API. Never add
      arbitrary path or file-deletion authority and never delete automatically.
 10. [ ] Validate the revised dashboard layout on Windows at minimum, default,
-    and maximized sizes. Based on operator use, decide whether drag-to-reorder,
-    hiding, or floating panes add enough value beyond the tabbed and
-    collapsible layout.
+    and maximized sizes.
 11. [ ] Confirm on Windows that the optional Token tooltip and Setup placement
     make clear that it is only for an explicitly authenticated adapter or
     reverse proxy and should remain blank for the normal loopback SSH tunnel.

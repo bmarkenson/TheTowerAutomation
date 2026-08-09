@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -17,6 +17,14 @@ from core.player_save_preflight import (
     PlayerSavePreflightContext,
     PlayerSavePreflightCoordinator,
     PlayerSavePreflightStatus,
+)
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    PlayerSaveBoundaryKind,
+    PlayerSaveNaturalBoundary,
+    PlayerSaveTargetBinding,
 )
 
 
@@ -113,6 +121,34 @@ def _context(*, generation: int = 1, strategy: str = "farm_t19"):
     )
 
 
+def _terminal_acquisition(
+    *,
+    source_scope: str = "activity-source",
+    runtime_session: str = "runtime-private",
+    target: str = "private-device-target",
+    generation: int = 1,
+    kind: PlayerSaveBoundaryKind = PlayerSaveBoundaryKind.GAME_OVER,
+) -> PlayerSaveAcquisitionBundle:
+    captured = datetime.fromisoformat(CAPTURED_AT)
+    return PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.NATURAL_BOUNDARY,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="stable_natural_boundary",
+        binding=PlayerSaveTargetBinding(target, generation),
+        acquisition_started_at=captured - timedelta(milliseconds=1),
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=_snapshot(),
+        boundary=PlayerSaveNaturalBoundary(
+            kind=kind,
+            observed_at=captured,
+            runtime_session_id=runtime_session,
+            activity_scope_id=source_scope,
+        ),
+    )
+
+
 def _coordinator(
     monkeypatch,
     *,
@@ -200,6 +236,131 @@ def test_one_authoritative_snapshot_reconciles_all_checks(monkeypatch):
     assert result.provenance["save_version"] == {"data": 9, "game": 1073}
 
 
+def test_natural_game_over_save_binds_only_to_exact_retry_successor(monkeypatch):
+    successor = replace(_context(), activity_scope_id="activity-retry")
+    coordinator = _coordinator(monkeypatch, context_fn=lambda: successor)
+
+    result = coordinator.stage_direct_retry(
+        _terminal_acquisition(),
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        source_activity_scope_id="activity-source",
+    )
+
+    assert result.ready
+    assert result.reason == "direct_retry_save_reconciled"
+    assert result.accepted_checks == ("auto_pick_perks", "cards_deck")
+    assert result.carry is coordinator.carry
+    assert result.carry is not None
+    assert result.carry.state is CarriedEvidenceState.LAUNCH_DISPATCHED
+    assert result.carry.launch_kind == "game_over_direct_retry"
+    assert not coordinator.bind_running(
+        battle_started=True,
+        stable_running=False,
+        continuity_verified=True,
+    )
+    assert coordinator.bind_running(
+        battle_started=False,
+        stable_running=True,
+        continuity_verified=True,
+    )
+    assert coordinator.consume("auto_pick_perks") is True
+
+
+@pytest.mark.parametrize(
+    "acquisition",
+    [
+        _terminal_acquisition(runtime_session="different-runtime"),
+        _terminal_acquisition(source_scope="different-source"),
+        _terminal_acquisition(target="different-target"),
+        _terminal_acquisition(generation=2),
+        _terminal_acquisition(kind=PlayerSaveBoundaryKind.TOURNAMENT_RESULTS),
+    ],
+)
+def test_direct_retry_binding_change_uses_ui_without_blocking_route(
+    monkeypatch,
+    acquisition,
+):
+    successor = replace(_context(), activity_scope_id="activity-retry")
+    coordinator = _coordinator(monkeypatch, context_fn=lambda: successor)
+
+    result = coordinator.stage_direct_retry(
+        acquisition,
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        source_activity_scope_id="activity-source",
+    )
+
+    assert result.ready
+    assert result.reason == "direct_retry_binding_unverified"
+    assert result.carry is None
+    assert result.ui_required_checks == ("auto_pick_perks", "cards_deck")
+
+
+def test_direct_retry_requires_a_distinct_successor_scope(monkeypatch):
+    same_scope = replace(_context(), activity_scope_id="activity-source")
+    coordinator = _coordinator(monkeypatch, context_fn=lambda: same_scope)
+
+    result = coordinator.stage_direct_retry(
+        _terminal_acquisition(),
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        source_activity_scope_id="activity-source",
+    )
+
+    assert result.ready
+    assert result.reason == "direct_retry_binding_unverified"
+    assert result.carry is None
+    assert result.ui_required_checks == ("auto_pick_perks", "cards_deck")
+
+
+def test_direct_retry_active_round_projection_uses_ui_without_blocking_route(
+    monkeypatch,
+):
+    acquisition = _terminal_acquisition()
+    active_runtime = SimpleNamespace(round_active=True)
+    acquisition = replace(
+        acquisition,
+        snapshot=replace(acquisition.snapshot, runtime_save=active_runtime),
+    )
+    successor = replace(_context(), activity_scope_id="activity-retry")
+    coordinator = _coordinator(monkeypatch, context_fn=lambda: successor)
+
+    result = coordinator.stage_direct_retry(
+        acquisition,
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        source_activity_scope_id="activity-source",
+    )
+
+    assert result.ready
+    assert result.reason == "direct_retry_binding_unverified"
+    assert result.carry is None
+    assert result.ui_required_checks == ("auto_pick_perks", "cards_deck")
+
+
+def test_requirement_fallback_preserves_unrelated_carried_check(monkeypatch):
+    coordinator = _coordinator(monkeypatch)
+    carry = coordinator.acquire(
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        initial_frame=object(),
+    ).carry
+    assert carry is not None
+    coordinator.fallback_checks(
+        "cards_requirement_changed",
+        check_ids=("cards_deck",),
+    )
+    assert carry.values == {"auto_pick_perks": True}
+    assert coordinator.decision("cards_deck")["disposition"] == "ui_required"
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert coordinator.bind_running(
+        battle_started=True,
+        stable_running=True,
+        continuity_verified=True,
+    )
+    assert coordinator.consume("auto_pick_perks") is True
+
+
 def test_trusted_mismatch_queues_ui_without_erasing_unrelated_carry(monkeypatch):
     coordinator = _coordinator(monkeypatch)
 
@@ -231,7 +392,7 @@ def test_trusted_mismatch_queues_ui_without_erasing_unrelated_carry(monkeypatch)
     assert coordinator.bind_running(
         battle_started=True,
         stable_running=True,
-        action_authorized=True,
+        continuity_verified=True,
     )
     assert coordinator.consume("auto_pick_perks") is True
 
@@ -323,7 +484,7 @@ def test_observation_only_modules_are_accepted_and_carried(monkeypatch):
     assert coordinator.bind_running(
         battle_started=True,
         stable_running=True,
-        action_authorized=True,
+        continuity_verified=True,
     )
     assert coordinator.consume("modules") == observed
 
@@ -711,7 +872,7 @@ def test_carry_is_single_use_and_rejects_context_change(monkeypatch):
     assert coordinator.bind_running(
         battle_started=True,
         stable_running=True,
-        action_authorized=True,
+        continuity_verified=True,
     )
     assert coordinator.consume("auto_pick_perks") is True
     assert coordinator.consume("auto_pick_perks") is None
@@ -735,20 +896,11 @@ def test_carry_is_single_use_and_rejects_context_change(monkeypatch):
             None,
         ),
         (
-            "wait_pause_stop_interruption",
+            "dispatched_without_action_authority",
             {
                 "control": HomeBattleControl.NEW_BATTLE,
                 "action_authorized": False,
                 "dispatched": True,
-            },
-            None,
-        ),
-        (
-            "ambiguous_launch",
-            {
-                "control": HomeBattleControl.NEW_BATTLE,
-                "action_authorized": True,
-                "dispatched": False,
             },
             None,
         ),
@@ -758,20 +910,7 @@ def test_carry_is_single_use_and_rejects_context_change(monkeypatch):
             {
                 "battle_started": True,
                 "stable_running": True,
-                "action_authorized": True,
-            },
-        ),
-        (
-            "unstable_first_running_boundary",
-            {
-                "control": HomeBattleControl.NEW_BATTLE,
-                "action_authorized": True,
-                "dispatched": True,
-            },
-            {
-                "battle_started": True,
-                "stable_running": False,
-                "action_authorized": True,
+                "continuity_verified": True,
             },
         ),
     ],
@@ -797,6 +936,70 @@ def test_carry_rejects_non_owned_launch_transitions(
         assert not coordinator.bind_running(**bind_kwargs), scenario
 
     assert carry.state is CarriedEvidenceState.INVALIDATED
+
+
+def test_no_dispatch_remains_pending_for_a_later_verified_tap(monkeypatch):
+    coordinator = _coordinator(monkeypatch)
+    carry = coordinator.acquire(
+        {"auto_pick_perks": True},
+        initial_frame=object(),
+    ).carry
+    assert carry is not None
+
+    assert not coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=False,
+    )
+    assert carry.state is CarriedEvidenceState.PENDING_LAUNCH
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+
+
+def test_pause_suspends_carry_without_quarantining_snapshot(monkeypatch):
+    coordinator = _coordinator(monkeypatch)
+    carry = coordinator.acquire(
+        {"auto_pick_perks": True},
+        initial_frame=object(),
+    ).carry
+    assert carry is not None
+
+    coordinator.suspend_carry("pause_requires_fresh_running_evidence")
+
+    assert carry.state is CarriedEvidenceState.SUSPENDED
+    assert carry.values == {"auto_pick_perks": True}
+    assert not coordinator.snapshot_invalidated
+    assert coordinator.consume("auto_pick_perks") is None
+
+
+def test_unstable_first_running_frame_defers_until_stable(monkeypatch):
+    coordinator = _coordinator(monkeypatch)
+    carry = coordinator.acquire(
+        {"auto_pick_perks": True},
+        initial_frame=object(),
+    ).carry
+    assert carry is not None
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+
+    assert not coordinator.bind_running(
+        battle_started=True,
+        stable_running=False,
+        continuity_verified=True,
+    )
+    assert carry.state is CarriedEvidenceState.LAUNCH_DISPATCHED
+    assert coordinator.bind_running(
+        battle_started=False,
+        stable_running=True,
+        continuity_verified=True,
+    )
+    assert carry.state is CarriedEvidenceState.BOUND_RUNNING
 
 
 @pytest.mark.parametrize(

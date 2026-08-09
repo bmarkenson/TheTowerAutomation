@@ -718,8 +718,9 @@ with PID, average/maximum utilization, and memory. Collection uses one
 persistent native Windows PDH query with reusable buffers; names reuse the
 existing ten-second process discovery. Missing counters display as unavailable.
 GPU temperature and clocks are not collected because the corresponding sensor
-interfaces are vendor-specific. PresentMon frame telemetry remains a separate
-future opt-in provider.
+interfaces are vendor-specific. Continuous frame telemetry is not a planned
+control-surface provider; use a bounded, issue-specific diagnostic trace only
+when the retained counters cannot answer a concrete performance anomaly.
 
 The compact **Pause sampling** control remains visible in the health strip at
 the window's minimum supported size. Pausing flushes the current partial
