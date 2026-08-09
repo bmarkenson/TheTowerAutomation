@@ -481,8 +481,20 @@ def execute_actions(
                     log_mission(f"[EXEC] Skip target_priority_ensure while state={last_state}", "DEBUG")
                     continue
                 expected_order = act.get("order")
+                attachment_context = bool(
+                    ctx is not None
+                    and (
+                        ctx.data.get("startup_gates_deferred") is True
+                        or ctx.data.get("manual_return_reconciliation_active")
+                        is True
+                    )
+                )
                 save_coordinator = (
-                    ctx.data.get("player_save_preflight_coordinator")
+                    ctx.data.get(
+                        "player_save_attachment_evidence"
+                        if attachment_context
+                        else "player_save_preflight_coordinator"
+                    )
                     if ctx is not None
                     else None
                 )
@@ -644,13 +656,11 @@ def execute_actions(
                 manual_return_context = bool(
                     ctx.data.get("manual_return_reconciliation_active") is True
                 )
-                attached_route = bool(
-                    (
-                        act.get("stay_in_battle_when_attached") is True
-                        and attached_context
-                    )
-                    or manual_return_context
-                )
+                # A process attachment never owns a current-battle teardown or
+                # Home repair.  Its save-first pass stays in the battle for
+                # every strategy; the action flag remains a source-level
+                # declaration rather than an authority grant.
+                attached_route = bool(attached_context or manual_return_context)
                 if mv is not None:
                     save_coordinator = (
                         ctx.data.get("player_save_attachment_evidence")
@@ -719,8 +729,15 @@ def execute_actions(
                     )
                     completion = "[SESSION_PREFLIGHT] Session validation completed"
                     if variation_summary:
+                        variation_kind = (
+                            "immutable attachment mismatch reported"
+                            if evidence_payload.get(
+                                "reported_attachment_mismatches"
+                            )
+                            else "module variation observed"
+                        )
                         completion += (
-                            "; module variation observed — " + variation_summary
+                            f"; {variation_kind} — " + variation_summary
                         )
                     log_mission(completion, "INFO")
                     log_mission(
@@ -734,7 +751,8 @@ def execute_actions(
                     ).strip().lower()
                     observation_only = mismatch_policy == "notify"
                     home_repair_available = bool(
-                        result.evidence is not None
+                        not attached_route
+                        and result.evidence is not None
                         and getattr(
                             result.evidence,
                             "requires_no_battle_repair",

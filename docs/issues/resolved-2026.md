@@ -8,6 +8,171 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Reattached battle stalled on the terminal View Perks opener
+
+**Stable ID:** `ISSUE-2026-036` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 after automation restarted and attached to an
+  already-running Tier 19 battle whose Perk choices were exhausted.
+- **Symptom:** Attached-session preflight needed to verify Auto Pick Perks from
+  the UI because it had no reusable current-battle evidence for that check.
+  The top-bar control had changed from numeric Perk progress to `View Perks`,
+  so `navigation.open_perks` repeatedly failed its 0.90 safe-tap match and the
+  exclusive preflight could not advance. The failed match sent no input.
+- **Evidence:** The action log placed process exit, restart, battle attachment,
+  strategy adoption, and preflight in that order. A bounded exact-target frame
+  retained as `test/fixtures/open_perks_complete_20260809.png` showed the
+  terminal control. Its former template scored about 0.59, while save-backed
+  observations showed the active battle and completed Perk progression were
+  otherwise healthy.
+- **Safety response:** Diagnosis used read-only runtime evidence and one bounded
+  exact-target capture. No Pause change, navigation, Exit, Surrender, battle
+  transition, restart, or other device input was sent for the repair.
+- **Cause:** The safe-tap template covered the numeric-progress form of the
+  in-battle Perks opener but not its terminal `View Perks` form. Reattachment
+  correctly invokes exclusive session preflight; the defect was the incomplete
+  target authority used by that preflight, not ordinary mid-battle validation.
+- **Resolution:** Commit `41fc1fd` replaces the dynamic 20x70 crop with the
+  invariant 12x60 right frame of the same in-battle opener. Numeric progress
+  and terminal forms now share one target-specific match while the preflight's
+  existing `RUNNING` state guard remains in force.
+- **Regression:** `test/test_tap_safety.py` requires the opener to match an
+  ordinary active-wave frame, a dynamic-progress frame, and the terminal
+  retained frame. It also requires rejection of Home and the pre-battle Perks
+  configuration screen.
+- **Validation:** Both label-compatible grayscale/zero-padding and detector
+  color/default-padding probes accepted all three positive frames above 0.90
+  and rejected both non-battle frames below 0.90. After merging the later
+  weekly-chest promotions, the combined Perks, preflight, timeline, mission,
+  and initialization slice passed 288 tests. The exact merged candidate's
+  supported checkpoint passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,065 tests in 347.55 seconds.
+- **Fixed by:** `41fc1fd`.
+
+### Weekly Mission collector rewound an already-claimed track
+
+**Stable ID:** `ISSUE-2026-035` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 the operator reported that the mission collector
+  returned to the start of the weekly chest bar even though the visible earlier
+  milestones already showed collection checkmarks.
+- **Symptom:** When no glowing weekly chest was present in the entry frame, the
+  handler restarted a bounded left-to-right traversal. This also happened on a
+  post-claim recheck and on later badge probes whose unchanged weekly progress
+  had already been reviewed.
+- **Evidence:** Static inspection found that
+  `_find_weekly_mission_chest()` recognized only the claimable chest template
+  before unconditionally calling `scroll_to_edge()`. The retained claimed
+  `20/35` frame contains four distinct checkmarks and no claim target; its
+  paired claimable frame has the same progress, three checks, and the glowing
+  fourth chest. Historical production logs from 2026-08-07 show an offscreen
+  chest found after a complete left-to-right scan and then a six-swipe rewind
+  and repeat traversal immediately after that chest was claimed. A rollout
+  observation on 2026-08-09 exposed the other important case: the unchanged
+  `35/35` track reopened at its right edge with visible claimed milestones
+  `(15, 20, 25, 30, 35)` and repeated the same six gestures.
+- **Safety response:** A shifted sequence ending at `35` was not treated as
+  proof about hidden earlier milestones. The collector retains its bounded full
+  traversal on the first ambiguous view and records reusable coverage only
+  after reaching both edges without finding a claim target. Visible targets
+  still win before every shortcut.
+- **Cause:** The earlier offscreen-chest repair was intentionally stateless. It
+  had neither milestone-label evidence to distinguish a real prefix beginning
+  at `5`, nor route-local knowledge that the current claim loop had just scanned
+  everything to the left, nor cycle-scoped knowledge that unchanged unlocked
+  progress had already received a complete review.
+- **Resolution:** Commit `3747659` added authoritative `completed N/35` OCR and
+  distinct-check counting for the fully visible all-claimed case. Commit
+  `7707b69` OCRs the milestone under every visible check and searches right
+  immediately only for an exact contiguous prefix `(5, 10, ...)`; gaps,
+  shifted windows, incomplete OCR, and low confidence still normalize first.
+  Commit `c43293d` carries explicit left-search coverage through the current
+  claim loop and retains a completed whole-track review in process for the same
+  unlocked-chest count and Monday-00:00-UTC cycle. A visible claim, a changed
+  unlock count, a weekly reset, uncertain progress, failure to prove the left
+  edge, or anything other than a confirmed right-edge miss invalidates or
+  bypasses the retained review.
+- **Regression:** `test/test_mission_reward_handler.py` exercises retained
+  claimed, claimable, and partial-viewport frames; exact prefix acceptance;
+  shifted and gapped rejection; post-claim rightward continuation; unchanged
+  progress reuse; progress and cycle invalidation; action-guard propagation;
+  and the original offscreen discovery fallback.
+- **Validation:** The final mission/action-authority and App-focused suites
+  passed 69 and 139 tests. The complete supported checkpoint passed twice at
+  exact commit `c43293d`: compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,063 tests.
+  The first production pass from a fresh process conservatively traversed the
+  shifted `35/35` viewport once, found no target, and recorded complete coverage
+  through milestone `35` for unchanged-progress reuse. The next naturally
+  scheduled production probe observed the same progress, returned
+  `weekly_progress_already_reviewed` with zero swipes, and emitted no weekly
+  track navigation input.
+- **Deployment:** Production was fast-forwarded to `c43293d` after rollback tag
+  `production-before-20260809T190132Z-7707b69` was created. The managed runtime
+  reattached to the same active battle through save-backed continuity, passed
+  session preflight, and returned to steady state. No Windows package input
+  changed.
+- **Fixed by:** `3747659`, `7707b69`, and `c43293d`.
+
+### Perk top-bar OCR ignored the independent battle-wave observation
+
+**Stable ID:** `ISSUE-2026-034` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 during an active Tier 19 Farm battle after the
+  save-backed Perk timeline was deployed.
+- **Symptom:** The passive top-bar reader repeatedly rejected schedules such as
+  raw `3089)/773124` and `31227/°3124`, even though the independent battle wave
+  and later clean frames established the real pairs as `3089 / 3124` and
+  `3122 / 3124`. The current run accumulated 57 rejected observations and two
+  three-frame warning streaks; both streaks recovered, every schedule boundary
+  through 3124 was still recorded, and exact saved Perk picks remained valid.
+- **Evidence:** Fresh read-only preflight correlated the active PID, target,
+  acknowledgement, observation, action log, and persisted timeline. One
+  bounded exact-target capture showed clean `3133 / 3206`; the unchanged OCR
+  crop and Tesseract settings read that frame correctly. The failures were
+  therefore intermittent separator/token contamination rather than a
+  persistent geometry mismatch.
+- **Safety response:** The existing 250-wave lead guard rejected the corrupt
+  values without opening Perks or sending input. Diagnosis sent no Pause,
+  restart, navigation, Exit, or Surrender action, and production was not
+  changed.
+- **Cause:** The observer already received the separately detected battle wave
+  but used it only as recorded metadata. Schedule validity and transition
+  gating still trusted the top bar's OCR current-wave token. The animated
+  separator could also join one or two extra leading digits to the OCR
+  next-wave token.
+- **Resolution:** Commit `105fd78` makes the independent battle wave the
+  current-wave authority for numeric top-bar schedules. It prefers the full OCR
+  next-wave token, then permits only the longest minimally trimmed suffix after
+  removing at most two leading artifact digits when that suffix satisfies the
+  same 250-wave lead. Split, substituted, trailing, more heavily prefixed, or
+  still-implausible values remain invalid read-only retries. Two stable
+  observations are still required, and save-backed Perk identity, ordering,
+  levels, and pick waves are unchanged.
+- **Regression:** `test/test_perk_timeline.py` covers the reported prefixed
+  next-wave form, contaminated current-wave form, a schedule already passed by
+  the independent wave, unreconciled parsing, and persistent irrecoverable
+  retry behavior.
+- **Validation:** The focused Perk timeline suite passed 43 tests. After
+  merging current `develop`, the combined Perk/save/terminal/run-initialization
+  slice passed 222 tests, and the supported checkpoint passed compilation,
+  state-definition validation, clickmap integrity with zero errors and the
+  established 44 orphan candidates, and all 2,056 tests. The exact integrated
+  production candidate `a98ec0f` repeated that checkpoint in 352.31 seconds.
+- **Deployment:** Production advanced from `dd51aa2` behind rollback tag
+  `production-before-20260809T171630Z-dd51aa2` to exact candidate `a98ec0f`.
+  Automation stopped cleanly after its in-flight mission-reward route reached
+  a result, then replacement PID `376160` acquired the `localhost:5555` lock.
+  Save-backed attachment confirmed the same active Tier 19 battle, the runtime
+  explicitly adopted `farm_t19_ad_assist`, and its exclusive session preflight
+  completed with active requirements valid and no Strategy Action Gate. A
+  fresh unpaused `RUNNING` heartbeat at wave 3292 established steady state.
+  No Surrender, Game Over, in-game Home, Retry, or new battle was issued. This
+  source-only change had no Windows package input, so native publication was
+  neither required nor performed.
+- **Fixed by:** `105fd78`.
+
 ### Perk repair trusted transient Ban reads and local viewport edges
 
 **Stable ID:** `ISSUE-2026-033` · **Lifecycle:** `resolved`

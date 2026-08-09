@@ -39,6 +39,91 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 weekly-chest scan coverage reuse
+
+- Commits `3747659`, `7707b69`, and `c43293d` remove redundant weekly-track
+  rewinds in three evidence-backed cases: all unlocked checks are visible, an
+  exact OCRed claimed prefix begins at milestone `5`, or the current route has
+  already completed the left-side search. A whole-track miss is also retained
+  in process for later probes at the same unlock level and UTC weekly cycle.
+- A claim target is always checked first. Shifted or gapped check sequences,
+  incomplete or low-confidence OCR, changed progress, a weekly reset, a claim,
+  an unproved left edge, and an incomplete right search all invalidate or bypass
+  reuse and preserve the bounded normalize-and-search fallback.
+- Retained image and mocked state regressions cover the visual cases,
+  post-claim continuation, repeated-probe reuse, progress/reset invalidation,
+  action authority, and the original offscreen discovery path. Focused suites
+  passed 69 and 139 tests; two complete checkpoints at final runtime commit
+  `c43293d` each passed all 2,063 tests, compilation, state definitions, and
+  clickmap integrity with zero errors and the established 44 orphan notices.
+- Production was tagged at `7707b69`, fast-forwarded to `c43293d`, save-attached
+  to the same active battle, and returned to steady state after session
+  preflight. Its first fresh-process mission pass performed the one required
+  conservative traversal of the shifted `35/35` viewport and retained complete
+  coverage through milestone `35`. The next naturally scheduled probe reused
+  that coverage with `weekly_progress_already_reviewed`, zero swipes, and no
+  weekly-track navigation input. Incident history is recorded in
+  [`ISSUE-2026-035`](../issues/resolved-2026.md#weekly-mission-collector-rewound-an-already-claimed-track).
+
+### 2026-08-09 completed-state Perks opener
+
+- Commit `41fc1fd` teaches `navigation.open_perks` to recognize the completed
+  solid `View Perks` state as well as the numeric in-progress state by using the
+  stable outer frame border. This unblocks the Auto Pick Perks check when an
+  attached-session preflight has no reusable current-battle evidence; it does
+  not add periodic mid-battle preflight.
+- The retained completed-state frame scores above `0.999`, and historical
+  numeric-progress positives remain above `0.993`. Home and the pre-battle
+  Perks configuration screen are explicit negative regressions preserving the
+  0.90 safe-tap boundary; retained Daily Missions and Game Over frames also
+  remain below threshold.
+- Focused navigation and tap-safety coverage passed 85 tests, and the complete
+  checkpoint passed all 2,059 tests. Two later post-deployment attachment
+  preflights verified the completed-state opener before guarded input and
+  completed successfully. After merging the later weekly-chest promotions,
+  the combined Perks/preflight/timeline/mission slice passed 288 tests and the
+  exact merged candidate passed all 2,065 tests in 347.55 seconds, compilation,
+  state definitions, and clickmap integrity with zero errors. The defect and
+  follow-up validation are recorded in
+  [`ISSUE-2026-036`](../issues/resolved-2026.md#reattached-battle-stalled-on-the-terminal-view-perks-opener).
+
+### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
+
+- Commit `105fd78` makes the independent battle-wave observation authoritative
+  for the top bar's current wave. A full OCR next-wave token must remain within
+  the existing 250-wave lead; if separator noise prefixes one or two digits,
+  only the longest minimally trimmed suffix satisfying the same bound is
+  accepted. Split, substituted, trailing, more heavily prefixed, and otherwise
+  implausible values remain read-only retries, and two stable observations are
+  still required.
+- The change repairs the retained `3089)/773124` and `31227/°3124` patterns
+  without changing save-backed Perk identity, ordering, level, or exact saved
+  pick-wave authority. It also rejects a top-bar schedule whose displayed next
+  wave has already been passed by the independent observation.
+- The focused timeline suite passed 43 tests. After merging current `develop`,
+  the combined Perk/save/terminal/run-initialization slice passed 222 tests,
+  and the supported checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and all 2,056 tests. The exact integrated candidate `a98ec0f` repeated that
+  checkpoint in 352.31 seconds. Diagnosis used one bounded read-only capture;
+  no production action was taken during diagnosis. The current contract is
+  documented in the
+  [player-save architecture](../architecture/player_save.md#temporal-classes-and-merge-rules),
+  with the incident evidence in
+  [`ISSUE-2026-034`](../issues/resolved-2026.md#perk-top-bar-ocr-ignored-the-independent-battle-wave-observation).
+- Production advanced from `dd51aa2` behind rollback tag
+  `production-before-20260809T171630Z-dd51aa2` to exact candidate `a98ec0f`.
+  The existing automation owner stopped cleanly after an in-flight guarded
+  mission-reward route completed. Replacement PID `376160` acquired the
+  `localhost:5555` lock and completed save-backed same-battle attachment.
+- The replacement explicitly adopted `farm_t19_ad_assist`; its exclusive
+  session preflight verified the active requirements, returned to steady state,
+  and produced a fresh unpaused `RUNNING` heartbeat at wave 3292 with no
+  Strategy Action Gate. No Surrender, Game Over, in-game Home, Retry, or new
+  battle was issued. The five-file source/test/documentation delta contained no
+  Windows package input, so native publication was neither required nor
+  performed.
+
 ### 2026-08-09 same-ID Strategy revision reload
 
 - Commit `e5ef4e6` makes a fresh Strategy request compare the complete latest

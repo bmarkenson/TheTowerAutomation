@@ -742,7 +742,7 @@ same-round projection can still prove the positive prefix already serialized.
 | Temporal class | Current examples | Required interpretation |
 | --- | --- | --- |
 | `current_configuration` | A mapped Home configuration check | Requires `forced_serialization`; it says nothing about a later input. |
-| `round_invariant` | Workshop preset, equipped Guardians, selected Bot preset, and equipped Modules | Once exact mapping and round binding prove the value belonged to the round, it applies to the whole round. Bot progression or medal-funded upgrades are separate point-in-time facts. |
+| `round_invariant` | Workshop preset, Free Upgrade locks, equipped Guardians, selected Bot preset, equipped Modules, and Perk Auto Pick order | Once exact mapping and round binding prove the value belonged to the round, it applies to the whole round. Bot progression or medal-funded upgrades are separate point-in-time facts. |
 | `point_in_time` | Cards preset and Cards at an active attachment | Describes only the acquisition boundary. Different later evidence may represent a legal change rather than a contradiction. |
 | `monotonic_round_prefix` | Ordered saved Perk picks and their saved waves | Every published pick is historical positive evidence. A passive checkpoint cannot prove that no later pick exists. |
 | `terminal_final` | Causally attached Battle History / More Stats fields | Requires a bound natural terminal and a valid append or capped rollover. |
@@ -769,28 +769,42 @@ exact mapping, target-generation fingerprint, scope fingerprint, round
 fingerprint, capture boundary, and temporal class without retaining the raw
 target or scope identifier.
 
-No Strategy treats Workshop preset, equipped Guardians, selected Bot preset,
-and equipped Modules as sticky round-invariant facts. Identical observations
-merge, but a differing complete save value or authoritative complete preset UI
-observation marks that field unavailable for the round; a later value cannot
-restore it. Partial Guardian or Module UI evidence cannot replace a complete
-save claim. Cards retain their point-in-time boundary and may legally differ at
-a later capture. Bot progression is neither projected into nor compared with
-the selected Bot preset. The resulting facts populate the existing
+No Strategy treats Workshop preset, Free Upgrade locks, equipped Guardians,
+selected Bot preset, equipped Modules, and Perk Auto Pick order as sticky
+round-invariant facts. Identical observations merge, but a differing complete
+save value or authoritative complete preset UI observation marks that field
+unavailable for the round; a later value cannot restore it. Partial Guardian or
+Module UI evidence cannot replace a complete save claim. Cards retain their
+point-in-time boundary and may legally differ at a later capture. Bot
+progression is neither projected into nor compared with the selected Bot
+preset. The resulting facts populate the existing
 `observed_run_configuration` actual loadout, never configured intent.
 
-The same typed attachment object supplies Tournament's in-battle preflight
-with Workshop, selected Bot preset, equipped Guardians, and equipped Modules.
-Its one-use consumer accepts only round-invariant facts and rechecks process,
-target generation, activity scope, and active-battle ownership at every
-consumption. Exact Workshop, Bot, and Guardian matches omit their redundant UI
-sections. Complete Modules omit UI for an enforced match or an
-observation-only assignment; a mapped observation-only variation remains
-reported rather than becoming repair authority. Missing, mismatched, or
-rebound Bot, Guardian, or enforced Module evidence retains the established UI
-check, while unresolved Workshop preserves the explicit Home-only deferral.
-Cards and current-configuration facts remain ineligible. No path adds a
-game-Home route, another Android lifecycle action, or another save read.
+The same typed attachment object supplies configured in-battle preflight with
+every complete projected fact, including Cards, Workshop, Free Upgrade locks,
+selected Bot preset, equipped Guardians and Modules, Auto Pick, Card Recharge,
+Perk configuration, Target Priority, and the supported Ultimate Weapon
+components. Its one-use consumer rechecks process, target generation, activity
+scope, and active-battle ownership at every consumption. A forced attachment
+save is authoritative current evidence for all of those facts at its exact
+capture boundary; temporal class controls what a mismatch means rather than
+whether the fact may be consumed.
+
+An exact match omits that check's redundant UI. Missing, incomplete,
+unsupported, unparseable, or rebound evidence retains the supported per-field
+UI fallback. A field with no current-battle UI route remains explicitly
+deferred or unavailable, while unresolved Workshop preserves its Home-only
+deferral. A
+complete saved mismatch never opens UI merely to confirm the save. Workshop,
+Free Upgrade locks, selected Bot preset, equipped Guardians, equipped Modules,
+and Perk Auto Pick order retain their round-invariant class: a mismatch is
+recorded and reported but is nonblocking because it cannot be repaired for the
+active battle. A fully observed UI fallback mismatch for one of those fields
+has the same result. Point-in-time and current-configuration mismatches use an
+available guarded in-battle repair or the strategy mismatch policy. Every
+source and disposition remains explicit in session evidence. No attachment
+path adds game-Home repair, another Android lifecycle action, another save
+read, or Surrender authority.
 
 The normal Perk monitor consumes the same forced-attachment bundle, scheduled
 `passive_stable_read` bundles, and the lifecycle-issued natural terminal
@@ -804,13 +818,18 @@ collector remains neither an acquisition service nor an authority source.
 The run timeline is now a consumer of that monitor rather than a second Perks
 UI observer. Stable top-bar schedule or `View Perks` transitions request one
 coalesced `passive_stable_read`; they do not require or request forced
-serialization and grant no input authority. The worker retains a detached
-exact prefix under the monitor lock, and App applies it to the persisted
-same-scope timeline on the serialized main thread. Attachment's already-owned
-forced bundle seeds the same path without reacquisition. Every timeline row
-therefore carries the save's exact oldest-first sequence, pick wave, semantic
-ID/key, and level-after. A pending visual boundary means only that no later
-positive prefix has yet serialized; it is never evidence of absence.
+serialization and grant no input authority. Numeric schedule observations use
+the independently detected battle wave as their current-wave anchor. The full
+OCR next-wave token must satisfy the bounded schedule lead; otherwise only the
+longest suffix produced by removing at most two leading separator-artifact
+digits may qualify. Split, substituted, trailing, or still-implausible OCR
+remains an invalid read-only retry. The worker retains a detached exact prefix
+under the monitor lock, and App applies it to the persisted same-scope timeline
+on the serialized main thread. Attachment's already-owned forced bundle seeds
+the same path without reacquisition. Every timeline row therefore carries the
+save's exact oldest-first sequence, pick wave, semantic ID/key, and level-after.
+A pending visual boundary means only that no later positive prefix has yet
+serialized; it is never evidence of absence.
 
 Each complete active Perk projection is bound to the exact process session,
 activity scope, target generation, mapping, and active-round identity. An

@@ -25,9 +25,11 @@ def test_attachment_facts_have_separate_temporal_classes():
     observations = running_attachment_observations(
         {
             "workshop_preset": "Tourney",
+            "free_upgrade_locks": ["Shockwave Size"],
             "guardian_chips": ["Fetch", "Scout"],
             "bots_preset": "Farm",
             "modules": {"cannon_primary": "Amplifying Strike"},
+            "perk_auto_pick_order": ["game_speed", "damage"],
             "cards_deck": "Farm",
             "bots_progression": {"medals_spent": 42},
         }
@@ -38,15 +40,17 @@ def test_attachment_facts_have_separate_temporal_classes():
     }
     assert classes == {
         "workshop_preset": PlayerSaveTemporalClass.ROUND_INVARIANT,
+        "free_upgrade_locks": PlayerSaveTemporalClass.ROUND_INVARIANT,
         "guardian_chips": PlayerSaveTemporalClass.ROUND_INVARIANT,
         "bots_preset": PlayerSaveTemporalClass.ROUND_INVARIANT,
         "modules": PlayerSaveTemporalClass.ROUND_INVARIANT,
+        "perk_auto_pick_order": PlayerSaveTemporalClass.ROUND_INVARIANT,
         "cards_deck": PlayerSaveTemporalClass.POINT_IN_TIME,
         "bots_progression": PlayerSaveTemporalClass.CURRENT_CONFIGURATION,
     }
 
 
-def test_bound_consumer_is_one_use_and_round_invariant_only():
+def test_bound_consumer_accepts_every_exact_bound_class_once():
     observations = running_attachment_observations(
         {
             "workshop_preset": "Tourney",
@@ -55,7 +59,13 @@ def test_bound_consumer_is_one_use_and_round_invariant_only():
     )
     evidence = BoundRunningAttachmentSaveEvidence(observations, _context)
 
+    assert evidence.temporal_class("cards_deck") is (
+        PlayerSaveTemporalClass.POINT_IN_TIME
+    )
+    assert not evidence.mismatch_is_report_only("cards_deck")
+    assert evidence.consume("cards_deck") == "Farm"
     assert evidence.consume("cards_deck") is None
+    assert evidence.mismatch_is_report_only("workshop_preset")
     assert evidence.consume("workshop_preset") == "Tourney"
     assert evidence.consume("workshop_preset") is None
 

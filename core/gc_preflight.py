@@ -14,6 +14,7 @@ from core.gc_module_loadout import (
     evaluate_gc_module_loadout,
     gc_module_loadout_evidence_from_dict,
 )
+from core.player_save_temporal import ROUND_INVARIANT_ATTACHMENT_CHECKS
 from core.state_detector import detect_state_and_overlays
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
@@ -30,11 +31,17 @@ Detector = Callable[[Any], Detection]
 
 _CHECK_LABELS = {
     "cards_deck": "Cards deck",
+    "card_recharge_modes": "Card recharge modes",
     "workshop_preset": "Workshop preset",
+    "free_upgrade_locks": "Free Upgrade locks",
     "bots_preset": "Bot preset",
     "guardian_chips": "Guardian Chips",
     "modules": "Modules",
     "auto_pick_perks": "Auto Pick Perks",
+    "perk_first_choice": "First Perk Choice",
+    "perk_bans": "Perk Bans",
+    "perk_auto_pick_order": "Auto Pick priority",
+    "target_priority": "Target Priority",
     "ultimate_weapons": "Ultimate Weapons",
 }
 
@@ -162,10 +169,53 @@ def summarize_gc_preflight_variations(
     *,
     max_details: int = 4,
 ) -> str:
-    """Return confident observe-mode differences from the module reference."""
+    """Return nonblocking attachment or observe-mode configuration differences."""
 
     if not isinstance(evidence, Mapping):
         return ""
+    reported = evidence.get("reported_attachment_mismatches")
+    details: list[str] = []
+    if isinstance(reported, Mapping):
+        for check_id, raw in reported.items():
+            if not isinstance(raw, Mapping):
+                continue
+            label = _CHECK_LABELS.get(
+                str(check_id),
+                str(check_id).replace("_", " ").title(),
+            )
+            expected = raw.get("expected")
+            observed = raw.get("observed")
+            if (
+                str(check_id) == "modules"
+                and isinstance(expected, Mapping)
+                and isinstance(observed, Mapping)
+            ):
+                for slot_key, expected_module in expected.items():
+                    observed_module = observed.get(slot_key)
+                    if observed_module == expected_module:
+                        continue
+                    slot_label = str(slot_key).replace("_", " ").title()
+                    details.append(
+                        f"{slot_label} module: expected {expected_module}, "
+                        f"observed {observed_module} "
+                        "(immutable in active battle)"
+                    )
+                continue
+            details.append(
+                f"{label}: expected {expected!r}, observed {observed!r} "
+                "(immutable in active battle)"
+            )
+    if details:
+        limit = max(1, int(max_details))
+        omitted = len(details) - limit
+        summary = "; ".join(details[:limit])
+        if omitted > 0:
+            summary += (
+                f"; +{omitted} more variation"
+                f"{'s' if omitted != 1 else ''}"
+            )
+        return summary
+
     modules = evidence.get("modules")
     if not isinstance(modules, Mapping):
         return ""
@@ -330,6 +380,13 @@ class GcSessionPreflightEvidence:
     )
     module_source: str = "ui"
     auto_pick_perks_source: str = "ui"
+    ultimate_weapons_source: str = "ui"
+    attachment_requirement_checks: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict
+    )
+    reported_attachment_mismatches: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict
+    )
     waivers: Mapping[str, Any] = field(default_factory=dict)
 
     def is_waived(self, check_id: str) -> bool:
@@ -343,21 +400,25 @@ class GcSessionPreflightEvidence:
         return (
             (
                 self.configuration.cards.valid
+                or "cards_deck" in self.reported_attachment_mismatches
                 or self.is_waived("cards_deck")
                 or self.is_deferred("cards_deck")
             )
             and (
                 self.configuration.workshop.valid
+                or "workshop_preset" in self.reported_attachment_mismatches
                 or self.is_waived("workshop_preset")
                 or self.is_deferred("workshop_preset")
             )
             and (
                 self.configuration.bots.valid
+                or "bots_preset" in self.reported_attachment_mismatches
                 or self.is_waived("bots_preset")
                 or self.is_deferred("bots_preset")
             )
             and (
                 self.configuration.guardians.valid
+                or "guardian_chips" in self.reported_attachment_mismatches
                 or self.is_waived("guardian_chips")
                 or self.is_deferred("guardian_chips")
             )
@@ -369,9 +430,20 @@ class GcSessionPreflightEvidence:
             return True
         if self.modules is None:
             return False
+        if "modules" in self.reported_attachment_mismatches:
+            return self.modules.fully_observed
         if self.module_mode == "observe":
             return self.modules.fully_observed
         return self.modules.valid
+
+    @property
+    def attachment_requirements_valid(self) -> bool:
+        return all(
+            check.get("blocking") is not True
+            or check.get("valid") is True
+            for check in self.attachment_requirement_checks.values()
+            if isinstance(check, Mapping)
+        )
 
     @property
     def auto_pick_perks_valid(self) -> bool:
@@ -397,6 +469,7 @@ class GcSessionPreflightEvidence:
             self.configuration_valid
             and self.modules_blocking_valid
             and self.auto_pick_perks_valid
+            and self.attachment_requirements_valid
             and (
                 self.ultimate_weapons.valid
                 or self.is_waived("ultimate_weapons")
@@ -407,10 +480,26 @@ class GcSessionPreflightEvidence:
     def failed_checks(self) -> tuple[str, ...]:
         failures = []
         for check_id, valid in (
-            ("cards_deck", self.configuration.cards.valid),
-            ("workshop_preset", self.configuration.workshop.valid),
-            ("bots_preset", self.configuration.bots.valid),
-            ("guardian_chips", self.configuration.guardians.valid),
+            (
+                "cards_deck",
+                self.configuration.cards.valid
+                or "cards_deck" in self.reported_attachment_mismatches,
+            ),
+            (
+                "workshop_preset",
+                self.configuration.workshop.valid
+                or "workshop_preset" in self.reported_attachment_mismatches,
+            ),
+            (
+                "bots_preset",
+                self.configuration.bots.valid
+                or "bots_preset" in self.reported_attachment_mismatches,
+            ),
+            (
+                "guardian_chips",
+                self.configuration.guardians.valid
+                or "guardian_chips" in self.reported_attachment_mismatches,
+            ),
             ("modules", self.modules_blocking_valid),
             ("auto_pick_perks", self.auto_pick_perks_valid),
             (
@@ -425,13 +514,30 @@ class GcSessionPreflightEvidence:
                 and not self.is_deferred(check_id)
             ):
                 failures.append(check_id)
-        return tuple(failures)
+        for check_id, check in self.attachment_requirement_checks.items():
+            if (
+                isinstance(check, Mapping)
+                and check.get("blocking") is True
+                and check.get("valid") is not True
+                and not self.is_waived(check_id)
+            ):
+                failures.append(str(check_id))
+        return tuple(dict.fromkeys(failures))
 
     @property
     def deferred_checks(self) -> tuple[str, ...]:
         checks = list(self.deferred_configuration_checks)
-        if self.free_upgrade_locks.get("status") == "unavailable_deferred":
+        if (
+            self.free_upgrade_locks.get("status") == "unavailable_deferred"
+            and "free_upgrade_locks" not in self.attachment_requirement_checks
+        ):
             checks.append("free_upgrade_locks")
+        checks.extend(
+            str(check_id)
+            for check_id, check in self.attachment_requirement_checks.items()
+            if isinstance(check, Mapping)
+            and check.get("disposition") == "unavailable_deferred"
+        )
         return tuple(dict.fromkeys(checks))
 
     @property
@@ -443,6 +549,7 @@ class GcSessionPreflightEvidence:
             or bool(
                 not self.is_waived("modules")
                 and self.module_mode == "enforce"
+                and "modules" not in self.reported_attachment_mismatches
                 and self.modules is not None
                 and self.modules.has_authoritative_mismatch
             )
@@ -485,6 +592,9 @@ class GcSessionPreflightEvidence:
             source=self.auto_pick_perks_source,
         )
         payload["ultimate_weapons"]["valid"] = self.ultimate_weapons.valid
+        payload["ultimate_weapons"]["source"] = (
+            self.ultimate_weapons_source
+        )
         payload["configuration"]["blocking_valid"] = self.configuration_valid
         payload["deferred_configuration_checks"] = list(
             self.deferred_configuration_checks
@@ -590,9 +700,11 @@ def validate_gc_preflight_screens(
     """Validate captured, save-backed, or explicitly deferred sections.
 
     A missing screen is accepted only when that exact section has explicit
-    ``save_match`` provenance or the caller explicitly marks that section as
-    deferred. A deferred section remains invalid in raw configuration evidence
-    so it cannot be mistaken for an observation. A supplied screen is always
+    authoritative save provenance or the caller explicitly marks that section
+    as deferred. A saved mismatch remains separately represented in session
+    evidence; this synthetic section only prevents a redundant UI confirmation.
+    A deferred section remains invalid in raw configuration evidence so it
+    cannot be mistaken for an observation. A supplied screen is always
     evaluated, even if save provenance or a deferral also exists, so an
     observed contradiction cannot be hidden.
     """
@@ -870,6 +982,14 @@ def validate_gc_session_preflight_screens(
     section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
     auto_pick_perks_required: bool = True,
     auto_pick_boundary_evidence: Optional[Mapping[str, Any]] = None,
+    ultimate_weapons_source: str = "ui",
+    attachment_requirement_checks: Optional[
+        Mapping[str, Mapping[str, Any]]
+    ] = None,
+    reported_attachment_mismatches: Optional[
+        Mapping[str, Mapping[str, Any]]
+    ] = None,
+    attachment_report_only_requirements: Optional[Mapping[str, Any]] = None,
     waivers: Optional[Mapping[str, Any]] = None,
     configuration_boundary_evidence: Optional[Mapping[str, Any]] = None,
     module_boundary_evidence: Optional[Mapping[str, Any]] = None,
@@ -893,7 +1013,115 @@ def validate_gc_session_preflight_screens(
             "session preflight has unsupported deferred checks: "
             + ", ".join(unsupported_deferred)
         )
-    active_accepted_sections = dict(accepted_sections or {})
+    active_accepted_sections = {
+        str(section): dict(provenance)
+        for section, provenance in (accepted_sections or {}).items()
+        if isinstance(provenance, Mapping)
+    }
+    active_attachment_checks = {
+        str(check_id): dict(check)
+        for check_id, check in (attachment_requirement_checks or {}).items()
+        if isinstance(check, Mapping)
+    }
+    active_reported_mismatches = {
+        str(check_id): dict(check)
+        for check_id, check in (reported_attachment_mismatches or {}).items()
+        if isinstance(check, Mapping)
+    }
+    active_report_only_requirements = {
+        str(check_id): expected
+        for check_id, expected in (
+            attachment_report_only_requirements or {}
+        ).items()
+    }
+    unsupported_report_only = sorted(
+        set(active_report_only_requirements)
+        - set(ROUND_INVARIANT_ATTACHMENT_CHECKS)
+    )
+    if unsupported_report_only:
+        raise ValueError(
+            "session preflight has unsupported attachment report-only checks: "
+            + ", ".join(unsupported_report_only)
+        )
+
+    attachment_disposition_contracts = {
+        "save_match": (True, False, "bound_player_save_preflight"),
+        "save_mismatch": (False, True, "bound_player_save_preflight"),
+        "save_mismatch_reported": (
+            False,
+            False,
+            "bound_player_save_preflight",
+        ),
+        "ui_mismatch_reported": (False, False, "ui_fallback"),
+        "unavailable_deferred": (None, False, "ui_fallback"),
+    }
+    for check_id, check in active_attachment_checks.items():
+        disposition = str(check.get("disposition") or "")
+        contract = attachment_disposition_contracts.get(disposition)
+        if contract is None:
+            raise ValueError(
+                f"attachment check {check_id} has unsupported disposition"
+            )
+        valid, blocking, source = contract
+        if (
+            check.get("valid") is not valid
+            or check.get("blocking") is not blocking
+            or check.get("source") != source
+        ):
+            raise ValueError(
+                f"attachment check {check_id} violates {disposition} contract"
+            )
+        if disposition in {
+            "save_mismatch_reported",
+            "ui_mismatch_reported",
+        } and (
+            check_id not in ROUND_INVARIANT_ATTACHMENT_CHECKS
+            or check.get("temporal_class") != "round_invariant"
+        ):
+            raise ValueError(
+                f"attachment check {check_id} lacks round-invariant authority"
+            )
+    for check_id, reported in active_reported_mismatches.items():
+        check = active_attachment_checks.get(check_id)
+        if (
+            check is None
+            or check.get("disposition")
+            not in {"save_mismatch_reported", "ui_mismatch_reported"}
+            or reported != check
+            or check_id not in active_report_only_requirements
+            or reported.get("expected")
+            != active_report_only_requirements[check_id]
+        ):
+            raise ValueError(
+                f"reported attachment mismatch {check_id} lacks matching evidence"
+            )
+
+    validation_accepted_sections = {
+        section: dict(provenance)
+        for section, provenance in active_accepted_sections.items()
+    }
+    section_check_ids = {
+        section: check_id
+        for check_id, section in _CONFIGURATION_CHECK_SECTIONS.items()
+    }
+    for section, provenance in validation_accepted_sections.items():
+        disposition = str(provenance.get("disposition") or "")
+        if disposition not in {"save_mismatch", "save_mismatch_reported"}:
+            continue
+        check_id = section_check_ids.get(section)
+        check = active_attachment_checks.get(str(check_id))
+        if (
+            check_id is None
+            or check is None
+            or check.get("disposition") != disposition
+            or provenance.get("source") != "bound_player_save_preflight"
+            or check.get("expected") != provenance.get("expected")
+            or check.get("observed") != provenance.get("observed")
+        ):
+            raise ValueError(
+                f"accepted attachment section {section} lacks mismatch evidence"
+            )
+        provenance["disposition"] = "save_match"
     if configuration_boundary_evidence is not None and (
         normalized_deferred_checks or active_accepted_sections
     ):
@@ -942,6 +1170,19 @@ def validate_gc_session_preflight_screens(
         free_upgrade_lock_boundary_evidence,
         waiver=active_waivers.get("free_upgrade_locks"),
     )
+    reported_locks = active_reported_mismatches.get("free_upgrade_locks")
+    if isinstance(reported_locks, Mapping):
+        free_upgrade_locks = {
+            "status": str(reported_locks["disposition"]),
+            "source": str(reported_locks["source"]),
+            "boundary": "ACTIVE_BATTLE",
+            "required": list(normalized_free_upgrade_locks),
+            "observed": reported_locks.get("observed"),
+            "checked": reported_locks.get("source") == "ui_fallback",
+            "valid": False,
+            "blocking_valid": True,
+            "reason": "active_battle_free_upgrade_locks_are_immutable",
+        }
 
     configuration = (
         gc_preflight_evidence_from_dict(configuration_boundary_evidence)
@@ -953,7 +1194,7 @@ def validate_gc_session_preflight_screens(
             guardians_screen=guardians_screen,
             detector=detector,
             section_specs=section_specs,
-            accepted_sections=active_accepted_sections,
+            accepted_sections=validation_accepted_sections,
             deferred_sections=(
                 _CONFIGURATION_CHECK_SECTIONS[check_id]
                 for check_id in normalized_deferred_checks
@@ -1014,6 +1255,54 @@ def validate_gc_session_preflight_screens(
             raise ValueError(
                 f"module policy {module_mode!r} requires screen or boundary evidence"
             )
+
+    section_results = {
+        "workshop_preset": configuration.workshop,
+        "bots_preset": configuration.bots,
+        "guardian_chips": configuration.guardians,
+    }
+    for check_id, expected in active_report_only_requirements.items():
+        if check_id in active_reported_mismatches:
+            continue
+        observed: Any = None
+        source = "ui_fallback"
+        if check_id == "modules":
+            if (
+                module_mode == "observe"
+                or modules is None
+                or not modules.fully_observed
+                or modules.valid
+            ):
+                continue
+            observed = {
+                str(slot.slot_key): slot.actual
+                for slot in modules.slots
+            }
+        else:
+            section = section_results.get(check_id)
+            if (
+                section is None
+                or section.valid
+                or section.detected_state == "DEFERRED"
+            ):
+                continue
+            observed = {
+                "detected_state": section.detected_state,
+                "detected_secondary": list(section.detected_secondary),
+                "missing_secondary": list(section.missing_secondary),
+            }
+        report = {
+            "source": source,
+            "disposition": "ui_mismatch_reported",
+            "expected": expected,
+            "observed": observed,
+            "valid": False,
+            "blocking": False,
+            "temporal_class": "round_invariant",
+        }
+        active_attachment_checks[check_id] = report
+        active_reported_mismatches[check_id] = dict(report)
+
     return GcSessionPreflightEvidence(
         configuration=configuration,
         free_upgrade_lock_requirements=normalized_free_upgrade_locks,
@@ -1030,6 +1319,9 @@ def validate_gc_session_preflight_screens(
         accepted_configuration_sections=active_accepted_sections,
         module_source=module_source,
         auto_pick_perks_source=auto_pick_source,
+        ultimate_weapons_source=str(ultimate_weapons_source or "ui"),
+        attachment_requirement_checks=active_attachment_checks,
+        reported_attachment_mismatches=active_reported_mismatches,
         waivers=active_waivers,
     )
 

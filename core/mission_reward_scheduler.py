@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -47,6 +48,62 @@ def _as_utc(now: datetime | None) -> datetime:
     if current.tzinfo is None or current.utcoffset() is None:
         raise ValueError("mission reward wall time must be timezone-aware")
     return current.astimezone(timezone.utc)
+
+
+def weekly_mission_cycle_start(now: datetime | None = None) -> datetime:
+    """Return the Monday 00:00 UTC boundary for the active weekly cycle."""
+
+    current = _as_utc(now)
+    return current.replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    ) - timedelta(days=current.weekday())
+
+
+@dataclass
+class WeeklyChestReviewState:
+    """Remember a complete weekly-chest review within one process and cycle."""
+
+    _cycle_start: datetime | None = None
+    _reviewed_unlocked_chests: int | None = None
+
+    def covers(
+        self,
+        unlocked_chests: int | None,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        if unlocked_chests is None or unlocked_chests < 0:
+            return False
+        self._refresh_cycle(now)
+        if self._reviewed_unlocked_chests == unlocked_chests:
+            return True
+        self._reviewed_unlocked_chests = None
+        return False
+
+    def mark_reviewed(
+        self,
+        unlocked_chests: int | None,
+        *,
+        now: datetime | None = None,
+    ) -> None:
+        if unlocked_chests is None or unlocked_chests < 0:
+            return
+        self._refresh_cycle(now)
+        self._reviewed_unlocked_chests = unlocked_chests
+
+    def invalidate(self) -> None:
+        """Discard retained coverage after a contradictory or successful claim."""
+
+        self._reviewed_unlocked_chests = None
+
+    def _refresh_cycle(self, now: datetime | None) -> None:
+        cycle_start = weekly_mission_cycle_start(now)
+        if cycle_start != self._cycle_start:
+            self._cycle_start = cycle_start
+            self._reviewed_unlocked_chests = None
 
 
 class MissionRewardScheduler:
@@ -101,6 +158,8 @@ __all__ = [
     "LOCAL_TIMEZONE",
     "MissionRewardScheduler",
     "PROBE_COOLDOWN_SECONDS",
+    "WeeklyChestReviewState",
     "daily_mission_claims_allowed",
     "seconds_until_daily_mission_release",
+    "weekly_mission_cycle_start",
 ]

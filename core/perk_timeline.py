@@ -52,6 +52,7 @@ PERK_PROGRESS_TEXT_REGION = (400, 25, 340, 71)
 # The largest retained real lead is 191 waves. Keep margin for future profiles
 # while rejecting separator artifacts such as ``705`` becoming ``7705``.
 MAX_PERK_SCHEDULE_LEAD_WAVES = 250
+MAX_PERK_SCHEDULE_PREFIX_ARTIFACT_DIGITS = 2
 INVALID_PROGRESS_WARNING_FRAMES = 3
 PWR_FAMILY = "perk_wave_requirement"
 BOUNDARY_COVERAGE_COMPLETE = "complete"
@@ -214,6 +215,63 @@ class PerkProgress:
         if self.status == "complete":
             return ("complete", None)
         return None
+
+
+def _reconcile_perk_progress_wave(
+    progress: PerkProgress,
+    observed_wave: Optional[int],
+) -> PerkProgress:
+    """Validate a top-bar schedule against the independent battle wave.
+
+    The animated separator can join one or two noise digits to the front of
+    the real next-wave token.  Prefer the complete OCR token, then accept only
+    the longest minimally trimmed suffix that is plausible from the separate
+    battle-wave observation.  Split, substituted, or trailing noise remains
+    invalid.
+    """
+
+    if (
+        progress.status not in {"scheduled", "invalid_schedule"}
+        or type(observed_wave) is not int
+        or observed_wave < 0
+        or type(progress.next_wave) is not int
+    ):
+        return progress
+    next_wave = progress.next_wave
+    if not _scheduled_progress_is_plausible(observed_wave, next_wave):
+        digits = str(next_wave)
+        for prefix_length in range(
+            1,
+            min(
+                MAX_PERK_SCHEDULE_PREFIX_ARTIFACT_DIGITS,
+                len(digits) - 1,
+            )
+            + 1,
+        ):
+            suffix = digits[prefix_length:]
+            if suffix.startswith("0"):
+                continue
+            candidate = int(suffix)
+            if _scheduled_progress_is_plausible(observed_wave, candidate):
+                next_wave = candidate
+                break
+    status = (
+        "scheduled"
+        if _scheduled_progress_is_plausible(observed_wave, next_wave)
+        else "invalid_schedule"
+    )
+    if (
+        progress.current_wave == observed_wave
+        and progress.next_wave == next_wave
+        and progress.status == status
+    ):
+        return progress
+    return replace(
+        progress,
+        status=status,
+        current_wave=observed_wave,
+        next_wave=next_wave,
+    )
 
 
 @dataclass(frozen=True)
@@ -1932,7 +1990,10 @@ class PerkTimelineObserver:
         self._sync_persistence_scope(restore=True)
         state = str(detection.get("state") or "UNKNOWN")
         if state == "RUNNING":
-            progress = progress_fn(screenshot)
+            progress = _reconcile_perk_progress_wave(
+                progress_fn(screenshot),
+                wave,
+            )
             self._record_progress_health(progress)
             self.tracker.observe(
                 progress,
