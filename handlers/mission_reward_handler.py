@@ -49,6 +49,10 @@ WEEKLY_MISSION_CHECKMARK_MAX_WIDTH = 115
 WEEKLY_MISSION_CHECKMARK_MIN_HEIGHT = 50
 WEEKLY_MISSION_CHECKMARK_MAX_HEIGHT = 100
 WEEKLY_MISSION_CHECKMARK_CENTER_TOLERANCE = 25.0
+WEEKLY_MISSION_MILESTONE_LABEL_Y = 430
+WEEKLY_MISSION_MILESTONE_LABEL_HEIGHT = 60
+WEEKLY_MISSION_MILESTONE_LABEL_HALF_WIDTH = 55
+WEEKLY_MISSION_MILESTONE_MIN_CONFIDENCE = 80.0
 WEEKLY_MISSION_SEARCH_COMPLETE = frozenset(
     {
         "all_unlocked_claimed",
@@ -225,6 +229,7 @@ class WeeklyMissionTrackEvidence:
     checkmarks: int
     confidence: float = -1.0
     raw_text: str = ""
+    claimed_milestones: tuple[int, ...] = ()
 
     @property
     def unlocked_chests(self) -> Optional[int]:
@@ -244,6 +249,25 @@ class WeeklyMissionTrackEvidence:
             unlocked is not None
             and unlocked > 0
             and self.checkmarks == unlocked
+        )
+
+    @property
+    def visible_claimed_prefix(self) -> bool:
+        """Whether visible checks prove the track begins with a claimed prefix."""
+
+        unlocked = self.unlocked_chests
+        expected = tuple(
+            range(
+                WEEKLY_MISSION_CHEST_INTERVAL,
+                (self.checkmarks + 1) * WEEKLY_MISSION_CHEST_INTERVAL,
+                WEEKLY_MISSION_CHEST_INTERVAL,
+            )
+        )
+        return (
+            unlocked is not None
+            and 0 < self.checkmarks < unlocked
+            and len(self.claimed_milestones) == self.checkmarks
+            and self.claimed_milestones == expected
         )
 
 
@@ -671,6 +695,7 @@ def _find_weekly_mission_chest(
         "[MISSION_REWARDS] Weekly track evidence: "
         f"completed={track.completed}/{track.total} "
         f"confidence={track.confidence:.1f} checkmarks={track.checkmarks} "
+        f"milestones={track.claimed_milestones} "
         f"unlocked={track.unlocked_chests} raw={track.raw_text!r}",
         "DEBUG",
     )
@@ -687,21 +712,32 @@ def _find_weekly_mission_chest(
         if action_guard_fn is not None
         else {}
     )
-    first = scroll_to_edge(
-        "gesture_targets.goto_first:weekly_mission_chests",
-        source_label="indicators.daily_missions",
-        screenshot=screenshot,
-        progress_region=WEEKLY_MISSION_CHEST_REGION,
-        max_swipes=4,
-        settle_s=0.8,
-        stable_threshold=2.0,
-        **guard_kwargs,
-    )
-    current = first.screenshot if first.screenshot is not None else screenshot
-    if first.reason not in {"edge_reached", "max_swipes_exceeded"}:
-        return first
-    if is_visible(WEEKLY_MISSION_CHEST, screenshot=current):
-        return ScrollResult(True, current, first.swipes, "target_visible")
+    rewind_swipes = 0
+    current = screenshot
+    if track.visible_claimed_prefix:
+        log(
+            "[MISSION_REWARDS] Weekly track shows a contiguous claimed "
+            f"prefix through milestone {track.claimed_milestones[-1]}; "
+            "searching right without left-edge normalization",
+            "DEBUG",
+        )
+    else:
+        first = scroll_to_edge(
+            "gesture_targets.goto_first:weekly_mission_chests",
+            source_label="indicators.daily_missions",
+            screenshot=screenshot,
+            progress_region=WEEKLY_MISSION_CHEST_REGION,
+            max_swipes=4,
+            settle_s=0.8,
+            stable_threshold=2.0,
+            **guard_kwargs,
+        )
+        rewind_swipes = first.swipes
+        current = first.screenshot if first.screenshot is not None else screenshot
+        if first.reason not in {"edge_reached", "max_swipes_exceeded"}:
+            return first
+        if is_visible(WEEKLY_MISSION_CHEST, screenshot=current):
+            return ScrollResult(True, current, rewind_swipes, "target_visible")
 
     found = scroll_until_visible(
         "gesture_targets.goto_next:weekly_mission_chests",
@@ -717,9 +753,44 @@ def _find_weekly_mission_chest(
     return ScrollResult(
         found.success,
         found.screenshot,
-        first.swipes + found.swipes,
+        rewind_swipes + found.swipes,
         found.reason,
     )
+
+
+def _read_weekly_claimed_milestones(
+    screenshot,
+    checkmark_centers: list[float],
+) -> tuple[int, ...]:
+    """OCR the milestone directly below each detected checkmark, fail closed."""
+
+    screen_height, screen_width = screenshot.shape[:2]
+    label_y = WEEKLY_MISSION_MILESTONE_LABEL_Y
+    label_height = WEEKLY_MISSION_MILESTONE_LABEL_HEIGHT
+    half_width = WEEKLY_MISSION_MILESTONE_LABEL_HALF_WIDTH
+    if label_y + label_height > screen_height:
+        return ()
+
+    milestones: list[int] = []
+    for center in sorted(checkmark_centers):
+        center_x = int(round(center))
+        left = center_x - half_width
+        right = center_x + half_width
+        if left < 0 or right > screen_width:
+            return ()
+        crop = screenshot[label_y : label_y + label_height, left:right]
+        try:
+            raw_text, confidence = ocr_text_and_conf(crop, psm=7)
+        except Exception:
+            return ()
+        match = re.fullmatch(r"\s*(\d+)\s*", raw_text or "")
+        if (
+            match is None
+            or confidence < WEEKLY_MISSION_MILESTONE_MIN_CONFIDENCE
+        ):
+            return ()
+        milestones.append(int(match.group(1)))
+    return tuple(milestones)
 
 
 def _measure_weekly_mission_track(screenshot) -> WeeklyMissionTrackEvidence:
@@ -803,12 +874,17 @@ def _measure_weekly_mission_track(screenshot) -> WeeklyMissionTrackEvidence:
             continue
         checkmark_centers.append(center)
 
+    claimed_milestones = _read_weekly_claimed_milestones(
+        screenshot,
+        [check_x + center for center in checkmark_centers],
+    )
     return WeeklyMissionTrackEvidence(
         completed,
         total,
         len(checkmark_centers),
         confidence,
         raw_text,
+        claimed_milestones,
     )
 
 
