@@ -854,10 +854,11 @@ The no-frame-telemetry target is below 0.5% average host CPU. Aggregate fields
 include control-surface CPU and sampling duration so the Windows deployment can
 verify that budget. GPU collection also records its own sampling duration.
 Temperature and clock telemetry are not included because Windows does not
-provide them through the same vendor-neutral counters. A later targeted
-PresentMon provider should feed frame statistics into the same in-memory
-aggregation/spool path, never emit one record per presented frame, and keep
-total average CPU below 1%.
+provide them through the same vendor-neutral counters. Continuous frame timing
+is not a planned control-surface telemetry feature. If a specific performance
+anomaly cannot be resolved from the retained counters, collect one bounded,
+opt-in diagnostic trace for that issue rather than adding a permanent provider,
+frame spool, or dashboard surface.
 
 Control request examples:
 
@@ -1075,23 +1076,10 @@ These are the next useful additions, in approximate priority order:
 3. Extend the implemented active-battle → Home Resume Battle safety yield to
    broader likely manual-player activity, then show configurable grace-period
    countdown and ownership in the GUI.
-4. Add targeted opt-in PresentMon frame telemetry through the existing
-   in-memory host-performance aggregation path. Scope collection to the
-   BlueStacks renderer, retain summaries rather than individual frames, and
-   validate the combined one-percent CPU budget on Windows.
-5. Add an optional current screenshot with capture time and a prominent stale
-   watermark. It should remain read-only and rate-limited.
-6. Add battle comparisons, trend charts, and aggregate rates by strategy, tier,
+4. Add battle comparisons, trend charts, and aggregate rates by strategy, tier,
    profile, battle type, and date range.
-7. Add opt-in notifications for battle completion, invalid capture quality,
+5. Add opt-in notifications for battle completion, invalid capture quality,
    stale runtime, control acknowledgement timeout, and blocked preflight.
-8. Extend next-start strategy selection to safe custom YAML plans. Such changes
-   should show a resolved configuration diff before they take effect.
-9. Support multiple ADB targets with independent authority, history, and health
-   views.
-10. If access expands beyond an SSH tunnel and one trusted operator, add TLS,
-   named users/roles, request IDs, and a durable control audit log before adding
-   more write operations.
 
 Repository implementation of save-backed Attach/Return reconciliation and
 **Capture current setup as…** is included in revision 29. Revision 30 adds the

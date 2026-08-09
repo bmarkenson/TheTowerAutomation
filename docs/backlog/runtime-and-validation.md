@@ -1013,9 +1013,7 @@ evidence.
      audited exact-record operation through the versioned API. Never add
      arbitrary path or file-deletion authority and never delete automatically.
 10. [ ] Validate the revised dashboard layout on Windows at minimum, default,
-    and maximized sizes. Based on operator use, decide whether drag-to-reorder,
-    hiding, or floating panes add enough value beyond the tabbed and
-    collapsible layout.
+    and maximized sizes.
 11. [ ] Confirm on Windows that the optional Token tooltip and Setup placement
     make clear that it is only for an explicitly authenticated adapter or
     reverse proxy and should remain blank for the normal loopback SSH tunnel.
