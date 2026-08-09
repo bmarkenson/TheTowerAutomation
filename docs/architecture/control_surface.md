@@ -438,7 +438,7 @@ memory only. The API deliberately sends no CORS permission.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, latest observation, structured Strategy Action Gate, and runtime evidence |
+| `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, current save-backed Perks, latest observation, structured Strategy Action Gate, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/interactive-development-lease` | Request, heartbeat, or release the one cooperative development lease; never dispatch device input |
 | `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit independently of battle intent, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
@@ -456,6 +456,28 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
+
+### Current battle Perk status
+
+Server revision 31 advertises `current_battle_perks_v1` and adds the
+`current_battle_perks` status object. The runtime's existing Perk timeline
+owner writes a compact presentation beside its atomic same-run checkpoint only
+after the shared save monitor accepts a complete exact prefix. It collapses
+that prefix to one row per semantic Perk, records the current level and most
+recent saved selection wave, and orders rows by most recent selection. The
+object also retains the checkpoint capture time, saved wave, total pick count,
+and unique count so the client never presents a passive save as newer than it
+is.
+
+The adapter accepts the presentation only when its checkpoint schema is
+supported and `activity_scope_run_id` exactly matches the atomic current-run
+ledger. A missing checkpoint reports `awaiting_save_checkpoint`; an absent
+current run or malformed projection reports `unavailable`; and every such
+result contains an empty item list. A scope transition therefore hides the old
+battle immediately even if the runtime has not yet written the new battle's
+first save checkpoint. This is a read-only projection: the API performs no
+save acquisition, serialization, panel navigation, device input, or action-
+authority decision.
 
 ### Structured Strategy Action Gate status
 
@@ -855,6 +877,12 @@ Process request examples:
   GUI inference. Start Automation always leaves actions Paused. This contract
   requires server revision 30 and capability `better_control_model_v2`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
+- A read-only **Perks** tab showing the current run's monitor-validated saved
+  inventory, level, and last selection wave in most-recent-first order. It
+  shows the checkpoint wave and local capture time, preserves an unchanged
+  scroll position across ordinary five-second status refreshes, and clears on
+  an unavailable or changed activity scope. The current native client requires
+  server revision 31 and capability `current_battle_perks_v1`.
 - Take Manual Control selects default minimal or opt-in full collection for a
   later save-confirmed manual Surrender without granting Surrender authority.
   **Capture current setup as…** shows fresh-save captured values, unresolved

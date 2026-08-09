@@ -32,6 +32,9 @@ public sealed class StatusResponse
     [JsonPropertyName("current_run")]
     public CurrentRunStatus? CurrentRun { get; set; }
 
+    [JsonPropertyName("current_battle_perks")]
+    public CurrentBattlePerksStatus CurrentBattlePerks { get; set; } = new();
+
     [JsonPropertyName("strategy_action_gate")]
     public StrategyActionGateStatus? StrategyActionGate { get; set; }
 
@@ -445,6 +448,57 @@ public sealed class CurrentRunStatus
 
     [JsonPropertyName("started_at")]
     public string? StartedAt { get; set; }
+}
+
+public sealed class CurrentBattlePerksStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unavailable";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = "";
+
+    [JsonPropertyName("order_semantics")]
+    public string OrderSemantics { get; set; } = "";
+
+    [JsonPropertyName("captured_at")]
+    public string? CapturedAt { get; set; }
+
+    [JsonPropertyName("saved_wave")]
+    public int? SavedWave { get; set; }
+
+    [JsonPropertyName("picked_count")]
+    public int PickedCount { get; set; }
+
+    [JsonPropertyName("unique_count")]
+    public int UniqueCount { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<CurrentBattlePerkItem> Items { get; set; } = [];
+}
+
+public sealed class CurrentBattlePerkItem
+{
+    [JsonPropertyName("perk_key")]
+    public string PerkKey { get; set; } = "";
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "";
+
+    [JsonPropertyName("level")]
+    public int Level { get; set; }
+
+    [JsonPropertyName("last_selected_wave")]
+    public int LastSelectedWave { get; set; }
+
+    [JsonPropertyName("last_selected_sequence")]
+    public int LastSelectedSequence { get; set; }
 }
 
 public sealed class AcknowledgementStatus

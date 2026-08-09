@@ -58,6 +58,7 @@ BOUNDARY_COVERAGE_COMPLETE = "complete"
 BOUNDARY_COVERAGE_VISIBILITY_GAP = "incomplete_visibility_gap"
 SELECTION_SCAN_MODE = "until_first_unchanged"
 PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION = 3
+CURRENT_PERKS_PRESENTATION_SCHEMA_VERSION = 1
 PERKS_CLOSE_DESTINATIONS = {
     "RUNNING",
     "GAME_OVER",
@@ -805,6 +806,59 @@ class PerkTimelineTracker:
                 if self._pending is not None
                 else None
             ),
+        }
+
+    def current_perks_presentation(self) -> dict[str, Any]:
+        """Return the save-backed current inventory for read-only clients.
+
+        The persisted tracker checkpoint remains the authority.  This compact
+        additive projection deliberately omits the private round identity and
+        save payload details while preserving the checkpoint's honest
+        freshness boundary.
+        """
+
+        checkpoint = self._save_checkpoint
+        common: dict[str, Any] = {
+            "schema_version": CURRENT_PERKS_PRESENTATION_SCHEMA_VERSION,
+            "source": "monitor_validated_player_save_perk_prefix",
+            "order_semantics": "most_recent_selection_first",
+        }
+        if checkpoint is None:
+            return {
+                **common,
+                "status": "awaiting_save_checkpoint",
+                "reason": "save_checkpoint_unavailable",
+                "captured_at": None,
+                "saved_wave": None,
+                "picked_count": 0,
+                "unique_count": 0,
+                "items": [],
+            }
+
+        latest_by_key: dict[str, dict[str, Any]] = {}
+        for pick in checkpoint["picks"]:
+            perk_key = str(pick["perk_key"])
+            latest_by_key[perk_key] = {
+                "perk_key": perk_key,
+                "label": perk_configuration_label(perk_key),
+                "level": int(pick["level_after"]),
+                "last_selected_wave": int(pick["saved_wave"]),
+                "last_selected_sequence": int(pick["sequence"]),
+            }
+        items = sorted(
+            latest_by_key.values(),
+            key=lambda item: item["last_selected_sequence"],
+            reverse=True,
+        )
+        return {
+            **common,
+            "status": "available",
+            "reason": "",
+            "captured_at": str(checkpoint["captured_at"]),
+            "saved_wave": int(checkpoint["saved_wave"]),
+            "picked_count": int(checkpoint["picked_count"]),
+            "unique_count": len(items),
+            "items": items,
         }
 
     def _append_saved_pick(
@@ -1791,6 +1845,9 @@ class PerkTimelineObserver:
             # Even a clean process replacement leaves an interval during which
             # top-bar schedule changes could not be observed.
             self._progress_visibility_interrupted = True
+            presentation_needs_refresh = payload.get(
+                "current_perks"
+            ) != self.tracker.current_perks_presentation()
             self._last_persisted_payload = copy.deepcopy(payload)
             log(
                 "[PERK_TIMELINE] Restored same-run checkpoint "
@@ -1799,6 +1856,9 @@ class PerkTimelineObserver:
                 f"route_open={self._route_open}",
                 "INFO",
             )
+            if presentation_needs_refresh:
+                self._last_persisted_payload = None
+                self._persist_state()
             return
 
         if previous_scope_id is not None and previous_scope_id != scope_id:
@@ -1817,6 +1877,7 @@ class PerkTimelineObserver:
             "activity_scope_run_id": self._active_scope_id,
             "route_open": self._route_open,
             "tracker": self.tracker.checkpoint(),
+            "current_perks": self.tracker.current_perks_presentation(),
         }
         if payload == self._last_persisted_payload:
             return

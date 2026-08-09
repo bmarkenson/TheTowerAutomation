@@ -176,15 +176,19 @@ loaded records. Periodic battle refreshes leave an unchanged list alone and
 defer genuine updates while a Type, Strategy, or Quality filter menu is open so
 the popup and selected battle remain stable.
 
-The left workspace uses full-height **Controls**, **Process**, **Setup**, and
-**Details** tabs instead of dividing its height among several independently
-scrolling cards. Everyday Automation Paused/Enabled, explicit battle workflow,
-manual-control, game-speed, future terminal-policy, strategy, and run-
-configuration actions remain on Controls. Service state, PID, ADB target,
-Start Automation, and Stop Automation are on Process. API and SSH fields are confined to the
-Setup tab, which scrolls when its independent API and ADB tunnel controls do
-not fit; the optional bearer token remains memory-only. Detailed lock and
-runtime evidence is on Details.
+The left workspace uses full-height **Controls**, **Process**, **Setup**,
+**Details**, and **Perks** tabs instead of dividing its height among several
+independently scrolling cards. Everyday Automation Paused/Enabled, explicit
+battle workflow, manual-control, game-speed, future terminal-policy, strategy,
+and run-configuration actions remain on Controls. Service state, PID, ADB
+target, Start Automation, and Stop Automation are on Process. API and SSH
+fields are confined to the Setup tab, which scrolls when its independent API
+and ADB tunnel controls do not fit; the optional bearer token remains
+memory-only. Detailed lock and runtime evidence is on Details. Perks shows the
+current battle's monitor-validated player-save inventory, collapsed to one row
+per Perk and ordered by its most recent selection. Its checkpoint wave and
+capture time remain visible because the passive save can trail the displayed
+game wave; a new battle scope never inherits the prior battle's list.
 
 The top bar keeps four different health signals visible: the fixed Linux API
 service's systemd state, HTTP reachability, the Windows-local API SSH tunnel,
@@ -322,7 +326,8 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 30 preserves `strategy_authoring_v1`,
+server revision 31 adds `current_battle_perks_v1` while preserving revision
+30's `strategy_authoring_v1`,
 `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains `strategy_revision_history_v1`, and adds
@@ -717,7 +722,7 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Better Control Model build requires revision 30,
+current Windows build requires revision 31, `current_battle_perks_v1`,
 `better_control_model_v2`, `save_backed_setup_capture_v2`,
 `terminal_dispositions_v2`,
 `managed_custom_module_presets_v1`,

@@ -144,6 +144,61 @@ def _fresh_runtime_lock(root: Path, *, state: str):
     return lock_handle
 
 
+def _write_current_run_scope(root: Path, *, run_id: str) -> None:
+    logs = root / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "activity_scope.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "scope": "current_run",
+                "run_id": run_id,
+                "started_at": "2026-08-08T10:00:00-07:00",
+                "source_file_id": "1:1",
+                "start_offset": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _current_perks_presentation() -> dict:
+    return {
+        "schema_version": 1,
+        "status": "available",
+        "reason": "",
+        "source": "monitor_validated_player_save_perk_prefix",
+        "order_semantics": "most_recent_selection_first",
+        "captured_at": "2026-08-08T17:05:00+00:00",
+        "saved_wave": 620,
+        "picked_count": 5,
+        "unique_count": 3,
+        "items": [
+            {
+                "perk_key": "damage",
+                "label": "Damage",
+                "level": 1,
+                "last_selected_wave": 580,
+                "last_selected_sequence": 5,
+            },
+            {
+                "perk_key": "perk_wave_requirement",
+                "label": "Perk Wave Requirement",
+                "level": 3,
+                "last_selected_wave": 540,
+                "last_selected_sequence": 4,
+            },
+            {
+                "perk_key": "max_health",
+                "label": "Max Health",
+                "level": 1,
+                "last_selected_wave": 100,
+                "last_selected_sequence": 1,
+            },
+        ],
+    }
+
+
 def test_control_store_preserves_fields_and_resumes_only_matching_deadline(tmp_path):
     path = tmp_path / "automation_ctl.json"
     path.write_text(json.dumps({"mode": "WAIT", "custom": "keep"}), encoding="utf-8")
@@ -342,6 +397,83 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
     assert status["acknowledgements"]["adb_target"]["acknowledges_current"]
     assert status["acknowledgements"]["strategy"]["value"] == "farm_t18"
     assert status["acknowledgements"]["strategy"]["acknowledges_current"]
+
+
+def test_status_exposes_scope_bound_current_save_perks(tmp_path):
+    _write_current_run_scope(tmp_path, run_id="battle-perks-status")
+    presentation = _current_perks_presentation()
+    timeline_path = (
+        tmp_path / "logs" / "automation_ctl.perk_timeline_state.json"
+    )
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "activity_scope_run_id": "battle-perks-status",
+                "route_open": False,
+                "tracker": {},
+                "current_perks": presentation,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = _service(tmp_path).status()
+
+    assert status["current_battle_perks"] == presentation
+    assert "current_battle_perks_v1" in status["capabilities"]
+
+
+def test_status_never_exposes_perks_from_another_run(tmp_path):
+    _write_current_run_scope(tmp_path, run_id="new-battle")
+    timeline_path = (
+        tmp_path / "logs" / "automation_ctl.perk_timeline_state.json"
+    )
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "activity_scope_run_id": "old-battle",
+                "route_open": False,
+                "tracker": {},
+                "current_perks": _current_perks_presentation(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    current = _service(tmp_path).status()["current_battle_perks"]
+
+    assert current["status"] == "awaiting_save_checkpoint"
+    assert current["reason"] == "current_run_checkpoint_unavailable"
+    assert current["items"] == []
+
+
+def test_status_rejects_internally_inconsistent_current_perks(tmp_path):
+    _write_current_run_scope(tmp_path, run_id="invalid-perks")
+    presentation = _current_perks_presentation()
+    presentation["picked_count"] = 4
+    timeline_path = (
+        tmp_path / "logs" / "automation_ctl.perk_timeline_state.json"
+    )
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "activity_scope_run_id": "invalid-perks",
+                "route_open": False,
+                "tracker": {},
+                "current_perks": presentation,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    current = _service(tmp_path).status()["current_battle_perks"]
+
+    assert current["status"] == "unavailable"
+    assert current["reason"] == "current_perks_projection_invalid"
+    assert current["items"] == []
 
 
 def test_status_serializes_fresh_runtime_owned_strategy_gate(tmp_path):
@@ -1334,10 +1466,16 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 30" in native_compatibility
+    assert "MinimumServerRevision = 31" in native_compatibility
     assert '"better_control_model_v2"' in native_compatibility
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
+    assert '"current_battle_perks_v1"' in native_compatibility
+    assert "current_battle_perks_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '<TabItem Header="Perks">' in native_xaml
+    assert 'x:Name="CurrentPerksGrid"' in native_xaml
+    assert 'JsonPropertyName("current_battle_perks")' in native_models
+    assert "RenderCurrentBattlePerks(status.CurrentBattlePerks)" in native_code
     assert '"save_backed_setup_capture_v2"' in native_compatibility
     assert "save_backed_setup_capture_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "save_backed_setup_capture_v2" in CONTROL_SURFACE_CAPABILITIES
