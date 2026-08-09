@@ -24,6 +24,9 @@ owner work. Complete the repository-change checklist before this procedure and
 6. Apply only separately reviewed non-Git changes, restart affected services,
    and perform a bounded production smoke test. Record the deployed commit and
    result.
+7. Complete the [successful-promotion closure](#close-a-successful-promotion).
+   Deployment does not implicitly authorize a remote push, tag publication,
+   branch deletion, or worktree removal.
 
 | Candidate contents | Production boundary |
 | --- | --- |
@@ -32,6 +35,35 @@ owner work. Complete the repository-change checklist before this procedure and
 | Control surface or shared modules | Stop/restart the control-surface service; also stop automation when shared runtime code changes. |
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
+
+## Close a successful promotion
+
+Treat deployment, remote publication, and feature retirement as separate
+recorded decisions. After the smoke test succeeds:
+
+1. Recheck that production `HEAD` and `main` still equal exact candidate `D`,
+   that `D` remains reachable from `develop`, and that both permanent
+   worktrees are clean. Record the durable completion and validation evidence
+   before removing any temporary ref or checkout.
+2. If the operator elects to publish production, read the live remote `main`
+   tip, require it to be an ancestor of `D`, and push only the explicit
+   fast-forward refspec `refs/heads/main:refs/heads/main`. Verify the live
+   remote tip equals `D` afterward and reconcile the local remote-tracking ref.
+   A normal push publishes every commit reachable from `D`, with its existing
+   ancestry and metadata; it is not a tip-only snapshot.
+3. Do not automatically publish rollback tags, archive tags, feature branches,
+   or bundles with `main`. A remote feature branch is the supported way to
+   publish branch-only interim commits before integration, while tag
+   publication remains a separate operator decision. Deleting any remote ref
+   is also a separate exact-target decision.
+4. Give every feature branch involved in the outcome one explicit disposition:
+   integrated and eligible for normal retirement; explicitly superseded or
+   abandoned and eligible only for archived retirement; or retained/deferred
+   with its owner and remaining work recorded. Ambiguity always selects
+   retained/deferred.
+5. Apply the retirement procedure below only to exact approved objects. Recheck
+   branches, worktrees, ignored evidence, and concurrent ownership immediately
+   before each mutation, then finish by re-listing the complete topology.
 
 ## Retire feature work
 
@@ -74,7 +106,9 @@ pretending the discarded commit was integrated:
 1. Create a uniquely named annotated `archive/...` tag at the exact branch tip
    and verify that the tag object dereferences to that commit. Never move or
    reuse the tag; pushing it is a separate operator decision. Deleting the
-   archive tag or making the commit unreachable is outside this procedure.
+   archive tag or making the commit unreachable is outside this procedure. A
+   Git bundle is useful supplementary recovery but does not replace this
+   durable in-repository archive ref.
 2. Recheck that the branch, worktree, tip, ownership, and inspected content are
    unchanged and that the verified archive tag still names the tip.
 3. Run `git worktree remove <exact-path>` without `--force`. If Git refuses,
