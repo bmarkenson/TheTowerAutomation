@@ -19,7 +19,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var result = ControlSurfaceCompatibility.Evaluate(
             Status(
-                29,
+                31,
                 "better_control_model_v2",
                 "save_backed_setup_capture_v2")
         );
@@ -31,11 +31,12 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(31);
+        var status = Status(32);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
         Assert.Contains("better_control_model_v2", result.MissingCapabilities);
+        Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
             "save_backed_setup_capture_v2",
             result.MissingCapabilities);
@@ -51,7 +52,7 @@ public sealed class ControlSurfaceCompatibilityTests
             """
             {
               "schema_version": 1,
-              "server_revision": 30,
+              "server_revision": 32,
               "capability": "save_backed_setup_capture_v2",
               "capture": {
                 "request_id": "capture-1",
@@ -70,11 +71,58 @@ public sealed class ControlSurfaceCompatibilityTests
     }
 
     [Fact]
+    public void StatusDeserializesCurrentSaveBackedPerks()
+    {
+        var response = System.Text.Json.JsonSerializer.Deserialize<StatusResponse>(
+            """
+            {
+              "api_version": 1,
+              "server_revision": 32,
+              "current_battle_perks": {
+                "schema_version": 1,
+                "status": "available",
+                "reason": "",
+                "source": "monitor_validated_player_save_perk_prefix",
+                "order_semantics": "most_recent_selection_first",
+                "captured_at": "2026-08-08T17:05:00+00:00",
+                "saved_wave": 620,
+                "picked_count": 5,
+                "unique_count": 2,
+                "items": [
+                  {
+                    "perk_key": "damage",
+                    "label": "Damage",
+                    "level": 1,
+                    "last_selected_wave": 580,
+                    "last_selected_sequence": 5
+                  },
+                  {
+                    "perk_key": "perk_wave_requirement",
+                    "label": "Perk Wave Requirement",
+                    "level": 3,
+                    "last_selected_wave": 540,
+                    "last_selected_sequence": 4
+                  }
+                ]
+              }
+            }
+            """);
+
+        Assert.NotNull(response);
+        Assert.Equal("available", response!.CurrentBattlePerks.Status);
+        Assert.Equal(620, response.CurrentBattlePerks.SavedWave);
+        Assert.Equal(5, response.CurrentBattlePerks.PickedCount);
+        Assert.Equal(2, response.CurrentBattlePerks.Items.Count);
+        Assert.Equal("Damage", response.CurrentBattlePerks.Items[0].Label);
+        Assert.Equal(3, response.CurrentBattlePerks.Items[1].Level);
+    }
+
+    [Fact]
     public void ReadyCaptureCannotBypassServerCompatibility()
     {
         var oldServer = ControlSurfaceCompatibility.Evaluate(
             Status(
-                29,
+                30,
                 "better_control_model_v2",
                 "save_backed_setup_capture_v2"));
         var model = new BetterControlModelStatus
@@ -95,11 +143,12 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                31,
+                32,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
                 "completed_battle_discard",
+                "current_battle_perks_v1",
                 "current_run_activity_scope",
                 "exclusive_strategy_validation_status",
                 "explicit_strategy_disposition",

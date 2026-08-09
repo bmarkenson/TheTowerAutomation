@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim _serviceStatusGate = new(1, 1);
     private readonly SemaphoreSlim _tunnelHostRefreshGate = new(1, 1);
     private readonly ObservableCollection<ActivityEntry> _activity = [];
+    private readonly ObservableCollection<CurrentBattlePerkItem> _currentBattlePerks = [];
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
     private CancellationTokenSource? _refreshCancellation;
@@ -83,6 +84,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         ActivityGrid.ItemsSource = _activity;
+        CurrentPerksGrid.ItemsSource = _currentBattlePerks;
 
         _settings = SettingsStore.Load();
         BaseUrlBox.Text = _settings.BaseUrl;
@@ -2320,6 +2322,7 @@ public partial class MainWindow : Window
         PriorTransitionText.Text = status.PriorTransition is null
             ? "No earlier state transition in the current log tail"
             : FormatObservation(status.PriorTransition);
+        RenderCurrentBattlePerks(status.CurrentBattlePerks);
 
         var runtime = status.Runtime.Instances.FirstOrDefault(instance => instance.Active)
             ?? status.Runtime.Instances.FirstOrDefault();
@@ -2632,6 +2635,99 @@ public partial class MainWindow : Window
             ?? "";
     }
 
+    private void RenderCurrentBattlePerks(CurrentBattlePerksStatus? perks)
+    {
+        perks ??= new CurrentBattlePerksStatus();
+        var items = perks.Items ?? [];
+        if (!CurrentBattlePerksMatch(_currentBattlePerks, items))
+        {
+            _currentBattlePerks.Clear();
+            foreach (var item in items)
+            {
+                _currentBattlePerks.Add(item);
+            }
+        }
+        if (string.Equals(perks.Status, "available", StringComparison.Ordinal))
+        {
+            CurrentPerksSummaryText.Text = perks.UniqueCount == 0
+                ? "No perks in the latest save checkpoint"
+                : $"{perks.UniqueCount} current perk"
+                    + (perks.UniqueCount == 1 ? "" : "s")
+                    + $" · {perks.PickedCount} total pick"
+                    + (perks.PickedCount == 1 ? "" : "s");
+            CurrentPerksSummaryText.Foreground = new SolidColorBrush(
+                Color.FromRgb(101, 230, 166));
+            var wave = perks.SavedWave?.ToString(CultureInfo.InvariantCulture)
+                ?? "unknown";
+            var captured = DateTimeOffset.TryParse(
+                perks.CapturedAt,
+                out var capturedAt)
+                ? capturedAt.LocalDateTime.ToString("g")
+                : "unknown time";
+            CurrentPerksCheckpointText.Text =
+                $"Player-save checkpoint at wave {wave} · captured {captured}.";
+            return;
+        }
+
+        CurrentPerksSummaryText.Text = string.Equals(
+            perks.Status,
+            "awaiting_save_checkpoint",
+            StringComparison.Ordinal)
+            ? "Waiting for a player-save checkpoint"
+            : "Current battle perks unavailable";
+        CurrentPerksSummaryText.Foreground = new SolidColorBrush(
+            string.Equals(
+                perks.Status,
+                "awaiting_save_checkpoint",
+                StringComparison.Ordinal)
+                ? Color.FromRgb(241, 191, 91)
+                : Color.FromRgb(255, 113, 135));
+        CurrentPerksCheckpointText.Text = perks.Reason switch
+        {
+            "current_run_unavailable" =>
+                "No current battle scope is available yet.",
+            "timeline_checkpoint_unavailable" =>
+                "The running battle has not persisted its timeline yet.",
+            "current_run_checkpoint_unavailable" =>
+                "Waiting for a timeline checkpoint bound to this battle.",
+            "timeline_checkpoint_too_large" or
+            "timeline_checkpoint_invalid" or
+            "current_perks_projection_invalid" =>
+                "The persisted Perk presentation could not be read safely.",
+            _ => "The list updates from the running battle's passive save monitor.",
+        };
+    }
+
+    private static bool CurrentBattlePerksMatch(
+        IReadOnlyList<CurrentBattlePerkItem> current,
+        IReadOnlyList<CurrentBattlePerkItem> updated)
+    {
+        if (current.Count != updated.Count)
+        {
+            return false;
+        }
+        for (var index = 0; index < current.Count; index++)
+        {
+            var left = current[index];
+            var right = updated[index];
+            if (!string.Equals(
+                    left.PerkKey,
+                    right.PerkKey,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    left.Label,
+                    right.Label,
+                    StringComparison.Ordinal)
+                || left.Level != right.Level
+                || left.LastSelectedWave != right.LastSelectedWave
+                || left.LastSelectedSequence != right.LastSelectedSequence)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void RenderBetterControlModel(
         BetterControlModelStatus? model,
         bool processActive)
@@ -2644,7 +2740,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 31 with better_control_model_v2 is required."
+                    "Linux API revision 32 with the required control-surface capabilities is required."
                 );
             }
             if (model is not null

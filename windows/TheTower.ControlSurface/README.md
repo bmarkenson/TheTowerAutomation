@@ -21,10 +21,30 @@ publish\win-x64\TheTower.ControlSurface.exe
 publish\win-x64\TheTower.TunnelHost.exe
 ```
 
+Each successful replacement retains up to two earlier complete packages,
+newest first:
+
+```text
+publish\previous\1\TheTower.ControlSurface.exe
+publish\previous\1\TheTower.TunnelHost.exe
+publish\previous\2\TheTower.ControlSurface.exe
+publish\previous\2\TheTower.TunnelHost.exe
+```
+
+The publisher builds and verifies both new executables before changing the
+managed package directories. It then rotates the old current package to
+`previous\1`, the former `previous\1` to `previous\2`, and discards anything
+older. A first or second publication naturally has fewer retained slots. An
+incomplete current or retained package blocks rotation instead of silently
+discarding the rollback copy, and an installation failure restores the prior
+managed layout.
+
 The target PC does not need the .NET runtime because the publish is
 self-contained. Deploy the complete `win-x64` directory; copying only the GUI
 executable deliberately fails closed because it would leave no authoritative
-SSH owner. The output directory is ignored by Git.
+SSH owner. If rollback is required, deploy one complete numbered prior
+directory without mixing files across versions. The output directory is
+ignored by Git.
 
 The same Windows executable can be compiled on Ubuntu 24.04 even though WPF
 cannot be run there. Do not use Ubuntu's `dotnet-sdk-8.0` package for this
@@ -52,9 +72,10 @@ windows/TheTower.ControlSurface/publish-linux.sh
 Set `THETOWER_DOTNET=/absolute/path/to/dotnet` to select a different Microsoft
 SDK installation. The script rejects SDKs missing WindowsDesktop before it
 starts the build. It publishes both projects into a staging directory, verifies
-both required executables, and replaces the prior package only after both
-succeed. The GUI project explicitly enables Windows targeting; copy the
-complete result directory to Windows for runtime testing.
+both required executables, and performs the same guarded current-plus-two-prior
+rotation as the Windows publisher only after both builds succeed. The GUI
+project explicitly enables Windows targeting; copy the complete result
+directory to Windows for runtime testing.
 
 ## Connect
 
@@ -176,15 +197,19 @@ loaded records. Periodic battle refreshes leave an unchanged list alone and
 defer genuine updates while a Type, Strategy, or Quality filter menu is open so
 the popup and selected battle remain stable.
 
-The left workspace uses full-height **Controls**, **Process**, **Setup**, and
-**Details** tabs instead of dividing its height among several independently
-scrolling cards. Everyday Automation Paused/Enabled, explicit battle workflow,
-manual-control, game-speed, future terminal-policy, strategy, and run-
-configuration actions remain on Controls. Service state, PID, ADB target,
-Start Automation, and Stop Automation are on Process. API and SSH fields are confined to the
-Setup tab, which scrolls when its independent API and ADB tunnel controls do
-not fit; the optional bearer token remains memory-only. Detailed lock and
-runtime evidence is on Details.
+The left workspace uses full-height **Controls**, **Process**, **Setup**,
+**Details**, and **Perks** tabs instead of dividing its height among several
+independently scrolling cards. Everyday Automation Paused/Enabled, explicit
+battle workflow, manual-control, game-speed, future terminal-policy, strategy,
+and run-configuration actions remain on Controls. Service state, PID, ADB
+target, Start Automation, and Stop Automation are on Process. API and SSH
+fields are confined to the Setup tab, which scrolls when its independent API
+and ADB tunnel controls do not fit; the optional bearer token remains
+memory-only. Detailed lock and runtime evidence is on Details. Perks shows the
+current battle's monitor-validated player-save inventory, collapsed to one row
+per Perk and ordered by its most recent selection. Its checkpoint wave and
+capture time remain visible because the passive save can trail the displayed
+game wave; a new battle scope never inherits the prior battle's list.
 
 The top bar keeps four different health signals visible: the fixed Linux API
 service's systemd state, HTTP reachability, the Windows-local API SSH tunnel,
@@ -322,8 +347,8 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 31 preserves `strategy_authoring_v1`,
-`strategy_authoring_specialized_editors_v1`,
+server revision 32 adds `current_battle_perks_v1` while preserving revision
+31's `strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains `strategy_revision_history_v1`, and adds
 `strategy_authoring_preset_local_copy_v1`. Revision 30 added
@@ -751,7 +776,7 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Better Control Model build requires revision 31,
+current Windows build requires revision 32, `current_battle_perks_v1`,
 `better_control_model_v2`, `save_backed_setup_capture_v2`,
 `terminal_dispositions_v2`,
 `managed_custom_module_presets_v1`,

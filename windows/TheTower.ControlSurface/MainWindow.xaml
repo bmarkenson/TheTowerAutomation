@@ -788,6 +788,65 @@
               </StackPanel>
             </ScrollViewer>
           </TabItem>
+
+          <TabItem Header="Perks">
+            <Grid Margin="9">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+              <TextBlock Grid.Row="0"
+                         Text="CURRENT BATTLE PERKS"
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="10"
+                         FontWeight="Bold"
+                         Margin="4,2,4,5" />
+              <StackPanel Grid.Row="1" Margin="4,3,4,9">
+                <TextBlock x:Name="CurrentPerksSummaryText"
+                           Text="Waiting for a player-save checkpoint."
+                           FontSize="14"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap" />
+                <TextBlock x:Name="CurrentPerksCheckpointText"
+                           Text="The list updates from the running battle's passive save monitor."
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           TextWrapping="Wrap"
+                           Margin="0,3,0,0" />
+              </StackPanel>
+              <DataGrid Grid.Row="2"
+                        x:Name="CurrentPerksGrid"
+                        AutoGenerateColumns="False"
+                        IsReadOnly="True"
+                        CanUserAddRows="False"
+                        CanUserDeleteRows="False"
+                        CanUserReorderColumns="False"
+                        SelectionMode="Single"
+                        SelectionUnit="FullRow"
+                        HeadersVisibility="Column"
+                        ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="Perk"
+                                      Binding="{Binding Label}"
+                                      Width="*" />
+                  <DataGridTextColumn Header="Lv"
+                                      Binding="{Binding Level}"
+                                      Width="42" />
+                  <DataGridTextColumn Header="Last wave"
+                                      Binding="{Binding LastSelectedWave}"
+                                      Width="72" />
+                </DataGrid.Columns>
+              </DataGrid>
+              <TextBlock Grid.Row="3"
+                         Text="Newest selected or leveled perk first. Values reflect the latest completed player-save checkpoint and may trail the live wave."
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="10"
+                         TextWrapping="Wrap"
+                         Margin="4,8,4,2" />
+            </Grid>
+          </TabItem>
         </TabControl>
       </Border>
 

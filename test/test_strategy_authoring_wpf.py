@@ -305,8 +305,9 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 31" in compatibility
+    assert "MinimumServerRevision = 32" in compatibility
     assert '"better_control_model_v2"' in compatibility
+    assert '"current_battle_perks_v1"' in compatibility
     assert '"save_backed_setup_capture_v2"' in compatibility
     capture_code = _text("SetupCaptureWindow.xaml.cs")
     capture_xaml = _text("SetupCaptureWindow.xaml")
