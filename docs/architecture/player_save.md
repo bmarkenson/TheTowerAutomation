@@ -341,8 +341,15 @@ The shared guarded Android-Home serializer requires the exact runtime session,
 activity scope, lifecycle-owned active-battle state, and target/generation to
 survive two stable pre-background `RUNNING` frames, `KEYCODE_HOME`, two
 byte-identical save reads, launcher restoration, and two stable post-restore
-`RUNNING` frames. The fresh resolved snapshot must contain an active-round
-identity. With no prior identity, its newest completed tail becomes the
+`RUNNING` frames. Launcher-command acceptance is dispatch evidence, not proof
+that the source has rendered. After its initial half-second settle, the shared
+serializer therefore retries stable-source verification while a 12-second
+convergence budget remains, capped at six attempts. Exact target binding,
+caller context, and action authority are rechecked before and after every
+attempt; any loss blocks immediately with a distinct diagnostic reason, while
+an unchanged but still-transitioning source blocks only after convergence
+times out. The fresh resolved snapshot must contain an active-round identity.
+With no prior identity, its newest completed tail becomes the
 baseline. A same-source unchanged tail preserves the scope; a changed tail
 starts a later scope. A UI baseline may migrate only through independently
 normalized Tier/Wave/Battle Date, whose save date must be unambiguous .NET

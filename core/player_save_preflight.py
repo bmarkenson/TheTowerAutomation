@@ -549,6 +549,15 @@ class PlayerSavePreflightCoordinator:
                 "restored_source_boundary_unverified": (
                     "restored_target_or_new_battle_boundary_unverified"
                 ),
+                "restored_target_binding_unverified": (
+                    "restored_target_or_new_battle_boundary_unverified"
+                ),
+                "restored_context_boundary_unverified": (
+                    "restored_target_or_new_battle_boundary_unverified"
+                ),
+                "restored_source_convergence_timeout": (
+                    "restored_new_battle_boundary_convergence_timeout"
+                ),
             }.get(serialized.reason, serialized.reason)
             return self._blocked_result(
                 requested,
