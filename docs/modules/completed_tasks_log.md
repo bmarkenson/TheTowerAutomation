@@ -59,11 +59,40 @@ canonical document linked by an entry for current behavior.
   minimum revision advances with the new capability while older browser
   behavior remains compatible. Revision 32 preserves develop's independently
   assigned revision-31 preset-local-copy capability.
-- The exact feature checkpoint passed all 2,029 Python tests in 337.92 seconds,
-  all 84 linked .NET model/compatibility tests, `git diff --check`, and the
-  Release WPF cross-build with zero errors. No live process, device, save
-  acquisition, Windows runtime smoke, integration, promotion, or deployment
-  action was performed.
+- Commit `2d42fe8` also makes native publication retain the two newest complete
+  prior packages. Both publishers stage and validate the GUI and tunnel host
+  together, rotate the old current package through `publish/previous/1` and
+  `publish/previous/2`, and restore the pre-publication layout if replacement
+  fails. They refuse incomplete current or history slots rather than mixing
+  executable generations.
+- The merged feature checkpoint passed all 2,035 Python tests in 342.44
+  seconds, all 97 linked portable .NET tests, the two Linux publisher
+  regressions, `git diff --check`, `bash -n`, `shellcheck`, and the Release WPF
+  cross-build with zero errors. Exact committed `develop` candidate `5f93cba`
+  repeated the complete Python checkpoint in 343.07 seconds. The WPF builds
+  emitted only the known sandbox read-only NuGet vulnerability-cache warning;
+  restore, compilation, and publication completed successfully.
+- Production advanced from `11a01c6` behind rollback tag
+  `production-before-20260809T044814Z-11a01c6`. The control surface restarted
+  at revision 32, and replacement automation PID `3666933` attached to the
+  same running-battle scope, adopted `farm_t19_ad_assist`, completed its guarded
+  session preflight, and returned to normal RUNNING authority. No Surrender,
+  End Run, or battle transition was issued during the promotion smoke.
+- The live revision-32 API projected the save-backed list from that battle at
+  saved wave 230 with **Perk Wave Requirement** level 1 (last selected at wave
+  180), then published a fresh unpaused observation at wave 260 after preflight
+  released its exclusive hold. This validates the source-to-runtime API path;
+  the WPF presentation itself was not executed on Windows.
+- The complete Windows package was published from `5f93cba` at 21:56 PDT.
+  `TheTower.ControlSurface.exe` is 72,363,007 bytes with SHA-256
+  `c13e709f307d32f979dc9fff300cfcfb467133ac2602fce584582f36ed3abe72`;
+  `TheTower.TunnelHost.exe` is 35,172,117 bytes with SHA-256
+  `387a2d5d620b8ced392b2d00dc2628a5a1e8333af866d074b6b3f5ac8286221d`.
+  Rollback slot 1 exactly retains the former package hashes
+  `934c529b9e2772667e5d821ff847dce4b7e4ac439af20986aa331eed313c8e8d`
+  and `aaf4c2de9b3b1b3ed41b3c136e29c238005e823580423201c412d79b523352ca`;
+  slot 2 is correctly absent until another successful publication. The
+  package has not been copied to or runtime-smoked on a Windows host.
 
 ### 2026-08-08 passive save-backed Perk timeline correction
 
