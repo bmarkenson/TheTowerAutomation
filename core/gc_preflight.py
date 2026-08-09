@@ -441,8 +441,9 @@ class GcSessionPreflightEvidence:
         return all(
             check.get("blocking") is not True
             or check.get("valid") is True
-            for check in self.attachment_requirement_checks.values()
+            for check_id, check in self.attachment_requirement_checks.items()
             if isinstance(check, Mapping)
+            and not self.is_waived(check_id)
         )
 
     @property

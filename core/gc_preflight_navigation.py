@@ -772,6 +772,10 @@ def run_read_only_gc_preflight(
         running_attachment = bool(
             getattr(player_save_preflight, "is_running_attachment", False)
         )
+        gate_waivers = requirements.get("_gate_waivers")
+        active_gate_waivers = (
+            gate_waivers if isinstance(gate_waivers, Mapping) else {}
+        )
         attachment_requirement_checks: dict[str, dict[str, Any]] = {}
         reported_attachment_mismatches: dict[str, dict[str, Any]] = {}
         attachment_report_only_requirements = (
@@ -779,6 +783,7 @@ def run_read_only_gc_preflight(
                 check_id: copy.deepcopy(requirements[check_id])
                 for check_id in ROUND_INVARIANT_ATTACHMENT_CHECKS
                 if check_id in requirements
+                and check_id not in active_gate_waivers
             }
             if stay_in_battle
             else {}
@@ -885,11 +890,7 @@ def run_read_only_gc_preflight(
             raise _NavigationFailure(
                 "profile supplied an invalid Auto Pick Perks requirement"
             )
-        gate_waivers = requirements.get("_gate_waivers")
-        auto_pick_skipped = (
-            isinstance(gate_waivers, Mapping)
-            and "auto_pick_perks" in gate_waivers
-        )
+        auto_pick_skipped = "auto_pick_perks" in active_gate_waivers
         carried_auto_pick = (
             consume_save("auto_pick_perks")
             if callable(consume_save)
@@ -1106,7 +1107,10 @@ def run_read_only_gc_preflight(
                         )
             if running_attachment:
                 for check_id in _ATTACHMENT_SAVE_ONLY_REQUIREMENT_CHECKS:
-                    if check_id not in requirements:
+                    if (
+                        check_id not in requirements
+                        or check_id in active_gate_waivers
+                    ):
                         continue
                     carried_value = consume_save(check_id)
                     if carried_value is None:
@@ -1134,7 +1138,10 @@ def run_read_only_gc_preflight(
                         )
         if stay_in_battle and not running_attachment:
             for check_id in _ATTACHMENT_SAVE_ONLY_REQUIREMENT_CHECKS:
-                if check_id in requirements:
+                if (
+                    check_id in requirements
+                    and check_id not in active_gate_waivers
+                ):
                     record_unavailable_attachment_check(check_id)
         carried_primaries = (
             consume_save("ultimate_weapon_primaries")

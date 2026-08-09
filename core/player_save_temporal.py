@@ -38,6 +38,8 @@ ROUND_INVARIANT_ATTACHMENT_CHECKS = frozenset(
         "guardian_chips",
         "bots_preset",
         "modules",
+        "perk_bans",
+        "perk_first_choice",
         "perk_auto_pick_order",
     }
 )

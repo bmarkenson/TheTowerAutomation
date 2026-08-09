@@ -903,6 +903,8 @@ def test_round_invariant_mismatches_are_nonblocking_for_running_attachment():
             "generator_primary": "Project Funding",
         },
         "free_upgrade_locks": ["Shockwave Size"],
+        "perk_first_choice": "damage",
+        "perk_bans": ["interest"],
         "perk_auto_pick_order": ["damage"],
         "auto_pick_perks": True,
         "ultimate_weapon_primaries": {
@@ -930,6 +932,8 @@ def test_round_invariant_mismatches_are_nonblocking_for_running_attachment():
             "guardian_chips": ["Fetch", "Summon", "Scout"],
             "modules": dict(MODULE_REQUIREMENTS),
             "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+            "perk_first_choice": "perk_wave_requirement",
+            "perk_bans": [],
             "perk_auto_pick_order": ["game_speed", "damage"],
             "auto_pick_perks": True,
             "ultimate_weapons": ULTIMATE_REQUIREMENTS,
@@ -976,6 +980,8 @@ def test_round_invariant_mismatches_are_nonblocking_for_running_attachment():
     assert set(rendered["reported_attachment_mismatches"]) == {
         "free_upgrade_locks",
         "modules",
+        "perk_bans",
+        "perk_first_choice",
         "perk_auto_pick_order",
     }
     assert all(
@@ -991,6 +997,78 @@ def test_round_invariant_mismatches_are_nonblocking_for_running_attachment():
     assert ui.static_taps == []
     assert ui.visible_taps == []
     assert ui.swipes == []
+
+
+def test_running_attachment_does_not_evaluate_waived_save_only_check():
+    ui = _FakeUi()
+    carried = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": dict(MODULE_REQUIREMENTS),
+        "auto_pick_perks": True,
+        "perk_bans": ["interest"],
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    result = run_read_only_gc_preflight(
+        {
+            "cards_deck": "Farm",
+            "workshop_preset": "Farm",
+            "bots_preset": "Farm",
+            "guardian_chips": ["Fetch", "Summon", "Scout"],
+            "modules": dict(MODULE_REQUIREMENTS),
+            "auto_pick_perks": True,
+            "perk_bans": [],
+            "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+            "loadout_policies": {"modules": "enforce"},
+            "_gate_waivers": {
+                "perk_bans": {
+                    "source": "strategy_profile",
+                    "scope": "every_run",
+                }
+            },
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attachment must not attempt Home repair")
+        ),
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete bound UW facts must avoid UI")
+            )
+        ),
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.evidence is not None and result.evidence.valid
+    assert "perk_bans" not in result.evidence.attachment_requirement_checks
+    assert "perk_bans" not in result.evidence.reported_attachment_mismatches
+    assert result.evidence.waivers["perk_bans"]["scope"] == "every_run"
+    assert bound.consume("perk_bans") == ["interest"]
+    assert ui.static_taps == []
+    assert ui.visible_taps == []
 
 
 def test_unparsed_module_fact_uses_ui_but_still_reports_immutable_mismatch():
