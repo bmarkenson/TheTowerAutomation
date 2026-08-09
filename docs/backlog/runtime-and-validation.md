@@ -978,10 +978,12 @@ can change as operator use supplies better evidence.
    already-current selection with no pending request and an already-queued
    next-boundary selection remain no-ops. **Switch this battle** remains a
    separate explicit fresh-evidence active-adoption request. A stopped process
-   still uses the visible selection on Start and persists a startup default only
-   through the separate save action. Successful Strategy publication and
-   restore-as-new must automatically follow with the same next-boundary request,
-   including for a same-ID revision; Base publication does not. Confirm
+   still uses the visible selection on Start; saving a startup default without
+   starting remains a separate explicit action. While the process is active,
+   successful Strategy publication and restore-as-new must automatically follow
+   with the same next-boundary request, including for a same-ID revision; when
+   stopped, they update only the visible Start selection. Base publication does
+   not send a process request. Confirm
    immediate sending/accepted/queued/failed feedback, current/pending display,
    dirty/failed selection retention across polling, stale-server warning and
    explicit reload, active-battle adoption, and an acknowledged paused Workshop
@@ -1081,10 +1083,12 @@ can change as operator use supplies better evidence.
         distinct. During an active process, a genuine dropdown selection itself
         commits the normal next-boundary request; **Switch this battle** remains
         a separate explicit active-adoption action. A stopped process retains
-        explicit startup-default persistence. Successful Strategy publication
-        or restore-as-new automatically follows with the normal next-boundary
-        request, including when its stable ID equals Current, but never switches
-        the current battle. Show target/observed speed and future terminal
+        explicit startup-default persistence. While the process is active,
+        successful Strategy publication or restore-as-new automatically follows
+        with the normal next-boundary request, including when its stable ID
+        equals Current; when stopped, it updates only the visible Start
+        selection. Neither path switches the current battle. Show target/observed
+        speed and future terminal
         policy without turning any of them into an immediate Start/Resume
         action.
       - **Configure next run**, save-backed **Capture current setup as...**,
@@ -1157,7 +1161,7 @@ can change as operator use supplies better evidence.
       Native authoring-catalog smoke, single-instance confirmation, and host
       sampler CPU attribution also stay in their existing workstreams; layout
       work must not increase passive client CPU or change telemetry cadence.
-    - **Implementation slices.** Land behavior-preserving slices in order:
+    - **Implementation slices.** Land coordinated slices in order:
       1. [x] Replace the split/sidebar shell with responsive global status and
          full-width Overview, Activity, Perks, and System navigation; move
          existing named controls without changing API requests or authority.
@@ -1174,13 +1178,14 @@ can change as operator use supplies better evidence.
       4. [x] Add only those reserved status/alert fields whose authoritative
          server models and runtime directives exist; leave absent capabilities
          absent rather than synthesizing them in the client.
-      5. [ ] Make active-process Strategy selection commit the normal
+      5. [x] Make active-process Strategy selection commit the normal
          next-boundary request exactly once, retain only a failure-time retry,
          and keep active-battle adoption explicit. Preserve stopped-process and
-         polling behavior. Follow each successful Strategy publication or
-         restore-as-new with the same normal next-boundary request, forcing the
-         same-ID definition-aware path without adding a revision-specific
-         runtime payload or changing Base publication.
+         polling behavior. While the process is active, follow each successful
+         Strategy publication or restore-as-new with the same normal
+         next-boundary request, forcing the same-ID definition-aware path without
+         adding a revision-specific runtime payload or changing Base publication.
+         When stopped, update only the visible Start selection.
       6. [ ] Cross-build and run focused native/static regressions, then perform
          Windows keyboard/mouse and visual smoke at minimum, preferred,
          default, and maximized sizes, including 100% and 125% display scaling.
@@ -1201,7 +1206,7 @@ can change as operator use supplies better evidence.
       authoring tests pass, and the repository checkpoint passes compile,
       state-definition/clickmap integrity, and all 2,036 Python tests. Windows
       visual, mouse/keyboard, 100%/125% scaling, preferred/minimum-size
-      no-scroll, and passive-CPU validation remain open under slice 5 and are
+      no-scroll, and passive-CPU validation remain open under slice 6 and are
       not inferred from the cross-build.
     - **2026-08-09 slice-two checkpoint.** Stable API URL, memory-only token,
       SSH/forwarding defaults, startup host sampling, and dashboard reset now
@@ -1217,7 +1222,7 @@ can change as operator use supplies better evidence.
       lifecycle tests pass. The repository checkpoint passes compile,
       state-definition/clickmap integrity, and all 2,052 Python tests. Windows
       modal focus, keyboard/access-key, scaling, and visual validation remain
-      open under slice 5.
+      open under slice 6.
     - **2026-08-09 slice-three checkpoint.** Overview now uses a compact
       authority row with secondary timed Pause, one server-authoritative
       Start/Attach slot, and one contextual Take/Return slot whose manual
@@ -1232,7 +1237,7 @@ can change as operator use supplies better evidence.
       repository checkpoint passes compile, state-definition/clickmap
       integrity, and all 2,053 Python tests. Windows visual, interaction,
       scaling, and preferred/minimum-size no-scroll validation remain open
-      under slice 5.
+      under slice 6.
     - **2026-08-09 slice-four checkpoint.** The status band now models the
       already-published atomic Linux server timestamp and combines it only with
       the authoritative current activity-scope start to show run elapsed while
@@ -1244,7 +1249,24 @@ can change as operator use supplies better evidence.
       cross-builds; 73 focused Python/static tests, all 97 native authoring
       tests, and all 18 tunnel-host lifecycle tests pass. The repository
       checkpoint passes compile, state-definition/clickmap integrity, and all
-      2,054 Python tests. Windows runtime validation remains the only open
-      redesign slice.
+      2,054 Python tests. Windows runtime validation remained open under slice
+      6; the later Strategy behavior slice is tracked above.
+    - **2026-08-09 slice-five checkpoint.** A genuine active-process Strategy
+      dropdown change now sends one normal next-boundary `set_strategy` request;
+      programmatic reconciliation stays silent, accepted requests clear dirty
+      state, and failed requests retain the visible choice with a conditional
+      Retry. Token ownership, publication deduplication, deferred-publication
+      coalescing, and dirty polling protection prevent stale responses or
+      refreshes from replacing newer intent. **Switch this battle** remains the
+      only active-adoption action. Strategy publication and restore-as-new now
+      select the published revision and use the same boundary request while the
+      process is active, including for same-ID revisions; when stopped they only
+      update the visible Start selection, and Base publication sends no process
+      request. The WPF project cross-builds; 74 focused Python/static tests and
+      all 120 portable native authoring/coordinator tests pass. The supported
+      repository checkpoint passes compile, state-definition/clickmap
+      integrity, and all 2,058 Python tests. Windows visual, mouse/keyboard,
+      scaling, process-state, failure/retry, and same-ID publication validation
+      remain open under slice 6; no live runtime or device action was performed.
     - Defer drag-to-reorder, floating panes, and extensive per-card hiding until
       operator use of the redesigned pages demonstrates a concrete need.

@@ -1661,7 +1661,7 @@ def test_native_overview_uses_contextual_exact_action_slots_and_compact_status()
         assert f'x:Name="{field}"' in native_xaml
     assert 'x:Name="StrategyActionHelpText"' in native_xaml
     assert (
-        "StrategyActionHelpText.Visibility = _strategySelectionDirty"
+        "StrategyActionHelpText.Visibility = _strategySelection.Dirty"
         in native_code
     )
     assert (
@@ -1676,6 +1676,71 @@ def test_native_overview_uses_contextual_exact_action_slots_and_compact_status()
     assert "Saved request:" in native_code
     assert "awaiting acknowledgement" in native_code
     assert 'new { action = tag }' in native_code
+
+
+def test_native_strategy_selection_auto_queues_and_retains_failed_intent():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(encoding="utf-8")
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(encoding="utf-8")
+    coordinator = (native_root / "StrategySelectionCoordinator.cs").read_text(
+        encoding="utf-8"
+    )
+    profiles = (native_root / "StrategyProfilesWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    history = (native_root / "StrategyHistoryWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    capture = (native_root / "SetupCaptureWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Content="Use next battle"' not in native_xaml
+    assert 'Content="Save startup default"' in native_xaml
+    assert 'Content="Switch this battle"' in native_xaml
+    assert '"Retry next battle"' in native_code
+    assert "QueueStrategyButton.Visibility = !_strategyProcessActive" in native_code
+    assert "private async void StrategySelectionBox_SelectionChanged" in native_code
+    assert "if (_updatingStrategySelection)" in native_code
+    assert "_updatingStrategySelection = true" in native_code
+    assert "userDriven: true" in native_code
+    assert "await SubmitStrategyRequestAsync(attempt" in native_code
+    assert "if (!_strategySelection.Dirty)" in native_code
+    assert "if (!userDriven)" in coordinator
+    assert "IsNextBoundaryNoOp" in coordinator
+    assert "_inFlight?.Token == attempt.Token" in coordinator
+    assert "_failedNextBoundaryStrategy = attempt.Strategy" in coordinator
+    assert "StrategyRequestOrigin.PublishedRevision" in coordinator
+    assert "_handledPublications.Add(notice)" in coordinator
+    assert "HasHandledPublication" in coordinator
+    assert "_deferredPublication = notice" in coordinator
+    assert "response.Request is not { Accepted: true } request" in native_code
+    assert "if (!_strategySelection.CompleteFailed(" in native_code
+    assert "if (!_strategySelection.CompleteAccepted(" in native_code
+    assert "RefreshAfterStrategyResponseAsync" in native_code
+    assert 'new { action = "set_strategy", strategy }' in native_code
+    assert "apply_to_active_run = true" in native_code
+    assert "_strategySelection.Dirty && selected is not null" in native_code
+    assert "UsePublishedStrategyAsync" in native_code
+    assert "_publishedStrategyHandler" in profiles
+    assert "_publishedStrategyHandler" in history
+    assert "_publishedStrategyHandler" in capture
+    publication_handler = native_code.split(
+        "private async Task<StrategyPublicationUseResult> UsePublishedStrategyAsync",
+        maxsplit=1,
+    )[1].split("private void SetStrategyRequestFeedback", maxsplit=1)[0]
+    assert publication_handler.index("HasHandledPublication") < (
+        publication_handler.index("EnsureStrategyOption")
+    )
+    start_handler = native_code.split(
+        "private async void Process_Click", maxsplit=1
+    )[1].split("private void AdbPortBox_TextChanged", maxsplit=1)[0]
+    assert 'action = "start"' in start_handler
+    assert "strategy," in start_handler
 
 
 def test_native_status_uses_only_published_dashboard_metrics():
@@ -1804,7 +1869,9 @@ def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     assert "startup_gate_policy" not in script
     assert "run_state" not in script
     assert "restart_attached" not in script
-    assert 'Content="Use next battle"' in native_xaml
+    assert 'Content="Use next battle"' not in native_xaml
+    assert 'Content="Save startup default"' in native_xaml
+    assert '"Retry next battle"' in native_code
     assert 'Content="Switch this battle"' in native_xaml
     assert 'x:Name="StrategyProfilesButton"' in native_xaml
     assert 'Header="Strategy profiles…"' in native_xaml

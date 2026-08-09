@@ -18,6 +18,8 @@ public partial class SetupCaptureWindow : Window
         RegexOptions.CultureInvariant);
 
     private readonly ControlSurfaceApi _api;
+    private readonly Func<StrategyPublicationNotice, Task<StrategyPublicationUseResult>>?
+        _publishedStrategyHandler;
     private readonly DispatcherTimer _pollTimer = new()
     {
         Interval = TimeSpan.FromSeconds(1.5),
@@ -29,9 +31,18 @@ public partial class SetupCaptureWindow : Window
     private bool _applying;
 
     public SetupCaptureWindow(ControlSurfaceApi api)
+        : this(api, null)
+    {
+    }
+
+    internal SetupCaptureWindow(
+        ControlSurfaceApi api,
+        Func<StrategyPublicationNotice, Task<StrategyPublicationUseResult>>?
+            publishedStrategyHandler)
     {
         InitializeComponent();
         _api = api;
+        _publishedStrategyHandler = publishedStrategyHandler;
         _pollTimer.Tick += async (_, _) => await PollAsync();
         Loaded += async (_, _) => await BeginAsync();
         Closed += (_, _) => _pollTimer.Stop();
@@ -263,7 +274,8 @@ public partial class SetupCaptureWindow : Window
                     var editor = new StrategyProfilesWindow(
                         _api,
                         _review.Source,
-                        _review.Resolution)
+                        _review.Resolution,
+                        _publishedStrategyHandler)
                     {
                         Owner = Owner,
                     };

@@ -179,12 +179,16 @@ current runtime state.
 
 - Native selection lacked accepted/current/pending feedback, and a later
   same-ID publication was incorrectly treated as the definition already
-  loaded; preserve unsent choices and keep queue/adopt actions explicit,
-  definition-aware, and boundary-aware.
+  loaded. Preserve failed choices; genuine active-process dropdown changes and
+  successful active-process publication/restore must queue next-boundary use
+  automatically, while stopped publication/restore updates only the visible
+  Start selection and active-battle adoption stays explicit, definition-aware,
+  and boundary-aware.
 - Load the [dossier](issues/open-2026.md#native-strategy-selection-did-not-report-acceptance-or-live-disposition)
   for native strategy confirmation or recurrence. Next: verify same-ID
-  publication/reload, the dropdown's explicit activation actions, queue/adopt
-  feedback, and Pause preservation on Windows; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
+  publication/reload, automatic dropdown queueing, conditional retry,
+  explicit active adoption, feedback, and Pause preservation on Windows;
+  [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
 
 ### Windows client could not identify or reload a stale Linux control service
 

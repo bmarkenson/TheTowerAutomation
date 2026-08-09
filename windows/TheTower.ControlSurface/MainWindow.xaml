@@ -393,13 +393,14 @@
                     <ComboBox x:Name="StrategySelectionBox"
                               SelectionChanged="StrategySelectionBox_SelectionChanged"
                               IsEnabled="False"
+                              ToolTip="While the managed process is active, choosing a Strategy queues it for the next battle."
                               Margin="4" />
                     <Button Grid.Column="1"
                             x:Name="StrategyProfilesButton"
                             Content="Profiles…"
                             Click="StrategyProfiles_Click"
                             IsEnabled="False"
-                            ToolTip="Clone, validate, and publish compact Farm strategy profiles without activating them."
+                            ToolTip="Clone, validate, and publish compact Farm Strategy profiles. Publication queues next-battle use for an active process or selects it for Start when stopped; it never switches the current battle."
                             Margin="4" />
                   </Grid>
                   <UniformGrid Columns="3" Margin="4,1,4,4">
@@ -439,7 +440,7 @@
                     </Grid.ColumnDefinitions>
                     <Button x:Name="QueueStrategyButton"
                             Grid.Column="0"
-                            Content="Use next battle"
+                            Content="Save startup default"
                             Click="QueueStrategy_Click"
                             IsEnabled="False" />
                     <Button x:Name="AdoptStrategyButton"

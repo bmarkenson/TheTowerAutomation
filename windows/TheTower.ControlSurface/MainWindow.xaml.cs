@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim _tunnelHostRefreshGate = new(1, 1);
     private readonly ObservableCollection<ActivityEntry> _activity = [];
     private readonly ObservableCollection<CurrentBattlePerkItem> _currentBattlePerks = [];
+    private readonly StrategySelectionCoordinator _strategySelection = new();
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
     private CancellationTokenSource? _refreshCancellation;
@@ -50,8 +51,6 @@ public partial class MainWindow : Window
     private string? _activityScopeId;
     private string _strategyRequestMessage = "";
     private bool _updatingStrategySelection;
-    private bool _strategySelectionDirty;
-    private bool _strategyRequestInFlight;
     private bool _strategyLifecycleAvailable;
     private bool _strategyProcessActive;
     private string? _configuredStrategy;
@@ -1671,17 +1670,14 @@ public partial class MainWindow : Window
     {
         try
         {
-            var dialog = new StrategyProfilesWindow(_api) { Owner = this };
+            var dialog = new StrategyProfilesWindow(
+                _api,
+                UsePublishedStrategyAsync)
+            {
+                Owner = this,
+            };
             dialog.ShowDialog();
             await RefreshStatusAsync(force: true);
-            if (!string.IsNullOrWhiteSpace(dialog.PublishedStrategyId))
-            {
-                SelectStrategy(dialog.PublishedStrategyId);
-                _strategySelectionDirty = true;
-                _strategyRequestMessage =
-                    $"Published {StrategyDisplayName(dialog.PublishedStrategyId)}; select an activation action when ready.";
-                UpdateStrategyActionAvailability();
-            }
         }
         catch (Exception exc)
         {
@@ -1789,7 +1785,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void StrategySelectionBox_SelectionChanged(
+    private async void StrategySelectionBox_SelectionChanged(
         object sender,
         SelectionChangedEventArgs e)
     {
@@ -1798,72 +1794,241 @@ public partial class MainWindow : Window
             return;
         }
 
-        _strategySelectionDirty = true;
-        _strategyRequestMessage = "";
+        SetStrategyRequestFeedback("", (Brush)FindResource("MutedBrush"));
+        var attempt = _strategySelection.SelectionChanged(
+            CurrentStrategySelectionContext(),
+            SelectedStrategy(),
+            userDriven: true);
         UpdateStrategyActionAvailability();
+        if (attempt is not null)
+        {
+            await SubmitStrategyRequestAsync(attempt, showErrorDialog: false);
+        }
     }
 
-    private async void QueueStrategy_Click(object sender, RoutedEventArgs e) =>
-        await SubmitSelectedStrategyAsync(adoptActiveBattle: false);
-
-    private async void AdoptStrategy_Click(object sender, RoutedEventArgs e) =>
-        await SubmitSelectedStrategyAsync(adoptActiveBattle: true);
-
-    private async Task SubmitSelectedStrategyAsync(bool adoptActiveBattle)
+    private async void QueueStrategy_Click(object sender, RoutedEventArgs e)
     {
-        var strategy = SelectedStrategy();
-        if (strategy is null)
+        var context = CurrentStrategySelectionContext();
+        var selected = SelectedStrategy();
+        var attempt = context.ProcessActive
+            ? _strategySelection.TryBeginRetry(context, selected)
+            : _strategySelection.TryBeginStartupSave(context, selected);
+        if (attempt is not null)
         {
-            return;
+            await SubmitStrategyRequestAsync(attempt, showErrorDialog: true);
         }
+    }
 
-        _strategyRequestInFlight = true;
+    private async void AdoptStrategy_Click(object sender, RoutedEventArgs e)
+    {
+        var attempt = _strategySelection.TryBeginActiveAdoption(
+            CurrentStrategySelectionContext(),
+            SelectedStrategy());
+        if (attempt is not null)
+        {
+            await SubmitStrategyRequestAsync(attempt, showErrorDialog: true);
+        }
+    }
+
+    private async Task<StrategyRequestOutcome> SubmitStrategyRequestAsync(
+        StrategyRequestAttempt attempt,
+        bool showErrorDialog)
+    {
+        var strategy = attempt.Strategy;
         UpdateStrategyActionAvailability();
         try
         {
-            var action = adoptActiveBattle
-                ? "active-battle adoption"
-                : _strategyProcessActive ? "boundary queue" : "next-start save";
-            StrategySelectionText.Text =
-                $"Sending {StrategyDisplayName(strategy)} {action} request...";
-            StrategySelectionText.Visibility = Visibility.Visible;
-            object payload = adoptActiveBattle
+            var action = attempt.Kind switch
+            {
+                StrategyRequestKind.ActiveBattle => "active-battle adoption",
+                StrategyRequestKind.StartupDefault => "next-start save",
+                _ => "boundary queue",
+            };
+            SetStrategyRequestFeedback(
+                $"Sending {StrategyDisplayName(strategy)} {action} request...",
+                new SolidColorBrush(Color.FromRgb(241, 191, 91)));
+            object payload = attempt.ApplyToActiveRun
                 ? new { action = "set_strategy", strategy, apply_to_active_run = true }
                 : new { action = "set_strategy", strategy };
             var response = await _api.PostProcessAsync(
                 payload,
                 CancellationToken.None);
-            if (response.Request is { Accepted: true } request)
+            if (response.Request is not { Accepted: true } request)
             {
-                var requested = NormalizeStrategy(request.Strategy) ?? strategy;
-                var requestedLabel = StrategyDisplayName(requested);
-                _strategyRequestMessage = request.Disposition switch
+                if (!_strategySelection.CompleteFailed(
+                        attempt,
+                        SelectedStrategy()))
                 {
-                    "queued" => $"Accepted {requestedLabel}; queued for the next confirmed run boundary.",
-                    "saved" => $"Accepted {requestedLabel}; saved for the next process start.",
-                    "active_battle_requested" => $"Accepted {requestedLabel}; waiting for active-battle adoption.",
-                    _ => $"Accepted {requestedLabel} strategy request.",
-                };
-                _strategySelectionDirty = false;
-                if (!string.IsNullOrWhiteSpace(request.Warning))
-                {
-                    _strategyRequestMessage += $" Audit warning: {request.Warning}";
+                    return new StrategyRequestOutcome(
+                        false,
+                        "Ignored a superseded Strategy rejection.");
                 }
+                var reason = response.Request?.Warning
+                    ?? response.Request?.Disposition
+                    ?? "Linux did not confirm request acceptance.";
+                var message = $"Strategy request was not accepted: {reason}";
+                SetStrategyRequestFeedback(
+                    message,
+                    new SolidColorBrush(Color.FromRgb(255, 113, 135)));
+                await RefreshAfterStrategyResponseAsync(response);
+                if (showErrorDialog)
+                {
+                    ShowError(new InvalidOperationException(message));
+                }
+                return new StrategyRequestOutcome(false, message);
             }
+
+            var requested = NormalizeStrategy(request.Strategy) ?? strategy;
+            var requestedLabel = StrategyDisplayName(requested);
+            var acceptedMessage = request.Disposition switch
+            {
+                "queued" => $"Accepted {requestedLabel}; queued for the next confirmed run boundary.",
+                "saved" => $"Accepted {requestedLabel}; saved for the next process start.",
+                "active_battle_requested" => $"Accepted {requestedLabel}; waiting for active-battle adoption.",
+                _ => $"Accepted {requestedLabel} strategy request.",
+            };
+            if (!_strategySelection.CompleteAccepted(
+                    attempt,
+                    SelectedStrategy()))
+            {
+                return new StrategyRequestOutcome(
+                    true,
+                    "Linux accepted a superseded Strategy request; its stale response was ignored.");
+            }
+            if (!string.IsNullOrWhiteSpace(request.Warning))
+            {
+                acceptedMessage += $" Audit warning: {request.Warning}";
+            }
+            SetStrategyRequestFeedback(
+                acceptedMessage,
+                new SolidColorBrush(Color.FromRgb(101, 230, 166)));
+            await RefreshAfterStrategyResponseAsync(response);
+            return new StrategyRequestOutcome(true, acceptedMessage);
+        }
+        catch (Exception exc)
+        {
+            if (!_strategySelection.CompleteFailed(
+                    attempt,
+                    SelectedStrategy()))
+            {
+                return new StrategyRequestOutcome(
+                    false,
+                    "A superseded Strategy request failed after a newer request took ownership.");
+            }
+            var message = $"Strategy request was not accepted: {exc.Message}";
+            SetStrategyRequestFeedback(
+                message,
+                new SolidColorBrush(Color.FromRgb(255, 113, 135)));
+            if (showErrorDialog)
+            {
+                ShowError(exc);
+            }
+            await RefreshStatusAsync(force: true);
+            return new StrategyRequestOutcome(false, message);
+        }
+        finally
+        {
+            var hadDeferredPublication =
+                _strategySelection.HasDeferredPublication;
+            var deferred = _strategySelection.TryBeginDeferredPublication(
+                CurrentStrategySelectionContext());
+            UpdateStrategyActionAvailability();
+            if (deferred is not null)
+            {
+                _ = SubmitStrategyRequestAsync(deferred, showErrorDialog: false);
+            }
+            else if (hadDeferredPublication
+                && _strategyProcessActive
+                && _strategySelection.RetryAvailable(SelectedStrategy()))
+            {
+                SetStrategyRequestFeedback(
+                    "The deferred publication request could not start because "
+                        + "Strategy control is unavailable; the selection is retained for Retry.",
+                    new SolidColorBrush(Color.FromRgb(241, 191, 91)));
+            }
+        }
+    }
+
+    private async Task RefreshAfterStrategyResponseAsync(StatusResponse response)
+    {
+        try
+        {
             RenderStatus(response);
             await RefreshActivityAsync(force: true);
         }
         catch (Exception exc)
         {
-            _strategyRequestMessage = $"Strategy request was not accepted: {exc.Message}";
-            ShowError(exc);
+            LastErrorText.Text =
+                "The Strategy response was received, but the dashboard refresh failed: "
+                + exc.Message;
             await RefreshStatusAsync(force: true);
         }
-        finally
+    }
+
+    private async Task<StrategyPublicationUseResult> UsePublishedStrategyAsync(
+        StrategyPublicationNotice publication)
+    {
+        if (_strategySelection.HasHandledPublication(publication))
         {
-            _strategyRequestInFlight = false;
-            UpdateStrategyActionAvailability();
+            return new StrategyPublicationUseResult(
+                true,
+                "This publication notice was already handled; no duplicate selection or request was made.");
         }
+
+        await RefreshStatusAsync(force: true);
+        EnsureStrategyOption(publication.StrategyId);
+        SelectStrategy(publication.StrategyId);
+        var attempt = _strategySelection.Published(
+            CurrentStrategySelectionContext(),
+            publication);
+        if (!_strategyProcessActive)
+        {
+            var message =
+                $"Selected {StrategyDisplayName(publication.StrategyId)} version "
+                + $"{publication.LogicalVersion} for Start Automation. "
+                + "The saved startup default was not changed.";
+            SetStrategyRequestFeedback(
+                message,
+                new SolidColorBrush(Color.FromRgb(101, 230, 166)));
+            UpdateStrategyActionAvailability();
+            return new StrategyPublicationUseResult(true, message);
+        }
+        if (attempt is null)
+        {
+            var deferred = _strategySelection.HasDeferredPublication;
+            var unavailable = !_strategyLifecycleAvailable;
+            if (unavailable)
+            {
+                _strategySelection.MarkAutomaticFailure(publication.StrategyId);
+            }
+            var message = deferred
+                ? "Its next-boundary request will follow the Strategy request already in flight."
+                : unavailable
+                    ? "The automatic next-boundary request could not start because Strategy control is unavailable; the selection is retained for Retry."
+                    : "This publication notice was already handled; no duplicate next-boundary request was sent.";
+            SetStrategyRequestFeedback(
+                message,
+                deferred || unavailable
+                    ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+                    : (Brush)FindResource("MutedBrush"));
+            UpdateStrategyActionAvailability();
+            return new StrategyPublicationUseResult(!unavailable, message);
+        }
+
+        var outcome = await SubmitStrategyRequestAsync(
+            attempt,
+            showErrorDialog: false);
+        return new StrategyPublicationUseResult(outcome.Accepted, outcome.Message);
+    }
+
+    private void SetStrategyRequestFeedback(string message, Brush foreground)
+    {
+        _strategyRequestMessage = message;
+        StrategySelectionText.Text = message;
+        StrategySelectionText.Foreground = foreground;
+        StrategySelectionText.Visibility = string.IsNullOrWhiteSpace(message)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
     }
 
     private async void Process_Click(object sender, RoutedEventArgs e)
@@ -1909,9 +2074,10 @@ public partial class MainWindow : Window
                         strategy,
                     },
                     CancellationToken.None);
-                _strategySelectionDirty = false;
-                _strategyRequestMessage =
-                    $"Started Paused with selected {StrategyDisplayName(strategy)} strategy.";
+                _strategySelection.MarkExternalAcceptance(strategy);
+                SetStrategyRequestFeedback(
+                    $"Started Paused with selected {StrategyDisplayName(strategy)} strategy.",
+                    new SolidColorBrush(Color.FromRgb(101, 230, 166)));
             }
             else
             {
@@ -2808,7 +2974,7 @@ public partial class MainWindow : Window
         _requestedStrategy = requestedStrategy;
         _pendingStrategy = pendingStrategy;
         _strategyApplyMode = status.Control.StrategyApplyMode;
-        if (!_strategySelectionDirty)
+        if (!_strategySelection.Dirty)
         {
             SelectStrategy(
                 pendingStrategy
@@ -3195,7 +3361,10 @@ public partial class MainWindow : Window
 
     private void CaptureSetup_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new SetupCaptureWindow(_api) { Owner = this };
+        var dialog = new SetupCaptureWindow(_api, UsePublishedStrategyAsync)
+        {
+            Owner = this,
+        };
         dialog.ShowDialog();
         _ = RefreshStatusAsync(force: true);
     }
@@ -3506,8 +3675,14 @@ public partial class MainWindow : Window
         IEnumerable<string>? options,
         params string?[] retainedValues)
     {
+        var selected = SelectedStrategy();
+        IEnumerable<string> dirtySelection =
+            _strategySelection.Dirty && selected is not null
+                ? [selected]
+                : [];
         var desired = (options ?? [])
             .Concat(retainedValues.Where(value => !string.IsNullOrWhiteSpace(value))!)
+            .Concat(dirtySelection)
             .Select(NormalizeStrategy)
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Cast<string>()
@@ -3527,8 +3702,6 @@ public partial class MainWindow : Window
         {
             return;
         }
-
-        var selected = SelectedStrategy();
         _updatingStrategySelection = true;
         try
         {
@@ -3552,6 +3725,35 @@ public partial class MainWindow : Window
                     NormalizeStrategy(item.Tag?.ToString()),
                     selection,
                     StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            _updatingStrategySelection = false;
+        }
+    }
+
+    private void EnsureStrategyOption(string strategy)
+    {
+        var normalized = NormalizeStrategy(strategy);
+        if (normalized is null
+            || StrategySelectionBox.Items
+                .OfType<ComboBoxItem>()
+                .Any(item => string.Equals(
+                    NormalizeStrategy(item.Tag?.ToString()),
+                    normalized,
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        _updatingStrategySelection = true;
+        try
+        {
+            StrategySelectionBox.Items.Add(new ComboBoxItem
+            {
+                Content = StrategyDisplayName(normalized),
+                Tag = normalized,
+            });
         }
         finally
         {
@@ -3615,25 +3817,10 @@ public partial class MainWindow : Window
     {
         var selected = SelectedStrategy();
         var hasSelection = selected is not null;
+        var context = CurrentStrategySelectionContext();
         var hasPending = _pendingStrategy is not null;
-        var queueAlreadyRequested = _strategyProcessActive
-            ? hasPending
-                ? string.Equals(
-                    selected,
-                    _requestedStrategy,
-                    StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(
-                        _strategyApplyMode,
-                        "next_boundary",
-                        StringComparison.OrdinalIgnoreCase)
-                : string.Equals(
-                    selected,
-                    _currentStrategy,
-                    StringComparison.OrdinalIgnoreCase)
-            : string.Equals(
-                selected,
-                _configuredStrategy,
-                StringComparison.OrdinalIgnoreCase);
+        var queueAlreadyRequested =
+            StrategySelectionCoordinator.IsNextBoundaryNoOp(context, selected);
         var adoptionAlreadyRequested = hasPending
             && string.Equals(
                 selected,
@@ -3643,25 +3830,33 @@ public partial class MainWindow : Window
                 _strategyApplyMode,
                 "active_battle",
                 StringComparison.OrdinalIgnoreCase);
+        var requestInFlight = _strategySelection.RequestInFlight;
+        var retryAvailable = _strategyProcessActive
+            && _strategySelection.RetryAvailable(selected);
 
         StrategySelectionBox.IsEnabled =
-            _strategyLifecycleAvailable && !_strategyRequestInFlight;
+            _strategyLifecycleAvailable && !requestInFlight;
         StrategyProfilesButton.IsEnabled =
-            _serverCompatibility?.IsCompatible == true;
+            _serverCompatibility?.IsCompatible == true && !requestInFlight;
         StrategyProfilesMenuItem.IsEnabled = StrategyProfilesButton.IsEnabled;
         QueueStrategyButton.Content = _strategyProcessActive
-            ? "Use next battle"
+            ? "Retry next battle"
             : "Save startup default";
         QueueStrategyButton.ToolTip = _strategyProcessActive
-            ? "Keep this battle unchanged and apply the selection at the next confirmed battle boundary."
+            ? "Retry the failed automatic next-boundary request for this retained selection."
             : "Remember this strategy without starting automation. System > Services Start Automation already uses the current selection.";
+        QueueStrategyButton.Visibility = !_strategyProcessActive || retryAvailable
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         Grid.SetColumnSpan(
             QueueStrategyButton,
             _strategyProcessActive ? 1 : 2);
         QueueStrategyButton.IsEnabled = _strategyLifecycleAvailable
             && hasSelection
-            && !queueAlreadyRequested
-            && !_strategyRequestInFlight;
+            && !requestInFlight
+            && (_strategyProcessActive
+                ? retryAvailable
+                : !queueAlreadyRequested);
         AdoptStrategyButton.IsEnabled = _strategyLifecycleAvailable
             && _strategyProcessActive
             && _serverCompatibility?.IsCompatible == true
@@ -3671,25 +3866,39 @@ public partial class MainWindow : Window
                 _currentStrategy,
                 StringComparison.OrdinalIgnoreCase)
             && !adoptionAlreadyRequested
-            && !_strategyRequestInFlight;
+            && !requestInFlight;
         AdoptStrategyButton.Visibility = _strategyProcessActive
             ? Visibility.Visible
             : Visibility.Collapsed;
+        Grid.SetColumn(AdoptStrategyButton, retryAvailable ? 1 : 0);
+        Grid.SetColumnSpan(AdoptStrategyButton, retryAvailable ? 1 : 2);
         AdoptStrategyButton.ToolTip =
             "Request this strategy for the current battle. New-run setup still waits for a genuine boundary.";
         SelectedStrategyValueText.Text = StrategyDisplayName(selected);
         StrategyActionHelpText.Text = _strategyProcessActive
-            ? "Use next battle leaves the current strategy alone. Switch this battle changes normal strategy behavior now; startup setup still waits for the next real boundary."
+            ? retryAvailable
+                ? "The automatic next-boundary request failed. The selection is retained for Retry; Switch this battle remains a separate action."
+                : "Changing the selection queues it for the next battle. Switch this battle changes normal strategy behavior now; startup setup still waits for the next real boundary."
             : "Start already uses this selection. Save startup default only if it should be remembered without starting automation.";
-        StrategyActionHelpText.Visibility = _strategySelectionDirty
+        StrategyActionHelpText.Visibility = _strategySelection.Dirty
             ? Visibility.Visible
             : Visibility.Collapsed;
         if (string.IsNullOrWhiteSpace(_strategyRequestMessage)
-            && !_strategyRequestInFlight)
+            && !requestInFlight)
         {
             StrategySelectionText.Visibility = Visibility.Collapsed;
         }
     }
+
+    private StrategySelectionContext CurrentStrategySelectionContext() =>
+        new(
+            _strategyLifecycleAvailable,
+            _strategyProcessActive,
+            _configuredStrategy,
+            _currentStrategy,
+            _requestedStrategy,
+            _pendingStrategy,
+            _strategyApplyMode);
 
     private void UpdateControlSurfaceCompatibility()
     {

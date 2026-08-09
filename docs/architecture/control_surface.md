@@ -77,9 +77,13 @@ agnostic.
   acknowledged-paused ADB-port configuration, and fixed managed-service
   start/stop. Active strategy
   requests are declarative runtime configuration, not direct tap authority.
-  Profile publication writes only a fixed-name file beneath
+  The profile-publication endpoint writes only a fixed-name file beneath
   `config/strategies/custom`; it does not select, queue, adopt, start, restart,
-  stop, pause, enable, or otherwise apply that profile.
+  stop, pause, enable, or otherwise apply that profile. After that endpoint
+  confirms a Strategy publication or restore, the native client separately
+  submits the ordinary `set_strategy` request for the next boundary when the
+  process is active; when stopped it selects the Strategy for Start without
+  changing the saved default. Base publication submits no control request.
   There is no arbitrary tap, shell command, process kill, direct Surrender,
   file-path, or ADB endpoint.
 - Complete Stop persists `STOPPED` before asking the fixed systemd user service
@@ -131,7 +135,10 @@ agnostic.
   `NEW_BATTLE` and Workshop are authoritative no-battle boundaries, including
   while paused. Home `RESUME_BATTLE` never authorizes a boundary switch.
   Selecting the current strategy replaces and thereby cancels a different
-  pending request.
+  pending request. When no different request is pending, a same-ID request is a
+  no-op only when the latest resolved definition matches the loaded definition;
+  a newly published same-ID revision remains pending for the same guarded
+  boundary installation.
 - Every explicit Tournament selection, including a stopped process Start with
   Tournament selected, also creates a one-use exclusive-validation receipt
   bound to that strategy request and generated-plan fingerprint. Status exposes
@@ -449,7 +456,7 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/strategy-authoring/history` | Newest-first immutable custom-Strategy lineage and revision summaries, including retired lineages, without expanded plans |
 | `GET` | `/api/v1/strategy-authoring/history/{id}` | One custom Strategy lineage and its ordered revision summaries |
 | `GET` | `/api/v1/strategy-authoring/history/{id}/{version}` | One retained revision's review-safe source, Base snapshot, resolution, fingerprints, audit identity, and validation state without its generated plan |
-| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, materialize a catalog-bound normalized preset copy, create an immutable custom Module preset, compare retained revisions, or review/confirm restore-as-new, without activation |
+| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, materialize a catalog-bound normalized preset copy, create an immutable custom Module preset, compare retained revisions, or review/confirm restore-as-new, without runtime-control mutation |
 | `GET` | `/api/v1/setup-capture` | Current runtime-issued capture status, availability, inactive captured-draft catalog, Module presets, and comparison Bases |
 | `POST` | `/api/v1/setup-capture` | Request a new forced-save capture, review a fingerprinted captured-versus-Base difference, save through the existing Module/Strategy owner, or cancel; never activate or publish |
 | `GET` | `/api/v1/setup-capture/drafts/{id}` | Reopen one immutable captured Strategy source in the ordinary authoring editor without selecting or activating it |
@@ -567,9 +574,15 @@ revision.
 Custom publications live under `config/strategies/custom` and are ignored by
 Git as operator-owned configuration. Profile IDs are restricted to fixed-name
 lowercase identifiers and cannot collide with bundled or legacy names. There is
-no delete or arbitrary-path operation on the older profile endpoint. Selecting
-or applying a published profile remains a separate explicit action through the
-existing process API and its normal next-boundary or active-battle semantics.
+no delete or arbitrary-path operation on the older profile endpoint.
+Publication and control remain separate API operations. In the native workflow,
+a successful Strategy publication during an active process automatically
+triggers the existing process API's normal next-boundary request; it never
+triggers active-battle adoption. When stopped, the client selects it for Start
+without persisting a different startup default. If the active request fails,
+the publication remains committed and the selected Strategy remains available
+for Retry. Other clients may still select or apply a published profile
+explicitly through the same process API.
 
 ## Sparse strategy authoring
 
@@ -706,8 +719,10 @@ The preview also supports attaching the first compatible Base to an existing
 editable Strategy whose current source has no Base. The native client exposes
 that choice, restores the published no-Base source when requesting the preview,
 and blocks publication of the changed pin until the returned review fingerprint
-is present. The published Strategy keeps its ID and receives a new version;
-selection and activation remain unchanged.
+is present. The authoring endpoint keeps the Strategy ID and publishes a new
+version without changing control state. The native workflow then selects that
+Strategy and separately queues its latest definition for the next boundary; it
+does not switch the current battle.
 
 ### Immutable Strategy history and restore
 
@@ -756,9 +771,11 @@ code using its embedded historical Base snapshot, then binds the semantic
 review to a third fingerprint. Only an explicit confirmation can publish that
 intent as the lineage's next version. A stale latest, changed history revision,
 or changed review returns HTTP 409; WPF preserves the open authoring draft and
-refreshes history/latest catalogs only after a successful restore. Restore
-never mutates history, selects or activates the Strategy, restarts automation,
-changes Pause, or changes any control directive.
+refreshes history/latest catalogs only after a successful restore. The restore
+endpoint never mutates history, restarts automation, changes Pause, or changes
+a control directive. After success, the native workflow selects the restored
+Strategy and separately queues its newly published latest definition for the
+next boundary without switching the current battle.
 
 ## Activity log audiences
 
@@ -1031,17 +1048,24 @@ Process request examples:
   apply authority and accepts only an integer TCP port; its validated handoff
   keeps Pause and the former target if new-target connection or screenshot
   validation fails.
-- Validated strategy selection (`farm_t18`, `farm_t19`,
-  `tournament`, or `none`). A stopped selection is saved for the next start;
-  an active selection is queued for a confirmed run boundary by default. The
-  native GUI separates a strategy dropdown from explicit **Use next battle**
-  and **Switch this battle** actions while active. When stopped, **Save startup
-  default** only persists the selection; Start already uses the visible
-  selection. **Switch this battle** applies normal behavior and report identity
-  after fresh active-battle evidence while deferring new-run gates. The
-  dropdown preserves an unsent selection across
-  status refreshes, action buttons disable requests that would be no-ops, and
-  status reports selected, current, and pending strategies separately.
+- Validated strategy selection (`farm_t18`, `farm_t19`, `tournament`, or
+  `none`). For an active process, a genuine dropdown change immediately submits
+  one ordinary next-boundary request. Programmatic polling/render changes never
+  submit. Selecting Current replaces a different pending Strategy, while
+  already-current with no pending request and already-pending next-boundary
+  selections are no-ops. Acceptance clears dirty state; transport or explicit
+  rejection retains the selected value across polling and exposes **Retry next
+  battle** without allowing another in-flight request. **Switch this battle** is
+  the separate explicit active-adoption request and keeps its fresh-evidence and
+  deferred-new-run-gate semantics. When stopped, Start already uses and saves
+  the visible selection; **Save startup default** remains the explicit way to
+  persist it without starting.
+  Successful Strategy publication and restore-as-new select the published ID.
+  While the process is active, they automatically submit the same next-boundary
+  request, including when the stable ID equals Current; when stopped, they only
+  update the visible Start selection. Base publication never submits a process
+  request. Publication success is not rolled back if queueing fails. Status
+  reports selected, current, and pending Strategies separately.
 - Durable Tournament-validation status in both clients. It distinguishes Home
   preflight pending, ordinary-battle ownership, battle-only checks, cleanup,
   launch confirmation, and a failed/cancelled result with its reason. A ready

@@ -313,20 +313,22 @@ At Tournament Results, Wait retains the captured screen. Continue
 automatically and Return/stay Home use the verified dismissal owner after the
 result is saved; dismissal itself does not start another battle.
 
-The strategy dropdown likewise preserves an unsent choice across refreshes.
-For an active process, selection alone does not
-change the current or queued strategy: choose **Use next battle** to leave the
-current battle's strategy in place, or **Switch this battle** to request
-adoption after fresh running or resumable-Home evidence. For a stopped
-process, **Start Automation** saves and launches the visibly selected Strategy,
-then leaves input Paused with no battle workflow selected. **Save startup
-default** persists a stopped selection without starting. Adoption changes normal strategy behavior and
-Battle End identity without a restart, while new-run initialization, session
-preflight, and Home-only gates wait for the next genuine boundary. Selecting
-the displayed Current strategy and queueing it cancels a different pending
-request. Actions that would be no-ops are disabled; the panel reports request
-acceptance immediately and shows selected, current, and pending values
-separately.
+For an active process, a genuine strategy-dropdown change immediately submits
+one normal next-boundary request and leaves the current battle unchanged.
+Programmatic polling/render updates submit nothing. Selecting Current cancels a
+different pending Strategy; selecting an already-queued next-boundary Strategy,
+or unchanged Current when nothing is pending, is a no-op. The selector is
+disabled while one request is in flight. Sending, acceptance, queueing, and
+failure appear immediately. Acceptance clears dirty state; failure retains the
+visible selection across polling and exposes **Retry next battle**. **Switch
+this battle** remains a separate explicit request that waits for fresh running
+or resumable-Home evidence. For a stopped process, **Start Automation** saves
+and launches the visibly selected Strategy, then leaves input Paused with no
+battle workflow selected. **Save startup default** persists a stopped selection
+without starting. Active adoption changes normal strategy behavior and Battle
+End identity without a restart, while new-run initialization, session preflight,
+and Home-only gates wait for the next genuine boundary. Selected, current, and
+pending values remain separate.
 
 The same panel selects a persistent numeric game-speed target. The dropdown
 offers `x0.0` through `x6.0` in `x0.5` increments and `x6.3 — Maximum
@@ -518,15 +520,21 @@ confirmation. Base publication uses the latest Base fingerprint and Strategy
 publication uses the source fingerprint, so a stale editor retains its draft
 and must reload instead of overwriting newer work.
 
-Publishing never selects or activates a Strategy. After publication, use the
-normal strategy dropdown plus **Use next battle**, **Switch this battle**, or a
-managed Start. Existing schema-1 and schema-2 custom publications are adopted
+The authoring endpoint never changes runtime control. After successful Strategy
+publication, the native client selects its stable ID and automatically submits
+the ordinary next-boundary request when the managed process is active—even if
+the ID equals Current—without switching the current battle. When stopped, it
+selects the Strategy for Start Automation without changing the saved startup
+default.
+Base publication submits no control request. A queue failure does not undo the
+publication; the selected Strategy remains visible with **Retry next battle**.
+Existing schema-1 and schema-2 custom publications are adopted
 conservatively into immutable history without rewriting their latest facade;
 schema-1 authoring conversion still does not infer inheritance. Local
 definition snapshots, embedded Base resolution, and fingerprints remain
 Linux-owned review evidence rather than editable fields. Shared presets remain
 available. Tournament behavior, generated YAML rules, executor actions,
-runtime strategy gates, and activation behavior remain outside this editor.
+runtime strategy gates, and active-battle adoption remain outside this editor.
 
 **History** opens a separate custom-Strategy lineage window. Active and retired
 lineages remain discoverable, with immutable versions newest first. The list
@@ -544,9 +552,11 @@ current validation errors. **Restore as new revision** remains disabled until a
 successful review. Confirmation states that Linux will re-normalize and rebuild
 the exact historical intent through current trusted code and publish it as the
 lineage's next immutable latest version—not move or mutate the old revision.
-Restore never selects or activates the Strategy, restarts automation, changes
-Pause, or changes runtime control. A stale history/latest conflict preserves
-the open authoring draft; success refreshes both history and latest catalogs.
+The restore endpoint never restarts automation, changes Pause, or changes
+runtime control. After success, the native client uses the same automatic
+next-boundary selection behavior as ordinary publication and never switches the
+current battle. A stale history/latest conflict preserves the open authoring
+draft; success refreshes both history and latest catalogs.
 
 For a custom Strategy, **Rename Strategy** selects the editable display-name
 field; **Review & Publish...** applies the rename through the same Linux
@@ -580,7 +590,9 @@ still requires the complete visible smoke below.
    profile/Base and custom Module preset catalogs, and start the control-surface
    server with `--repository-root`, `--module-preset-directory`, plus control,
    log, history, and telemetry paths inside the same temporary root. Do not use
-   process or activation endpoints.
+   a real managed-process, live activation, or device endpoint. For the active/
+   stopped checks below, use only a disposable or stubbed process endpoint whose
+   state and request log are confined to the temporary root.
 2. Connect the native client to that server and open **Strategy profiles...**.
    Confirm the window renders immediately with no `TwoWay`/read-only-property
    binding exception. Select a bundled read-only Strategy and confirm disabled
@@ -628,14 +640,30 @@ still requires the complete visible smoke below.
    editor again, plus Inherit, Override Enforce, Override Observe, explicit
    Ignore, Reset to inherited, preset/local switching, and both forms' dormant
    values across repeated state changes. Validate, publish, close, reopen, and
-   verify exact round trips and Linux-owned definition snapshots in review.
+   verify exact round trips and Linux-owned definition snapshots in review. With
+   the disposable process reported stopped, confirm publication selects the
+   Strategy for Start Automation without calling the process endpoint or
+   changing the saved startup default.
    Use **Rename Strategy** to change its display name, review and publish, then
    reopen and verify the name and version advanced while its stable ID did not.
+   With the disposable process active, publish another revision under that same
+   stable ID. Confirm the client sends exactly one normal next-boundary
+   `set_strategy` request, never `apply_to_active_run`, shows sending then
+   accepted/queued feedback, keeps Current unchanged, and shows the publication
+   as Pending. Inject one rejected response and one transport failure in turn;
+   polling must retain the visible selection and expose one **Retry next battle**
+   action without duplicating an in-flight request. Confirm selecting Current
+   replaces a different pending Strategy, while reselecting already-pending or
+   unchanged Current is a no-op. **Switch this battle** must remain the only
+   explicit active-adoption path. While still active, publish a disposable Base
+   revision and confirm it sends no process request. Return the disposable
+   process to stopped before continuing.
 5. Open an editable disposable existing Strategy with **No Base** (including a
    copied schema-1 fixture). Select the disposable Base, confirm **Review Base
    selection...** appears and publication is blocked before review, inspect and
    accept the semantic review, validate, publish, and reopen. Verify the same
-   Strategy ID now pins the reviewed Base revision and nothing was activated.
+   Strategy ID now pins the reviewed Base revision, remains selected for Start,
+   and does not change process control or the current battle.
 6. Seed one unknown Ultimate Weapon group and one unknown toggle field through
    the disposable server fixture. Change a known toggle, validate, publish,
    reopen, and verify both unknown values are unchanged and only described as
@@ -650,10 +678,15 @@ still requires the complete visible smoke below.
    Base, Ignore/override, plan, rule-count, metadata, and validation comparison.
    Cancel once and prove no catalog/control change. Reopen, confirm **Restore as
    new revision**, and verify the next logical version appears while the old
-   revisions remain byte-for-byte retained. Confirm no Strategy was selected or
-   activated. Repeat discovery after retirement and verify the retired lineage
+   revisions remain byte-for-byte retained. Confirm the restored Strategy is
+   selected for Start without changing the saved startup default or current
+   battle. With the disposable process active, restore once more and confirm
+   exactly one normal next-boundary request is sent even though the stable ID
+   still equals Current; the current battle must not switch. Repeat discovery
+   after retirement and verify the retired lineage
    can be reviewed/restored. If a second client advances latest between review
    and confirmation, verify the conflict preserves the first window's draft.
+   Return the disposable process to stopped before continuing.
 9. Clone a second disposable custom Strategy solely for deletion. Select it for
    the next battle in the disposable control catalog without starting a
    process, then verify **Delete Strategy...** is refused and neither the file
@@ -661,9 +694,12 @@ still requires the complete visible smoke below.
    decline once to prove cancellation, then confirm it. Verify the custom item
    leaves both new and legacy active catalogs, its exact publication appears in
    the disposable `retired` archive, and no process or Strategy was activated.
-10. Throughout the run, verify Validate and restore preview write nothing,
-   publishing/restoring never changes
-   the selected/active Strategy, no activation prompt appears, and the real
+10. Throughout the run, verify Validate and restore preview write nothing. In
+   the stopped disposable fixture, publication/restore may update only the
+   client's visible Start selection; it must not call the process endpoint or
+   change the saved startup default. In the active fixture, publication/restore
+   may send only the expected next-boundary request and must not switch the
+   current battle. The real
    operator profile catalog and control state remain byte-for-byte untouched.
 
 When a startup requirement fails, the runtime publishes the failed check,

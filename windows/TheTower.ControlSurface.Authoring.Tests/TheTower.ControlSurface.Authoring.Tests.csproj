@@ -22,5 +22,7 @@
              Link="StrategyAuthoringViewModels.cs" />
     <Compile Include="..\TheTower.ControlSurface\StrategyStructuredEditorViewModels.cs"
              Link="StrategyStructuredEditorViewModels.cs" />
+    <Compile Include="..\TheTower.ControlSurface\StrategySelectionCoordinator.cs"
+             Link="StrategySelectionCoordinator.cs" />
   </ItemGroup>
 </Project>
