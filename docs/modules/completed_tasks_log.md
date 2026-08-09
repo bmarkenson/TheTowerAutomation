@@ -39,6 +39,31 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 restored-source convergence after guarded serialization
+
+- Commit `7cfad7a` treats successful launcher dispatch as distinct from visible
+  source restoration. After the initial half-second settle, the shared guarded
+  serializer retries stable-source verification while a 12-second budget
+  remains, capped at six attempts. This applies consistently to active-battle
+  attachment, Home preflight, and setup capture.
+- Exact target binding, caller context, and action authority are rechecked
+  before and after every attempt and still block immediately on change. A
+  source that merely remains transitional now receives bounded retries and
+  ends with `restored_source_convergence_timeout`; target, context, and control
+  interruptions have distinct diagnostic reasons. Retry observations remain
+  `DEBUG` detail under the existing single `ACTION`/`RESULT` workflow.
+- The attachment regression reproduces the deployment incident's observable
+  sequence—two initial `RUNNING` frames, one post-restore `UNKNOWN` frame, then
+  two `RUNNING` frames—and completes on the second verification attempt.
+  Separate tests prove bounded timeout and immediate control-authority
+  interruption. Screenshot capture and publication behavior are unchanged.
+- The focused serializer, History, and preflight suite passed 101 tests; the
+  adjacent continuity and control suite passed 233. The supported isolated
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan notices, and all 2,057 tests in
+  358.55 seconds. No production process, device input, battle transition, or
+  live validation was used.
+
 ### 2026-08-09 same-ID Strategy revision reload
 
 - Commit `e5ef4e6` makes a fresh Strategy request compare the complete latest
