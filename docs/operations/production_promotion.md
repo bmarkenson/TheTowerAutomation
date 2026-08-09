@@ -46,20 +46,40 @@ documentation-only and test-only changes do not activate this boundary.
 
 After verifying that the production checkout is exactly `D`, run the supported
 [`publish-linux.sh`](../../windows/TheTower.ControlSurface/publish-linux.sh) or
-Windows `publish.ps1` workflow. It must atomically replace
-`windows/TheTower.ControlSurface/publish/win-x64` with a complete
+Windows `publish.ps1` workflow. It must stage and verify a complete
 self-contained package containing adjacent, nonempty
-`TheTower.ControlSurface.exe` and `TheTower.TunnelHost.exe` files. Do not copy
-only one executable, publish from a different commit, or treat portable tests
-or an earlier package as satisfying this boundary.
+`TheTower.ControlSurface.exe` and `TheTower.TunnelHost.exe` files before its
+guarded replacement of `windows/TheTower.ControlSurface/publish/win-x64`.
+The same operation must retain the former current package as
+`publish/previous/1`, move the former slot 1 to `publish/previous/2`, and prune
+only older packages after the new current package verifies successfully. A
+first or second publication may have fewer prior slots; every present slot must
+remain a complete two-executable package. Do not copy only one executable,
+mix files from different slots, publish from a different commit, or treat
+portable tests or an earlier package as satisfying the current-publication
+boundary.
 
 Before reporting the promotion complete, record `D`, the publication time,
-size, and SHA-256 digest of both executables. A failed or unverified publication
-blocks the production-success claim even when the Linux deployment and smoke
-test pass. Cross-publication does not establish WPF runtime behavior; follow
-the native client's
+size, and SHA-256 digest of both current executables. Also inventory every
+retained slot and record both executable sizes and digests, associating it with
+its prior production commit when the existing publication record proves that
+mapping. A failed or unverified publication or package rotation blocks the
+production-success claim even when the Linux deployment and smoke test pass.
+Cross-publication does not establish WPF runtime behavior; follow the native
+client's
 [Windows-only lifecycle validation](../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation)
 before describing a package as deployed and validated on Windows.
+
+### Native Windows package rollback
+
+If a post-publication Windows defect requires immediate artifact rollback,
+close the affected GUI, select one retained slot by its recorded hashes, and
+deploy that complete directory. Never combine its GUI with another slot's
+tunnel host. Record the chosen slot, hashes, associated source commit when
+known, destination, and Windows smoke result. This is a bounded artifact
+recovery, not a source rollback: create the normal reviewed revert or
+fix-forward on `main`, integrate it into `develop`, and republish from that
+exact production commit so `publish/win-x64` again matches production source.
 
 ## Retire feature work
 

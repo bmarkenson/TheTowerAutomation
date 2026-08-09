@@ -21,10 +21,30 @@ publish\win-x64\TheTower.ControlSurface.exe
 publish\win-x64\TheTower.TunnelHost.exe
 ```
 
+Each successful replacement retains up to two earlier complete packages,
+newest first:
+
+```text
+publish\previous\1\TheTower.ControlSurface.exe
+publish\previous\1\TheTower.TunnelHost.exe
+publish\previous\2\TheTower.ControlSurface.exe
+publish\previous\2\TheTower.TunnelHost.exe
+```
+
+The publisher builds and verifies both new executables before changing the
+managed package directories. It then rotates the old current package to
+`previous\1`, the former `previous\1` to `previous\2`, and discards anything
+older. A first or second publication naturally has fewer retained slots. An
+incomplete current or retained package blocks rotation instead of silently
+discarding the rollback copy, and an installation failure restores the prior
+managed layout.
+
 The target PC does not need the .NET runtime because the publish is
 self-contained. Deploy the complete `win-x64` directory; copying only the GUI
 executable deliberately fails closed because it would leave no authoritative
-SSH owner. The output directory is ignored by Git.
+SSH owner. If rollback is required, deploy one complete numbered prior
+directory without mixing files across versions. The output directory is
+ignored by Git.
 
 The same Windows executable can be compiled on Ubuntu 24.04 even though WPF
 cannot be run there. Do not use Ubuntu's `dotnet-sdk-8.0` package for this
@@ -52,9 +72,10 @@ windows/TheTower.ControlSurface/publish-linux.sh
 Set `THETOWER_DOTNET=/absolute/path/to/dotnet` to select a different Microsoft
 SDK installation. The script rejects SDKs missing WindowsDesktop before it
 starts the build. It publishes both projects into a staging directory, verifies
-both required executables, and replaces the prior package only after both
-succeed. The GUI project explicitly enables Windows targeting; copy the
-complete result directory to Windows for runtime testing.
+both required executables, and performs the same guarded current-plus-two-prior
+rotation as the Windows publisher only after both builds succeed. The GUI
+project explicitly enables Windows targeting; copy the complete result
+directory to Windows for runtime testing.
 
 ## Connect
 
