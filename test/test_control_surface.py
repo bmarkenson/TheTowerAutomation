@@ -1473,7 +1473,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"current_battle_perks_v1"' in native_compatibility
     assert "current_battle_perks_v1" in CONTROL_SURFACE_CAPABILITIES
-    assert '<TabItem Header="Perks">' in native_xaml
+    assert '<TabItem x:Name="PerksTab" Header="Perks" Tag="perks">' in native_xaml
     assert 'x:Name="CurrentPerksGrid"' in native_xaml
     assert 'JsonPropertyName("current_battle_perks")' in native_models
     assert "RenderCurrentBattlePerks(status.CurrentBattlePerks)" in native_code
@@ -1510,6 +1510,58 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
     assert '"automatic_battle_attachment"' not in native_compatibility
+
+
+def test_native_dashboard_uses_stable_full_width_pages_and_bounded_system_views():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    for page in (
+        '<TabItem x:Name="OverviewTab" Header="Overview" Tag="overview">',
+        '<TabItem x:Name="ActivityTab" Header="Activity" Tag="activity">',
+        '<TabItem x:Name="PerksTab" Header="Perks" Tag="perks">',
+        '<TabItem x:Name="SystemTab" Header="System" Tag="system">',
+    ):
+        assert page in native_xaml
+    for system_page in (
+        '<TabItem Header="Services" Tag="services">',
+        '<TabItem Header="Connections" Tag="connections">',
+        '<TabItem Header="Diagnostics" Tag="diagnostics">',
+    ):
+        assert system_page in native_xaml
+
+    assert 'Header="_View"' in native_xaml
+    assert 'Header="_Tools"' in native_xaml
+    assert 'Header="_Preferences"' in native_xaml
+    assert 'x:Name="SidebarColumn"' not in native_xaml
+    assert 'x:Name="ProcessStateText"' in native_xaml
+    assert 'x:Name="DirectiveRequestText"' in native_xaml
+    assert 'x:Name="StrategyScopeText"' in native_xaml
+    assert 'x:Name="TargetSpeedText"' in native_xaml
+    assert 'x:Name="LinuxApiServiceStatusText"' in native_xaml
+    assert 'x:Name="ConnectionText"' in native_xaml
+    assert 'x:Name="ApiTunnelTopStatusText"' in native_xaml
+    assert 'x:Name="AdbTunnelTopStatusText"' in native_xaml
+
+    assert 'private const string OverviewPageId = "overview";' in native_code
+    assert 'private const string SystemPageId = "system";' in native_code
+    assert "layout.SidebarTabIndex switch" in native_code
+    assert "SelectedPageId(SidebarTabs, OverviewPageId)" in native_code
+    assert "ReferenceEquals(SidebarTabs.SelectedItem, ActivityTab)" in native_code
+    assert 'public string DashboardPage { get; set; } = "";' in native_models
+    assert 'public string SystemPage { get; set; } = "";' in native_models
 
 
 def test_better_control_clients_expose_distinct_workflows_and_capture_review():
@@ -1597,7 +1649,8 @@ def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     assert "restart_attached" not in script
     assert 'Content="Use next battle"' in native_xaml
     assert 'Content="Switch this battle"' in native_xaml
-    assert 'Content="Strategy profiles..."' in native_xaml
+    assert 'x:Name="StrategyProfilesButton"' in native_xaml
+    assert 'Header="Strategy profiles…"' in native_xaml
     assert '"strategy_authoring_v1"' in native_compatibility
     assert '"strategy_authoring_profile_lifecycle_v1"' in native_compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in native_compatibility

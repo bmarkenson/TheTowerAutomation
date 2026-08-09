@@ -13,9 +13,13 @@ namespace TheTower.ControlSurface;
 
 public partial class MainWindow : Window
 {
-    private const double DefaultSidebarWidth = 380;
-    private const double DefaultLatestBattleHeight = 205;
-    private const double MinimumExpandedLatestBattleHeight = 155;
+    private const string OverviewPageId = "overview";
+    private const string ActivityPageId = "activity";
+    private const string PerksPageId = "perks";
+    private const string SystemPageId = "system";
+    private const string ServicesSystemPageId = "services";
+    private const string ConnectionsSystemPageId = "connections";
+    private const string DiagnosticsSystemPageId = "diagnostics";
     private readonly ControlSurfaceApi _api = new();
     private readonly HostPerformanceTracker _hostPerformance;
     private readonly TunnelHostConnection _tunnelHost = new();
@@ -77,9 +81,6 @@ public partial class MainWindow : Window
     private string? _autoPromptedTournamentLaunchRequestId;
     private bool _tournamentLaunchDialogOpen;
     private bool _tournamentLaunchCanStart;
-    private double _lastExpandedLatestBattleHeight =
-        DefaultLatestBattleHeight;
-
     public MainWindow()
     {
         InitializeComponent();
@@ -153,10 +154,48 @@ public partial class MainWindow : Window
     }
 
     private void ShowControls_Click(object sender, RoutedEventArgs e) =>
-        SidebarTabs.SelectedIndex = 0;
+        SelectPage(SidebarTabs, OverviewPageId);
 
-    private void ShowSetup_Click(object sender, RoutedEventArgs e) =>
-        SidebarTabs.SelectedIndex = 2;
+    private void ShowActivity_Click(object sender, RoutedEventArgs e) =>
+        SelectPage(SidebarTabs, ActivityPageId);
+
+    private void ShowPerks_Click(object sender, RoutedEventArgs e) =>
+        SelectPage(SidebarTabs, PerksPageId);
+
+    private void ShowSystem_Click(object sender, RoutedEventArgs e) =>
+        SelectPage(SidebarTabs, SystemPageId);
+
+    private void ShowSetup_Click(object sender, RoutedEventArgs e)
+    {
+        SelectPage(SidebarTabs, SystemPageId);
+        SelectPage(SystemTabs, ConnectionsSystemPageId);
+    }
+
+    private void SidebarTabs_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, SidebarTabs))
+        {
+            return;
+        }
+        if (ReferenceEquals(SidebarTabs.SelectedItem, ActivityTab)
+            && ActivityAutoFollowBox.IsChecked == true
+            && _activity.Count > 0)
+        {
+            _ = Dispatcher.InvokeAsync(
+                () => ActivityGrid.ScrollIntoView(_activity[0]),
+                DispatcherPriority.Background);
+        }
+        if (!IsLoaded)
+        {
+            return;
+        }
+        _settings.MainWindowLayout.DashboardPage = SelectedPageId(
+            SidebarTabs,
+            OverviewPageId);
+        SaveSettingsBestEffort();
+    }
 
     private void PreviousStateToggle_Click(object sender, RoutedEventArgs e)
     {
@@ -185,7 +224,6 @@ public partial class MainWindow : Window
     private void ResetLayout_Click(object sender, RoutedEventArgs e)
     {
         _settings.MainWindowLayout = new MainWindowLayoutSettings();
-        _lastExpandedLatestBattleHeight = DefaultLatestBattleHeight;
         RestoreMainWindowLayout();
         SaveSettingsBestEffort();
     }
@@ -194,20 +232,22 @@ public partial class MainWindow : Window
     {
         _settings.MainWindowLayout ??= new MainWindowLayoutSettings();
         var layout = _settings.MainWindowLayout;
-        SidebarColumn.Width = new GridLength(ClampFinite(
-            layout.SidebarWidth,
-            320,
-            650,
-            DefaultSidebarWidth));
-        _lastExpandedLatestBattleHeight = ClampFinite(
-            layout.LatestBattleHeight,
-            MinimumExpandedLatestBattleHeight,
-            500,
-            DefaultLatestBattleHeight);
-        SidebarTabs.SelectedIndex = Math.Clamp(
-            layout.SidebarTabIndex,
-            0,
-            SidebarTabs.Items.Count - 1);
+        if (string.IsNullOrWhiteSpace(layout.DashboardPage))
+        {
+            (layout.DashboardPage, layout.SystemPage) = layout.SidebarTabIndex switch
+            {
+                1 => (SystemPageId, ServicesSystemPageId),
+                2 => (SystemPageId, ConnectionsSystemPageId),
+                3 => (SystemPageId, DiagnosticsSystemPageId),
+                4 => (PerksPageId, ServicesSystemPageId),
+                _ => (OverviewPageId, ServicesSystemPageId),
+            };
+            layout.PreviousStateExpanded = false;
+            layout.HostHealthExpanded = false;
+            layout.LatestBattleExpanded = false;
+        }
+        SelectPage(SidebarTabs, layout.DashboardPage, OverviewPageId);
+        SelectPage(SystemTabs, layout.SystemPage, ServicesSystemPageId);
         SetPreviousStateExpanded(layout.PreviousStateExpanded);
         SetHostHealthExpanded(layout.HostHealthExpanded);
         SetLatestBattleExpanded(layout.LatestBattleExpanded);
@@ -216,25 +256,44 @@ public partial class MainWindow : Window
     private void CaptureMainWindowLayout()
     {
         var layout = _settings.MainWindowLayout;
-        if (double.IsFinite(SidebarColumn.ActualWidth)
-            && SidebarColumn.ActualWidth >= 320)
-        {
-            layout.SidebarWidth = SidebarColumn.ActualWidth;
-        }
-        if (LatestBattleTitleRow.Height.Value > 0
-            && double.IsFinite(LatestBattleRow.ActualHeight)
-            && LatestBattleRow.ActualHeight >= MinimumExpandedLatestBattleHeight)
-        {
-            _lastExpandedLatestBattleHeight = LatestBattleRow.ActualHeight;
-        }
-        layout.LatestBattleHeight = _lastExpandedLatestBattleHeight;
         layout.PreviousStateExpanded =
             PreviousStatePanel.Visibility == Visibility.Visible;
         layout.HostHealthExpanded =
             HostPerformancePanel.Visibility == Visibility.Visible;
         layout.LatestBattleExpanded = LatestBattleTitleRow.Height.Value > 0;
-        layout.SidebarTabIndex = SidebarTabs.SelectedIndex;
+        layout.DashboardPage = SelectedPageId(SidebarTabs, OverviewPageId);
+        layout.SystemPage = SelectedPageId(SystemTabs, ServicesSystemPageId);
     }
+
+    private static void SelectPage(
+        TabControl tabs,
+        string? requestedPage,
+        string? fallbackPage = null)
+    {
+        var page = tabs.Items
+            .OfType<TabItem>()
+            .FirstOrDefault(item => string.Equals(
+                item.Tag?.ToString(),
+                requestedPage,
+                StringComparison.OrdinalIgnoreCase));
+        if (page is null && fallbackPage is not null)
+        {
+            page = tabs.Items
+                .OfType<TabItem>()
+                .FirstOrDefault(item => string.Equals(
+                    item.Tag?.ToString(),
+                    fallbackPage,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+        tabs.SelectedItem = page ?? tabs.Items.OfType<TabItem>().FirstOrDefault();
+    }
+
+    private static string SelectedPageId(TabControl tabs, string fallback) =>
+        tabs.SelectedItem is TabItem item
+            && item.Tag is string pageId
+            && !string.IsNullOrWhiteSpace(pageId)
+                ? pageId
+                : fallback;
 
     private void SetPreviousStateExpanded(bool expanded)
     {
@@ -258,41 +317,20 @@ public partial class MainWindow : Window
 
     private void SetLatestBattleExpanded(bool expanded)
     {
-        if (expanded)
-        {
-            LatestBattleRow.MinHeight = MinimumExpandedLatestBattleHeight;
-            LatestBattleRow.Height = new GridLength(
-                _lastExpandedLatestBattleHeight);
-            LatestBattleTitleRow.Height = GridLength.Auto;
-            LatestBattleMetricsRow.Height = new GridLength(1, GridUnitType.Star);
-            LatestBattleSplitterRow.Height = new GridLength(8);
-            LatestBattleSplitter.Visibility = Visibility.Visible;
-            LatestBattleToggleButton.Content = "Hide summary";
-            return;
-        }
-
-        if (double.IsFinite(LatestBattleRow.ActualHeight)
-            && LatestBattleRow.ActualHeight >= MinimumExpandedLatestBattleHeight)
-        {
-            _lastExpandedLatestBattleHeight = LatestBattleRow.ActualHeight;
-        }
-        LatestBattleTitleRow.Height = new GridLength(0);
-        LatestBattleMetricsRow.Height = new GridLength(0);
         LatestBattleRow.MinHeight = 48;
         LatestBattleRow.Height = GridLength.Auto;
         LatestBattleSplitterRow.Height = new GridLength(0);
         LatestBattleSplitter.Visibility = Visibility.Collapsed;
-        LatestBattleToggleButton.Content = "Show summary";
+        LatestBattleTitleRow.Height = expanded
+            ? GridLength.Auto
+            : new GridLength(0);
+        LatestBattleMetricsRow.Height = expanded
+            ? GridLength.Auto
+            : new GridLength(0);
+        LatestBattleToggleButton.Content = expanded
+            ? "Hide summary"
+            : "Show summary";
     }
-
-    private static double ClampFinite(
-        double value,
-        double minimum,
-        double maximum,
-        double fallback) =>
-        double.IsFinite(value)
-            ? Math.Clamp(value, minimum, maximum)
-            : fallback;
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
@@ -2244,6 +2282,8 @@ public partial class MainWindow : Window
         DirectiveText.Text = FormatActionAuthority(
             status.ControlModel,
             status.Control);
+        DirectiveRequestText.Text =
+            $"Requested: {FormatAutomationState(status.Control)}";
         ModeText.Text = FormatExecutionMode(status.Control.Mode);
         var strategyGate = status.StrategyActionGate;
         var strategyGateVisible = strategyGate is
@@ -2266,6 +2306,9 @@ public partial class MainWindow : Window
         }
         _gameSpeedTarget = status.Control.GameSpeedTarget;
         SelectGameSpeedTarget(_gameSpeedTarget);
+        TargetSpeedText.Text = _gameSpeedTarget >= 6.3
+            ? "Maximum (x6.3)"
+            : $"x{_gameSpeedTarget:F1}";
         var observedGameSpeed = status.Observation?.GameSpeed;
         ObservedSpeedText.Text = observedGameSpeed is double observed
             ? $"x{observed:F1}"
@@ -2354,6 +2397,16 @@ public partial class MainWindow : Window
         ProcessPidText.Text = processPid?.ToString(CultureInfo.InvariantCulture) ?? "-";
         var lifecycleAvailable = service?.Available == true;
         var processActive = service?.Active == true || status.Runtime.Active;
+        ProcessStateText.Text = processActive
+            ? "Running"
+            : lifecycleAvailable
+                ? "Stopped"
+                : "Unavailable";
+        ProcessStateText.Foreground = processActive
+            ? new SolidColorBrush(Color.FromRgb(101, 230, 166))
+            : lifecycleAvailable
+                ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+                : (Brush)FindResource("MutedBrush");
         StartAutomationButton.IsEnabled = lifecycleAvailable
             && !processActive
             && string.IsNullOrWhiteSpace(status.Control.Error)
@@ -2514,6 +2567,12 @@ public partial class MainWindow : Window
         var currentStrategyLabel = currentStrategy is null
             ? "awaiting runtime evidence"
             : StrategyDisplayName(currentStrategy);
+        StrategyScopeText.Text = !processActive
+            ? $"Next: {configuredStrategyLabel}"
+            : pendingStrategy is not null
+                ? $"Current: {currentStrategyLabel} · Pending: "
+                    + StrategyDisplayName(pendingStrategy)
+                : $"Current: {currentStrategyLabel}";
         var strategyState = !processActive
             ? $"Process inactive | Next start: {configuredStrategyLabel}"
             : $"Current: {currentStrategyLabel} | "
@@ -2786,6 +2845,9 @@ public partial class MainWindow : Window
             : captureOpenAction == SetupCaptureOpenAction.Inspect
             ? "Inspect the completed result; retry requires a separate explicit action."
             : captureAction.Reason;
+        CaptureSetupMenuItem.IsEnabled = CaptureSetupButton.IsEnabled;
+        CaptureSetupMenuItem.Header = CaptureSetupButton.Content;
+        CaptureSetupMenuItem.ToolTip = CaptureSetupButton.ToolTip;
         var enable = Action("enable");
         ResumeButton.IsEnabled = processActive && enable.Available;
         ResumeButton.ToolTip = enable.Reason;
@@ -3052,7 +3114,9 @@ public partial class MainWindow : Window
         {
             _activity.Add(entry);
         }
-        if (ActivityAutoFollowBox.IsChecked == true && _activity.Count > 0)
+        if (ReferenceEquals(SidebarTabs.SelectedItem, ActivityTab)
+            && ActivityAutoFollowBox.IsChecked == true
+            && _activity.Count > 0)
         {
             _ = Dispatcher.InvokeAsync(
                 () => ActivityGrid.ScrollIntoView(_activity[0]),
@@ -3269,6 +3333,7 @@ public partial class MainWindow : Window
             _strategyLifecycleAvailable && !_strategyRequestInFlight;
         StrategyProfilesButton.IsEnabled =
             _serverCompatibility?.IsCompatible == true;
+        StrategyProfilesMenuItem.IsEnabled = StrategyProfilesButton.IsEnabled;
         QueueStrategyButton.Content = _strategyProcessActive
             ? "Use next battle"
             : "Save startup default";

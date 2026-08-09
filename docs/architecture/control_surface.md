@@ -891,6 +891,14 @@ Process request examples:
 
 ## Current GUI capabilities
 
+- The native operational window uses full-width **Overview**, **Activity**,
+  **Perks**, and **System** pages instead of a permanently narrow control
+  sidebar. Overview keeps current control and run-configuration decisions
+  together, while service/tunnel operations, connection fields, host
+  telemetry, and runtime evidence live under bounded System subpages. The
+  application header groups four separately labelled Linux service, HTTP, API
+  SSH, and ADB SSH signals and routes routine navigation through **View**,
+  **Tools**, and **Preferences** menus.
 - Persistent indefinite and timed Pause, explicit Automation Enabled, and
   requested-versus-acknowledged state. The text defines Paused as zero
   automated input while observation continues and does not describe Enabled
@@ -902,8 +910,9 @@ Process request examples:
   was introduced in server revision 30; the current client requires revision
   32 and capability `better_control_model_v2`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
-- A read-only **Perks** tab showing the current run's monitor-validated saved
-  inventory, level, and last selection wave in most-recent-first order. It
+- A read-only full-width **Perks** page showing the current run's
+  monitor-validated saved inventory, level, and last selection wave in
+  most-recent-first order. It
   shows the checkpoint wave and local capture time, preserves an unchanged
   scroll position across ordinary five-second status refreshes, and clears on
   an unavailable or changed activity scope. The current native client requires
@@ -963,8 +972,9 @@ Process request examples:
   warning visible and confirm before starting a managed runtime under it; the
   native client also distinguishes saved intent from runtime acknowledgement.
   This requires server revision 14 and capability `game_speed_target`.
-- Native Windows host health for system CPU, memory, processor clock,
-  BlueStacks CPU/RAM/process identity, and local publication state. Hovering
+- Native Windows host health under **System > Diagnostics** for system CPU,
+  memory, processor clock, BlueStacks CPU/RAM/process identity, and local
+  publication state. Hovering
   the strip shows sampling cost, BlueStacks I/O, last Linux acknowledgement,
   and any sampler/spool/upload error. The display remains local and current
   while the API is unavailable.
@@ -1027,28 +1037,34 @@ Process request examples:
 - Current wave, coins/minute, menu, secondary states, and overlays from the
   latest status report.
 - Target, owner PID, lock state, and runtime-start evidence.
-- A live process PID in the top banner plus systemd MainPID/runtime-lock PID
-  comparison in the detailed evidence view; stale lock PIDs are never promoted
-  as live process identity.
-- Most-recent completed-battle summary in the operational window, with unified
-  completed-run history in a separate native window. The history includes
+- A live process PID under **System > Services** plus systemd
+  MainPID/runtime-lock PID comparison in Diagnostics; stale lock PIDs are never
+  promoted as live process identity.
+- A compact, normally collapsed most-recent completed-battle summary on
+  Overview, with unified completed-run history in a separate native window.
+  The history includes
   Farm/Tournament/Milestone classification, strategy, tier, wave, duration,
   Coins/hour, Cells/hour, capture quality, full sections, captured perks,
   resolved settings, game-speed target/timeline, and preflight evidence.
 - Local filters for type, Tier, minimum/maximum wave, strategy, and quality.
 - Local export of the currently filtered completed-battle summaries as UTF-8
   CSV.
-- Draggable layout dividers across the operational control sections and between
-  the history list and selected-battle report.
+- A draggable layout divider between the history list and selected-battle
+  report; the main operational pages no longer depend on persisted sidebar or
+  latest-battle splitter sizes.
 - Local persistence of the main and Battle History window positions, sizes, and
-  maximized states. Invalid or off-screen placement is ignored, and minimized
+  maximized states, plus stable string IDs for the selected dashboard and
+  System pages and expansion state for optional diagnostic/summary detail.
+  Legacy numeric sidebar selections are migrated once; obsolete pane sizes are
+  safely ignored. Invalid or off-screen placement is ignored, and minimized
   state is never restored.
 - A per-Windows-session instance guard. A repeated launch restores and activates
   the existing operational window rather than creating competing clients.
-- Independently refreshed recent activity that defaults to concise operational
-  entries in the explicit current-run scope, with newest-entry following,
-  non-destructive local clear/restore, and server-side diagnostic/all-level
-  filters, without granting general log-file access.
+- A full-width, independently refreshed **Activity** page that defaults to
+  concise operational entries in the explicit current-run scope, with
+  newest-entry following, non-destructive local clear/restore, and server-side
+  diagnostic/all-level filters, without granting general log-file access.
+  Hidden-page refresh does not scroll the grid until Activity is selected.
 - A responsive browser fallback served by the Linux adapter.
 
 ## Deliberately deferred capabilities

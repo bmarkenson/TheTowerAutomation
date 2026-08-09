@@ -105,9 +105,10 @@ offer a non-loopback ADB bind.
 
 Each process uses BatchMode, strict host-key checking, a bounded connect
 timeout, keepalives, and `ExitOnForwardFailure`. An ADB remote-listener conflict
-therefore does not stop the API tunnel. The Setup tab reports whether Windows
-has a TCP listener for the configured BlueStacks port separately from whether
-OpenSSH accepted the Linux reverse listener. Raw SSH exit detail is retained.
+therefore does not stop the API tunnel. **System > Connections** reports
+whether Windows has a TCP listener for the configured BlueStacks port
+separately from whether OpenSSH accepted the Linux reverse listener. Raw SSH
+exit detail is retained.
 A bind or SSH-policy conflict keeps that tunnel desired but pauses its retry
 until the operator changes the port or policy and selects Retry/Restart. Other
 unexpected exits retry independently after 5, 10, 20, then at most 30 seconds.
@@ -152,30 +153,33 @@ the fixed `thetower-control-surface.service` user unit. IPC requests carry only
 the action enum and validated connection configuration; there is no remote
 command, unit, path, or shell-input field. HTTP API traffic remains in the GUI.
 
-The Setup tab shows the connected host version, instance, and PID. A protocol
-mismatch disables tunnel/service commands and requires explicit **Restart
-tunnel host...** confirmation. A compatible restart asks the existing host to
-stop its owned children; an incompatible replacement verifies the reported PID,
-start time, and executable path before terminating it. In either case the new
-host loads configuration but does not replay tunnel desire. Headless startup
-failures are retained in
+**System > Connections** shows the connected host version, instance, and PID.
+A protocol mismatch disables tunnel/service commands and requires explicit
+**Restart tunnel host...** confirmation. A compatible restart asks the
+existing host to stop its owned children; an incompatible replacement verifies
+the reported PID, start time, and executable path before terminating it. In
+either case the new host loads configuration but does not replay tunnel desire.
+Headless startup failures are retained in
 `%LOCALAPPDATA%\TheTower\tunnel-host-startup.log`.
 
 The main and Battle History windows also remember their normal position, size,
 and maximized state in `%LOCALAPPDATA%\TheTower\control-surface.json`. The main
-window additionally remembers its control-pane width, latest-battle height,
-selected control tab, and the expanded state of Previous Game Screen, Host
-Health, and the latest-battle summary. **Reset layout** restores those pane
-defaults. A saved position that no longer leaves a usable title bar on the
-current virtual desktop is ignored, and a window is never reopened minimized.
+window additionally remembers stable IDs for the selected dashboard and System
+pages and the expanded state of Previous Game Screen, Host Health, and the
+latest-battle summary. A saved numeric tab selection from the former sidebar is
+migrated once; obsolete pane widths and heights are ignored. **View > Reset
+layout** restores the page defaults. A saved position that no longer leaves a
+usable title bar on the current virtual desktop is ignored, and a window is
+never reopened minimized.
 
 Only one control-surface process is allowed per Windows session. Launching the
 application again restores and foregrounds the existing main window, or flashes
 it on the taskbar if Windows declines the foreground request.
 
-The operational window keeps the most recent completed battle visible without
-devoting the normal control workspace to the full history. Select **Open battle
-history...** to open the separate completed-battles window. That window merges
+Overview keeps a compact, normally collapsed summary of the most recent
+completed battle without devoting the normal workspace to the full history.
+Select **Tools > Battle history...** to open the separate completed-battles
+window. That window merges
 Battle and Tournament records and classifies Farm, Tournament, and Milestone
 using strategy plus terminal-screen evidence. It filters by type, Tier, wave
 range, strategy, and capture quality. The report banner includes Coins/hour and
@@ -197,42 +201,44 @@ loaded records. Periodic battle refreshes leave an unchanged list alone and
 defer genuine updates while a Type, Strategy, or Quality filter menu is open so
 the popup and selected battle remain stable.
 
-The left workspace uses full-height **Controls**, **Process**, **Setup**,
-**Details**, and **Perks** tabs instead of dividing its height among several
-independently scrolling cards. Everyday Automation Paused/Enabled, explicit
-battle workflow, manual-control, game-speed, future terminal-policy, strategy,
-and run-configuration actions remain on Controls. Service state, PID, ADB
-target, Start Automation, and Stop Automation are on Process. API and SSH
-fields are confined to the Setup tab, which scrolls when its independent API
-and ADB tunnel controls do not fit; the optional bearer token remains
-memory-only. Detailed lock and runtime evidence is on Details. Perks shows the
-current battle's monitor-validated player-save inventory, collapsed to one row
-per Perk and ordered by its most recent selection. Its checkpoint wave and
-capture time remain visible because the passive save can trail the displayed
-game wave; a new battle scope never inherits the prior battle's list.
+The main workspace uses full-width **Overview**, **Activity**, **Perks**, and
+**System** pages. Overview places routine authority and exact battle/manual
+workflow controls beside Strategy, target speed, terminal policy, and next-run
+configuration. Activity and Perks receive the full data width and retain their
+independent refresh and scroll behavior. System divides infrastructure into
+**Services**, **Connections**, and **Diagnostics**: process lifecycle and ADB
+runtime target; API/SSH transport and tunnel host; then optional prior-screen,
+runtime, and host-performance evidence. These pages may use their own fallback
+scrollbar when the supported minimum window cannot contain the bounded form.
+The **Preferences > Connection and device settings...** shortcut currently
+opens System > Connections; a separately bounded stable-preferences surface and
+explicit ADB draft/applied presentation remain the next redesign slice. The
+optional bearer token remains memory-only.
 
-The top bar keeps four different health signals visible: the fixed Linux API
-service's systemd state, HTTP reachability, the Windows-local API SSH tunnel,
-and the ADB reverse-forward SSH tunnel. **Start API**/**Stop API** and
-**Restart API service** affect only
-`thetower-control-surface.service`. **Restart SSH...** offers separate API- and
-ADB-tunnel actions so an ADB bind conflict cannot disturb API control. The
-Process tab's automation-service state remains separately labelled
-**Automation service**.
+The application header keeps four different health signals visible: the fixed
+Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
+tunnel, and the ADB reverse-forward SSH tunnel. Selecting the group opens
+System detail. Service and tunnel Start/Stop/Restart actions live under System
+instead of competing with routine controls in the header. API actions affect
+only `thetower-control-surface.service`, and API/ADB SSH tunnel recovery remains
+independent so an ADB bind conflict cannot disturb API control.
 
-Drag the main vertical divider and the latest-battle divider to resize those
-panes. Their positions persist locally. Previous Game Screen, Host Health, and
-the latest-battle summary can be collapsed independently. The battle-history
-window has a separate draggable divider between its battle list and
-selected-battle report. Data-grid columns remain directly resizable as well.
+The main operational pages no longer have draggable sidebar or latest-battle
+splitters. Previous Game Screen and Host Health are independently expandable
+under System > Diagnostics, and the latest-battle summary is independently
+expandable on Overview. The battle-history window retains its separate
+draggable divider between the list and selected-battle report. Data-grid
+columns remain directly resizable.
 
-The status strip distinguishes effective **Automation** action authority from
-**Game Screen**, the observer's latest detected game context. For example, a
-normal active run displays `Automation Enabled` and `Active Battle` rather than
-two unqualified `RUNNING` values. Wave and Coins/min remain prominent. Service and
-PID evidence remains available on Process without occupying the always-visible
-status strip, and Previous Game Screen remains visible by default but can be
-collapsed.
+The global status area distinguishes **Process**, effective **Action
+Authority**, observed **Game Screen**, **Strategy Scope**, and **When This
+Battle Ends**. For example, a stopped process remains `Stopped` even when a
+saved next-start directive exists; the requested directive is shown separately
+from effective authority. A second row retains Wave, Coins/min, target versus
+observed speed, and heartbeat freshness. Service, PID, lock, and detailed
+runtime evidence remain available under System without occupying the
+always-visible status area. Previous Game Screen is diagnostic detail and is
+collapsed by default.
 
 A fresh active running-battle Strategy Action Gate appears in its own amber
 banner: **Strategy actions blocked — observation and safe collectors remain
@@ -761,15 +767,15 @@ The old Validate/Skip attachment radio buttons and attached-reload action are
 not part of revision 29.
 
 The managed runtime ADB port, bundled strategy, and startup-gate policy share
-the Linux environment file while remaining independent settings. The Process
-tab's ADB port selects the Linux runtime target. The Setup tab's Windows
-BlueStacks and Linux ADB-forward ports configure transport. Normally the
+the Linux environment file while remaining independent settings. **System >
+Services** selects the Linux runtime target. **System > Connections** configures
+the Windows BlueStacks and Linux ADB-forward transport ports. Normally the
 managed runtime port matches the Linux ADB-forward port, but changing either
 setting does not silently rewrite the other or alter the API tunnel.
 
 The companion reports API SSH state independently of the GUI's HTTP probe. If
-OpenSSH remains alive but that probe fails, the top bar keeps API SSH active,
-labels HTTP unavailable, and keeps **Stop API tunnel** enabled.
+OpenSSH remains alive but that probe fails, the application header keeps API
+SSH active, labels HTTP unavailable, and keeps **Stop API tunnel** enabled.
 
 The status endpoint advertises its API version, monotonic server revision, and
 supported capabilities. The Windows build carries an expected API version, a

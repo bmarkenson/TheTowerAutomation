@@ -1132,7 +1132,7 @@ can change as operator use supplies better evidence.
       sampler CPU attribution also stay in their existing workstreams; layout
       work must not increase passive client CPU or change telemetry cadence.
     - **Implementation slices.** Land behavior-preserving slices in order:
-      1. [ ] Replace the split/sidebar shell with responsive global status and
+      1. [x] Replace the split/sidebar shell with responsive global status and
          full-width Overview, Activity, Perks, and System navigation; move
          existing named controls without changing API requests or authority.
          Keep them in the MainWindow namescope, guard hidden-page Activity
@@ -1156,5 +1156,17 @@ can change as operator use supplies better evidence.
          passive CPU regression. Re-run the outstanding Better Control,
          Strategy, incompatibility-banner, Token, and History-input usability
          checks at natural safe boundaries without manufacturing a battle.
+    - **2026-08-08 slice-one checkpoint.** The feature worktree now uses the
+      full-width four-page shell, bounded System subpages, compact four-signal
+      health group, responsive two-row status, menu routes, hidden-Activity
+      scroll guard, and stable dashboard/System page IDs with legacy numeric
+      selection migration. Existing controls remain in the MainWindow
+      namescope and request/authority behavior is unchanged. The WPF project
+      cross-builds on Linux; 70 focused Python/static tests and all 97 native
+      authoring tests pass, and the repository checkpoint passes compile,
+      state-definition/clickmap integrity, and all 2,036 Python tests. Windows
+      visual, mouse/keyboard, 100%/125% scaling, preferred/minimum-size
+      no-scroll, and passive-CPU validation remain open under slice 5 and are
+      not inferred from the cross-build.
     - Defer drag-to-reorder, floating panes, and extensive per-card hiding until
       operator use of the redesigned pages demonstrates a concrete need.

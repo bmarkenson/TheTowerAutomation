@@ -2657,10 +2657,12 @@ public sealed class WindowPlacementSettings
 
 public sealed class MainWindowLayoutSettings
 {
+    public string DashboardPage { get; set; } = "";
+    public string SystemPage { get; set; } = "";
     public double SidebarWidth { get; set; } = 380;
     public double LatestBattleHeight { get; set; } = 205;
-    public bool PreviousStateExpanded { get; set; } = true;
+    public bool PreviousStateExpanded { get; set; }
     public bool HostHealthExpanded { get; set; }
-    public bool LatestBattleExpanded { get; set; } = true;
+    public bool LatestBattleExpanded { get; set; }
     public int SidebarTabIndex { get; set; }
 }
