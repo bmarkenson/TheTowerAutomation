@@ -811,13 +811,18 @@ collector remains neither an acquisition service nor an authority source.
 The run timeline is now a consumer of that monitor rather than a second Perks
 UI observer. Stable top-bar schedule or `View Perks` transitions request one
 coalesced `passive_stable_read`; they do not require or request forced
-serialization and grant no input authority. The worker retains a detached
-exact prefix under the monitor lock, and App applies it to the persisted
-same-scope timeline on the serialized main thread. Attachment's already-owned
-forced bundle seeds the same path without reacquisition. Every timeline row
-therefore carries the save's exact oldest-first sequence, pick wave, semantic
-ID/key, and level-after. A pending visual boundary means only that no later
-positive prefix has yet serialized; it is never evidence of absence.
+serialization and grant no input authority. Numeric schedule observations use
+the independently detected battle wave as their current-wave anchor. The full
+OCR next-wave token must satisfy the bounded schedule lead; otherwise only the
+longest suffix produced by removing at most two leading separator-artifact
+digits may qualify. Split, substituted, trailing, or still-implausible OCR
+remains an invalid read-only retry. The worker retains a detached exact prefix
+under the monitor lock, and App applies it to the persisted same-scope timeline
+on the serialized main thread. Attachment's already-owned forced bundle seeds
+the same path without reacquisition. Every timeline row therefore carries the
+save's exact oldest-first sequence, pick wave, semantic ID/key, and level-after.
+A pending visual boundary means only that no later positive prefix has yet
+serialized; it is never evidence of absence.
 
 Each complete active Perk projection is bound to the exact process session,
 activity scope, target generation, mapping, and active-round identity. An

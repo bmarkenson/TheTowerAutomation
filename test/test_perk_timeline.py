@@ -643,7 +643,7 @@ def test_unstable_or_low_confidence_view_perks_is_not_exhaustion(tmp_path):
     assert observer.exhaustion_evidence() is None
 
 
-def test_measure_perk_progress_rejects_implausible_concatenated_wave():
+def test_measure_perk_progress_rejects_unreconciled_concatenated_wave():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
     progress = measure_perk_progress(
@@ -655,6 +655,89 @@ def test_measure_perk_progress_rejects_implausible_concatenated_wave():
     assert progress.current_wave == 690
     assert progress.next_wave == 7705
     assert progress.token is None
+
+
+def test_observer_reconciles_prefixed_next_wave_with_independent_wave():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    contaminated = PerkProgress(
+        "invalid_schedule",
+        3089,
+        773124,
+        "3089)/773124",
+        41.0,
+    )
+
+    for _ in range(2):
+        assert observer.handle(
+            running,
+            {"state": "RUNNING"},
+            wave=3089,
+            actions_allowed=False,
+            action_guard_fn=lambda: False,
+            progress_fn=lambda frame: contaminated,
+        ) is False
+
+    assert tracker.checkpoint()["armed_next_wave"] == 3124
+
+
+def test_observer_reconciles_top_bar_current_with_independent_wave():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    contaminated = PerkProgress(
+        "invalid_schedule",
+        31227,
+        3124,
+        "31227 / 3124",
+        89.0,
+    )
+
+    with patch("core.perk_timeline.log") as log_mock:
+        for _ in range(2):
+            assert observer.handle(
+                running,
+                {"state": "RUNNING"},
+                wave=3122,
+                actions_allowed=False,
+                action_guard_fn=lambda: False,
+                progress_fn=lambda frame: contaminated,
+            ) is False
+
+    assert tracker.checkpoint()["armed_next_wave"] == 3124
+    assert not any(
+        "Ignoring implausible top-bar schedule" in str(call.args[0])
+        for call in log_mock.call_args_list
+    )
+
+
+def test_observer_rejects_top_bar_schedule_that_actual_wave_has_passed():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    stale = _progress(690, 705)
+
+    with patch("core.perk_timeline.log") as log_mock:
+        for _ in range(3):
+            assert observer.handle(
+                running,
+                {"state": "RUNNING"},
+                wave=706,
+                actions_allowed=False,
+                action_guard_fn=lambda: False,
+                progress_fn=lambda frame: stale,
+            ) is False
+
+    assert tracker.checkpoint()["armed_next_wave"] is None
+    assert any(
+        call.args[1] == "WARN"
+        and "retrying without device input" in call.args[0]
+        for call in log_mock.call_args_list
+    )
 
 
 def test_tracker_requires_the_armed_wave_before_accepting_a_transition():
@@ -692,8 +775,8 @@ def test_observer_retries_persistent_invalid_progress_without_navigation():
     invalid = PerkProgress(
         "invalid_schedule",
         690,
-        7705,
-        "690 / 7705",
+        999999,
+        "690 / 999999",
         89.0,
     )
     taps = []

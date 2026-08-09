@@ -58,11 +58,51 @@ canonical document linked by an entry for current behavior.
   Separate tests prove bounded timeout and immediate control-authority
   interruption. Screenshot capture and publication behavior are unchanged.
 - The focused serializer, History, and preflight suite passed 101 tests; the
-  adjacent continuity and control suite passed 233. The supported isolated
-  checkpoint passed compilation, state definitions, clickmap integrity with
-  zero errors and the established 44 orphan notices, and all 2,057 tests in
-  358.55 seconds. No production process, device input, battle transition, or
-  live validation was used.
+  adjacent continuity and control suite passed 233. Its pre-integration
+  checkpoint passed all 2,057 tests in 358.55 seconds. After merging current
+  `develop` and preserving its independently deployed Perk reconciliation, the
+  combined focused slice passed 318 tests. The exact integrated checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,060 tests in 392.75 seconds.
+  No production process, device input, battle transition, or live validation
+  was used for this repair.
+
+### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
+
+- Commit `105fd78` makes the independent battle-wave observation authoritative
+  for the top bar's current wave. A full OCR next-wave token must remain within
+  the existing 250-wave lead; if separator noise prefixes one or two digits,
+  only the longest minimally trimmed suffix satisfying the same bound is
+  accepted. Split, substituted, trailing, more heavily prefixed, and otherwise
+  implausible values remain read-only retries, and two stable observations are
+  still required.
+- The change repairs the retained `3089)/773124` and `31227/°3124` patterns
+  without changing save-backed Perk identity, ordering, level, or exact saved
+  pick-wave authority. It also rejects a top-bar schedule whose displayed next
+  wave has already been passed by the independent observation.
+- The focused timeline suite passed 43 tests. After merging current `develop`,
+  the combined Perk/save/terminal/run-initialization slice passed 222 tests,
+  and the supported checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and all 2,056 tests. The exact integrated candidate `a98ec0f` repeated that
+  checkpoint in 352.31 seconds. Diagnosis used one bounded read-only capture;
+  no production action was taken during diagnosis. The current contract is
+  documented in the
+  [player-save architecture](../architecture/player_save.md#temporal-classes-and-merge-rules),
+  with the incident evidence in
+  [`ISSUE-2026-034`](../issues/resolved-2026.md#perk-top-bar-ocr-ignored-the-independent-battle-wave-observation).
+- Production advanced from `dd51aa2` behind rollback tag
+  `production-before-20260809T171630Z-dd51aa2` to exact candidate `a98ec0f`.
+  The existing automation owner stopped cleanly after an in-flight guarded
+  mission-reward route completed. Replacement PID `376160` acquired the
+  `localhost:5555` lock and completed save-backed same-battle attachment.
+- The replacement explicitly adopted `farm_t19_ad_assist`; its exclusive
+  session preflight verified the active requirements, returned to steady state,
+  and produced a fresh unpaused `RUNNING` heartbeat at wave 3292 with no
+  Strategy Action Gate. No Surrender, Game Over, in-game Home, Retry, or new
+  battle was issued. The five-file source/test/documentation delta contained no
+  Windows package input, so native publication was neither required nor
+  performed.
 
 ### 2026-08-09 same-ID Strategy revision reload
 
