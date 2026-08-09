@@ -1625,6 +1625,59 @@ def test_native_preferences_are_bounded_and_adb_drafts_survive_status_polling():
     assert 'new { action = "set_adb_port", adb_port = adbPort }' in native_code
 
 
+def test_native_overview_uses_contextual_exact_action_slots_and_compact_status():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Header="Timed pause…"' in native_xaml
+    assert 'x:Name="ManualSurrenderPanel" Visibility="Collapsed"' in native_xaml
+    assert 'x:Name="StartBattleButton"' in native_xaml
+    assert 'x:Name="AttachBattleButton"' in native_xaml
+    assert "StartBattleButton.Visibility = start.Available" in native_code
+    assert "AttachBattleButton.Visibility = attach.Available" in native_code
+    assert "ManualSurrenderPanel.Visibility = showTakeManualControl" in native_code
+    assert (
+        "var showReturnControl = giveBack.Available || manualOngoing;"
+        in native_code
+    )
+
+    for field in (
+        "CurrentStrategyValueText",
+        "NextStrategyLabelText",
+        "NextStrategyValueText",
+        "SelectedStrategyValueText",
+        "TerminalPolicyText",
+        "LatestBattleCompactText",
+    ):
+        assert f'x:Name="{field}"' in native_xaml
+    assert 'x:Name="StrategyActionHelpText"' in native_xaml
+    assert (
+        "StrategyActionHelpText.Visibility = _strategySelectionDirty"
+        in native_code
+    )
+    assert (
+        "TournamentValidationText.Visibility = validationRelevant"
+        in native_code
+    )
+    assert (
+        "CaptureSetupText.Visibility = model?.SetupCapture is not null"
+        in native_code
+    )
+    assert "ConfigureRunText.Visibility = configuredSkips.Count > 0" in native_code
+    assert "Saved request:" in native_code
+    assert "awaiting acknowledgement" in native_code
+    assert 'new { action = tag }' in native_code
+
+
 def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")

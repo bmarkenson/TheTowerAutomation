@@ -246,81 +246,119 @@
                              FontSize="10"
                              FontWeight="Bold"
                              Margin="4,0,4,5" />
-                  <TextBlock Text="AUTOMATION"
+                  <TextBlock Text="AUTOMATION AUTHORITY"
                              Foreground="{StaticResource MutedBrush}"
                              FontSize="10"
                              FontWeight="Bold"
                              Margin="4,2,4,0" />
-                  <UniformGrid Columns="4">
-                    <Button x:Name="PauseButton" Content="Automation Paused" Tag="pause" Click="Control_Click" />
-                    <Button x:Name="ResumeButton" Content="Automation Enabled" Tag="enable" Click="Control_Click" />
-                    <Button x:Name="Pause15Button" Content="Pause 15 min" Tag="pause:15" Click="Control_Click" />
-                    <Button x:Name="Pause30Button" Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
-                  </UniformGrid>
-                  <TextBlock Text="Paused blocks automated device input while observation may continue. Enabled permits guarded actions."
-                             TextWrapping="Wrap"
-                             Foreground="{StaticResource MutedBrush}"
-                             FontSize="10"
-                             Margin="6,2,6,5" />
-
-                  <TextBlock Text="MANUAL CONTROL"
-                             Foreground="{StaticResource MutedBrush}"
-                             FontSize="10"
-                             FontWeight="Bold"
-                             Margin="4,5,4,0" />
-                  <UniformGrid Columns="2">
-                    <Button x:Name="TakeManualControlButton" Content="Take Manual Control" Tag="take_manual_control" Click="Control_Click" />
-                    <Button x:Name="ReturnControlButton" Content="Return Control" Tag="return_control" Click="Control_Click" />
-                  </UniformGrid>
-                  <TextBlock x:Name="ManualControlText"
-                             Text="Automation retains control."
-                             TextWrapping="Wrap"
-                             Foreground="{StaticResource MutedBrush}"
-                             FontSize="10"
-                             Margin="6,2,6,3" />
-                  <TextBlock Text="IF THIS MANUAL BATTLE IS SURRENDERED"
-                             Foreground="{StaticResource MutedBrush}"
-                             FontSize="9"
-                             FontWeight="Bold"
-                             Margin="4,3,4,0" />
-                  <ComboBox x:Name="ManualSurrenderCollectionBox"
-                            Margin="4"
-                            ToolTip="This collection choice never authorizes automation to Surrender.">
-                    <ComboBoxItem Content="Exclude stats (minimal save-backed record)" Tag="minimal" IsSelected="True" />
-                    <ComboBoxItem Content="Collect normal terminal stats" Tag="full" />
-                  </ComboBox>
-
-                  <TextBlock Text="BATTLE WORKFLOW"
-                             Foreground="{StaticResource MutedBrush}"
-                             FontSize="10"
-                             FontWeight="Bold"
-                             Margin="4,7,4,0" />
-                  <UniformGrid Columns="2">
-                    <Button x:Name="StartBattleButton"
-                            Content="Start Battle"
-                            Tag="start_battle"
-                            Click="Control_Click"
-                            IsEnabled="False"
-                            ToolTipService.ShowOnDisabled="True" />
-                    <Button x:Name="AttachBattleButton"
-                            Content="Attach to Battle"
-                            Tag="attach_battle"
-                            Click="Control_Click"
-                            IsEnabled="False"
-                            ToolTipService.ShowOnDisabled="True" />
-                  </UniformGrid>
-                  <TextBlock x:Name="BattleWorkflowText"
-                             Text="Waiting for fresh game-boundary evidence."
-                             TextWrapping="Wrap"
-                             Foreground="{StaticResource MutedBrush}"
-                             FontSize="10"
-                             Margin="6,2,6,3" />
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="PauseButton"
+                            Content="Automation Paused"
+                            Tag="pause"
+                            Click="Control_Click" />
+                    <Button Grid.Column="1"
+                            x:Name="ResumeButton"
+                            Content="Automation Enabled"
+                            Tag="enable"
+                            Click="Control_Click" />
+                    <Expander Grid.Column="2"
+                              Header="Timed pause…"
+                              ToolTip="Pause automated device input for a bounded duration while observation continues."
+                              VerticalAlignment="Top"
+                              Width="176"
+                              Margin="4">
+                      <UniformGrid Columns="2">
+                        <Button x:Name="Pause15Button" Content="15 min" Tag="pause:15" Click="Control_Click" />
+                        <Button x:Name="Pause30Button" Content="30 min" Tag="pause:30" Click="Control_Click" />
+                      </UniformGrid>
+                    </Expander>
+                  </Grid>
                   <TextBlock x:Name="ControlSelectionText"
-                             Text="Waiting for control status."
+                             Text="Waiting for requested and acknowledged authority."
                              TextWrapping="Wrap"
                              Foreground="{StaticResource MutedBrush}"
                              FontSize="10"
-                             Margin="6,5,6,2" />
+                             Margin="6,2,6,4" />
+
+                  <Grid Margin="0,2,0,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,5,0">
+                      <TextBlock Text="MANUAL AUTHORITY"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="10"
+                                 FontWeight="Bold"
+                                 Margin="4,3,4,0" />
+                      <Grid>
+                        <Button x:Name="TakeManualControlButton"
+                                Content="Take Manual Control"
+                                Tag="take_manual_control"
+                                Click="Control_Click" />
+                        <Button x:Name="ReturnControlButton"
+                                Content="Return Control"
+                                Tag="return_control"
+                                Click="Control_Click"
+                                Visibility="Collapsed" />
+                      </Grid>
+                      <StackPanel x:Name="ManualSurrenderPanel" Visibility="Collapsed">
+                        <TextBlock Text="IF THIS MANUAL BATTLE IS SURRENDERED"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontSize="9"
+                                   FontWeight="Bold"
+                                   Margin="4,2,4,0" />
+                        <ComboBox x:Name="ManualSurrenderCollectionBox"
+                                  Margin="4"
+                                  ToolTip="This collection choice never authorizes automation to Surrender.">
+                          <ComboBoxItem Content="Exclude stats (minimal save-backed record)" Tag="minimal" IsSelected="True" />
+                          <ComboBoxItem Content="Collect normal terminal stats" Tag="full" />
+                        </ComboBox>
+                      </StackPanel>
+                      <TextBlock x:Name="ManualControlText"
+                                 Text="Waiting for manual-authority status."
+                                 TextWrapping="Wrap"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="10"
+                                 Visibility="Collapsed"
+                                 Margin="6,2,6,1" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Margin="5,0,0,0">
+                      <TextBlock Text="BATTLE ACTION"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="10"
+                                 FontWeight="Bold"
+                                 Margin="4,3,4,0" />
+                      <Grid>
+                        <Button x:Name="StartBattleButton"
+                                Content="Start Battle"
+                                Tag="start_battle"
+                                Click="Control_Click"
+                                IsEnabled="False"
+                                Visibility="Collapsed"
+                                ToolTipService.ShowOnDisabled="True" />
+                        <Button x:Name="AttachBattleButton"
+                                Content="Attach to Battle"
+                                Tag="attach_battle"
+                                Click="Control_Click"
+                                IsEnabled="False"
+                                Visibility="Collapsed"
+                                ToolTipService.ShowOnDisabled="True" />
+                      </Grid>
+                      <TextBlock x:Name="BattleWorkflowText"
+                                 Text="Waiting for fresh game-boundary evidence."
+                                 TextWrapping="Wrap"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="10"
+                                 Margin="6,2,6,1" />
+                    </StackPanel>
+                  </Grid>
                 </StackPanel>
               </Border>
 
@@ -355,6 +393,36 @@
                             ToolTip="Clone, validate, and publish compact Farm strategy profiles without activating them."
                             Margin="4" />
                   </Grid>
+                  <UniformGrid Columns="3" Margin="4,1,4,4">
+                    <StackPanel Margin="0,0,8,0">
+                      <TextBlock Text="CURRENT"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="9" />
+                      <TextBlock x:Name="CurrentStrategyValueText"
+                                 Text="Waiting"
+                                 FontWeight="SemiBold"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,0">
+                      <TextBlock x:Name="NextStrategyLabelText"
+                                 Text="NEXT"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="9" />
+                      <TextBlock x:Name="NextStrategyValueText"
+                                 Text="Waiting"
+                                 FontWeight="SemiBold"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel>
+                      <TextBlock Text="SELECTED"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="9" />
+                      <TextBlock x:Name="SelectedStrategyValueText"
+                                 Text="Waiting"
+                                 FontWeight="SemiBold"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                  </UniformGrid>
                   <Grid>
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*" />
@@ -377,18 +445,21 @@
                              TextWrapping="Wrap"
                              Foreground="{StaticResource MutedBrush}"
                              FontSize="10"
+                             Visibility="Collapsed"
                              Margin="6,2,6,0" />
                   <TextBlock x:Name="StrategySelectionText"
                              Text="Waiting for strategy status."
                              TextWrapping="Wrap"
                              Foreground="{StaticResource MutedBrush}"
                              FontSize="10"
+                             Visibility="Collapsed"
                              Margin="6,3,6,0" />
                   <TextBlock x:Name="TournamentValidationText"
                              Text="No exclusive strategy validation request."
                              TextWrapping="Wrap"
                              Foreground="{StaticResource MutedBrush}"
                              FontSize="10"
+                             Visibility="Collapsed"
                              Margin="6,2,6,0" />
 
                   <Grid Margin="0,7,0,0">
@@ -420,6 +491,13 @@
                         <ComboBoxItem Content="x6.0" Tag="6.0" />
                         <ComboBoxItem Content="x6.3 — Maximum available" Tag="6.3" />
                       </ComboBox>
+                      <TextBlock x:Name="GameSpeedTargetText"
+                                 Text="Waiting for target and observed speed."
+                                 TextWrapping="Wrap"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="10"
+                                 ToolTip="Custom targets are enforced on safe running frames. Maximum available advances from x5.0 to x6.3 when the perk permits it."
+                                 Margin="6,1,6,2" />
                     </StackPanel>
                     <StackPanel Grid.Column="1">
                       <TextBlock Text="WHEN THIS BATTLE ENDS"
@@ -440,57 +518,48 @@
                                 ToolTip="Return Home after Game Over and do not automatically start or resume a battle."
                                 Click="Mode_Click" />
                       </UniformGrid>
+                      <TextBlock x:Name="TerminalPolicyText"
+                                 Text="Waiting for requested and acknowledged terminal policy."
+                                 TextWrapping="Wrap"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="10"
+                                 Margin="6,1,6,2" />
                     </StackPanel>
                   </Grid>
-                  <TextBlock x:Name="GameSpeedTargetText"
-                             Text="Maximum available speed is active."
-                             TextWrapping="Wrap"
-                             Foreground="{StaticResource MutedBrush}"
-                             FontSize="10"
-                             Margin="6,1,6,3" />
 
                   <Grid Margin="0,5,0,0">
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*" />
                       <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                      <TextBlock Text="SAVE-BACKED AUTHORING"
-                                 Foreground="{StaticResource MutedBrush}"
-                                 FontSize="10"
-                                 FontWeight="Bold"
-                                 Margin="4,0,4,0" />
-                      <Button x:Name="CaptureSetupButton"
-                              Content="Capture current setup as…"
-                              Click="CaptureSetup_Click"
-                              IsEnabled="False"
-                              ToolTipService.ShowOnDisabled="True" />
-                      <TextBlock x:Name="CaptureSetupText"
-                                 Text="Waiting for an exact runtime-owned boundary."
-                                 TextWrapping="Wrap"
-                                 Foreground="{StaticResource MutedBrush}"
-                                 FontSize="10"
-                                 Margin="6,1,6,2" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1">
-                      <TextBlock Text="NEXT RUN"
-                                 Foreground="{StaticResource MutedBrush}"
-                                 FontSize="10"
-                                 FontWeight="Bold"
-                                 Margin="4,0,4,0" />
-                      <Button x:Name="ConfigureRunButton"
-                              Content="Configure next run…"
-                              Click="ConfigureRun_Click"
-                              Style="{StaticResource PrimaryButton}"
-                              IsEnabled="False" />
-                      <TextBlock x:Name="ConfigureRunText"
-                                 Text="Strategy defaults; no one-run skips staged."
-                                 TextWrapping="Wrap"
-                                 Foreground="{StaticResource MutedBrush}"
-                                 FontSize="10"
-                                 Margin="6,1,6,2" />
-                    </StackPanel>
+                    <Button Grid.Column="0"
+                            x:Name="CaptureSetupButton"
+                            Content="Capture current setup as…"
+                            Click="CaptureSetup_Click"
+                            IsEnabled="False"
+                            ToolTipService.ShowOnDisabled="True" />
+                    <Button Grid.Column="1"
+                            x:Name="ConfigureRunButton"
+                            Content="Configure next run…"
+                            Click="ConfigureRun_Click"
+                            Style="{StaticResource PrimaryButton}"
+                            IsEnabled="False"
+                            ToolTipService.ShowOnDisabled="True" />
                   </Grid>
+                  <TextBlock x:Name="CaptureSetupText"
+                             Text="Waiting for an exact runtime-owned boundary."
+                             TextWrapping="Wrap"
+                             Foreground="{StaticResource MutedBrush}"
+                             FontSize="10"
+                             Visibility="Collapsed"
+                             Margin="6,1,6,0" />
+                  <TextBlock x:Name="ConfigureRunText"
+                             Text="Strategy defaults; no one-run skips staged."
+                             TextWrapping="Wrap"
+                             Foreground="{StaticResource MutedBrush}"
+                             FontSize="10"
+                             Visibility="Collapsed"
+                             Margin="6,1,6,0" />
 
                   <Button x:Name="GateDecisionButton"
                           Content="Review preflight decision"
@@ -550,15 +619,20 @@
                       <ColumnDefinition Width="Auto" />
                       <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="MOST RECENT COMPLETED BATTLE"
-                               Foreground="{StaticResource MutedBrush}"
-                               FontSize="10"
-                               FontWeight="Bold"
-                               Margin="4"
-                               VerticalAlignment="Center" />
+                    <StackPanel Margin="4,0" VerticalAlignment="Center">
+                      <TextBlock Text="MOST RECENT COMPLETED BATTLE"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="10"
+                                 FontWeight="Bold" />
+                      <TextBlock x:Name="LatestBattleCompactText"
+                                 Text="No completed battles found"
+                                 FontSize="13"
+                                 FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
                     <Button Grid.Column="1"
                             x:Name="LatestBattleToggleButton"
-                            Content="Hide summary"
+                            Content="Details"
                             Click="LatestBattleToggle_Click"
                             Padding="10,5" />
                     <Button Grid.Column="2"

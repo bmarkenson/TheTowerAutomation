@@ -205,8 +205,15 @@ the popup and selected battle remain stable.
 The main workspace uses full-width **Overview**, **Activity**, **Perks**, and
 **System** pages. Overview places routine authority and exact battle/manual
 workflow controls beside Strategy, target speed, terminal policy, and next-run
-configuration. Activity and Perks receive the full data width and retain their
-independent refresh and scroll behavior. System divides infrastructure into
+configuration. It shows only the server-authoritative matching battle action
+and the currently relevant Take/Return manual action; the manual Surrender
+collection choice travels with Take. Timed Pause is a secondary expansion.
+Current, pending-next/startup, and locally selected Strategy stay separately
+labelled, while request, capture, skip, and validation prose appears only when
+it carries an active consequence. The collapsed completed-battle card retains
+a useful type/Tier/wave/coins summary and its History route. Activity and Perks
+receive the full data width and retain their independent refresh and scroll
+behavior. System divides infrastructure into
 **Services**, **Connections**, and **Diagnostics**: process lifecycle and ADB
 runtime target; API/SSH transport and tunnel host; then optional prior-screen,
 runtime, and host-performance evidence. These pages may use their own fallback

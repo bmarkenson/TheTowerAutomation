@@ -430,8 +430,8 @@ public partial class MainWindow : Window
             ? GridLength.Auto
             : new GridLength(0);
         LatestBattleToggleButton.Content = expanded
-            ? "Hide summary"
-            : "Show summary";
+            ? "Hide details"
+            : "Details";
     }
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
@@ -1826,6 +1826,7 @@ public partial class MainWindow : Window
                 : _strategyProcessActive ? "boundary queue" : "next-start save";
             StrategySelectionText.Text =
                 $"Sending {StrategyDisplayName(strategy)} {action} request...";
+            StrategySelectionText.Visibility = Visibility.Visible;
             object payload = adoptActiveBattle
                 ? new { action = "set_strategy", strategy, apply_to_active_run = true }
                 : new { action = "set_strategy", strategy };
@@ -2169,6 +2170,8 @@ public partial class MainWindow : Window
         catch (Exception exc)
         {
             LatestBattleTitleText.Text = "Completed battles unavailable";
+            LatestBattleCompactText.Text = "Completed battles unavailable";
+            LatestBattleCompactText.ToolTip = exc.Message;
             LastErrorText.Text = $"Battle history: {exc.Message}";
         }
         finally
@@ -2519,25 +2522,20 @@ public partial class MainWindow : Window
         if (_gameSpeedTarget < 6.3)
         {
             GameSpeedTargetText.Text = observedGameSpeed is not double current
-                ? $"Target x{_gameSpeedTarget:F1}; awaiting an observed speed "
-                    + "from the next status frame."
+                ? $"Target x{_gameSpeedTarget:F1} · observed speed unavailable"
                 : exactSpeedReached
-                    ? $"Target x{_gameSpeedTarget:F1} • observed x{current:F1}. "
-                        + "The target is enforced in this and future battles."
-                    : $"Target x{_gameSpeedTarget:F1} • observed x{current:F1}. "
-                        + "Automation will correct it on the next safe running frame.";
+                    ? $"Target x{_gameSpeedTarget:F1} · observed x{current:F1}"
+                    : $"Target x{_gameSpeedTarget:F1} · observed x{current:F1} "
+                        + "· correction pending";
         }
         else
         {
             GameSpeedTargetText.Text = observedGameSpeed is double current
                 ? maximumSpeedReached
-                    ? $"Maximum available • observed x{current:F1}. The guard "
-                        + "verifies the + ceiling at x5.0 and advances to x6.3 "
-                        + "with the perk."
-                    : $"Maximum available • observed x{current:F1}. Automation "
-                        + "will increase it on the next safe running frame."
-                : "Maximum available; awaiting an observed speed from the next "
-                    + "status frame.";
+                    ? $"Maximum available · observed x{current:F1}"
+                    : $"Maximum available · observed x{current:F1} "
+                        + "· increase pending"
+                : "Maximum available · observed speed unavailable";
         }
         GameSpeedTargetText.Foreground = _gameSpeedTarget < 6.3
             ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
@@ -2628,6 +2626,11 @@ public partial class MainWindow : Window
                 StringComparison.OrdinalIgnoreCase);
         ConfigureRunButton.IsEnabled = canConfigureRun
             && _startupGateContext?.Checks.Count > 0;
+        ConfigureRunButton.ToolTip = _startupGateContext?.Checks.Count > 0
+            ? canConfigureRun
+                ? "Choose one-run startup-gate skips without changing Strategy defaults."
+                : "Pause automation before configuring one-run startup-gate skips."
+            : "No configurable startup checks are available for the current Strategy.";
         var configuredSkips = _startupGateContext is null
             ? new List<string>()
             : _startupGateContext.Checks
@@ -2643,6 +2646,9 @@ public partial class MainWindow : Window
             : !canConfigureRun
                 ? "Pause automation to configure one-run skips."
             : "Strategy defaults; no one-run skips staged.";
+        ConfigureRunText.Visibility = configuredSkips.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         _currentGateDecision = status.Control.GateDecision;
         var pendingGate = status.Control.GateDecision is
             { Status: "pending" } gate ? gate : null;
@@ -2792,24 +2798,42 @@ public partial class MainWindow : Window
         var currentStrategyLabel = currentStrategy is null
             ? "awaiting runtime evidence"
             : StrategyDisplayName(currentStrategy);
+        var selectedStrategyLabel = StrategyDisplayName(selectedStrategy);
         StrategyScopeText.Text = !processActive
             ? $"Next: {configuredStrategyLabel}"
             : pendingStrategy is not null
                 ? $"Current: {currentStrategyLabel} · Pending: "
                     + StrategyDisplayName(pendingStrategy)
                 : $"Current: {currentStrategyLabel}";
-        var strategyState = !processActive
-            ? $"Process inactive | Next start: {configuredStrategyLabel}"
-            : $"Current: {currentStrategyLabel} | "
-                + $"{pendingStrategyLabel}: {StrategyDisplayName(pendingStrategy)}";
-        strategyState += $" | Selected: {StrategyDisplayName(selectedStrategy)}";
-        StrategySelectionText.Text = string.IsNullOrWhiteSpace(_strategyRequestMessage)
-            ? strategyState
-            : $"{strategyState} | {_strategyRequestMessage}";
+        CurrentStrategyValueText.Text = processActive
+            ? currentStrategyLabel
+            : "No active process";
+        NextStrategyLabelText.Text = processActive
+            ? "PENDING NEXT"
+            : "NEXT START";
+        NextStrategyValueText.Text = processActive
+            ? pendingStrategy is null
+                ? "None queued"
+                : StrategyDisplayName(pendingStrategy)
+            : configuredStrategyLabel;
+        SelectedStrategyValueText.Text = selectedStrategyLabel;
+        StrategySelectionText.Text = _strategyRequestMessage;
+        StrategySelectionText.Visibility = string.IsNullOrWhiteSpace(
+            _strategyRequestMessage)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        var exclusiveValidation = status.Control.ExclusiveValidation;
         TournamentValidationText.Text = FormatExclusiveValidation(
-            status.Control.ExclusiveValidation);
+            exclusiveValidation);
+        var validationRelevant = exclusiveValidation is not null
+            && (!string.IsNullOrWhiteSpace(exclusiveValidation.CurrentRequestId)
+                || exclusiveValidation.Receipts.Values.Any(receipt =>
+                    receipt.Status is "claimed" or "running" or "cleanup"));
+        TournamentValidationText.Visibility = validationRelevant
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         _currentTournamentLaunch = CurrentTournamentLaunch(
-            status.Control.ExclusiveValidation);
+            exclusiveValidation);
         _tournamentLaunchCanStart = processActive
             && _serverCompatibility?.IsCompatible == true
             && string.Equals(
@@ -2835,9 +2859,6 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(new Action(async () =>
                 await ShowTournamentLaunchAsync(launchReceipt)));
         }
-        var stateDisposition = !processActive
-            ? "saved; process inactive"
-            : statePending ? "awaiting runtime" : "active directive";
         var modeDisposition = !processActive
             ? "saved for next terminal"
             : modePending ? "awaiting runtime" : "active directive";
@@ -2848,20 +2869,20 @@ public partial class MainWindow : Window
                 + (string.IsNullOrWhiteSpace(terminalPolicyStatus.Reason)
                     ? ""
                     : $" — {terminalPolicyStatus.Reason}");
+        TerminalPolicyText.Text =
+            $"{FormatExecutionMode(status.Control.Mode)} · "
+            + terminalPolicyDisposition;
+        TerminalPolicyText.Foreground = modePending
+            ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+            : (Brush)FindResource("MutedBrush");
+        ControlSelectionText.Text = !processActive
+            ? $"Saved request: {FormatAutomationState(status.Control)} · process stopped"
+            : $"Requested: {FormatAutomationState(status.Control)} · Runtime: "
+                + $"{FormatActionAuthority(status.ControlModel, status.Control)} · "
+                + (statePending ? "awaiting acknowledgement" : "acknowledged");
         var requestedAdbTarget = status.Control.AdbPort is not null
             ? $"localhost:{status.Control.AdbPort.Value}"
             : service?.AdbTarget ?? "unknown";
-        var adbDisposition = adbTargetPending
-            ? "handoff pending"
-            : processActive ? "active" : "next start";
-        ControlSelectionText.Text =
-            $"Action authority: {FormatActionAuthority(status.ControlModel, status.Control)} "
-            + $"({stateDisposition}) | When this battle ends: "
-            + $"{FormatExecutionMode(status.Control.Mode)} "
-            + $"({terminalPolicyDisposition}) | "
-            + $"ADB target: {requestedAdbTarget} ({adbDisposition}) | "
-            + $"One-run skips: {configuredSkips.Count} | "
-            + $"Gate decision: {status.Control.GateDecision?.Status ?? "none"}";
 
         var pidAgreement = service?.MainPid is not null && runtime?.Pid is not null
             ? service.MainPid == runtime.Pid ? "match" : "MISMATCH"
@@ -3041,12 +3062,32 @@ public partial class MainWindow : Window
         var attach = Action("attach_battle");
         AttachBattleButton.IsEnabled = attach.Available;
         AttachBattleButton.ToolTip = attach.Reason;
+        StartBattleButton.Visibility = start.Available
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AttachBattleButton.Visibility = attach.Available
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         var take = Action("take_manual_control");
         TakeManualControlButton.IsEnabled = take.Available;
         TakeManualControlButton.ToolTip = take.Reason;
         var giveBack = Action("return_control");
         ReturnControlButton.IsEnabled = giveBack.Available;
         ReturnControlButton.ToolTip = giveBack.Reason;
+        var manual = model?.ManualControl;
+        var manualOngoing = manual is not null
+            && manual.Status is not ("completed" or "interrupted" or "failed");
+        var showReturnControl = giveBack.Available || manualOngoing;
+        var showTakeManualControl = take.Available && !showReturnControl;
+        TakeManualControlButton.Visibility = showTakeManualControl
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ReturnControlButton.Visibility = showReturnControl
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ManualSurrenderPanel.Visibility = showTakeManualControl
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         var captureAction = Action("capture_current_setup");
         var captureReady = model?.SetupCapture?.Status == "ready";
         var captureOpenAction = model is null
@@ -3091,11 +3132,17 @@ public partial class MainWindow : Window
                 + (string.IsNullOrWhiteSpace(workflow.Reason)
                     ? ""
                     : $" — {workflow.Reason}")
+            : start.Available
+                ? "Verified New Battle boundary."
+                : attach.Available
+                    ? "Verified resumable or active battle boundary."
             : model is null
                 ? "Waiting for Better Control Model status."
-                : $"{FormatStatusToken(model.Observation.GameState)} — choose "
-                    + "only an available matching intent.";
-        ManualControlText.Text = model?.ManualControl is { } manual
+                : $"{FormatStatusToken(model.Observation.GameState)} · "
+                    + (string.IsNullOrWhiteSpace(model.Observation.Reason)
+                        ? "No matching battle action is currently available."
+                        : model.Observation.Reason);
+        ManualControlText.Text = manual is not null
             ? $"{FormatStatusToken(manual.Status)}"
                 + (string.IsNullOrWhiteSpace(manual.Detail)
                     ? ""
@@ -3105,13 +3152,20 @@ public partial class MainWindow : Window
                     : $" ({FormatStatusToken(manual.RefreshStatus)})")
                 + $" · manual Surrender collection: "
                 + $"{FormatStatusToken(manual.SurrenderCollection)}"
-            : "Automation retains control.";
+            : take.Reason;
+        ManualControlText.Visibility = manual is not null
+            || !showTakeManualControl
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         CaptureSetupText.Text = model?.SetupCapture is { } capture
             ? $"{FormatStatusToken(capture.Status)}"
                 + (string.IsNullOrWhiteSpace(capture.Reason)
                     ? ""
                     : $" — {capture.Reason}")
             : captureAction.Reason;
+        CaptureSetupText.Visibility = model?.SetupCapture is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void CaptureSetup_Click(object sender, RoutedEventArgs e)
@@ -3299,6 +3353,8 @@ public partial class MainWindow : Window
         if (battle is null)
         {
             LatestBattleTitleText.Text = "No completed battles found";
+            LatestBattleCompactText.Text = "No completed battles found";
+            LatestBattleCompactText.ToolTip = null;
             LatestCapturedText.Text = "-";
             LatestStrategyText.Text = "-";
             LatestTypeText.Text = "-";
@@ -3325,6 +3381,15 @@ public partial class MainWindow : Window
         LatestCellsText.Text = battle.CellsEarned ?? "-";
         LatestCellsHourText.Text = battle.CellsPerHour ?? "-";
         LatestQualityText.Text = battle.QualityDisplay;
+        LatestBattleCompactText.Text =
+            $"{battle.BattleTypeDisplay} · "
+            + $"{(battle.Tier is int tier ? $"T{tier}" : "Tier -")} · "
+            + $"Wave {battle.Wave?.ToString(CultureInfo.InvariantCulture) ?? "-"} · "
+            + $"{battle.CoinsEarned ?? "-"} coins · "
+            + $"{battle.CoinsPerHour ?? "-"}/h";
+        LatestBattleCompactText.ToolTip =
+            $"{battle.BattleId} · captured {battle.CapturedDisplay} · "
+            + $"Strategy {battle.StrategyDisplay} · {battle.QualityDisplay}";
     }
 
     private void RenderActivity(ActivityResponse response)
@@ -3587,9 +3652,18 @@ public partial class MainWindow : Window
             : Visibility.Collapsed;
         AdoptStrategyButton.ToolTip =
             "Request this strategy for the current battle. New-run setup still waits for a genuine boundary.";
+        SelectedStrategyValueText.Text = StrategyDisplayName(selected);
         StrategyActionHelpText.Text = _strategyProcessActive
             ? "Use next battle leaves the current strategy alone. Switch this battle changes normal strategy behavior now; startup setup still waits for the next real boundary."
             : "Start already uses this selection. Save startup default only if it should be remembered without starting automation.";
+        StrategyActionHelpText.Visibility = _strategySelectionDirty
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (string.IsNullOrWhiteSpace(_strategyRequestMessage)
+            && !_strategyRequestInFlight)
+        {
+            StrategySelectionText.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void UpdateControlSurfaceCompatibility()

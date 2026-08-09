@@ -901,6 +901,15 @@ Process request examples:
   header groups four separately labelled Linux service, HTTP, API SSH, and ADB
   SSH signals and routes routine navigation through **View**, **Tools**, and
   **Preferences** menus.
+- Overview uses one server-authoritative battle-action slot and one contextual
+  manual-authority slot: only the matching **Start Battle**/**Attach to
+  Battle** and **Take Manual Control**/**Return Control** action is shown. The
+  manual Surrender collection choice appears with Take, timed Pause is a
+  secondary expansion, and routine explanatory prose collapses unless a
+  request, draft, workflow, validation, or error needs attention. Run
+  configuration labels current, pending-next/startup, and locally selected
+  Strategy separately; the latest completed battle remains useful as a compact
+  one-line summary when its detail is collapsed.
 - Persistent indefinite and timed Pause, explicit Automation Enabled, and
   requested-versus-acknowledged state. The text defines Paused as zero
   automated input while observation continues and does not describe Enabled

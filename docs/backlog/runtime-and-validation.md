@@ -1146,7 +1146,7 @@ can change as operator use supplies better evidence.
       2. [x] Separate stable Preferences from System operations, add explicit
          ADB draft/applied presentation, and preserve the existing validated
          apply/rollback contract.
-      3. [ ] Compact Overview actions and helper copy through contextual
+      3. [x] Compact Overview actions and helper copy through contextual
          presentation while preserving every requested/acknowledged and
          exact-workflow distinction.
       4. [ ] Add only those reserved status/alert fields whose authoritative
@@ -1187,5 +1187,20 @@ can change as operator use supplies better evidence.
       state-definition/clickmap integrity, and all 2,052 Python tests. Windows
       modal focus, keyboard/access-key, scaling, and visual validation remain
       open under slice 5.
+    - **2026-08-09 slice-three checkpoint.** Overview now uses a compact
+      authority row with secondary timed Pause, one server-authoritative
+      Start/Attach slot, and one contextual Take/Return slot whose manual
+      Surrender collection choice appears only with Take. Current,
+      pending-next/startup, and selected Strategy remain separately labelled;
+      request, capture, one-run-skip, and Tournament validation explanations
+      collapse when they have no current consequence. Target/observed speed and
+      requested/acknowledged terminal policy remain explicit, and the collapsed
+      latest-battle card keeps a useful summary plus History route. The WPF
+      project cross-builds; 72 focused Python/static tests, all 97 native
+      authoring tests, and all 18 tunnel-host lifecycle tests pass. The
+      repository checkpoint passes compile, state-definition/clickmap
+      integrity, and all 2,053 Python tests. Windows visual, interaction,
+      scaling, and preferred/minimum-size no-scroll validation remain open
+      under slice 5.
     - Defer drag-to-reorder, floating panes, and extensive per-card hiding until
       operator use of the redesigned pages demonstrates a concrete need.
