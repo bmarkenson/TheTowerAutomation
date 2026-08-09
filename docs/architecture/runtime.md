@@ -795,15 +795,19 @@ battle gains validation-battle Surrender authority.
 
 Automatic validation of an already-running Tournament does not use the
 exclusive validation receipt. Any still-pending pre-Tournament request is
-cancelled before attachment work begins. Without Home boundary evidence, the
-runtime inspects Cards, Ultimate Weapons, Modules, Bots, and Guardians in
-battle. It never invokes Exit Battle → Go Home → Resume Battle. Exact bound
-save evidence now satisfies the Home-only Workshop preset check through the
-same guarded attachment acquisition and a one-use temporal carrier; without
-that evidence, Workshop is recorded explicitly as deferred rather than
-observed or waived. This adds no game-Home route, Android lifecycle action, or
-second save read. Once that inventory pass
-reaches a conclusive result, the explicitly
+cancelled before attachment work begins. The same guarded attachment
+acquisition supplies a one-use temporal carrier for round-invariant Workshop,
+Bot, Guardian, and Module facts. Exact Workshop, Bot, and Guardian matches omit
+their redundant UI sections. A complete Module fact also omits Modules UI when
+it matches an enforced loadout or when the policy is observation-only; an
+observation-only variation remains visible in session evidence. Missing,
+mismatched, or rebound Bot, Guardian, or enforced Module evidence retains its
+existing UI check. Missing or mismatched Workshop evidence remains explicitly
+deferred because the attachment never invokes Exit Battle → Go Home → Resume
+Battle. Cards and Ultimate Weapons retain their in-battle UI paths because
+their attachment facts do not have round-invariant authority. This adds no
+game-Home route, Android lifecycle action, or second save read. Once that
+selective inventory pass reaches a conclusive result, the explicitly
 `run_when_attached` battle-only rules enforce Damage Slider `100%` and the
 configured Orb Distance for an authoritative configured Attack Range; a
 readable unconfigured Range is preserved without opening Distance Adjuster.

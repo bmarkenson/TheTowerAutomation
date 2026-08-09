@@ -197,6 +197,25 @@ canonical document linked by an entry for current behavior.
   a live policy-change-at-Home exercise, and a natural terminal-to-Home
   continuation remain in the Better Control backlog rather than being
   manufactured during deployment.
+
+### 2026-08-08 attachment preflight round-invariant reuse
+
+- Running-battle Strategy preflight now consumes all four facts already
+  classified and bound as round-invariant by the guarded attachment save:
+  Workshop preset, selected Bot preset, equipped Guardians, and equipped
+  Modules. Exact configuration matches and complete eligible Module
+  observations omit only their redundant UI sections.
+- Cards, Auto Pick, Ultimate Weapons, Damage Slider, and Orb Distance retain
+  their established UI authority. Missing or mismatched Bot, Guardian, or
+  enforced Module facts retain the existing UI fallback; unresolved Workshop
+  remains explicitly deferred without a Home route. Observation-only Module
+  variations remain reported and never become repair authority.
+- Focused navigation, Tournament, typed temporal, action-executor, and player-
+  save reconciliation coverage passed 199 tests. The supported development
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan candidates, and all 1,971 tests in
+  436.21 seconds. No live/device action was performed.
+
 ### 2026-08-08 save-to-UI fallback contract repair
 
 - The combined candidate is based directly on completed Better Control tip

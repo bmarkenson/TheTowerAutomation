@@ -457,7 +457,11 @@ def reconcile_requirements(
         evidence = snapshot.checks.get(str(check_id))
         observed = evidence.value if evidence is not None else None
         matches = (
-            _check_matches(str(check_id), expected_value, observed)
+            save_check_matches_requirement(
+                str(check_id),
+                expected_value,
+                observed,
+            )
             if evidence is not None and evidence.status == "observed"
             else None
         )
@@ -2373,7 +2377,13 @@ def save_observation_supports_requirement(
     )
 
 
-def _check_matches(check_id: str, expected: Any, observed: Any) -> bool:
+def save_check_matches_requirement(
+    check_id: str,
+    expected: Any,
+    observed: Any,
+) -> bool:
+    """Compare one normalized save value with a profile requirement."""
+
     if check_id == "free_upgrade_locks":
         expected_set = {_normal_scalar(value) for value in expected or []}
         observed_set = {_normal_scalar(value) for value in observed or []}
@@ -2499,5 +2509,6 @@ __all__ = [
     "read_player_save_file",
     "reconcile_acquired_requirements",
     "reconcile_requirements",
+    "save_check_matches_requirement",
     "save_observation_supports_requirement",
 ]

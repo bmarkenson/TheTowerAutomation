@@ -2,6 +2,7 @@ from pathlib import Path
 
 import cv2
 
+from core.gc_module_loadout import gc_module_loadout_evidence_from_assignments
 from core.matcher import get_match
 from core.tournament_preflight import (
     TOURNAMENT_SECTION_SPECS,
@@ -145,6 +146,33 @@ def test_confident_tournament_module_variation_is_observed_without_failing():
     assert not evidence.modules.valid
     assert evidence.modules_blocking_valid
     assert evidence.failed_checks == ()
+
+
+def test_bound_module_observation_retains_save_source_in_session_evidence():
+    requirements = load_tournament_requirements()
+    module_boundary = gc_module_loadout_evidence_from_assignments(
+        requirements["modules"],
+        requirements["modules"],
+    ).as_dict()
+    module_boundary["source"] = "bound_player_save_preflight"
+
+    evidence = validate_tournament_session_preflight_screens(
+        cards_screen=_load(TOURNAMENT_FIXTURES["cards"]),
+        workshop_screen=_load(TOURNAMENT_FIXTURES["workshop"]),
+        bots_screen=_load(TOURNAMENT_FIXTURES["bots"]),
+        guardians_screen=_load(TOURNAMENT_FIXTURES["guardians"]),
+        modules_screen=None,
+        module_requirements=requirements["modules"],
+        module_mode=requirements["loadout_policies"]["modules"],
+        ultimate_requirements=requirements["ultimate_weapons"],
+        ultimate_observations=_ultimate_observations(requirements),
+        module_boundary_evidence=module_boundary,
+    )
+
+    assert evidence.valid
+    assert evidence.as_dict()["modules"]["source"] == (
+        "bound_player_save_preflight"
+    )
 
 
 def test_farm_setup_fails_the_tournament_contract():
