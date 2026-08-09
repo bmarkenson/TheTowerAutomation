@@ -65,7 +65,22 @@ canonical document linked by an entry for current behavior.
   clickmap integrity with zero errors and the established 44 orphan candidates,
   and all 2,050 tests in 346.29 seconds. Production and integration were still
   at `080fc17`, already contained by the feature, when this candidate was
-  frozen; live validation and promotion had not yet been performed.
+  frozen. Exact committed `develop` candidate `29cc5c2` repeated the complete
+  checkpoint with all 2,050 tests passing in 344.45 seconds.
+- Production advanced from `080fc17` behind rollback tag
+  `production-before-20260809T075154Z-080fc17`. Because the changed player-save
+  owner is imported by both long-lived Python services, the control surface
+  restarted as PID `3915031`; replacement automation PID `3915418` acquired the
+  exact `localhost:5555` lock and completed a guarded same-battle attachment
+  from its fresh forced-save continuity receipt.
+- The replacement adopted `farm_t19_ad_assist`, completed its requested session
+  preflight, and published fresh `RUNNING / NEXT_BATTLE` evidence without an
+  action gate at wave 2022. No Surrender, Game Over, game-Home, Retry, or battle
+  transition was issued. The attachment smoke remained a distinct temporal
+  boundary: it reused bound save evidence for Bots, Guardians, and Workshop,
+  while Cards, Modules, Auto Pick, and Ultimate Weapons used their established
+  attachment UI paths. Natural Home-launch and direct-Retry confirmation of the
+  new zero-UI carry remains in the runtime validation backlog.
 
 ### 2026-08-08 current-battle Perks control-surface view
 
