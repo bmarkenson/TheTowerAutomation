@@ -4,11 +4,12 @@ This document defines the contract for GUI-authored strategy bases and
 strategies. The sparse model, immutable Base revisions, immutable custom
 Strategy lineages, restore-as-new workflow, and current Farm editors are
 implemented. Profile-local Module, Target Priority, and Orb definitions now
-have additive API discovery and managed native editors. Module presets also
-have one immutable installation-local custom catalog plus authoritative native
-eight-slot previews and save-as-new creation; the expanded disposable Windows
-runtime smoke remains. The original Farm profile format remains supported as
-a compatibility facade.
+have additive API discovery, managed native editors, and an explicit
+catalog-bound **Edit a copy...** transition from shared preset to local intent.
+Module presets also have one immutable installation-local custom catalog plus
+authoritative native eight-slot previews and save-as-new creation; the expanded
+disposable Windows runtime smoke remains. The original Farm profile format
+remains supported as a compatibility facade.
 
 The runtime architecture remains authoritative for action ownership and
 execution. This authoring layer resolves reusable, operator-friendly source
@@ -472,6 +473,43 @@ responses may contain schema-3 source values, `definition_snapshot`, Base
 `resolution_fingerprint`, and `base_resolution`; clients continue treating
 the latter three as server-owned review evidence rather than editable data.
 
+Server revision 31 adds `strategy_authoring_preset_local_copy_v1` and the
+`materialize_loadout_preset` authoring operation. Existing resolution
+`definition_snapshot` data is the correct Linux materialization primitive, but
+it is not a safe WPF copy source: a row can be inherited, ignored, dormant, or
+backed by an immutable retained publication snapshot rather than the current
+catalog choice. Each of the three preset/local registry entries therefore
+includes a `preset_catalog_fingerprint` for the exact catalog snapshot offered
+to the client. WPF submits exactly the setting ID, selected preset ID, and that
+fingerprint. Linux reloads one current catalog snapshot, rejects a mismatch as
+stale, and calls the ordinary definition-snapshot resolver and setting
+normalizer against that same snapshot. The response contains the exact
+normalized local definition and its server fingerprint, with `published:
+false` and `publication_activates_strategy: false`.
+
+**Edit a copy...** is enabled only for an editable Base or Strategy row whose
+active source state is Enforce or Observe and whose shared-preset form has an
+exact selection. Bundled read-only Strategies keep the control disabled;
+cloned and editable custom Strategies use the same row contract. On success,
+the client first proves that the response matches the requested setting,
+preset, catalog fingerprint, and declared local-editor shape, then atomically
+replaces the dormant local value and switches the row to **Profile-local
+definition**. It does not save or publish a document, create or select a
+preset, select or activate a Strategy, queue a boundary action, or apply
+runtime configuration.
+
+A local draft becomes meaningful when the source already contains a local
+definition or the operator has selected or changed that local form. If such a
+draft is dormant, **Edit a copy...** asks explicitly: replace it with the
+normalized selected preset, retain it and switch to it, or cancel with both
+forms untouched. The untouched server-supplied default local seed does not
+trigger that replacement prompt. Unknown presets, stale fingerprints,
+normalization/shape rejection, missing capability, timeout, interruption, and
+other response failures leave the selected preset and complete local draft
+intact. Base omission/reinclusion and Strategy Inherit/Override/Observe/Ignore,
+validation reconstruction, review, history, and publication continue using
+the existing dormant-value and source-authority paths.
+
 ### Managed custom Module presets
 
 `config/loadouts/modules.yaml` remains the immutable bundled Module catalog.
@@ -501,13 +539,16 @@ server-resolved source preset or one current profile-local definition, creates
 a new ID, returns structured validation/conflict errors, refreshes the merged
 catalog, and never publishes, selects, or activates a Base or Strategy. The WPF
 client shows the selected preset's eight-slot metadata and read-only bundled or
-immutable custom label. **Create variant** and **Save as preset** use the same
-metadata-driven row controls; after success, incremental option reconciliation
-keeps every retained selection object visible and explicitly selects the new
-preset in that row. The normal Validate → Review → Publish boundary remains.
-Failure leaves the open draft, dormant forms, and selections intact. Missing
-capability hides creation controls and the revision-25 compatibility check
-fails closed.
+immutable custom label. **Duplicate preset...** honestly names the immutable
+exact-copy operation; **Save as preset...** remains the separate Module-only
+operation that submits the current edited local definition. After success,
+incremental option reconciliation keeps every retained selection object visible
+and explicitly selects the new preset in that row. Neither action is the local
+**Edit a copy...** transition. The normal Validate → Review → Publish boundary
+remains. Failure leaves the open draft, dormant forms, and selections intact.
+Missing capability hides creation controls and the revision-25 compatibility
+check fails closed. Target Priority and Orb Distance acquire no managed custom
+preset catalogs from local-copy authoring.
 
 Base revisions and Strategy publications continue retaining normalized
 definition snapshots. History comparison, restore-as-new validation, and plan
@@ -663,11 +704,12 @@ The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
 
 All four original slices, the immutable-history/safe-fallback slice, managed
-custom Module preset creation, and save-backed setup capture are implemented.
-Server revision 30 retains
+custom Module preset creation, save-backed setup capture, and explicit preset
+local-copy authoring are implemented. Server revision 31 retains
 `strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`, and
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains revision-23 `strategy_revision_history_v1`, and adds
+`strategy_authoring_preset_local_copy_v1`. Revision 30 added
 `save_backed_setup_capture_v2` while retaining revision-29
 `save_backed_setup_capture_v1`; revision 25 added
 `managed_custom_module_presets_v1` after revision 24 added

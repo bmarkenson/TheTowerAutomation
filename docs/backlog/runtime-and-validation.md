@@ -891,13 +891,19 @@ stages:
   [`../architecture/control_surface.md`](../architecture/control_surface.md).
   - [ ] Run the disposable-catalog Windows runtime smoke for Base and Strategy
     preset/local editing, inheritance/override/Ignore, validation errors,
-    complete Module preset previews, bundled/custom labels, Create variant,
-    Save as preset, catalog refresh/explicit selection, collision/failure
-    retention, review/publish, history comparison, and restore-as-new. Make
-    only narrow repairs supported by that evidence; creation and publication
-    must not activate automation. Revalidate all eight Module slots with the
-    revision-25 package after changing a Module choice and after creating each
-    kind of custom preset; `7e4c7a2` fixed the earlier blank-selection defect.
+    complete Module preset previews, bundled/custom labels, immutable
+    **Duplicate preset**, local **Save as preset**, and catalog-bound **Edit a
+    copy** for Modules, Target Priority, and Orb Distance. Exercise exact
+    non-default preset materialization; read-only bundled versus cloned/custom
+    editing; meaningful dormant-draft retain, replace, and cancel; stale,
+    unknown, interrupted, and invalid responses; catalog refresh/explicit
+    selection; collision/failure retention; review/publish; history comparison;
+    and restore-as-new. Make only narrow repairs supported by that evidence;
+    copying, creation, and publication must not activate automation. Revalidate
+    all eight Module slots with the revision-31 package after editing a copy,
+    changing a Module choice, and creating each kind of custom preset;
+    `7e4c7a2` fixed the earlier blank-selection defect. Confirm Target Priority
+    and Orb Distance copies remain Base/Strategy-local with no managed catalog.
   - [ ] Attribute and reduce Windows control-surface CPU use for passive
     performance collection. Retained 2026-07-30/31 aggregates measured
     approximately `0.83%` process CPU clean and `1.9%` under contention,

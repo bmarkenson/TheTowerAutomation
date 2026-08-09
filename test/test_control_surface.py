@@ -6,6 +6,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import threading
 from unittest.mock import patch
@@ -142,6 +143,61 @@ def _fresh_runtime_lock(root: Path, *, state: str):
     lock_handle = lock_path.open("r", encoding="utf-8")
     fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     return lock_handle
+
+
+def _write_current_run_scope(root: Path, *, run_id: str) -> None:
+    logs = root / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "activity_scope.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "scope": "current_run",
+                "run_id": run_id,
+                "started_at": "2026-08-08T10:00:00-07:00",
+                "source_file_id": "1:1",
+                "start_offset": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _current_perks_presentation() -> dict:
+    return {
+        "schema_version": 1,
+        "status": "available",
+        "reason": "",
+        "source": "monitor_validated_player_save_perk_prefix",
+        "order_semantics": "most_recent_selection_first",
+        "captured_at": "2026-08-08T17:05:00+00:00",
+        "saved_wave": 620,
+        "picked_count": 5,
+        "unique_count": 3,
+        "items": [
+            {
+                "perk_key": "damage",
+                "label": "Damage",
+                "level": 1,
+                "last_selected_wave": 580,
+                "last_selected_sequence": 5,
+            },
+            {
+                "perk_key": "perk_wave_requirement",
+                "label": "Perk Wave Requirement",
+                "level": 3,
+                "last_selected_wave": 540,
+                "last_selected_sequence": 4,
+            },
+            {
+                "perk_key": "max_health",
+                "label": "Max Health",
+                "level": 1,
+                "last_selected_wave": 100,
+                "last_selected_sequence": 1,
+            },
+        ],
+    }
 
 
 def test_control_store_preserves_fields_and_resumes_only_matching_deadline(tmp_path):
@@ -342,6 +398,83 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
     assert status["acknowledgements"]["adb_target"]["acknowledges_current"]
     assert status["acknowledgements"]["strategy"]["value"] == "farm_t18"
     assert status["acknowledgements"]["strategy"]["acknowledges_current"]
+
+
+def test_status_exposes_scope_bound_current_save_perks(tmp_path):
+    _write_current_run_scope(tmp_path, run_id="battle-perks-status")
+    presentation = _current_perks_presentation()
+    timeline_path = (
+        tmp_path / "logs" / "automation_ctl.perk_timeline_state.json"
+    )
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "activity_scope_run_id": "battle-perks-status",
+                "route_open": False,
+                "tracker": {},
+                "current_perks": presentation,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = _service(tmp_path).status()
+
+    assert status["current_battle_perks"] == presentation
+    assert "current_battle_perks_v1" in status["capabilities"]
+
+
+def test_status_never_exposes_perks_from_another_run(tmp_path):
+    _write_current_run_scope(tmp_path, run_id="new-battle")
+    timeline_path = (
+        tmp_path / "logs" / "automation_ctl.perk_timeline_state.json"
+    )
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "activity_scope_run_id": "old-battle",
+                "route_open": False,
+                "tracker": {},
+                "current_perks": _current_perks_presentation(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    current = _service(tmp_path).status()["current_battle_perks"]
+
+    assert current["status"] == "awaiting_save_checkpoint"
+    assert current["reason"] == "current_run_checkpoint_unavailable"
+    assert current["items"] == []
+
+
+def test_status_rejects_internally_inconsistent_current_perks(tmp_path):
+    _write_current_run_scope(tmp_path, run_id="invalid-perks")
+    presentation = _current_perks_presentation()
+    presentation["picked_count"] = 4
+    timeline_path = (
+        tmp_path / "logs" / "automation_ctl.perk_timeline_state.json"
+    )
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "activity_scope_run_id": "invalid-perks",
+                "route_open": False,
+                "tracker": {},
+                "current_perks": presentation,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    current = _service(tmp_path).status()["current_battle_perks"]
+
+    assert current["status"] == "unavailable"
+    assert current["reason"] == "current_perks_projection_invalid"
+    assert current["items"] == []
 
 
 def test_status_serializes_fresh_runtime_owned_strategy_gate(tmp_path):
@@ -1334,10 +1467,16 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 30" in native_compatibility
+    assert "MinimumServerRevision = 32" in native_compatibility
     assert '"better_control_model_v2"' in native_compatibility
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
+    assert '"current_battle_perks_v1"' in native_compatibility
+    assert "current_battle_perks_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '<TabItem Header="Perks">' in native_xaml
+    assert 'x:Name="CurrentPerksGrid"' in native_xaml
+    assert 'JsonPropertyName("current_battle_perks")' in native_models
+    assert "RenderCurrentBattlePerks(status.CurrentBattlePerks)" in native_code
     assert '"save_backed_setup_capture_v2"' in native_compatibility
     assert "save_backed_setup_capture_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "save_backed_setup_capture_v2" in CONTROL_SURFACE_CAPABILITIES
@@ -1345,6 +1484,8 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "terminal_dispositions_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"managed_custom_module_presets_v1"' in native_compatibility
     assert '"strategy_authoring_local_loadout_editors_v1"' in native_compatibility
+    assert '"strategy_authoring_preset_local_copy_v1"' in native_compatibility
+    assert "strategy_authoring_preset_local_copy_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"strategy_revision_history_v1"' in native_compatibility
     assert '"strategy_action_gate_v1"' in native_compatibility
     assert 'x:Name="StrategyActionGateBanner"' in native_xaml
@@ -1688,6 +1829,129 @@ def test_windows_publish_package_requires_gui_and_tunnel_host_executables():
         assert "TheTower.ControlSurface.exe" in script
         assert "TheTower.TunnelHost.exe" in script
         assert "TheTower.TunnelHost.csproj" in script
+        assert "previous" in script
+        assert "prior package 1" in script.lower()
+        assert ".publish.lock" in script
+
+    assert "Assert-CompletePackage" in powershell
+    assert ".Length -le 0" in powershell
+    assert "validate_package" in linux
+    assert "! -s" in linux
+
+
+def test_linux_windows_publisher_retains_two_complete_prior_packages(tmp_path):
+    source_root = Path(__file__).parents[1]
+    source_native = source_root / "windows" / "TheTower.ControlSurface"
+    windows_root = tmp_path / "windows"
+    native_root = windows_root / "TheTower.ControlSurface"
+    host_root = windows_root / "TheTower.TunnelHost"
+    native_root.mkdir(parents=True)
+    host_root.mkdir(parents=True)
+    (native_root / "TheTower.ControlSurface.csproj").write_text(
+        "<Project />\n",
+        encoding="utf-8",
+    )
+    (host_root / "TheTower.TunnelHost.csproj").write_text(
+        "<Project />\n",
+        encoding="utf-8",
+    )
+    publisher = native_root / "publish-linux.sh"
+    shutil.copy2(source_native / "publish-linux.sh", publisher)
+    publisher.chmod(0o755)
+
+    sdk_base = tmp_path / "fake-sdk" / "8.0.423"
+    targets = (
+        sdk_base
+        / "Sdks"
+        / "Microsoft.NET.Sdk.WindowsDesktop"
+        / "targets"
+        / "Microsoft.NET.Sdk.WindowsDesktop.targets"
+    )
+    targets.parent.mkdir(parents=True)
+    targets.write_text("<Project />\n", encoding="utf-8")
+    fake_dotnet = tmp_path / "fake-dotnet"
+    fake_dotnet.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "--info" ]]; then
+    printf ' Base Path: {sdk_base}\\n'
+    exit 0
+fi
+if [[ "${{1:-}}" != "publish" ]]; then
+    exit 2
+fi
+project="${{2:-}}"
+shift 2
+output=""
+while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "--output" ]]; then
+        output="${{2:-}}"
+        break
+    fi
+    shift
+done
+if [[ -z "$output" ]]; then
+    exit 3
+fi
+mkdir -p -- "$output"
+if [[ "$project" == *"TheTower.TunnelHost.csproj" ]]; then
+    printf '%s' "${{FAKE_VERSION}}:host" > "$output/TheTower.TunnelHost.exe"
+else
+    if [[ "${{FAKE_FAIL_GUI:-0}}" == "1" ]]; then
+        exit 9
+    fi
+    printf '%s' "${{FAKE_VERSION}}:gui" > "$output/TheTower.ControlSurface.exe"
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_dotnet.chmod(0o755)
+
+    def publish(
+        version: str,
+        *,
+        fail_gui: bool = False,
+    ) -> subprocess.CompletedProcess:
+        environment = os.environ.copy()
+        environment["THETOWER_DOTNET"] = str(fake_dotnet)
+        environment["FAKE_VERSION"] = version
+        environment["FAKE_FAIL_GUI"] = "1" if fail_gui else "0"
+        return subprocess.run(
+            [str(publisher)],
+            cwd=tmp_path,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def assert_package(path: Path, version: str) -> None:
+        assert (path / "TheTower.ControlSurface.exe").read_text(
+            encoding="utf-8"
+        ) == f"{version}:gui"
+        assert (path / "TheTower.TunnelHost.exe").read_text(
+            encoding="utf-8"
+        ) == f"{version}:host"
+
+    publish_root = native_root / "publish"
+    for version in ("one", "two", "three", "four"):
+        result = publish(version)
+        assert result.returncode == 0, result.stderr
+
+    assert_package(publish_root / "win-x64", "four")
+    assert_package(publish_root / "previous" / "1", "three")
+    assert_package(publish_root / "previous" / "2", "two")
+
+    failed = publish("five", fail_gui=True)
+    assert failed.returncode != 0
+    assert_package(publish_root / "win-x64", "four")
+    assert_package(publish_root / "previous" / "1", "three")
+    assert_package(publish_root / "previous" / "2", "two")
+    assert sorted(
+        path.name
+        for path in publish_root.iterdir()
+        if path.name.startswith(".")
+    ) == [".publish.lock"]
 
 
 def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):

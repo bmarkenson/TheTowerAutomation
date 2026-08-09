@@ -39,31 +39,60 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
-### 2026-08-08 managed new-battle save carry correction
+### 2026-08-08 current-battle Perks control-surface view
 
-- Production diagnosis found that the Home save preflight had accepted the
-  configured Auto Pick, Ultimate Weapon, Cards, Workshop, Bot, Guardian, and
-  Module facts, but their complete one-time carry was rejected at the first
-  `RUNNING` frame. The just-completed Start workflow had retired from the
-  supervisor while its exclusive hold remained in the central authority
-  snapshot, so a generic lifecycle check misclassified that exact boundary as
-  unrelated ownership and forced every in-battle UI fallback.
-- Commit `b93c11f` attributes only the immediate carry binding to the exact
-  Start workflow that successfully crossed into the new battle. The existing
-  coordinator still requires the matching context, dispatched runtime-owned
-  New Battle launch, first stable `RUNNING` observation, and Enabled control.
-  WAIT, Pause, Stop, another authority owner, or a replacement operator
-  workflow continues to reject the complete carry.
-- The bound coordinator now reaches the existing in-battle consumers, which
-  omit redundant Auto Pick and Ultimate Weapon panels and reuse the accepted
-  Home evidence for Cards, Workshop, Bots, Guardians, Modules, and the other
-  allowlisted checks. Rejections now log the individual boundary predicates,
-  resulting carry state, and safe reason code without private continuity data.
-- The focused owner/caller slice passed 496 tests. The exact feature candidate
-  then passed compilation, state definitions, clickmap integrity with zero
-  errors and the established 44 orphan candidates, and all 2,025 tests in
-  367.41 seconds. No integration, promotion, deployment, or device input was
-  performed by this feature result.
+- Commit `8b9f1ee` adds a compact read-only presentation beside the existing
+  atomic Perk timeline checkpoint. It collapses the monitor-validated exact
+  player-save prefix to one row per semantic Perk with current level and most
+  recent saved selection wave, ordered most-recent-first. The presentation
+  retains checkpoint wave, capture time, total picks, and unique count without
+  exposing private round identity or raw save data.
+- Control-surface revision 32 advertises `current_battle_perks_v1`. Status
+  publishes the list only when the timeline checkpoint matches the atomic
+  current-run activity scope and its internal counts/order remain consistent;
+  a new scope, missing checkpoint, or malformed projection returns an empty
+  awaiting/unavailable view. This adds no save acquisition, serialization,
+  panel navigation, device input, or action authority.
+- The native client adds a full-height **Perks** tab with Perk, level, and last
+  saved selection wave, plus explicit checkpoint wave/time. Ordinary
+  five-second refreshes preserve the grid when rows are unchanged. The native
+  minimum revision advances with the new capability while older browser
+  behavior remains compatible. Revision 32 preserves develop's independently
+  assigned revision-31 preset-local-copy capability.
+- Commit `2d42fe8` also makes native publication retain the two newest complete
+  prior packages. Both publishers stage and validate the GUI and tunnel host
+  together, rotate the old current package through `publish/previous/1` and
+  `publish/previous/2`, and restore the pre-publication layout if replacement
+  fails. They refuse incomplete current or history slots rather than mixing
+  executable generations.
+- The merged feature checkpoint passed all 2,035 Python tests in 342.44
+  seconds, all 97 linked portable .NET tests, the two Linux publisher
+  regressions, `git diff --check`, `bash -n`, `shellcheck`, and the Release WPF
+  cross-build with zero errors. Exact committed `develop` candidate `5f93cba`
+  repeated the complete Python checkpoint in 343.07 seconds. The WPF builds
+  emitted only the known sandbox read-only NuGet vulnerability-cache warning;
+  restore, compilation, and publication completed successfully.
+- Production advanced from `11a01c6` behind rollback tag
+  `production-before-20260809T044814Z-11a01c6`. The control surface restarted
+  at revision 32, and replacement automation PID `3666933` attached to the
+  same running-battle scope, adopted `farm_t19_ad_assist`, completed its guarded
+  session preflight, and returned to normal RUNNING authority. No Surrender,
+  End Run, or battle transition was issued during the promotion smoke.
+- The live revision-32 API projected the save-backed list from that battle at
+  saved wave 230 with **Perk Wave Requirement** level 1 (last selected at wave
+  180), then published a fresh unpaused observation at wave 260 after preflight
+  released its exclusive hold. This validates the source-to-runtime API path;
+  the WPF presentation itself was not executed on Windows.
+- The complete Windows package was published from `5f93cba` at 21:56 PDT.
+  `TheTower.ControlSurface.exe` is 72,363,007 bytes with SHA-256
+  `c13e709f307d32f979dc9fff300cfcfb467133ac2602fce584582f36ed3abe72`;
+  `TheTower.TunnelHost.exe` is 35,172,117 bytes with SHA-256
+  `387a2d5d620b8ced392b2d00dc2628a5a1e8333af866d074b6b3f5ac8286221d`.
+  Rollback slot 1 exactly retains the former package hashes
+  `934c529b9e2772667e5d821ff847dce4b7e4ac439af20986aa331eed313c8e8d`
+  and `aaf4c2de9b3b1b3ed41b3c136e29c238005e823580423201c412d79b523352ca`;
+  slot 2 is correctly absent until another successful publication. The
+  package has not been copied to or runtime-smoked on a Windows host.
 
 ### 2026-08-08 passive save-backed Perk timeline correction
 
@@ -257,6 +286,79 @@ canonical document linked by an entry for current behavior.
   transition, or device input. It did not manufacture an active attachment to
   exercise the new selective preflight route; that behavior remains supported
   by the complete retained regression checkpoint.
+
+### 2026-08-08 explicit preset local-copy authoring
+
+- Commit `09515e2` adds revision-31 capability
+  `strategy_authoring_preset_local_copy_v1` and the catalog-bound
+  `materialize_loadout_preset` operation. Linux compares the exact displayed
+  catalog fingerprint and reuses ordinary definition-snapshot resolution and
+  normalization for Modules, Target Priority, and Orb Distance; the operation
+  never writes, publishes, selects, activates, queues, or applies a Strategy or
+  preset.
+- The native authoring rows now expose **Edit a copy...** only for editable
+  active preset selections. A meaningful dormant local draft receives explicit
+  replace, retain, and cancel choices; response identity/shape validation is
+  atomic, so stale catalogs, unknown presets, invalid normalization, missing
+  capability, interruptions, and errors preserve both forms. Bundled read-only
+  Strategies remain non-editable, while clones and custom Strategies use the
+  same local-copy path.
+- Module **Create variant...** is now honestly labelled **Duplicate preset...**
+  and remains an immutable exact-copy preset operation. Module-only **Save as
+  preset...** still submits the current edited local definition. Target
+  Priority and Orb Distance gained no managed custom-preset catalogs.
+- The focused authoring slice passed 125 Python tests and all 96 portable native
+  authoring/compatibility tests. The complete supported checkpoint passed
+  compilation, state-definition validation, clickmap integrity with zero
+  errors and the established 44 orphan candidates, and all 1,973 tests in
+  492.74 seconds.
+- Linux lacks the `Microsoft.NET.Sdk.WindowsDesktop` targets needed to compile
+  the complete WPF application; that expected host limitation does not affect
+  the portable native suite. The expanded disposable-catalog Windows build and
+  usability smoke remains pending. No live process or device interaction was
+  performed.
+- Final integration commit `4d480bf` merges the feature with production tip
+  `ee4c861`, preserving both completion histories. The exact integrated
+  candidate passed compilation, state-definition validation, clickmap
+  integrity across 291 entries and 220 referenced templates with zero errors
+  and the established 44 orphan candidates, all 2,030 Python tests in 343.27
+  seconds, and all 96 portable native authoring tests.
+- Production advanced from `ee4c861` behind rollback tag
+  `production-before-20260809T013944Z-ee4c861`. Automation PID `3391293`
+  stopped cleanly during the active battle and released its
+  `localhost:5555` lock. The restarted control surface reported revision 31,
+  `strategy_authoring_preset_local_copy_v1`, `preset_local_copy: true`, the
+  `materialize_loadout_preset` operation, four module presets, and no catalog
+  errors. The pending setup-capture review remained ready with its original
+  preview fingerprint.
+- Replacement automation PID `3453512` started Paused, acquired the exact
+  target lock, and published fresh active-battle evidence. Explicit Attach
+  used a guarded forced save, restored the source, and bound same-battle
+  continuity; explicit active-battle adoption then restored
+  `farm_t19_ad_assist`. Session preflight verified the active requirements,
+  deferred only the normal `free_upgrade_locks` next-boundary check, returned
+  through the resumable Home route, and entered steady Running state at wave
+  2039 and game speed x6.3. No Surrender or new battle was issued.
+- Follow-up guidance commit `3acb45a` makes a production promotion that changes
+  any input to either native Windows executable incomplete until the supported
+  workflow atomically publishes and verifies the complete two-executable
+  package from the exact production checkout. Documentation-only and test-only
+  changes do not activate that boundary.
+- From `main == develop == 3acb45a`, `publish-linux.sh` replaced the stale
+  package at `windows/TheTower.ControlSurface/publish/win-x64`. Publication
+  completed at 2026-08-09 04:14:34 UTC with exactly the adjacent self-contained
+  Windows x64 PE executables: `TheTower.ControlSurface.exe` is 72,358,911 bytes
+  with SHA-256 `934c529b9e2772667e5d821ff847dce4b7e4ac439af20986aa331eed313c8e8d`,
+  and `TheTower.TunnelHost.exe` is 35,172,086 bytes with SHA-256
+  `aaf4c2de9b3b1b3ed41b3c136e29c238005e823580423201c412d79b523352ca`.
+- Both projects compiled and the atomic publisher exited successfully. Restore
+  also reported nonfatal `NU1900` diagnostics because the execution
+  environment left NuGet's existing user HTTP cache read-only after confirming
+  every project was already up to date. The compiled GUI payload contains
+  `strategy_authoring_preset_local_copy_v1`, and all 96 portable native
+  authoring/compatibility tests passed. Cross-publication does not execute WPF;
+  the separate Windows-only lifecycle and visible usability smoke remain
+  pending rather than being claimed here.
 
 ### 2026-08-08 save-to-UI fallback contract repair
 

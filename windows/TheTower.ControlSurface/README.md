@@ -21,10 +21,30 @@ publish\win-x64\TheTower.ControlSurface.exe
 publish\win-x64\TheTower.TunnelHost.exe
 ```
 
+Each successful replacement retains up to two earlier complete packages,
+newest first:
+
+```text
+publish\previous\1\TheTower.ControlSurface.exe
+publish\previous\1\TheTower.TunnelHost.exe
+publish\previous\2\TheTower.ControlSurface.exe
+publish\previous\2\TheTower.TunnelHost.exe
+```
+
+The publisher builds and verifies both new executables before changing the
+managed package directories. It then rotates the old current package to
+`previous\1`, the former `previous\1` to `previous\2`, and discards anything
+older. A first or second publication naturally has fewer retained slots. An
+incomplete current or retained package blocks rotation instead of silently
+discarding the rollback copy, and an installation failure restores the prior
+managed layout.
+
 The target PC does not need the .NET runtime because the publish is
 self-contained. Deploy the complete `win-x64` directory; copying only the GUI
 executable deliberately fails closed because it would leave no authoritative
-SSH owner. The output directory is ignored by Git.
+SSH owner. If rollback is required, deploy one complete numbered prior
+directory without mixing files across versions. The output directory is
+ignored by Git.
 
 The same Windows executable can be compiled on Ubuntu 24.04 even though WPF
 cannot be run there. Do not use Ubuntu's `dotnet-sdk-8.0` package for this
@@ -52,9 +72,10 @@ windows/TheTower.ControlSurface/publish-linux.sh
 Set `THETOWER_DOTNET=/absolute/path/to/dotnet` to select a different Microsoft
 SDK installation. The script rejects SDKs missing WindowsDesktop before it
 starts the build. It publishes both projects into a staging directory, verifies
-both required executables, and replaces the prior package only after both
-succeed. The GUI project explicitly enables Windows targeting; copy the
-complete result directory to Windows for runtime testing.
+both required executables, and performs the same guarded current-plus-two-prior
+rotation as the Windows publisher only after both builds succeed. The GUI
+project explicitly enables Windows targeting; copy the complete result
+directory to Windows for runtime testing.
 
 ## Connect
 
@@ -176,15 +197,19 @@ loaded records. Periodic battle refreshes leave an unchanged list alone and
 defer genuine updates while a Type, Strategy, or Quality filter menu is open so
 the popup and selected battle remain stable.
 
-The left workspace uses full-height **Controls**, **Process**, **Setup**, and
-**Details** tabs instead of dividing its height among several independently
-scrolling cards. Everyday Automation Paused/Enabled, explicit battle workflow,
-manual-control, game-speed, future terminal-policy, strategy, and run-
-configuration actions remain on Controls. Service state, PID, ADB target,
-Start Automation, and Stop Automation are on Process. API and SSH fields are confined to the
-Setup tab, which scrolls when its independent API and ADB tunnel controls do
-not fit; the optional bearer token remains memory-only. Detailed lock and
-runtime evidence is on Details.
+The left workspace uses full-height **Controls**, **Process**, **Setup**,
+**Details**, and **Perks** tabs instead of dividing its height among several
+independently scrolling cards. Everyday Automation Paused/Enabled, explicit
+battle workflow, manual-control, game-speed, future terminal-policy, strategy,
+and run-configuration actions remain on Controls. Service state, PID, ADB
+target, Start Automation, and Stop Automation are on Process. API and SSH
+fields are confined to the Setup tab, which scrolls when its independent API
+and ADB tunnel controls do not fit; the optional bearer token remains
+memory-only. Detailed lock and runtime evidence is on Details. Perks shows the
+current battle's monitor-validated player-save inventory, collapsed to one row
+per Perk and ordered by its most recent selection. Its checkpoint wave and
+capture time remain visible because the passive save can trail the displayed
+game wave; a new battle scope never inherits the prior battle's list.
 
 The top bar keeps four different health signals visible: the fixed Linux API
 service's systemd state, HTTP reachability, the Windows-local API SSH tunnel,
@@ -322,10 +347,11 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 30 preserves `strategy_authoring_v1`,
-`strategy_authoring_specialized_editors_v1`,
+server revision 32 adds `current_battle_perks_v1` while preserving revision
+31's `strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains `strategy_revision_history_v1`, and adds
+`strategy_authoring_preset_local_copy_v1`. Revision 30 added
 `save_backed_setup_capture_v2` while retaining
 `save_backed_setup_capture_v1`; revision 25 added
 `managed_custom_module_presets_v1` after revision 24 added
@@ -392,15 +418,36 @@ duplicating its distance parser or canonicalizer. The inactive preset and
 local drafts both survive form changes, Base omission/reinclusion, Strategy
 Inherit/Override/Ignore changes, and validation refreshes.
 
+When a shared preset is active on an editable Enforce or Observe row, **Edit a
+copy...** asks Linux to materialize that exact preset against the catalog
+fingerprint currently displayed. Linux uses the ordinary resolver and
+normalizer and returns the complete local definition; the client never derives
+it from preview text or Farm defaults. A successful response switches only the
+open row to **Profile-local definition**. It does not save or publish, create or
+select a preset, select or activate a Strategy, queue work, or apply runtime
+configuration. Bundled read-only Strategies cannot edit a copy; clone the
+Strategy first or open an editable custom Strategy.
+
+If the row already has a meaningful dormant local draft, the prompt makes all
+three outcomes explicit: replace it with the normalized selected preset,
+retain and reopen it, or cancel without changing either form. Unknown presets,
+stale catalogs, Linux validation rejection, missing capability, timeout, and
+other errors also retain the selected preset and complete local draft. The
+untouched server default local seed is not treated as operator-authored draft
+state.
+
 Whenever the Module shared-preset form is selected, the editor shows the
 Linux-supplied normalized eight-slot definition with each slot label and
 assigned Module. Bundled presets are labelled read-only; custom presets are
-labelled immutable and save-as-new. **Create variant...** copies any selected
-bundled or custom preset to a new safe ID, while **Save as preset...** submits
-the current profile-local Module fields. Linux validates both through the
-authoritative Module normalizer and stores custom presets only under its fixed
-installation-local catalog. The client never supplies a path or duplicates
-family validation.
+labelled immutable and save-as-new. **Duplicate preset...** copies any selected
+bundled or custom preset to a new immutable safe ID, while **Save as preset...**
+submits the current profile-local Module fields. Both remain distinct from
+**Edit a copy...**, which creates only editable local draft state. Linux
+validates both through the authoritative Module normalizer and stores custom
+presets only under its fixed installation-local catalog. The client never
+supplies a path or duplicates family validation. Target Priority and Orb
+Distance copies remain local; this workflow does not create managed catalogs
+for them.
 
 After creation, the row refreshes its preset options without resetting the
 collection, explicitly selects the new preset, and keeps the local draft
@@ -524,14 +571,26 @@ still requires the complete visible smoke below.
    Target Priority, all three Orb Distance fields, and Damage percentage.
    Select Farm Standard and Tournament Standard in turn; verify the preview
    visibly lists exactly eight named slot/Module pairs and labels both bundled
-   and read-only. Create a variant of one bundled preset, verify it appears
+   and read-only. Use **Edit a copy...** on Tournament Standard, Farm T19
+   Target Priority, and Tournament 98.38m Orb Distance; verify each local form
+   contains the exact selected non-default definition rather than Farm defaults
+   and no publication/activation occurs. Create a meaningful local draft,
+   return to a preset, and exercise retain, replace, and cancel; cancel and a
+   forced stale/error response must preserve both forms. Confirm the same
+   button is disabled on a bundled read-only Strategy and enabled after
+   **Clone Strategy** and on an editable custom Strategy. Exercise Inherit,
+   Override Enforce, Override Observe, Ignore, and Base omission/reinclusion
+   around those drafts.
+
+   Use **Duplicate preset...** on one bundled Module preset, verify it appears
    immediately with a custom immutable label and becomes the explicit current
    row selection, then cancel before publication. In local form, change one
    Module, use **Save as preset...**, and verify the second custom preset is
-   immediately selectable while the local draft remains dormant. Retry an
-   existing ID and one invalid ID; verify the useful error leaves the complete
-   draft and every visible selection unchanged. Confirm no preset operation
-   creates a Base/Strategy publication or changes selection/activation.
+   immediately selectable while the edited local draft remains dormant. Retry
+   an existing ID and one invalid ID; verify the useful error leaves the
+   complete draft and every visible selection unchanged. Confirm no preset
+   operation creates a Base/Strategy publication or changes
+   selection/activation.
    After changing any Module choice, confirm all eight current ComboBox
    selections remain visibly populated and that the new value is unavailable
    in the other compatible slot.
@@ -717,11 +776,12 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Better Control Model build requires revision 30,
+current Windows build requires revision 32, `current_battle_perks_v1`,
 `better_control_model_v2`, `save_backed_setup_capture_v2`,
 `terminal_dispositions_v2`,
 `managed_custom_module_presets_v1`,
-`strategy_authoring_local_loadout_editors_v1`, and
+`strategy_authoring_local_loadout_editors_v1`,
+`strategy_authoring_preset_local_copy_v1`, and
 `strategy_revision_history_v1` while retaining all earlier required
 capabilities. The banner reports the actual revision/capability mismatch and
 the exact recovery

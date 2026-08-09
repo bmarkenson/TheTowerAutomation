@@ -5,6 +5,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import re
 
 import pytest
 import yaml
@@ -263,6 +264,10 @@ def test_registry_editor_metadata_declares_every_specialized_constraint():
         assert preset["local_editor"]["schema_version"] == 1
         assert preset["local_editor"]["key"] == "local"
         assert preset["local_editor"]["initial_value"]
+        assert re.fullmatch(
+            r"[0-9a-f]{64}",
+            preset["preset_catalog_fingerprint"],
+        )
 
     modules = catalog["modules"]["editor"]["local_editor"]
     assert modules["value_kind"] == "object"
@@ -311,6 +316,8 @@ def test_profile_local_metadata_is_additive_to_revision_23_preset_contract():
         assert set(item["initial_value"]) == {"preset"}
         editor = copy.deepcopy(item["editor"])
         local_editor = editor.pop("local_editor")
+        catalog_fingerprint = editor.pop("preset_catalog_fingerprint")
+        assert re.fullmatch(r"[0-9a-f]{64}", catalog_fingerprint)
 
         # This is the complete shape consumed by the revision-23 native client.
         assert editor["value_kind"] == "object"

@@ -72,13 +72,14 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 30
+CONTROL_SURFACE_REVISION = 32
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "better_control_model_v1",
     "better_control_model_v2",
     "completed_battle_discard",
+    "current_battle_perks_v1",
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
     "explicit_strategy_disposition",
@@ -95,6 +96,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "strategy_action_gate_v1",
     "strategy_authoring_profile_lifecycle_v1",
     "strategy_authoring_local_loadout_editors_v1",
+    "strategy_authoring_preset_local_copy_v1",
     "strategy_authoring_specialized_editors_v1",
     "strategy_authoring_v1",
     "strategy_profile_catalog_v1",
@@ -103,6 +105,9 @@ CONTROL_SURFACE_CAPABILITIES = (
     "terminal_dispositions_v2",
     "tournament_launch_confirmation",
 )
+CURRENT_BATTLE_PERKS_SCHEMA_VERSION = 1
+MAX_PERK_TIMELINE_STATUS_BYTES = 2 * 1024 * 1024
+MAX_CURRENT_BATTLE_PERK_ITEMS = 64
 ATTACHED_RESTART_TIMEOUT_SECONDS = 20.0
 ATTACHED_RESTART_POLL_SECONDS = 0.25
 DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS = 30
@@ -212,6 +217,9 @@ class ControlSurfaceService:
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.control_path = self._resolve_path(control_file)
+        self.perk_timeline_path = self.control_path.with_name(
+            f"{self.control_path.stem}.perk_timeline_state.json"
+        )
         self.action_log = self._resolve_path(action_log)
         self.activity_scope_path = (
             self.action_log.with_name(DEFAULT_ACTIVITY_SCOPE_FILENAME)
@@ -794,6 +802,28 @@ class ControlSurfaceService:
                     request.get("source"),
                     request.get("target_base"),
                 )
+            elif operation == "materialize_loadout_preset":
+                if set(request) != {
+                    "operation",
+                    "setting_id",
+                    "preset",
+                    "expected_catalog_fingerprint",
+                }:
+                    raise StrategyProfileError(
+                        "Preset materialization requires exactly operation, "
+                        "setting_id, preset, and expected_catalog_fingerprint"
+                    )
+                materialization = self.profile_store.materialize_loadout_preset(
+                    request.get("setting_id"),
+                    request.get("preset"),
+                    request.get("expected_catalog_fingerprint"),
+                )
+                response = {
+                    "valid": True,
+                    "published": False,
+                    "materialization": materialization,
+                    "publication_activates_strategy": False,
+                }
             elif operation == "create_module_preset":
                 if set(request) != {
                     "operation",
@@ -1127,6 +1157,7 @@ class ControlSurfaceService:
         )
         healthy = bool(runtime["active"] and observation and not observation["stale"])
         current_run = self._load_activity_scope()
+        current_battle_perks = self._current_battle_perks(current_run)
         control_model = self._better_control_model_status(
             control=control,
             acknowledgements=acknowledgements,
@@ -1156,6 +1187,7 @@ class ControlSurfaceService:
                 if current_run is not None
                 else None
             ),
+            "current_battle_perks": current_battle_perks,
             "strategy_action_gate": strategy_action_gate,
             "interactive_development_lease": interactive_development_lease,
             "control_model": control_model,
@@ -2912,6 +2944,60 @@ class ControlSurfaceService:
             "source_file_id": source_file_id,
             "start_offset": start_offset,
         }
+
+    def _current_battle_perks(
+        self,
+        current_run: Optional[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Load the runtime-owned, scope-bound Perk presentation checkpoint."""
+
+        if current_run is None:
+            return _unavailable_current_battle_perks(
+                status="unavailable",
+                reason="current_run_unavailable",
+            )
+        try:
+            if self.perk_timeline_path.stat().st_size > (
+                MAX_PERK_TIMELINE_STATUS_BYTES
+            ):
+                return _unavailable_current_battle_perks(
+                    status="unavailable",
+                    reason="timeline_checkpoint_too_large",
+                )
+            with self.perk_timeline_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except FileNotFoundError:
+            return _unavailable_current_battle_perks(
+                status="awaiting_save_checkpoint",
+                reason="timeline_checkpoint_unavailable",
+            )
+        except (OSError, json.JSONDecodeError):
+            return _unavailable_current_battle_perks(
+                status="unavailable",
+                reason="timeline_checkpoint_invalid",
+            )
+
+        if not isinstance(payload, Mapping):
+            return _unavailable_current_battle_perks(
+                status="unavailable",
+                reason="timeline_checkpoint_invalid",
+            )
+        if (
+            payload.get("schema_version") != 3
+            or str(payload.get("activity_scope_run_id") or "").strip()
+            != str(current_run.get("run_id") or "").strip()
+        ):
+            return _unavailable_current_battle_perks(
+                status="awaiting_save_checkpoint",
+                reason="current_run_checkpoint_unavailable",
+            )
+        try:
+            return _normalize_current_battle_perks(payload.get("current_perks"))
+        except (TypeError, ValueError):
+            return _unavailable_current_battle_perks(
+                status="unavailable",
+                reason="current_perks_projection_invalid",
+            )
 
     def _resolve_path(self, path: Path | str) -> Path:
         candidate = Path(path)
@@ -4774,6 +4860,158 @@ def _collapse_completed_operations(
                     entry["collapsed"] = True
         collapsed.append(entry)
     return [entry for entry in collapsed if entry is not None]
+
+
+def _unavailable_current_battle_perks(
+    *,
+    status: str,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": CURRENT_BATTLE_PERKS_SCHEMA_VERSION,
+        "status": status,
+        "reason": reason,
+        "source": "perk_timeline_checkpoint",
+        "order_semantics": "most_recent_selection_first",
+        "captured_at": None,
+        "saved_wave": None,
+        "picked_count": 0,
+        "unique_count": 0,
+        "items": [],
+    }
+
+
+def _normalize_current_battle_perks(value: object) -> dict[str, Any]:
+    """Validate the additive presentation written by the runtime owner."""
+
+    if not isinstance(value, Mapping):
+        raise TypeError("current Perks presentation must be an object")
+    status = str(value.get("status") or "")
+    reason = str(value.get("reason") or "")
+    source = str(value.get("source") or "")
+    order_semantics = str(value.get("order_semantics") or "")
+    if (
+        value.get("schema_version") != CURRENT_BATTLE_PERKS_SCHEMA_VERSION
+        or status not in {"available", "awaiting_save_checkpoint"}
+        or len(reason) > 128
+        or source != "monitor_validated_player_save_perk_prefix"
+        or order_semantics != "most_recent_selection_first"
+    ):
+        raise ValueError("current Perks presentation metadata is invalid")
+
+    raw_items = value.get("items")
+    if (
+        not isinstance(raw_items, Sequence)
+        or isinstance(raw_items, (str, bytes, bytearray))
+        or len(raw_items) > MAX_CURRENT_BATTLE_PERK_ITEMS
+    ):
+        raise ValueError("current Perks presentation items are invalid")
+    items: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    previous_sequence: Optional[int] = None
+    previous_wave: Optional[int] = None
+    for raw_item in raw_items:
+        if not isinstance(raw_item, Mapping):
+            raise ValueError("current Perk item is invalid")
+        perk_key = str(raw_item.get("perk_key") or "")
+        label = " ".join(str(raw_item.get("label") or "").split())
+        level = raw_item.get("level")
+        last_wave = raw_item.get("last_selected_wave")
+        last_sequence = raw_item.get("last_selected_sequence")
+        if (
+            re.fullmatch(r"[a-z][a-z0-9_]{0,95}", perk_key) is None
+            or perk_key in seen_keys
+            or not label
+            or len(label) > 160
+            or type(level) is not int
+            or level < 1
+            or type(last_wave) is not int
+            or last_wave < 0
+            or type(last_sequence) is not int
+            or last_sequence < 1
+            or (
+                previous_sequence is not None
+                and last_sequence >= previous_sequence
+            )
+            or (previous_wave is not None and last_wave > previous_wave)
+        ):
+            raise ValueError("current Perk item is invalid")
+        seen_keys.add(perk_key)
+        previous_sequence = last_sequence
+        previous_wave = last_wave
+        items.append(
+            {
+                "perk_key": perk_key,
+                "label": label,
+                "level": level,
+                "last_selected_wave": last_wave,
+                "last_selected_sequence": last_sequence,
+            }
+        )
+
+    captured_at = value.get("captured_at")
+    saved_wave = value.get("saved_wave")
+    picked_count = value.get("picked_count")
+    unique_count = value.get("unique_count")
+    if status == "awaiting_save_checkpoint":
+        if (
+            reason != "save_checkpoint_unavailable"
+            or captured_at is not None
+            or saved_wave is not None
+            or type(picked_count) is not int
+            or picked_count != 0
+            or type(unique_count) is not int
+            or unique_count != 0
+            or items
+        ):
+            raise ValueError("awaiting current Perks presentation is invalid")
+    else:
+        if not isinstance(captured_at, str):
+            raise ValueError("current Perks capture timestamp is invalid")
+        try:
+            parsed_capture = datetime.fromisoformat(
+                captured_at.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "current Perks capture timestamp is invalid"
+            ) from exc
+        if (
+            parsed_capture.tzinfo is None
+            or reason
+            or type(saved_wave) is not int
+            or saved_wave < 0
+            or type(picked_count) is not int
+            or picked_count < 0
+            or type(unique_count) is not int
+            or unique_count != len(items)
+            or picked_count < unique_count
+            or sum(item["level"] for item in items) != picked_count
+            or (
+                bool(items)
+                and items[0]["last_selected_sequence"] != picked_count
+            )
+            or any(item["level"] > picked_count for item in items)
+            or any(
+                item["last_selected_sequence"] > picked_count
+                or item["last_selected_wave"] > saved_wave
+                for item in items
+            )
+        ):
+            raise ValueError("available current Perks presentation is invalid")
+
+    return {
+        "schema_version": CURRENT_BATTLE_PERKS_SCHEMA_VERSION,
+        "status": status,
+        "reason": reason,
+        "source": source,
+        "order_semantics": order_semantics,
+        "captured_at": captured_at,
+        "saved_wave": saved_wave,
+        "picked_count": picked_count,
+        "unique_count": unique_count,
+        "items": items,
+    }
 
 
 def _parse_log_line(line: str) -> Optional[dict[str, str]]:

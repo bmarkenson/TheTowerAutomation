@@ -244,6 +244,16 @@ def test_portable_view_model_suite_covers_editors_states_and_round_trips():
     assert "DormantIgnoreValueSurvivesInheritedAndReconstructedRows" in tests
     assert "PresetAndLocalDraftsSurviveFormAndSourceStateTransitions" in tests
     assert "PresetAndLocalDraftsSurviveSparseBaseTransitions" in tests
+    assert "EditCopyRequestsExactSelectedPresetAndAppliesLinuxDefinition" in tests
+    assert "DormantLocalDraftReplaceRetainAndCancelPathsAreExplicit" in tests
+    assert "RejectedOrInterruptedPresetCopyLeavesBothDraftFormsIntact" in tests
+    assert (
+        "PresetCopyRequiresEditableEntityAndCapabilityWhileDuplicateStaysDistinct"
+        in tests
+    )
+    assert (
+        "PresetCopyAvailabilityFollowsIncludeOverrideObserveAndIgnore" in tests
+    )
     assert "ModuleLocalEditorUsesEightFieldsAndPreventsRepeatedChoices" in tests
     assert (
         "ChangingOneModuleSelectionKeepsEverySelectionAvailableDuringPeerRefresh"
@@ -259,8 +269,9 @@ def test_portable_view_model_suite_covers_editors_states_and_round_trips():
         in tests
     )
     assert "MissingManagedCapabilityHidesCreationAndRetainsDraftOnFailure" in tests
-    assert "VariantCreationIsAvailableFromAReadOnlySelectedPreset" in tests
+    assert "PresetDuplicationIsAvailableFromAReadOnlySelectedPreset" in tests
     assert "ManagedModulePresetCreationResultRoundTripsWithoutPublication" in tests
+    assert "PresetMaterializationResponseRoundTripsWithoutPublication" in tests
     assert (
         "TargetPriorityLocalEditorRetainsCompleteMembershipInChangedOrder"
         in tests
@@ -294,8 +305,9 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 30" in compatibility
+    assert "MinimumServerRevision = 32" in compatibility
     assert '"better_control_model_v2"' in compatibility
+    assert '"current_battle_perks_v1"' in compatibility
     assert '"save_backed_setup_capture_v2"' in compatibility
     capture_code = _text("SetupCaptureWindow.xaml.cs")
     capture_xaml = _text("SetupCaptureWindow.xaml")
@@ -304,6 +316,7 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert 'x:Name="TryAgainButton"' in capture_xaml
     assert '"managed_custom_module_presets_v1"' in compatibility
     assert '"strategy_authoring_local_loadout_editors_v1"' in compatibility
+    assert '"strategy_authoring_preset_local_copy_v1"' in compatibility
     assert '"strategy_revision_history_v1"' in compatibility
     assert '"strategy_authoring_profile_lifecycle_v1"' in compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in compatibility
@@ -321,6 +334,8 @@ def test_wpf_profile_local_loadout_controls_use_only_nested_server_metadata():
     assert 'JsonPropertyName("unique_field_values")' in models
     assert 'JsonPropertyName("profile_local_loadout_editors")' in models
     assert 'JsonPropertyName("preset_catalog")' in models
+    assert 'JsonPropertyName("preset_catalog_fingerprint")' in models
+    assert 'JsonPropertyName("preset_local_copy")' in models
     assert "public int SchemaVersion { get; set; } = 3;" in models
     assert "_definition.Editor.LocalEditor is not null" in view_models
     assert "presetField.Key" in view_models
@@ -330,15 +345,72 @@ def test_wpf_profile_local_loadout_controls_use_only_nested_server_metadata():
     assert "SelectedPreset?.Value.Clone()" in view_models
     assert "dormantValue?.PresetValue" in view_models
     assert "dormantValue?.LocalValue" in view_models
+    assert "dormantValue?.LocalMaterialized" in view_models
+    assert "BuildEditPresetCopyRequest" in view_models
+    assert "ApplyMaterializedPresetCopy" in view_models
+    assert "EditorJson.ValuesEqual" in view_models
     assert "UniqueFieldValues" in structured
     assert "RefreshUniqueFieldOptions" in structured
     assert "ServerNormalizedText" in structured
     assert 'AutomationProperties.Name="Definition source"' in xaml
     assert 'AutomationProperties.Name="Shared preset"' in xaml
+    assert 'Content="Edit a copy..."' in xaml
+    assert 'Click="EditPresetCopy_Click"' in xaml
     assert "MoveLocalDefinitionListItemUp_Click" in xaml
     assert "MoveLocalDefinitionListItemDown_Click" in xaml
     assert "row.LocalDefinitionEditor?.MoveListItem" in code
     assert "raw json" not in xaml.lower()
+
+
+def test_wpf_edit_copy_is_catalog_bound_atomic_and_non_publishing():
+    xaml = _text("StrategyProfilesWindow.xaml")
+    code = _text("StrategyProfilesWindow.xaml.cs")
+    models = _text("Models.cs")
+    view_models = _text("StrategyAuthoringViewModels.cs")
+
+    assert 'Content="Edit a copy..."' in xaml
+    assert 'IsEnabled="{Binding CanEditPresetCopy, Mode=OneWay}"' in xaml
+    assert 'Visibility="{Binding PresetLocalCopyVisible' in xaml
+    assert 'AutomationProperties.Name="Edit a local copy of selected preset"' in xaml
+
+    for property_name in (
+        "preset_local_copy",
+        "preset_catalog_fingerprint",
+        "expected_catalog_fingerprint",
+        "materialization",
+        "definition_fingerprint",
+    ):
+        assert f'JsonPropertyName("{property_name}")' in models
+    assert 'Operation { get; set; } = "materialize_loadout_preset"' in models
+
+    assert '"materialize_loadout_preset"' in view_models
+    assert "DefinitionPresetControlEnabled" in view_models
+    assert "HasMeaningfulDormantLocalDraft" in view_models
+    assert "RetainDormantLocalDraft" in view_models
+    assert "ApplyMaterializedPresetCopy" in view_models
+    assert "candidate.CurrentValue" in view_models
+    assert "EditorJson.ValuesEqual" in view_models
+    assert "LocalDefinitionEditor = candidate" in view_models
+
+    flow = code.split("private async Task EditPresetCopyAsync", 1)[1].split(
+        "private async void DuplicateModulePreset_Click", 1
+    )[0]
+    assert "MessageBoxButton.YesNoCancel" in flow
+    assert "Yes — replace" in flow
+    assert "No — retain" in flow
+    assert "Cancel — keep" in flow
+    assert "row.BuildEditPresetCopyRequest()" in flow
+    assert "response.Published" in flow
+    assert "response.PublicationActivatesStrategy" in flow
+    assert "row.ApplyMaterializedPresetCopy(response.Materialization)" in flow
+    assert (
+        "no Strategy or preset was saved, published, selected, activated, queued, or applied"
+        in flow
+    )
+    assert "selected preset and local draft are unchanged" in flow
+    assert "ApplyCatalog(" not in flow
+    assert 'operation = "publish_' not in flow
+    assert "EditorPanel.IsEnabled = !busy" in code
 
 
 def test_wpf_module_preset_preview_and_save_as_new_flow_are_authoritative():
@@ -355,9 +427,9 @@ def test_wpf_module_preset_preview_and_save_as_new_flow_are_authoritative():
         in xaml
     )
     assert 'Text="{Binding Module, Mode=OneWay}"' in xaml
-    assert 'Content="Create variant..."' in xaml
+    assert 'Content="Duplicate preset..."' in xaml
     assert 'Content="Save as preset..."' in xaml
-    assert 'Click="CreateModuleVariant_Click"' in xaml
+    assert 'Click="DuplicateModulePreset_Click"' in xaml
     assert 'Click="SaveModulePreset_Click"' in xaml
     assert "ModulePresetManagementVisible" in xaml
 
@@ -380,7 +452,7 @@ def test_wpf_module_preset_preview_and_save_as_new_flow_are_authoritative():
     assert "JsonIgnoreCondition.WhenWritingNull" in models
 
     assert "SelectedModulePreset?.Slots" in view_models
-    assert "BuildCreateModuleVariantRequest" in view_models
+    assert "BuildDuplicateModulePresetRequest" in view_models
     assert "BuildSaveModulePresetRequest" in view_models
     assert "ReconcileModulePresetCatalog" in view_models
     assert "PresetOptions.Move" in view_models

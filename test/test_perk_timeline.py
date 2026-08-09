@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -176,6 +177,63 @@ def test_saved_prefix_replaces_panel_timeline_and_extends_exactly():
     assert tracker.drain_mapping_evidence() == ()
 
 
+def test_current_perks_presentation_collapses_levels_newest_first():
+    tracker = PerkTimelineTracker()
+    assert tracker.current_perks_presentation() == {
+        "schema_version": 1,
+        "source": "monitor_validated_player_save_perk_prefix",
+        "order_semantics": "most_recent_selection_first",
+        "status": "awaiting_save_checkpoint",
+        "reason": "save_checkpoint_unavailable",
+        "captured_at": None,
+        "saved_wave": None,
+        "picked_count": 0,
+        "unique_count": 0,
+        "items": [],
+    }
+
+    checkpoint = _saved_checkpoint(
+        12,
+        420,
+        (100, 0, "max_health", 1),
+        (200, 1, "perk_wave_requirement", 1),
+        (250, 1, "perk_wave_requirement", 2),
+        (300, 1, "perk_wave_requirement", 3),
+        (400, 2, "damage", 1),
+    )
+    assert tracker.record_saved_checkpoint(checkpoint) == "initial_saved_prefix"
+
+    presentation = tracker.current_perks_presentation()
+    assert presentation["status"] == "available"
+    assert presentation["captured_at"] == checkpoint["captured_at"]
+    assert presentation["saved_wave"] == 420
+    assert presentation["picked_count"] == 5
+    assert presentation["unique_count"] == 3
+    assert presentation["items"] == [
+        {
+            "perk_key": "damage",
+            "label": "Damage",
+            "level": 1,
+            "last_selected_wave": 400,
+            "last_selected_sequence": 5,
+        },
+        {
+            "perk_key": "perk_wave_requirement",
+            "label": "Perk Wave Requirement",
+            "level": 3,
+            "last_selected_wave": 300,
+            "last_selected_sequence": 4,
+        },
+        {
+            "perk_key": "max_health",
+            "label": "Max Health",
+            "level": 1,
+            "last_selected_wave": 100,
+            "last_selected_sequence": 1,
+        },
+    ]
+
+
 def test_passive_observation_never_opens_perks_for_a_pending_baseline():
     tracker = PerkTimelineTracker(confirmation_frames=1)
     observer = PerkTimelineObserver(tracker)
@@ -215,6 +273,10 @@ def test_save_backed_timeline_checkpoint_restores_for_the_same_scope(tmp_path):
         (200, 1, "damage", 1),
     )
     assert observer.observe_saved_checkpoint(checkpoint) == "initial_saved_prefix"
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert persisted["current_perks"] == (
+        observer.tracker.current_perks_presentation()
+    )
 
     restarted = PerkTimelineObserver(
         state_path=state_path,

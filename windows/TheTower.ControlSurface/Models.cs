@@ -32,6 +32,9 @@ public sealed class StatusResponse
     [JsonPropertyName("current_run")]
     public CurrentRunStatus? CurrentRun { get; set; }
 
+    [JsonPropertyName("current_battle_perks")]
+    public CurrentBattlePerksStatus CurrentBattlePerks { get; set; } = new();
+
     [JsonPropertyName("strategy_action_gate")]
     public StrategyActionGateStatus? StrategyActionGate { get; set; }
 
@@ -445,6 +448,57 @@ public sealed class CurrentRunStatus
 
     [JsonPropertyName("started_at")]
     public string? StartedAt { get; set; }
+}
+
+public sealed class CurrentBattlePerksStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unavailable";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = "";
+
+    [JsonPropertyName("order_semantics")]
+    public string OrderSemantics { get; set; } = "";
+
+    [JsonPropertyName("captured_at")]
+    public string? CapturedAt { get; set; }
+
+    [JsonPropertyName("saved_wave")]
+    public int? SavedWave { get; set; }
+
+    [JsonPropertyName("picked_count")]
+    public int PickedCount { get; set; }
+
+    [JsonPropertyName("unique_count")]
+    public int UniqueCount { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<CurrentBattlePerkItem> Items { get; set; } = [];
+}
+
+public sealed class CurrentBattlePerkItem
+{
+    [JsonPropertyName("perk_key")]
+    public string PerkKey { get; set; } = "";
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "";
+
+    [JsonPropertyName("level")]
+    public int Level { get; set; }
+
+    [JsonPropertyName("last_selected_wave")]
+    public int LastSelectedWave { get; set; }
+
+    [JsonPropertyName("last_selected_sequence")]
+    public int LastSelectedSequence { get; set; }
 }
 
 public sealed class AcknowledgementStatus
@@ -1164,6 +1218,9 @@ public sealed class StrategyAuthoringCapabilities
     [JsonPropertyName("profile_local_loadout_editors")]
     public bool ProfileLocalLoadoutEditors { get; set; }
 
+    [JsonPropertyName("preset_local_copy")]
+    public bool PresetLocalCopy { get; set; }
+
     [JsonPropertyName("managed_custom_module_presets")]
     public bool ManagedCustomModulePresets { get; set; }
 }
@@ -1210,7 +1267,7 @@ public sealed class ModulePresetDetail
     public string LifecycleLabel => Origin switch
     {
         "bundled" => "Bundled preset • read-only",
-        "custom" => "Custom preset • immutable; changes save as a new variant",
+        "custom" => "Custom preset • immutable; duplicate or edit a local copy",
         _ => "Preset origin unavailable • read-only",
     };
 }
@@ -1269,6 +1326,42 @@ public sealed class ModulePresetCreationSource
     [JsonPropertyName("local")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Local { get; set; }
+}
+
+public sealed class LoadoutPresetMaterializationRequest
+{
+    [JsonPropertyName("operation")]
+    public string Operation { get; set; } = "materialize_loadout_preset";
+
+    [JsonPropertyName("setting_id")]
+    public string SettingId { get; set; } = "";
+
+    [JsonPropertyName("preset")]
+    public string Preset { get; set; } = "";
+
+    [JsonPropertyName("expected_catalog_fingerprint")]
+    public string ExpectedCatalogFingerprint { get; set; } = "";
+}
+
+public sealed class LoadoutPresetMaterialization
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("setting_id")]
+    public string SettingId { get; set; } = "";
+
+    [JsonPropertyName("preset")]
+    public string Preset { get; set; } = "";
+
+    [JsonPropertyName("catalog_fingerprint")]
+    public string CatalogFingerprint { get; set; } = "";
+
+    [JsonPropertyName("definition")]
+    public JsonElement Definition { get; set; }
+
+    [JsonPropertyName("definition_fingerprint")]
+    public string DefinitionFingerprint { get; set; } = "";
 }
 
 public sealed class AuthoringSourceStateDefinition
@@ -1386,6 +1479,9 @@ public sealed class StrategyEditorMetadata
 
     [JsonPropertyName("preset_catalog")]
     public string? PresetCatalog { get; set; }
+
+    [JsonPropertyName("preset_catalog_fingerprint")]
+    public string PresetCatalogFingerprint { get; set; } = "";
 }
 
 public sealed class StrategyEditorOption
@@ -1789,6 +1885,9 @@ public sealed class StrategyAuthoringMutationResponse
 
     [JsonPropertyName("preset")]
     public ModulePresetDetail? Preset { get; set; }
+
+    [JsonPropertyName("materialization")]
+    public LoadoutPresetMaterialization? Materialization { get; set; }
 
     [JsonPropertyName("retired")]
     public bool Retired { get; set; }

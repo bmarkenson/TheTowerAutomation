@@ -14,7 +14,8 @@ owner work. Complete the repository-change checklist before this procedure and
    refs and prove that `M` is an ancestor of `D`.
 3. Run the complete checkpoint at `D`; review all `M..D` commits and the
    aggregate diff. Resolve remaining uncertainty with retained or live evidence
-   as appropriate.
+   as appropriate. Classify every publishable Windows-package input in that
+   diff; a source checkout update does not publish the native client.
 4. Create a unique annotated local tag at `M`, for example
    `production-before-20260804T210500Z-fe3c83b`. Never move or reuse it; pushing
    a tag is a separate operator decision.
@@ -30,8 +31,55 @@ owner work. Complete the repository-change checklist before this procedure and
 | Documentation only | Fast-forward without stopping automation. |
 | Runtime Python, YAML, templates, or runtime-read assets | Stop automation before update; restart and smoke-test afterward. |
 | Control surface or shared modules | Stop/restart the control-surface service; also stop automation when shared runtime code changes. |
+| Native Windows package input | Complete the [required Windows package publication](#required-windows-package-publication) after the production checkout reaches `D`. |
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
+
+### Required Windows package publication
+
+Any promotion whose aggregate `M..D` diff changes an input to either published
+Windows executable must also publish the complete native Windows package.
+Inputs include application source, XAML, project files, resources, and publish
+tooling under `windows/TheTower.ControlSurface`, `windows/TheTower.TunnelHost`,
+`windows/TheTower.TunnelHost.Core`, and `windows/TheTower.TunnelProtocol`;
+documentation-only and test-only changes do not activate this boundary.
+
+After verifying that the production checkout is exactly `D`, run the supported
+[`publish-linux.sh`](../../windows/TheTower.ControlSurface/publish-linux.sh) or
+Windows `publish.ps1` workflow. It must stage and verify a complete
+self-contained package containing adjacent, nonempty
+`TheTower.ControlSurface.exe` and `TheTower.TunnelHost.exe` files before its
+guarded replacement of `windows/TheTower.ControlSurface/publish/win-x64`.
+The same operation must retain the former current package as
+`publish/previous/1`, move the former slot 1 to `publish/previous/2`, and prune
+only older packages after the new current package verifies successfully. A
+first or second publication may have fewer prior slots; every present slot must
+remain a complete two-executable package. Do not copy only one executable,
+mix files from different slots, publish from a different commit, or treat
+portable tests or an earlier package as satisfying the current-publication
+boundary.
+
+Before reporting the promotion complete, record `D`, the publication time,
+size, and SHA-256 digest of both current executables. Also inventory every
+retained slot and record both executable sizes and digests, associating it with
+its prior production commit when the existing publication record proves that
+mapping. A failed or unverified publication or package rotation blocks the
+production-success claim even when the Linux deployment and smoke test pass.
+Cross-publication does not establish WPF runtime behavior; follow the native
+client's
+[Windows-only lifecycle validation](../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation)
+before describing a package as deployed and validated on Windows.
+
+### Native Windows package rollback
+
+If a post-publication Windows defect requires immediate artifact rollback,
+close the affected GUI, select one retained slot by its recorded hashes, and
+deploy that complete directory. Never combine its GUI with another slot's
+tunnel host. Record the chosen slot, hashes, associated source commit when
+known, destination, and Windows smoke result. This is a bounded artifact
+recovery, not a source rollback: create the normal reviewed revert or
+fix-forward on `main`, integrate it into `develop`, and republish from that
+exact production commit so `publish/win-x64` again matches production source.
 
 ## Retire feature work
 
