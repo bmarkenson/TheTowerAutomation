@@ -5734,6 +5734,27 @@ class App:
         strategy = self._mission_mgr.strategy
         return str(strategy.name if strategy else "none").strip().lower()
 
+    def _current_strategy_definition_matches(self, requested_name: str) -> bool:
+        """Return whether the latest named definition is already loaded."""
+
+        current = self._mission_mgr.strategy
+        try:
+            requested = get_strategy(requested_name)
+        except Exception:
+            # Resolution is retried by the guarded boundary application.  A
+            # failed comparison must never acknowledge an unproved reload.
+            return False
+        if current is None or requested is None:
+            return current is requested
+        current_config = getattr(current, "config", None)
+        requested_config = getattr(requested, "config", None)
+        return bool(
+            type(current) is type(requested)
+            and isinstance(current_config, Mapping)
+            and isinstance(requested_config, Mapping)
+            and current_config == requested_config
+        )
+
     def _exclusive_validation_definition(
         self,
     ) -> Optional[ExclusiveValidationDefinition]:
@@ -6982,7 +7003,12 @@ class App:
             return
         self._last_strategy_request = normalized_request
         requested_name = normalized_request[0]
-        if requested_name == self._current_strategy_name():
+        current_name = self._current_strategy_name()
+        same_name_reload = requested_name == current_name
+        if (
+            same_name_reload
+            and self._current_strategy_definition_matches(requested_name)
+        ):
             self._pending_strategy_request = None
             log(
                 f"[CTRL] Strategy set to {requested_name} via control file",
