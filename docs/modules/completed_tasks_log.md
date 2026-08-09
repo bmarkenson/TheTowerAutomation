@@ -39,6 +39,71 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 same-ID Strategy revision reload
+
+- Commit `e5ef4e6` makes a fresh Strategy request compare the complete latest
+  resolved definition with the definition already loaded by the runtime.
+  Matching stable IDs are now acknowledged as a no-op only when those
+  definitions also match. A changed or temporarily unreadable same-ID
+  publication remains pending for the existing guarded boundary application
+  or active-battle adoption path.
+- This repairs the observed path in which `farm_t19_ad_assist` version 2
+  declared Astral Deliverance, but the runtime cleared Start Battle's fresh
+  request solely because version 1 had the same ID. The old definition then
+  retained Being Annihilator and its matching preflight fingerprint. Start
+  Battle already creates a new Strategy request identity; verified Home
+  `NEW_BATTLE` installs the changed definition before run initialization and
+  setup checks.
+- Identical-definition selection still cancels a different pending request
+  without resetting strategy variables, cooldowns, gates, or waivers. Failed
+  definition resolution never emits the successful Strategy acknowledgement
+  and is retried by the existing boundary application.
+- The focused control, boundary, and Tournament slice passed 295 tests. The
+  supported isolated checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors, and all 2,038 tests in 353.42 seconds.
+  No production process, device input, battle transition, or live reload was
+  used for this repository repair.
+- Merge commit `59d69b6` reconciles the feature with current `develop` while
+  retaining only its five-file runtime, regression-test, and history delta.
+  The focused initialization file passed 113 tests, and the exact merged
+  candidate passed the complete supported checkpoint: compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,053 tests in 360.70 seconds.
+- Production advanced from `1c02bb3` behind rollback tag
+  `production-before-20260809T163959Z-1c02bb3` to exact candidate `59d69b6`.
+  Automation stopped cleanly at active-battle wave 2684. Replacement PID
+  `306276` acquired the `localhost:5555` lock; one attachment attempt failed
+  closed at restored-source verification, and one new request after fresh
+  `RUNNING` evidence completed a same-battle, complete-save attachment. No
+  Surrender, Game Over, in-game Home, Retry, or new battle was issued.
+- The replacement explicitly adopted `farm_t19_ad_assist` and completed its
+  exclusive session preflight. Cannon Assist was both expected and detected as
+  **Astral Deliverance** with confidence `0.9649463891983032`; the complete
+  Module set matched and no preflight check failed. The hold cleared, and a
+  fresh unpaused `RUNNING` heartbeat at wave 2756 established steady state with
+  no Strategy Action Gate. This source-only candidate changed no Windows
+  package input, so native publication was neither required nor performed.
+- The smoke confirms that a restarted production runtime loads the published
+  v2 definition. The in-process same-ID v1-to-v2 publication transition and
+  the agreed implicit next-battle dropdown action remain separate Windows
+  confirmation work under `ISSUE-2026-010`.
+
+### 2026-08-09 control-surface backlog pruning
+
+- Documentation-only commit `889121e` removes drag/reorder/floating-pane
+  customization, an embedded current screenshot, a permanent PresentMon
+  provider, native custom-YAML selection, multiple simultaneous ADB targets,
+  and expanded multi-user security from the active control-surface roadmap.
+- Atomic runtime status, automatic recovery and its eventual controls,
+  comparisons/trends, notifications, existing host telemetry, and the Windows
+  validation backlog remain active. A concrete performance anomaly may still
+  use one bounded issue-specific frame-timing trace; it does not establish a
+  permanent sampler, spool, or dashboard feature.
+- Current-reference inspection found no remaining active roadmap references to
+  the retired ideas outside immutable history. `git diff --check` passed; this
+  outcome changes documentation only and requires no Windows package
+  publication or service restart.
+
 ### 2026-08-08 save-backed new-battle carry lifecycle
 
 - Commit `f74f94e` separates transient control state from evidence failure.
