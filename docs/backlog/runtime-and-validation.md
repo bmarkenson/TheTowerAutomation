@@ -799,6 +799,21 @@ stages:
       clickmap integrity with zero errors and the established 44 orphan
       candidates, and all 2,011 tests in 338.55 seconds. No battle launch,
       device input, live runtime, or Windows validation was used.
+    - [x] Exact promotion candidate `066e167` repeated the complete supported
+      checkpoint: compilation and state definitions passed, clickmap integrity
+      reported zero errors and the established 44 orphan candidates, and all
+      2,011 tests passed in 343.11 seconds. Production advanced from `36497dc`
+      behind rollback tag
+      `production-before-20260809T000743Z-36497dc`.
+    - [x] The bounded production smoke cleanly stopped PID `3244540`, released
+      its exact `localhost:5555` lock, and started replacement PID `3334597`
+      Paused. The replacement acquired that lock, published fresh Home/New
+      Battle evidence, acknowledged the exact Pause and restored Enable
+      requests, and exposed `home_ad_gem` as its sole effective auxiliary
+      collector while Strategy and lifecycle actions remained blocked. It then
+      collected the already-visible five-gem Home reward and stayed Home; no
+      Start Battle intent, battle transition, Surrender, or manufactured test
+      boundary was used. Native Windows usability remains pending.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

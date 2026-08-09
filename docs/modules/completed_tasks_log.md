@@ -59,8 +59,20 @@ canonical document linked by an entry for current behavior.
   broader owner/caller slice passed 515. Exact corrected candidate `58380f4`
   passed compilation, state definitions, clickmap integrity with zero errors
   and the established 44 orphan candidates, and all 2,011 tests in 338.55
-  seconds. No live/device or Windows validation was performed, no Windows code
-  changed, and production promotion remains separate.
+  seconds. Exact promotion candidate `066e167` repeated that complete
+  checkpoint with all 2,011 tests passing in 343.11 seconds.
+- Production advanced from `36497dc` behind rollback tag
+  `production-before-20260809T000743Z-36497dc`. Automation PID `3244540`
+  stopped cleanly and released its `localhost:5555` lock; replacement PID
+  `3334597` started Paused, acquired the lock, published fresh Home/New Battle
+  evidence, and acknowledged the exact Pause and restored Enable requests.
+  Runtime status exposed `home_ad_gem` as the sole allowed auxiliary collector
+  while Strategy and lifecycle action authority remained blocked.
+- The replacement naturally claimed the already-visible five-gem Home reward,
+  recorded the verified tap and successful result, observed the overlay
+  disappear, and stayed Home without a Start Battle intent or battle
+  transition. No Surrender or manufactured test boundary was used. No Windows
+  code changed; native Windows usability remains pending.
 
 ### 2026-08-08 recoverable runtime diagnostic reconciliation
 
