@@ -56,12 +56,25 @@ canonical document linked by an entry for current behavior.
   the combined Perk/save/terminal/run-initialization slice passed 222 tests,
   and the supported checkpoint passed compilation, state definitions,
   clickmap integrity with zero errors and the established 44 orphan candidates,
-  and all 2,056 tests in 350.51 seconds. Diagnosis used one bounded read-only
-  capture; no production reload, deployment, or device input was performed.
-  The current contract is in the
+  and all 2,056 tests. The exact integrated candidate `a98ec0f` repeated that
+  checkpoint in 352.31 seconds. Diagnosis used one bounded read-only capture;
+  no production action was taken during diagnosis. The current contract is
+  documented in the
   [player-save architecture](../architecture/player_save.md#temporal-classes-and-merge-rules),
   with the incident evidence in
   [`ISSUE-2026-034`](../issues/resolved-2026.md#perk-top-bar-ocr-ignored-the-independent-battle-wave-observation).
+- Production advanced from `dd51aa2` behind rollback tag
+  `production-before-20260809T171630Z-dd51aa2` to exact candidate `a98ec0f`.
+  The existing automation owner stopped cleanly after an in-flight guarded
+  mission-reward route completed. Replacement PID `376160` acquired the
+  `localhost:5555` lock and completed save-backed same-battle attachment.
+- The replacement explicitly adopted `farm_t19_ad_assist`; its exclusive
+  session preflight verified the active requirements, returned to steady state,
+  and produced a fresh unpaused `RUNNING` heartbeat at wave 3292 with no
+  Strategy Action Gate. No Surrender, Game Over, in-game Home, Retry, or new
+  battle was issued. The five-file source/test/documentation delta contained no
+  Windows package input, so native publication was neither required nor
+  performed.
 
 ### 2026-08-09 same-ID Strategy revision reload
 

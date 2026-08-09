@@ -51,8 +51,19 @@ and actionable work lives in
   merging current `develop`, the combined Perk/save/terminal/run-initialization
   slice passed 222 tests, and the supported checkpoint passed compilation,
   state-definition validation, clickmap integrity with zero errors and the
-  established 44 orphan candidates, and all 2,056 tests in 350.51 seconds. No
-  live rollout or post-fix device validation was performed.
+  established 44 orphan candidates, and all 2,056 tests. The exact integrated
+  production candidate `a98ec0f` repeated that checkpoint in 352.31 seconds.
+- **Deployment:** Production advanced from `dd51aa2` behind rollback tag
+  `production-before-20260809T171630Z-dd51aa2` to exact candidate `a98ec0f`.
+  Automation stopped cleanly after its in-flight mission-reward route reached
+  a result, then replacement PID `376160` acquired the `localhost:5555` lock.
+  Save-backed attachment confirmed the same active Tier 19 battle, the runtime
+  explicitly adopted `farm_t19_ad_assist`, and its exclusive session preflight
+  completed with active requirements valid and no Strategy Action Gate. A
+  fresh unpaused `RUNNING` heartbeat at wave 3292 established steady state.
+  No Surrender, Game Over, in-game Home, Retry, or new battle was issued. This
+  source-only change had no Windows package input, so native publication was
+  neither required nor performed.
 - **Fixed by:** `105fd78`.
 
 ### Perk repair trusted transient Ban reads and local viewport edges
