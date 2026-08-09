@@ -136,6 +136,7 @@ def test_home_target_priority_control_does_not_exist():
         ),
         ("navigation.open_perks", "ui_state_20260714/active_wave_stats.png"),
         ("navigation.open_perks", "open_perks_dynamic_progress_20260723.png"),
+        ("navigation.open_perks", "open_perks_complete_20260809.png"),
         ("navigation.workshop:upgrade", "workshop_farm_active_20260714.png"),
         (
             "navigation.workshop:attack",
