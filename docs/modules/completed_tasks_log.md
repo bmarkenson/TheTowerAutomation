@@ -74,6 +74,18 @@ canonical document linked by an entry for current behavior.
   clickmap integrity with zero errors and the established 44 orphan candidates,
   and all 2,022 tests in 338.73 seconds. This integration performed no live,
   device, promotion, or deployment action.
+- Exact committed `develop` candidate `7d2552b` repeated the complete supported
+  checkpoint before promotion: compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan candidates, and all
+  2,022 tests passed in 339.32 seconds.
+- Production advanced from `f809815` behind rollback tag
+  `production-before-20260809T004403Z-f809815`. The control surface restarted
+  as PID `3372261`; replacement automation PID `3372605` acquired the held
+  `localhost:5555` lock, acknowledged the exact restored Enable request, and
+  published fresh Home/New Battle evidence while terminal policy remained
+  Home. No Start Battle, Attach to Battle, battle transition, or device input
+  was issued during the smoke. A natural ordinary battle and Game Over remain
+  required to confirm the deployed passive checkpoint and terminal-tail routes.
 
 ### 2026-08-08 idle-Home gem authority
 

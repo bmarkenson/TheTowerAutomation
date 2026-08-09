@@ -159,9 +159,15 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         and a later natural terminal clear prove completeness. No qualifying
         natural terminal boundary occurred during the deployment window, so
         every terminal UI fallback remains authoritative.
-      - [ ] Integrate and promote the
-        [completed passive timeline correction](../modules/completed_tasks_log.md#2026-08-08-passive-save-backed-perk-timeline-correction),
-        then observe an ordinary battle without creating or accelerating a
+      - [x] Integrated and promoted the
+        [completed passive timeline correction](../modules/completed_tasks_log.md#2026-08-08-passive-save-backed-perk-timeline-correction)
+        as runtime commit `7d2552b`, behind rollback tag
+        `production-before-20260809T004403Z-f809815`. The exact committed
+        `develop` candidate passed the complete supported checkpoint with all
+        2,022 tests in 339.32 seconds. The bounded production smoke replaced
+        both services, restored exact-target Enabled/Home authority, and stayed
+        at verified Home/New Battle without a battle intent or device input.
+      - [ ] Observe an ordinary battle without creating or accelerating a
         boundary. Confirm stable top-bar transitions produce passive
         acquisition/timeline progress with no in-battle
         `navigation.open_perks` input. At natural Game Over, confirm a proved
