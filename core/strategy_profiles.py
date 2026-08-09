@@ -54,6 +54,7 @@ from core.strategy_authoring import (
     farm_source_from_resolution,
     fingerprint_document,
     legacy_farm_source_to_strategy_source,
+    materialize_loadout_preset as materialize_authoring_loadout_preset,
     normalize_base_source,
     normalize_strategy_source,
     preview_strategy_rebase,
@@ -109,6 +110,7 @@ STRATEGY_AUTHORING_OPERATIONS = (
     "compare_strategy_revision",
     "preview_restore_strategy",
     "publish_restore_strategy",
+    "materialize_loadout_preset",
     "create_module_preset",
 )
 MAX_PROFILE_FILE_BYTES = 4 * 1024 * 1024
@@ -372,6 +374,29 @@ class StrategyProfileStore:
             display_name,
             definition,
         )
+
+    def materialize_loadout_preset(
+        self,
+        setting_id: object,
+        preset_id: object,
+        expected_catalog_fingerprint: object,
+    ) -> dict[str, Any]:
+        """Resolve one displayed preset into an exact normalized local draft."""
+
+        module_catalog = self.module_preset_store.catalog()
+        try:
+            return materialize_authoring_loadout_preset(
+                setting_id,
+                preset_id,
+                expected_catalog_fingerprint,
+                module_preset_definitions=module_preset_definitions(
+                    module_catalog
+                ),
+            )
+        except StrategyAuthoringConflictError as exc:
+            raise StrategyProfileConflictError(str(exc)) from exc
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(str(exc)) from exc
 
     def review_captured_strategy_draft(
         self,
@@ -847,6 +872,7 @@ class StrategyProfileStore:
                 "immutable_strategy_history": True,
                 "restore_as_new": True,
                 "profile_local_loadout_editors": True,
+                "preset_local_copy": True,
                 "managed_custom_module_presets": True,
                 "save_backed_setup_capture": True,
             },

@@ -155,6 +155,7 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
     assert catalog["strategies"]["items"][2]["authoring_supported"] is False
     assert catalog["capabilities"]["publication_activates_strategy"] is False
     assert catalog["capabilities"]["profile_local_loadout_editors"] is True
+    assert catalog["capabilities"]["preset_local_copy"] is True
     assert catalog["capabilities"]["managed_custom_module_presets"] is True
     assert catalog["capabilities"]["operations"] == [
         "validate_base",
@@ -166,6 +167,7 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
         "compare_strategy_revision",
         "preview_restore_strategy",
         "publish_restore_strategy",
+        "materialize_loadout_preset",
         "create_module_preset",
     ]
     assert [state["id"] for state in catalog["capabilities"]["base_source_states"]] == [
@@ -211,6 +213,17 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
         if "local_editor" in item["editor"]
     }
     assert set(local_editors) == {"modules", "target_priority", "orb_distance"}
+    assert all(
+        len(
+            next(
+                item
+                for item in catalog["setting_registry"]
+                if item["id"] == setting_id
+            )["editor"]["preset_catalog_fingerprint"]
+        )
+        == 64
+        for setting_id in local_editors
+    )
     modules_registry = next(
         item for item in catalog["setting_registry"] if item["id"] == "modules"
     )
@@ -281,6 +294,147 @@ def test_api_local_editor_initial_values_validate_exactly_without_control_mutati
     assert service.control_store.status() == before_control
     assert not (tmp_path / "profiles" / "bases").exists()
     _assert_no_expanded_plan(response)
+
+
+@pytest.mark.parametrize(
+    ("setting_id", "preset_id", "catalog_path"),
+    (
+        ("modules", "tournament_standard", None),
+        (
+            "target_priority",
+            "farm_t19",
+            ROOT / "config" / "loadouts" / "target_priorities.yaml",
+        ),
+        (
+            "orb_distance",
+            "tournament_range_98_38",
+            ROOT / "config" / "loadouts" / "orb_distances.yaml",
+        ),
+    ),
+)
+def test_materialize_exact_selected_non_default_preset_without_mutation(
+    tmp_path,
+    setting_id,
+    preset_id,
+    catalog_path,
+):
+    service = _service(tmp_path)
+    before_control = service.control_store.status()
+    catalog = service.strategy_authoring()
+    registry = {
+        item["id"]: item for item in catalog["setting_registry"]
+    }
+    if setting_id == "modules":
+        expected = next(
+            item["definition"]
+            for item in catalog["module_presets"]["items"]
+            if item["id"] == preset_id
+        )
+    else:
+        expected = _yaml(catalog_path)["presets"][preset_id]
+
+    response = service.apply_strategy_authoring(
+        {
+            "operation": "materialize_loadout_preset",
+            "setting_id": setting_id,
+            "preset": preset_id,
+            "expected_catalog_fingerprint": registry[setting_id]["editor"][
+                "preset_catalog_fingerprint"
+            ],
+        }
+    )
+
+    assert response["operation"] == "materialize_loadout_preset"
+    assert response["valid"] is True
+    assert response["published"] is False
+    assert response["publication_activates_strategy"] is False
+    assert response["materialization"]["setting_id"] == setting_id
+    assert response["materialization"]["preset"] == preset_id
+    assert response["materialization"]["definition"] == expected
+    assert len(response["materialization"]["definition_fingerprint"]) == 64
+    assert service.control_store.status() == before_control
+    assert not (tmp_path / "profiles" / "bases").exists()
+    assert not list((tmp_path / "profiles").glob("*.profile.yaml"))
+    _assert_no_expanded_plan(response)
+
+
+def test_preset_materialization_rejects_unknown_stale_and_invalid_catalogs(
+    tmp_path,
+    monkeypatch,
+):
+    service = _service(tmp_path)
+    before_control = service.control_store.status()
+    initial = service.strategy_authoring()
+    modules = next(
+        item for item in initial["setting_registry"] if item["id"] == "modules"
+    )
+    initial_fingerprint = modules["editor"]["preset_catalog_fingerprint"]
+
+    with pytest.raises(ControlSurfaceRequestError, match="unknown modules preset") as unknown:
+        service.apply_strategy_authoring(
+            {
+                "operation": "materialize_loadout_preset",
+                "setting_id": "modules",
+                "preset": "missing_preset",
+                "expected_catalog_fingerprint": initial_fingerprint,
+            }
+        )
+    assert unknown.value.status == 400
+
+    service.apply_strategy_authoring(
+        {
+            "operation": "create_module_preset",
+            "id": "catalog_change",
+            "display_name": "Catalog Change",
+            "source": {"preset": "farm_standard"},
+        }
+    )
+    with pytest.raises(ControlSurfaceRequestError, match="changed after it was opened") as stale:
+        service.apply_strategy_authoring(
+            {
+                "operation": "materialize_loadout_preset",
+                "setting_id": "modules",
+                "preset": "farm_standard",
+                "expected_catalog_fingerprint": initial_fingerprint,
+            }
+        )
+    assert stale.value.status == 409
+
+    invalid_catalog = copy.deepcopy(service.profile_store.module_preset_store.catalog())
+    invalid_item = next(
+        item
+        for item in invalid_catalog["items"]
+        if item["id"] == "tournament_standard"
+    )
+    invalid_item["definition"]["cannon_primary"] = invalid_item["definition"][
+        "cannon_assist"
+    ]
+    monkeypatch.setattr(
+        service.profile_store.module_preset_store,
+        "catalog",
+        lambda: copy.deepcopy(invalid_catalog),
+    )
+    invalid_registry = service.strategy_authoring()
+    invalid_modules = next(
+        item
+        for item in invalid_registry["setting_registry"]
+        if item["id"] == "modules"
+    )
+    with pytest.raises(ControlSurfaceRequestError, match="preset .* is invalid") as invalid:
+        service.apply_strategy_authoring(
+            {
+                "operation": "materialize_loadout_preset",
+                "setting_id": "modules",
+                "preset": "tournament_standard",
+                "expected_catalog_fingerprint": invalid_modules["editor"][
+                    "preset_catalog_fingerprint"
+                ],
+            }
+        )
+    assert invalid.value.status == 400
+    assert service.control_store.status() == before_control
+    assert not list((tmp_path / "profiles" / "bases").glob("*.yaml"))
+    assert not list((tmp_path / "profiles").glob("*.profile.yaml"))
 
 
 def test_managed_module_preset_creation_refreshes_all_catalogs_without_publication(
@@ -1256,7 +1410,7 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
 
         status, server_status = request("GET", "/api/v1/status")
         assert status == 200
-        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 31
+        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 32
         assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
         assert "save_backed_setup_capture_v1" in CONTROL_SURFACE_CAPABILITIES
         assert "save_backed_setup_capture_v2" in CONTROL_SURFACE_CAPABILITIES
@@ -1265,6 +1419,10 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
             in CONTROL_SURFACE_CAPABILITIES
         )
         assert "managed_custom_module_presets_v1" in CONTROL_SURFACE_CAPABILITIES
+        assert (
+            "strategy_authoring_preset_local_copy_v1"
+            in CONTROL_SURFACE_CAPABILITIES
+        )
         assert "strategy_revision_history_v1" in CONTROL_SURFACE_CAPABILITIES
         assert (
             "strategy_authoring_profile_lifecycle_v1"

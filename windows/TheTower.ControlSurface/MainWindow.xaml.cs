@@ -2740,7 +2740,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 31 with the required control-surface capabilities is required."
+                    "Linux API revision 32 with the required control-surface capabilities is required."
                 );
             }
             if (model is not null

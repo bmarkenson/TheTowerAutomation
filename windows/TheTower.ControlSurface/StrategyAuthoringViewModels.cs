@@ -16,7 +16,8 @@ public sealed record AuthoringDormantValue(
     JsonElement Value,
     bool Materialized,
     JsonElement? PresetValue = null,
-    JsonElement? LocalValue = null);
+    JsonElement? LocalValue = null,
+    bool LocalMaterialized = false);
 
 public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
 {
@@ -31,11 +32,13 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     private StrategyEditorOption? _selectedScalarOption;
     private string _valueText = "";
     private bool _hasDormantValue;
+    private bool _localDraftMaterialized;
     private bool _configuring;
     private bool _dirty;
     private StrategyResolvedSetting? _resolution;
     private Dictionary<string, ModulePresetDetail> _modulePresetDetails = [];
     private readonly bool _managedModulePresetCreation;
+    private readonly bool _presetLocalCopy;
     private readonly Dictionary<string, JsonElement> _ultimateUnknownGroups = [];
 
     public AuthoringSettingRowViewModel(
@@ -77,6 +80,12 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             && capabilities.Operations.Contains(
                 "create_module_preset",
                 StringComparer.Ordinal);
+        _presetLocalCopy = capabilities.PresetLocalCopy
+            && capabilities.Operations.Contains(
+                "materialize_loadout_preset",
+                StringComparer.Ordinal)
+            && !string.IsNullOrWhiteSpace(
+                definition.Editor.PresetCatalogFingerprint);
         ConfigureDefinitionForms(suppliedValue, dormantValue);
         AllListOptions = definition.Editor.Options;
         ListValues.CollectionChanged += (_, _) =>
@@ -148,7 +157,8 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             Notify(nameof(DefinitionFormControlEnabled));
             Notify(nameof(DefinitionPresetControlEnabled));
             Notify(nameof(LocalDefinitionControlEnabled));
-            Notify(nameof(CanCreateModuleVariant));
+            Notify(nameof(CanDuplicateModulePreset));
+            Notify(nameof(CanEditPresetCopy));
             Notify(nameof(CanSelectCreatedModulePreset));
             Notify(nameof(CanSaveModulePreset));
             Notify(nameof(CanAddListItem));
@@ -175,12 +185,18 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
                 return;
             }
             _selectedDefinitionForm = value;
+            if (value.Key == _definition.Editor.LocalEditor?.Key)
+            {
+                _localDraftMaterialized = true;
+            }
             MarkValueChanged();
             Notify();
             Notify(nameof(IsPresetDefinitionSelected));
             Notify(nameof(IsLocalDefinitionSelected));
             Notify(nameof(DefinitionPresetControlEnabled));
             Notify(nameof(LocalDefinitionControlEnabled));
+            Notify(nameof(HasMeaningfulDormantLocalDraft));
+            Notify(nameof(CanEditPresetCopy));
             NotifyModulePresetState();
             Notify(nameof(EffectiveValueDisplay));
         }
@@ -201,6 +217,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             MarkValueChanged();
             Notify();
             NotifyModulePresetState();
+            Notify(nameof(CanEditPresetCopy));
             Notify(nameof(EffectiveValueDisplay));
         }
     }
@@ -311,6 +328,16 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         && !_definition.Editor.Fixed;
     public bool LocalDefinitionControlEnabled =>
         ValueEditorEnabled && IsLocalDefinitionSelected;
+    public bool PresetLocalCopyVisible =>
+        UsesPresetOrLocalEditor && _presetLocalCopy;
+    public bool CanEditPresetCopy =>
+        PresetLocalCopyVisible
+        && DefinitionPresetControlEnabled
+        && SelectedPreset?.Value.ValueKind == JsonValueKind.String;
+    public bool HasMeaningfulDormantLocalDraft =>
+        UsesPresetOrLocalEditor && _localDraftMaterialized;
+    public string SelectedPresetDisplayName =>
+        SelectedPreset?.DisplayName ?? "selected preset";
     public bool UsesManagedPresetCatalog =>
         UsesPresetOrLocalEditor
         && !string.IsNullOrWhiteSpace(_definition.Editor.PresetCatalog);
@@ -342,7 +369,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         SelectedModulePreset?.Slots ?? [];
     public bool ModulePresetManagementVisible =>
         UsesManagedPresetCatalog && _managedModulePresetCreation;
-    public bool CanCreateModuleVariant =>
+    public bool CanDuplicateModulePreset =>
         ModulePresetManagementVisible
         && SelectedModulePreset?.CanCreateVariant == true;
     public bool CanSelectCreatedModulePreset =>
@@ -551,17 +578,101 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
                 : null,
             UsesPresetOrLocalEditor
                 ? LocalDefinitionEditor?.CurrentValue?.Clone()
-                : null);
+                : null,
+            UsesPresetOrLocalEditor && _localDraftMaterialized);
     }
 
-    public ModulePresetCreationRequest BuildCreateModuleVariantRequest(
+    public LoadoutPresetMaterializationRequest BuildEditPresetCopyRequest()
+    {
+        if (!CanEditPresetCopy
+            || SelectedPreset?.Value.GetString() is not { } preset)
+        {
+            throw new InvalidOperationException(
+                "Editing a preset copy is unavailable for this selection.");
+        }
+        return new LoadoutPresetMaterializationRequest
+        {
+            SettingId = Id,
+            Preset = preset,
+            ExpectedCatalogFingerprint =
+                _definition.Editor.PresetCatalogFingerprint,
+        };
+    }
+
+    public void RetainDormantLocalDraft()
+    {
+        if (!CanEditPresetCopy || !HasMeaningfulDormantLocalDraft)
+        {
+            throw new InvalidOperationException(
+                "There is no editable dormant local definition to retain.");
+        }
+        SelectedDefinitionForm = DefinitionForms.Single(form =>
+            form.Key == _definition.Editor.LocalEditor?.Key);
+    }
+
+    public void ApplyMaterializedPresetCopy(
+        LoadoutPresetMaterialization materialization)
+    {
+        if (!CanEditPresetCopy
+            || SelectedPreset?.Value.GetString() is not { } preset
+            || _definition.Editor.LocalEditor is not { } localMetadata)
+        {
+            throw new InvalidOperationException(
+                "The selected preset is no longer eligible for editing a copy.");
+        }
+        if (materialization.SchemaVersion != 1
+            || !string.Equals(materialization.SettingId, Id, StringComparison.Ordinal)
+            || !string.Equals(materialization.Preset, preset, StringComparison.Ordinal)
+            || !string.Equals(
+                materialization.CatalogFingerprint,
+                _definition.Editor.PresetCatalogFingerprint,
+                StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(materialization.DefinitionFingerprint)
+            || materialization.DefinitionFingerprint.Length != 64)
+        {
+            throw new InvalidOperationException(
+                "Linux returned preset materialization for a different or stale selection.");
+        }
+
+        var candidate = new AuthoringLocalDefinitionViewModel(
+            localMetadata,
+            materialization.Definition,
+            LocalDefinitionChanged);
+        if (candidate.CurrentValue is not { } candidateValue
+            || !EditorJson.ValuesEqual(
+                candidateValue,
+                materialization.Definition))
+        {
+            throw new InvalidOperationException(
+                "Linux returned a definition the declared local editor cannot represent exactly.");
+        }
+
+        LocalDefinitionEditor = candidate;
+        _localDraftMaterialized = true;
+        _hasDormantValue = true;
+        _selectedDefinitionForm = DefinitionForms.Single(form =>
+            form.Key == localMetadata.Key);
+        Dirty = true;
+        Notify(nameof(LocalDefinitionEditor));
+        Notify(nameof(SelectedDefinitionForm));
+        Notify(nameof(IsPresetDefinitionSelected));
+        Notify(nameof(IsLocalDefinitionSelected));
+        Notify(nameof(DefinitionPresetControlEnabled));
+        Notify(nameof(LocalDefinitionControlEnabled));
+        Notify(nameof(HasMeaningfulDormantLocalDraft));
+        Notify(nameof(CanEditPresetCopy));
+        NotifyModulePresetState();
+        Notify(nameof(EffectiveValueDisplay));
+    }
+
+    public ModulePresetCreationRequest BuildDuplicateModulePresetRequest(
         string identifier,
         string displayName)
     {
-        if (!CanCreateModuleVariant || SelectedModulePreset is not { } selected)
+        if (!CanDuplicateModulePreset || SelectedModulePreset is not { } selected)
         {
             throw new InvalidOperationException(
-                "Managed Module preset variants are unavailable for this selection.");
+                "Managed Module preset duplication is unavailable for this selection.");
         }
         return CreateModulePresetRequest(
             identifier,
@@ -604,6 +715,12 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         {
             throw new InvalidOperationException(
                 "Linux returned Module preset metadata for the wrong editor catalog.");
+        }
+        if (string.IsNullOrWhiteSpace(
+                refreshedDefinition.Editor.PresetCatalogFingerprint))
+        {
+            throw new InvalidOperationException(
+                "Linux returned Module preset metadata without a catalog fingerprint.");
         }
 
         var refreshedOptions = refreshedDefinition.Editor.Fields
@@ -673,8 +790,11 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         }
 
         _definition.Editor.Fields[0].Options = PresetOptions.ToList();
+        _definition.Editor.PresetCatalogFingerprint =
+            refreshedDefinition.Editor.PresetCatalogFingerprint;
         _modulePresetDetails = details;
         NotifyModulePresetState();
+        Notify(nameof(CanEditPresetCopy));
 
         if (!selectCreatedPreset)
         {
@@ -800,10 +920,12 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         var localDraft = activeLocal
             ?? dormantValue?.LocalValue
             ?? localMetadata.InitialValue;
+        _localDraftMaterialized = activeLocal.HasValue
+            || dormantValue?.LocalMaterialized == true;
         LocalDefinitionEditor = new AuthoringLocalDefinitionViewModel(
             localMetadata,
             localDraft,
-            MarkValueChanged);
+            LocalDefinitionChanged);
 
         var selectedKey = activeLocal.HasValue
             ? localMetadata.Key
@@ -1031,7 +1153,8 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         }
         _hasDormantValue = true;
         Dirty = true;
-        Notify(nameof(CanCreateModuleVariant));
+        Notify(nameof(CanDuplicateModulePreset));
+        Notify(nameof(CanEditPresetCopy));
         Notify(nameof(CanSelectCreatedModulePreset));
         Notify(nameof(CanSaveModulePreset));
     }
@@ -1043,8 +1166,15 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         Notify(nameof(ModulePresetPreviewTitle));
         Notify(nameof(ModulePresetLifecycleDisplay));
         Notify(nameof(ModulePresetPreviewSlots));
-        Notify(nameof(CanCreateModuleVariant));
+        Notify(nameof(CanDuplicateModulePreset));
         Notify(nameof(CanSaveModulePreset));
+    }
+
+    private void LocalDefinitionChanged()
+    {
+        _localDraftMaterialized = true;
+        MarkValueChanged();
+        Notify(nameof(HasMeaningfulDormantLocalDraft));
     }
 
     private static string FormatJson(JsonElement? value)

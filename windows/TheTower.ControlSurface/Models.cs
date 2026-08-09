@@ -1218,6 +1218,9 @@ public sealed class StrategyAuthoringCapabilities
     [JsonPropertyName("profile_local_loadout_editors")]
     public bool ProfileLocalLoadoutEditors { get; set; }
 
+    [JsonPropertyName("preset_local_copy")]
+    public bool PresetLocalCopy { get; set; }
+
     [JsonPropertyName("managed_custom_module_presets")]
     public bool ManagedCustomModulePresets { get; set; }
 }
@@ -1264,7 +1267,7 @@ public sealed class ModulePresetDetail
     public string LifecycleLabel => Origin switch
     {
         "bundled" => "Bundled preset • read-only",
-        "custom" => "Custom preset • immutable; changes save as a new variant",
+        "custom" => "Custom preset • immutable; duplicate or edit a local copy",
         _ => "Preset origin unavailable • read-only",
     };
 }
@@ -1323,6 +1326,42 @@ public sealed class ModulePresetCreationSource
     [JsonPropertyName("local")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Local { get; set; }
+}
+
+public sealed class LoadoutPresetMaterializationRequest
+{
+    [JsonPropertyName("operation")]
+    public string Operation { get; set; } = "materialize_loadout_preset";
+
+    [JsonPropertyName("setting_id")]
+    public string SettingId { get; set; } = "";
+
+    [JsonPropertyName("preset")]
+    public string Preset { get; set; } = "";
+
+    [JsonPropertyName("expected_catalog_fingerprint")]
+    public string ExpectedCatalogFingerprint { get; set; } = "";
+}
+
+public sealed class LoadoutPresetMaterialization
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("setting_id")]
+    public string SettingId { get; set; } = "";
+
+    [JsonPropertyName("preset")]
+    public string Preset { get; set; } = "";
+
+    [JsonPropertyName("catalog_fingerprint")]
+    public string CatalogFingerprint { get; set; } = "";
+
+    [JsonPropertyName("definition")]
+    public JsonElement Definition { get; set; }
+
+    [JsonPropertyName("definition_fingerprint")]
+    public string DefinitionFingerprint { get; set; } = "";
 }
 
 public sealed class AuthoringSourceStateDefinition
@@ -1440,6 +1479,9 @@ public sealed class StrategyEditorMetadata
 
     [JsonPropertyName("preset_catalog")]
     public string? PresetCatalog { get; set; }
+
+    [JsonPropertyName("preset_catalog_fingerprint")]
+    public string PresetCatalogFingerprint { get; set; } = "";
 }
 
 public sealed class StrategyEditorOption
@@ -1843,6 +1885,9 @@ public sealed class StrategyAuthoringMutationResponse
 
     [JsonPropertyName("preset")]
     public ModulePresetDetail? Preset { get; set; }
+
+    [JsonPropertyName("materialization")]
+    public LoadoutPresetMaterialization? Materialization { get; set; }
 
     [JsonPropertyName("retired")]
     public bool Retired { get; set; }

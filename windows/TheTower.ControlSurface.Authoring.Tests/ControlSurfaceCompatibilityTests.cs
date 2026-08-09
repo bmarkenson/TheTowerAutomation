@@ -19,7 +19,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var result = ControlSurfaceCompatibility.Evaluate(
             Status(
-                30,
+                31,
                 "better_control_model_v2",
                 "save_backed_setup_capture_v2")
         );
@@ -31,7 +31,7 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(31);
+        var status = Status(32);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
@@ -39,6 +39,9 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
             "save_backed_setup_capture_v2",
+            result.MissingCapabilities);
+        Assert.Contains(
+            "strategy_authoring_preset_local_copy_v1",
             result.MissingCapabilities);
     }
 
@@ -49,7 +52,7 @@ public sealed class ControlSurfaceCompatibilityTests
             """
             {
               "schema_version": 1,
-              "server_revision": 31,
+              "server_revision": 32,
               "capability": "save_backed_setup_capture_v2",
               "capture": {
                 "request_id": "capture-1",
@@ -74,7 +77,7 @@ public sealed class ControlSurfaceCompatibilityTests
             """
             {
               "api_version": 1,
-              "server_revision": 31,
+              "server_revision": 32,
               "current_battle_perks": {
                 "schema_version": 1,
                 "status": "available",
@@ -140,7 +143,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                31,
+                32,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
@@ -158,6 +161,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "save_backed_setup_capture_v2",
                 "strategy_action_gate_v1",
                 "strategy_authoring_local_loadout_editors_v1",
+                "strategy_authoring_preset_local_copy_v1",
                 "strategy_authoring_profile_lifecycle_v1",
                 "strategy_authoring_specialized_editors_v1",
                 "strategy_authoring_v1",
