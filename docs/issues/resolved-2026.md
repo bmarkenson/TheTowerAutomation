@@ -8,6 +8,48 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Weekly Mission collector rewound an already-claimed track
+
+**Stable ID:** `ISSUE-2026-035` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 the operator reported that the mission collector
+  returned to the start of the weekly chest bar even though the visible earlier
+  milestones already showed collection checkmarks.
+- **Symptom:** When no glowing weekly chest was present in the entry frame, the
+  handler always sent bounded leftward-normalization gestures before searching
+  right. A frame that already proved every unlocked chest was collected was
+  treated the same as an ambiguous retained viewport.
+- **Evidence:** Static inspection found that
+  `_find_weekly_mission_chest()` recognized only the claimable chest template
+  before unconditionally calling `scroll_to_edge()`. The retained claimed
+  `20/35` frame contains four distinct checkmarks and no claim target; its
+  paired claimable frame has the same progress, three checkmarks, and the
+  glowing fourth chest. The retained `35/35` frame exposes only five of seven
+  unlocked milestones, providing the partial-viewport negative case.
+- **Safety response:** Diagnosis and implementation used retained frames in an
+  isolated feature worktree. No production process, device input, runtime
+  reload, or live-state claim was made.
+- **Cause:** The earlier offscreen-weekly-chest repair correctly normalized the
+  track whenever the claim template was absent, but it had no positive terminal
+  state for an already-claimed unlocked prefix. Consequently even decisive
+  checkmark evidence fell through to the conservative full traversal.
+- **Resolution:** Commit `3747659` measures exact `completed N/35` progress and
+  distinct green checkmarks before normalization. When authoritative progress
+  and the visual count prove that every unlocked five-mission milestone is
+  checked, the search completes as an ordinary no-reward result with zero
+  swipes. The visible claim target is still checked first. Low-confidence,
+  cropped, unexpected-total, incomplete, and partial-viewport evidence retains
+  the original bounded normalize-and-search fallback.
+- **Regression:** `test/test_mission_reward_handler.py` exercises the retained
+  claimed, claimable, and partial-viewport frames; low-confidence and
+  unexpected-total rejection; zero-swipe completion; and continued offscreen
+  discovery from incomplete evidence.
+- **Validation:** The focused mission-reward and scrolling suites passed 52
+  tests. The supported isolated checkpoint passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the established 44 orphan
+  notices, and all 2,058 tests in 400.07 seconds.
+- **Fixed by:** `3747659`.
+
 ### Perk top-bar OCR ignored the independent battle-wave observation
 
 **Stable ID:** `ISSUE-2026-034` · **Lifecycle:** `resolved`

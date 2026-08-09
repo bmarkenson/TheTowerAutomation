@@ -39,6 +39,26 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 claimed weekly-chest rewind shortcut
+
+- Commit `3747659` prevents the Daily Missions collector from normalizing the
+  weekly-chest track to its left edge when the entry frame already proves every
+  unlocked milestone chest is claimed. The proof combines authoritative
+  `completed N/35` OCR with one distinct green checkmark for each unlocked
+  five-mission milestone; a visible claim target still wins first.
+- Cropped frames, low-confidence OCR, an unexpected weekly total, missing or
+  partially visible checkmarks, and any incomplete claimed count retain the
+  existing bounded left-edge normalization and rightward search. The earlier
+  offscreen-chest repair therefore remains the conservative fallback.
+- Retained claimed, claimable, and partial-viewport Daily Missions frames cover
+  positive and negative evidence. The focused mission-reward and scrolling
+  suites passed 52 tests. The supported isolated checkpoint passed
+  compilation, state definitions, clickmap integrity with zero errors and the
+  established 44 orphan notices, and all 2,058 tests in 400.07 seconds. No
+  production process, device interaction, or live validation was required.
+  Incident history is recorded in
+  [`ISSUE-2026-035`](../issues/resolved-2026.md#weekly-mission-collector-rewound-an-already-claimed-track).
+
 ### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
 
 - Commit `105fd78` makes the independent battle-wave observation authoritative
