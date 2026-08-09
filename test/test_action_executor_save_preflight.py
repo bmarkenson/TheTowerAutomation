@@ -81,15 +81,15 @@ def test_target_priority_consumes_bound_exact_order_without_opening_ui():
     }
 
 
-def test_target_priority_carried_mismatch_invalidates_then_runs_existing_ui():
-    invalidations = []
+def test_target_priority_requirement_change_falls_back_without_global_invalidation():
+    fallbacks = []
 
     class BoundSave:
         def consume(self, _check_id):
             return list(reversed(ORDER))
 
-        def invalidate(self, reason):
-            invalidations.append(reason)
+        def fallback_checks(self, reason, *, check_ids):
+            fallbacks.append((reason, check_ids))
 
     ctx = MissionContext(
         data={
@@ -109,10 +109,11 @@ def test_target_priority_carried_mismatch_invalidates_then_runs_existing_ui():
             action_guard_fn=lambda: True,
         )
 
-    assert invalidations == ["target_priority_action_requirement_changed"]
+    assert fallbacks == [
+        ("target_priority_action_requirement_changed", ("target_priority",))
+    ]
     ensure.assert_called_once()
     assert ensure.call_args.kwargs["expected"] == ORDER
-    assert callable(ensure.call_args.kwargs["repair_observer_fn"])
 
 
 def test_target_priority_ui_repair_preserves_other_carried_checks():
@@ -312,8 +313,8 @@ def test_observed_module_variation_binds_without_enforcement():
     } == TOURNAMENT_VARIATION
 
 
-def test_changed_observed_module_carry_invalidates_before_session_use():
-    invalidations = []
+def test_changed_observed_module_carry_falls_back_before_session_use():
+    fallbacks = []
 
     class BoundSave:
         def consume(self, _check_id):
@@ -322,8 +323,8 @@ def test_changed_observed_module_carry_invalidates_before_session_use():
                 "armor_assist": "Anti-Cube Portal",
             }
 
-        def invalidate(self, reason):
-            invalidations.append(reason)
+        def fallback_checks(self, reason, *, check_ids):
+            fallbacks.append((reason, check_ids))
 
     setup = {
         "modules": {
@@ -344,19 +345,21 @@ def test_changed_observed_module_carry_invalidates_before_session_use():
     bound = _bind_save_backed_home_evidence(setup, BoundSave())
 
     assert "modules" not in bound
-    assert invalidations == ["module_boundary_requirement_changed"]
+    assert fallbacks == [
+        ("module_boundary_requirement_changed", ("modules",))
+    ]
 
 
-def test_changed_later_lock_requirement_invalidates_carried_snapshot():
-    invalidations = []
+def test_changed_later_lock_requirement_falls_back_only_that_check():
+    fallbacks = []
 
     class BoundSave:
         def consume(self, check_id):
             assert check_id == "free_upgrade_locks"
             return list(FARM_FREE_UPGRADE_LOCKS)
 
-        def invalidate(self, reason):
-            invalidations.append(reason)
+        def fallback_checks(self, reason, *, check_ids):
+            fallbacks.append((reason, check_ids))
 
     setup = {
         "free_upgrade_locks": {
@@ -369,8 +372,11 @@ def test_changed_later_lock_requirement_invalidates_carried_snapshot():
     bound = _bind_save_backed_home_evidence(setup, BoundSave())
 
     assert "free_upgrade_locks" not in bound
-    assert invalidations == [
-        "free_upgrade_lock_boundary_requirement_changed"
+    assert fallbacks == [
+        (
+            "free_upgrade_lock_boundary_requirement_changed",
+            ("free_upgrade_locks",),
+        )
     ]
 
 

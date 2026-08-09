@@ -34,6 +34,9 @@ from core.tournament_conditions import derive_tournament_conditions_from_save
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionType,
+    PlayerSaveBoundaryKind,
+    PlayerSaveNaturalBoundary,
+    PlayerSaveTargetBinding,
 )
 
 
@@ -641,6 +644,72 @@ def reconcile_acquired_requirements(
     )
     result.pop("freshness_verified", None)
     result["acquisition"] = acquisition.redacted_provenance()
+    return result
+
+
+def reconcile_direct_retry_requirements(
+    acquisition: PlayerSaveAcquisitionBundle,
+    requirements: Mapping[str, Any],
+    *,
+    runtime_session_id: str,
+    source_activity_scope_id: str,
+    successor_activity_scope_id: str,
+    expected_binding: PlayerSaveTargetBinding,
+    max_snapshot_age_s: Optional[float] = None,
+    now: Optional[datetime] = None,
+) -> dict[str, Any]:
+    """Reconcile configuration for one exact natural Game Over -> Retry.
+
+    A natural terminal save is not generic current-configuration authority.
+    This deliberately narrow seam accepts it only while the acquisition still
+    names the same process, predecessor activity scope, target, and target
+    generation that own the verified direct-Retry transition.  Home and
+    attachment callers must continue to use their existing acquisition paths.
+    """
+
+    if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+        raise TypeError("direct-Retry reconciliation requires a typed acquisition")
+    if not acquisition.complete or acquisition.snapshot is None:
+        raise ValueError("direct-Retry reconciliation requires a complete acquisition")
+    if acquisition.acquisition_type is not PlayerSaveAcquisitionType.NATURAL_BOUNDARY:
+        raise ValueError("direct-Retry reconciliation requires a natural boundary")
+    boundary = acquisition.boundary
+    if (
+        not isinstance(boundary, PlayerSaveNaturalBoundary)
+        or boundary.kind is not PlayerSaveBoundaryKind.GAME_OVER
+    ):
+        raise ValueError("direct-Retry reconciliation requires a Game Over boundary")
+    runtime_id = str(runtime_session_id or "").strip()
+    source_scope = str(source_activity_scope_id or "").strip()
+    successor_scope = str(successor_activity_scope_id or "").strip()
+    if (
+        not runtime_id
+        or not source_scope
+        or not successor_scope
+        or successor_scope == source_scope
+        or boundary.runtime_session_id != runtime_id
+        or boundary.activity_scope_id != source_scope
+    ):
+        raise ValueError("direct-Retry predecessor binding changed")
+    if not isinstance(expected_binding, PlayerSaveTargetBinding):
+        raise TypeError("direct-Retry reconciliation requires a target binding")
+    if not acquisition.matches_binding(expected_binding):
+        raise ValueError("direct-Retry target binding changed")
+
+    runtime_save = acquisition.snapshot.runtime_save
+    if runtime_save is not None and runtime_save.round_active is not False:
+        raise ValueError("direct-Retry terminal save still reports an active round")
+
+    result = reconcile_requirements(
+        acquisition.snapshot,
+        requirements,
+        freshness_verified=True,
+        max_snapshot_age_s=max_snapshot_age_s,
+        now=now,
+    )
+    result.pop("freshness_verified", None)
+    result["acquisition"] = acquisition.redacted_provenance()
+    result["authority"] = "natural_game_over_direct_retry"
     return result
 
 
@@ -2508,6 +2577,7 @@ __all__ = [
     "pull_player_save_bytes",
     "read_player_save_file",
     "reconcile_acquired_requirements",
+    "reconcile_direct_retry_requirements",
     "reconcile_requirements",
     "save_check_matches_requirement",
     "save_observation_supports_requirement",

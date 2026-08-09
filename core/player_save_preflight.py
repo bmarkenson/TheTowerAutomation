@@ -1,4 +1,4 @@
-"""Guarded save-first evidence at the ordinary Home ``NEW_BATTLE`` boundary.
+"""Guarded save-first evidence across exact new-battle boundaries.
 
 The save can suppress redundant observation only.  It never authorizes input,
 repair, lifecycle progression, attachment, or strategy dispatch.  All device
@@ -24,9 +24,11 @@ from core.player_save import (
     decode_player_save_bytes,
     pull_player_save_bytes,
     reconcile_acquired_requirements,
+    reconcile_direct_retry_requirements,
 )
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
+    PlayerSaveTargetBinding,
     StablePlayerSaveAcquirer,
 )
 from core.player_save_history import history_metadata_from_acquisition
@@ -85,6 +87,7 @@ class PlayerSavePreflightStatus(str, Enum):
 class CarriedEvidenceState(str, Enum):
     PENDING_LAUNCH = "pending_launch"
     LAUNCH_DISPATCHED = "launch_dispatched"
+    SUSPENDED = "suspended"
     BOUND_RUNNING = "bound_running"
     INVALIDATED = "invalidated"
     CONSUMED = "consumed"
@@ -126,7 +129,11 @@ class CarriedPlayerSaveEvidence:
     snapshot_fingerprint: str
     values: dict[str, Any]
     state: CarriedEvidenceState = CarriedEvidenceState.PENDING_LAUNCH
+    launch_kind: str = "home_new_battle"
+    source_activity_scope_id: str = field(default="", repr=False)
+    battle_started_observed: bool = False
     consumed: set[str] = field(default_factory=set)
+    fallback_reasons: dict[str, str] = field(default_factory=dict)
     invalidation_reason: str = ""
 
     def mark_runtime_launch(
@@ -137,14 +144,21 @@ class CarriedPlayerSaveEvidence:
         action_authorized: bool,
         dispatched: bool,
     ) -> bool:
+        if self.state is not CarriedEvidenceState.PENDING_LAUNCH:
+            return False
+        if self.launch_kind != "home_new_battle":
+            self.invalidate("runtime_launch_kind_changed")
+            return False
         if (
-            self.state is not CarriedEvidenceState.PENDING_LAUNCH
-            or not self.context.matches(context)
+            not self.context.matches(context)
             or control is not HomeBattleControl.NEW_BATTLE
-            or not action_authorized
-            or not dispatched
         ):
             self.invalidate("runtime_owned_new_battle_launch_unproven")
+            return False
+        if not dispatched:
+            return False
+        if not action_authorized:
+            self.invalidate("runtime_launch_dispatched_without_authority")
             return False
         self.state = CarriedEvidenceState.LAUNCH_DISPATCHED
         return True
@@ -155,16 +169,27 @@ class CarriedPlayerSaveEvidence:
         *,
         battle_started: bool,
         stable_running: bool,
-        action_authorized: bool,
+        continuity_verified: bool,
     ) -> bool:
-        if (
-            self.state is not CarriedEvidenceState.LAUNCH_DISPATCHED
-            or not self.context.matches(context)
-            or not battle_started
-            or not stable_running
-            or not action_authorized
-        ):
+        if self.state is CarriedEvidenceState.BOUND_RUNNING:
+            if self.context.matches(context):
+                return True
+            self.invalidate("carried_evidence_context_changed")
+            return False
+        if self.state is not CarriedEvidenceState.LAUNCH_DISPATCHED:
+            if battle_started:
+                self.invalidate("first_running_boundary_continuity_failed")
+            return False
+        if not self.context.matches(context):
             self.invalidate("first_running_boundary_continuity_failed")
+            return False
+        if battle_started:
+            self.battle_started_observed = True
+        if (
+            not self.battle_started_observed
+            or not stable_running
+            or not continuity_verified
+        ):
             return False
         self.state = CarriedEvidenceState.BOUND_RUNNING
         return True
@@ -193,6 +218,23 @@ class CarriedPlayerSaveEvidence:
             self.state = CarriedEvidenceState.CONSUMED
         return value
 
+    def reject_checks(self, check_ids: tuple[str, ...], reason: str) -> None:
+        """Route only changed requirements to UI without distrusting the save."""
+
+        normalized_reason = str(reason or "check_requires_ui_fallback")
+        for check_id in {str(value) for value in check_ids}:
+            if check_id in self.values:
+                self.values.pop(check_id, None)
+                self.fallback_reasons[check_id] = normalized_reason
+        if (
+            self.state not in {
+                CarriedEvidenceState.INVALIDATED,
+                CarriedEvidenceState.CONSUMED,
+            }
+            and not (set(self.values) - self.consumed)
+        ):
+            self.state = CarriedEvidenceState.CONSUMED
+
     def invalidate(self, reason: str) -> None:
         if self.state in {
             CarriedEvidenceState.INVALIDATED,
@@ -203,14 +245,34 @@ class CarriedPlayerSaveEvidence:
         self.state = CarriedEvidenceState.INVALIDATED
         self.invalidation_reason = str(reason or "continuity_invalidated")
 
+    def suspend(self, reason: str) -> None:
+        """Retain diagnostics while requiring fresh save or UI evidence."""
+
+        if self.state in {
+            CarriedEvidenceState.INVALIDATED,
+            CarriedEvidenceState.CONSUMED,
+        }:
+            return
+        self.state = CarriedEvidenceState.SUSPENDED
+        self.invalidation_reason = str(reason or "carry_revalidation_required")
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema_version": 1,
             "state": self.state.value,
             "provenance": self.context.redacted(),
             "snapshot_fingerprint": self.snapshot_fingerprint,
-            "available_checks": sorted(self.values),
+            "transition": {
+                "kind": self.launch_kind,
+                "source_activity_scope": (
+                    _redacted(self.source_activity_scope_id)
+                    if self.source_activity_scope_id
+                    else None
+                ),
+            },
+            "available_checks": sorted(set(self.values) - self.consumed),
             "consumed_checks": sorted(self.consumed),
+            "fallback_checks": dict(sorted(self.fallback_reasons.items())),
             "invalidation_reason": self.invalidation_reason,
         }
 
@@ -310,7 +372,7 @@ def normalize_player_save_preflight_mode(value: Any) -> str:
 
 
 class PlayerSavePreflightCoordinator:
-    """Acquire, reconcile, and bind one authoritative Home snapshot."""
+    """Acquire, reconcile, and bind one authoritative boundary snapshot."""
 
     def __init__(
         self,
@@ -595,6 +657,193 @@ class PlayerSavePreflightCoordinator:
             context=context,
         )
 
+    def stage_direct_retry(
+        self,
+        acquisition: Optional[PlayerSaveAcquisitionBundle],
+        requirements: Mapping[str, Any],
+        *,
+        source_activity_scope_id: str,
+        mode: Any = DEFAULT_PLAYER_SAVE_PREFLIGHT_MODE,
+    ) -> PlayerSavePreflightResult:
+        """Stage accepted terminal-save facts for one verified direct Retry.
+
+        The Retry tap and successor activity scope must already exist.  Failure
+        here never owns or reverses that lifecycle action; it simply leaves the
+        existing per-check UI validation path in place.
+        """
+
+        selected_mode = normalize_player_save_preflight_mode(mode)
+        requested = requested_player_save_check_ids(requirements)
+        self.discard_carry("superseded_by_direct_retry_boundary")
+        self._decisions = {}
+        self._ui_verified_checks = {}
+        self._snapshot_invalidation_reason = ""
+        context: Optional[PlayerSavePreflightContext]
+        try:
+            context = self._context_fn()
+        except Exception:
+            context = None
+
+        reason = "direct_retry_save_unavailable"
+        decisions: dict[str, dict[str, Any]]
+        provenance: dict[str, Any] = {
+            "transition": "game_over_direct_retry",
+            "snapshot_trust": {
+                "status": "not_acquired",
+                "reason": reason,
+            },
+        }
+        if context is not None:
+            provenance["context"] = context.redacted()
+        if selected_mode != "save_first":
+            reason = f"{selected_mode}_policy"
+            decisions = _all_ui_decisions(requested, reason)
+        elif context is None:
+            reason = "direct_retry_context_unavailable"
+            decisions = _all_ui_decisions(requested, reason)
+        elif not isinstance(acquisition, PlayerSaveAcquisitionBundle):
+            decisions = _all_ui_decisions(requested, reason)
+        else:
+            try:
+                plan = reconcile_direct_retry_requirements(
+                    acquisition,
+                    requirements,
+                    runtime_session_id=context.runtime_session_id,
+                    source_activity_scope_id=source_activity_scope_id,
+                    successor_activity_scope_id=context.activity_scope_id,
+                    expected_binding=PlayerSaveTargetBinding(
+                        context.target,
+                        context.target_generation,
+                    ),
+                )
+            except (TypeError, ValueError):
+                reason = "direct_retry_binding_unverified"
+                decisions = _all_ui_decisions(requested, reason)
+            else:
+                reason = "direct_retry_save_reconciled"
+                decisions = {
+                    str(key): dict(value)
+                    for key, value in (plan.get("checks") or {}).items()
+                }
+                provenance.update(
+                    acquisition=acquisition.redacted_provenance(),
+                    mapping_id=acquisition.snapshot.mapping_id,
+                    source_fingerprint=_redacted(
+                        f"snapshot\0{acquisition.snapshot.source_sha256}"
+                    ),
+                    snapshot_trust=dict(plan.get("snapshot_trust") or {}),
+                    authority=str(plan.get("authority") or ""),
+                )
+
+        self._decisions = {
+            check_id: dict(decision)
+            for check_id, decision in decisions.items()
+        }
+        carry = None
+        if (
+            reason == "direct_retry_save_reconciled"
+            and context is not None
+            and isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        ):
+            values = {
+                check_id: decision.get("observed")
+                for check_id, decision in decisions.items()
+                if check_id in CARRIED_SAVE_CHECKS
+                and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
+            }
+            if values:
+                carry = CarriedPlayerSaveEvidence(
+                    context=context,
+                    snapshot_fingerprint=str(provenance["source_fingerprint"]),
+                    values=values,
+                    state=CarriedEvidenceState.LAUNCH_DISPATCHED,
+                    launch_kind="game_over_direct_retry",
+                    source_activity_scope_id=str(source_activity_scope_id),
+                )
+                self._carry = carry
+        if reason != "direct_retry_save_reconciled":
+            provenance["snapshot_trust"] = {
+                "status": "not_authoritative",
+                "reason": reason,
+            }
+        result = PlayerSavePreflightResult(
+            PlayerSavePreflightStatus.READY,
+            reason,
+            selected_mode,
+            decisions,
+            provenance,
+            True,
+            _history_ui_decision("terminal_history_handoff_is_independent"),
+            carry=carry,
+            acquisition=(
+                acquisition
+                if isinstance(acquisition, PlayerSaveAcquisitionBundle)
+                else None
+            ),
+            context=context,
+        )
+        log(
+            "[PLAYER_SAVE_PREFLIGHT] Direct-Retry evidence staging "
+            f"result={'accepted' if carry is not None else 'ui_fallback'} "
+            f"reason={reason} accepted={list(result.accepted_checks)} "
+            f"ui_fallback={list(result.ui_required_checks)}",
+            "INFO",
+        )
+        return result
+
+    def discard_carry(self, reason: str) -> None:
+        """Discard transition applicability without distrusting the snapshot."""
+
+        carry = self._carry
+        if carry is None:
+            return
+        carry.invalidate(str(reason or "carry_continuity_invalidated"))
+        self._carry = None
+
+    def suspend_carry(self, reason: str) -> None:
+        """Require fresh evidence after Pause without quarantining the snapshot."""
+
+        if self._carry is not None:
+            self._carry.suspend(str(reason or "carry_revalidation_required"))
+
+    def fallback_checks(
+        self,
+        reason: str,
+        *,
+        check_ids: tuple[str, ...],
+    ) -> None:
+        """Downgrade changed checks to their UI path and preserve the rest."""
+
+        normalized_reason = str(reason or "check_requires_ui_fallback")
+        normalized_ids = tuple(sorted({str(value) for value in check_ids}))
+        if self._carry is not None:
+            self._carry.reject_checks(normalized_ids, normalized_reason)
+        for check_id in normalized_ids:
+            decision = self._decisions.get(check_id)
+            if decision is None:
+                continue
+            decision.update(
+                disposition="ui_required",
+                reason=normalized_reason,
+                save_evidence_authoritative=False,
+                ui_required=True,
+                ui_requirement_kind="fallback",
+                repair_queued=False,
+            )
+        log(
+            "[PLAYER_SAVE_PREFLIGHT] Checks routed to UI without snapshot "
+            f"invalidation: reason={normalized_reason} checks={list(normalized_ids)} "
+            "remaining_accepted_carry="
+            f"{self._available_carry_checks()}",
+            "INFO",
+        )
+
+    def _available_carry_checks(self) -> list[str]:
+        carry = self._carry
+        if carry is None:
+            return []
+        return sorted(set(carry.values) - carry.consumed)
+
     def invalidate(
         self,
         reason: str,
@@ -662,7 +911,7 @@ class PlayerSavePreflightCoordinator:
             f"check={normalized} disposition={status} "
             f"save_disposition={decision.get('disposition') or 'none'} "
             "carry_promoted=False remaining_accepted_carry="
-            f"{sorted(self._carry.values) if self._carry is not None else []}",
+            f"{self._available_carry_checks()}",
             "INFO",
         )
         return True
@@ -685,12 +934,15 @@ class PlayerSavePreflightCoordinator:
                 dispatched=dispatched,
             )
         except Exception:
-            carry.invalidate("launch_context_unavailable")
+            if dispatched:
+                carry.invalidate("launch_context_unavailable_after_dispatch")
             accepted = False
         log(
             "[PLAYER_SAVE_PREFLIGHT] Carried launch binding "
-            f"result={'accepted' if accepted else 'rejected'}",
-            "INFO" if accepted else "WARN",
+            f"result={'accepted' if accepted else 'pending_or_rejected'} "
+            f"dispatched={bool(dispatched)} state={carry.state.value} "
+            f"reason={carry.invalidation_reason or 'none'}",
+            "INFO",
         )
         return accepted
 
@@ -699,7 +951,7 @@ class PlayerSavePreflightCoordinator:
         *,
         battle_started: bool,
         stable_running: bool,
-        action_authorized: bool,
+        continuity_verified: bool,
     ) -> bool:
         carry = self._carry
         if carry is None:
@@ -709,15 +961,19 @@ class PlayerSavePreflightCoordinator:
                 self._context_fn(),
                 battle_started=battle_started,
                 stable_running=stable_running,
-                action_authorized=action_authorized,
+                continuity_verified=continuity_verified,
             )
         except Exception:
-            carry.invalidate("running_context_unavailable")
             accepted = False
         log(
             "[PLAYER_SAVE_PREFLIGHT] First RUNNING carry binding "
-            f"result={'accepted' if accepted else 'rejected'}",
-            "INFO" if accepted else "WARN",
+            f"result={'accepted' if accepted else 'pending_or_rejected'} "
+            f"battle_started={bool(battle_started)} "
+            f"stable_running={bool(stable_running)} "
+            f"continuity_verified={bool(continuity_verified)} "
+            f"state={carry.state.value} "
+            f"reason={carry.invalidation_reason or 'none'}",
+            "INFO",
         )
         return accepted
 
@@ -728,7 +984,6 @@ class PlayerSavePreflightCoordinator:
         try:
             value = carry.consume(check_id, self._context_fn())
         except Exception:
-            carry.invalidate("consumption_context_unavailable")
             return None
         if value is not None:
             log(

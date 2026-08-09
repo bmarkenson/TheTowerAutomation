@@ -291,30 +291,46 @@ disagrees with a `save_match`, the save/UI contradiction invalidates the whole
 snapshot and fails closed. The V1073-RUNTIME-013 collector remains a separate
 optional observation stream and supplies no Home preflight authority.
 
-Accepted session-only values are single-use evidence for the exact next
-runtime-owned `NEW_BATTLE` launch and its first stable `RUNNING` boundary. The
-binding covers Auto Pick enabled `true`, exact complete Target Priority order,
-an exact enforced Farm Module assignment or complete observation-only mapped
-Tournament assignment, all nine primaries on, Spotlight Missiles on, Poison
-Swamp Stun, and exact Home sections needed by the later consistency check.
-Restart, attachment, Retry without this Home preflight,
-strategy/configuration/target change, manual or ambiguous launch,
-WAIT/Pause/Stop, a save/UI contradiction, requirement change, or an unrelated
-later battle rejects the complete carry. A verified Home, Target Priority,
-Poison Swamp Stun, Damage Slider, Orb Distance, or other independent UI-only
-repair preserves unrelated carry. The repaired check stays supported only by
-its UI evidence unless a genuinely new authoritative snapshot is acquired.
-Save evidence never authorizes a tap, repair, launch, lifecycle transition,
+Accepted session-only values are single-use evidence for two exact transition
+types: a runtime-owned Home `NEW_BATTLE` launch, and a same-process natural
+Game Over -> direct Retry successor. They cover Cards, Workshop, Bot and
+Guardian selections, Free Upgrade locks, Modules, Auto Pick enabled `true`,
+exact complete Target Priority order, all nine primaries on, Spotlight Missiles
+on, Poison Swamp Stun, and the other supported Home checks. A Home carrier is
+armed only by verified authorized dispatch. No dispatch remains pending, and
+an unstable first `RUNNING` frame defers instead of rejecting the evidence.
+`WAIT` is only the next-terminal policy and has no effect on binding.
+
+The direct-Retry carrier reuses the already acquired natural terminal bundle
+without another read. It requires the typed Game Over boundary to name the
+same runtime, predecessor activity scope, target, and target generation; the
+runtime projection, when present, must be inactive. The carrier is created only
+after the verified Retry tap creates a successor activity scope, then binds on
+that successor's first stable `RUNNING` evidence.
+
+Pause blocks input and suspends unconsumed carry pending fresh save or UI
+evidence; it does not quarantine the snapshot. Restart/Stop, attachment,
+strategy/configuration/target change, a competing workflow, manual or ambiguous
+launch, wrong transition, or an unrelated later battle discards the carrier.
+A requirement change, unsupported mapping, or incomplete component routes only
+the affected check to UI. A verified Home, Target Priority, Poison Swamp Stun,
+Damage Slider, Orb Distance, or other independent UI-only repair preserves
+unrelated carry. Only an authoritative save/UI contradiction quarantines every
+remaining saved decision. The repaired check stays supported only by its UI
+evidence unless a genuinely new authoritative snapshot is acquired. Save
+evidence never authorizes a tap, repair, launch, lifecycle transition,
 attachment, terminal binding, dispatch, or strategy action.
 
 The same authoritative Home snapshot supplies the source-tagged structural
 newest history-tail identity to Activity Continuity before its UI baseline may
-run. It remains usable when `killedBy` lacks a semantic mapping. Direct Retry
-uses a fresh stable two-identical-read exact-target acquisition, passively
-polls an unchanged tail, accepts one append or capacity-30 rollover, and falls
-back to guarded UI only when acquisition, structure, transition, and source
-binding permit it. It never consumes a collector receipt or performs a second
-Home acquisition. UI and save fingerprints are compared only within the same
+run. It remains usable when `killedBy` lacks a semantic mapping. At direct
+Retry, configuration reconciliation reuses the natural terminal bundle with
+zero additional acquisition. Separately, Activity Continuity uses a fresh
+stable two-identical-read exact-target acquisition after Retry, passively polls
+an unchanged tail, accepts one append or capacity-30 rollover, and falls back
+to guarded UI only when acquisition, structure, transition, and source binding
+permit it. It never consumes a collector receipt or performs a second Home
+acquisition. UI and save fingerprints are compared only within the same
 source/mapping contract; legacy schema-1 scopes are conservatively recognized
 as UI-derived.
 
