@@ -39,6 +39,22 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 control-surface backlog pruning
+
+- Documentation-only commit `889121e` removes drag/reorder/floating-pane
+  customization, an embedded current screenshot, a permanent PresentMon
+  provider, native custom-YAML selection, multiple simultaneous ADB targets,
+  and expanded multi-user security from the active control-surface roadmap.
+- Atomic runtime status, automatic recovery and its eventual controls,
+  comparisons/trends, notifications, existing host telemetry, and the Windows
+  validation backlog remain active. A concrete performance anomaly may still
+  use one bounded issue-specific frame-timing trace; it does not establish a
+  permanent sampler, spool, or dashboard feature.
+- Current-reference inspection found no remaining active roadmap references to
+  the retired ideas outside immutable history. `git diff --check` passed; this
+  outcome changes documentation only and requires no Windows package
+  publication or service restart.
+
 ### 2026-08-08 save-backed new-battle carry lifecycle
 
 - Commit `f74f94e` separates transient control state from evidence failure.
