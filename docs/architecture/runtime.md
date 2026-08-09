@@ -826,13 +826,16 @@ unparseable fact retains only that field's supported UI fallback; a field with
 no current-battle UI route remains explicitly deferred or unavailable, as does
 an unresolved Home-only Workshop fact. A complete
 saved mismatch is not sent to UI merely for confirmation. Workshop, Free
-Upgrade locks, selected Bot preset, equipped Guardians, equipped Modules, and
-Perk Auto Pick order are immutable for the active battle, so their mismatch is
+Upgrade locks, selected Bot preset, equipped Guardians, equipped Modules,
+First Perk Choice, Perk Bans, and Perk Auto Pick order are immutable for the
+active battle, so their mismatch is
 logged as nonblocking session evidence and the pass continues. The same rule
 applies when a fallback UI produces a fully observed mismatch for one of those
 immutable fields. A mutable mismatch follows its existing guarded in-battle
 repair when one exists, such as Auto Pick, or the strategy's mismatch decision
-without a redundant confirmation traversal. Ultimate Weapon component
+without a redundant confirmation traversal. Profile and run waivers are
+applied before attachment reconciliation; a waived fact is not consumed,
+warned, or made blocking. Ultimate Weapon component
 evidence records its save/UI source explicitly.
 
 Every process attachment stays in the current battle. It gains no game-Home
@@ -922,9 +925,10 @@ verified values remain under `run_configuration` and
 `runtime.session_preflight_evidence`, respectively.
 
 The actual-loadout merge classifies Workshop, Free Upgrade locks, equipped
-Guardians, selected Bot preset, equipped Modules, and Perk Auto Pick order as
-round-invariant. It keeps a complete save claim when later Guardian or Module
-UI evidence is partial, and any differing complete same-round invariant fails
+Guardians, selected Bot preset, equipped Modules, First Perk Choice, Perk Bans,
+and Perk Auto Pick order as round-invariant. It keeps a complete save claim
+when later Guardian or Module UI evidence is partial, and any differing
+complete same-round invariant fails
 closed as `unavailable` instead of using the latest value. Cards remain
 point-in-time, while Bot progression remains a separate fact from the selected
 preset. Every published save field carries

@@ -742,7 +742,7 @@ same-round projection can still prove the positive prefix already serialized.
 | Temporal class | Current examples | Required interpretation |
 | --- | --- | --- |
 | `current_configuration` | A mapped Home configuration check | Requires `forced_serialization`; it says nothing about a later input. |
-| `round_invariant` | Workshop preset, Free Upgrade locks, equipped Guardians, selected Bot preset, equipped Modules, and Perk Auto Pick order | Once exact mapping and round binding prove the value belonged to the round, it applies to the whole round. Bot progression or medal-funded upgrades are separate point-in-time facts. |
+| `round_invariant` | Workshop preset, Free Upgrade locks, equipped Guardians, selected Bot preset, equipped Modules, First Perk Choice, Perk Bans, and Perk Auto Pick order | Once exact mapping and round binding prove the value belonged to the round, it applies to the whole round. Bot progression or medal-funded upgrades are separate point-in-time facts. |
 | `point_in_time` | Cards preset and Cards at an active attachment | Describes only the acquisition boundary. Different later evidence may represent a legal change rather than a contradiction. |
 | `monotonic_round_prefix` | Ordered saved Perk picks and their saved waves | Every published pick is historical positive evidence. A passive checkpoint cannot prove that no later pick exists. |
 | `terminal_final` | Causally attached Battle History / More Stats fields | Requires a bound natural terminal and a valid append or capped rollover. |
@@ -770,9 +770,10 @@ fingerprint, capture boundary, and temporal class without retaining the raw
 target or scope identifier.
 
 No Strategy treats Workshop preset, Free Upgrade locks, equipped Guardians,
-selected Bot preset, equipped Modules, and Perk Auto Pick order as sticky
-round-invariant facts. Identical observations merge, but a differing complete
-save value or authoritative complete preset UI observation marks that field
+selected Bot preset, equipped Modules, First Perk Choice, Perk Bans, and Perk
+Auto Pick order as sticky round-invariant facts. Identical observations merge,
+but a differing complete save value or authoritative complete preset UI
+observation marks that field
 unavailable for the round; a later value cannot restore it. Partial Guardian or
 Module UI evidence cannot replace a complete save claim. Cards retain their
 point-in-time boundary and may legally differ at a later capture. Bot
@@ -797,12 +798,15 @@ deferred or unavailable, while unresolved Workshop preserves its Home-only
 deferral. A
 complete saved mismatch never opens UI merely to confirm the save. Workshop,
 Free Upgrade locks, selected Bot preset, equipped Guardians, equipped Modules,
-and Perk Auto Pick order retain their round-invariant class: a mismatch is
+First Perk Choice, Perk Bans, and Perk Auto Pick order retain their
+round-invariant class: a mismatch is
 recorded and reported but is nonblocking because it cannot be repaired for the
 active battle. A fully observed UI fallback mismatch for one of those fields
 has the same result. Point-in-time and current-configuration mismatches use an
 available guarded in-battle repair or the strategy mismatch policy. Every
-source and disposition remains explicit in session evidence. No attachment
+profile or run waiver is applied before attachment reconciliation, so a waived
+fact is neither consumed nor reported as a mismatch. Every source and
+disposition remains explicit in session evidence. No attachment
 path adds game-Home repair, another Android lifecycle action, another save
 read, or Surrender authority.
 
