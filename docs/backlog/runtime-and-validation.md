@@ -918,22 +918,16 @@ stages:
 
 ### Agreed operator-control sequence
 
-The first implementation target is Battle History filter reliability. The
-remaining order is provisional and can change as operator use supplies better
-evidence.
+The operator selected the native dashboard redesign in item 9 as the current
+implementation target on 2026-08-08. The remaining order is provisional and
+can change as operator use supplies better evidence.
 
 1. [ ] Verify the repaired Battle History filter input on Windows: the window
    opens without terminating the app, one click opens all three combo boxes,
    each popup remains usable across independent refreshes, and mouse and
    keyboard selection work normally. Track confirmation in
    [`ISSUE-2026-014`](../issues/open-2026.md#battle-history-filter-dropdowns-required-repeated-clicks).
-2. [ ] Preserve an ineligible live ADB-port edit as an explicit draft instead
-   of silently replacing it with the active port.
-   - Explain that a live switch requires an acknowledged indefinite Pause and
-     has not yet been applied.
-   - Reset the draft only after a successful switch or an explicit operator
-     revert; keep the existing validation and rollback behavior.
-3. [ ] Publish a structured atomic runtime-status snapshot and revise the
+2. [ ] Publish a structured atomic runtime-status snapshot and revise the
    normal Status presentation around operator-relevant fields.
    - Make directive, acknowledgement, process evidence, run state, wave,
      current Coins/min, and pause/recovery state authoritative API fields so
@@ -950,17 +944,17 @@ evidence.
      outcomes from the estimate.
    - Resolve the stale-running top-bar defect tracked in
      [`ISSUE-2026-012`](../issues/open-2026.md#native-top-bar-retained-a-running-directive-after-automation-stopped).
-4. [ ] Extend concise human-readable requirement results to in-battle
+3. [ ] Extend concise human-readable requirement results to in-battle
    session-preflight and recovery checks, including expected state, observed
    state, and final disposition such as passed, failed, waived, or fallback.
-5. [ ] Publish and display Peak Coins/min for the active and completed run.
+4. [ ] Publish and display Peak Coins/min for the active and completed run.
    - Maintain the active peak within an authoritative run boundary and expose
      it through the runtime snapshot; after a mid-battle attach, label a peak
      that cannot be recovered as `since attach`.
    - Derive the completed peak from accepted `coin_rate_samples` and include it
      in the battle report. Do not label Coins/min multiplied by 60 as realized
      Coins/hour.
-6. [ ] Generalize the guarded return-to-game timer to known recoverable panels,
+5. [ ] Generalize the guarded return-to-game timer to known recoverable panels,
    including Wave Stats (`WAVE_PANEL`).
    - Validate an authoritative close control and post-action return to the
      running battle for each supported panel instead of assuming the existing
@@ -970,7 +964,7 @@ evidence.
      countdown or Pause block in the runtime snapshot and GUI.
    - Add return-now, extend, and cancel only as explicit runtime directives
      with freshness and ownership checks.
-7. [ ] Verify boundary-aware Strategy changes on Windows: immediate accepted-
+6. [ ] Verify boundary-aware Strategy changes on Windows: immediate accepted-
    request feedback, current/pending display, selection retention, pending
    replacement/cancellation, stale-server warning and explicit reload,
    active-battle adoption, and an acknowledged paused Workshop application
@@ -978,14 +972,14 @@ evidence.
    [`ISSUE-2026-010`](../issues/open-2026.md#native-strategy-selection-did-not-report-acceptance-or-live-disposition)
    and
    [`ISSUE-2026-011`](../issues/open-2026.md#windows-client-could-not-identify-or-reload-a-stale-linux-control-service).
-8. [ ] Rework Battle History filters after the input defect is fixed and their
+7. [ ] Rework Battle History filters after the input defect is fixed and their
    real behavior can be evaluated.
    - Prioritize useful distinctions such as type, Tier, strategy, outcome,
      quality, and date range. Retain wave range only if operator use justifies
      it, otherwise move it to an advanced view or remove it.
    - Make filter semantics clear when the client has loaded only a bounded
      newest-record page.
-9. [ ] Define and implement report disposition for short, interrupted,
+8. [ ] Define and implement report disposition for short, interrupted,
    configuration-repair, surrendered, and manually aborted battles.
    - Prefer evidence-based inference. A causally bound terminal save whose
      mapped `killedBy` value is `Surrender` identifies a surrendered run;
@@ -1008,10 +1002,159 @@ evidence.
    - If operator use still requires permanent discard, expose only a confirmed,
      audited exact-record operation through the versioned API. Never add
      arbitrary path or file-deletion authority and never delete automatically.
-10. [ ] Validate the revised dashboard layout on Windows at minimum, default,
-    and maximized sizes. Based on operator use, decide whether drag-to-reorder,
-    hiding, or floating panes add enough value beyond the tabbed and
-    collapsible layout.
-11. [ ] Confirm on Windows that the optional Token tooltip and Setup placement
-    make clear that it is only for an explicitly authenticated adapter or
-    reverse proxy and should remain blank for the normal loopback SSH tunnel.
+9. [ ] Redesign and validate the native operational dashboard around one
+    glanceable Overview plus full-width Activity, Perks, and System pages.
+    The existing narrow tabbed sidebar, permanently visible completed-battle
+    summary/activity split, wrapped tab headers, and long Controls scroll are
+    superseded as the design target by this specification.
+    - **Outcome and lifecycle.** Keep this item as the disposable coordinator
+      for the whole-window redesign. The current authority, API, and workflow
+      contracts remain canonical in
+      [`../architecture/control_surface.md`](../architecture/control_surface.md);
+      this item owns active layout requirements, implementation slices, and
+      validation evidence only. Update current architecture and operator
+      guidance with every slice that changes visible behavior. At completion,
+      record the result in the completed-task log and remove this active
+      specification rather than retaining a second current contract.
+    - **Layout baseline.** Optimize first for the operator's approximately
+      `1300x1000` preferred window, then validate the declared `1120x720`
+      minimum, the existing `1500x940` default, and maximized presentation.
+      Overview must not require structural vertical scrolling at the preferred,
+      default, or maximized sizes. At minimum size, reflow and compact before
+      allowing one page-scoped fallback scrollbar. Activity, Perks, History,
+      and diagnostic lists may scroll inside their own data regions; ordinary
+      controls and page chrome must not.
+    - **Application chrome and global state.** Replace the healthy-state row of
+      service/tunnel action buttons with a compact application header, a
+      grouped connection-health affordance, and **View**, **Tools**, and
+      **Preferences** navigation. The group must retain separately labelled
+      Linux service, HTTP, API SSH, and ADB SSH states even when four healthy
+      values compress into one line. Preserve a full-width global alert region
+      that can stack simultaneous API-compatibility, Strategy Action Gate,
+      startup-gate decision, Tournament-launch review, and other actionable
+      conditions without conflating them with global Pause. A healthy detail
+      may collapse; a failure and its bounded recovery action must never be
+      hidden in Preferences or below a scroll boundary. Acknowledgement-timeout
+      alerts remain a reserved type until authoritative timeout status exists;
+      do not infer them from polling age.
+    - **Responsive status.** Present process lifecycle, automation action
+      authority, observed game state, Strategy scope, and terminal policy as
+      separate labelled concepts. Make `Stopped` unambiguous while retaining
+      saved next-start intent separately; never render a persisted directive
+      as proof that the process is live. Use responsive rows or wrapping cards
+      rather than equal-width cells that allow long values to collide. Show
+      battle-only metrics only when relevant, avoid seas of `-`, and retain
+      target-versus-observed speed plus acknowledgement/staleness evidence.
+    - **Overview page.** Keep only current decisions and consequences in the
+      everyday page:
+      - An authority card keeps explicit Automation **Paused** and **Enabled**
+        selections with requested/acknowledged/pending/rejected presentation.
+        Timed pauses share a compact secondary affordance; handler-specific
+        Pause/Resume must integrate with this owner rather than create another
+        authority control.
+      - One exact battle-action slot may present **Start Battle** only for a
+        verified new-battle boundary or **Attach to Battle** only for a
+        verified resumable/active boundary. Ambiguous state presents neither;
+        the client never chooses or substitutes a workflow silently.
+      - One manual-authority area presents **Take Manual Control** or
+        **Return Control** with the existing reconciliation state. Manual
+        Surrender collection policy appears only when manual control makes it
+        relevant and never grants Surrender authority.
+      - A run-configuration card keeps selected/current/pending Strategy
+        distinct, retains explicit next-battle versus active-battle adoption,
+        and shows target/observed speed and future terminal policy without
+        turning any of them into an immediate Start/Resume action.
+      - **Configure next run**, save-backed **Capture current setup as...**,
+        Strategy Profiles, and Battle History remain discoverable through the
+        relevant field or **Tools**, but their separate dialogs are not
+        redesigned by this outcome.
+      - Existing startup-gate decisions and Tournament-launch receipts keep
+        their automatic prompts plus a persistent, state-bound review action
+        in the stacked alert region or Overview; they are not hidden merely
+        because their former Controls position is removed.
+      - Reduce the latest completed battle to a compact summary with a clear
+        History route. Raw Activity, host telemetry, connection forms, and
+        runtime evidence are not permanently visible on Overview.
+    - **Activity and Perks pages.** Give each existing data surface the full
+      workspace width. Activity retains independent one-second refresh,
+      current-run scope, level filters, newest following, local clear/restore,
+      complete-copy text, and stable user interaction during status/battle
+      refresh. Perks retains checkpoint time/wave, most-recent-first inventory,
+      and stable selection/scroll while an unchanged battle scope refreshes.
+    - **System page.** Group infrastructure health and bounded repair by
+      responsibility: Linux API/HTTP/API SSH/ADB SSH, automation process
+      lifecycle, tunnel host, ADB target, host telemetry, and detailed runtime
+      evidence. Start/Stop Automation remains independent from Pause/Enable
+      and Start/Attach. Show configured, requested/draft, and active ADB target
+      distinctly; preserve an ineligible local draft until successful apply or
+      explicit **Revert**, and state that live handoff requires acknowledged
+      indefinite Pause. Host sampling and service/tunnel restart actions live
+      here rather than competing with routine commands. Keep the prior
+      meaningful game transition as a compact Diagnostics detail outside the
+      Operational Activity narrative.
+    - **Preferences.** Put stable connection and presentation choices behind a
+      modal or otherwise bounded Preferences surface: API URL, optional
+      in-memory bearer token, SSH destination, forwarding-port defaults,
+      layout/display defaults, and future opt-in notifications or grace-period
+      defaults when their owning runtime capabilities exist. The token remains
+      blank for the normal loopback SSH route and is never persisted. Live
+      Pause/Enable, Start/Attach, service repair, active speed, terminal policy,
+      and Strategy adoption are operations, not preferences. **Reset layout**
+      belongs under **View** or presentation preferences and must reuse the
+      existing settings owner.
+    - **Contextual alerts and future API slots.** Reserve one consistent
+      Overview/global pattern, normally absent, for requirement results and
+      runtime-owned recovery. When later API work publishes authoritative
+      values, it may show current/queued Strategy, elapsed/expected duration,
+      Peak Coins/min (including `since attach`), expected-versus-observed
+      requirement results, or a non-running recovery countdown. **Return
+      now**, **Extend**, and **Cancel** appear only after explicit
+      freshness/ownership-checked runtime directives exist; the GUI never
+      substitutes direct taps or derives these facts from Activity text.
+    - **Interaction and accessibility.** No primary value or action may
+      overlap, rely on clipped text, or wrap top-level navigation into multiple
+      rows at the supported widths. Preserve unsent edits across polling;
+      periodic refresh must not steal focus, close a popup, replace a dirty
+      draft, reset list position, or delay Activity. Communicate selection,
+      pending, warning, and error with text/shape in addition to color. Keep
+      keyboard navigation, visible focus, access keys, disabled-action reasons,
+      and logical tab order. Persist the selected page and valid window
+      placement, migrating or safely ignoring the superseded sidebar/splitter
+      settings.
+    - **Adjacent backlog integration.** Treat broader report disposition and
+      Battle History outcome/date filtering as later data-model work: provide a
+      contextual run/history location but do not add a permanent discard or
+      infer an outcome in WPF. Keep the repaired History popup/update behavior
+      as an acceptance constraint. Optional screenshots, analytics/trend
+      charts, PresentMon telemetry, multiple ADB targets, custom-YAML
+      selection, and expanded-access security remain separate future work.
+      Native authoring-catalog smoke, single-instance confirmation, and host
+      sampler CPU attribution also stay in their existing workstreams; layout
+      work must not increase passive client CPU or change telemetry cadence.
+    - **Implementation slices.** Land behavior-preserving slices in order:
+      1. [ ] Replace the split/sidebar shell with responsive global status and
+         full-width Overview, Activity, Perks, and System navigation; move
+         existing named controls without changing API requests or authority.
+         Keep them in the MainWindow namescope, guard hidden-page Activity
+         scrolling, persist a stable string page ID, map or safely ignore the
+         legacy sidebar/splitter settings, and update current architecture and
+         operator guidance in the same slice.
+      2. [ ] Separate stable Preferences from System operations, add explicit
+         ADB draft/applied presentation, and preserve the existing validated
+         apply/rollback contract.
+      3. [ ] Compact Overview actions and helper copy through contextual
+         presentation while preserving every requested/acknowledged and
+         exact-workflow distinction.
+      4. [ ] Add only those reserved status/alert fields whose authoritative
+         server models and runtime directives exist; leave absent capabilities
+         absent rather than synthesizing them in the client.
+      5. [ ] Cross-build and run focused native/static regressions, then perform
+         Windows keyboard/mouse and visual smoke at minimum, preferred,
+         default, and maximized sizes, including 100% and 125% display scaling.
+         Verify no ordinary Overview scroll, collision, truncated primary
+         action, refresh-driven interaction loss, authority ambiguity, or
+         passive CPU regression. Re-run the outstanding Better Control,
+         Strategy, incompatibility-banner, Token, and History-input usability
+         checks at natural safe boundaries without manufacturing a battle.
+    - Defer drag-to-reorder, floating panes, and extensive per-card hiding until
+      operator use of the redesigned pages demonstrates a concrete need.
