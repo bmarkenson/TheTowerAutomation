@@ -215,6 +215,22 @@ canonical document linked by an entry for current behavior.
   checkpoint passed compilation, state definitions, clickmap integrity with
   zero errors and the established 44 orphan candidates, and all 1,971 tests in
   436.21 seconds. No live/device action was performed.
+- Final integration commit `b5c7bd8` merges the feature with production tip
+  `4ad383e`, including the deployed passive Perk timeline and idle-Home gem
+  authority. The expanded owner/caller regression passed 736 tests. The exact
+  integration candidate then passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan candidates, and all
+  2,025 tests in 339.26 seconds.
+- Production advanced from `4ad383e` behind rollback tag
+  `production-before-20260809T005925Z-4ad383e`. Automation PID `3372605`
+  stopped cleanly at Home and released its `localhost:5555` lock. Replacement
+  PID `3391293` acquired that exact lock, acknowledged its startup Pause and
+  the exact restored Enable request, and published fresh Home/New Battle
+  evidence while terminal policy remained Home.
+- The bounded smoke issued no Start Battle, Attach to Battle, battle
+  transition, or device input. It did not manufacture an active attachment to
+  exercise the new selective preflight route; that behavior remains supported
+  by the complete retained regression checkpoint.
 
 ### 2026-08-08 save-to-UI fallback contract repair
 
