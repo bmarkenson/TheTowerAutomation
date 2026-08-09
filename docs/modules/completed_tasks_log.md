@@ -284,6 +284,26 @@ canonical document linked by an entry for current behavior.
   deferred only the normal `free_upgrade_locks` next-boundary check, returned
   through the resumable Home route, and entered steady Running state at wave
   2039 and game speed x6.3. No Surrender or new battle was issued.
+- Follow-up guidance commit `3acb45a` makes a production promotion that changes
+  any input to either native Windows executable incomplete until the supported
+  workflow atomically publishes and verifies the complete two-executable
+  package from the exact production checkout. Documentation-only and test-only
+  changes do not activate that boundary.
+- From `main == develop == 3acb45a`, `publish-linux.sh` replaced the stale
+  package at `windows/TheTower.ControlSurface/publish/win-x64`. Publication
+  completed at 2026-08-09 04:14:34 UTC with exactly the adjacent self-contained
+  Windows x64 PE executables: `TheTower.ControlSurface.exe` is 72,358,911 bytes
+  with SHA-256 `934c529b9e2772667e5d821ff847dce4b7e4ac439af20986aa331eed313c8e8d`,
+  and `TheTower.TunnelHost.exe` is 35,172,086 bytes with SHA-256
+  `aaf4c2de9b3b1b3ed41b3c136e29c238005e823580423201c412d79b523352ca`.
+- Both projects compiled and the atomic publisher exited successfully. Restore
+  also reported nonfatal `NU1900` diagnostics because the execution
+  environment left NuGet's existing user HTTP cache read-only after confirming
+  every project was already up to date. The compiled GUI payload contains
+  `strategy_authoring_preset_local_copy_v1`, and all 96 portable native
+  authoring/compatibility tests passed. Cross-publication does not execute WPF;
+  the separate Windows-only lifecycle and visible usability smoke remain
+  pending rather than being claimed here.
 
 ### 2026-08-08 save-to-UI fallback contract repair
 
