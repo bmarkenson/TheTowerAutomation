@@ -8,6 +8,8 @@ import re
 import time
 from typing import Callable, Optional
 
+import cv2
+
 from core.event_missions import (
     EventMissionInventory,
     capture_event_mission_inventory,
@@ -34,10 +36,25 @@ REWARD_REVEAL_SKIP = "buttons.skip_reward_reveal"
 
 EVENT_CONTENT_REGION = (0, 840, 1080, 900)
 WEEKLY_MISSION_CHEST_REGION = (0, 290, 1080, 210)
+WEEKLY_MISSION_PROGRESS_REGION = (740, 175, 340, 80)
+WEEKLY_MISSION_CHECKMARK_REGION = (0, 320, 1080, 120)
 DAILY_MISSION_CAPACITY_REGION = (0, 485, 500, 100)
 DAILY_MISSION_CAPACITY_MIN_CONFIDENCE = 80.0
+WEEKLY_MISSION_PROGRESS_MIN_CONFIDENCE = 60.0
+WEEKLY_MISSION_EXPECTED_TOTAL = 35
+WEEKLY_MISSION_CHEST_INTERVAL = 5
+WEEKLY_MISSION_CHECKMARK_MIN_AREA = 700
+WEEKLY_MISSION_CHECKMARK_MIN_WIDTH = 70
+WEEKLY_MISSION_CHECKMARK_MAX_WIDTH = 115
+WEEKLY_MISSION_CHECKMARK_MIN_HEIGHT = 50
+WEEKLY_MISSION_CHECKMARK_MAX_HEIGHT = 100
+WEEKLY_MISSION_CHECKMARK_CENTER_TOLERANCE = 25.0
 WEEKLY_MISSION_SEARCH_COMPLETE = frozenset(
-    {"edge_before_target", "max_swipes_exceeded"}
+    {
+        "all_unlocked_claimed",
+        "edge_before_target",
+        "max_swipes_exceeded",
+    }
 )
 SUNDAY_FULL_CAPACITY_CLAIMS = 2
 MAX_DAILY_REWARDS = 12
@@ -198,6 +215,35 @@ class DailyMissionCapacity:
             self.current == 8
             and self.limit == 8
             and self.confidence >= DAILY_MISSION_CAPACITY_MIN_CONFIDENCE
+        )
+
+
+@dataclass(frozen=True)
+class WeeklyMissionTrackEvidence:
+    completed: Optional[int]
+    total: Optional[int]
+    checkmarks: int
+    confidence: float = -1.0
+    raw_text: str = ""
+
+    @property
+    def unlocked_chests(self) -> Optional[int]:
+        if (
+            self.completed is None
+            or self.total != WEEKLY_MISSION_EXPECTED_TOTAL
+            or self.confidence < WEEKLY_MISSION_PROGRESS_MIN_CONFIDENCE
+            or not 0 <= self.completed <= self.total
+        ):
+            return None
+        return self.completed // WEEKLY_MISSION_CHEST_INTERVAL
+
+    @property
+    def all_unlocked_claimed(self) -> bool:
+        unlocked = self.unlocked_chests
+        return (
+            unlocked is not None
+            and unlocked > 0
+            and self.checkmarks == unlocked
         )
 
 
@@ -620,6 +666,22 @@ def _find_weekly_mission_chest(
     if is_visible(WEEKLY_MISSION_CHEST, screenshot=screenshot):
         return ScrollResult(True, screenshot, 0, "target_visible")
 
+    track = _measure_weekly_mission_track(screenshot)
+    log(
+        "[MISSION_REWARDS] Weekly track evidence: "
+        f"completed={track.completed}/{track.total} "
+        f"confidence={track.confidence:.1f} checkmarks={track.checkmarks} "
+        f"unlocked={track.unlocked_chests} raw={track.raw_text!r}",
+        "DEBUG",
+    )
+    if track.all_unlocked_claimed:
+        log(
+            "[MISSION_REWARDS] Weekly track already shows every unlocked "
+            "chest as claimed; skipping left-edge normalization",
+            "DEBUG",
+        )
+        return ScrollResult(False, screenshot, 0, "all_unlocked_claimed")
+
     guard_kwargs = (
         {"action_guard_fn": action_guard_fn}
         if action_guard_fn is not None
@@ -657,6 +719,96 @@ def _find_weekly_mission_chest(
         found.screenshot,
         first.swipes + found.swipes,
         found.reason,
+    )
+
+
+def _measure_weekly_mission_track(screenshot) -> WeeklyMissionTrackEvidence:
+    """Return positive evidence for unlocked weekly chests already claimed."""
+
+    if (
+        screenshot is None
+        or not hasattr(screenshot, "shape")
+        or len(screenshot.shape) < 2
+    ):
+        return WeeklyMissionTrackEvidence(None, None, 0)
+
+    screen_height, screen_width = screenshot.shape[:2]
+    progress_x, progress_y, progress_width, progress_height = (
+        WEEKLY_MISSION_PROGRESS_REGION
+    )
+    check_x, check_y, check_width, check_height = WEEKLY_MISSION_CHECKMARK_REGION
+    if (
+        progress_x + progress_width > screen_width
+        or progress_y + progress_height > screen_height
+        or check_x + check_width > screen_width
+        or check_y + check_height > screen_height
+    ):
+        return WeeklyMissionTrackEvidence(None, None, 0)
+
+    progress_crop = screenshot[
+        progress_y : progress_y + progress_height,
+        progress_x : progress_x + progress_width,
+    ]
+    try:
+        raw_text, confidence = ocr_text_and_conf(progress_crop, psm=7)
+    except Exception:
+        raw_text, confidence = "", -1.0
+    match = re.search(
+        r"\bcompleted?\s*(\d+)\s*/\s*(\d+)(?!\d)",
+        raw_text,
+        re.IGNORECASE,
+    )
+    completed = int(match.group(1)) if match is not None else None
+    total = int(match.group(2)) if match is not None else None
+
+    checkmark_crop = screenshot[
+        check_y : check_y + check_height,
+        check_x : check_x + check_width,
+    ]
+    try:
+        hsv = cv2.cvtColor(checkmark_crop, cv2.COLOR_BGR2HSV)
+        green = cv2.inRange(hsv, (40, 100, 150), (80, 255, 255))
+        _count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+            green,
+            connectivity=8,
+        )
+    except cv2.error:
+        return WeeklyMissionTrackEvidence(
+            completed,
+            total,
+            0,
+            confidence,
+            raw_text,
+        )
+
+    # The glow and solid stroke can be separate overlapping components. Merge
+    # those by horizontal center so each visible checkmark is counted once.
+    checkmark_centers: list[float] = []
+    for x, _y, width, height, area in stats[1:]:
+        if (
+            area < WEEKLY_MISSION_CHECKMARK_MIN_AREA
+            or not WEEKLY_MISSION_CHECKMARK_MIN_WIDTH
+            <= width
+            <= WEEKLY_MISSION_CHECKMARK_MAX_WIDTH
+            or not WEEKLY_MISSION_CHECKMARK_MIN_HEIGHT
+            <= height
+            <= WEEKLY_MISSION_CHECKMARK_MAX_HEIGHT
+        ):
+            continue
+        center = float(x) + (float(width) / 2.0)
+        if any(
+            abs(center - known) <= WEEKLY_MISSION_CHECKMARK_CENTER_TOLERANCE
+            for known in checkmark_centers
+        ):
+            continue
+        checkmark_centers.append(center)
+
+    return WeeklyMissionTrackEvidence(
+        completed,
+        total,
+        len(checkmark_centers),
+        confidence,
+        raw_text,
     )
 
 

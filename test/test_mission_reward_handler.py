@@ -212,6 +212,51 @@ def test_daily_claim_and_weekly_chest_templates_require_available_artwork():
     assert claimed_confidence < 0.9
 
 
+def test_weekly_track_evidence_requires_every_unlocked_chest_checkmark():
+    claimed = rewards._measure_weekly_mission_track(
+        _load("daily_weekly_chest_claimed_20260715.png")
+    )
+    available = rewards._measure_weekly_mission_track(
+        _load("daily_rewards_claimable_20260715.png")
+    )
+    partially_visible = rewards._measure_weekly_mission_track(
+        _load("daily_missions_full_20260719.png")
+    )
+    unknown = rewards._measure_weekly_mission_track(
+        np.zeros((2, 2, 3), dtype=np.uint8)
+    )
+
+    assert (claimed.completed, claimed.total) == (20, 35)
+    assert claimed.confidence >= 60.0
+    assert claimed.checkmarks == 4
+    assert claimed.unlocked_chests == 4
+    assert claimed.all_unlocked_claimed
+
+    assert (available.completed, available.total) == (20, 35)
+    assert available.checkmarks == 3
+    assert not available.all_unlocked_claimed
+
+    assert (partially_visible.completed, partially_visible.total) == (35, 35)
+    assert partially_visible.checkmarks == 5
+    assert partially_visible.unlocked_chests == 7
+    assert not partially_visible.all_unlocked_claimed
+
+    assert unknown.unlocked_chests is None
+    assert not unknown.all_unlocked_claimed
+    assert not rewards.WeeklyMissionTrackEvidence(
+        20,
+        35,
+        4,
+        rewards.WEEKLY_MISSION_PROGRESS_MIN_CONFIDENCE - 0.1,
+    ).all_unlocked_claimed
+    assert not rewards.WeeklyMissionTrackEvidence(
+        20,
+        40,
+        4,
+        99.0,
+    ).all_unlocked_claimed
+
+
 def test_daily_mission_capacity_ocr_distinguishes_full_from_partial():
     full = rewards._read_daily_mission_capacity(
         _load("daily_missions_full_20260719.png")
@@ -293,6 +338,17 @@ def test_weekly_chest_search_normalizes_then_finds_offscreen_target():
         patch.object(rewards, "is_visible", side_effect=[False, False]),
         patch.object(
             rewards,
+            "_measure_weekly_mission_track",
+            return_value=rewards.WeeklyMissionTrackEvidence(
+                20,
+                35,
+                3,
+                95.0,
+                "completed 20/35",
+            ),
+        ),
+        patch.object(
+            rewards,
             "scroll_to_edge",
             return_value=normalized,
         ) as to_edge,
@@ -324,6 +380,23 @@ def test_weekly_chest_search_normalizes_then_finds_offscreen_target():
         settle_s=0.8,
         stable_threshold=2.0,
     )
+
+
+def test_weekly_chest_search_skips_rewind_for_fully_claimed_visible_track():
+    claimed = _load("daily_weekly_chest_claimed_20260715.png")
+
+    with (
+        patch.object(rewards, "scroll_to_edge") as to_edge,
+        patch.object(rewards, "scroll_until_visible") as until_visible,
+    ):
+        result = rewards._find_weekly_mission_chest(claimed)
+
+    assert not result.success
+    assert result.screenshot is claimed
+    assert result.swipes == 0
+    assert result.reason == "all_unlocked_claimed"
+    to_edge.assert_not_called()
+    until_visible.assert_not_called()
 
 
 def test_event_missions_tab_navigation_is_visible_from_retained_bots_tab():
