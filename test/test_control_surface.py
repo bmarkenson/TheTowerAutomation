@@ -1334,7 +1334,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 30" in native_compatibility
+    assert "MinimumServerRevision = 31" in native_compatibility
     assert '"better_control_model_v2"' in native_compatibility
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
@@ -1345,6 +1345,8 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "terminal_dispositions_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"managed_custom_module_presets_v1"' in native_compatibility
     assert '"strategy_authoring_local_loadout_editors_v1"' in native_compatibility
+    assert '"strategy_authoring_preset_local_copy_v1"' in native_compatibility
+    assert "strategy_authoring_preset_local_copy_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"strategy_revision_history_v1"' in native_compatibility
     assert '"strategy_action_gate_v1"' in native_compatibility
     assert 'x:Name="StrategyActionGateBanner"' in native_xaml

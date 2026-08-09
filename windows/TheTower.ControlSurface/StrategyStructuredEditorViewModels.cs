@@ -669,7 +669,7 @@ internal static class EditorJson
         return result;
     }
 
-    private static bool ValuesEqual(JsonElement left, JsonElement right)
+    internal static bool ValuesEqual(JsonElement left, JsonElement right)
     {
         if (left.ValueKind != right.ValueKind)
         {

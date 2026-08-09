@@ -300,13 +300,24 @@
                                   SelectedItem="{Binding SelectedDefinitionForm, Mode=TwoWay}"
                                   IsEnabled="{Binding DefinitionFormControlEnabled, Mode=OneWay}"
                                   AutomationProperties.Name="Definition source" />
-                        <ComboBox ItemsSource="{Binding PresetOptions, Mode=OneWay}"
-                                  DisplayMemberPath="DisplayName"
-                                  SelectedItem="{Binding SelectedPreset, Mode=TwoWay}"
-                                  IsEnabled="{Binding DefinitionPresetControlEnabled, Mode=OneWay}"
-                                  Visibility="{Binding IsPresetDefinitionSelected, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
-                                  Margin="0,4,0,0"
-                                  AutomationProperties.Name="Shared preset" />
+                        <Grid Visibility="{Binding IsPresetDefinitionSelected, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                              Margin="0,4,0,0">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <ComboBox ItemsSource="{Binding PresetOptions, Mode=OneWay}"
+                                    DisplayMemberPath="DisplayName"
+                                    SelectedItem="{Binding SelectedPreset, Mode=TwoWay}"
+                                    IsEnabled="{Binding DefinitionPresetControlEnabled, Mode=OneWay}"
+                                    AutomationProperties.Name="Shared preset" />
+                          <Button Grid.Column="1" Content="Edit a copy..."
+                                  Click="EditPresetCopy_Click"
+                                  IsEnabled="{Binding CanEditPresetCopy, Mode=OneWay}"
+                                  Visibility="{Binding PresetLocalCopyVisible, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                  Margin="6,0,0,0"
+                                  AutomationProperties.Name="Edit a local copy of selected preset" />
+                        </Grid>
                         <Border Background="#111C2D" BorderBrush="#324661"
                                 BorderThickness="1" CornerRadius="4" Padding="9"
                                 Margin="0,6,0,0"
@@ -336,12 +347,12 @@
                                 </DataTemplate>
                               </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <Button Content="Create variant..."
-                                    Click="CreateModuleVariant_Click"
-                                    IsEnabled="{Binding CanCreateModuleVariant, Mode=OneWay}"
+                            <Button Content="Duplicate preset..."
+                                    Click="DuplicateModulePreset_Click"
+                                    IsEnabled="{Binding CanDuplicateModulePreset, Mode=OneWay}"
                                     Visibility="{Binding ModulePresetManagementVisible, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
                                     HorizontalAlignment="Left" Margin="0,7,0,0"
-                                    AutomationProperties.Name="Create Module preset variant" />
+                                    AutomationProperties.Name="Duplicate immutable Module preset" />
                           </StackPanel>
                         </Border>
                         <StackPanel IsEnabled="{Binding LocalDefinitionControlEnabled, Mode=OneWay}"

@@ -232,6 +232,37 @@ canonical document linked by an entry for current behavior.
   exercise the new selective preflight route; that behavior remains supported
   by the complete retained regression checkpoint.
 
+### 2026-08-08 explicit preset local-copy authoring
+
+- Commit `09515e2` adds revision-31 capability
+  `strategy_authoring_preset_local_copy_v1` and the catalog-bound
+  `materialize_loadout_preset` operation. Linux compares the exact displayed
+  catalog fingerprint and reuses ordinary definition-snapshot resolution and
+  normalization for Modules, Target Priority, and Orb Distance; the operation
+  never writes, publishes, selects, activates, queues, or applies a Strategy or
+  preset.
+- The native authoring rows now expose **Edit a copy...** only for editable
+  active preset selections. A meaningful dormant local draft receives explicit
+  replace, retain, and cancel choices; response identity/shape validation is
+  atomic, so stale catalogs, unknown presets, invalid normalization, missing
+  capability, interruptions, and errors preserve both forms. Bundled read-only
+  Strategies remain non-editable, while clones and custom Strategies use the
+  same local-copy path.
+- Module **Create variant...** is now honestly labelled **Duplicate preset...**
+  and remains an immutable exact-copy preset operation. Module-only **Save as
+  preset...** still submits the current edited local definition. Target
+  Priority and Orb Distance gained no managed custom-preset catalogs.
+- The focused authoring slice passed 125 Python tests and all 96 portable native
+  authoring/compatibility tests. The complete supported checkpoint passed
+  compilation, state-definition validation, clickmap integrity with zero
+  errors and the established 44 orphan candidates, and all 1,973 tests in
+  492.74 seconds.
+- Linux lacks the `Microsoft.NET.Sdk.WindowsDesktop` targets needed to compile
+  the complete WPF application; that expected host limitation does not affect
+  the portable native suite. The expanded disposable-catalog Windows build and
+  usability smoke remains pending. No live process or device interaction was
+  performed.
+
 ### 2026-08-08 save-to-UI fallback contract repair
 
 - The combined candidate is based directly on completed Better Control tip

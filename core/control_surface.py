@@ -72,7 +72,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 30
+CONTROL_SURFACE_REVISION = 31
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -95,6 +95,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "strategy_action_gate_v1",
     "strategy_authoring_profile_lifecycle_v1",
     "strategy_authoring_local_loadout_editors_v1",
+    "strategy_authoring_preset_local_copy_v1",
     "strategy_authoring_specialized_editors_v1",
     "strategy_authoring_v1",
     "strategy_profile_catalog_v1",
@@ -794,6 +795,28 @@ class ControlSurfaceService:
                     request.get("source"),
                     request.get("target_base"),
                 )
+            elif operation == "materialize_loadout_preset":
+                if set(request) != {
+                    "operation",
+                    "setting_id",
+                    "preset",
+                    "expected_catalog_fingerprint",
+                }:
+                    raise StrategyProfileError(
+                        "Preset materialization requires exactly operation, "
+                        "setting_id, preset, and expected_catalog_fingerprint"
+                    )
+                materialization = self.profile_store.materialize_loadout_preset(
+                    request.get("setting_id"),
+                    request.get("preset"),
+                    request.get("expected_catalog_fingerprint"),
+                )
+                response = {
+                    "valid": True,
+                    "published": False,
+                    "materialization": materialization,
+                    "publication_activates_strategy": False,
+                }
             elif operation == "create_module_preset":
                 if set(request) != {
                     "operation",

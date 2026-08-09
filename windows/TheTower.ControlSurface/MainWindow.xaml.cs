@@ -2644,7 +2644,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 30 with better_control_model_v2 is required."
+                    "Linux API revision 31 with better_control_model_v2 is required."
                 );
             }
             if (model is not null
