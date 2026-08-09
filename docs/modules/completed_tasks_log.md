@@ -87,6 +87,30 @@ canonical document linked by an entry for current behavior.
   clickmap integrity with zero errors, and all 2,038 tests in 353.42 seconds.
   No production process, device input, battle transition, or live reload was
   used for this repository repair.
+- Merge commit `59d69b6` reconciles the feature with current `develop` while
+  retaining only its five-file runtime, regression-test, and history delta.
+  The focused initialization file passed 113 tests, and the exact merged
+  candidate passed the complete supported checkpoint: compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,053 tests in 360.70 seconds.
+- Production advanced from `1c02bb3` behind rollback tag
+  `production-before-20260809T163959Z-1c02bb3` to exact candidate `59d69b6`.
+  Automation stopped cleanly at active-battle wave 2684. Replacement PID
+  `306276` acquired the `localhost:5555` lock; one attachment attempt failed
+  closed at restored-source verification, and one new request after fresh
+  `RUNNING` evidence completed a same-battle, complete-save attachment. No
+  Surrender, Game Over, in-game Home, Retry, or new battle was issued.
+- The replacement explicitly adopted `farm_t19_ad_assist` and completed its
+  exclusive session preflight. Cannon Assist was both expected and detected as
+  **Astral Deliverance** with confidence `0.9649463891983032`; the complete
+  Module set matched and no preflight check failed. The hold cleared, and a
+  fresh unpaused `RUNNING` heartbeat at wave 2756 established steady state with
+  no Strategy Action Gate. This source-only candidate changed no Windows
+  package input, so native publication was neither required nor performed.
+- The smoke confirms that a restarted production runtime loads the published
+  v2 definition. The in-process same-ID v1-to-v2 publication transition and
+  the agreed implicit next-battle dropdown action remain separate Windows
+  confirmation work under `ISSUE-2026-010`.
 
 ### 2026-08-09 control-surface backlog pruning
 
