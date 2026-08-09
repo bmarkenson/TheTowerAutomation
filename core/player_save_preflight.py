@@ -716,7 +716,12 @@ class PlayerSavePreflightCoordinator:
             accepted = False
         log(
             "[PLAYER_SAVE_PREFLIGHT] First RUNNING carry binding "
-            f"result={'accepted' if accepted else 'rejected'}",
+            f"result={'accepted' if accepted else 'rejected'} "
+            f"battle_started={bool(battle_started)} "
+            f"stable_running={bool(stable_running)} "
+            f"action_authorized={bool(action_authorized)} "
+            f"state={carry.state.value} "
+            f"reason={carry.invalidation_reason or 'none'}",
             "INFO" if accepted else "WARN",
         )
         return accepted

@@ -4218,6 +4218,52 @@ class App:
         )
         return completed is not None and completed.get("status") == "completed"
 
+    def _bind_started_battle_player_save_preflight(
+        self,
+        *,
+        stable_running: bool,
+        start_workflow_completed: bool,
+    ) -> bool:
+        """Bind Home save facts across the exact launch owner's first run frame."""
+
+        coordinator = getattr(
+            self,
+            "_player_save_preflight_coordinator",
+            None,
+        )
+        if coordinator is None:
+            return False
+
+        # Completing an explicit Start workflow retires its supervisor record
+        # immediately, while the central authority snapshot still contains
+        # that workflow's pre-capture hold until this RUNNING frame publishes
+        # its new owners. Attribute this one continuity check to the exact
+        # workflow that just completed. Pause, Stop, WAIT, a different hold,
+        # or any unconditional authority denial still rejects the carry.
+        launch_owner = (
+            AuthorityHold.OPERATOR_WORKFLOW
+            if start_workflow_completed
+            else None
+        )
+        carry_action_authorized = bool(
+            AUTOMATION.mode is not ExecMode.WAIT
+            and self._runtime_action_guard(
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                owner=launch_owner,
+            )
+            and self._operator_workflow_authority_hold() is None
+        )
+        bound = coordinator.bind_running(
+            battle_started=True,
+            stable_running=stable_running,
+            action_authorized=carry_action_authorized,
+        )
+        if bound:
+            self._mission_mgr.ctx.data[
+                "player_save_preflight_coordinator"
+            ] = coordinator
+        return bool(bound)
+
     def _operator_workflow_authority_hold(
         self,
     ) -> Optional[AuthorityHoldState]:
@@ -8008,39 +8054,22 @@ class App:
                     detection
                 )
                 if battle_started is True:
-                    self._complete_started_battle_workflow(battle_started)
+                    start_workflow_completed = (
+                        self._complete_started_battle_workflow(battle_started)
+                    )
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)
                     self._reset_player_save_audit_perk_mapping_evidence()
                     self._steady_run_entry_pending = False
                     if game_speed_guard is not None:
                         game_speed_guard.reset_battle()
-                    save_coordinator = getattr(
-                        self,
-                        "_player_save_preflight_coordinator",
-                        None,
+                    self._bind_started_battle_player_save_preflight(
+                        stable_running=(
+                            str(detection.get("state") or "").upper()
+                            == "RUNNING"
+                        ),
+                        start_workflow_completed=start_workflow_completed,
                     )
-                    if save_coordinator is not None:
-                        carry_action_authorized = bool(
-                            AUTOMATION.mode is not ExecMode.WAIT
-                            and self._runtime_action_guard(
-                                action_class=(
-                                    RuntimeActionClass.LIFECYCLE_ACTION
-                                )
-                            )
-                        )
-                        bound = save_coordinator.bind_running(
-                            battle_started=True,
-                            stable_running=(
-                                str(detection.get("state") or "").upper()
-                                == "RUNNING"
-                            ),
-                            action_authorized=carry_action_authorized,
-                        )
-                        if bound:
-                            self._mission_mgr.ctx.data[
-                                "player_save_preflight_coordinator"
-                            ] = save_coordinator
                 self._complete_ready_attachment_after_adoption()
                 continuity_pending = False
                 activity_continuity = getattr(

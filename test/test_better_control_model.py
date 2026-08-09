@@ -1420,8 +1420,67 @@ def test_start_dispatch_survives_preflight_scope_change_and_completes(
     assert supervisor.battle_workflow["status"] == "action_dispatched"
     battle_started = manager.maybe_run_start({"state": "RUNNING"})
     assert battle_started is True
-    assert app._complete_started_battle_workflow(battle_started) is True
+    start_workflow_completed = app._complete_started_battle_workflow(
+        battle_started
+    )
+    assert start_workflow_completed is True
     assert supervisor.battle_workflow["status"] == "completed"
+
+    # The authority snapshot still contains the launch workflow's hold until
+    # the main loop publishes the first RUNNING-frame owners.  That retired
+    # hold must remain attributable to the exact workflow that just completed
+    # so the one-time Home save evidence can cross the same boundary.
+    assert app._runtime_action_guard(
+        action_class=RuntimeActionClass.LIFECYCLE_ACTION
+    ) is False
+    coordinator = MagicMock()
+    coordinator.bind_running.return_value = True
+    app._player_save_preflight_coordinator = coordinator
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    assert app._bind_started_battle_player_save_preflight(
+        stable_running=True,
+        start_workflow_completed=start_workflow_completed,
+    ) is True
+    coordinator.bind_running.assert_called_once_with(
+        battle_started=True,
+        stable_running=True,
+        action_authorized=True,
+    )
+    assert (
+        manager.ctx.data["player_save_preflight_coordinator"]
+        is coordinator
+    )
+
+    coordinator.reset_mock()
+    coordinator.bind_running.side_effect = lambda **kwargs: bool(
+        kwargs["action_authorized"]
+    )
+    AUTOMATION.mode = ExecMode.WAIT
+    assert app._bind_started_battle_player_save_preflight(
+        stable_running=True,
+        start_workflow_completed=start_workflow_completed,
+    ) is False
+    coordinator.bind_running.assert_called_once_with(
+        battle_started=True,
+        stable_running=True,
+        action_authorized=False,
+    )
+
+    coordinator.reset_mock()
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    store.request_battle_workflow("attach_battle", evidence=running)
+    assert app._bind_started_battle_player_save_preflight(
+        stable_running=True,
+        start_workflow_completed=start_workflow_completed,
+    ) is False
+    coordinator.bind_running.assert_called_once_with(
+        battle_started=True,
+        stable_running=True,
+        action_authorized=False,
+    )
+    assert supervisor.battle_workflow["intent"] == "attach_battle"
+    assert supervisor.battle_workflow["status"] == "requested"
 
 
 @pytest.mark.parametrize("changed_state", ["home_resume_battle", "game_over"])
