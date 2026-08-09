@@ -39,6 +39,31 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 same-ID Strategy revision reload
+
+- Commit `e5ef4e6` makes a fresh Strategy request compare the complete latest
+  resolved definition with the definition already loaded by the runtime.
+  Matching stable IDs are now acknowledged as a no-op only when those
+  definitions also match. A changed or temporarily unreadable same-ID
+  publication remains pending for the existing guarded boundary application
+  or active-battle adoption path.
+- This repairs the observed path in which `farm_t19_ad_assist` version 2
+  declared Astral Deliverance, but the runtime cleared Start Battle's fresh
+  request solely because version 1 had the same ID. The old definition then
+  retained Being Annihilator and its matching preflight fingerprint. Start
+  Battle already creates a new Strategy request identity; verified Home
+  `NEW_BATTLE` installs the changed definition before run initialization and
+  setup checks.
+- Identical-definition selection still cancels a different pending request
+  without resetting strategy variables, cooldowns, gates, or waivers. Failed
+  definition resolution never emits the successful Strategy acknowledgement
+  and is retried by the existing boundary application.
+- The focused control, boundary, and Tournament slice passed 295 tests. The
+  supported isolated checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors, and all 2,038 tests in 353.42 seconds.
+  No production process, device input, battle transition, or live reload was
+  used for this repository repair.
+
 ### 2026-08-08 current-battle Perks control-surface view
 
 - Commit `8b9f1ee` adds a compact read-only presentation beside the existing
