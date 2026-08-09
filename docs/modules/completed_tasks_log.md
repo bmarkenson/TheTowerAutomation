@@ -39,6 +39,31 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-08 current-battle Perks control-surface view
+
+- Commit `8b9f1ee` adds a compact read-only presentation beside the existing
+  atomic Perk timeline checkpoint. It collapses the monitor-validated exact
+  player-save prefix to one row per semantic Perk with current level and most
+  recent saved selection wave, ordered most-recent-first. The presentation
+  retains checkpoint wave, capture time, total picks, and unique count without
+  exposing private round identity or raw save data.
+- Control-surface revision 31 advertises `current_battle_perks_v1`. Status
+  publishes the list only when the timeline checkpoint matches the atomic
+  current-run activity scope and its internal counts/order remain consistent;
+  a new scope, missing checkpoint, or malformed projection returns an empty
+  awaiting/unavailable view. This adds no save acquisition, serialization,
+  panel navigation, device input, or action authority.
+- The native client adds a full-height **Perks** tab with Perk, level, and last
+  saved selection wave, plus explicit checkpoint wave/time. Ordinary
+  five-second refreshes preserve the grid when rows are unchanged. The native
+  minimum revision advances with the new capability while older browser
+  behavior remains compatible with revision 30.
+- The exact feature checkpoint passed all 2,029 Python tests in 337.92 seconds,
+  all 84 linked .NET model/compatibility tests, `git diff --check`, and the
+  Release WPF cross-build with zero errors. No live process, device, save
+  acquisition, Windows runtime smoke, integration, promotion, or deployment
+  action was performed.
+
 ### 2026-08-08 passive save-backed Perk timeline correction
 
 - Commit `39f4a4d` removes normal in-battle Perks-panel timeline navigation.
