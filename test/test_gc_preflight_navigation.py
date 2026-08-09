@@ -582,6 +582,105 @@ def test_attached_route_uses_all_bound_round_invariant_save_evidence():
         assert bound.consume(check_id) is None
 
 
+def test_bound_new_battle_carry_skips_all_redundant_configuration_ui():
+    ui = _FakeUi()
+    carried = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": dict(MODULE_REQUIREMENTS),
+        "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"}
+            for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
+    }
+    consumed = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            consumed.append(check_id)
+            return carried.get(check_id)
+
+        def invalidate(self, reason):
+            raise AssertionError(f"matching carried evidence invalidated: {reason}")
+
+    requirements = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": dict(MODULE_REQUIREMENTS),
+        "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+        "auto_pick_perks": True,
+        "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+        "loadout_policies": {"modules": "enforce"},
+    }
+
+    result = run_read_only_gc_preflight(
+        requirements,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("bound new-battle evidence must avoid the Home route")
+        ),
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("bound Ultimate Weapon evidence must avoid UI")
+            )
+        ),
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("bound Stun evidence must avoid UI")
+            )
+        ),
+        player_save_preflight=BoundSave(),
+        detect_home_control_fn=lambda _frame: _home_evidence(),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.reason == "all requirements verified"
+    assert consumed == [
+        "auto_pick_perks",
+        "cards_deck",
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+        "modules",
+        "free_upgrade_locks",
+        "ultimate_weapon_primaries",
+        "poison_swamp_stun",
+        "spotlight_missiles",
+    ]
+    assert result.evidence is not None
+    rendered = result.evidence.as_dict()
+    assert set(rendered["configuration"]["save_backed_sections"]) == {
+        "cards",
+        "workshop",
+        "bots",
+        "guardians",
+    }
+    assert rendered["modules"]["source"] == "bound_player_save_preflight"
+    assert rendered["auto_pick_perks"]["source"] == (
+        "bound_player_save_preflight"
+    )
+    assert rendered["free_upgrade_locks"]["source"] == (
+        "bound_player_save_preflight"
+    )
+    assert ui.static_taps == []
+    assert ui.visible_taps == []
+    assert ui.swipes == []
+
+
 def test_attached_route_keeps_ui_fallback_for_invariant_mismatches():
     ui = _FakeUi()
     boxes = [

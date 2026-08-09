@@ -679,9 +679,10 @@ def run_read_only_gc_preflight(
     """Verify session requirements and return to the original battle.
 
     When ``stay_in_battle`` is true, the route never invokes the resumable game
-    Home path. Exact bound round-invariant save facts may replace their
-    redundant UI observations. Any unresolved Home-only Workshop preset check
-    is reported as deferred.
+    Home path. Exact bound save facts may replace their redundant UI
+    observations; the evidence owner decides which temporal classes are safe
+    to consume. Any unresolved Home-only Workshop preset check is reported as
+    deferred.
     """
 
     route_completed = False
@@ -842,14 +843,21 @@ def run_read_only_gc_preflight(
             else {}
         )
         consume_save = getattr(player_save_preflight, "consume", None)
+        fallback_save_checks = getattr(
+            player_save_preflight,
+            "fallback_checks",
+            None,
+        )
+
+        def fallback_carried_check(check_id: str, reason: str) -> None:
+            if callable(fallback_save_checks):
+                fallback_save_checks(reason, check_ids=(check_id,))
+
         accepted_sections: dict[str, dict[str, Any]] = {}
-        attached_module_boundary_evidence = None
-        if (
-            stay_in_battle
-            and not use_no_battle_evidence
-            and callable(consume_save)
-        ):
+        carried_module_boundary_evidence = None
+        if not use_no_battle_evidence and callable(consume_save):
             for section, check_id in (
+                ("cards", "cards_deck"),
                 ("workshop", "workshop_preset"),
                 ("bots", "bots_preset"),
                 ("guardians", "guardian_chips"),
@@ -866,6 +874,11 @@ def run_read_only_gc_preflight(
                         "disposition": "save_match",
                         "source": "bound_player_save_preflight",
                     }
+                elif carried_value is not None:
+                    fallback_carried_check(
+                        check_id,
+                        "configuration_boundary_requirement_changed",
+                    )
 
             if module_mode != "preserve":
                 carried_modules = consume_save("modules")
@@ -880,7 +893,7 @@ def run_read_only_gc_preflight(
                         module_mode == "observe"
                         or carried_module_evidence.valid
                     ):
-                        attached_module_boundary_evidence = {
+                        carried_module_boundary_evidence = {
                             **carried_module_evidence.as_dict(),
                             "source": "bound_player_save_preflight",
                             "status": (
@@ -894,8 +907,45 @@ def run_read_only_gc_preflight(
                                 else "save_match"
                             ),
                             "checked": False,
-                            "reason": "round_invariant_attachment_observation",
+                            "reason": "bound_player_save_configuration_observation",
                         }
+                    else:
+                        fallback_carried_check(
+                            "modules",
+                            "module_boundary_requirement_changed",
+                        )
+                elif carried_modules is not None:
+                    fallback_carried_check(
+                        "modules",
+                        "module_boundary_requirement_changed",
+                    )
+            if (
+                free_upgrade_lock_requirements is not None
+                and free_upgrade_lock_boundary_evidence is None
+            ):
+                carried_locks = consume_save("free_upgrade_locks")
+                if (
+                    isinstance(carried_locks, list)
+                    and save_check_matches_requirement(
+                        "free_upgrade_locks",
+                        free_upgrade_lock_requirements,
+                        carried_locks,
+                    )
+                ):
+                    free_upgrade_lock_boundary_evidence = {
+                        "status": "save_match",
+                        "source": "bound_player_save_preflight",
+                        "boundary": HomeBattleControl.NEW_BATTLE.value,
+                        "required": list(free_upgrade_lock_requirements),
+                        "observed": list(carried_locks),
+                        "checked": False,
+                        "valid": True,
+                    }
+                elif carried_locks is not None:
+                    fallback_carried_check(
+                        "free_upgrade_locks",
+                        "free_upgrade_lock_boundary_requirement_changed",
+                    )
         carried_primaries = (
             consume_save("ultimate_weapon_primaries")
             if callable(consume_save)
@@ -1097,7 +1147,7 @@ def run_read_only_gc_preflight(
                 sleep_fn(0.5)
 
         cards = None
-        if not use_no_battle_evidence:
+        if not use_no_battle_evidence and "cards" not in accepted_sections:
             _ensure_running_side_menu_open(
                 capture_fn=capture_fn,
                 detector=detector,
@@ -1184,7 +1234,7 @@ def run_read_only_gc_preflight(
         modules = None
         if (
             module_mode != "preserve"
-            and attached_module_boundary_evidence is None
+            and carried_module_boundary_evidence is None
         ):
             _ensure_running_side_menu_open(
                 capture_fn=capture_fn,
@@ -1321,58 +1371,59 @@ def run_read_only_gc_preflight(
                 deferred_checks = ("workshop_preset",)
         else:
             # A normal session preflight may inspect the Workshop preset through
-            # the verified resumable Home route. Free Upgrade locks remain
-            # exclusive to NEW_BATTLE no-battle setup.
-            if not go_home_fn():
-                _capture_detection(capture_fn, detector)
-                raise _NavigationFailure("guarded Go Home failed")
-            home = _wait_for(
-                state="HOME_SCREEN",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
-            _verify_active_home(home, detect_home_control_fn)
+            # the verified resumable Home route. Free Upgrade locks have no
+            # in-battle UI route and require exact new-battle boundary evidence.
+            if "workshop" not in accepted_sections:
+                if not go_home_fn():
+                    _capture_detection(capture_fn, detector)
+                    raise _NavigationFailure("guarded Go Home failed")
+                home = _wait_for(
+                    state="HOME_SCREEN",
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    sleep_fn=sleep_fn,
+                )
+                _verify_active_home(home, detect_home_control_fn)
 
-            _guarded_static_tap(
-                "navigation.goto_workshop_home",
-                allowed_states={"HOME_SCREEN"},
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-            )
-            workshop = _wait_for(
-                state="WORKSHOP",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
-            _guarded_static_tap(
-                "navigation.goto_home",
-                allowed_states={"WORKSHOP"},
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-            )
-            home = _wait_for(
-                state="HOME_SCREEN",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
-            _verify_active_home(home, detect_home_control_fn)
-            _guarded_resume_battle(
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-                detect_home_control_fn=detect_home_control_fn,
-            )
-            _wait_for(
-                state="RUNNING",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
+                _guarded_static_tap(
+                    "navigation.goto_workshop_home",
+                    allowed_states={"HOME_SCREEN"},
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    safe_tap_fn=safe_tap_fn,
+                )
+                workshop = _wait_for(
+                    state="WORKSHOP",
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    sleep_fn=sleep_fn,
+                )
+                _guarded_static_tap(
+                    "navigation.goto_home",
+                    allowed_states={"WORKSHOP"},
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    safe_tap_fn=safe_tap_fn,
+                )
+                home = _wait_for(
+                    state="HOME_SCREEN",
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    sleep_fn=sleep_fn,
+                )
+                _verify_active_home(home, detect_home_control_fn)
+                _guarded_resume_battle(
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    safe_tap_fn=safe_tap_fn,
+                    detect_home_control_fn=detect_home_control_fn,
+                )
+                _wait_for(
+                    state="RUNNING",
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    sleep_fn=sleep_fn,
+                )
         route_completed = True
 
         validation_args = dict(
@@ -1392,9 +1443,9 @@ def run_read_only_gc_preflight(
             validation_args["deferred_checks"] = deferred_checks
         if accepted_sections:
             validation_args["accepted_sections"] = accepted_sections
-        if attached_module_boundary_evidence is not None:
+        if carried_module_boundary_evidence is not None:
             validation_args["module_boundary_evidence"] = (
-                attached_module_boundary_evidence
+                carried_module_boundary_evidence
             )
         waivers = requirements.get("_gate_waivers")
         if isinstance(waivers, Mapping) and waivers:

@@ -6,7 +6,7 @@ import json
 import os
 import re
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -40,6 +40,7 @@ from core.gc_no_battle_setup import (
     GcNoBattleSetupStatus,
 )
 from core.player_save import PlayerSaveSnapshot, SaveCheckEvidence
+from core.player_save_preflight import CarriedEvidenceState
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
@@ -58,7 +59,7 @@ from core.player_save_history import PlayerSaveAttachmentContext
 from core.player_save_serialization import GuardedSerializationStatus
 from core.strategy_authoring import FARM_SETTING_REGISTRY
 from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
-from core.run_state import AUTOMATION, ExecMode
+from core.run_state import AUTOMATION, ExecMode, RunState
 from handlers.game_over_handler import GameOverHandlingOutcome
 from tools import automation_ctl
 
@@ -1426,61 +1427,153 @@ def test_start_dispatch_survives_preflight_scope_change_and_completes(
     assert start_workflow_completed is True
     assert supervisor.battle_workflow["status"] == "completed"
 
-    # The authority snapshot still contains the launch workflow's hold until
-    # the main loop publishes the first RUNNING-frame owners.  That retired
-    # hold must remain attributable to the exact workflow that just completed
-    # so the one-time Home save evidence can cross the same boundary.
+    # The authority snapshot still contains the retired launch hold until the
+    # main loop publishes the first RUNNING-frame owners. Evidence binding is
+    # observational, so that stale action hold and terminal policy are not
+    # allowed to destroy the exact launch transition.
     assert app._runtime_action_guard(
         action_class=RuntimeActionClass.LIFECYCLE_ACTION
     ) is False
     coordinator = MagicMock()
     coordinator.bind_running.return_value = True
     app._player_save_preflight_coordinator = coordinator
-    AUTOMATION.mode = ExecMode.NEXT_BATTLE
-
-    assert app._bind_started_battle_player_save_preflight(
-        stable_running=True,
-        start_workflow_completed=start_workflow_completed,
-    ) is True
-    coordinator.bind_running.assert_called_once_with(
-        battle_started=True,
-        stable_running=True,
-        action_authorized=True,
-    )
-    assert (
-        manager.ctx.data["player_save_preflight_coordinator"]
-        is coordinator
-    )
-
-    coordinator.reset_mock()
-    coordinator.bind_running.side_effect = lambda **kwargs: bool(
-        kwargs["action_authorized"]
-    )
-    AUTOMATION.mode = ExecMode.WAIT
-    assert app._bind_started_battle_player_save_preflight(
-        stable_running=True,
-        start_workflow_completed=start_workflow_completed,
-    ) is False
-    coordinator.bind_running.assert_called_once_with(
-        battle_started=True,
-        stable_running=True,
-        action_authorized=False,
-    )
+    AUTOMATION.state = RunState.RUNNING
+    for mode in (ExecMode.NEXT_BATTLE, ExecMode.HOME, ExecMode.WAIT):
+        coordinator.reset_mock()
+        coordinator.bind_running.return_value = True
+        AUTOMATION.mode = mode
+        assert app._bind_started_battle_player_save_preflight(
+            battle_started=True,
+            stable_running=True,
+        ) is True
+        coordinator.bind_running.assert_called_once_with(
+            battle_started=True,
+            stable_running=True,
+            continuity_verified=True,
+        )
+        assert (
+            manager.ctx.data["player_save_preflight_coordinator"]
+            is coordinator
+        )
 
     coordinator.reset_mock()
     AUTOMATION.mode = ExecMode.NEXT_BATTLE
     store.request_battle_workflow("attach_battle", evidence=running)
+    supervisor.apply_control()
     assert app._bind_started_battle_player_save_preflight(
-        stable_running=True,
-        start_workflow_completed=start_workflow_completed,
-    ) is False
-    coordinator.bind_running.assert_called_once_with(
         battle_started=True,
         stable_running=True,
-        action_authorized=False,
+    ) is False
+    coordinator.bind_running.assert_not_called()
+    coordinator.discard_carry.assert_called_once_with(
+        "competing_workflow_at_running_boundary"
     )
     assert supervisor.battle_workflow["intent"] == "attach_battle"
     assert supervisor.battle_workflow["status"] == "requested"
+
+
+def test_verified_retry_scope_stages_terminal_save_for_current_strategy():
+    app = App.__new__(App)
+    coordinator = MagicMock()
+    carry = object()
+    result = SimpleNamespace(carry=carry)
+    coordinator.stage_direct_retry.return_value = result
+    strategy = MagicMock()
+    strategy.session_preflight_requirements.return_value = {
+        "auto_pick_perks": True
+    }
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx.data = {"player_save_preflight_coordinator": "old"}
+    app._mission_mgr = manager
+    app._player_save_preflight_coordinator = coordinator
+    app._player_save_preflight_session_id = ""
+    app._runtime_policy = lambda: {"player_save_preflight": "save_first"}
+    acquisition = MagicMock(spec=PlayerSaveAcquisitionBundle)
+
+    assert app._stage_direct_retry_player_save_preflight(
+        acquisition,
+        source_activity_scope_id="source-scope",
+        retry_scope={"reason": "game_over_retry", "run_id": "retry-scope"},
+    )
+
+    assert app._player_save_preflight_session_id
+    assert app._player_save_preflight_result is result
+    assert app._player_save_preflight_activity_scope_id == "retry-scope"
+    coordinator.stage_direct_retry.assert_called_once_with(
+        acquisition,
+        {"auto_pick_perks": True},
+        source_activity_scope_id="source-scope",
+        mode="save_first",
+    )
+
+
+def test_retry_save_staging_failure_preserves_retry_and_uses_ui_fallback():
+    app = App.__new__(App)
+    coordinator = MagicMock()
+    coordinator.stage_direct_retry.side_effect = RuntimeError("projection bug")
+    strategy = MagicMock()
+    strategy.session_preflight_requirements.return_value = {
+        "auto_pick_perks": True
+    }
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx.data = {"player_save_preflight_coordinator": coordinator}
+    app._mission_mgr = manager
+    app._player_save_preflight_coordinator = coordinator
+    app._player_save_preflight_session_id = ""
+    app._runtime_policy = lambda: {"player_save_preflight": "save_first"}
+
+    with patch("core.app.log") as emit:
+        assert not app._stage_direct_retry_player_save_preflight(
+            MagicMock(spec=PlayerSaveAcquisitionBundle),
+            source_activity_scope_id="source-scope",
+            retry_scope={"reason": "game_over_retry", "run_id": "retry-scope"},
+        )
+
+    coordinator.discard_carry.assert_called_once_with(
+        "direct_retry_save_staging_failed"
+    )
+    assert "player_save_preflight_coordinator" not in manager.ctx.data
+    assert "projection bug" not in emit.call_args.args[0]
+
+
+@pytest.mark.parametrize(
+    ("state", "method", "reason"),
+    [
+        (
+            RunState.PAUSED,
+            "suspend_carry",
+            "pause_requires_fresh_running_evidence",
+        ),
+        (
+            RunState.STOPPED,
+            "discard_carry",
+            "automation_stopped_before_running_bind",
+        ),
+    ],
+)
+def test_running_boundary_pause_or_stop_never_consumes_carried_save(
+    state,
+    method,
+    reason,
+):
+    app = App.__new__(App)
+    coordinator = MagicMock()
+    coordinator.carry = SimpleNamespace(
+        state=CarriedEvidenceState.LAUNCH_DISPATCHED
+    )
+    app._player_save_preflight_coordinator = coordinator
+    app._operator_workflow_authority_hold = lambda: None
+    AUTOMATION.state = state
+
+    assert not app._bind_started_battle_player_save_preflight(
+        battle_started=True,
+        stable_running=True,
+    )
+
+    getattr(coordinator, method).assert_called_once_with(reason)
+    coordinator.bind_running.assert_not_called()
 
 
 @pytest.mark.parametrize("changed_state", ["home_resume_battle", "game_over"])

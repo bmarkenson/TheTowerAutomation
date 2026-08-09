@@ -1404,8 +1404,6 @@ def run_gc_no_battle_setup(
             )
         update_save_preflight_evidence()
     except _SetupControlInterrupted as exc:
-        if not snapshot_invalidated:
-            invalidate_snapshot("home_setup_control_interrupted", current_check)
         update_save_preflight_evidence()
         log(
             "[GC_NO_BATTLE] Home setup yielded to the main observation loop; "

@@ -69,10 +69,14 @@ after acquisition/setup, again before Home handling, and finally after fresh
 control verification but before the tap, the runtime must still find the same
 Start/Attach/Return request ID, intent, status, control type, and lifecycle
 authority. A replacement request starts from its own next observation and
-gates; it never inherits the earlier request's launch. Pause, Stop, manual
-control, or another workflow blocks the tap and invalidates pending carried
-launch evidence. The terminal continuation performs the same check and clears
-its published pending state when authority or manual ownership supersedes it.
+gates; it never inherits the earlier request's launch. Pause blocks the tap and
+suspends unconsumed save carry so a later Enable uses fresh save or UI evidence;
+Stop discards the process-local carry. Manual control, a replacement request,
+or another workflow also discards the old transition binding. `WAIT` is only
+the future terminal disposition: it neither blocks an explicitly authorized
+Start nor invalidates the resulting first-`RUNNING` evidence. The terminal
+continuation performs the same ownership check and clears its published pending
+state when authority or manual ownership supersedes it.
 
 ## Attach to a current battle
 

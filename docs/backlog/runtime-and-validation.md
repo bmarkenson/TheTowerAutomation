@@ -150,7 +150,11 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         rejection was recorded.
       - [ ] Confirm valid Game Over → Home and Game Over → direct Retry each
         perform zero second save acquisition and zero Battle History
-        navigation.
+        navigation. On direct Retry, also confirm the same terminal bundle
+        supplies supported Cards, Workshop, Bots, Guardians, Modules, Free
+        Upgrade locks, Auto Pick, Target Priority, and Ultimate Weapon checks
+        without opening their UI; any unsupported or changed check must fall
+        back independently.
       - [ ] Confirm Tournament Results → Home reuses its valid terminal handoff
         without reacquisition.
       - [ ] Confirm one natural-terminal bundle fans out without duplicate

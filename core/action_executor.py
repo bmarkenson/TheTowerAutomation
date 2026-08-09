@@ -143,9 +143,12 @@ def _bind_save_backed_home_evidence(
             or not set(expected_locks).issubset(set(carried_locks))
         ):
             payload.pop("free_upgrade_locks", None)
-            invalidate = getattr(player_save_preflight, "invalidate", None)
-            if carried_locks is not None and callable(invalidate):
-                invalidate("free_upgrade_lock_boundary_requirement_changed")
+            fallback = getattr(player_save_preflight, "fallback_checks", None)
+            if carried_locks is not None and callable(fallback):
+                fallback(
+                    "free_upgrade_lock_boundary_requirement_changed",
+                    check_ids=("free_upgrade_locks",),
+                )
         else:
             bound_locks = dict(lock_evidence)
             bound_locks["source"] = "bound_player_save_preflight"
@@ -206,9 +209,12 @@ def _bind_save_backed_home_evidence(
         )
         if not carried_modules_match:
             payload.pop("modules", None)
-            invalidate = getattr(player_save_preflight, "invalidate", None)
-            if carried_modules is not None and callable(invalidate):
-                invalidate("module_boundary_requirement_changed")
+            fallback = getattr(player_save_preflight, "fallback_checks", None)
+            if carried_modules is not None and callable(fallback):
+                fallback(
+                    "module_boundary_requirement_changed",
+                    check_ids=("modules",),
+                )
         else:
             bound_modules = dict(modules)
             bound_modules["source"] = "bound_player_save_preflight"
@@ -517,9 +523,11 @@ def execute_actions(
                             "order": list(carried_order),
                         }
                 elif carried_order is not None:
-                    if callable(getattr(save_coordinator, "invalidate", None)):
-                        save_coordinator.invalidate(
-                            "target_priority_action_requirement_changed"
+                    fallback = getattr(save_coordinator, "fallback_checks", None)
+                    if callable(fallback):
+                        fallback(
+                            "target_priority_action_requirement_changed",
+                            check_ids=("target_priority",),
                         )
                     used_ui = True
                     ok = ensure_target_priority_order(
