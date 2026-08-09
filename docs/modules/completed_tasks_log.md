@@ -262,6 +262,28 @@ canonical document linked by an entry for current behavior.
   the portable native suite. The expanded disposable-catalog Windows build and
   usability smoke remains pending. No live process or device interaction was
   performed.
+- Final integration commit `4d480bf` merges the feature with production tip
+  `ee4c861`, preserving both completion histories. The exact integrated
+  candidate passed compilation, state-definition validation, clickmap
+  integrity across 291 entries and 220 referenced templates with zero errors
+  and the established 44 orphan candidates, all 2,030 Python tests in 343.27
+  seconds, and all 96 portable native authoring tests.
+- Production advanced from `ee4c861` behind rollback tag
+  `production-before-20260809T013944Z-ee4c861`. Automation PID `3391293`
+  stopped cleanly during the active battle and released its
+  `localhost:5555` lock. The restarted control surface reported revision 31,
+  `strategy_authoring_preset_local_copy_v1`, `preset_local_copy: true`, the
+  `materialize_loadout_preset` operation, four module presets, and no catalog
+  errors. The pending setup-capture review remained ready with its original
+  preview fingerprint.
+- Replacement automation PID `3453512` started Paused, acquired the exact
+  target lock, and published fresh active-battle evidence. Explicit Attach
+  used a guarded forced save, restored the source, and bound same-battle
+  continuity; explicit active-battle adoption then restored
+  `farm_t19_ad_assist`. Session preflight verified the active requirements,
+  deferred only the normal `free_upgrade_locks` next-boundary check, returned
+  through the resumable Home route, and entered steady Running state at wave
+  2039 and game speed x6.3. No Surrender or new battle was issued.
 
 ### 2026-08-08 save-to-UI fallback contract repair
 
