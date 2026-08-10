@@ -39,6 +39,27 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 terminal Perk reconciliation
+
+- Commit `47a0508` distinguishes the already-promoted completed-state opener
+  repair from top-bar text recognition. The earlier `41fc1fd` made the
+  `View Perks` control safe to tap by matching its invariant frame; it did not
+  change OCR. On the retained completed-state screenshot, the raw-color OCR
+  path returned `lt` at 47% confidence. The new failure-only Otsu retry reads
+  `View Perks` above 95% while numeric schedule observations retain their
+  existing fast path.
+- Whenever a usable nonfinal saved prefix still requires terminal UI evidence,
+  Game Over now proves the newest/top Perks edge, checks that first viewport,
+  and captures downward only until the first unchanged saved-recency marker or
+  the actual list edge. A marker already present in the top viewport dispatches
+  no downward gesture; missing or conflicted saved evidence still uses the
+  complete UI fallback.
+- Focused Perk tests passed all 100 cases, the wider Perks/Game Over/scrolling
+  slice passed all 147, and the supported checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,162 tests in 488.00 seconds. Natural Game Over
+  observation remains queued in the runtime validation backlog.
+
 ### 2026-08-10 save-mapping discovery and local confirmation lifecycle
 
 - Commits `eb8a391` and `4cd9f2d` add strict, private, append-only candidate
