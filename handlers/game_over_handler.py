@@ -95,9 +95,10 @@ def handle_game_over(
     Workflow:
       1) Capture the initial Game Stats dialog in memory.
       2) Use a proven save-backed final Perk inventory. If only an exact saved
-         prefix exists, inspect the newest terminal Perk viewport and reconcile
-         its tail without a full-list scroll. Capture the complete ordered list
-         only when no usable saved prefix exists, then return to Game Stats.
+         prefix exists, start at the newest terminal Perk edge and scroll only
+         until an unchanged saved-recency marker is reached. Capture the
+         complete ordered list only when no usable saved prefix exists, then
+         return to Game Stats.
       3) Prefer the causally bound, exact-version save History projection.
       4) If save evidence is unavailable or contradicts Game Stats, open More
          Stats and copy the complete report through Android's clipboard service.
@@ -745,10 +746,11 @@ def _capture_game_over_perks(
 
 
 def _capture_game_over_perk_tail(
+    monitoring: Mapping[str, Any],
     *,
     action_guard_fn: Optional[Callable[[], bool]] = None,
 ):
-    """Capture only the newest terminal Perk viewport and restore Game Stats."""
+    """Capture from the newest Perk edge through known saved recency."""
 
     game_stats_screen = capture_adb_screenshot()
     if game_stats_screen is None or not _game_stats_visible(game_stats_screen):
@@ -802,12 +804,57 @@ def _capture_game_over_perk_tail(
         settle_s=0.8,
         action_guard_fn=action_guard_fn,
     )
-    frames = [top.screenshot] if top.screenshot is not None else []
+    capture_reason = f"top_{top.reason}"
+    inventory_complete = False
+    if top.screenshot is None:
+        frames = []
+        source_complete = False
+    elif not top.success:
+        frames = [top.screenshot]
+        source_complete = False
+    else:
+        probe_frames = []
+
+        def saved_recency_reached(frame):
+            probe_frames.append(frame)
+            try:
+                probe = _terminal_perk_prefix_record(
+                    probe_frames,
+                    source_complete=True,
+                    source_reason="saved_recency_probe",
+                    inventory_complete=False,
+                )
+                _inventory, merge = merge_terminal_perk_tail(
+                    monitoring,
+                    probe,
+                )
+            except Exception:
+                return None
+            if merge.get("overlap_marker") is not None:
+                return "saved_recency_marker_reached"
+            return None
+
+        capture = capture_scroll_to_edge(
+            "gesture_targets.goto_next:perks",
+            source_label=PERKS_INDICATOR,
+            screenshot=top.screenshot,
+            progress_region=PERKS_CONTENT_REGION,
+            max_swipes=20,
+            settle_s=0.8,
+            stop_fn=saved_recency_reached,
+            action_guard_fn=action_guard_fn,
+        )
+        frames = list(capture.screenshots)
+        source_complete = capture.success
+        capture_reason = capture.reason
+        inventory_complete = capture.success and capture.reason == "edge_reached"
+
     try:
-        perks = ocr_selected_perks(
+        perks = _terminal_perk_prefix_record(
             frames,
-            source_complete=top.success,
-            source_reason=f"newest_visible_prefix:{top.reason}",
+            source_complete=source_complete,
+            source_reason=f"newest_saved_recency_prefix:{capture_reason}",
+            inventory_complete=inventory_complete,
         )
     except Exception as exc:
         log(f"[BATTLE_PERKS] Top-prefix OCR failed: {exc}", "ERROR", console=True)
@@ -816,31 +863,49 @@ def _capture_game_over_perk_tail(
             source_complete=False,
             source_reason=f"top_prefix_ocr_failed:{exc}",
         )
-    perks = dict(perks)
-    quality = dict(perks.get("quality") or {})
-    quality.update(
-        {
-            "scope_complete": bool(top.success),
-            "inventory_complete": False,
-            "capture_scope": "newest_visible_prefix",
-        }
-    )
-    perks.update(
-        {
-            "source_method": "terminal_perks_top_prefix_ocr",
-            "capture_scope": "newest_visible_prefix",
-            "quality": quality,
-        }
-    )
     log(
-        "[BATTLE_PERKS] Captured the newest terminal Perk prefix without "
-        "scrolling through the complete inventory",
+        f"[BATTLE_PERKS] Captured {len(frames)} terminal Perk viewport(s) "
+        f"from the newest edge through {capture_reason}",
         "DEBUG",
     )
     restored = _close_game_over_perks(
         action_guard_fn=action_guard_fn,
     )
     return perks, frames, restored
+
+
+def _terminal_perk_prefix_record(
+    frames,
+    *,
+    source_complete: bool,
+    source_reason: str,
+    inventory_complete: bool,
+):
+    """Describe one contiguous newest-first prefix for saved-tail merging."""
+
+    perks = dict(
+        ocr_selected_perks(
+            frames,
+            source_complete=source_complete,
+            source_reason=source_reason,
+        )
+    )
+    quality = dict(perks.get("quality") or {})
+    quality.update(
+        {
+            "scope_complete": bool(source_complete),
+            "inventory_complete": bool(inventory_complete),
+            "capture_scope": "newest_prefix_until_saved_recency",
+        }
+    )
+    perks.update(
+        {
+            "source_method": "terminal_perks_saved_recency_prefix_ocr",
+            "capture_scope": "newest_prefix_until_saved_recency",
+            "quality": quality,
+        }
+    )
+    return perks
 
 
 def _close_game_over_perks(
@@ -923,6 +988,7 @@ def _resolve_game_over_perks(
     )
     if can_reconcile_top:
         terminal_ui, frames, restored = _capture_game_over_perk_tail(
+            monitoring,
             action_guard_fn=action_guard_fn,
         )
         if not restored:

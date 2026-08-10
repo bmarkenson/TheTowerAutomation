@@ -219,9 +219,11 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         acquisition/timeline progress with no in-battle
         `navigation.open_perks` input. At natural Game Over, confirm a proved
         exhausted final prefix performs zero Perks navigation, or a nonfinal
-        bound prefix visits only the newest viewport and never dispatches
-        `gesture_targets.goto_next:perks`. Retain the record to confirm exact
-        saved picks and any terminal uncertainty are rendered separately.
+        bound prefix proves the newest/top edge and dispatches
+        `gesture_targets.goto_next:perks` only until the first unchanged
+        saved-recency marker (or the actual list edge). Retain the record to
+        confirm exact saved picks and any terminal uncertainty are rendered
+        separately.
   - [ ] Confirm the deployed direct-Retry repair on the next ordinary
     `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
     retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh

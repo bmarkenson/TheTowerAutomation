@@ -525,6 +525,19 @@ def test_measure_perk_progress_reads_retained_dynamic_top_bar():
     assert progress.next_wave == 191
 
 
+def test_measure_perk_progress_reads_retained_view_perks_top_bar():
+    frame = cv2.imread(
+        str(FIXTURES / "open_perks_complete_20260809.png")
+    )
+    assert frame is not None
+
+    progress = measure_perk_progress(frame)
+
+    assert progress.status == "complete"
+    assert progress.text_raw == "View Perks"
+    assert progress.confidence >= 80.0
+
+
 def test_measure_perk_progress_tolerates_ocr_artifacts_and_terminal_label():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 

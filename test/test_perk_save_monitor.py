@@ -785,7 +785,7 @@ def test_terminal_top_prefix_fills_only_tail_before_saved_recency_marker():
     monitoring = _qualified_monitoring()
     terminal_top = {
         "source_method": "terminal_perks_top_prefix_ocr",
-        "capture_scope": "newest_visible_prefix",
+        "capture_scope": "newest_prefix_until_saved_recency",
         "order_semantics": "latest_selected_first",
         "selected": [
             {
@@ -831,6 +831,9 @@ def test_terminal_top_prefix_fills_only_tail_before_saved_recency_marker():
     assert inventory is not None
     assert inventory["source_method"] == (
         "player_save_checkpoint_plus_terminal_top_prefix"
+    )
+    assert inventory["terminal_tail"]["capture_scope"] == (
+        "newest_prefix_until_saved_recency"
     )
     assert merge["overlap_marker"]["perk_key"] == "damage"
     assert merge["tail_correspondence"] == "unique"

@@ -20,7 +20,7 @@ from handlers.game_over_handler import (
 )
 from core.run_state import AUTOMATION, ExecMode, RunState
 from core.matcher import get_match
-from core.scrolling import ScrollResult
+from core.scrolling import ScrollCaptureResult, ScrollResult
 from utils.logger import log
 
 
@@ -158,36 +158,67 @@ def test_perks_capture_retries_close_until_game_stats_is_restored():
     ]
 
 
-def test_terminal_tail_capture_never_scrolls_through_the_full_inventory():
-    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+def test_terminal_tail_capture_starts_at_top_and_stops_at_saved_recency():
+    top_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    marker_frame = np.ones((1920, 1080, 3), dtype=np.uint8)
     parsed = {
         "source_method": "ocr",
         "order_semantics": "latest_selected_first",
         "selected": [{"display_text": "Orbs +1", "confidence": 95.0}],
         "quality": {"valid": True, "source_complete": True},
     }
+    monitoring = {"checkpoint": {"picks": [], "levels": [], "saved_wave": 1}}
+
+    def capture_until_marker(*_args, **kwargs):
+        stop_fn = kwargs["stop_fn"]
+        assert kwargs["screenshot"] is top_frame
+        assert stop_fn(top_frame) is None
+        assert stop_fn(marker_frame) == "saved_recency_marker_reached"
+        return ScrollCaptureResult(
+            True,
+            (top_frame, marker_frame),
+            1,
+            "saved_recency_marker_reached",
+        )
 
     with (
-        patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+        patch(
+            "handlers.game_over_handler.capture_adb_screenshot",
+            return_value=top_frame,
+        ),
         patch("handlers.game_over_handler._game_stats_visible", return_value=True),
-        patch("handlers.game_over_handler._wait_for_visible", return_value=frame),
+        patch(
+            "handlers.game_over_handler._wait_for_visible",
+            return_value=top_frame,
+        ),
         patch(
             "handlers.game_over_handler.scroll_to_edge",
-            return_value=ScrollResult(True, frame, 2, "edge_reached"),
-        ),
+            return_value=ScrollResult(True, top_frame, 2, "edge_reached"),
+        ) as top_scroll,
         patch("handlers.game_over_handler.ocr_selected_perks", return_value=parsed),
+        patch(
+            "handlers.game_over_handler.merge_terminal_perk_tail",
+            side_effect=(
+                (None, {"overlap_marker": None}),
+                (None, {"overlap_marker": {"perk_key": "max_health"}}),
+            ),
+        ),
         patch("handlers.game_over_handler.tap_if_visible", return_value=True),
         patch("handlers.game_over_handler._close_game_over_perks", return_value=True),
-        patch("handlers.game_over_handler.capture_scroll_to_edge") as full_scroll,
+        patch(
+            "handlers.game_over_handler.capture_scroll_to_edge",
+            side_effect=capture_until_marker,
+        ) as progressive_scroll,
     ):
-        result, frames, restored = _capture_game_over_perk_tail()
+        result, frames, restored = _capture_game_over_perk_tail(monitoring)
 
-    assert result["capture_scope"] == "newest_visible_prefix"
+    assert result["capture_scope"] == "newest_prefix_until_saved_recency"
     assert result["quality"]["scope_complete"] is True
     assert result["quality"]["inventory_complete"] is False
-    assert frames == [frame]
+    assert frames == [top_frame, marker_frame]
     assert restored is True
-    full_scroll.assert_not_called()
+    assert top_scroll.call_args.args[0] == "gesture_targets.goto_top:perks"
+    progressive_scroll.assert_called_once()
 
 
 def test_proven_final_prefix_skips_terminal_perks_navigation():
@@ -277,7 +308,10 @@ def test_malformed_complete_looking_inventory_preserves_terminal_perks_navigatio
     )
     assert frames == ["frame"]
     assert restored is True
-    capture_perks.assert_called_once_with(action_guard_fn=None)
+    capture_perks.assert_called_once_with(
+        context["perk_save_monitoring"],
+        action_guard_fn=None,
+    )
 
 
 def test_pending_saved_prefix_uses_only_terminal_top_reconciliation():
@@ -351,7 +385,10 @@ def test_pending_saved_prefix_uses_only_terminal_top_reconciliation():
     assert perks["terminal_tail"]["aggregates"][0]["perk_key"] == "orbs"
     assert frames == ["top-frame"]
     assert restored is True
-    capture_top.assert_called_once_with(action_guard_fn=None)
+    capture_top.assert_called_once_with(
+        context["perk_save_monitoring"],
+        action_guard_fn=None,
+    )
     capture_full.assert_not_called()
 
 
