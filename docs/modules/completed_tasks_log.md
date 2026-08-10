@@ -281,6 +281,14 @@ canonical document linked by an entry for current behavior.
   and the established 44 orphan notices, and all 2,060 tests in 392.75 seconds.
   No production process, device input, battle transition, or live validation
   was used for this repair.
+- Forward-port candidate `91339d1` merged current `develop` at `f84f4cb`,
+  preserving the later save-mapping, attached-preflight, control-surface, and
+  Mission reward changes. Its focused serializer, History, preflight, setup-
+  capture, continuity, and control-model slice passed all 296 tests. The exact
+  candidate then passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,165 tests
+  in 358.34 seconds. This revalidation used no production process, device
+  input, battle transition, or live validation.
 
 ### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
 
