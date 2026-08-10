@@ -181,6 +181,51 @@ class HostPerformanceStore:
             "server_run_id": normalized_server_run_id,
         }
 
+    def recent_aggregates(
+        self,
+        *,
+        run_id: Optional[str],
+        since: datetime,
+        limit: int = 8192,
+    ) -> list[dict[str, Any]]:
+        """Return bounded validated projections for degradation assessment."""
+
+        bounded_limit = max(1, min(int(limit), 8192))
+        normalized_run_id = _optional_run_id(run_id, field="run_id")
+        cutoff = _utc_datetime(since).isoformat(timespec="milliseconds")
+        if not self.path.exists():
+            return []
+        try:
+            with self._write_lock:
+                with sqlite3.connect(self.path, timeout=5.0) as connection:
+                    rows = connection.execute(
+                        """
+                        SELECT payload_json
+                        FROM host_performance_aggregates
+                        WHERE window_end_utc >= ?
+                          AND (? IS NULL OR run_id = ?)
+                        ORDER BY window_end_utc ASC
+                        LIMIT ?
+                        """,
+                        (
+                            cutoff,
+                            normalized_run_id,
+                            normalized_run_id,
+                            bounded_limit,
+                        ),
+                    ).fetchall()
+        except sqlite3.Error as exc:
+            raise HostPerformanceStorageError(str(exc)) from exc
+        result: list[dict[str, Any]] = []
+        for (raw,) in rows:
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(payload, dict):
+                result.append(payload)
+        return result
+
     @staticmethod
     def _prepare(connection: sqlite3.Connection) -> None:
         connection.execute(

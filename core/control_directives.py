@@ -40,6 +40,7 @@ from core.control_model import (
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
+from core.emulator_recovery import normalize_emulator_maintenance
 from core.strategy_profiles import (
     BUILTIN_STRATEGY_IDS,
     configurable_strategy_ids,
@@ -178,6 +179,18 @@ class ControlDirectiveStore:
                 if data.get("interactive_development_lease") is not None
                 and _valid_interactive_development_lease(
                     data.get("interactive_development_lease")
+                )
+                is None
+                else None
+            ),
+            "emulator_maintenance": normalize_emulator_maintenance(
+                data.get("emulator_maintenance")
+            ),
+            "emulator_maintenance_error": (
+                "emulator maintenance directive is malformed"
+                if data.get("emulator_maintenance") is not None
+                and normalize_emulator_maintenance(
+                    data.get("emulator_maintenance")
                 )
                 is None
                 else None
@@ -1189,6 +1202,213 @@ class ControlDirectiveStore:
 
         saved = self.update(mutate)
         return dict(saved["interactive_development_lease"])
+
+    def request_emulator_maintenance(
+        self,
+        *,
+        reason: str,
+        source: str,
+        runtime: Mapping[str, object],
+        battle_scope: Optional[str],
+        trigger: Optional[Mapping[str, object]] = None,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Persist one exact-runtime BlueStacks restart request."""
+
+        timestamp = _timestamp_at(now)
+        candidate = {
+            "schema_version": 1,
+            "request_id": uuid4().hex,
+            "action": "restart_bluestacks",
+            "state": "requested",
+            "reason": " ".join(str(reason or "").split())[:256],
+            "source": " ".join(str(source or "").split())[:64],
+            "requested_at": timestamp,
+            "updated_at": timestamp,
+            "runtime": dict(runtime),
+            "battle_scope": str(battle_scope or "").strip() or None,
+            "trigger": dict(trigger or {}),
+        }
+        normalized = normalize_emulator_maintenance(candidate)
+        if normalized is None:
+            raise ValueError(
+                "Emulator maintenance requires a reason, source, exact runtime, "
+                "ADB target, and bounded battle scope"
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            raw_current = data.get("emulator_maintenance")
+            current = normalize_emulator_maintenance(raw_current)
+            if raw_current is not None and current is None:
+                raise ValueError(
+                    "Existing emulator maintenance directive is malformed; "
+                    "it was preserved"
+                )
+            if current is not None and current["state"] != "terminal":
+                raise ValueError("An emulator maintenance request is busy")
+            data["emulator_maintenance"] = normalized
+            data["updated_at"] = timestamp
+            data["updated_by"] = str(source or "emulator-maintenance")[:64]
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["emulator_maintenance"])
+
+    def acknowledge_emulator_maintenance_host(
+        self,
+        request_id: str,
+        *,
+        host_ack: Mapping[str, object],
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Record the exact Windows process identity before host mutation."""
+
+        timestamp = _timestamp_at(now)
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            current = _require_emulator_maintenance(data, request_id)
+            if current["state"] == "host_acknowledged":
+                if not _same_emulator_host_identity(
+                    current.get("host_ack"),
+                    host_ack,
+                    include_previous=False,
+                ):
+                    raise ValueError(
+                        "Emulator maintenance host acknowledgement conflicts "
+                        "with the stored identity"
+                    )
+                return data
+            if current["state"] != "requested":
+                raise ValueError(
+                    "Emulator maintenance does not accept a host acknowledgement"
+                )
+            candidate = {
+                **current,
+                "state": "host_acknowledged",
+                "updated_at": timestamp,
+                "host_ack": dict(host_ack),
+            }
+            normalized = normalize_emulator_maintenance(candidate)
+            if normalized is None:
+                raise ValueError("Emulator maintenance host identity is malformed")
+            data["emulator_maintenance"] = normalized
+            data["updated_at"] = timestamp
+            data["updated_by"] = "windows-bluestacks-maintenance"
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["emulator_maintenance"])
+
+    def complete_emulator_maintenance_host(
+        self,
+        request_id: str,
+        *,
+        host_completion: Mapping[str, object],
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Record a newly ready process without replaying the host restart."""
+
+        timestamp = _timestamp_at(now)
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            current = _require_emulator_maintenance(data, request_id)
+            if current["state"] == "host_restarted":
+                if not _same_emulator_host_identity(
+                    current.get("host_completion"),
+                    host_completion,
+                    include_previous=True,
+                ):
+                    raise ValueError(
+                        "Emulator maintenance completion conflicts with the "
+                        "stored replacement identity"
+                    )
+                return data
+            if current["state"] != "host_acknowledged":
+                raise ValueError(
+                    "Emulator maintenance host completion is not expected"
+                )
+            host_ack = current.get("host_ack") or {}
+            completion = dict(host_completion)
+            if (
+                completion.get("host_id") != host_ack.get("host_id")
+                or completion.get("adb_port") != host_ack.get("adb_port")
+                or completion.get("previous_process_id")
+                != host_ack.get("process_id")
+                or completion.get("previous_process_started_at")
+                != host_ack.get("process_started_at")
+            ):
+                raise ValueError(
+                    "Emulator maintenance completion does not match the "
+                    "acknowledged old process"
+                )
+            if (
+                completion.get("process_id") == host_ack.get("process_id")
+                and completion.get("process_started_at")
+                == host_ack.get("process_started_at")
+            ):
+                raise ValueError(
+                    "Emulator maintenance completion must prove a new process"
+                )
+            candidate = {
+                **current,
+                "state": "host_restarted",
+                "updated_at": timestamp,
+                "host_completion": completion,
+            }
+            normalized = normalize_emulator_maintenance(candidate)
+            if normalized is None:
+                raise ValueError(
+                    "Emulator maintenance replacement identity is malformed"
+                )
+            data["emulator_maintenance"] = normalized
+            data["updated_at"] = timestamp
+            data["updated_by"] = "windows-bluestacks-maintenance"
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["emulator_maintenance"])
+
+    def finish_emulator_maintenance(
+        self,
+        request_id: str,
+        *,
+        disposition: str,
+        reason: str,
+        source: str,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Persist one idempotent terminal maintenance result."""
+
+        timestamp = _timestamp_at(now)
+        normalized_disposition = _bounded_text(disposition, 48).lower()
+        normalized_reason = " ".join(str(reason or "").split())[:256]
+        if not normalized_disposition or not normalized_reason:
+            raise ValueError(
+                "Emulator maintenance terminal disposition and reason are required"
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            current = _require_emulator_maintenance(data, request_id)
+            if current["state"] == "terminal":
+                return data
+            candidate = {
+                **current,
+                "state": "terminal",
+                "updated_at": timestamp,
+                "terminal_at": timestamp,
+                "terminal_disposition": normalized_disposition,
+                "terminal_reason": normalized_reason,
+            }
+            normalized = normalize_emulator_maintenance(candidate)
+            if normalized is None:
+                raise ValueError("Emulator maintenance terminal state is malformed")
+            data["emulator_maintenance"] = normalized
+            data["updated_at"] = timestamp
+            data["updated_by"] = str(source or "emulator-maintenance")[:64]
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["emulator_maintenance"])
 
     def heartbeat_interactive_development_lease(
         self,
@@ -2921,6 +3141,35 @@ def _require_interactive_development_lease(
     return lease
 
 
+def _require_emulator_maintenance(
+    data: Mapping[str, object],
+    request_id: str,
+) -> dict[str, Any]:
+    maintenance = normalize_emulator_maintenance(
+        data.get("emulator_maintenance")
+    )
+    if maintenance is None:
+        raise ValueError("No valid emulator maintenance request exists")
+    normalized_request_id = str(request_id or "").strip().lower()
+    if maintenance["request_id"] != normalized_request_id:
+        raise ValueError("Emulator maintenance request ID does not match")
+    return maintenance
+
+
+def _same_emulator_host_identity(
+    stored: object,
+    candidate: Mapping[str, object],
+    *,
+    include_previous: bool,
+) -> bool:
+    if not isinstance(stored, Mapping):
+        return False
+    keys = ["host_id", "adb_port", "process_id", "process_started_at"]
+    if include_previous:
+        keys.extend(["previous_process_id", "previous_process_started_at"])
+    return all(stored.get(key) == candidate.get(key) for key in keys)
+
+
 def _valid_strategy_apply_mode(value: object) -> str:
     normalized = str(value or "next_boundary").strip().lower()
     return normalized if normalized in STRATEGY_APPLY_MODES else "next_boundary"
@@ -3290,5 +3539,6 @@ __all__ = [
     "VALID_STATES",
     "normalize_automation_mode",
     "normalize_game_speed_target",
+    "normalize_emulator_maintenance",
     "normalize_interactive_development_lease",
 ]

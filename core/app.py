@@ -25,7 +25,11 @@ from utils.logger import (
     set_mission_log_path,
     start_retry_activity_scope,
 )
-from core.watchdog import CooperativeMutationGuard, watchdog_process_check
+from core.watchdog import (
+    CooperativeMutationGuard,
+    bring_to_foreground,
+    watchdog_process_check,
+)
 from core.adb_connection import AdbConnectionCoordinator
 from core.adb_target_session import AdbTargetSession
 from core.artifact_retention import RuntimeArtifactRetention
@@ -50,6 +54,10 @@ from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
 from core.daily_gem_scheduler import DailyGemScheduler
 from core.event_mission_tracker import EventMissionTracker, format_warning
+from core.emulator_recovery import (
+    EMULATOR_HOST_ACK_TIMEOUT_SECONDS,
+    RestartReplayWindow,
+)
 from core.home_battle import detect_home_battle_control
 from core.battle_lifecycle import HomeBattleControl
 from core.control_model import (
@@ -192,6 +200,10 @@ from handlers.game_over_handler import (
     GameOverHandlingOutcome,
     handle_game_over,
     restore_game_stats_for_terminal_route,
+)
+from handlers.game_restarted_handler import (
+    GameRestartedAction,
+    handle_game_restarted,
 )
 from handlers.tournament_result_handler import (
     dismiss_tournament_results_to_home,
@@ -479,6 +491,15 @@ class App:
         self._authority_holds: tuple[AuthorityHoldState, ...] = ()
         self._external_development_hold_active = False
         self._interactive_development_ack: Optional[Dict[str, Any]] = None
+        self._emulator_maintenance_hold_active = False
+        self._emulator_recovery_ack: Optional[Dict[str, Any]] = None
+        self._emulator_replay_window: Optional[RestartReplayWindow] = None
+        self._emulator_recovery_request_id: Optional[str] = None
+        self._emulator_recovery_durable_state: Optional[str] = None
+        self._emulator_recovery_resume_attempts = 0
+        self._emulator_recovery_next_action_at = 0.0
+        self._emulator_recovery_force_new_battle = False
+        self._emulator_recovery_action_logged = False
         self._control_observation_sequence = 0
         self._control_observation: Optional[Dict[str, Any]] = None
         self._terminal_home_continuation: Optional[Dict[str, Any]] = None
@@ -882,6 +903,13 @@ class App:
             "profile_progression": terminal_save["profile_progression"],
             "terminal_save_report": terminal_save["terminal_save_report"],
         }
+        replay = getattr(self, "_emulator_replay_window", None)
+        if (
+            isinstance(replay, RestartReplayWindow)
+            and replay.battle_scope
+            and replay.battle_scope == binding.get("activity_scope_run_id")
+        ):
+            context["emulator_recovery"] = replay.as_dict()
         if terminal == "GAME_OVER":
             monitor = getattr(self, "_perk_save_monitor", None)
             monitor_context = (
@@ -1373,6 +1401,13 @@ class App:
                     "interactive development owns the cooperative input window",
                 ),
             )
+        if bool(getattr(self, "_emulator_maintenance_hold_active", False)):
+            current_holds += (
+                AuthorityHoldState(
+                    AuthorityHold.EMULATOR_MAINTENANCE,
+                    "BlueStacks maintenance owns host and game recovery",
+                ),
+            )
         supervisor = getattr(self, "_supervisor", None)
         paused = bool(
             supervisor is not None
@@ -1439,6 +1474,9 @@ class App:
             ),
             control_model={
                 "schema_version": 1,
+                "emulator_maintenance": copy.deepcopy(
+                    getattr(self, "_emulator_recovery_ack", None)
+                ),
                 "observation": copy.deepcopy(
                     getattr(self, "_control_observation", None)
                 ),
@@ -4202,6 +4240,11 @@ class App:
 
         runtime_authorized = self._runtime_action_guard(
             action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+            owner=(
+                AuthorityHold.EMULATOR_MAINTENANCE
+                if source == "emulator_recovery"
+                else None
+            ),
         )
         workflow = self._supervisor.battle_workflow
         workflow_active = bool(
@@ -4257,6 +4300,27 @@ class App:
                 and str(manual.get("manual_control_id") or "") == request_id
                 and manual.get("status") == "reconciling"
                 and home_control is HomeBattleControl.RESUME_BATTLE
+            )
+        if source == "emulator_recovery":
+            maintenance = self._supervisor.emulator_maintenance
+            return bool(
+                runtime_authorized
+                and request_id
+                and not workflow_active
+                and not manual_active
+                and self._emulator_maintenance_hold_active
+                and isinstance(maintenance, Mapping)
+                and maintenance.get("state") == "host_restarted"
+                and str(maintenance.get("request_id") or "") == request_id
+                and home_control
+                in {
+                    HomeBattleControl.NEW_BATTLE,
+                    HomeBattleControl.RESUME_BATTLE,
+                }
+                and (
+                    home_control is HomeBattleControl.RESUME_BATTLE
+                    or self._emulator_recovery_force_new_battle
+                )
             )
         if source == "legacy_auto_start":
             return bool(
@@ -4899,6 +4963,497 @@ class App:
             holds=(initial_workflow_hold,) if initial_workflow_hold else (),
         )
         self._publish_action_authority()
+
+    def _set_emulator_recovery_ack(
+        self,
+        maintenance: Mapping[str, object],
+        *,
+        state: str,
+        reason: str,
+        now: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Publish the runtime-owned half of one host maintenance request."""
+
+        runtime = self._supervisor.current_exclusive_validation_owner()
+        replay = getattr(self, "_emulator_replay_window", None)
+        request_id = str(maintenance.get("request_id") or "")
+        if not (
+            isinstance(replay, RestartReplayWindow)
+            and replay.request_id == request_id
+        ):
+            replay = None
+        acknowledgement: Dict[str, Any] = {
+            "schema_version": 1,
+            "request_id": request_id,
+            "state": str(state),
+            "runtime": runtime,
+            "battle_scope": (
+                replay.battle_scope
+                if isinstance(replay, RestartReplayWindow)
+                else maintenance.get("battle_scope")
+            ),
+            "high_water_wave": (
+                replay.high_water_wave
+                if isinstance(replay, RestartReplayWindow)
+                else self._last_wave_value
+            ),
+            "intro_sprint_active": bool(
+                replay.intro_sprint_active
+                if isinstance(replay, RestartReplayWindow)
+                else self._activation_tracker().intro_sprint_active
+            ),
+            "replay_active": bool(
+                replay.active if isinstance(replay, RestartReplayWindow) else False
+            ),
+            "exclude_from_degradation": bool(
+                isinstance(replay, RestartReplayWindow)
+            ),
+            "reason": " ".join(str(reason or "").split())[:256],
+            "observed_at": self._interactive_development_timestamp(now),
+        }
+        if isinstance(replay, RestartReplayWindow):
+            acknowledgement.update(
+                {
+                    "expected_rollback_waves": replay.expected_rollback_waves,
+                    "expected_floor": replay.expected_floor,
+                    "lowest_observed_wave": replay.lowest_observed_wave,
+                }
+            )
+        self._emulator_recovery_ack = acknowledgement
+        return acknowledgement
+
+    def _finish_emulator_recovery(
+        self,
+        maintenance: Mapping[str, object],
+        *,
+        disposition: str,
+        reason: str,
+        now: Optional[float] = None,
+    ) -> bool:
+        """Finish the exact request and release only its process-local hold."""
+
+        request_id = str(maintenance.get("request_id") or "")
+        self._emulator_recovery_request_id = request_id
+        persisted = self._supervisor.finish_emulator_maintenance(
+            request_id,
+            disposition=disposition,
+            reason=reason,
+            now=now,
+        )
+        if not isinstance(persisted, Mapping):
+            self._set_emulator_recovery_ack(
+                maintenance,
+                state="terminal",
+                reason=(
+                    "terminal persistence failed; maintenance input remains held"
+                ),
+                now=now,
+            )
+            return False
+        self._set_emulator_recovery_ack(
+            persisted,
+            state="terminal",
+            reason=reason,
+            now=now,
+        )
+        self._emulator_maintenance_hold_active = False
+        self._emulator_recovery_force_new_battle = False
+        self._emulator_recovery_next_action_at = 0.0
+        self._update_action_authority()
+        self._publish_action_authority()
+        if getattr(self, "_emulator_recovery_action_logged", False):
+            log_result(
+                "BlueStacks recovery completed — "
+                f"{disposition.replace('_', ' ')}",
+                detail=(
+                    f"[EMULATOR_RECOVERY] request_id={request_id} "
+                    f"disposition={disposition} reason={reason}"
+                ),
+                operation_id=request_id,
+                console=True,
+            )
+        self._emulator_recovery_action_logged = False
+        return True
+
+    def _sync_emulator_maintenance_control_boundary(
+        self,
+        *,
+        now: Optional[float] = None,
+    ) -> None:
+        """Install the restart hold before capture or any ordinary handler."""
+
+        maintenance = self._supervisor.emulator_maintenance
+        if not isinstance(maintenance, Mapping):
+            return
+        request_id = str(maintenance.get("request_id") or "")
+        state = str(maintenance.get("state") or "")
+        if state == "terminal":
+            self._emulator_recovery_durable_state = state
+            if (
+                self._emulator_recovery_request_id == request_id
+                and self._emulator_maintenance_hold_active
+            ):
+                self._set_emulator_recovery_ack(
+                    maintenance,
+                    state="terminal",
+                    reason=str(
+                        maintenance.get("terminal_reason")
+                        or "host maintenance ended"
+                    ),
+                    now=now,
+                )
+                self._emulator_maintenance_hold_active = False
+                self._emulator_recovery_force_new_battle = False
+                self._update_action_authority()
+                self._publish_action_authority()
+                if getattr(self, "_emulator_recovery_action_logged", False):
+                    disposition = str(
+                        maintenance.get("terminal_disposition") or "terminal"
+                    )
+                    reason = str(
+                        maintenance.get("terminal_reason")
+                        or "host maintenance ended"
+                    )
+                    log_result(
+                        "BlueStacks recovery ended — "
+                        f"{disposition.replace('_', ' ')}",
+                        detail=(
+                            f"[EMULATOR_RECOVERY] request_id={request_id} "
+                            f"disposition={disposition} reason={reason}"
+                        ),
+                        operation_id=request_id,
+                        console=True,
+                    )
+                    self._emulator_recovery_action_logged = False
+            return
+        runtime = maintenance.get("runtime")
+        current_runtime = self._supervisor.current_exclusive_validation_owner()
+        if not isinstance(runtime, Mapping) or dict(runtime) != current_runtime:
+            self._supervisor.finish_emulator_maintenance(
+                request_id,
+                disposition="runtime_replaced",
+                reason=(
+                    "the exact runtime, PID, or ADB target bound to the request "
+                    "is no longer active"
+                ),
+                now=now,
+            )
+            return
+        if state == "requested":
+            requested_scope = str(
+                maintenance.get("battle_scope") or ""
+            ).strip()
+            current_scope = self._current_run_scope_id()
+            if not requested_scope or current_scope != requested_scope:
+                self._finish_emulator_recovery(
+                    maintenance,
+                    disposition="battle_scope_replaced",
+                    reason=(
+                        "the active battle scope changed before Windows "
+                        "acknowledged any host mutation"
+                    ),
+                    now=now,
+                )
+                return
+            try:
+                requested_at = datetime.fromisoformat(
+                    str(maintenance.get("requested_at") or "")
+                )
+                if requested_at.tzinfo is None:
+                    requested_at = requested_at.replace(tzinfo=timezone.utc)
+                current_time = time.time() if now is None else float(now)
+                request_age = current_time - requested_at.timestamp()
+            except (TypeError, ValueError):
+                request_age = 0.0
+            if request_age >= EMULATOR_HOST_ACK_TIMEOUT_SECONDS:
+                self._finish_emulator_recovery(
+                    maintenance,
+                    disposition="host_ack_timeout",
+                    reason=(
+                        "Windows did not acknowledge an exact BlueStacks "
+                        "process before the three-minute pre-mutation timeout"
+                    ),
+                    now=now,
+                )
+                return
+        if self._emulator_recovery_request_id != request_id:
+            self._emulator_recovery_request_id = request_id
+            self._emulator_recovery_durable_state = None
+            self._emulator_replay_window = RestartReplayWindow(
+                request_id=request_id,
+                high_water_wave=self._last_wave_value,
+                battle_scope=str(maintenance.get("battle_scope") or "") or None,
+                intro_sprint_active=(
+                    self._activation_tracker().intro_sprint_active
+                ),
+            )
+            self._emulator_recovery_resume_attempts = 0
+            self._emulator_recovery_next_action_at = 0.0
+            self._emulator_recovery_force_new_battle = False
+            self._emulator_recovery_action_logged = False
+        if not self._emulator_maintenance_hold_active:
+            with self._get_watchdog_mutation_guard().quiescence_boundary():
+                self._emulator_maintenance_hold_active = True
+                stop_blind_gem_tapper()
+        if getattr(self, "_emulator_recovery_durable_state", None) != state:
+            phase = (
+                "awaiting_adb"
+                if state == "host_restarted"
+                else "awaiting_host_restart"
+                if state == "host_acknowledged"
+                else "pending"
+            )
+            self._set_emulator_recovery_ack(
+                maintenance,
+                state=phase,
+                reason=(
+                    "replacement host process is ready; exact-target Android "
+                    "recovery is pending"
+                    if state == "host_restarted"
+                    else "Windows owns the exact-instance restart"
+                    if state == "host_acknowledged"
+                    else "a fresh running frame is required before host mutation"
+                ),
+                now=now,
+            )
+            self._emulator_recovery_durable_state = state
+        self._update_action_authority()
+        self._publish_action_authority()
+
+    def _advance_emulator_recovery(
+        self,
+        detection: Mapping[str, Any],
+        img: Frame,
+        *,
+        now: Optional[float] = None,
+    ) -> bool:
+        """Advance one restart from fresh UI evidence before passive observers."""
+
+        self._sync_emulator_maintenance_control_boundary(now=now)
+        if not bool(
+            getattr(self, "_emulator_maintenance_hold_active", False)
+        ):
+            return False
+        maintenance = self._supervisor.emulator_maintenance
+        if not isinstance(maintenance, Mapping):
+            return True
+        request_id = str(maintenance.get("request_id") or "")
+        maintenance_state = str(maintenance.get("state") or "")
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        self._update_action_authority(detection=detection)
+        self._publish_action_authority()
+        if self._supervisor.control_state != "RUNNING":
+            self._set_emulator_recovery_ack(
+                maintenance,
+                state="pending",
+                reason=(
+                    f"operator {self._supervisor.control_state} takes precedence"
+                ),
+                now=now,
+            )
+            self._publish_action_authority()
+            return True
+        if maintenance_state == "requested":
+            if state != "RUNNING":
+                self._set_emulator_recovery_ack(
+                    maintenance,
+                    state="pending",
+                    reason="a fresh RUNNING frame is required before restart",
+                    now=now,
+                )
+                self._publish_action_authority()
+                return True
+            lifecycle_authorized = self._runtime_action_guard(
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                owner=AuthorityHold.EMULATOR_MAINTENANCE,
+            )
+            strategy_authorized = self._runtime_action_guard(
+                action_class=RuntimeActionClass.STRATEGY_ACTION,
+                owner=AuthorityHold.EMULATOR_MAINTENANCE,
+            )
+            if not lifecycle_authorized or not strategy_authorized:
+                self._set_emulator_recovery_ack(
+                    maintenance,
+                    state="pending",
+                    reason=(
+                        "another runtime owner or operator control state blocks "
+                        "the BlueStacks restart boundary"
+                    ),
+                    now=now,
+                )
+                self._publish_action_authority()
+                return True
+            if not self._emulator_recovery_action_logged:
+                log_action_intent(
+                    "Restarting the degraded BlueStacks instance",
+                    reason=str(maintenance.get("reason") or "degradation detected"),
+                    detail=(
+                        f"[EMULATOR_RECOVERY] request_id={request_id} "
+                        f"battle_scope={self._current_run_scope_id() or 'unknown'} "
+                        f"high_water_wave={self._last_wave_value}"
+                    ),
+                    operation_id=request_id,
+                )
+                self._emulator_recovery_action_logged = True
+            self._set_emulator_recovery_ack(
+                maintenance,
+                state="host_restart_authorized",
+                reason=(
+                    "the suppressive runtime hold is installed on fresh "
+                    "RUNNING evidence"
+                ),
+                now=now,
+            )
+            self._publish_action_authority()
+            return True
+        if maintenance_state == "host_acknowledged":
+            self._set_emulator_recovery_ack(
+                maintenance,
+                state="awaiting_host_restart",
+                reason="Windows acknowledged the exact old process identity",
+                now=now,
+            )
+            self._publish_action_authority()
+            return True
+        if maintenance_state != "host_restarted":
+            return True
+
+        monotonic_now = time.monotonic()
+        replay = self._emulator_replay_window
+        if not isinstance(replay, RestartReplayWindow):
+            replay = RestartReplayWindow(
+                request_id,
+                self._last_wave_value,
+                battle_scope=str(maintenance.get("battle_scope") or "") or None,
+            )
+            self._emulator_replay_window = replay
+
+        if state == "RUNNING":
+            if self._emulator_recovery_force_new_battle:
+                return not self._finish_emulator_recovery(
+                    maintenance,
+                    disposition="fallback_new_battle",
+                    reason=(
+                        "the prior battle was not resumable and the configured "
+                        "replacement battle reached fresh RUNNING evidence"
+                    ),
+                    now=now,
+                )
+            if not replay.resume_dispatched:
+                replay.mark_resume_dispatched()
+            try:
+                observed_wave, observed_conf = detect_wave_number_from_image(img)
+            except Exception:
+                observed_wave, observed_conf = None, -1.0
+            observation = replay.observe(observed_wave)
+            if observation.caught_up:
+                if observed_wave is not None:
+                    self._last_wave_value = observed_wave
+                    self._last_wave_conf = observed_conf
+                    self._last_wave_ts = time.time()
+                return not self._finish_emulator_recovery(
+                    maintenance,
+                    disposition="resumed",
+                    reason=(
+                        "the resumed battle reached its pre-restart wave "
+                        "high-water"
+                    ),
+                    now=now,
+                )
+            self._set_emulator_recovery_ack(
+                maintenance,
+                state="replaying",
+                reason=(
+                    "The Tower is replaying its non-earning restart rollback "
+                    "before normal observers resume"
+                ),
+                now=now,
+            )
+            self._publish_action_authority()
+            return True
+
+        if state == "GAME_RESTARTED":
+            if monotonic_now < self._emulator_recovery_next_action_at:
+                return True
+            action_guard = lambda: self._runtime_action_guard(
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                owner=AuthorityHold.EMULATOR_MAINTENANCE,
+            )
+            if self._emulator_recovery_resume_attempts < 3:
+                self._emulator_recovery_resume_attempts += 1
+                dispatched = handle_game_restarted(
+                    img,
+                    action=GameRestartedAction.RESUME,
+                    action_guard_fn=action_guard,
+                )
+                if dispatched:
+                    replay.mark_resume_dispatched()
+                    self._set_emulator_recovery_ack(
+                        maintenance,
+                        state="resume_dispatched",
+                        reason="Welcome Back Resume was dispatched",
+                        now=now,
+                    )
+                self._emulator_recovery_next_action_at = monotonic_now + 8.0
+                self._publish_action_authority()
+                return True
+            dispatched = handle_game_restarted(
+                img,
+                action=GameRestartedAction.END_RUN,
+                action_guard_fn=action_guard,
+            )
+            if dispatched:
+                self._emulator_recovery_force_new_battle = True
+                self._set_emulator_recovery_ack(
+                    maintenance,
+                    state="fallback_ending_run",
+                    reason=(
+                        "Welcome Back remained after bounded Resume attempts; "
+                        "End run was dispatched for the configured fallback"
+                    ),
+                    now=now,
+                )
+            self._emulator_recovery_next_action_at = monotonic_now + 8.0
+            self._publish_action_authority()
+            return True
+
+        home_control = HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        )
+        if state == "HOME_SCREEN" and home_control in {
+            HomeBattleControl.RESUME_BATTLE,
+            HomeBattleControl.NEW_BATTLE,
+        }:
+            self._emulator_recovery_force_new_battle = bool(
+                home_control is HomeBattleControl.NEW_BATTLE
+            )
+            return False
+        if state == "GAME_OVER":
+            self._emulator_recovery_force_new_battle = True
+            return False
+
+        if monotonic_now >= self._emulator_recovery_next_action_at:
+            launched = False
+            if self._runtime_action_guard(
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                owner=AuthorityHold.EMULATOR_MAINTENANCE,
+            ):
+                launched = bring_to_foreground(
+                    input_reason=f"emulator_recovery request_id={request_id}"
+                )
+            self._set_emulator_recovery_ack(
+                maintenance,
+                state="awaiting_welcome_back" if launched else "launching_game",
+                reason=(
+                    "The Tower launch was dispatched; fresh game UI is pending"
+                    if launched
+                    else "The Tower launch is retrying after exact-target recovery"
+                ),
+                now=now,
+            )
+            self._emulator_recovery_next_action_at = monotonic_now + 15.0
+            self._publish_action_authority()
+        return True
 
     @staticmethod
     def _interactive_development_evidence(
@@ -8288,6 +8843,7 @@ class App:
             self._status_reporter.request_immediate_report()
         self._observe_strategy_request()
         self._sync_interactive_development_control_boundary()
+        self._sync_emulator_maintenance_control_boundary()
         if self._supervisor.is_paused:
             if stop_blind_gem_tapper():
                 self._blind_tapper_suspended = True
@@ -8316,6 +8872,7 @@ class App:
                     self._status_reporter.request_immediate_report()
                 self._observe_strategy_request()
                 self._sync_interactive_development_control_boundary()
+                self._sync_emulator_maintenance_control_boundary()
                 is_paused = self._supervisor.is_paused
                 if is_paused and stop_blind_gem_tapper():
                     self._blind_tapper_suspended = True
@@ -8362,6 +8919,11 @@ class App:
                     # Recovery may have navigated from a setup sub-screen. A
                     # fresh frame must establish verified Home before setup or
                     # any other handler runs again.
+                    continue
+
+                if self._advance_emulator_recovery(detection, img):
+                    # Host/app recovery owns this fresh frame.  In particular,
+                    # replay waves must not reach monotonic passive observers.
                     continue
 
                 # This passive sidecar sees exact Home NEW_BATTLE before any
@@ -8773,6 +9335,21 @@ class App:
                         owner=AuthorityHold.SESSION_PREFLIGHT,
                     ).allowed
                 )
+                emulator_recovery_action_allowed = bool(
+                    getattr(
+                        self,
+                        "_emulator_maintenance_hold_active",
+                        False,
+                    )
+                    and self._action_decision(
+                        RuntimeActionClass.STRATEGY_ACTION,
+                        owner=AuthorityHold.EMULATOR_MAINTENANCE,
+                    ).allowed
+                    and self._action_decision(
+                        RuntimeActionClass.LIFECYCLE_ACTION,
+                        owner=AuthorityHold.EMULATOR_MAINTENANCE,
+                    ).allowed
+                )
                 game_speed_guard = getattr(self, "_game_speed_guard", None)
                 if game_speed_guard is not None:
                     game_speed_guard.set_target(
@@ -9115,6 +9692,26 @@ class App:
                     self._mission_mgr.tick(img, detection)
                 if strategy_action_allowed and lifecycle_action_allowed:
                     self._handle_primary_states(new_state, overlays, img)
+                elif (
+                    emulator_recovery_action_allowed
+                    and new_state in {"HOME_SCREEN", "GAME_OVER"}
+                ):
+                    previous_owner = getattr(
+                        self,
+                        "_active_action_authority_owner",
+                        None,
+                    )
+                    self._active_action_authority_owner = (
+                        AuthorityHold.EMULATOR_MAINTENANCE
+                    )
+                    try:
+                        self._handle_primary_states(
+                            new_state,
+                            overlays,
+                            img,
+                        )
+                    finally:
+                        self._active_action_authority_owner = previous_owner
                 elif (
                     operator_workflow_action_allowed
                     and (
@@ -10885,6 +11482,14 @@ class App:
             return
 
         if new_state == "GAME_OVER" and self._handler_enabled("game_over"):
+            emulator_fallback = bool(
+                getattr(self, "_emulator_maintenance_hold_active", False)
+                and getattr(
+                    self,
+                    "_emulator_recovery_force_new_battle",
+                    False,
+                )
+            )
             manual = self._supervisor.manual_control
             manual_terminal = (
                 manual.get("terminal_evidence")
@@ -11272,6 +11877,33 @@ class App:
                         dict(manual_terminal.get("receipt") or {})
                     ),
                 }
+            emulator_fallback_disposition = (
+                {
+                    "schema_version": 1,
+                    "outcome": "interrupted",
+                    "initiator": "automatic_emulator_recovery",
+                    "collection": "full_terminal_ui",
+                    "representative": False,
+                    "analytics": "excluded",
+                    "history": "excluded_by_default",
+                    "reason": (
+                        "Welcome Back could not resume the old run; the "
+                        "operator-selected recovery policy requires a new battle"
+                    ),
+                    "provenance": {
+                        "maintenance_request_id": str(
+                            getattr(
+                                self,
+                                "_emulator_recovery_request_id",
+                                "",
+                            )
+                            or ""
+                        )
+                    },
+                }
+                if emulator_fallback
+                else None
+            )
             terminal_outcome = handle_game_over(
                 capture_stats=(
                     not isinstance(pending_terminal_route, Mapping)
@@ -11292,7 +11924,11 @@ class App:
                         )
                         or (
                             not manual_return
-                            and (not self._fast_game_over or no_strategy_run)
+                            and (
+                                not self._fast_game_over
+                                or no_strategy_run
+                                or emulator_fallback
+                            )
                         )
                     )
                 ),
@@ -11308,9 +11944,14 @@ class App:
                         None,
                     ),
                 ),
-                return_home_after_battle=(repair_in_progress or no_strategy_run),
+                return_home_after_battle=(
+                    repair_in_progress or no_strategy_run or emulator_fallback
+                ),
                 battle_context=terminal_battle_context,
-                report_disposition=manual_full_disposition,
+                report_disposition=(
+                    manual_full_disposition
+                    or emulator_fallback_disposition
+                ),
                 captured_at=(
                     terminal_acquisition.captured_at
                     if manual_return
@@ -11384,6 +12025,7 @@ class App:
                         "home"
                         if repair_in_progress
                         or no_strategy_run
+                        or emulator_fallback
                         or AUTOMATION.mode is ExecMode.HOME
                         else "retry"
                     ),
@@ -11637,6 +12279,27 @@ class App:
             )
             awaiting_initial_battle_intent = self._awaiting_initial_battle_intent()
             home_control = detect_home_battle_control(img).control
+            emulator_recovery_active = bool(
+                getattr(self, "_emulator_maintenance_hold_active", False)
+                and isinstance(
+                    self._supervisor.emulator_maintenance,
+                    Mapping,
+                )
+            )
+            emulator_recovery_new_battle = bool(
+                emulator_recovery_active
+                and getattr(
+                    self,
+                    "_emulator_recovery_force_new_battle",
+                    False,
+                )
+                and home_control is HomeBattleControl.NEW_BATTLE
+            )
+            emulator_recovery_resume = bool(
+                emulator_recovery_active
+                and not emulator_recovery_new_battle
+                and home_control is HomeBattleControl.RESUME_BATTLE
+            )
             terminal_mode = AUTOMATION.mode
             workflow = self._supervisor.battle_workflow
             workflow_active = bool(
@@ -11723,6 +12386,15 @@ class App:
                 home_launch_request_id = manual_control_id
             elif terminal_continuation_authorized:
                 home_launch_source = "terminal_continuation"
+            elif (
+                (emulator_recovery_new_battle or emulator_recovery_resume)
+                and not workflow_active
+                and not manual_active
+            ):
+                home_launch_source = "emulator_recovery"
+                home_launch_request_id = str(
+                    getattr(self, "_emulator_recovery_request_id", "") or ""
+                )
             elif legacy_home_launch_authorized:
                 home_launch_source = "legacy_auto_start"
 
@@ -11761,6 +12433,7 @@ class App:
             home_preflight_authorized = bool(
                 explicit_start
                 or terminal_continuation_authorized
+                or emulator_recovery_new_battle
                 or legacy_home_preflight_authorized
                 or validation_home_preflight_authorized
             )
@@ -12084,6 +12757,10 @@ class App:
                     launch_authorized
                     and home_launch_source == "terminal_continuation"
                 )
+                emulator_recovery_launch = bool(
+                    launch_authorized
+                    and home_launch_source == "emulator_recovery"
+                )
                 legacy_home_launch_authorized = bool(
                     launch_authorized
                     and home_launch_source == "legacy_auto_start"
@@ -12093,6 +12770,7 @@ class App:
                     or explicit_attach
                     or manual_return_resume
                     or terminal_continuation_authorized
+                    or emulator_recovery_launch
                     or legacy_home_launch_authorized
                 )
                 if (
@@ -12179,7 +12857,23 @@ class App:
                         f"{continuation_source}; the future policy alone does "
                         "not authorize this launch"
                     )
-                if explicit_attach or manual_return_resume:
+                elif emulator_recovery_launch:
+                    workflow_operation_id = home_launch_request_id
+                    workflow_action_purpose = (
+                        "Starting a replacement battle"
+                        if emulator_recovery_new_battle
+                        else "Resuming the recovered battle"
+                    )
+                    workflow_action_reason = (
+                        "the prior run was not resumable after BlueStacks "
+                        "maintenance"
+                        if emulator_recovery_new_battle
+                        else "Home still offers the exact resumable battle"
+                    )
+                if explicit_attach or manual_return_resume or (
+                    emulator_recovery_launch
+                    and emulator_recovery_resume
+                ):
                     launched = handle_home_screen(
                         restart_enabled=restart_enabled,
                         require_resume_battle=True,
@@ -12188,7 +12882,11 @@ class App:
                         action_reason=workflow_action_reason,
                         action_guard_fn=launch_action_guard,
                     )
-                elif explicit_start or terminal_continuation_authorized:
+                elif (
+                    explicit_start
+                    or terminal_continuation_authorized
+                    or emulator_recovery_launch
+                ):
                     launched = handle_home_screen(
                         restart_enabled=restart_enabled,
                         require_new_battle=True,
@@ -12220,6 +12918,30 @@ class App:
                     )
                 if terminal_continuation_authorized and launched:
                     self._consume_terminal_home_continuation()
+                if emulator_recovery_launch and launched:
+                    maintenance = self._supervisor.emulator_maintenance
+                    replay = getattr(self, "_emulator_replay_window", None)
+                    if emulator_recovery_resume:
+                        if isinstance(replay, RestartReplayWindow):
+                            replay.mark_resume_dispatched()
+                        if isinstance(maintenance, Mapping):
+                            self._set_emulator_recovery_ack(
+                                maintenance,
+                                state="resume_dispatched",
+                                reason="Home Resume Battle was dispatched",
+                            )
+                            self._publish_action_authority()
+                    elif isinstance(maintenance, Mapping):
+                        self._set_emulator_recovery_ack(
+                            maintenance,
+                            state="fallback_starting_battle",
+                            reason=(
+                                "the prior battle was not resumable and a "
+                                "verified configured New Battle launch was dispatched; "
+                                "fresh RUNNING evidence is pending"
+                            ),
+                        )
+                        self._publish_action_authority()
                 if carry_pending:
                     if restart_enabled:
                         save_coordinator.mark_runtime_launch(

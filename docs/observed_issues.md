@@ -55,11 +55,15 @@ current runtime state.
 
 - Two T19 runs kept near-normal effective speed but
   processed far fewer enemies and combos; host scheduling is an inference, so
-  do not change strategy or speed policy from this evidence alone.
+  do not change strategy or speed policy from this evidence alone. On
+  2026-08-10, an operator-reported lower-CPH sequence recovered after a manual
+  BlueStacks restart, supporting but not proving emulator aging.
 - Load the [dossier](issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed)
   for a throughput recurrence, T19 causal analysis, or host-correlation work.
-  Next: pair exact loadout/locks with host counters and targeted frame summaries;
-  see the [runtime backlog](backlog/runtime-and-validation.md).
+  Revision 35 adds a conservative default-off exact-instance mitigation. Next:
+  verify its configured Windows identity and one authorized end-to-end recovery,
+  while pairing any recurrence with exact loadout/locks and host counters; see
+  the [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Windows performance telemetry exceeded its client CPU budget
 

@@ -47,6 +47,12 @@ from core.gate_decisions import startup_gate_context_for_strategy
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
+from core.emulator_degradation import (
+    AUTOMATIC_RESTART_COOLDOWN,
+    assess_emulator_degradation,
+    load_comparable_battles,
+)
+from core.emulator_recovery import normalize_runtime_recovery_ack
 from core.host_performance import (
     DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS,
     HostPerformancePayloadError,
@@ -73,9 +79,10 @@ from utils.logger import DEFAULT_ACTIVITY_SCOPE_FILENAME
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
+EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 34
+CONTROL_SURFACE_REVISION = 35
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -90,6 +97,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "game_speed_target",
     "host_performance_gpu_v1",
     "host_performance_telemetry_v1",
+    "bluestacks_maintenance_v1",
     "interactive_development_lease_v1",
     "managed_custom_module_presets_v1",
     "observed_game_speed",
@@ -272,6 +280,13 @@ class ControlSurfaceService:
         self.adb_connection_manager = adb_connection_manager
         self._process_action_lock = threading.Lock()
         self._battle_mutation_lock = threading.RLock()
+        self._emulator_degradation_cache_lock = threading.Lock()
+        self._emulator_degradation_cache: Optional[
+            tuple[float, tuple[str, str], dict[str, Any]]
+        ] = None
+        self._emulator_battle_history_cache: Optional[
+            tuple[tuple[int, int], list[dict[str, Any]]]
+        ] = None
 
     def strategy_profiles(self) -> dict[str, Any]:
         """Return the constrained profile-editor catalog."""
@@ -1121,6 +1136,8 @@ class ControlSurfaceService:
                 },
                 "interactive_development_lease": None,
                 "interactive_development_lease_error": None,
+                "emulator_maintenance": None,
+                "emulator_maintenance_error": None,
                 "battle_workflow": None,
                 "battle_workflow_error": None,
                 "manual_control": None,
@@ -1152,12 +1169,24 @@ class ControlSurfaceService:
             now=current_time,
             runtime=runtime,
         )
+        current_run = self._load_activity_scope()
         interactive_development_lease = (
             self._interactive_development_lease_status(
                 control=control,
                 runtime_authority=strategy_action_gate,
                 now=current_time,
             )
+        )
+        host_maintenance = self._host_maintenance_status(
+            control=control,
+            runtime_authority=strategy_action_gate,
+        )
+        emulator_degradation = self._emulator_degradation_status(
+            control=control,
+            runtime_authority=strategy_action_gate,
+            current_run=current_run,
+            host_maintenance=host_maintenance,
+            now=current_time,
         )
         process_service = (
             self.process_manager.status() if self.process_manager is not None else None
@@ -1172,7 +1201,6 @@ class ControlSurfaceService:
             process_service,
         )
         healthy = bool(runtime["active"] and observation and not observation["stale"])
-        current_run = self._load_activity_scope()
         current_battle_perks = self._current_battle_perks(current_run)
         confirmed_local_mappings = confirmed_local_mapping_status(
             store=self.confirmed_local_mapping_store,
@@ -1212,11 +1240,496 @@ class ControlSurfaceService:
             "confirmed_local_mappings": confirmed_local_mappings,
             "strategy_action_gate": strategy_action_gate,
             "interactive_development_lease": interactive_development_lease,
+            "host_maintenance": host_maintenance,
+            "emulator_degradation": emulator_degradation,
             "control_model": control_model,
             "runtime": runtime,
             "process_service": process_service,
             "adb_connection": adb_connection,
         }
+
+    def _host_maintenance_status(
+        self,
+        *,
+        control: Mapping[str, Any],
+        runtime_authority: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Join a durable host request to its fresh runtime-owned hold proof."""
+
+        request = control.get("emulator_maintenance")
+        request = dict(request) if isinstance(request, Mapping) else None
+        control_model = runtime_authority.get("control_model")
+        acknowledgement = normalize_runtime_recovery_ack(
+            control_model.get("emulator_maintenance")
+            if isinstance(control_model, Mapping)
+            else None
+        )
+        fresh = bool(
+            acknowledgement is not None
+            and runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_active_runtime") is True
+        )
+        matching = bool(
+            request is not None
+            and acknowledgement is not None
+            and acknowledgement.get("request_id") == request.get("request_id")
+            and acknowledgement.get("runtime") == request.get("runtime")
+            and acknowledgement.get("battle_scope")
+            == request.get("battle_scope")
+        )
+        holds = runtime_authority.get("holds")
+        hold_installed = any(
+            isinstance(item, Mapping)
+            and item.get("hold") == "emulator_maintenance"
+            for item in (holds if isinstance(holds, list) else [])
+        )
+        host_restart_authorized = bool(
+            request is not None
+            and request.get("state") == "requested"
+            and fresh
+            and matching
+            and hold_installed
+            and acknowledgement.get("state") == "host_restart_authorized"
+        )
+        if control.get("emulator_maintenance_error"):
+            reason = str(control["emulator_maintenance_error"])
+        elif request is None:
+            reason = "no BlueStacks maintenance is requested"
+        elif request.get("state") == "terminal":
+            reason = str(
+                request.get("terminal_reason") or "maintenance is terminal"
+            )
+        elif not fresh:
+            reason = "fresh runtime maintenance acknowledgement is unavailable"
+        elif not matching:
+            reason = "runtime maintenance ownership does not match the request"
+        elif not hold_installed:
+            reason = "the suppressive emulator-maintenance hold is not installed"
+        elif host_restart_authorized:
+            reason = "the runtime authorized the exact Windows host restart"
+        else:
+            reason = str(
+                acknowledgement.get("reason")
+                if acknowledgement is not None
+                else "runtime recovery is pending"
+            )
+        return {
+            "schema_version": 1,
+            "request": request,
+            "runtime_acknowledgement": acknowledgement,
+            "acknowledgement_fresh": fresh,
+            "owner_matches_request": matching,
+            "hold_installed": hold_installed,
+            "host_restart_authorized": host_restart_authorized,
+            "active": bool(
+                request is not None and request.get("state") != "terminal"
+            ),
+            "exclude_from_degradation": bool(
+                acknowledgement is not None
+                and acknowledgement.get("exclude_from_degradation") is True
+            ),
+            "reason": reason,
+        }
+
+    def _emulator_degradation_status(
+        self,
+        *,
+        control: Mapping[str, Any],
+        runtime_authority: Mapping[str, Any],
+        current_run: Optional[Mapping[str, Any]],
+        host_maintenance: Mapping[str, Any],
+        now: float,
+    ) -> dict[str, Any]:
+        """Return a conservative, side-effect-free automatic-restart decision."""
+
+        assessed_at = datetime.fromtimestamp(now, tz=timezone.utc)
+        control_model = runtime_authority.get("control_model")
+        strategy_scope = (
+            control_model.get("strategy_scope")
+            if isinstance(control_model, Mapping)
+            else None
+        )
+        current_strategy = (
+            str(strategy_scope.get("active_battle") or "").strip().lower()
+            if isinstance(strategy_scope, Mapping)
+            else ""
+        )
+        run_id = (
+            str(current_run.get("run_id") or "").strip()
+            if isinstance(current_run, Mapping)
+            else ""
+        )
+        if not run_id:
+            return {
+                "schema_version": 1,
+                "assessed_at": assessed_at.isoformat(timespec="seconds"),
+                "status": "ineligible",
+                "automatic_ready": False,
+                "reason": "an active runtime battle scope is required",
+                "current_run_id": None,
+                "current_strategy": current_strategy or None,
+                "candidate_battle_ids": [],
+                "baseline_battle_ids": [],
+            }
+        cache_key = (run_id, current_strategy)
+        with self._emulator_degradation_cache_lock:
+            cached = self._emulator_degradation_cache
+            if (
+                cached is not None
+                and cached[1] == cache_key
+                and 0 <= now - cached[0] < EMULATOR_DEGRADATION_CACHE_SECONDS
+            ):
+                assessment = dict(cached[2])
+            else:
+                try:
+                    try:
+                        battle_dir_stat = self.battles_dir.stat()
+                        battle_signature = (
+                            battle_dir_stat.st_mtime_ns,
+                            battle_dir_stat.st_size,
+                        )
+                    except FileNotFoundError:
+                        battle_signature = (-1, -1)
+                    battle_cache = self._emulator_battle_history_cache
+                    if (
+                        battle_cache is not None
+                        and battle_cache[0] == battle_signature
+                    ):
+                        battles = list(battle_cache[1])
+                    else:
+                        battles = load_comparable_battles(self.battles_dir)
+                        self._emulator_battle_history_cache = (
+                            battle_signature,
+                            list(battles),
+                        )
+                    aggregates = self.host_performance_store.recent_aggregates(
+                        run_id=run_id,
+                        since=assessed_at - timedelta(hours=12),
+                    )
+                except (OSError, HostPerformanceStorageError) as exc:
+                    return {
+                        "schema_version": 1,
+                        "assessed_at": assessed_at.isoformat(timespec="seconds"),
+                        "status": "telemetry_unavailable",
+                        "automatic_ready": False,
+                        "reason": f"degradation evidence is unavailable: {exc}",
+                        "current_run_id": run_id,
+                        "current_strategy": current_strategy or None,
+                        "candidate_battle_ids": [],
+                        "baseline_battle_ids": [],
+                    }
+                assessment = assess_emulator_degradation(
+                    battles,
+                    aggregates,
+                    current_strategy=current_strategy,
+                    current_run_id=run_id,
+                    assessed_at=assessed_at,
+                )
+                self._emulator_degradation_cache = (
+                    now,
+                    cache_key,
+                    dict(assessment),
+                )
+        assessment["cooldown_seconds"] = int(
+            AUTOMATIC_RESTART_COOLDOWN.total_seconds()
+        )
+
+        def suppress(status: str, reason: str) -> dict[str, Any]:
+            return {
+                **assessment,
+                "status": status,
+                "automatic_ready": False,
+                "reason": reason,
+            }
+
+        if control.get("emulator_maintenance_error"):
+            return suppress(
+                "maintenance_state_invalid",
+                str(control.get("emulator_maintenance_error")),
+            )
+        durable = host_maintenance.get("request")
+        if isinstance(durable, Mapping):
+            if durable.get("state") != "terminal":
+                return suppress(
+                    "maintenance_active",
+                    "a BlueStacks maintenance request is already active",
+                )
+            if str(durable.get("battle_scope") or "") == run_id:
+                return suppress(
+                    "already_recovered_this_battle",
+                    "automatic recovery is limited to once per battle",
+                )
+            try:
+                terminal_at = datetime.fromisoformat(
+                    str(durable.get("terminal_at") or "")
+                )
+                if terminal_at.tzinfo is None:
+                    terminal_at = terminal_at.replace(tzinfo=timezone.utc)
+                remaining = AUTOMATIC_RESTART_COOLDOWN - (
+                    assessed_at - terminal_at.astimezone(timezone.utc)
+                )
+            except (TypeError, ValueError):
+                remaining = timedelta(0)
+            if remaining > timedelta(0):
+                blocked = suppress(
+                    "cooldown",
+                    "the eight-hour automatic-restart cooldown is active",
+                )
+                blocked["cooldown_remaining_seconds"] = int(
+                    remaining.total_seconds()
+                )
+                return blocked
+        if assessment.get("automatic_ready") is not True:
+            return assessment
+        if control.get("state") != "RUNNING":
+            return suppress(
+                "control_not_running",
+                "Automation must be Enabled before automatic recovery",
+            )
+        holds = runtime_authority.get("holds")
+        strategy_authority = runtime_authority.get("strategy_action_authority")
+        lifecycle_authority = runtime_authority.get("lifecycle_action_authority")
+        runtime_ready = bool(
+            runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_active_runtime") is True
+            and runtime_authority.get("active_battle") is True
+            and str(runtime_authority.get("runtime_battle_scope") or "")
+            == run_id
+            and str(runtime_authority.get("primary_state") or "").upper()
+            == "RUNNING"
+            and isinstance(runtime_authority.get("owner"), Mapping)
+            and not (holds if isinstance(holds, list) else [])
+            and isinstance(strategy_authority, Mapping)
+            and strategy_authority.get("allowed") is True
+            and isinstance(lifecycle_authority, Mapping)
+            and lifecycle_authority.get("allowed") is True
+        )
+        if not runtime_ready:
+            return suppress(
+                "runtime_not_ready",
+                "fresh unheld RUNNING battle authority is required",
+            )
+        return assessment
+
+    def apply_host_maintenance(
+        self,
+        request: Mapping[str, Any],
+        *,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Serialize request creation and host transitions with control writes."""
+
+        with self._process_action_lock:
+            return self._apply_host_maintenance_locked(request, now=now)
+
+    def _apply_host_maintenance_locked(
+        self,
+        request: Mapping[str, Any],
+        *,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Request maintenance or apply one exact Windows host transition."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        operation = str(request.get("operation") or "").strip().lower()
+        request_id = str(request.get("request_id") or "").strip().lower()
+        if operation not in {"request", "acknowledge", "complete", "fail"}:
+            raise ControlSurfaceRequestError(
+                "operation must be request, acknowledge, complete, or fail"
+            )
+        if operation == "request":
+            return self._request_emulator_maintenance(now=now)
+        if not request_id:
+            raise ControlSurfaceRequestError("request_id is required")
+        current = self.status(now=now)
+        maintenance = current.get("host_maintenance") or {}
+        durable = maintenance.get("request")
+        if not isinstance(durable, Mapping) or durable.get("request_id") != request_id:
+            raise ControlSurfaceRequestError(
+                "Host maintenance request ID does not match",
+                status=409,
+                code="maintenance_request_mismatch",
+            )
+        observed_at = datetime.fromtimestamp(
+            datetime.now().timestamp() if now is None else float(now)
+        ).astimezone().isoformat(timespec="seconds")
+        host_ack = {
+            "host_id": request.get("host_id"),
+            "adb_port": request.get("adb_port"),
+            "process_id": request.get("process_id"),
+            "process_started_at": request.get("process_started_at"),
+            "observed_at": observed_at,
+        }
+        host_completion = {
+            **host_ack,
+            "previous_process_id": request.get("previous_process_id"),
+            "previous_process_started_at": request.get(
+                "previous_process_started_at"
+            ),
+        }
+        try:
+            if operation == "acknowledge":
+                if durable.get("state") == "host_acknowledged" and (
+                    _same_host_transition(
+                        durable.get("host_ack"),
+                        host_ack,
+                        include_previous=False,
+                    )
+                ):
+                    saved = dict(durable)
+                elif maintenance.get("host_restart_authorized") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(
+                            maintenance.get("reason")
+                            or "the runtime has not authorized host mutation"
+                        ),
+                        status=409,
+                        code="maintenance_not_authorized",
+                    )
+                else:
+                    saved = (
+                        self.control_store.acknowledge_emulator_maintenance_host(
+                            request_id,
+                            host_ack=host_ack,
+                            now=now,
+                        )
+                    )
+            elif operation == "complete":
+                if durable.get("state") == "host_restarted" and (
+                    _same_host_transition(
+                        durable.get("host_completion"),
+                        host_completion,
+                        include_previous=True,
+                    )
+                ):
+                    saved = dict(durable)
+                else:
+                    saved = self.control_store.complete_emulator_maintenance_host(
+                        request_id,
+                        host_completion=host_completion,
+                        now=now,
+                    )
+            else:
+                failure_reason = " ".join(
+                    str(request.get("reason") or "").split()
+                )[:256]
+                if not failure_reason:
+                    raise ControlSurfaceRequestError(
+                        "fail requires a bounded reason"
+                    )
+                saved = (
+                    dict(durable)
+                    if durable.get("state") == "terminal"
+                    else self.control_store.finish_emulator_maintenance(
+                        request_id,
+                        disposition="host_failed",
+                        reason=failure_reason,
+                        source="windows-bluestacks-maintenance",
+                        now=now,
+                    )
+                )
+        except ControlSurfaceRequestError:
+            raise
+        except (ControlDirectiveError, ValueError) as exc:
+            raise ControlSurfaceRequestError(
+                str(exc),
+                status=409,
+                code="maintenance_conflict",
+            ) from exc
+        response = self.status(now=now)
+        response["request"] = {
+            "accepted": True,
+            "action": "host_maintenance",
+            "disposition": operation,
+            "request_id": request_id,
+        }
+        response["host_maintenance"]["request"] = saved
+        return response
+
+    def _request_emulator_maintenance(
+        self,
+        *,
+        now: Optional[float],
+    ) -> dict[str, Any]:
+        """Create one detector-authorized request bound to the live runtime."""
+
+        current = self.status(now=now)
+        assessment = current.get("emulator_degradation") or {}
+        if assessment.get("automatic_ready") is not True:
+            raise ControlSurfaceRequestError(
+                str(
+                    assessment.get("reason")
+                    or "automatic BlueStacks recovery is not ready"
+                ),
+                status=409,
+                code="emulator_degradation_not_ready",
+            )
+        authority = current.get("strategy_action_gate") or {}
+        owner = authority.get("owner")
+        current_run = current.get("current_run")
+        if not isinstance(owner, Mapping) or not isinstance(
+            current_run, Mapping
+        ):
+            raise ControlSurfaceRequestError(
+                "fresh runtime ownership and battle scope are required",
+                status=409,
+                code="maintenance_runtime_unavailable",
+            )
+        host = assessment.get("host_evidence")
+        trigger = {
+            "schema_version": assessment.get("schema_version"),
+            "assessed_at": assessment.get("assessed_at"),
+            "candidate_battle_ids": assessment.get("candidate_battle_ids", []),
+            "baseline_battle_ids": assessment.get("baseline_battle_ids", []),
+            "candidate_cph_ratio": assessment.get("candidate_cph_ratio"),
+            "individual_cph_ratios": assessment.get(
+                "individual_cph_ratios", []
+            ),
+            "effective_game_speed_ratio": assessment.get(
+                "effective_game_speed_ratio"
+            ),
+            "host_sample_count": (
+                host.get("sample_count") if isinstance(host, Mapping) else None
+            ),
+            "handle_ratio": (
+                host.get("handle_ratio") if isinstance(host, Mapping) else None
+            ),
+            "handle_delta": (
+                host.get("handle_delta") if isinstance(host, Mapping) else None
+            ),
+        }
+        runtime = {
+            "runtime_id": str(owner.get("runtime_id") or ""),
+            "pid": owner.get("pid"),
+            "adb_target": str(owner.get("adb_target") or ""),
+        }
+        try:
+            saved = self.control_store.request_emulator_maintenance(
+                reason=str(assessment.get("reason") or "degradation detected"),
+                source="windows-control-surface",
+                runtime=runtime,
+                battle_scope=str(current_run.get("run_id") or ""),
+                trigger=trigger,
+                now=now,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            raise ControlSurfaceRequestError(
+                str(exc),
+                status=409,
+                code="maintenance_conflict",
+            ) from exc
+        response = self.status(now=now)
+        response["request"] = {
+            "accepted": True,
+            "action": "host_maintenance",
+            "disposition": "requested",
+            "request_id": saved["request_id"],
+        }
+        response["host_maintenance"]["request"] = saved
+        return response
 
     def apply_interactive_development_lease(
         self,
@@ -4688,6 +5201,20 @@ def _battle_sort_key(item: Mapping[str, Any]) -> float:
         return datetime.fromisoformat(str(item.get("captured_at"))).timestamp()
     except (TypeError, ValueError):
         return 0.0
+
+
+def _same_host_transition(
+    stored: object,
+    candidate: Mapping[str, object],
+    *,
+    include_previous: bool,
+) -> bool:
+    if not isinstance(stored, Mapping):
+        return False
+    keys = ["host_id", "adb_port", "process_id", "process_started_at"]
+    if include_previous:
+        keys.extend(["previous_process_id", "previous_process_started_at"])
+    return all(stored.get(key) == candidate.get(key) for key in keys)
 
 
 def _utc_datetime(value: Optional[datetime]) -> datetime:

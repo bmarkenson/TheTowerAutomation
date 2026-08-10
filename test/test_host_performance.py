@@ -127,6 +127,41 @@ def test_host_performance_publish_is_idempotent_and_keeps_sample_run(tmp_path):
     assert stored["gpu_competitors"] == []
 
 
+def test_recent_host_aggregates_are_bounded_by_run_and_cutoff(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    first = _aggregate(
+        aggregate_id="cf2a62d6-427e-4476-89fd-d985c8ef3b7c",
+        sequence=1,
+        window_start_utc="2026-07-30T15:00:00+00:00",
+        window_end_utc="2026-07-30T15:00:09+00:00",
+        run_id="run-a",
+    )
+    second = _aggregate(
+        aggregate_id="962a5834-154e-4ef8-b2bc-de43393ae5bf",
+        sequence=2,
+        window_start_utc="2026-07-30T15:00:10+00:00",
+        window_end_utc="2026-07-30T15:00:19+00:00",
+        run_id="run-a",
+    )
+    other_run = _aggregate(
+        aggregate_id="a86ac09d-44ab-443b-a1aa-690b1d7ca070",
+        sequence=3,
+        window_start_utc="2026-07-30T15:00:20+00:00",
+        window_end_utc="2026-07-30T15:00:29+00:00",
+        run_id="run-b",
+    )
+    service.publish_host_performance(_request(first, second, other_run))
+
+    recent = service.host_performance_store.recent_aggregates(
+        run_id="run-a",
+        since=datetime(2026, 7, 30, 15, 0, 10, tzinfo=timezone.utc),
+    )
+
+    assert [item["aggregate_id"] for item in recent] == [
+        "962a5834-154e-4ef8-b2bc-de43393ae5bf"
+    ]
+
+
 def test_host_performance_stores_gpu_metrics_and_bounded_competitors(tmp_path):
     service = ControlSurfaceService(repository_root=tmp_path)
     aggregate = _aggregate(

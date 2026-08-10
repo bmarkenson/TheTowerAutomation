@@ -5,6 +5,7 @@ import pytest
 from core.adb_connection import AdbConnectionCoordinator
 from core.run_state import AUTOMATION, RunState
 from core.watchdog import CooperativeMutationGuard, _watchdog_process_check_once
+from core.watchdog import bring_to_foreground
 
 
 @pytest.fixture(autouse=True)
@@ -158,3 +159,53 @@ def test_watchdog_operator_control_is_rechecked_at_mutating_dispatch():
         _watchdog_process_check_once(connection, guard)
 
     restart.assert_not_called()
+
+
+def test_bring_to_foreground_reports_exact_launcher_acceptance():
+    accepted = Mock(returncode=0)
+    with (
+        patch("core.watchdog.adb_shell", return_value=accepted) as adb_shell,
+        patch("core.watchdog.time.sleep") as sleep,
+    ):
+        assert bring_to_foreground() is True
+
+    adb_shell.assert_called_once_with(
+        [
+            "monkey",
+            "-p",
+            "com.TechTreeGames.TheTower",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    sleep.assert_called_once_with(5)
+
+
+def test_bring_to_foreground_does_not_wait_after_launcher_rejection():
+    rejected = Mock(returncode=1)
+    with (
+        patch("core.watchdog.adb_shell", return_value=rejected),
+        patch("core.watchdog.time.sleep") as sleep,
+    ):
+        assert bring_to_foreground() is False
+
+    sleep.assert_not_called()
+
+
+def test_bring_to_foreground_audits_recovery_launcher_input():
+    accepted = Mock(returncode=0)
+    with (
+        patch("core.watchdog.adb_shell", return_value=accepted),
+        patch("core.watchdog.log_input") as input_log,
+        patch("core.watchdog.time.sleep"),
+    ):
+        assert bring_to_foreground(input_reason="emulator_recovery request-1")
+
+    input_log.assert_called_once()
+    assert "package=com.TechTreeGames.TheTower" in (
+        input_log.call_args.kwargs["detail"]
+    )
+    assert "request-1" in input_log.call_args.kwargs["detail"]

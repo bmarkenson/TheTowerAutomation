@@ -804,6 +804,37 @@ ADB-port, UTC, and fresh current-run correlation. This requires server revision
 13 and capabilities `host_performance_telemetry_v1` and
 `host_performance_gpu_v1`.
 
+**Preferences > BlueStacks Recovery** is a default-off opt-in for automatic
+restart after Linux confirms a sustained emulator-degradation signature. Before
+enabling it:
+
+1. Use a shortcut created for the intended BlueStacks instance and verify its
+   instance name. BlueStacks documents creating per-instance shortcuts in its
+   [Multi-instance Manager guidance](https://support.bluestacks.com/hc/en-us/articles/4402959142541),
+   but does not promise a stable raw command-line interface.
+2. Set the absolute path to that installation's `HD-Player.exe`, the exact
+   instance name, and the Windows ADB listener port. The Windows listener and
+   Linux forwarded/runtime ports remain separate settings.
+3. Leave recovery disabled until those values have been checked on this host.
+   The implementation starts `HD-Player.exe --instance INSTANCE`; a different
+   shortcut argument form requires a code/configuration update before enabling.
+
+An eligible request first makes the Linux runtime install a no-input maintenance
+hold on fresh `RUNNING` evidence. Windows then resolves the configured listener
+to exactly one `HD-Player.exe` PID/start time, durably acknowledges that exact
+identity, revalidates it before close or force-kill, starts only the configured
+instance, and requires a different exact listener owner on two consecutive
+polls. A lost response is reconciled instead of replaying the mutation.
+
+Linux reconnects ADB, launches The Tower, and handles the distinct **Welcome
+Back** popup. It tries **Resume**, suppresses the non-earning rollback until the
+old wave high-water, and—if Resume cannot clear the popup—uses **End run** and
+starts a verified configured new battle. Recovery remains held until the old
+battle catches up or the replacement battle is freshly `RUNNING`. An accepted
+request is reconciled even if the Preference is disabled afterward. The
+thresholds, cooldown, and exact authority handshake are specified in the
+[control-surface architecture](../../docs/architecture/control_surface.md#automatic-bluestacks-degradation-recovery).
+
 **System > Services** shows the managed localhost ADB target as four distinct
 values: configured next start, requested/acknowledged directive, active
 runtime, and local draft. While automation is stopped, **Save for next start**
@@ -844,9 +875,10 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 32, `current_battle_perks_v1`,
+current Windows build requires revision 35, `current_battle_perks_v1`,
 `better_control_model_v2`, `save_backed_setup_capture_v2`,
 `terminal_dispositions_v2`,
+`bluestacks_maintenance_v1`,
 `managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`,
 `strategy_authoring_preset_local_copy_v1`, and
@@ -906,6 +938,14 @@ already configured:
 7. With no desired tunnel, close the GUI and confirm the companion exits after
    about 15 seconds. Then start a desired tunnel, sign out of Windows, sign back
    in, and confirm neither the host nor a tunnel starts automatically.
+8. Keep BlueStacks recovery disabled while confirming the executable path,
+   instance shortcut, and listener port. In a disposable or operator-approved
+   active battle, enable it and exercise one detector-authorized request:
+   verify the acknowledged old PID/path/start time, replacement listener, ADB
+   reconnection, The Tower launch, distinct Welcome Back Resume, held rollback,
+   and release at the old wave high-water. Separately validate the bounded
+   **End run** -> full interrupted report -> configured **New Battle** fallback
+   only on a battle the operator has explicitly authorized for that boundary.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).

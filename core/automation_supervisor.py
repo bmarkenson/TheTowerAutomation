@@ -37,6 +37,7 @@ from core.control_directives import (
     ControlDirectiveStore,
     MAXIMUM_GAME_SPEED_TARGET,
     normalize_automation_mode,
+    normalize_emulator_maintenance,
     normalize_game_speed_target,
     normalize_interactive_development_lease,
 )
@@ -93,6 +94,9 @@ class AutomationSupervisor:
             normalize_interactive_development_lease(
                 initial_directives.get("interactive_development_lease")
             )
+        )
+        self._emulator_maintenance = normalize_emulator_maintenance(
+            initial_directives.get("emulator_maintenance")
         )
         self._battle_workflow = validate_battle_workflow(
             initial_directives.get("battle_workflow")
@@ -205,6 +209,16 @@ class AutomationSupervisor:
         return (
             deepcopy(self._interactive_development_lease)
             if self._interactive_development_lease is not None
+            else None
+        )
+
+    @property
+    def emulator_maintenance(self) -> Optional[Dict[str, object]]:
+        """Return the latest validated BlueStacks maintenance directive."""
+
+        return (
+            deepcopy(self._emulator_maintenance)
+            if self._emulator_maintenance is not None
             else None
         )
 
@@ -333,6 +347,9 @@ class AutomationSupervisor:
                 normalize_interactive_development_lease(
                     directives.get("interactive_development_lease")
                 )
+            )
+            self._emulator_maintenance = normalize_emulator_maintenance(
+                directives.get("emulator_maintenance")
             )
             self._battle_workflow = validate_battle_workflow(
                 directives.get("battle_workflow")
@@ -608,6 +625,34 @@ class AutomationSupervisor:
             return None
         self._interactive_development_lease = deepcopy(lease)
         return deepcopy(lease)
+
+    def finish_emulator_maintenance(
+        self,
+        request_id: str,
+        *,
+        disposition: str,
+        reason: str,
+        now: Optional[float] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Persist one terminal result owned by this recovery runtime."""
+
+        try:
+            maintenance = self._control_store.finish_emulator_maintenance(
+                request_id,
+                disposition=disposition,
+                reason=reason,
+                source="runtime-emulator-recovery",
+                now=now,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[EMULATOR_RECOVERY] Failed recording terminal maintenance "
+                f"state: {exc}",
+                "WARN",
+            )
+            return None
+        self._emulator_maintenance = deepcopy(maintenance)
+        return deepcopy(maintenance)
 
     def exclusive_validation_receipt(
         self,

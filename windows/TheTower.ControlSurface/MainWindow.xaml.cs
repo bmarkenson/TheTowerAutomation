@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private const string DiagnosticsSystemPageId = "diagnostics";
     private readonly ControlSurfaceApi _api = new();
     private readonly HostPerformanceTracker _hostPerformance;
+    private readonly BlueStacksMaintenanceCoordinator _blueStacksMaintenance;
     private readonly TunnelHostConnection _tunnelHost = new();
     private readonly ClientSettings _settings;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(5) };
@@ -101,6 +102,17 @@ public partial class MainWindow : Window
         WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
         RestoreMainWindowLayout();
         _api.Configure(_settings.BaseUrl, _apiToken);
+        _blueStacksMaintenance = new BlueStacksMaintenanceCoordinator(
+            _api,
+            new BlueStacksInstanceController(),
+            () => _settings);
+        _blueStacksMaintenance.StateChanged += (_, message) =>
+        {
+            if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+            {
+                _ = Dispatcher.BeginInvoke(() => LastErrorText.Text = message);
+            }
+        };
         _hostPerformance = new HostPerformanceTracker(_api);
         _hostPerformance.SetSamplingEnabled(
             _settings.HostPerformanceSamplingEnabled);
@@ -220,6 +232,12 @@ public partial class MainWindow : Window
             preferences.TunnelConfiguration.LinuxAdbPort;
         _settings.HostPerformanceSamplingEnabled =
             preferences.HostPerformanceSamplingEnabled;
+        _settings.BlueStacksAutomaticRecoveryEnabled =
+            preferences.BlueStacksAutomaticRecoveryEnabled;
+        _settings.BlueStacksPlayerExecutablePath =
+            preferences.BlueStacksPlayerExecutablePath;
+        _settings.BlueStacksInstanceName =
+            preferences.BlueStacksInstanceName;
         _api.Configure(_settings.BaseUrl, _apiToken);
         _hostPerformance.SetSamplingEnabled(
             _settings.HostPerformanceSamplingEnabled);
@@ -2270,7 +2288,12 @@ public partial class MainWindow : Window
         var cancellationToken = _refreshCancellation.Token;
         try
         {
-            RenderStatus(await _api.GetStatusAsync(cancellationToken));
+            var status = await _api.GetStatusAsync(cancellationToken);
+            RenderStatus(status);
+            if (_serverCompatibility?.IsCompatible == true)
+            {
+                _ = ObserveBlueStacksMaintenanceAsync(status);
+            }
             SetHttpConnectionStatus(
                 "Connected",
                 new SolidColorBrush(Color.FromRgb(73, 214, 157)));
@@ -2302,6 +2325,24 @@ public partial class MainWindow : Window
         finally
         {
             _refreshGate.Release();
+        }
+    }
+
+    private async Task ObserveBlueStacksMaintenanceAsync(StatusResponse status)
+    {
+        try
+        {
+            await _blueStacksMaintenance.ObserveStatusAsync(
+                status,
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+            {
+                await Dispatcher.InvokeAsync(
+                    () => LastErrorText.Text = exception.Message);
+            }
         }
     }
 

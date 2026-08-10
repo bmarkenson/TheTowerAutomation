@@ -87,6 +87,7 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             "/api/v1/strategy-profiles",
             "/api/v1/host-performance",
             "/api/v1/interactive-development-lease",
+            "/api/v1/host-maintenance",
         }:
             self._json_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
             return
@@ -133,6 +134,8 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                         payload
                     )
                 )
+            elif parsed.path == "/api/v1/host-maintenance":
+                response = self.server.service.apply_host_maintenance(payload)
             else:
                 response = self.server.service.publish_host_performance(payload)
         except UnicodeDecodeError:

@@ -52,6 +52,11 @@ states:
   - indicators.game_over
   - buttons.more_stats:game_over
 
+- name: GAME_RESTARTED
+  type: terminal_primary
+  match_keys:
+  - indicators.game_restarted
+
 - name: TOURNAMENT_RESULTS
   type: terminal_primary
   match_keys:

@@ -1366,6 +1366,74 @@ warning text in `actions.log`.
   Offline and unauthorized rows are outages. Runtime recovery is complete only
   after a supported fresh frame succeeds, and malformed captures while the
   transport remains connected retain their normal diagnostics.
+
+### Emulator maintenance and restart replay
+
+One schema-1 `emulator_maintenance` directive represents a BlueStacks restart
+requested by the Windows control surface's conservative, default-off
+[degradation detector](control_surface.md#automatic-bluestacks-degradation-recovery).
+The request is bound to the exact runtime ID, PID, ADB target, and current
+battle scope. It is not host authority. At the next fresh `RUNNING` boundary,
+the matching runtime installs the exclusive `emulator_maintenance` hold,
+stops background input, captures its last trusted wave and confirmed Intro
+Sprint state, and publishes a separate runtime acknowledgement. Windows may
+mutate the host only while that acknowledgement is fresh, owner-matched,
+battle-scope-matched, and explicitly `host_restart_authorized`.
+An activity-scope change before that host acknowledgement terminates the
+request without mutation; a request for one battle can never transfer to its
+successor.
+If Windows never acknowledges an old process identity, the pre-mutation request
+expires after three minutes and the runtime releases its hold. There is no such
+guess after durable host acknowledgement: a lost Windows result may mean the
+process already stopped, so the hold remains until exact reconciliation.
+
+The hold precedes capture on every later loop and suppresses ordinary Strategy,
+handler, auxiliary, watchdog-foreground, and lifecycle actions. Capture,
+detection, control synchronization, status, and exact ADB reconnection may
+continue. Pause and Stop cannot be bypassed by the hold. Pause before host
+acknowledgement prevents authorization; after an accepted Windows restart it
+blocks Linux game input while the durable host result remains available for
+later reconciliation.
+
+After Windows proves a different exact `HD-Player.exe` listener owner, Linux
+waits for the configured ADB target, uses one bounded Android launcher intent
+for `com.TechTreeGames.TheTower`, and requires fresh UI evidence. The distinct
+post-process **Welcome Back** modal is the terminal-primary `GAME_RESTARTED`
+state, not Home `RESUME_BATTLE`. From a freshly rematched modal, recovery tries
+**Resume** at most three times. If the modal remains, it selects **End run** and
+continues through natural Game Over/Home handling; it does not stop at a
+notification while leaving a known non-resumable run in place.
+
+The official [v28.0.6 patch note](https://www.techtreegames.com/post/v28-0-6-patch-notes)
+documents that process-restart resume returns five waves, or fifty waves while
+Intro Sprint is active. Those counts are retained as diagnostic expected
+floors, not trusted completion boundaries. The runtime instead holds every
+resumed `RUNNING` frame until wave OCR reaches the captured pre-restart
+high-water. During that window, ordinary wave-monotonic state, Coins/min,
+Perk/mission observations, strategy actions, and passive collectors do not see
+the replayed non-earning waves. If no trusted pre-restart wave exists, the
+first fresh numeric `RUNNING` wave is the strongest available completion
+boundary.
+
+When the old battle is positively non-resumable, **End run** is followed by the
+ordinary full terminal collector with an `interrupted`, nonrepresentative,
+analytics-excluded disposition. Recovery then permits only verified Home
+`NEW_BATTLE`, runs the configured new-battle preflight and action guards, and
+keeps its hold after the Battle tap until a fresh replacement `RUNNING` frame.
+Home `RESUME_BATTLE` remains an allowed alternative only while fallback has not
+committed to a new battle. Unknown or transient screens retain the hold and
+retry only the bounded app launcher; they never infer a Surrender, Resume, or
+Battle target from absence.
+
+A resumed record carries the request ID, battle scope, high-water, expected
+floor, lowest observed wave, and catch-up disposition under
+`runtime.emulator_recovery`. The interrupted old record receives the same
+provenance, while its replacement battle does not. Any record with that
+provenance is excluded from later degradation calibration so restart downtime
+and non-earning replay cannot train the trigger. The complete workflow emits
+one `ACTION`/`RESULT` pair plus an `INPUT` entry for each Android launch or
+verified UI action.
+
 - The native Windows control surface owns API local forwarding and ADB reverse
   forwarding as separate OpenSSH processes. The ADB process requests only
   `127.0.0.1:<linux-port>` and targets the independently configured Windows

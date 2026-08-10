@@ -28,6 +28,10 @@ public partial class PreferencesWindow : Window
                 CultureInfo.InvariantCulture);
         HostPerformanceSamplingBox.IsChecked =
             settings.HostPerformanceSamplingEnabled;
+        BlueStacksAutomaticRecoveryBox.IsChecked =
+            settings.BlueStacksAutomaticRecoveryEnabled;
+        BlueStacksPlayerPathBox.Text = settings.BlueStacksPlayerExecutablePath;
+        BlueStacksInstanceNameBox.Text = settings.BlueStacksInstanceName;
     }
 
     private void ResetLayout_Click(object sender, RoutedEventArgs e)
@@ -69,11 +73,22 @@ public partial class PreferencesWindow : Window
                         "Linux ADB forward port"),
                 },
                 requireDestination: false);
+            var recoveryEnabled = BlueStacksAutomaticRecoveryBox.IsChecked == true;
+            var playerPath = BlueStacksPlayerPathBox.Text.Trim();
+            if (recoveryEnabled)
+            {
+                playerPath = BlueStacksInstanceController.ValidateExecutablePath(
+                    playerPath);
+            }
             Result = new PreferencesResult(
                 baseUrl,
                 TokenBox.Password.Trim(),
                 configuration,
-                HostPerformanceSamplingBox.IsChecked == true);
+                HostPerformanceSamplingBox.IsChecked == true,
+                recoveryEnabled,
+                playerPath,
+                BlueStacksInstanceController.ValidateInstanceName(
+                    BlueStacksInstanceNameBox.Text));
             DialogResult = true;
         }
         catch (ArgumentException exc)
@@ -114,10 +129,14 @@ public partial class PreferencesWindow : Window
         }
         return port;
     }
+
 }
 
 public sealed record PreferencesResult(
     string BaseUrl,
     string InMemoryToken,
     TunnelHostConfiguration TunnelConfiguration,
-    bool HostPerformanceSamplingEnabled);
+    bool HostPerformanceSamplingEnabled,
+    bool BlueStacksAutomaticRecoveryEnabled,
+    string BlueStacksPlayerExecutablePath,
+    string BlueStacksInstanceName);

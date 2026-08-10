@@ -179,6 +179,14 @@ public sealed class ControlSurfaceApi : IDisposable
             payload,
             cancellationToken);
 
+    public Task<StatusResponse> PostHostMaintenanceAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<StatusResponse>(
+            "/api/v1/host-maintenance",
+            payload,
+            cancellationToken);
+
     private async Task<T> GetAsync<T>(string path, CancellationToken cancellationToken)
     {
         using var request = CreateRequest(HttpMethod.Get, path);

@@ -36,7 +36,7 @@ from core.adb_connection import (
 )
 from core.adb_utils import adb_shell
 from core.adb_target_session import ADB_TARGET_OPERATION_LOCK
-from utils.logger import log
+from utils.logger import log, log_input
 
 GAME_PACKAGE = "com.TechTreeGames.TheTower"
 """
@@ -189,23 +189,38 @@ def is_game_foregrounded():
         return False
 
 
-def bring_to_foreground():
+def bring_to_foreground(*, input_reason: Optional[str] = None) -> bool:
     """
     spec:
       name: bring_to_foreground
-      signature: bring_to_foreground() -> None
-      r: null
+      signature: bring_to_foreground(*, input_reason: str|None = None) -> bool
+      r: True only when Android accepted the bounded launcher command.
       s: [adb][log][sleep]
       e: none (uses check=False; best-effort)
       notes:
         - Sends a single monkey LAUNCHER intent for GAME_PACKAGE and waits ~5s.
     """
-    adb_shell([
+    if input_reason:
+        log_input(
+            "Launched The Tower through Android",
+            detail=(
+                f"ADB_SHELL monkey package={GAME_PACKAGE} "
+                f"reason={' '.join(str(input_reason).split())[:256]}"
+            ),
+        )
+    result = adb_shell([
         "monkey", "-p", GAME_PACKAGE,
         "-c", "android.intent.category.LAUNCHER", "1"
-    ], check=False)
+    ], capture_output=True, check=False)
+    if result is None or result.returncode != 0:
+        log(
+            "[WATCHDOG] The Tower launcher command was not accepted",
+            "DEBUG",
+        )
+        return False
     log("[WATCHDOG] Sent monkey event to foreground game.", "INFO")
     time.sleep(5)
+    return True
 
 
 def restart_game():

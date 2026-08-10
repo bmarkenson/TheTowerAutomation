@@ -35,6 +35,12 @@ public sealed class StatusResponse
     [JsonPropertyName("current_run")]
     public CurrentRunStatus? CurrentRun { get; set; }
 
+    [JsonPropertyName("host_maintenance")]
+    public HostMaintenanceStatus HostMaintenance { get; set; } = new();
+
+    [JsonPropertyName("emulator_degradation")]
+    public EmulatorDegradationStatus EmulatorDegradation { get; set; } = new();
+
     [JsonPropertyName("current_battle_perks")]
     public CurrentBattlePerksStatus CurrentBattlePerks { get; set; } = new();
 
@@ -55,6 +61,118 @@ public sealed class StatusResponse
 
     [JsonPropertyName("request")]
     public RequestStatus? Request { get; set; }
+}
+
+public sealed class HostMaintenanceStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("request")]
+    public HostMaintenanceRequest? Request { get; set; }
+
+    [JsonPropertyName("runtime_acknowledgement")]
+    public HostMaintenanceRuntimeAcknowledgement? RuntimeAcknowledgement
+        { get; set; }
+
+    [JsonPropertyName("host_restart_authorized")]
+    public bool HostRestartAuthorized { get; set; }
+
+    [JsonPropertyName("active")]
+    public bool Active { get; set; }
+
+    [JsonPropertyName("exclude_from_degradation")]
+    public bool ExcludeFromDegradation { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+}
+
+public sealed class EmulatorDegradationStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("assessed_at")]
+    public string AssessedAt { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("automatic_ready")]
+    public bool AutomaticReady { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("candidate_battle_ids")]
+    public List<string> CandidateBattleIds { get; set; } = [];
+
+    [JsonPropertyName("baseline_battle_ids")]
+    public List<string> BaselineBattleIds { get; set; } = [];
+
+    [JsonPropertyName("candidate_cph_ratio")]
+    public double? CandidateCphRatio { get; set; }
+
+    [JsonPropertyName("effective_game_speed_ratio")]
+    public double? EffectiveGameSpeedRatio { get; set; }
+}
+
+public sealed class HostMaintenanceRequest
+{
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("host_ack")]
+    public BlueStacksHostProcessIdentity? HostAcknowledgement { get; set; }
+
+    [JsonPropertyName("host_completion")]
+    public BlueStacksHostProcessIdentity? HostCompletion { get; set; }
+}
+
+public sealed class HostMaintenanceRuntimeAcknowledgement
+{
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    [JsonPropertyName("high_water_wave")]
+    public int? HighWaterWave { get; set; }
+
+    [JsonPropertyName("replay_active")]
+    public bool ReplayActive { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+}
+
+public sealed class BlueStacksHostProcessIdentity
+{
+    [JsonPropertyName("host_id")]
+    public string HostId { get; set; } = "";
+
+    [JsonPropertyName("adb_port")]
+    public int AdbPort { get; set; }
+
+    [JsonPropertyName("process_id")]
+    public int ProcessId { get; set; }
+
+    [JsonPropertyName("process_started_at")]
+    public string ProcessStartedAt { get; set; } = "";
+
+    [JsonPropertyName("previous_process_id")]
+    public int? PreviousProcessId { get; set; }
+
+    [JsonPropertyName("previous_process_started_at")]
+    public string? PreviousProcessStartedAt { get; set; }
 }
 
 public sealed class ConfirmedLocalMappingStatus
@@ -2695,6 +2813,10 @@ public sealed class ClientSettings
     public int WindowsBlueStacksAdbPort { get; set; } = 5555;
     public int LinuxAdbForwardPort { get; set; } = 5555;
     public bool HostPerformanceSamplingEnabled { get; set; } = true;
+    public bool BlueStacksAutomaticRecoveryEnabled { get; set; }
+    public string BlueStacksPlayerExecutablePath { get; set; } =
+        @"C:\Program Files\BlueStacks_nxt\HD-Player.exe";
+    public string BlueStacksInstanceName { get; set; } = "Nougat32";
     public WindowPlacementSettings? MainWindowPlacement { get; set; }
     public WindowPlacementSettings? BattleHistoryWindowPlacement { get; set; }
     public MainWindowLayoutSettings MainWindowLayout { get; set; } = new();

@@ -958,6 +958,16 @@ stages:
     separately from UI and other process activity, retain complete evidence
     cadence, and validate both clean and contended cases. Track evidence in
     [`ISSUE-2026-003`](../issues/open-2026.md#windows-performance-telemetry-exceeded-its-client-cpu-budget).
+  - [ ] Validate and calibrate the default-off BlueStacks degradation recovery
+    on Windows. Verify the installed `HD-Player.exe`, instance name from a
+    BlueStacks-created shortcut, and exact ADB listener before enabling it;
+    retain one detector decision and authorized end-to-end restart through
+    Welcome Back catch-up. Exercise the End run/New Battle branch only at an
+    explicitly authorized boundary. Compare false-positive/false-negative
+    behavior with exact run/configuration and host telemetry before changing
+    the trigger thresholds. This completes mitigation validation but does not
+    by itself resolve the cause tracked in
+    [`ISSUE-2026-002`](../issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
     second client, as tracked in

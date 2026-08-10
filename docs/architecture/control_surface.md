@@ -7,6 +7,7 @@ served by that same API.
 
 ```text
 Native Windows WPF app
+      ├── opt-in BlueStacks maintenance ──► exact ADB-listener PID / HD-Player.exe
       ├── current-user named pipe ──► TheTower.TunnelHost.exe
       │                                  ├── API ssh.exe local forward
       │                                  ├── ADB ssh.exe reverse forward
@@ -72,6 +73,8 @@ agnostic.
   optional strategy-scoped one-run check configuration,
   one cooperative interactive-development lease request, heartbeat, and
   release,
+  one detector-authorized BlueStacks maintenance handshake bound to the exact
+  runtime, ADB target, and battle scope,
   bundled or validated custom-strategy selection, constrained custom Farm
   profile publication, stopped or
   acknowledged-paused ADB-port configuration, and fixed managed-service
@@ -162,8 +165,14 @@ agnostic.
   new-run boundary, except for an explicitly declared read-only observer check.
   If `NEW_BATTLE` is observed first, the request follows the normal
   boundary-install path and all new-run gates remain active.
-- The API never accepts a PID, executable, service name, or command from the
-  Windows client. The Linux server is configured with one validated unit name.
+- The API never accepts an arbitrary executable, service name, shell command,
+  or process-mutation target from the Windows client. The Linux server is
+  configured with one validated unit name. BlueStacks maintenance is the
+  narrow exception for process-identity evidence: the host acknowledgement
+  reports the exact Windows listener PID/start time and the completion reports
+  its replacement, but Linux never executes either identity. Windows resolves
+  and revalidates the configured listener and executable locally before any
+  stop or start.
 - A malformed control file is reported and preserved rather than overwritten.
 - Status advertises an API version, a monotonic server revision, and explicit
   capabilities. The Windows client evaluates all three: it requires the
@@ -172,7 +181,10 @@ agnostic.
   Linux behavior must advance the Linux server revision and the client's
   minimum revision in the same change; independently gated features should
   also advertise and require a named capability.
-- Connecting the Windows client remains read-only. An incompatible API,
+- Connecting the Windows client remains read-only unless the operator has
+  explicitly enabled automatic BlueStacks recovery in local Preferences and
+  the server publishes a fresh detector-authorized request boundary. An
+  incompatible API,
   insufficient server revision, or missing required capability disables the
   dependent action and shows one generic client/server compatibility warning.
   Independently of HTTP, the client may use its validated SSH destination to
@@ -448,6 +460,7 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, current save-backed Perks, persistent save-mapping review status, latest observation, structured Strategy Action Gate, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/interactive-development-lease` | Request, heartbeat, or release the one cooperative development lease; never dispatch device input |
+| `POST` | `/api/v1/host-maintenance` | Create or advance the typed BlueStacks restart handshake; creation requires fresh server-side degradation and runtime authority, while acknowledgement/completion carry exact Windows process identity evidence |
 | `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit independently of battle intent, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
@@ -892,6 +905,70 @@ anomaly cannot be resolved from the retained counters, collect one bounded,
 opt-in diagnostic trace for that issue rather than adding a permanent provider,
 frame spool, or dashboard surface.
 
+### Automatic BlueStacks degradation recovery
+
+Server revision 35 adds capability `bluestacks_maintenance_v1`. The feature is
+disabled by default in the native client's local Preferences. Before enabling
+it, the operator must verify the absolute `HD-Player.exe` path, the Windows ADB
+listener port, and the instance name against a shortcut created by the installed
+BlueStacks version. The client launches only
+`HD-Player.exe --instance INSTANCE`; that argument form is deliberately
+configurable because BlueStacks documents per-instance shortcuts but does not
+publish a stable raw command-line contract.
+
+The Linux assessment is intentionally conservative and side-effect free. It
+compares the newest two representative completed Farm runs with the preceding
+three to five runs having the same Strategy and exact run-configuration
+fingerprint. Both candidates must be at or below 93% of the baseline median,
+their median must be at or below 90%, and their effective-game-speed median
+must remain at least 97% of baseline. A current exact-run telemetry window must
+also cover at least 16 minutes with a stable nonzero BlueStacks process set,
+recent median handle count at least 1.8 times and 4,000 handles above its
+low-water mark, and no host CPU or memory maximum at or above 95%. Missing host
+corroboration produces a recommendation only; host saturation defers recovery.
+Any battle that already contains emulator-recovery provenance is excluded from
+future calibration. The service caches this read-only assessment for one minute
+and retains the completed-run cohort until the battle directory changes, so
+five-second status polling does not repeatedly parse completed reports and
+thousands of retained host windows.
+
+When the detector reports `automatic_ready`, an opted-in Windows client may
+request one restart. Request creation still requires a fresh owner-matched
+`RUNNING` Farm battle, exact active Strategy and activity scope, Enabled
+automation, no other hold, and both normal Strategy and lifecycle authority.
+Only one automatic attempt is allowed per battle, and a terminal request starts
+an eight-hour cooldown.
+
+The durable request separates the two mutation owners:
+
+1. Linux binds the request to runtime ID, PID, ADB target, and battle scope. The
+   runtime captures the current wave, installs the suppressive
+   `emulator_maintenance` hold, and publishes a separate fresh authorization.
+2. Windows resolves the configured ADB listener through the native TCP owner
+   table and requires exactly one process whose executable path is the
+   configured `HD-Player.exe`. It posts that host name, port, PID, and start
+   time before mutation.
+3. Immediately before graceful close—and again before the force-kill fallback—
+   Windows revalidates listener PID, executable path, and start time. It starts
+   only the configured instance and accepts completion only after a different
+   exact process owns the listener for two consecutive polls.
+4. Linux then owns ADB reconnection, The Tower launch, Welcome Back handling,
+   replay suppression, and the configured new-battle fallback described in the
+   [runtime architecture](runtime.md#emulator-maintenance-and-restart-replay).
+
+Lost acknowledgement and completion responses are idempotent. After host
+acknowledgement, an uncertain result retains the Linux hold and reconciles the
+exact old or replacement listener on a later poll; it does not report failure
+merely because the response was lost. Disabling the Preference stops creation
+of new requests but does not abandon an already accepted one. A request that
+never receives a Windows process acknowledgement expires after three minutes,
+before host mutation, and normal runtime authority is restored. Once Windows
+has acknowledged the old identity, no timeout may guess whether mutation
+occurred; durable reconciliation is required. Pause before host
+authorization blocks the restart; Pause after acknowledgement allows Windows
+to reconcile the accepted host operation while Linux continues to block every
+game input until Enabled again.
+
 Control request examples:
 
 ```json
@@ -934,6 +1011,12 @@ Process request examples:
   header groups four separately labelled Linux service, HTTP, API SSH, and ADB
   SSH signals and routes routine navigation through **View**, **Tools**, and
   **Preferences** menus.
+- Preferences also contains the default-off BlueStacks recovery opt-in and its
+  exact executable/instance settings. Enabling it permits request creation only
+  when Linux reports the revision-35 degradation decision; an accepted request
+  is reconciled independently of later Preference changes. Recovery progress
+  is presented as host-maintenance state rather than as an Automation Pause or
+  a claim that the game is already running.
 - Overview uses one server-authoritative battle-action slot and one contextual
   manual-authority slot: only the matching **Start Battle**/**Attach to
   Battle** and **Take Manual Control**/**Return Control** action is shown. The
@@ -959,7 +1042,8 @@ Process request examples:
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  32 and capability `better_control_model_v2`;
+  35 and capabilities `better_control_model_v2` and
+  `bluestacks_maintenance_v1`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
 - A read-only full-width **Perks** page showing the current run's
   monitor-validated saved inventory, level, and last selection wave in

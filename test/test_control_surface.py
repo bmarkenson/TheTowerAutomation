@@ -728,6 +728,208 @@ def test_strategy_gate_status_never_scrapes_warning_text(tmp_path):
     assert gate["stale"] is True
 
 
+def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    run_id = "run-emulator-recovery"
+    owner = {
+        "runtime_id": "runtime-emulator-recovery",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+    }
+    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
+    _write_current_run_scope(tmp_path, run_id=run_id)
+    service = _service(tmp_path)
+    service.control_store.set_strategy("farm_t18", source="test")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope=run_id,
+        primary_state="RUNNING",
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+        control_model={
+            "schema_version": 1,
+            "observation": None,
+            "strategy_scope": {"active_battle": "farm_t18"},
+        },
+    )
+    detector_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "current_run_id": run_id,
+        "current_strategy": "farm_t18",
+        "status": "automatic_ready",
+        "automatic_ready": True,
+        "reason": "two slow runs and sustained handle growth",
+        "candidate_battle_ids": ["BattleSlow1", "BattleSlow2"],
+        "baseline_battle_ids": ["BattleBase1", "BattleBase2", "BattleBase3"],
+        "candidate_cph_ratio": 0.88,
+        "individual_cph_ratios": [0.87, 0.89],
+        "effective_game_speed_ratio": 0.99,
+        "host_evidence": {
+            "sample_count": 120,
+            "handle_ratio": 1.9,
+            "handle_delta": 4_500,
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=detector_ready,
+        ) as detector:
+            requested = service.apply_host_maintenance(
+                {"operation": "request"},
+                now=now.timestamp(),
+            )
+        assert detector.call_count == 1
+        assert detector.call_args.kwargs["current_strategy"] == "farm_t18"
+        maintenance = requested["host_maintenance"]["request"]
+        assert maintenance["state"] == "requested"
+        assert maintenance["runtime"] == owner
+        assert maintenance["battle_scope"] == run_id
+        request_id = maintenance["request_id"]
+
+        authority.update_context(
+            global_pause=False,
+            active_battle=True,
+            battle_scope=run_id,
+            primary_state="RUNNING",
+            holds=(
+                AuthorityHoldState(
+                    AuthorityHold.EMULATOR_MAINTENANCE,
+                    "BlueStacks maintenance owns host and game recovery",
+                ),
+            ),
+        )
+        runtime_ack = {
+            "schema_version": 1,
+            "request_id": request_id,
+            "state": "host_restart_authorized",
+            "runtime": owner,
+            "battle_scope": run_id,
+            "high_water_wave": 2_000,
+            "intro_sprint_active": False,
+            "replay_active": False,
+            "exclude_from_degradation": True,
+            "reason": "runtime hold installed",
+            "observed_at": now.isoformat(),
+        }
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 1),
+            now=now.timestamp() + 1,
+            control_model={
+                "schema_version": 1,
+                "emulator_maintenance": runtime_ack,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+            },
+        )
+        authorized = service.status(now=now.timestamp() + 1)[
+            "host_maintenance"
+        ]
+        assert authorized["host_restart_authorized"] is True
+        assert authorized["hold_installed"] is True
+
+        mismatched_scope_ack = {
+            **runtime_ack,
+            "battle_scope": "different-run",
+        }
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 1.25),
+            now=now.timestamp() + 1.25,
+            control_model={
+                "schema_version": 1,
+                "emulator_maintenance": mismatched_scope_ack,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+            },
+        )
+        scope_mismatch = service.status(now=now.timestamp() + 1.25)[
+            "host_maintenance"
+        ]
+        assert scope_mismatch["host_restart_authorized"] is False
+        assert scope_mismatch["owner_matches_request"] is False
+
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 1.5),
+            now=now.timestamp() + 1.5,
+            control_model={
+                "schema_version": 1,
+                "emulator_maintenance": runtime_ack,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+            },
+        )
+
+        ack_payload = {
+            "operation": "acknowledge",
+            "request_id": request_id,
+            "host_id": "WINDOWS-HOST",
+            "adb_port": 5555,
+            "process_id": 90,
+            "process_started_at": "2026-08-10T10:00:00+00:00",
+        }
+        acknowledged = service.apply_host_maintenance(
+            ack_payload,
+            now=now.timestamp() + 2,
+        )
+        repeated_ack = service.apply_host_maintenance(
+            ack_payload,
+            now=now.timestamp() + 3,
+        )
+        assert acknowledged["host_maintenance"]["request"]["state"] == (
+            "host_acknowledged"
+        )
+        assert repeated_ack["host_maintenance"]["request"]["host_ack"] == (
+            acknowledged["host_maintenance"]["request"]["host_ack"]
+        )
+
+        completion_payload = {
+            "operation": "complete",
+            "request_id": request_id,
+            "host_id": "WINDOWS-HOST",
+            "adb_port": 5555,
+            "process_id": 91,
+            "process_started_at": "2026-08-10T10:04:00+00:00",
+            "previous_process_id": 90,
+            "previous_process_started_at": "2026-08-10T10:00:00+00:00",
+        }
+        completed = service.apply_host_maintenance(
+            completion_payload,
+            now=now.timestamp() + 4,
+        )
+        repeated_completion = service.apply_host_maintenance(
+            completion_payload,
+            now=now.timestamp() + 5,
+        )
+        assert completed["host_maintenance"]["request"]["state"] == (
+            "host_restarted"
+        )
+        assert repeated_completion["host_maintenance"]["request"] == (
+            completed["host_maintenance"]["request"]
+        )
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_host_maintenance_request_rejects_an_unready_detector(tmp_path):
+    service = _service(tmp_path)
+    with pytest.raises(ControlSurfaceRequestError) as rejected:
+        service.apply_host_maintenance({"operation": "request"})
+
+    assert rejected.value.status == 409
+    assert rejected.value.code == "emulator_degradation_not_ready"
+
+
 def test_interactive_development_status_separates_request_and_fresh_ack(
     tmp_path,
 ):
@@ -1512,7 +1714,8 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 34" in native_compatibility
+    assert "MinimumServerRevision = 35" in native_compatibility
+    assert '"bluestacks_maintenance_v1"' in native_compatibility
     assert '"confirmed_local_mapping_status_v1"' in native_compatibility
     assert "confirmed_local_mapping_status_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_review_status_v1"' in native_compatibility
@@ -2805,6 +3008,24 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         assert response.status == 200
         assert "strategy_action_gate" in status_payload
         assert status_payload["strategy_action_gate"]["active"] is False
+        assert "emulator_degradation" in status_payload
+        assert status_payload["emulator_degradation"]["automatic_ready"] is False
+
+        maintenance_body = json.dumps({"operation": "request"})
+        connection.request(
+            "POST",
+            "/api/v1/host-maintenance",
+            body=maintenance_body,
+            headers={
+                "Authorization": "Bearer test-secret",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(maintenance_body)),
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 409
+        assert payload["code"] == "emulator_degradation_not_ready"
 
         connection.request(
             "GET",

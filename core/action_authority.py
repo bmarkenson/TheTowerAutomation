@@ -73,6 +73,7 @@ class AuthorityHold(str, Enum):
     OPERATOR_WORKFLOW = "operator_workflow"
     MANUAL_CONTROL_RETURN = "manual_control_return"
     SETUP_CAPTURE = "setup_capture"
+    EMULATOR_MAINTENANCE = "emulator_maintenance"
 
 
 class StrategyGateExitEvent(str, Enum):

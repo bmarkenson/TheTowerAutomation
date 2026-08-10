@@ -149,10 +149,11 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                34,
+                35,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
+                "bluestacks_maintenance_v1",
                 "completed_battle_discard",
                 "confirmed_local_mapping_status_v1",
                 "current_battle_perks_v1",
@@ -342,5 +343,53 @@ public sealed class ControlSurfaceCompatibilityTests
             "orb_distance",
             response.Draft.Review.Unresolved[0].SettingId);
         Assert.Equal(1, response.Draft.Review.CapturedVsBase.GetProperty("change_count").GetInt32());
+    }
+
+    [Fact]
+    public void StatusDeserializesBlueStacksRecoveryContracts()
+    {
+        var response = System.Text.Json.JsonSerializer.Deserialize<StatusResponse>(
+            """
+            {
+              "emulator_degradation": {
+                "schema_version": 1,
+                "assessed_at": "2026-08-10T12:00:00+00:00",
+                "status": "automatic_ready",
+                "automatic_ready": true,
+                "reason": "degraded",
+                "candidate_battle_ids": ["Battle1", "Battle2"],
+                "candidate_cph_ratio": 0.88,
+                "effective_game_speed_ratio": 0.99
+              },
+              "host_maintenance": {
+                "schema_version": 1,
+                "host_restart_authorized": true,
+                "request": {
+                  "request_id": "0123456789abcdef0123456789abcdef",
+                  "state": "requested",
+                  "reason": "degraded"
+                }
+              }
+            }
+            """);
+
+        Assert.NotNull(response);
+        Assert.True(response!.EmulatorDegradation.AutomaticReady);
+        Assert.Equal(0.88, response.EmulatorDegradation.CandidateCphRatio);
+        Assert.True(response.HostMaintenance.HostRestartAuthorized);
+        Assert.Equal("requested", response.HostMaintenance.Request!.State);
+    }
+
+    [Theory]
+    [InlineData("Nougat32")]
+    [InlineData("Pie64_1")]
+    public void BlueStacksInstanceNamesAreBounded(string instanceName)
+    {
+        Assert.Equal(
+            instanceName,
+            BlueStacksInstanceController.ValidateInstanceName(instanceName));
+        Assert.Throws<ArgumentException>(() =>
+            BlueStacksInstanceController.ValidateInstanceName(
+                instanceName + " --instance Other"));
     }
 }
