@@ -16,6 +16,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\TheTower.ControlSurface\Models.cs" Link="Models.cs" />
+    <Compile Include="..\TheTower.ControlSurface\GateDecisionPresentation.cs"
+             Link="GateDecisionPresentation.cs" />
     <Compile Include="..\TheTower.ControlSurface\ControlSurfaceCompatibility.cs"
              Link="ControlSurfaceCompatibility.cs" />
     <Compile Include="..\TheTower.ControlSurface\StrategyAuthoringViewModels.cs"

@@ -1298,6 +1298,19 @@ warning text in `actions.log`.
   stop/repair/restart sequence. Ambiguous or unknown module identity and other
   non-Home repair classes remain blocked. The matcher reports evidence but
   never directly authorizes an equipment action.
+- A terminal running-session decision is scoped to the first recognized failed
+  requirement retained in structured session-preflight evidence, falling back
+  to the manager's retained failed-check list only when needed. A generic
+  validator reason is replaced with the evidence summary, including normalized
+  expected and observed save-backed values when available; a specific repair or
+  transition failure remains authoritative. If neither source identifies a
+  recognized requirement, the blocking diagnostic decision offers Retry only:
+  it cannot write a synthetic `session_preflight` waiver or authorize repair.
+  Persisted generic or unscoped decisions are consumed before a corrected
+  request replaces them. Once the same Strategy subsequently records a
+  successful complete session preflight, its pending or resolved
+  `session_preflight` decision is consumed; decisions for another Strategy or
+  phase remain untouched.
 - A guarded configuration repair must reach verified Home `NEW_BATTLE`, use
   fresh detail/name and action guards for module changes, reapply the complete
   profile-owned no-battle setup, start the next battle, and require fresh

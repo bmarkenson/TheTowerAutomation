@@ -6,6 +6,7 @@ import numpy as np
 from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_module_loadout import gc_module_loadout_evidence_from_assignments
+from core.gc_preflight import summarize_gc_preflight_mismatch
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     _ensure_auto_pick_perks_enabled,
@@ -228,6 +229,29 @@ def test_mismatch_result_names_the_wrong_module_in_operator_summary():
         "Session configuration check complete — mismatch found; "
         "Generator Assist module: expected Singularity Harness, observed "
         "Galaxy Compressor"
+    )
+
+
+def test_mismatch_summary_uses_save_attachment_expected_and_observed_values():
+    summary = summarize_gc_preflight_mismatch(
+        {
+            "failed_checks": ["free_upgrade_locks"],
+            "attachment_requirement_checks": {
+                "free_upgrade_locks": {
+                    "source": "player_save",
+                    "expected": ["attack", "utility"],
+                    "observed": ["utility"],
+                    "valid": False,
+                    "blocking": True,
+                    "disposition": "mismatch",
+                }
+            },
+        }
+    )
+
+    assert summary == (
+        'Free Upgrade locks: expected ["attack", "utility"], observed '
+        '["utility"]'
     )
 
 

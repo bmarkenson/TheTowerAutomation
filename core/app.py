@@ -154,8 +154,10 @@ from core.gc_no_battle_setup import (
     recover_gc_no_battle_setup_home,
     run_gc_no_battle_setup,
 )
+from core.gc_preflight import summarize_gc_preflight_mismatch
 from core.game_speed import GameSpeedGuard
 from core.gate_decisions import (
+    STARTUP_GATE_CHECK_LABELS,
     build_gate_decision_options,
     merge_profile_skip_waivers,
     startup_gate_check_catalog,
@@ -224,6 +226,13 @@ Frame = NDArray[np.uint8]
 HOME_SETUP_MAX_ATTEMPTS = 3
 BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS = 20.0
 _BATTLE_SCOPE_UNSET = object()
+_GENERIC_SESSION_PREFLIGHT_REASONS = frozenset(
+    {
+        "configuration mismatch",
+        "session preflight mismatch",
+        "running-battle strategy validation failed",
+    }
+)
 
 
 class App:
@@ -6904,6 +6913,7 @@ class App:
         expected: object,
         blocking: bool = True,
         allow_repair_restart: bool = False,
+        allow_waive: bool = True,
     ) -> Optional[Dict[str, Any]]:
         repair_authority = None
         if allow_repair_restart:
@@ -6918,9 +6928,14 @@ class App:
                 allow_repair_restart = False
         options = build_gate_decision_options(
             check_id,
-            self._mission_mgr.gate_fallbacks(check_id),
+            (
+                self._mission_mgr.gate_fallbacks(check_id)
+                if allow_waive
+                else ()
+            ),
             advisory=not blocking,
             allow_repair_restart=allow_repair_restart,
+            allow_waive=allow_waive,
         )
         directive = self._supervisor.publish_gate_decision(
             strategy=self._current_strategy_name(),
@@ -6968,6 +6983,8 @@ class App:
     def _matching_gate_decision(
         self,
         phase: str,
+        *,
+        prompt_pending: bool = True,
     ) -> Optional[Dict[str, Any]]:
         directive = self._gate_decision_directive()
         if not directive or directive.get("status") == "consumed":
@@ -6978,7 +6995,7 @@ class App:
             or str(directive.get("phase") or "").lower() != phase
         ):
             return None
-        if directive.get("status") == "pending":
+        if directive.get("status") == "pending" and prompt_pending:
             directive = self._prompt_for_gate_decision(directive) or directive
         return directive
 
@@ -6999,6 +7016,11 @@ class App:
             return False
         action = str(selected.get("action") or "").lower()
         if action == "waive":
+            if (
+                phase == "session_preflight"
+                and check_id not in STARTUP_GATE_CHECK_LABELS
+            ):
+                return False
             waiver = {
                 "request_id": request_id,
                 "decision_id": str(directive.get("decision_id") or ""),
@@ -7076,29 +7098,146 @@ class App:
         )
         return True
 
+    def _session_preflight_gate_context(
+        self,
+    ) -> Tuple[list[str], str]:
+        """Return scoped failed checks and the best retained operator reason."""
+
+        mission_vars = self._mission_mgr.ctx.data.get("mission_vars", {})
+        if not isinstance(mission_vars, Mapping):
+            mission_vars = {}
+        raw_evidence = mission_vars.get("gc_session_preflight_evidence")
+        evidence: Mapping[str, Any] = (
+            raw_evidence if isinstance(raw_evidence, Mapping) else {}
+        )
+
+        def scoped_checks(raw: object) -> list[str]:
+            if not isinstance(raw, (list, tuple)):
+                return []
+            checks: list[str] = []
+            for value in raw:
+                check_id = str(value or "").strip()
+                if (
+                    check_id in STARTUP_GATE_CHECK_LABELS
+                    and check_id not in checks
+                ):
+                    checks.append(check_id)
+            return checks
+
+        evidence_checks = scoped_checks(evidence.get("failed_checks"))
+        manager_checks = scoped_checks(
+            self._mission_mgr.session_preflight_failure_checks()
+        )
+        checks = evidence_checks or manager_checks
+
+        stored_reason = str(
+            mission_vars.get("gc_session_preflight_last_reason") or ""
+        ).strip()
+        if (
+            not stored_reason
+            or stored_reason.lower() in _GENERIC_SESSION_PREFLIGHT_REASONS
+        ):
+            if checks:
+                summary_evidence = dict(evidence)
+                summary_evidence["failed_checks"] = checks
+                reason = summarize_gc_preflight_mismatch(summary_evidence)
+            else:
+                reason = (
+                    "Session preflight failed without a scoped requirement; "
+                    "retry to collect fresh evidence"
+                )
+        else:
+            reason = stored_reason
+        return checks, reason[:1000]
+
+    @staticmethod
+    def _unscoped_session_gate_is_safe(
+        directive: Mapping[str, Any],
+    ) -> bool:
+        options = directive.get("options")
+        return bool(
+            isinstance(options, (list, tuple))
+            and options
+            and all(
+                isinstance(option, Mapping)
+                and str(option.get("action") or "").lower() in {"retry", "pause"}
+                for option in options
+            )
+        )
+
+    def _retire_successful_session_preflight_decision(self) -> None:
+        """Consume only this Strategy's stale running-session decision."""
+
+        mission_vars = self._mission_mgr.ctx.data.get("mission_vars", {})
+        if not isinstance(mission_vars, Mapping) or not (
+            mission_vars.get("gc_session_preflight_completed") is True
+            and mission_vars.get("gc_session_preflight_last_status") == "complete"
+        ):
+            return
+        directive = self._gate_decision_directive()
+        if not directive or directive.get("status") not in {
+            "pending",
+            "resolved",
+        }:
+            return
+        if (
+            str(directive.get("strategy") or "").lower()
+            != self._current_strategy_name()
+            or str(directive.get("phase") or "").lower()
+            != "session_preflight"
+        ):
+            return
+        request_id = str(directive.get("request_id") or "")
+        if request_id:
+            self._supervisor.consume_gate_decision(
+                request_id,
+                completion_reason=(
+                    "session preflight subsequently completed successfully"
+                ),
+            )
+
     def _handle_terminal_session_gate_decision(self) -> None:
-        checks = self._mission_mgr.session_preflight_failure_checks()
+        checks, reason = self._session_preflight_gate_context()
         check_id = checks[0] if checks else "session_preflight"
-        directive = self._matching_gate_decision("session_preflight")
-        if directive is None:
-            requirements = self._mission_mgr.strategy.session_preflight_requirements()
-            reason = str(
-                self._mission_mgr.ctx.data.get("mission_vars", {}).get(
-                    "gc_session_preflight_last_reason",
-                    "session preflight mismatch",
+        directive = self._matching_gate_decision(
+            "session_preflight",
+            prompt_pending=False,
+        )
+        if directive is not None:
+            directive_check = str(directive.get("check_id") or "").strip()
+            refresh_required = bool(
+                directive_check != check_id
+                or str(directive.get("reason") or "").strip() != reason
+                or (
+                    not checks
+                    and not self._unscoped_session_gate_is_safe(directive)
                 )
             )
+            if refresh_required:
+                retired = self._supervisor.consume_gate_decision(
+                    str(directive.get("request_id") or ""),
+                    completion_reason=(
+                        "superseded by refreshed session preflight evidence"
+                    ),
+                )
+                if not retired:
+                    return
+                directive = None
+        if directive is None:
+            requirements = self._mission_mgr.strategy.session_preflight_requirements()
             directive = self._publish_gate_decision(
                 phase="session_preflight",
                 check_id=check_id,
                 reason=reason,
-                expected=requirements.get(check_id),
+                expected=(requirements.get(check_id) if checks else None),
                 allow_repair_restart=(
-                    self._mission_mgr.session_preflight_restart_available()
+                    bool(checks)
+                    and self._mission_mgr.session_preflight_restart_available()
                 ),
+                allow_waive=bool(checks),
             )
-            if directive and directive.get("status") == "pending":
-                directive = self._prompt_for_gate_decision(directive) or directive
+        if directive and directive.get("status") == "pending":
+            directive = self._prompt_for_gate_decision(directive) or directive
         if directive:
             self._apply_gate_decision(directive, phase="session_preflight")
 
@@ -7302,20 +7441,7 @@ class App:
                 # replacing it; the new preflight evidence remains available
                 # through its own gate-decision ledger.
                 return
-            mission_vars = self._mission_mgr.ctx.data.setdefault(
-                "mission_vars",
-                {},
-            )
-            checks = self._mission_mgr.session_preflight_failure_checks()
-            evidence = mission_vars.get("gc_session_preflight_evidence")
-            if not checks and isinstance(evidence, Mapping):
-                raw_checks = evidence.get("failed_checks")
-                if isinstance(raw_checks, (list, tuple)):
-                    checks = [str(value) for value in raw_checks]
-            reason = str(
-                mission_vars.get("gc_session_preflight_last_reason")
-                or "running-battle strategy validation failed"
-            )
+            checks, reason = self._session_preflight_gate_context()
             authority.activate_strategy_gate(
                 strategy=self._current_strategy_name(),
                 battle_scope=self._current_run_scope_id(),
@@ -7326,15 +7452,21 @@ class App:
             )
             return
 
+        strategy = self._mission_mgr.strategy
+        session_preflight_complete = bool(
+            strategy is not None
+            and strategy.requires_session_preflight()
+            and strategy.is_session_preflight_complete(self._mission_mgr.ctx)
+        )
+        if session_preflight_complete:
+            self._retire_successful_session_preflight_decision()
+
         gate = authority.strategy_gate
         if gate is None:
             return
-        strategy = self._mission_mgr.strategy
         if (
             gate.source == "session_preflight"
-            and strategy is not None
-            and strategy.requires_session_preflight()
-            and strategy.is_session_preflight_complete(self._mission_mgr.ctx)
+            and session_preflight_complete
         ):
             authority.clear_strategy_gate(
                 event=StrategyGateExitEvent.SUCCESSFUL_VALIDATION,

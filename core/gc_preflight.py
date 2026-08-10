@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
@@ -55,6 +56,22 @@ _CONFIGURATION_CHECK_SECTIONS = {
     "bots_preset": "bots",
     "guardian_chips": "guardians",
 }
+
+
+def _concise_evidence_value(value: Any, *, limit: int = 140) -> str:
+    """Format one normalized requirement value for an operator summary."""
+
+    if value is None:
+        return "unknown"
+    if isinstance(value, str):
+        text = value.strip() or "unknown"
+    elif isinstance(value, (Mapping, list, tuple)):
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    else:
+        text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: max(1, limit - 1)].rstrip() + "…"
 
 
 def summarize_gc_preflight_mismatch(
@@ -153,6 +170,27 @@ def summarize_gc_preflight_mismatch(
                 )
                 details.append(f"Ultimate Weapons {label}: {observed}")
                 detailed_checks.add("ultimate_weapons")
+
+    attachment_checks = evidence.get("attachment_requirement_checks")
+    if isinstance(attachment_checks, Mapping):
+        for check_id in failed_checks:
+            if check_id in detailed_checks:
+                continue
+            check = attachment_checks.get(check_id)
+            if not isinstance(check, Mapping):
+                continue
+            expected = _concise_evidence_value(check.get("expected"))
+            observed = _concise_evidence_value(
+                check.get("observed", check.get("disposition"))
+            )
+            label = _CHECK_LABELS.get(
+                check_id,
+                check_id.replace("_", " ").title(),
+            )
+            details.append(
+                f"{label}: expected {expected}, observed {observed}"
+            )
+            detailed_checks.add(check_id)
 
     for check_id in failed_checks:
         if check_id not in detailed_checks:

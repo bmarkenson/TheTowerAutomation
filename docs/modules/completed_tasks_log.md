@@ -71,6 +71,30 @@ canonical document linked by an entry for current behavior.
   so the two-minute/30-minute outcome behavior and residual-badge diagnostic
   remain queued for natural-trigger confirmation.
 
+### 2026-08-09 scoped session-gate evidence and lifecycle
+
+- Terminal session-preflight decisions now recover recognized failed checks
+  from retained structured evidence, replace generic mismatch text with concise
+  expected-versus-observed detail, and preserve specific repair failures. An
+  internal failure without a recoverable check remains blocking with Retry as
+  its only choice; it cannot create a useless `session_preflight` waiver or
+  offer repair. Persisted generic requests are replaced safely.
+- A later successful complete preflight consumes only the same Strategy's
+  pending or resolved session-preflight request. Other Strategies and phases
+  remain untouched, preventing the native client from auto-opening a stale
+  failure after recovery.
+- The native decision window now distinguishes running-session and Home startup
+  gates and humanizes raw check IDs through a portable presentation helper. The
+  existing protocol already carried the corrected check, reason, expected
+  value, and options, so no server revision or capability changed.
+- Focused and affected Python suites passed 233 tests, with 23 additional
+  action-executor/run-initialization preflight tests passing. The supported
+  checkpoint then passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,089 tests
+  in 355.60 seconds. All 123 portable native tests passed, including the linked
+  presentation helper; this Linux SDK lacks the WindowsDesktop targets required
+  to build the WPF host itself.
+
 ### 2026-08-09 save-backed attached-session preflight
 
 - Commit `2a303ba` lets an exact-bound forced attachment save satisfy every

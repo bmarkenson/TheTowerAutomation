@@ -37,6 +37,16 @@ the gate pending and sends no input. `force-continue` is only a compatibility
 alias for the scoped `gate bypass_once`; it cannot create a waiver before a
 real failure or skip unrelated checks.
 
+A terminal in-battle failure opens **Session preflight needs direction** rather
+than a startup-labelled dialog. The check name is human-readable, and a generic
+failure reason is replaced with retained expected-versus-observed evidence when
+available. If the runtime could not recover one recognized failed check, the
+request remains blocking and offers only Retry; no bypass, profile fallback, or
+repair is safe without a requirement scope. A subsequent successful preflight
+automatically retires the same Strategy's session-preflight request. If an old
+dialog remains visible after that status refresh, close it without choosing an
+option; the consumed request is no longer actionable.
+
 ## Authority and save-first behavior
 
 Every choice is requirement-scoped. Retry and waiver recapture current

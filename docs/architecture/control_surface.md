@@ -1019,7 +1019,15 @@ Process request examples:
   request. Retry re-runs the check with fresh evidence; a bypass or configured
   fallback waives only the named requirement for the current run, so unrelated
   checks such as Auto Pick Perks remain authoritative. Closing the dialog
-  leaves automation blocked and the request pending.
+  leaves automation blocked and the request pending. Running-session requests
+  use a phase-specific **Session preflight needs direction** title, a humanized
+  requirement label, and the runtime's concise evidence summary instead of a
+  generic configuration-mismatch message. If the runtime cannot recover a
+  recognized failed requirement, the dialog offers Retry only; it never offers
+  an unscoped bypass or repair. A later successful preflight consumes only the
+  matching Strategy's session-preflight request so the client cannot auto-open
+  a stale failure. These are presentation and lifecycle corrections within the
+  existing gate-decision fields and require no protocol revision or capability.
 - Non-blocking attached-Tournament warning dialogs use the same scoped decision
   channel. They offer persistent Pause for manual changes, a fresh read-only
   retry, or continuation with only the displayed mismatch waived. Closing the
