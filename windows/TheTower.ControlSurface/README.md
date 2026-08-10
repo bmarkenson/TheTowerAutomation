@@ -293,6 +293,13 @@ act as an immediate Start/Resume command. The buttons apply immediately, which
 prevents a periodic status refresh from replacing an unsaved selection.
 State and terminal-policy acknowledgements match an exact Linux request ID;
 same-value requests remain visibly pending without being rewritten.
+Revision 35 extends that exact receipt contract to state, terminal policy,
+game-speed target, ADB target, and Strategy. Linux publishes the receipts in
+its atomically replaced runtime-owned status file and binds the whole snapshot
+to runtime ID, PID, target, and target generation. The client never derives a
+current acknowledgement from Activity text, a log timestamp, observation,
+handler activity, or an allowed authority flag, so a noisy or rotated action
+log cannot turn a healthy long-running runtime into false `pending` state.
 
 **Start Battle** is enabled only for fresh verified Home New Battle evidence;
 **Attach to Battle** is enabled only for fresh active or resumable evidence.
@@ -344,6 +351,15 @@ without starting. Active adoption changes normal strategy behavior and Battle
 End identity without a restart, while new-run initialization, session preflight,
 and Home-only gates wait for the next genuine boundary. Selected, current, and
 pending values remain separate.
+
+Current, pending-next-boundary, pending-active-adoption, and next-start Strategy
+labels come from Linux `control_model.strategy_scope`. Missing or contradictory
+legacy Strategy acknowledgements do not reconstruct or override that scope.
+Acknowledgement-based reconstruction is retained only for a server that does
+not advertise `better_control_model_v2`. A stopped process still shows the
+authoritative next-start default without inventing an active Strategy, and a
+dirty or failed selection remains locally retained across polling exactly as
+before.
 
 The same panel selects a persistent numeric game-speed target. The dropdown
 offers `x0.0` through `x6.0` in `x0.5` increments and `x6.3 — Maximum
@@ -843,7 +859,10 @@ new target without recreating its startup/session gates. Polling does not
 replace a dirty draft; invalid or currently ineligible input remains visible
 until **Revert** or a successful apply. Wait for target acknowledgement before
 resuming; the existing validated API rollback leaves the runtime paused on its
-former target after a failed connection or capture.
+former target after a failed connection or capture. Paused handoff eligibility
+uses the durable exact state receipt, and target completion uses the durable
+exact ADB receipt; neither depends on retaining the corresponding Activity
+lines.
 
 Attachment is never automatic. **Start Automation** changes only the managed
 process lifecycle and leaves action authority Paused. After a fresh
@@ -874,9 +893,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 36, `current_battle_perks_v1`,
-`better_control_model_v2`, `save_backed_setup_capture_v2`,
-`save_mapping_integration_v1`,
+current Windows build requires revision 37, `current_battle_perks_v1`,
+`better_control_model_v2`, `runtime_control_acknowledgements_v1`,
+`save_backed_setup_capture_v2`, `save_mapping_integration_v1`,
 `host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,
 `managed_custom_module_presets_v1`,
@@ -946,6 +965,21 @@ already configured:
    only the displayed feature targets become unstaged changes; keep the
    uncommitted/unpromoted/pending-validation result visible and confirm no
    automatic retry, service restart, runtime-control change, or device input.
+9. For revision 37, connect to a fresh exact-owner runtime snapshot after the
+   relevant acknowledgement lines have moved more than 262 KiB behind the log
+   tail, then after log rotation. Confirm Action Authority, terminal policy,
+   speed, ADB, setup-capture availability, and an acknowledged indefinite Pause
+   remain stable without issuing a control request to refresh the display.
+10. Confirm Strategy Scope shows the Linux-authored startup default, current
+   battle, pending next boundary, and explicit pending active adoption even when
+   compatibility acknowledgements are absent or contradictory. Repeat with a
+   stopped process, a dirty local selection, a failed/retried request, and a
+   same-ID publication; polling must preserve those existing behaviors.
+
+Revision-37 items 9 and 10 remain pending until they are actually exercised in
+a Windows WPF session. Linux cross-builds and portable compatibility tests do
+not count as that runtime validation, and no live control or device request is
+needed merely to refresh these displays.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).

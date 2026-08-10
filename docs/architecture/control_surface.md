@@ -190,10 +190,10 @@ expiry attempt.
 
 ## Better Control Model
 
-Server revision 34 retains the revision-30 `better_control_model_v1` and
+Server revision 37 retains the revision-30 `better_control_model_v1` and
 `save_backed_setup_capture_v1` for additive compatibility and advertises
-`better_control_model_v2` plus `save_backed_setup_capture_v2`. The additive
-`control_model` status object
+`better_control_model_v2`, `save_backed_setup_capture_v2`, and
+`runtime_control_acknowledgements_v1`. The additive `control_model` status object
 keeps five dimensions independent:
 
 | Dimension | Values and authority |
@@ -213,11 +213,34 @@ authority heartbeat cannot renew the nested game observation: both timestamps
 must remain inside their freshness windows. Malformed control JSON makes every
 Better Control Model action unavailable with `control_invalid`.
 
-State and terminal-policy directives carry separate request IDs. Runtime log
-acknowledgements include the applied ID, and status considers an acknowledgement
-current only when both value and request ID match. Repeating an unacknowledged
-same-value request reports `pending` without rewriting its identity; a stopped
-or exactly acknowledged repeat is a visible no-op.
+State, terminal-policy, game-speed, ADB-target, and Strategy directives carry
+separate request IDs. The runtime records a receipt only after it applies the
+exact request and publishes all current receipts in the same atomically
+replaced runtime-owned file as action authority. Its envelope binds
+`runtime_id`, PID, ADB target, and positive target generation to the active held
+target lock. Status exposes receipts only while that complete owner and
+freshness binding matches; a former process, recycled PID, former target
+generation, rotated log, or stale snapshot cannot acknowledge a current
+request. At startup the runtime atomically adds missing IDs to legacy fields
+and materializes the already-established implicit state, mode, and speed
+defaults, without requiring a display-refresh control request.
+
+Status considers a receipt current only when both its value and request ID
+match the current directive. A same-value replacement therefore reports
+`pending` until the runtime replaces that field's receipt with the new exact
+ID. Existing `[CTRL]` action-log messages remain chronological audit evidence;
+neither current acknowledgement nor action authority is reconstructed from a
+bounded log tail, timestamps, observations, handler activity, or an allowed
+authority flag.
+
+The runtime also authors `control_model.strategy_scope` with the startup
+default, active-battle Strategy, pending next-boundary Strategy, optional
+pending active-battle adoption, and current Strategy request ID. The native
+client uses that scope for current/next/startup presentation whenever
+`better_control_model_v2` is advertised. It reconstructs the older
+acknowledgement-based presentation only when that capability is genuinely
+absent; a missing or contradictory compatibility acknowledgement cannot
+override an authoritative scope.
 
 ### Command and transition matrix
 
@@ -548,8 +571,11 @@ route.
 
 The adapter reads only the runtime-owned atomic snapshot. It rejects malformed
 or unsupported schemas, inactive publishers, expired timestamps, and PID/ADB
-owners that do not match an active runtime lock. Missing or stale evidence is
-reported as unavailable/stale and cannot be promoted into action authority.
+owners that do not match an active runtime lock. Revision-37 acknowledgement
+and authoritative Strategy-scope projections additionally require the exact
+runtime ID and target generation recorded in that lock. Missing or stale
+evidence is reported as unavailable/stale and cannot be promoted into action
+authority.
 Warning text in the action log is never parsed as gate state. Adding this
 field is backward compatible: earlier clients ignore it and retain every older
 endpoint and capability. `home_ad_gem` is an additive collector value and a
@@ -850,6 +876,13 @@ upgrade. The GUI presents only the latest status and a prior meaningful
 transition outside the Operational activity list while retaining complete
 status history in `Status only` and `All levels`.
 
+Control acknowledgements are not part of that transitional log-derived view.
+The action log retains their semantic audit messages, but revision 37 obtains
+current state, terminal-policy, speed, ADB, and Strategy receipts only from the
+fresh exact-owner atomic runtime channel. Log size, bounded-tail position, and
+rotation therefore cannot change Action Authority, acknowledgement indicators,
+setup-capture availability, or paused ADB-handoff eligibility.
+
 The native client's default `Current run` scope uses the atomic
 `logs/activity_scope.json` ledger. Automation startup creates it only when no
 valid scope exists and otherwise reuses it, while verified Home `NEW_BATTLE`
@@ -1021,7 +1054,8 @@ Process request examples:
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  32 and capability `better_control_model_v2`;
+  35 plus `better_control_model_v2` and
+  `runtime_control_acknowledgements_v1`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
 - A read-only full-width **Perks** page showing the current run's
   monitor-validated saved inventory, level, and last selection wave in
@@ -1216,10 +1250,12 @@ coordination contract is defined in
 
 These are the next useful additions, in approximate priority order:
 
-1. Publish a small atomic runtime-status JSON snapshot directly from the
-   automation. This should include an observation sequence/time, current UI
-   state, battle identity, wave, strategy/profile, action gate, active handler,
-   and last error. It will replace action-log parsing as the primary live view.
+1. Extend the existing atomic runtime-owned authority/control snapshot with the
+   remaining live-view fields: wave, compact UI detail, active handler, and
+   last error. Observation identity/time, battle identity, Strategy scope,
+   action gate, startup policy, and exact control receipts already use this
+   channel in revision 37 and must not regress to action-log authority. The
+   extension will replace the remaining log-derived heartbeat presentation.
 2. Add recovery-timer controls such as extend, cancel, and return-now only after
    those operations have explicit runtime directives and freshness/authority
    checks. The GUI must not implement them as direct taps.

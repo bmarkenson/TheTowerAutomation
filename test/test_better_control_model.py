@@ -712,11 +712,13 @@ def _publish_runtime_observation(
     active_strategy: str | None = None,
     explicit_home_intent_required: bool = False,
     terminal_home_continuation: dict[str, object] | None = None,
+    acknowledgements: dict[str, object] | None = None,
 ) -> None:
     owner = {
         "runtime_id": evidence["runtime_id"],
         "pid": evidence["pid"],
         "adb_target": evidence["adb_target"],
+        "target_generation": evidence["target_generation"],
     }
     authority = RuntimeActionAuthority()
     authority.update_context(
@@ -733,6 +735,7 @@ def _publish_runtime_observation(
         authority.snapshot(),
         owner=owner,
         now=published_at,
+        acknowledgements=acknowledgements,
         control_model={
             "schema_version": 1,
             "observation": {
@@ -765,8 +768,27 @@ def _publish_runtime_observation(
                 "active": True,
                 "pid": evidence["pid"],
                 "target": evidence["adb_target"],
+                "runtime_id": evidence["runtime_id"],
+                "target_generation": evidence["target_generation"],
             }
         ],
+    }
+
+
+def _runtime_acknowledgements(
+    **receipts: tuple[str, object],
+) -> dict[str, object]:
+    acknowledged_at = _timestamp()
+    return {
+        "schema_version": 1,
+        **{
+            field: {
+                "value": value,
+                "request_id": request_id,
+                "acknowledged_at": acknowledged_at,
+            }
+            for field, (value, request_id) in receipts.items()
+        },
     }
 
 
@@ -3830,25 +3852,26 @@ def test_same_value_state_ack_requires_the_exact_request_identity(tmp_path):
     service = ControlSurfaceService(repository_root=tmp_path)
     first = service.control_store.set_state("PAUSED", source="first")
     second = service.control_store.set_state("PAUSED", source="second")
-    timestamp = datetime.fromisoformat(
-        str(second["state_updated_at"])
-    ).strftime("%Y-%m-%d %H:%M:%S")
-    service.action_log.parent.mkdir(parents=True, exist_ok=True)
-    service.action_log.write_text(
-        f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file "
-        f"request_id={first['state_request_id']}\n",
-        encoding="utf-8",
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        acknowledgements=_runtime_acknowledgements(
+            state=("PAUSED", first["state_request_id"]),
+        ),
     )
 
     stale_ack = service.status()["acknowledgements"]["state"]
     assert stale_ack["request_id"] == first["state_request_id"]
     assert stale_ack["acknowledges_current"] is False
 
-    with service.action_log.open("a", encoding="utf-8") as handle:
-        handle.write(
-            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file "
-            f"request_id={second['state_request_id']}\n"
-        )
+    _publish_runtime_observation(
+        service,
+        evidence,
+        acknowledgements=_runtime_acknowledgements(
+            state=("PAUSED", second["state_request_id"]),
+        ),
+    )
     current_ack = service.status()["acknowledgements"]["state"]
     assert current_ack["request_id"] == second["state_request_id"]
     assert current_ack["acknowledges_current"] is True
@@ -3860,25 +3883,26 @@ def test_same_value_terminal_policy_ack_requires_exact_request_identity(
     service = ControlSurfaceService(repository_root=tmp_path)
     first = service.control_store.set_mode("WAIT", source="first")
     second = service.control_store.set_mode("WAIT", source="second")
-    timestamp = datetime.fromisoformat(
-        str(second["mode_updated_at"])
-    ).strftime("%Y-%m-%d %H:%M:%S")
-    service.action_log.parent.mkdir(parents=True, exist_ok=True)
-    service.action_log.write_text(
-        f"[INFO {timestamp}] [CTRL] Mode set to WAIT via control file "
-        f"request_id={first['mode_request_id']}\n",
-        encoding="utf-8",
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        acknowledgements=_runtime_acknowledgements(
+            mode=("WAIT", first["mode_request_id"]),
+        ),
     )
 
     stale_ack = service.status()["acknowledgements"]["mode"]
     assert stale_ack["request_id"] == first["mode_request_id"]
     assert stale_ack["acknowledges_current"] is False
 
-    with service.action_log.open("a", encoding="utf-8") as handle:
-        handle.write(
-            f"[INFO {timestamp}] [CTRL] Mode set to WAIT via control file "
-            f"request_id={second['mode_request_id']}\n"
-        )
+    _publish_runtime_observation(
+        service,
+        evidence,
+        acknowledgements=_runtime_acknowledgements(
+            mode=("WAIT", second["mode_request_id"]),
+        ),
+    )
     current_ack = service.status()["acknowledgements"]["mode"]
     assert current_ack["request_id"] == second["mode_request_id"]
     assert current_ack["acknowledges_current"] is True
@@ -4445,7 +4469,14 @@ def test_setup_capture_api_reports_pause_and_saves_without_control_mutation(
     assert paused.value.code == "automation_paused"
 
     enabled = service.control_store.set_state("RUNNING", source="test")
-    _publish_runtime_observation(service, evidence, paused=False)
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=False,
+        acknowledgements=_runtime_acknowledgements(
+            state=("RUNNING", enabled["state_request_id"]),
+        ),
+    )
     timestamp = datetime.fromisoformat(
         str(enabled["state_updated_at"])
     ).strftime("%Y-%m-%d %H:%M:%S")
@@ -4774,7 +4805,14 @@ def test_setup_capture_request_and_runtime_share_one_action_result_pair(
     service = ControlSurfaceService(repository_root=tmp_path)
     evidence = _evidence(game_state="home_new_battle")
     enabled = service.control_store.set_state("RUNNING", source="test")
-    _publish_runtime_observation(service, evidence, paused=False)
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=False,
+        acknowledgements=_runtime_acknowledgements(
+            state=("RUNNING", enabled["state_request_id"]),
+        ),
+    )
     timestamp = datetime.fromisoformat(
         str(enabled["state_updated_at"])
     ).strftime("%Y-%m-%d %H:%M:%S")

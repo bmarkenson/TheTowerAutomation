@@ -147,6 +147,129 @@ def _fresh_runtime_lock(root: Path, *, state: str):
     return lock_handle
 
 
+def _fresh_exact_runtime_lock(
+    root: Path,
+    *,
+    runtime_id: str,
+    target_generation: int,
+    target: str = "localhost:5555",
+):
+    lock_path = root / "logs" / "automation-localhost_5555.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "runtime_id": runtime_id,
+                "target": target,
+                "target_generation": target_generation,
+                "state": "held",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    lock_handle = lock_path.open("r", encoding="utf-8")
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return lock_handle
+
+
+def _directive_acknowledgements(
+    control: dict[str, object],
+    *,
+    acknowledged_at: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "state": {
+            "value": control["state"],
+            "request_id": control["state_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "mode": {
+            "value": control["mode"],
+            "request_id": control["mode_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "game_speed_target": {
+            "value": f"x{control['game_speed_target']:.1f}",
+            "request_id": control["game_speed_target_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "adb_target": {
+            "value": f"localhost:{control['adb_port']}",
+            "request_id": control["adb_port_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "strategy": {
+            "value": control["strategy"],
+            "request_id": control["strategy_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+    }
+
+
+def _publish_runtime_acknowledgements(
+    root: Path,
+    *,
+    now: datetime,
+    owner: dict[str, object],
+    acknowledgements: dict[str, object],
+    runtime_active: bool = True,
+    strategy_scope: dict[str, object] | None = None,
+) -> None:
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope="ack-scope",
+        primary_state="RUNNING",
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        root / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    assert publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        runtime_active=runtime_active,
+        now=now.timestamp(),
+        acknowledgements=acknowledgements,
+        control_model={
+            "schema_version": 1,
+            "observation": {
+                "schema_version": 1,
+                "observation_id": f"{owner['runtime_id']}:1",
+                "observed_at": now.isoformat(timespec="seconds"),
+                "primary_state": "RUNNING",
+                "home_battle_control": "UNKNOWN",
+                "game_state": "active_battle",
+                "active_battle": True,
+                "activity_scope_run_id": "ack-scope",
+                "target_generation": owner.get("target_generation"),
+            },
+            "battle_lifecycle": {"active_battle_adopted": True},
+            "strategy_scope": strategy_scope
+            or {
+                "startup_default": "farm_t18",
+                "active_battle": "farm_t18",
+                "pending_next_boundary": None,
+                "pending_active_battle": None,
+            },
+        },
+    )
+
+
+def _control_with_all_request_identities(root: Path) -> dict[str, object]:
+    store = ControlDirectiveStore(root / "logs" / "automation_ctl.json")
+    store.set_state("RUNNING", source="test")
+    store.set_mode("WAIT", source="test")
+    store.set_game_speed_target(4.5, source="test")
+    store.set_adb_port(5555, source="test")
+    store.set_strategy("farm_t18", source="test")
+    return store.status()
+
+
 def _write_current_run_scope(root: Path, *, run_id: str) -> None:
     logs = root / "logs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -394,12 +517,325 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
         "stale": False,
     }
     assert status["runtime"]["instances"][0]["active"]
-    assert status["acknowledgements"]["state"]["acknowledges_current"]
-    assert status["acknowledgements"]["mode"]["acknowledges_current"]
-    assert status["acknowledgements"]["game_speed_target"]["acknowledges_current"]
-    assert status["acknowledgements"]["adb_target"]["acknowledges_current"]
-    assert status["acknowledgements"]["strategy"]["value"] == "farm_t18"
-    assert status["acknowledgements"]["strategy"]["acknowledges_current"]
+    assert status["acknowledgements"] == {
+        "state": None,
+        "mode": None,
+        "game_speed_target": None,
+        "adb_target": None,
+        "strategy": None,
+    }
+
+
+def test_runtime_acknowledgements_survive_more_than_tail_window_of_log_output(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-long-log",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+    }
+    action_log = tmp_path / "logs" / "actions.log"
+    audit_prefix = "".join(
+        f"[INFO {now:%Y-%m-%d %H:%M:%S}] [CTRL] {field} acknowledged\n"
+        for field in acknowledgements
+        if field != "schema_version"
+    )
+    noisy_line = (
+        f"[DEBUG {now:%Y-%m-%d %H:%M:%S}] " + ("x" * 1024) + "\n"
+    )
+    action_log.write_text(
+        audit_prefix
+        + (noisy_line * 300)
+        + f"[STATUS {now:%Y-%m-%d %H:%M:%S}] "
+        "State=RUNNING | Wave=500 | Coins/min=1.0T\n",
+        encoding="utf-8",
+    )
+    assert action_log.stat().st_size > 262_144
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-long-log",
+        target_generation=7,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    for field in (
+        "state",
+        "mode",
+        "game_speed_target",
+        "adb_target",
+        "strategy",
+    ):
+        assert status["acknowledgements"][field]["acknowledges_current"]
+        assert status["acknowledgements"][field]["request_id"] == (
+            acknowledgements[field]["request_id"]
+        )
+    assert status["control_model"]["action_authority"]["effective"] == (
+        "enabled"
+    )
+    assert status["control_model"]["when_battle_ends"]["acknowledged"]
+    assert status["control_model"]["strategy_scope"] == {
+        "startup_default": "farm_t18",
+        "active_battle": "farm_t18",
+        "pending_next_boundary": None,
+        "pending_active_battle": None,
+        "request_id": control["strategy_request_id"],
+        "observation_only": False,
+    }
+
+
+def test_runtime_acknowledgements_survive_action_log_rotation(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-rotated-log",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+    }
+    action_log = tmp_path / "logs" / "actions.log"
+    action_log.write_text(
+        f"[INFO {now:%Y-%m-%d %H:%M:%S}] old acknowledgement audit\n",
+        encoding="utf-8",
+    )
+    action_log.replace(action_log.with_suffix(".log.1"))
+    action_log.write_text(
+        f"[STATUS {now:%Y-%m-%d %H:%M:%S}] "
+        "State=RUNNING | Wave=501 | Coins/min=1.1T\n",
+        encoding="utf-8",
+    )
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-rotated-log",
+        target_generation=4,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert all(
+        receipt is not None and receipt["acknowledges_current"]
+        for receipt in status["acknowledgements"].values()
+    )
+    assert status["control_model"]["actions"]["capture_current_setup"][
+        "code"
+    ] == "available"
+
+
+@pytest.mark.parametrize("legacy_strategy_receipt", (None, "farm_t19"))
+def test_authoritative_strategy_scope_wins_over_legacy_acknowledgements(
+    tmp_path,
+    legacy_strategy_receipt,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    if legacy_strategy_receipt is None:
+        acknowledgements["strategy"] = None
+    else:
+        acknowledgements["strategy"] = {
+            "value": legacy_strategy_receipt,
+            "request_id": control["strategy_request_id"],
+            "acknowledged_at": now.isoformat(timespec="seconds"),
+        }
+    owner = {
+        "runtime_id": "runtime-strategy-scope",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 6,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-strategy-scope",
+        target_generation=6,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+        strategy_scope={
+            "startup_default": "farm_t19_ad_assist",
+            "active_battle": "farm_t19_ad_assist",
+            "pending_next_boundary": None,
+            "pending_active_battle": None,
+        },
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert status["acknowledgements"]["strategy"] is None or not status[
+        "acknowledgements"
+    ]["strategy"]["acknowledges_current"]
+    assert status["control_model"]["strategy_scope"] == {
+        "startup_default": "farm_t19_ad_assist",
+        "active_battle": "farm_t19_ad_assist",
+        "pending_next_boundary": None,
+        "pending_active_battle": None,
+        "request_id": control["strategy_request_id"],
+        "observation_only": False,
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "runtime_id",
+        "pid",
+        "adb_target",
+        "target_generation",
+        "age_seconds",
+    ),
+    (
+        ("prior-runtime", os.getpid(), "localhost:5555", 9, 0),
+        ("current-runtime", os.getpid() + 1000, "localhost:5555", 9, 0),
+        ("current-runtime", os.getpid(), "localhost:5565", 9, 0),
+        ("current-runtime", os.getpid(), "localhost:5555", 8, 0),
+        ("current-runtime", os.getpid(), "localhost:5555", 9, 31),
+    ),
+)
+def test_runtime_acknowledgements_reject_stale_or_wrong_runtime_owner(
+    tmp_path,
+    runtime_id,
+    pid,
+    adb_target,
+    target_generation,
+    age_seconds,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="current-runtime",
+        target_generation=9,
+    )
+    published_at = now - timedelta(seconds=age_seconds)
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=published_at,
+        owner={
+            "runtime_id": runtime_id,
+            "pid": pid,
+            "adb_target": adb_target,
+            "target_generation": target_generation,
+        },
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert all(
+        receipt is None for receipt in status["acknowledgements"].values()
+    )
+    assert status["control_model"]["action_authority"]["effective"] in {
+        "pending",
+        "unknown",
+    }
+
+
+def test_same_value_request_stays_pending_until_exact_request_id_replaces_ack(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    store = ControlDirectiveStore(tmp_path / "logs" / "automation_ctl.json")
+    first = store.set_state("RUNNING", source="first")
+    store.set_mode("WAIT", source="test")
+    store.set_game_speed_target(4.5, source="test")
+    store.set_adb_port(5555, source="test")
+    store.set_strategy("farm_t18", source="test")
+    first_control = store.status()
+    acknowledgements = _directive_acknowledgements(
+        first_control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-request-replacement",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 12,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-request-replacement",
+        target_generation=12,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    second = store.set_state("RUNNING", source="replacement")
+    try:
+        pending = _service(tmp_path).status(now=now.timestamp())
+        assert pending["acknowledgements"]["state"]["request_id"] == (
+            first["state_request_id"]
+        )
+        assert not pending["acknowledgements"]["state"][
+            "acknowledges_current"
+        ]
+        assert pending["control_model"]["action_authority"]["effective"] == (
+            "pending"
+        )
+
+        acknowledgements["state"] = {
+            "value": "RUNNING",
+            "request_id": second["state_request_id"],
+            "acknowledged_at": now.isoformat(timespec="seconds"),
+        }
+        _publish_runtime_acknowledgements(
+            tmp_path,
+            now=now,
+            owner=owner,
+            acknowledgements=acknowledgements,
+        )
+        current = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert current["acknowledgements"]["state"]["request_id"] == (
+        second["state_request_id"]
+    )
+    assert current["acknowledgements"]["state"]["acknowledges_current"]
+    assert current["control_model"]["action_authority"]["effective"] == (
+        "enabled"
+    )
 
 
 def test_status_exposes_scope_bound_current_save_perks(tmp_path):
@@ -1346,8 +1782,10 @@ def test_runtime_evidence_exposes_clean_release_metadata(tmp_path):
             "pid": None,
             "pid_alive": None,
             "released_at": released_at,
+            "runtime_id": None,
             "started_at": None,
             "target": "localhost:5555",
+            "target_generation": None,
         }
     ]
 
@@ -1730,7 +2168,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 36" in native_compatibility
+    assert "MinimumServerRevision = 37" in native_compatibility
     assert '"confirmed_local_mapping_status_v1"' in native_compatibility
     assert "confirmed_local_mapping_status_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_review_status_v1"' in native_compatibility
@@ -1744,6 +2182,11 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Header="Save mapping integration…"' in native_xaml
     assert "RenderConfirmedLocalMappings(status.ConfirmedLocalMappings)" in native_code
     assert '"better_control_model_v2"' in native_compatibility
+    assert '"runtime_control_acknowledgements_v1"' in native_compatibility
+    assert "ResolveStrategyScope(" in native_compatibility
+    assert (
+        "ControlSurfaceCompatibility.ResolveStrategyScope(" in native_code
+    )
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"current_battle_perks_v1"' in native_compatibility

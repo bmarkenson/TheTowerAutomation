@@ -155,6 +155,7 @@ class ControlDirectiveStore:
                 "game_speed_target_request_id"
             ),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
+            "adb_port_request_id": data.get("adb_port_request_id"),
             "strategy": self._valid_strategy(data.get("strategy")),
             "strategy_apply_mode": _valid_strategy_apply_mode(
                 data.get("strategy_apply_mode")
@@ -210,6 +211,51 @@ class ControlDirectiveStore:
             "path": str(self.path),
             "exists": self.path.exists(),
         }
+
+    def ensure_request_identities(self) -> dict[str, str]:
+        """Materialize implicit defaults and add exact IDs to legacy fields."""
+
+        fields = (
+            ("state", "state_request_id"),
+            ("mode", "mode_request_id"),
+            ("game_speed_target", "game_speed_target_request_id"),
+            ("adb_port", "adb_port_request_id"),
+            ("strategy", "strategy_request_id"),
+        )
+        implicit_defaults: dict[str, object] = {
+            "state": "RUNNING",
+            "mode": "NEXT_BATTLE",
+            "game_speed_target": MAXIMUM_GAME_SPEED_TARGET,
+        }
+
+        def valid_request_id(value: object) -> bool:
+            normalized = str(value or "").strip()
+            return bool(
+                normalized
+                and len(normalized) <= 128
+                and all(
+                    character.isascii()
+                    and (character.isalnum() or character in "._:-")
+                    for character in normalized
+                )
+            )
+
+        with self._lock():
+            current = self._read_unlocked()
+            added: dict[str, str] = {}
+            for value_field, identity_field in fields:
+                if value_field not in current or current.get(value_field) is None:
+                    if value_field not in implicit_defaults:
+                        continue
+                    current[value_field] = implicit_defaults[value_field]
+                if valid_request_id(current.get(identity_field)):
+                    continue
+                request_id = uuid4().hex
+                current[identity_field] = request_id
+                added[identity_field] = request_id
+            if added:
+                self._write_unlocked(current)
+            return added
 
     def request_battle_workflow(
         self,
@@ -1343,6 +1389,7 @@ class ControlDirectiveStore:
             data["adb_port"] = port
             data["updated_at"] = timestamp
             data["adb_port_updated_at"] = timestamp
+            data["adb_port_request_id"] = uuid4().hex
             if source:
                 data["updated_by"] = source
             return data

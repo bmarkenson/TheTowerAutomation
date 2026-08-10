@@ -23,6 +23,21 @@ internal sealed record BetterControlWorkflowPresentation(
     bool Pending,
     bool Terminal);
 
+internal sealed record StrategyScopePresentation(
+    string? StartupDefault,
+    string? CurrentStrategy,
+    string? PendingNextBoundary,
+    string? PendingActiveBattle,
+    bool Authoritative)
+{
+    public string? PendingStrategy =>
+        PendingActiveBattle ?? PendingNextBoundary;
+
+    public string PendingLabel => PendingActiveBattle is not null
+        ? "Pending active adoption"
+        : "Pending boundary";
+}
+
 internal sealed record ConfirmedLocalMappingPresentation(
     bool Visible,
     string Severity,
@@ -43,7 +58,7 @@ internal static class ControlSurfaceCompatibility
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 36;
+    public const int MinimumServerRevision = 37;
 
     private static readonly string[] RequiredCapabilities =
     [
@@ -62,6 +77,7 @@ internal static class ControlSurfaceCompatibility
         "host_performance_telemetry_v1",
         "managed_custom_module_presets_v1",
         "observed_game_speed",
+        "runtime_control_acknowledgements_v1",
         "selected_strategy_process_start",
         "save_backed_setup_capture_v2",
         "save_mapping_integration_v1",
@@ -106,6 +122,57 @@ internal static class ControlSurfaceCompatibility
     public static bool CanOpenSaveMappingIntegration(
         ControlSurfaceCompatibilityResult? compatibility) =>
         compatibility?.IsCompatible == true;
+
+    public static StrategyScopePresentation ResolveStrategyScope(
+        StatusResponse status,
+        bool processActive,
+        string? configuredStrategy)
+    {
+        var authoritative = (status.Capabilities ?? []).Contains(
+            "better_control_model_v2",
+            StringComparer.Ordinal);
+        if (authoritative)
+        {
+            var scope = status.ControlModel?.StrategyScope;
+            return new StrategyScopePresentation(
+                NormalizeStrategy(scope?.StartupDefault),
+                processActive
+                    ? NormalizeStrategy(scope?.ActiveBattle)
+                    : null,
+                processActive
+                    ? NormalizeStrategy(scope?.PendingNextBoundary)
+                    : null,
+                processActive
+                    ? NormalizeStrategy(scope?.PendingActiveBattle)
+                    : null,
+                true);
+        }
+
+        var configured = NormalizeStrategy(configuredStrategy);
+        var requested = NormalizeStrategy(status.Control.Strategy)
+            ?? configured;
+        var pending = processActive
+            && status.Control.Strategy is not null
+            && status.Acknowledgements.Strategy is not
+                { AcknowledgesCurrent: true };
+        var current = !processActive
+            ? null
+            : status.Control.Strategy is null
+                ? configured
+                : NormalizeStrategy(
+                    status.Acknowledgements.Strategy?.Value);
+        var activeRequest = pending
+            && string.Equals(
+                status.Control.StrategyApplyMode,
+                "active_battle",
+                StringComparison.OrdinalIgnoreCase);
+        return new StrategyScopePresentation(
+            configured,
+            current,
+            pending && !activeRequest ? requested : null,
+            activeRequest ? requested : null,
+            false);
+    }
 
     public static ConfirmedLocalMappingPresentation ConfirmedLocalMapping(
         ConfirmedLocalMappingStatus? status)
@@ -298,5 +365,11 @@ internal static class ControlSurfaceCompatibility
             label,
             pending,
             terminal);
+    }
+
+    private static string? NormalizeStrategy(string? strategy)
+    {
+        var normalized = strategy?.Trim().ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 }

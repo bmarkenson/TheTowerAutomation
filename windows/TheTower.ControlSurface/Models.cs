@@ -559,6 +559,9 @@ public sealed class BetterControlStrategyScopeStatus
 
     [JsonPropertyName("pending_next_boundary")]
     public string? PendingNextBoundary { get; set; }
+
+    [JsonPropertyName("pending_active_battle")]
+    public string? PendingActiveBattle { get; set; }
 }
 
 public sealed class BetterControlTerminalPolicyStatus
@@ -965,6 +968,9 @@ public sealed class ControlStatus
     [JsonPropertyName("game_speed_target")]
     public double GameSpeedTarget { get; set; } = 6.3;
 
+    [JsonPropertyName("game_speed_target_request_id")]
+    public string? GameSpeedTargetRequestId { get; set; }
+
     [JsonPropertyName("remaining_seconds")]
     public int? RemainingSeconds { get; set; }
 
@@ -973,6 +979,9 @@ public sealed class ControlStatus
 
     [JsonPropertyName("adb_port_updated_at")]
     public string? AdbPortUpdatedAt { get; set; }
+
+    [JsonPropertyName("adb_port_request_id")]
+    public string? AdbPortRequestId { get; set; }
 
     [JsonPropertyName("strategy")]
     public string? Strategy { get; set; }
@@ -1210,6 +1219,12 @@ public sealed class RuntimeInstance
 
     [JsonPropertyName("target")]
     public string? Target { get; set; }
+
+    [JsonPropertyName("runtime_id")]
+    public string? RuntimeId { get; set; }
+
+    [JsonPropertyName("target_generation")]
+    public int? TargetGeneration { get; set; }
 
     [JsonPropertyName("started_at")]
     public string? StartedAt { get; set; }

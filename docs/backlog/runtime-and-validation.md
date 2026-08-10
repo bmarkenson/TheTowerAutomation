@@ -908,6 +908,44 @@ stages:
       collected the already-visible five-gem Home reward and stayed Home; no
       Start Battle intent, battle transition, Surrender, or manufactured test
       boundary was used. Native Windows usability remains pending.
+  - Durable acknowledgement and Strategy Scope correction checkpoint
+    (2026-08-10, feature branch):
+    - [x] Server revision 37 and capability
+      `runtime_control_acknowledgements_v1` publish exact applied state, mode,
+      speed, ADB, and Strategy receipts in the existing atomic runtime-owned
+      authority channel. The envelope must match runtime ID, PID, target, and
+      target generation in the active lock; each field must match the current
+      request ID and value. Legacy/implicit defaults gain IDs at startup without
+      an operator refresh, while action-log messages remain audit-only.
+    - [x] Action Authority, terminal policy, setup-capture availability, paused
+      ADB handoff, and speed/ADB indicators now consume those durable receipts.
+      Attached-restart readiness also uses the exact receipt, fresh runtime
+      observation, and replacement startup-policy snapshot rather than appended
+      log position. No runtime authority semantics or input routes changed.
+    - [x] WPF renders Linux `control_model.strategy_scope` for startup, current,
+      pending-next, and pending-active presentation. Compatibility reconstruction
+      runs only without `better_control_model_v2`; dirty selection, failed retry,
+      same-ID publication, stopped-process, and explicit active adoption remain
+      under the existing selection coordinator.
+    - [x] Repository regressions cover a valid receipt beyond 262 KiB of later
+      log output, rotation, stale/wrong runtime/PID/target/generation rejection,
+      exact request replacement, all five receipt types, authoritative Strategy
+      Scope versus missing/contradictory legacy evidence, and portable WPF
+      current/pending presentation. The expanded affected Python aggregate
+      passes 465 tests, the concurrent-promotion boundary slice passes 203
+      tests, and all 139 portable native tests pass. The Release WPF project
+      cross-builds with zero errors. The supported checkpoint passes
+      compilation, state-definition
+      validation, clickmap integrity with zero errors and the established 44
+      orphan candidates, and all 2,211 Python tests in 353.14 seconds after
+      rebasing onto current `develop` at `adf2176`.
+    - [ ] Run the revision-37 Windows checks in
+      [`../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation`](../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation):
+      preserve every indicator across long noisy output and rotation without a
+      refresh request, and verify authoritative Strategy current/pending/startup
+      rendering plus dirty/retry/same-ID/stopped/active-adoption behavior. No
+      Windows runtime, live process, or device validation is claimed here; see
+      [ISSUE-2026-037](../issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending).
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

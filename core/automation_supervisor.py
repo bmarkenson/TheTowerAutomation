@@ -21,6 +21,7 @@ Public usage (simplified):
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import math
 import os
 import time
@@ -77,6 +78,23 @@ class AutomationSupervisor:
     ) -> None:
         self.control_file = Path(control_file)
         self._control_store = ControlDirectiveStore(self.control_file)
+        try:
+            added_request_ids = (
+                self._control_store.ensure_request_identities()
+            )
+        except ControlDirectiveError as exc:
+            added_request_ids = {}
+            log(
+                "[CTRL] Could not add exact identities to legacy control "
+                f"directives: {exc}",
+                "WARN",
+            )
+        if added_request_ids:
+            log(
+                "[CTRL] Added exact request identities to legacy fields: "
+                + ", ".join(sorted(added_request_ids)),
+                "INFO",
+            )
         initial_directives = self._load_control_directive()
         self._strategy_request = self._parse_strategy_request(initial_directives)
         self._game_speed_target = self._parse_game_speed_target(
@@ -139,6 +157,15 @@ class AutomationSupervisor:
         self._last_deferred_adb_request: Optional[Tuple[int, object]] = None
         self._next_adb_handoff_attempt_at = 0.0
         self._unexpected_manual_yield_emergency = False
+        self._control_acknowledgements: Dict[
+            str, Optional[Dict[str, object]]
+        ] = {
+            "state": None,
+            "mode": None,
+            "game_speed_target": None,
+            "adb_target": None,
+            "strategy": None,
+        }
 
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
@@ -251,6 +278,43 @@ class AutomationSupervisor:
         state = getattr(AUTOMATION, "state", None)
         value = getattr(state, "value", state)
         return str(value or "UNKNOWN").strip().upper()
+
+    @property
+    def runtime_id(self) -> str:
+        """Return this supervisor's process-lifetime runtime identity."""
+
+        return self._runtime_id
+
+    @property
+    def control_acknowledgements(self) -> Dict[str, object]:
+        """Return exact runtime-applied directive receipts for publication."""
+
+        return {
+            "schema_version": 1,
+            **deepcopy(self._control_acknowledgements),
+        }
+
+    def acknowledge_strategy(
+        self,
+        strategy: str,
+        request_id: object,
+    ) -> bool:
+        """Record Strategy application only for the exact current request."""
+
+        normalized_strategy = str(strategy or "").strip().lower()
+        normalized_request_id = str(request_id or "").strip()
+        current = self._strategy_request
+        if (
+            current is None
+            or normalized_strategy != str(current[0]).strip().lower()
+            or normalized_request_id != str(current[1] or "").strip()
+        ):
+            return False
+        return self._record_control_acknowledgement(
+            "strategy",
+            normalized_strategy,
+            normalized_request_id,
+        )
 
     @property
     def control_request_identity(self) -> Dict[str, object]:
@@ -370,11 +434,15 @@ class AutomationSupervisor:
             self._apply_game_speed_target(
                 directives.get("game_speed_target"),
                 acknowledge_unchanged=game_speed_target_changed,
+                request_id=directives.get(
+                    "game_speed_target_request_id"
+                ),
             )
             self._sync_pause_deadline(directives)
             self._apply_adb_port(
                 directives.get("adb_port"),
                 directives.get("adb_port_updated_at"),
+                request_id=directives.get("adb_port_request_id"),
             )
 
         if self._unexpected_manual_yield_emergency:
@@ -1417,6 +1485,35 @@ class AutomationSupervisor:
             log(f"[CTRL] Failed reading control file: {exc}", "WARN")
             return {}
 
+    def _record_control_acknowledgement(
+        self,
+        field: str,
+        value: str,
+        request_id: object,
+    ) -> bool:
+        """Replace one receipt only after the exact directive was applied."""
+
+        normalized_request_id = str(request_id or "").strip()
+        if (
+            field not in self._control_acknowledgements
+            or not normalized_request_id
+            or len(normalized_request_id) > 128
+            or any(
+                not character.isascii()
+                or not (character.isalnum() or character in "._:-")
+                for character in normalized_request_id
+            )
+        ):
+            return False
+        self._control_acknowledgements[field] = {
+            "value": str(value),
+            "request_id": normalized_request_id,
+            "acknowledged_at": datetime.now(timezone.utc)
+            .astimezone()
+            .isoformat(timespec="seconds"),
+        }
+        return True
+
     def _apply_state(
         self,
         state: object,
@@ -1442,6 +1539,11 @@ class AutomationSupervisor:
                     "INFO",
                     console=True,
                 )
+                self._record_control_acknowledgement(
+                    "state",
+                    normalized,
+                    request_id,
+                )
             return
         try:
             AUTOMATION.state = normalized
@@ -1452,6 +1554,11 @@ class AutomationSupervisor:
                 console=True,
             )
             self._last_applied_state = normalized
+            self._record_control_acknowledgement(
+                "state",
+                normalized,
+                request_id,
+            )
         except Exception as exc:
             log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
 
@@ -1481,6 +1588,11 @@ class AutomationSupervisor:
                     "INFO",
                     console=True,
                 )
+                self._record_control_acknowledgement(
+                    "mode",
+                    normalized,
+                    request_id,
+                )
             return
         try:
             AUTOMATION.mode = normalized
@@ -1491,6 +1603,11 @@ class AutomationSupervisor:
                 console=True,
             )
             self._last_applied_mode = normalized
+            self._record_control_acknowledgement(
+                "mode",
+                normalized,
+                request_id,
+            )
         except Exception as exc:
             log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")
 
@@ -1499,6 +1616,7 @@ class AutomationSupervisor:
         target: object,
         *,
         acknowledge_unchanged: bool = False,
+        request_id: object = None,
     ) -> None:
         normalized = self._parse_game_speed_target(target)
         self._game_speed_target = normalized
@@ -1510,6 +1628,11 @@ class AutomationSupervisor:
                     "INFO",
                     console=True,
                 )
+                self._record_control_acknowledgement(
+                    "game_speed_target",
+                    f"x{normalized:.1f}",
+                    request_id,
+                )
             return
         self._last_applied_game_speed_target = normalized
         log(
@@ -1518,14 +1641,25 @@ class AutomationSupervisor:
             "INFO",
             console=True,
         )
+        self._record_control_acknowledgement(
+            "game_speed_target",
+            f"x{normalized:.1f}",
+            request_id,
+        )
 
-    def _apply_adb_port(self, port: object, updated_at: object) -> None:
+    def _apply_adb_port(
+        self,
+        port: object,
+        updated_at: object,
+        *,
+        request_id: object = None,
+    ) -> None:
         if isinstance(port, bool) or not isinstance(port, int):
             return
         if not 1 <= port <= 65535 or self._adb_port_handoff is None:
             return
 
-        request = (port, updated_at)
+        request = (port, request_id or updated_at)
         if request == self._last_applied_adb_request:
             return
         target = f"localhost:{port}"
@@ -1535,6 +1669,11 @@ class AutomationSupervisor:
                 f"[CTRL] ADB target set to {target} via control file",
                 "INFO",
                 console=True,
+            )
+            self._record_control_acknowledgement(
+                "adb_target",
+                target,
+                request_id,
             )
             return
         if not self.is_paused:
@@ -1562,6 +1701,11 @@ class AutomationSupervisor:
                 f"[CTRL] ADB target set to {target} via control file",
                 "INFO",
                 console=True,
+            )
+            self._record_control_acknowledgement(
+                "adb_target",
+                target,
+                request_id,
             )
             return
 

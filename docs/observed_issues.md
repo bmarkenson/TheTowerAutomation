@@ -190,6 +190,21 @@ current runtime state.
   explicit active adoption, feedback, and Pause preservation on Windows;
   [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
 
+### Long action-log retention made current controls appear pending
+
+**Stable ID:** `ISSUE-2026-037` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A healthy exact-owner runtime reported correct Strategy Scope and authority,
+  but current acknowledgements disappeared after their audit lines aged beyond
+  the adapter's 262 KiB tail. The repair publishes exact state, mode, speed,
+  ADB, and Strategy receipts in the atomic runtime channel and makes WPF render
+  authoritative Strategy Scope; action logs remain audit-only.
+- Load the [dossier](issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending)
+  for a recurrence, acknowledgement-channel change, or Windows confirmation.
+  Next: verify long-run and rotated-log presentation, Strategy current/pending,
+  paused ADB handoff, and setup-capture availability in WPF without issuing a
+  refresh request; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+
 ### Windows client could not identify or reload a stale Linux control service
 
 **Stable ID:** `ISSUE-2026-011` · **Lifecycle:** `repair_awaiting_confirmation`

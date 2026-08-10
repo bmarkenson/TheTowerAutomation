@@ -274,6 +274,10 @@ class App:
                 self._handoff_adb_port if adb_target_session is not None else None
             ),
         )
+        if adb_target_session is not None:
+            adb_target_session.bind_runtime_owner(
+                self._supervisor.runtime_id
+            )
         self._mission_mgr = MissionManager(
             self._load_mission(config),
             self._load_strategy(config),
@@ -472,7 +476,7 @@ class App:
         self._action_authority = RuntimeActionAuthority()
         self._action_authority_publisher = RuntimeActionAuthorityPublisher(
             Path(config.control_file).with_name("strategy_action_gate.json"),
-            owner=self._supervisor.current_exclusive_validation_owner(),
+            owner=self._runtime_status_owner(),
         )
         self._authority_battle_active = False
         self._authority_primary_state = "UNKNOWN"
@@ -1404,6 +1408,25 @@ class App:
             shutting_down=shutting_down,
         )
 
+    def _runtime_status_owner(self) -> Dict[str, object]:
+        """Return the runtime owner bound to the held target generation."""
+
+        owner = self._supervisor.current_exclusive_validation_owner()
+        session = getattr(self, "_adb_target_session", None)
+        if session is None:
+            return owner
+        try:
+            target = session.snapshot()
+        except Exception:
+            return owner
+        if target.owned:
+            owner = {
+                **owner,
+                "adb_target": target.target,
+                "target_generation": target.generation,
+            }
+        return owner
+
     def _publish_action_authority(
         self,
         *,
@@ -1413,20 +1436,35 @@ class App:
         if publisher is None:
             return False
         supervisor = getattr(self, "_supervisor", None)
-        owner = (
-            supervisor.current_exclusive_validation_owner()
-            if supervisor is not None
-            and callable(
-                getattr(supervisor, "current_exclusive_validation_owner", None)
-            )
-            else None
-        )
+        owner = self._runtime_status_owner() if supervisor is not None else None
         manager = getattr(self, "_mission_mgr", None)
         awaiting_intent = getattr(
             manager, "awaiting_initial_battle_intent", None
         )
         active_battle_observed = getattr(
             manager, "active_battle_observed", None
+        )
+        strategy_request = getattr(
+            supervisor,
+            "strategy_request",
+            None,
+        )
+        pending_strategy = getattr(self, "_pending_strategy_request", None)
+        current_strategy = (
+            self._current_strategy_name()
+            if manager is not None
+            else str(
+                getattr(getattr(self, "_config", None), "strategy_name", "none")
+                or "none"
+            )
+            .strip()
+            .lower()
+        )
+        startup_default = (
+            str(strategy_request[0]).strip().lower()
+            if isinstance(strategy_request, tuple)
+            and len(strategy_request) >= 1
+            else current_strategy
         )
         return publisher.publish(
             self._get_action_authority().snapshot(),
@@ -1437,8 +1475,24 @@ class App:
                 "_interactive_development_ack",
                 None,
             ),
+            acknowledgements=getattr(
+                supervisor,
+                "control_acknowledgements",
+                None,
+            ),
             control_model={
                 "schema_version": 1,
+                "startup_gate_policy": str(
+                    getattr(
+                        getattr(self, "_config", None),
+                        "startup_gate_policy",
+                        "",
+                    )
+                    or ""
+                )
+                .strip()
+                .lower()
+                or None,
                 "observation": copy.deepcopy(
                     getattr(self, "_control_observation", None)
                 ),
@@ -1465,16 +1519,38 @@ class App:
                     ),
                 },
                 "strategy_scope": {
+                    "startup_default": startup_default,
                     "active_battle": (
-                        self._current_strategy_name()
+                        current_strategy
                         if callable(active_battle_observed)
                         and active_battle_observed()
+                        else None
+                    ),
+                    "pending_next_boundary": (
+                        str(pending_strategy[0]).strip().lower()
+                        if isinstance(pending_strategy, tuple)
+                        and len(pending_strategy) >= 3
+                        and pending_strategy[2] == "next_boundary"
+                        else None
+                    ),
+                    "pending_active_battle": (
+                        str(pending_strategy[0]).strip().lower()
+                        if isinstance(pending_strategy, tuple)
+                        and len(pending_strategy) >= 3
+                        and pending_strategy[2] == "active_battle"
+                        else None
+                    ),
+                    "request_id": (
+                        str(strategy_request[1]).strip()
+                        if isinstance(strategy_request, tuple)
+                        and len(strategy_request) >= 2
+                        and str(strategy_request[1] or "").strip()
                         else None
                     ),
                     "observation_only": bool(
                         callable(active_battle_observed)
                         and active_battle_observed()
-                        and self._current_strategy_name() == "none"
+                        and current_strategy == "none"
                     ),
                 },
             },
@@ -7372,6 +7448,10 @@ class App:
             and self._current_strategy_definition_matches(requested_name)
         ):
             self._pending_strategy_request = None
+            self._supervisor.acknowledge_strategy(
+                requested_name,
+                normalized_request[1],
+            )
             log(
                 f"[CTRL] Strategy set to {requested_name} via control file",
                 "INFO",
@@ -7577,7 +7657,10 @@ class App:
                 console=True,
             )
             return False
-        self._complete_strategy_application(requested_name)
+        self._complete_strategy_application(
+            requested_name,
+            request_id=request[1],
+        )
         log(
             f"[CTRL] Strategy set to {requested_name} via control file",
             "INFO",
@@ -7601,7 +7684,10 @@ class App:
                 console=True,
             )
             return False
-        self._complete_strategy_application(requested_name)
+        self._complete_strategy_application(
+            requested_name,
+            request_id=request[1],
+        )
         log(
             f"[CTRL] Adopted strategy {requested_name} for active battle; "
             "startup gates deferred until the next run boundary",
@@ -7616,7 +7702,12 @@ class App:
         )
         return True
 
-    def _complete_strategy_application(self, requested_name: str) -> None:
+    def _complete_strategy_application(
+        self,
+        requested_name: str,
+        *,
+        request_id: object = None,
+    ) -> None:
         self._get_action_authority().clear_strategy_gate(
             event=StrategyGateExitEvent.ACTIVE_STRATEGY_CHANGE,
             reason=(
@@ -7628,6 +7719,10 @@ class App:
         )
         self._pending_auxiliary_cleanup = None
         self._config.strategy_name = requested_name
+        self._supervisor.acknowledge_strategy(
+            requested_name,
+            request_id,
+        )
         self._pending_strategy_request = None
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False

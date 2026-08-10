@@ -571,6 +571,7 @@ class RunBoundaryTests(unittest.TestCase):
     def test_app_adopts_requested_strategy_at_resumable_home(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()
+        app._supervisor = MagicMock()
         app._pending_strategy_request = (
             "farm_t18",
             "request-active",
@@ -600,6 +601,7 @@ class RunBoundaryTests(unittest.TestCase):
     def test_active_adoption_request_at_new_battle_uses_boundary_replacement(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()
+        app._supervisor = MagicMock()
         app._pending_strategy_request = (
             "farm_t18",
             "request-active",

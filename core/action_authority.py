@@ -938,13 +938,25 @@ class RuntimeActionAuthorityPublisher:
         stale_after_seconds: int = STRATEGY_ACTION_GATE_STALE_AFTER_SECONDS,
     ) -> None:
         self.path = Path(path)
-        self.owner = {
+        self.owner = self._normalize_owner(owner)
+        self.stale_after_seconds = max(1, int(stale_after_seconds))
+        self._last_error: Optional[str] = None
+
+    @staticmethod
+    def _normalize_owner(owner: Mapping[str, object]) -> dict[str, object]:
+        normalized: dict[str, object] = {
             "runtime_id": str(owner.get("runtime_id") or ""),
             "pid": int(owner.get("pid") or os.getpid()),
             "adb_target": str(owner.get("adb_target") or "unknown"),
         }
-        self.stale_after_seconds = max(1, int(stale_after_seconds))
-        self._last_error: Optional[str] = None
+        target_generation = owner.get("target_generation")
+        if (
+            isinstance(target_generation, int)
+            and not isinstance(target_generation, bool)
+            and target_generation >= 1
+        ):
+            normalized["target_generation"] = target_generation
+        return normalized
 
     def publish(
         self,
@@ -957,15 +969,12 @@ class RuntimeActionAuthorityPublisher:
             Mapping[str, object]
         ] = None,
         control_model: Optional[Mapping[str, object]] = None,
+        acknowledgements: Optional[Mapping[str, object]] = None,
     ) -> bool:
         published_owner = dict(self.owner)
         if owner is not None:
             try:
-                published_owner = {
-                    "runtime_id": str(owner.get("runtime_id") or ""),
-                    "pid": int(owner.get("pid") or os.getpid()),
-                    "adb_target": str(owner.get("adb_target") or "unknown"),
-                }
+                published_owner = self._normalize_owner(owner)
             except (TypeError, ValueError):
                 published_owner = dict(self.owner)
         payload = {
@@ -982,6 +991,11 @@ class RuntimeActionAuthorityPublisher:
             "control_model": (
                 dict(control_model)
                 if isinstance(control_model, Mapping)
+                else None
+            ),
+            "acknowledgements": (
+                dict(acknowledgements)
+                if isinstance(acknowledgements, Mapping)
                 else None
             ),
             **snapshot.as_dict(),

@@ -81,7 +81,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 36
+CONTROL_SURFACE_REVISION = 37
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -101,6 +101,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "managed_custom_module_presets_v1",
     "observed_game_speed",
     "persistent_adb_connection_v1",
+    "runtime_control_acknowledgements_v1",
     "save_backed_setup_capture_v1",
     "save_backed_setup_capture_v2",
     "save_mapping_review_status_v1",
@@ -160,26 +161,7 @@ _STATUS_SUMMARY_RE = re.compile(
     r"(?:\s*\|\s*Speed=(?P<speed>[^|]+?))?\s*$"
 )
 _STATUS_DETAIL_PREFIX = "[STATUS_DETAIL] "
-_STATE_ACK_RE = re.compile(
-    r"^\[CTRL] State set to (?P<value>RUNNING|PAUSED|STOPPED) via control file"
-    r"(?: request_id=(?P<request_id>[A-Za-z0-9._:-]{1,128}))?$"
-)
-_MODE_ACK_RE = re.compile(
-    r"^\[CTRL] Mode set to (?P<value>NEXT_BATTLE|RETRY|WAIT|HOME) "
-    r"via control file"
-    r"(?: request_id=(?P<request_id>[A-Za-z0-9._:-]{1,128}))?$"
-)
-_GAME_SPEED_TARGET_ACK_RE = re.compile(
-    r"^\[CTRL] Game speed target set to "
-    r"(?P<value>x(?:[0-5]\.[05]|6\.[03])) via control file$"
-)
-_ADB_TARGET_ACK_RE = re.compile(
-    r"^\[CTRL] ADB target set to (?P<value>localhost:(?:[1-9]\d{0,4})) via control file$"
-)
-_STRATEGY_ACK_RE = re.compile(
-    r"^\[CTRL] Strategy set to "
-    r"(?P<value>[a-z][a-z0-9_]{2,47}) via control file$"
-)
+_CONTROL_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 
 
 class ControlSurfaceRequestError(ValueError):
@@ -1242,6 +1224,7 @@ class ControlSurfaceService:
                 "mode": "UNKNOWN",
                 "game_speed_target": MAXIMUM_GAME_SPEED_TARGET,
                 "game_speed_target_updated_at": None,
+                "game_speed_target_request_id": None,
                 "adb_port": None,
                 "resume_at": None,
                 "remaining_seconds": None,
@@ -1251,6 +1234,7 @@ class ControlSurfaceService:
                 "mode_updated_at": None,
                 "mode_request_id": None,
                 "adb_port_updated_at": None,
+                "adb_port_request_id": None,
                 "strategy": None,
                 "strategy_apply_mode": "next_boundary",
                 "strategy_updated_at": None,
@@ -1289,11 +1273,14 @@ class ControlSurfaceService:
                 ),
                 None,
             )
-        acknowledgements = self._latest_acknowledgements(lines, control)
         runtime = self._runtime_evidence()
         strategy_action_gate = self._strategy_action_gate_status(
             now=current_time,
             runtime=runtime,
+        )
+        acknowledgements = self._latest_acknowledgements(
+            strategy_action_gate,
+            control,
         )
         interactive_development_lease = (
             self._interactive_development_lease_status(
@@ -2494,17 +2481,22 @@ class ControlSurfaceService:
             )
 
         try:
-            pause_log_offset = _file_size(self.action_log)
+            previous_observation_id = str(
+                (
+                    (before.get("control_model") or {}).get("observation")
+                    or {}
+                ).get("observation_id")
+                or ""
+            )
             self.control_store.set_state(
                 "PAUSED",
                 source="control-surface-attached-restart",
             )
             self._wait_for_attached_restart_pause(
                 previous_pid=previous_pid,
-                log_offset=pause_log_offset,
+                previous_observation_id=previous_observation_id,
             )
 
-            log_offset = _file_size(self.action_log)
             stopped = manager.stop()
             if self.adb_connection_manager is not None:
                 self.adb_connection_manager.ensure_target(
@@ -2548,7 +2540,6 @@ class ControlSurfaceService:
 
             self._wait_for_replacement_runtime(
                 replacement_pid=replacement_pid,
-                log_offset=log_offset,
             )
 
             restored_state = original_state
@@ -2625,9 +2616,9 @@ class ControlSurfaceService:
         self,
         *,
         previous_pid: int,
-        log_offset: int,
+        previous_observation_id: str = "",
     ) -> dict[str, Any]:
-        """Require post-request Pause acknowledgement and fresh RUNNING proof."""
+        """Require an exact Pause receipt and a later runtime observation."""
 
         deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
         last_missing: list[str] = []
@@ -2635,31 +2626,23 @@ class ControlSurfaceService:
             status = self.status()
             process = status.get("process_service") or {}
             runtime = status.get("runtime") or {}
-            observation = status.get("observation") or {}
-            expected_state_request_id = status.get("control", {}).get(
-                "state_request_id"
+            acknowledgement = (
+                (status.get("acknowledgements") or {}).get("state") or {}
             )
-            appended = _lines_from_offset(self.action_log, log_offset)
-            parsed = [entry for line in appended if (entry := _parse_log_line(line))]
-            pause_indices = [
-                index
-                for index, entry in enumerate(parsed)
-                if (
-                    (match := _STATE_ACK_RE.fullmatch(entry["message"]))
-                    and match.group("value") == "PAUSED"
-                    and (
-                        expected_state_request_id is None
-                        or match.group("request_id")
-                        == expected_state_request_id
-                    )
-                )
-            ]
-            pause_consumed = bool(pause_indices)
+            observation = (
+                (status.get("control_model") or {}).get("observation") or {}
+            )
+            pause_consumed = bool(
+                acknowledgement.get("acknowledges_current") is True
+                and acknowledgement.get("value") == "PAUSED"
+            )
+            observation_id = str(observation.get("observation_id") or "")
             fresh_status = bool(
-                pause_indices
-                and any(
-                    index > pause_indices[-1] and entry["level"] == "STATUS"
-                    for index, entry in enumerate(parsed)
+                observation.get("available") is True
+                and observation_id
+                and (
+                    not previous_observation_id
+                    or observation_id != previous_observation_id
                 )
             )
             matching_owner = any(
@@ -2677,10 +2660,11 @@ class ControlSurfaceService:
                 last_missing.append("PAUSED control acknowledgement")
             if not fresh_status:
                 last_missing.append("post-request status observation")
-            elif observation.get("state") != "RUNNING":
+            elif observation.get("primary_state") != "RUNNING":
                 raise AutomationProcessError(
                     "Attached restart paused safely but the fresh runtime "
-                    f"observation was {observation.get('state') or 'UNKNOWN'}, "
+                    "observation was "
+                    f"{observation.get('primary_state') or 'UNKNOWN'}, "
                     "not RUNNING"
                 )
             if not last_missing:
@@ -2696,7 +2680,6 @@ class ControlSurfaceService:
         self,
         *,
         replacement_pid: int,
-        log_offset: int,
     ) -> dict[str, Any]:
         deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
         last_missing: list[str] = []
@@ -2704,43 +2687,25 @@ class ControlSurfaceService:
             status = self.status()
             process = status.get("process_service") or {}
             runtime = status.get("runtime") or {}
-            expected_state_request_id = status.get("control", {}).get(
-                "state_request_id"
+            acknowledgement = (
+                (status.get("acknowledgements") or {}).get("state") or {}
             )
-            appended = _lines_from_offset(self.action_log, log_offset)
-            parsed = [entry for line in appended if (entry := _parse_log_line(line))]
+            control_model = status.get("control_model") or {}
+            observation = control_model.get("observation") or {}
             matching_owner = any(
                 instance.get("active") and instance.get("pid") == replacement_pid
                 for instance in runtime.get("instances", [])
             )
-            policy_indices = [
-                index
-                for index, entry in enumerate(parsed)
-                if "[RUN_INIT] Startup gate policy=next_run" in entry["message"]
-            ]
-            pause_indices = [
-                index
-                for index, entry in enumerate(parsed)
-                if (
-                    (match := _STATE_ACK_RE.fullmatch(entry["message"]))
-                    and match.group("value") == "PAUSED"
-                    and (
-                        expected_state_request_id is None
-                        or match.group("request_id")
-                        == expected_state_request_id
-                    )
-                )
-                and policy_indices
-                and index > policy_indices[-1]
-            ]
-            policy_loaded = bool(policy_indices)
-            pause_consumed = bool(pause_indices)
+            policy_loaded = (
+                control_model.get("startup_gate_policy") == "next_run"
+            )
+            pause_consumed = bool(
+                acknowledgement.get("acknowledges_current") is True
+                and acknowledgement.get("value") == "PAUSED"
+            )
             first_status = bool(
-                pause_indices
-                and any(
-                    index > pause_indices[-1] and entry["level"] == "STATUS"
-                    for index, entry in enumerate(parsed)
-                )
+                observation.get("available") is True
+                and observation.get("observation_id")
             )
             last_missing = []
             if not (
@@ -2751,7 +2716,7 @@ class ControlSurfaceService:
             if not matching_owner:
                 last_missing.append("replacement ADB lock")
             if not policy_loaded:
-                last_missing.append("next_run startup log")
+                last_missing.append("next_run startup policy acknowledgement")
             if not pause_consumed:
                 last_missing.append("PAUSED control acknowledgement")
             if not first_status:
@@ -3275,107 +3240,86 @@ class ControlSurfaceService:
 
     def _latest_acknowledgements(
         self,
-        lines: Sequence[str],
+        runtime_authority: Mapping[str, Any],
         control: Mapping[str, Any],
     ) -> dict[str, Any]:
-        state_ack = None
-        mode_ack = None
-        game_speed_target_ack = None
-        adb_target_ack = None
-        strategy_ack = None
-        state_updated_at = control.get("state_updated_at")
-        mode_updated_at = control.get("mode_updated_at")
-        game_speed_target_updated_at = control.get(
-            "game_speed_target_updated_at"
-        )
-        adb_port_updated_at = control.get("adb_port_updated_at")
-        strategy_updated_at = control.get("strategy_updated_at")
-        legacy_updated_at = (
-            control.get("updated_at")
-            if (
-                state_updated_at is None
-                and mode_updated_at is None
-                and adb_port_updated_at is None
+        """Project only fresh, exact runtime-owned directive receipts."""
+
+        published = runtime_authority.get("acknowledgements")
+        if not isinstance(published, Mapping):
+            published = {}
+
+        def receipt(
+            field: str,
+            expected_value: object,
+            expected_request_id: object,
+        ) -> Optional[dict[str, Any]]:
+            candidate = published.get(field)
+            if not isinstance(candidate, Mapping):
+                return None
+            value = str(candidate.get("value") or "").strip()
+            request_id = str(candidate.get("request_id") or "").strip()
+            acknowledged_at = _parse_timestamp(
+                candidate.get("acknowledged_at")
             )
+            if (
+                not value
+                or not _CONTROL_REQUEST_ID_RE.fullmatch(request_id)
+                or acknowledged_at is None
+            ):
+                return None
+            requested_id = str(expected_request_id or "").strip()
+            return {
+                "value": value,
+                "at": acknowledged_at.isoformat(timespec="seconds"),
+                "request_id": request_id,
+                "acknowledges_current": bool(
+                    requested_id
+                    and request_id == requested_id
+                    and value == expected_value
+                ),
+            }
+
+        target = control.get("game_speed_target")
+        expected_speed = (
+            f"x{target:.1f}"
+            if isinstance(target, (int, float))
+            and not isinstance(target, bool)
             else None
         )
-        for line in reversed(lines):
-            entry = _parse_log_line(line)
-            if not entry:
-                continue
-            if state_ack is None and (match := _STATE_ACK_RE.fullmatch(entry["message"])):
-                state_ack = _ack_entry(
-                    entry,
-                    match.group("value"),
-                    control.get("state"),
-                    state_updated_at or legacy_updated_at,
-                    acknowledged_request_id=match.group("request_id"),
-                    expected_request_id=control.get("state_request_id"),
-                )
-            if mode_ack is None and (match := _MODE_ACK_RE.fullmatch(entry["message"])):
-                mode_value = normalize_automation_mode(match.group("value"))
-                mode_ack = _ack_entry(
-                    entry,
-                    mode_value,
-                    control.get("mode"),
-                    mode_updated_at or legacy_updated_at,
-                    acknowledged_request_id=match.group("request_id"),
-                    expected_request_id=control.get("mode_request_id"),
-                )
-            if game_speed_target_ack is None and (
-                match := _GAME_SPEED_TARGET_ACK_RE.fullmatch(entry["message"])
-            ):
-                target = control.get("game_speed_target")
-                expected_target = (
-                    f"x{target:.1f}"
-                    if isinstance(target, (int, float))
-                    and not isinstance(target, bool)
-                    else None
-                )
-                game_speed_target_ack = _ack_entry(
-                    entry,
-                    match.group("value"),
-                    expected_target,
-                    game_speed_target_updated_at,
-                )
-            if adb_target_ack is None and (
-                match := _ADB_TARGET_ACK_RE.fullmatch(entry["message"])
-            ):
-                expected_port = control.get("adb_port")
-                expected_target = (
-                    f"localhost:{expected_port}"
-                    if isinstance(expected_port, int)
-                    else None
-                )
-                adb_target_ack = _ack_entry(
-                    entry,
-                    match.group("value"),
-                    expected_target,
-                    adb_port_updated_at,
-                )
-            if strategy_ack is None and (
-                match := _STRATEGY_ACK_RE.fullmatch(entry["message"])
-            ):
-                strategy_ack = _ack_entry(
-                    entry,
-                    match.group("value"),
-                    control.get("strategy"),
-                    strategy_updated_at,
-                )
-            if (
-                state_ack is not None
-                and mode_ack is not None
-                and game_speed_target_ack is not None
-                and (control.get("adb_port") is None or adb_target_ack is not None)
-                and (control.get("strategy") is None or strategy_ack is not None)
-            ):
-                break
+        expected_port = control.get("adb_port")
+        expected_adb_target = (
+            f"localhost:{expected_port}"
+            if isinstance(expected_port, int)
+            and not isinstance(expected_port, bool)
+            else None
+        )
         return {
-            "state": state_ack,
-            "mode": mode_ack,
-            "game_speed_target": game_speed_target_ack,
-            "adb_target": adb_target_ack,
-            "strategy": strategy_ack,
+            "state": receipt(
+                "state",
+                control.get("state"),
+                control.get("state_request_id"),
+            ),
+            "mode": receipt(
+                "mode",
+                control.get("mode"),
+                control.get("mode_request_id"),
+            ),
+            "game_speed_target": receipt(
+                "game_speed_target",
+                expected_speed,
+                control.get("game_speed_target_request_id"),
+            ),
+            "adb_target": receipt(
+                "adb_target",
+                expected_adb_target,
+                control.get("adb_port_request_id"),
+            ),
+            "strategy": receipt(
+                "strategy",
+                control.get("strategy"),
+                control.get("strategy_request_id"),
+            ),
         }
 
     def _strategy_action_gate_status(
@@ -3397,6 +3341,7 @@ class ControlSurfaceService:
                 "runtime_active": False,
                 "owner": None,
                 "owner_matches_active_runtime": False,
+                "owner_matches_exact_runtime": False,
                 "gate_id": None,
                 "strategy": None,
                 "battle_scope": None,
@@ -3444,6 +3389,7 @@ class ControlSurfaceService:
                 "auxiliary_route": None,
                 "interactive_development_lease": None,
                 "control_model": None,
+                "acknowledgements": None,
                 "path": self._display_path(self.strategy_action_gate_path),
             }
             if error:
@@ -3482,6 +3428,18 @@ class ControlSurfaceService:
                 "the runtime-owned Strategy Gate snapshot has no valid owner PID"
             )
         owner_target = str(owner.get("adb_target") or "").strip()
+        owner_runtime_id = str(owner.get("runtime_id") or "").strip()
+        raw_target_generation = owner.get("target_generation")
+        owner_target_generation = (
+            raw_target_generation
+            if isinstance(raw_target_generation, int)
+            and not isinstance(raw_target_generation, bool)
+            and raw_target_generation >= 1
+            else None
+        )
+        exact_owner_declared = bool(
+            owner_runtime_id and owner_target_generation is not None
+        )
         observed_at = str(payload.get("observed_at") or "").strip()
         try:
             observed_timestamp = datetime.fromisoformat(observed_at).timestamp()
@@ -3508,7 +3466,19 @@ class ControlSurfaceService:
                 or owner_target == "unknown"
                 or str(instance.get("target") or "") == owner_target
             )
+            and (
+                not exact_owner_declared
+                or (
+                    str(instance.get("runtime_id") or "")
+                    == owner_runtime_id
+                    and instance.get("target_generation")
+                    == owner_target_generation
+                )
+            )
             for instance in (instances if isinstance(instances, list) else [])
+        )
+        owner_matches_exact_runtime = bool(
+            exact_owner_declared and owner_matches
         )
         runtime_active = payload.get("runtime_active") is True
         stale = bool(
@@ -3559,12 +3529,28 @@ class ControlSurfaceService:
         ):
             runtime_control_model = None
         elif runtime_control_model.get("observation") is not None:
+            normalized_observation = validate_observation(
+                runtime_control_model.get("observation")
+            )
+            if (
+                exact_owner_declared
+                and isinstance(normalized_observation, Mapping)
+                and normalized_observation.get("target_generation")
+                != owner_target_generation
+            ):
+                normalized_observation = None
             runtime_control_model = {
                 **dict(runtime_control_model),
-                "observation": validate_observation(
-                    runtime_control_model.get("observation")
-                ),
+                "observation": normalized_observation,
             }
+        runtime_acknowledgements = payload.get("acknowledgements")
+        if not (
+            not stale
+            and owner_matches_exact_runtime
+            and isinstance(runtime_acknowledgements, Mapping)
+            and runtime_acknowledgements.get("schema_version") == 1
+        ):
+            runtime_acknowledgements = None
         return {
             "schema_version": 1,
             "available": True,
@@ -3575,11 +3561,13 @@ class ControlSurfaceService:
             "stale_after_seconds": stale_after,
             "runtime_active": runtime_active,
             "owner": {
-                "runtime_id": str(owner.get("runtime_id") or ""),
+                "runtime_id": owner_runtime_id,
                 "pid": owner_pid,
                 "adb_target": owner_target or "unknown",
+                "target_generation": owner_target_generation,
             },
             "owner_matches_active_runtime": owner_matches,
+            "owner_matches_exact_runtime": owner_matches_exact_runtime,
             "gate_id": payload.get("gate_id"),
             "strategy": payload.get("strategy"),
             "battle_scope": payload.get("battle_scope"),
@@ -3635,6 +3623,11 @@ class ControlSurfaceService:
             "control_model": (
                 dict(runtime_control_model)
                 if isinstance(runtime_control_model, Mapping)
+                else None
+            ),
+            "acknowledgements": (
+                dict(runtime_acknowledgements)
+                if isinstance(runtime_acknowledgements, Mapping)
                 else None
             ),
             "path": self._display_path(self.strategy_action_gate_path),
@@ -3901,8 +3894,14 @@ class ControlSurfaceService:
         runtime_observation = None
         runtime_lifecycle: Mapping[str, Any] = {}
         runtime_strategy_scope: Mapping[str, Any] = {}
+        runtime_startup_gate_policy: Optional[str] = None
         runtime_model = runtime_authority.get("control_model")
         if isinstance(runtime_model, Mapping):
+            startup_gate_policy = str(
+                runtime_model.get("startup_gate_policy") or ""
+            ).strip().lower()
+            if startup_gate_policy in STARTUP_GATE_POLICIES:
+                runtime_startup_gate_policy = startup_gate_policy
             runtime_observation = validate_observation(
                 runtime_model.get("observation")
             )
@@ -4259,29 +4258,66 @@ class ControlSurfaceService:
             isinstance(strategy_ack, Mapping)
             and strategy_ack.get("acknowledges_current") is True
         )
-        acknowledged_strategy = (
-            str(strategy_ack.get("value") or "").strip().lower()
-            if isinstance(strategy_ack, Mapping)
-            else ""
+        runtime_scope_current = bool(
+            runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_active_runtime") is True
         )
+        authoritative_runtime_scope = bool(
+            runtime_scope_current
+            and runtime_authority.get("owner_matches_exact_runtime") is True
+            and "startup_default" in runtime_strategy_scope
+            and "pending_next_boundary" in runtime_strategy_scope
+        )
+        runtime_startup_strategy = str(
+            runtime_strategy_scope.get("startup_default") or ""
+        ).strip().lower()
         runtime_active_strategy = str(
             runtime_strategy_scope.get("active_battle") or ""
         ).strip().lower()
         active_strategy = (
             runtime_active_strategy
-            if runtime_lifecycle.get("active_battle_adopted") is True
+            if runtime_scope_current
+            and runtime_lifecycle.get("active_battle_adopted") is True
             and runtime_active_strategy
             else None
         )
-        pending_strategy = (
-            configured_strategy
-            if control.get("strategy_apply_mode") == "next_boundary"
-            and (
-                not strategy_ack_current
-                or active_strategy != configured_strategy
-            )
-            else None
+        startup_strategy = (
+            runtime_startup_strategy
+            if authoritative_runtime_scope and runtime_startup_strategy
+            else str(process.get("strategy") or configured_strategy)
         )
+        if authoritative_runtime_scope:
+            pending_strategy = (
+                str(
+                    runtime_strategy_scope.get("pending_next_boundary")
+                    or ""
+                ).strip().lower()
+                or None
+            )
+            pending_active_strategy = (
+                str(
+                    runtime_strategy_scope.get("pending_active_battle")
+                    or ""
+                ).strip().lower()
+                or None
+            )
+        else:
+            pending_strategy = (
+                configured_strategy
+                if control.get("strategy_apply_mode") == "next_boundary"
+                and (
+                    not strategy_ack_current
+                    or active_strategy != configured_strategy
+                )
+                else None
+            )
+            pending_active_strategy = (
+                configured_strategy
+                if control.get("strategy_apply_mode") == "active_battle"
+                and not strategy_ack_current
+                else None
+            )
         mode = str(control.get("mode") or "NEXT_BATTLE").upper()
         terminal_labels = {
             "NEXT_BATTLE": "continue_automatically",
@@ -4573,6 +4609,7 @@ class ControlSurfaceService:
 
         return {
             "schema_version": 1,
+            "startup_gate_policy": runtime_startup_gate_policy,
             "process": {
                 "state": process_state,
                 "live": process_live,
@@ -4601,9 +4638,10 @@ class ControlSurfaceService:
             },
             "observation": observation,
             "strategy_scope": {
-                "startup_default": str(process.get("strategy") or configured_strategy),
+                "startup_default": startup_strategy,
                 "active_battle": active_strategy,
                 "pending_next_boundary": pending_strategy,
+                "pending_active_battle": pending_active_strategy,
                 "request_id": control.get("strategy_request_id"),
                 "observation_only": bool(
                     runtime_strategy_scope.get("observation_only") is True
@@ -4702,10 +4740,21 @@ class ControlSurfaceService:
             held = _is_lock_held(path)
             pid = metadata.get("pid")
             alive = _pid_alive(pid)
+            runtime_id = str(metadata.get("runtime_id") or "").strip()
+            raw_target_generation = metadata.get("target_generation")
+            target_generation = (
+                raw_target_generation
+                if isinstance(raw_target_generation, int)
+                and not isinstance(raw_target_generation, bool)
+                and raw_target_generation >= 1
+                else None
+            )
             item = {
                 "file": path.name,
                 "pid": pid if isinstance(pid, int) else None,
                 "target": metadata.get("target"),
+                "runtime_id": runtime_id or None,
+                "target_generation": target_generation,
                 "metadata_state": metadata.get("state"),
                 "started_at": metadata.get("started_at"),
                 "released_at": metadata.get("released_at"),
@@ -4931,26 +4980,6 @@ def _tail_line_records_with_source(
         )
         cursor += len(raw_line)
     return records, f"{source.st_dev}:{source.st_ino}", size
-
-
-def _file_size(path: Path) -> int:
-    try:
-        return path.stat().st_size
-    except OSError:
-        return 0
-
-
-def _lines_from_offset(path: Path, offset: int) -> list[str]:
-    """Read complete log lines appended after a captured byte offset."""
-
-    try:
-        with path.open("rb") as handle:
-            size = handle.seek(0, os.SEEK_END)
-            handle.seek(offset if 0 <= offset <= size else 0)
-            data = handle.read()
-    except OSError:
-        return []
-    return data.decode("utf-8", errors="replace").splitlines()
 
 
 def _attach_operation_ids(
@@ -5238,40 +5267,6 @@ def _parse_timestamp(value: object) -> Optional[datetime]:
     if parsed.tzinfo is None:
         parsed = parsed.astimezone()
     return parsed
-
-
-def _ack_entry(
-    entry: Mapping[str, str],
-    value: str,
-    expected_value: object,
-    expected_updated_at: object,
-    *,
-    acknowledged_request_id: object = None,
-    expected_request_id: object = None,
-) -> dict[str, Any]:
-    acknowledged_at = _parse_timestamp(entry.get("timestamp"))
-    requested_at = _parse_timestamp(expected_updated_at)
-    observed_request_id = str(acknowledged_request_id or "").strip() or None
-    requested_id = str(expected_request_id or "").strip() or None
-    is_current = value == expected_value
-    if requested_id is not None:
-        is_current = bool(
-            is_current and observed_request_id == requested_id
-        )
-    elif requested_at is not None:
-        is_current = bool(
-            is_current
-            and acknowledged_at is not None
-            and acknowledged_at >= requested_at
-        )
-    return {
-        "value": value,
-        "at": acknowledged_at.isoformat(timespec="seconds")
-        if acknowledged_at
-        else entry.get("timestamp"),
-        "request_id": observed_request_id,
-        "acknowledges_current": is_current,
-    }
 
 
 def _none_if_dash(value: str) -> Optional[str]:

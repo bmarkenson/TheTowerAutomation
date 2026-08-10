@@ -222,6 +222,150 @@ def test_repeated_mode_directive_is_acknowledged_by_request_identity(tmp_path):
     ]
 
 
+def test_runtime_publishes_exact_receipts_for_every_control_dimension(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    state = store.set_state("PAUSED", source="test")
+    mode = store.set_mode("WAIT", source="test")
+    speed = store.set_game_speed_target(4.5, source="test")
+    adb = store.set_adb_port(5555, source="test")
+    strategy = store.set_strategy("farm_t18", source="test")
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+        adb_port_handoff=lambda _port: True,
+    )
+
+    assert supervisor.apply_control()
+    assert supervisor.acknowledge_strategy(
+        "farm_t18",
+        strategy["strategy_request_id"],
+    )
+
+    acknowledgements = supervisor.control_acknowledgements
+    assert acknowledgements["schema_version"] == 1
+    assert acknowledgements["state"] == {
+        "value": "PAUSED",
+        "request_id": state["state_request_id"],
+        "acknowledged_at": acknowledgements["state"]["acknowledged_at"],
+    }
+    assert acknowledgements["mode"]["request_id"] == mode["mode_request_id"]
+    assert acknowledgements["mode"]["value"] == "WAIT"
+    assert acknowledgements["game_speed_target"]["request_id"] == (
+        speed["game_speed_target_request_id"]
+    )
+    assert acknowledgements["game_speed_target"]["value"] == "x4.5"
+    assert acknowledgements["adb_target"]["request_id"] == (
+        adb["adb_port_request_id"]
+    )
+    assert acknowledgements["adb_target"]["value"] == "localhost:5555"
+    assert acknowledgements["strategy"]["request_id"] == (
+        strategy["strategy_request_id"]
+    )
+    assert acknowledgements["strategy"]["value"] == "farm_t18"
+
+    replacement = store.set_state("PAUSED", source="replacement")
+    assert supervisor.apply_control()
+    assert supervisor.control_acknowledgements["state"]["request_id"] == (
+        replacement["state_request_id"]
+    )
+    assert not supervisor.acknowledge_strategy(
+        "farm_t18",
+        "wrong-request-id",
+    )
+    assert supervisor.control_acknowledgements["strategy"]["request_id"] == (
+        strategy["strategy_request_id"]
+    )
+
+
+def test_legacy_directives_gain_exact_ids_without_operator_refresh(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    control_file = tmp_path / "automation_ctl.json"
+    original = {
+        "state": "PAUSED",
+        "mode": "WAIT",
+        "game_speed_target": 4.5,
+        "adb_port": 5555,
+        "strategy": "farm_t18",
+        "strategy_apply_mode": "next_boundary",
+        "updated_at": "2026-08-10T12:00:00-07:00",
+    }
+    control_file.write_text(json.dumps(original), encoding="utf-8")
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+        adb_port_handoff=lambda _port: True,
+    )
+
+    migrated = ControlDirectiveStore(control_file).status()
+    assert migrated["updated_at"] == original["updated_at"]
+    for field in (
+        "state_request_id",
+        "mode_request_id",
+        "game_speed_target_request_id",
+        "adb_port_request_id",
+        "strategy_request_id",
+    ):
+        assert migrated[field]
+
+    assert supervisor.apply_control()
+    assert supervisor.acknowledge_strategy(
+        "farm_t18",
+        migrated["strategy_request_id"],
+    )
+    acknowledgements = supervisor.control_acknowledgements
+    assert acknowledgements["state"]["request_id"] == (
+        migrated["state_request_id"]
+    )
+    assert acknowledgements["mode"]["request_id"] == (
+        migrated["mode_request_id"]
+    )
+    assert acknowledgements["game_speed_target"]["request_id"] == (
+        migrated["game_speed_target_request_id"]
+    )
+    assert acknowledgements["adb_target"]["request_id"] == (
+        migrated["adb_port_request_id"]
+    )
+    assert acknowledgements["strategy"]["request_id"] == (
+        migrated["strategy_request_id"]
+    )
+
+
+def test_implicit_control_defaults_gain_exact_runtime_receipts(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+    )
+
+    migrated = ControlDirectiveStore(control_file).status()
+    assert migrated["state"] == "RUNNING"
+    assert migrated["mode"] == "NEXT_BATTLE"
+    assert migrated["game_speed_target"] == 6.3
+    assert migrated["state_request_id"]
+    assert migrated["mode_request_id"]
+    assert migrated["game_speed_target_request_id"]
+
+    assert supervisor.apply_control()
+    acknowledgements = supervisor.control_acknowledgements
+    assert acknowledgements["state"]["request_id"] == (
+        migrated["state_request_id"]
+    )
+    assert acknowledgements["mode"]["request_id"] == (
+        migrated["mode_request_id"]
+    )
+    assert acknowledgements["game_speed_target"]["request_id"] == (
+        migrated["game_speed_target_request_id"]
+    )
+
+
 def test_game_speed_target_is_persistent_and_applies_to_a_live_supervisor(
     tmp_path,
 ):

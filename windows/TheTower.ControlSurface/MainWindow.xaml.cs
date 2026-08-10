@@ -2762,7 +2762,11 @@ public partial class MainWindow : Window
             service?.StrategyOptions,
             service?.Strategy,
             status.Control.Strategy,
-            status.Acknowledgements.Strategy?.Value);
+            status.Acknowledgements.Strategy?.Value,
+            status.ControlModel?.StrategyScope.StartupDefault,
+            status.ControlModel?.StrategyScope.ActiveBattle,
+            status.ControlModel?.StrategyScope.PendingNextBoundary,
+            status.ControlModel?.StrategyScope.PendingActiveBattle);
         _hostPerformance.UpdateServerContext(
             status.Control.AdbPort ?? service?.AdbPort,
             status.CurrentRun?.RunId,
@@ -2980,24 +2984,16 @@ public partial class MainWindow : Window
             ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
             : (Brush)FindResource("BorderBrush");
 
-        var configuredStrategy = NormalizeStrategy(service?.Strategy);
+        var strategyScope = ControlSurfaceCompatibility.ResolveStrategyScope(
+            status,
+            processActive,
+            service?.Strategy);
+        var configuredStrategy = strategyScope.StartupDefault;
         var requestedStrategy = NormalizeStrategy(status.Control.Strategy)
             ?? configuredStrategy;
-        var strategyPending = processActive
-            && status.Control.Strategy is not null
-            && status.Acknowledgements.Strategy is not { AcknowledgesCurrent: true };
-        var currentStrategy = !processActive
-            ? null
-            : status.Control.Strategy is null
-                ? configuredStrategy
-                : NormalizeStrategy(status.Acknowledgements.Strategy?.Value);
-        var pendingStrategy = strategyPending ? requestedStrategy : null;
-        var pendingStrategyLabel = strategyPending && string.Equals(
-            status.Control.StrategyApplyMode,
-            "active_battle",
-            StringComparison.OrdinalIgnoreCase)
-            ? "Pending active adoption"
-            : "Pending boundary";
+        var currentStrategy = strategyScope.CurrentStrategy;
+        var pendingStrategy = strategyScope.PendingStrategy;
+        var pendingStrategyLabel = strategyScope.PendingLabel;
         _strategyLifecycleAvailable = lifecycleAvailable;
         _strategyProcessActive = processActive;
         _configuredStrategy = configuredStrategy;
@@ -3024,14 +3020,19 @@ public partial class MainWindow : Window
         StrategyScopeText.Text = !processActive
             ? $"Next: {configuredStrategyLabel}"
             : pendingStrategy is not null
-                ? $"Current: {currentStrategyLabel} · Pending: "
+                ? $"Current: {currentStrategyLabel} · "
+                    + (strategyScope.PendingActiveBattle is not null
+                        ? "Pending active: "
+                        : "Pending next: ")
                     + StrategyDisplayName(pendingStrategy)
                 : $"Current: {currentStrategyLabel}";
         CurrentStrategyValueText.Text = processActive
             ? currentStrategyLabel
             : "No active process";
         NextStrategyLabelText.Text = processActive
-            ? "PENDING NEXT"
+            ? strategyScope.PendingActiveBattle is not null
+                ? "PENDING ACTIVE"
+                : "PENDING NEXT"
             : "NEXT START";
         NextStrategyValueText.Text = processActive
             ? pendingStrategy is null
@@ -3138,7 +3139,7 @@ public partial class MainWindow : Window
                 $"Strategy Gate allowed collectors: {Join(strategyGate?.AllowedAuxiliaryCollectors)}",
                 $"{pendingStrategyLabel}: {pendingStrategy ?? "-"}",
                 $"Strategy request mode: {status.Control.StrategyApplyMode}",
-                $"Configured next-start strategy: {service?.Strategy ?? "-"}",
+                $"Configured next-start strategy: {configuredStrategy ?? "-"}",
                 $"Strategy source: {service?.StrategySource ?? "-"}",
                 $"Strategy file: {service?.StrategyEnvironmentFile ?? "-"}",
                 $"Next-start gate policy: {service?.StartupGatePolicy ?? "-"}",
@@ -3302,7 +3303,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 36 with the required control-surface capabilities is required."
+                    "Linux API revision 37 with the required control-surface capabilities is required."
                 );
             }
             if (model is not null
