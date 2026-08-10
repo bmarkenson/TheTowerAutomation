@@ -1066,6 +1066,83 @@ def proposed_mapping_patch(
     return proposal
 
 
+def validate_mapping_candidate_result(
+    record: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> None:
+    """Require one rendered canonical mapping to own the receipt exactly."""
+
+    normalized = validate_mapping_candidate_record(record)
+    if not isinstance(mapping, Mapping):
+        raise PlayerSaveMappingCandidateError(
+            "mapping_candidate_proposal_result_invalid"
+        )
+    candidate = normalized["candidate"]
+    if candidate["value_kind"] not in {
+        "module_info_index",
+        "module_assist_type",
+    }:
+        if _candidate_state_in_mapping(candidate, mapping) != "match":
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_proposal_result_mismatch"
+            )
+        return
+    loadout = mapping.get("module_loadout")
+    if not isinstance(loadout, Mapping):
+        raise PlayerSaveMappingCandidateError(
+            "mapping_candidate_proposal_result_invalid"
+        )
+    raw_to_name: dict[int, str] = {}
+    name_to_raw: dict[str, int] = {}
+    for role in ("primary", "assist"):
+        slots = loadout.get(role)
+        if not isinstance(slots, list):
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_proposal_result_invalid"
+            )
+        for slot in slots:
+            if not isinstance(slot, Mapping):
+                raise PlayerSaveMappingCandidateError(
+                    "mapping_candidate_proposal_result_invalid"
+                )
+            values = slot.get("values")
+            if not isinstance(values, list):
+                raise PlayerSaveMappingCandidateError(
+                    "mapping_candidate_proposal_result_invalid"
+                )
+            for value in values:
+                if (
+                    not isinstance(value, Mapping)
+                    or isinstance(value.get("info_index"), bool)
+                    or not isinstance(value.get("info_index"), int)
+                    or not isinstance(value.get("name"), str)
+                    or not value["name"].strip()
+                ):
+                    raise PlayerSaveMappingCandidateError(
+                        "mapping_candidate_proposal_result_invalid"
+                    )
+                raw_value = value["info_index"]
+                semantic_value = value["name"]
+                prior_name = raw_to_name.get(raw_value)
+                prior_raw = name_to_raw.get(semantic_value)
+                if (
+                    prior_name is not None
+                    and prior_name != semantic_value
+                ) or (
+                    prior_raw is not None
+                    and prior_raw != raw_value
+                ):
+                    raise PlayerSaveMappingCandidateError(
+                        "mapping_candidate_proposal_result_conflict"
+                    )
+                raw_to_name[raw_value] = semantic_value
+                name_to_raw[semantic_value] = raw_value
+    if _candidate_state_in_mapping(candidate, mapping) != "match":
+        raise PlayerSaveMappingCandidateError(
+            "mapping_candidate_proposal_result_mismatch"
+        )
+
+
 def _repository_mapping_target(
     repository_root: Path,
     mapping_id: str,
@@ -2217,4 +2294,5 @@ __all__ = [
     "resolve_mapping_candidates",
     "validate_mapping_candidate_context",
     "validate_mapping_candidate_record",
+    "validate_mapping_candidate_result",
 ]

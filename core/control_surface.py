@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import threading
 import time
@@ -61,6 +62,11 @@ from core.player_save_setup_capture import (
 from core.player_save import confirmed_local_mapping_status
 from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
 from core.player_save_mapping_candidates import AppendOnlyMappingCandidateStore
+from core.player_save_mapping_integration import (
+    SAVE_MAPPING_INTEGRATION_CAPABILITY,
+    SaveMappingIntegrationError,
+    SaveMappingIntegrationManager,
+)
 from core.strategy_profiles import (
     STRATEGY_AUTHORING_OPERATIONS,
     StrategyProfileConflictError,
@@ -75,7 +81,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 34
+CONTROL_SURFACE_REVISION = 35
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -97,6 +103,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "save_backed_setup_capture_v1",
     "save_backed_setup_capture_v2",
     "save_mapping_review_status_v1",
+    SAVE_MAPPING_INTEGRATION_CAPABILITY,
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
     "strategy_authoring_profile_lifecycle_v1",
@@ -259,6 +266,10 @@ class ControlSurfaceService:
                 "logs/player_save_mapping_candidates/receipts-v2.jsonl"
             )
         )
+        self.save_mapping_integration_manager = SaveMappingIntegrationManager(
+            repository_root=self.repository_root,
+            candidate_store=self.mapping_candidate_store,
+        )
         self.profile_store = StrategyProfileStore(
             profile_directory=self.strategy_profile_dir,
             module_preset_directory=self.module_preset_dir,
@@ -277,6 +288,137 @@ class ControlSurfaceService:
         """Return the constrained profile-editor catalog."""
 
         return self.profile_store.catalog()
+
+    def save_mapping_integration(self) -> dict[str, Any]:
+        """Return review candidates and server-discovered feature worktrees."""
+
+        return self.save_mapping_integration_manager.catalog()
+
+    def apply_save_mapping_integration(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Review or prepare one exact mapping proposal in a feature worktree."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        operation = str(request.get("operation") or "").strip().lower()
+        required = {
+            "review": {"operation", "candidate_record_id", "workspace_id"},
+            "prepare": {
+                "operation",
+                "candidate_record_id",
+                "workspace_id",
+                "reviewed_proposal_fingerprint",
+            },
+        }
+        if operation not in required:
+            raise ControlSurfaceRequestError("operation must be review or prepare")
+        if set(request) != required[operation]:
+            raise ControlSurfaceRequestError(
+                f"{operation} accepts exactly: "
+                + ", ".join(sorted(required[operation]))
+            )
+        candidate_record_id = request.get("candidate_record_id")
+        workspace_id = request.get("workspace_id")
+        try:
+            if operation == "review":
+                return self.save_mapping_integration_manager.review(
+                    candidate_record_id=candidate_record_id,
+                    workspace_id=workspace_id,
+                )
+
+            reviewed_fingerprint = request.get(
+                "reviewed_proposal_fingerprint"
+            )
+            preview = self.save_mapping_integration_manager.review(
+                candidate_record_id=candidate_record_id,
+                workspace_id=workspace_id,
+            )
+            if reviewed_fingerprint != preview.get(
+                "reviewed_proposal_fingerprint"
+            ):
+                raise SaveMappingIntegrationError(
+                    "reviewed_proposal_stale",
+                    "The proposal or repository snapshot changed; nothing was "
+                    "written. Refresh and review again.",
+                )
+            prepared_result = preview.get("prepared_result")
+            if isinstance(prepared_result, Mapping):
+                return dict(prepared_result)
+            availability = preview.get("prepare") or {}
+            if availability.get("available") is not True:
+                raise SaveMappingIntegrationError(
+                    str(availability.get("code") or "prepare_unavailable"),
+                    str(
+                        availability.get("reason")
+                        or "Canonical preparation is unavailable."
+                    ),
+                )
+            record_prefix = str(candidate_record_id or "")[:12]
+            fingerprint_prefix = str(reviewed_fingerprint or "")[:12]
+            operation_id = (
+                f"save-mapping-{record_prefix}-{fingerprint_prefix}-"
+                f"{secrets.token_hex(6)}"
+            )
+            workspace = preview.get("workspace") or {}
+            action_warning = self._append_audit(
+                "Preparing reviewed canonical save mapping "
+                f"candidate={record_prefix} branch={workspace.get('branch')} "
+                f"targets={len(_mapping_proposal_targets(preview.get('proposal')))} "
+                f"[OPERATION] id={operation_id}",
+                level="ACTION",
+            )
+            if action_warning:
+                raise ControlSurfaceRequestError(
+                    "Canonical preparation audit could not be written; nothing was changed.",
+                    status=503,
+                    code="mapping_prepare_audit_unavailable",
+                )
+            try:
+                result = self.save_mapping_integration_manager.prepare(
+                    candidate_record_id=candidate_record_id,
+                    workspace_id=workspace_id,
+                    reviewed_proposal_fingerprint=reviewed_fingerprint,
+                )
+            except SaveMappingIntegrationError as exc:
+                disposition = _save_mapping_prepare_disposition(exc.code)
+                self._append_audit(
+                    "Canonical save mapping preparation "
+                    f"disposition={disposition} code={exc.code} "
+                    f"[OPERATION] id={operation_id}",
+                    level="RESULT",
+                )
+                raise
+            except Exception as exc:
+                self._append_audit(
+                    "Canonical save mapping preparation "
+                    "disposition=unconfirmed code=unexpected_failure "
+                    f"[OPERATION] id={operation_id}",
+                    level="RESULT",
+                )
+                raise ControlSurfaceRequestError(
+                    "Canonical preparation failed unexpectedly; inspect the "
+                    "selected feature worktree before continuing.",
+                    status=500,
+                    code="mapping_prepare_unexpected_failure",
+                ) from exc
+            result_warning = self._append_audit(
+                "Canonical save mapping preparation disposition=prepared "
+                f"candidate={record_prefix} branch={workspace.get('branch')} "
+                "committed=false promoted=false validation=pending "
+                f"[OPERATION] id={operation_id}",
+                level="RESULT",
+            )
+            if result_warning:
+                result["warning"] = result_warning
+            return result
+        except SaveMappingIntegrationError as exc:
+            raise ControlSurfaceRequestError(
+                str(exc),
+                status=_save_mapping_integration_error_status(exc.code),
+                code=exc.code,
+            ) from exc
 
     def strategy_authoring(self) -> dict[str, Any]:
         """Return the additive sparse Base/Strategy authoring catalog."""
@@ -4599,6 +4741,47 @@ class ControlSurfaceService:
         except OSError as exc:
             return f"Control changed, but audit logging failed: {exc}"
         return None
+
+
+def _mapping_proposal_targets(proposal: object) -> list[Mapping[str, Any]]:
+    if not isinstance(proposal, Mapping):
+        return []
+    if proposal.get("schema_version") == 2:
+        targets = proposal.get("targets")
+        return [item for item in targets or [] if isinstance(item, Mapping)]
+    target = proposal.get("target")
+    return [target] if isinstance(target, Mapping) else []
+
+
+def _save_mapping_integration_error_status(code: str) -> int:
+    if code in {
+        "mapping_candidate_record_not_found",
+        "workspace_snapshot_stale",
+    }:
+        return 404
+    if code in {
+        "git_inspection_failed",
+        "worktree_catalog_unavailable",
+        "development_root_unavailable",
+        "integration_lock_unavailable",
+        "commit_state_uncertain",
+        "mapping_prepare_rollback_failed",
+        "prepared_state_unconfirmed",
+        "transaction_write_failed",
+    }:
+        return 503
+    return 409
+
+
+def _save_mapping_prepare_disposition(code: str) -> str:
+    if code in {
+        "commit_state_uncertain",
+        "mapping_prepare_rollback_failed",
+        "prepared_state_unconfirmed",
+        "transaction_recovery_required",
+    }:
+        return "unconfirmed"
+    return "failed"
 
 
 def _battle_summary(record: Mapping[str, Any]) -> dict[str, Any]:

@@ -9,7 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -36,6 +36,7 @@ from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
 from core.gate_decisions import build_gate_decision_options
+from core.player_save_mapping_integration import SaveMappingIntegrationError
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
 
 
@@ -468,6 +469,219 @@ def test_status_exposes_local_mapping_lifecycle_without_blocking_health(tmp_path
     assert status["confirmed_local_mappings"] == mapping_status
     assert status["healthy"]
     assert not status["confirmed_local_mappings"]["blocks_startup"]
+
+
+def test_save_mapping_integration_catalog_and_review_are_non_mutating(tmp_path):
+    service = _service(tmp_path)
+    catalog = {
+        "schema_version": 1,
+        "capability": "save_mapping_integration_v1",
+        "available": True,
+        "reason": "",
+        "repository": {},
+        "workspaces": [],
+        "items": [],
+    }
+    review = {
+        "operation": "review",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "workspace": {"workspace_id": "c" * 64},
+        "proposal": {"schema_version": 2, "targets": []},
+        "prepare": {"available": False, "code": "workspace_dirty", "reason": "dirty"},
+        "prepared": False,
+    }
+    service.save_mapping_integration_manager.catalog = Mock(return_value=catalog)
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+
+    assert service.save_mapping_integration() == catalog
+    assert service.apply_save_mapping_integration(
+        {
+            "operation": "review",
+            "candidate_record_id": "a" * 64,
+            "workspace_id": "c" * 64,
+        }
+    ) == review
+    service.save_mapping_integration_manager.review.assert_called_once_with(
+        candidate_record_id="a" * 64,
+        workspace_id="c" * 64,
+    )
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_prepare_requires_exact_review_and_logs_one_pair(tmp_path):
+    service = _service(tmp_path)
+    review = {
+        "operation": "review",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "workspace": {
+            "workspace_id": "c" * 64,
+            "branch": "feature/mapping-test",
+        },
+        "proposal": {
+            "schema_version": 2,
+            "targets": [{"path": "one.json"}, {"path": "two.json"}],
+        },
+        "prepare": {"available": True, "code": "", "reason": ""},
+        "prepared": False,
+    }
+    prepared = {
+        "operation": "prepare",
+        "disposition": "prepared",
+        "committed": False,
+        "promoted": False,
+        "validation_status": "pending",
+    }
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+    service.save_mapping_integration_manager.prepare = Mock(return_value=prepared)
+
+    result = service.apply_save_mapping_integration(
+        {
+            "operation": "prepare",
+            "candidate_record_id": "a" * 64,
+            "workspace_id": "c" * 64,
+            "reviewed_proposal_fingerprint": "b" * 64,
+        }
+    )
+
+    assert result == prepared
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    assert activity.count("[ACTION ") == 1
+    assert activity.count("[RESULT ") == 1
+    operation_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if "[OPERATION] id=" in line
+    ]
+    assert len(set(operation_ids)) == 1
+    assert operation_ids[0].startswith(
+        "save-mapping-aaaaaaaaaaaa-bbbbbbbbbbbb-"
+    )
+    assert len(operation_ids[0].rsplit("-", 1)[1]) == 12
+    assert "committed=false promoted=false validation=pending" in activity
+
+
+def test_save_mapping_prepare_attempts_have_unique_audit_identities(tmp_path):
+    service = _service(tmp_path)
+    review = {
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "workspace": {"branch": "feature/mapping-test"},
+        "proposal": {"schema_version": 2, "targets": [{"path": "one.json"}]},
+        "prepare": {"available": True, "code": "", "reason": ""},
+        "prepared": False,
+        "prepared_result": None,
+    }
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+    service.save_mapping_integration_manager.prepare = Mock(
+        side_effect=SaveMappingIntegrationError(
+            "commit_state_uncertain",
+            "Inspect the selected feature worktree.",
+        )
+    )
+    request = {
+        "operation": "prepare",
+        "candidate_record_id": "a" * 64,
+        "workspace_id": "c" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+    }
+
+    for _ in range(2):
+        with pytest.raises(ControlSurfaceRequestError) as failure:
+            service.apply_save_mapping_integration(request)
+        assert failure.value.status == 503
+        assert failure.value.code == "commit_state_uncertain"
+
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    action_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if line.startswith("[ACTION ")
+    ]
+    result_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if line.startswith("[RESULT ")
+    ]
+    assert len(action_ids) == 2
+    assert len(set(action_ids)) == 2
+    assert sorted(action_ids) == sorted(result_ids)
+    assert activity.count("disposition=unconfirmed code=commit_state_uncertain") == 2
+
+
+def test_save_mapping_exact_prepared_review_reopens_without_new_audit(tmp_path):
+    service = _service(tmp_path)
+    prepared = {
+        "operation": "prepare",
+        "disposition": "prepared",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+    }
+    service.save_mapping_integration_manager.review = Mock(
+        return_value={
+            "reviewed_proposal_fingerprint": "b" * 64,
+            "prepared": True,
+            "prepared_result": prepared,
+            "prepare": {
+                "available": False,
+                "code": "already_prepared",
+                "reason": "Already prepared.",
+            },
+        }
+    )
+    service.save_mapping_integration_manager.prepare = Mock()
+
+    result = service.apply_save_mapping_integration(
+        {
+            "operation": "prepare",
+            "candidate_record_id": "a" * 64,
+            "workspace_id": "c" * 64,
+            "reviewed_proposal_fingerprint": "b" * 64,
+        }
+    )
+
+    assert result == prepared
+    service.save_mapping_integration_manager.prepare.assert_not_called()
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_prepare_rejects_stale_fingerprint_without_audit(tmp_path):
+    service = _service(tmp_path)
+    service.save_mapping_integration_manager.review = Mock(
+        return_value={
+            "reviewed_proposal_fingerprint": "b" * 64,
+            "prepared": False,
+            "prepare": {"available": True, "code": "", "reason": ""},
+        }
+    )
+
+    with pytest.raises(ControlSurfaceRequestError) as failure:
+        service.apply_save_mapping_integration(
+            {
+                "operation": "prepare",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "c" * 64,
+                "reviewed_proposal_fingerprint": "d" * 64,
+            }
+        )
+
+    assert failure.value.status == 409
+    assert failure.value.code == "reviewed_proposal_stale"
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_integration_requests_are_exact_shape(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ControlSurfaceRequestError, match="accepts exactly"):
+        service.apply_save_mapping_integration(
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+                "path": "/client/supplied/path",
+            }
+        )
 
 
 def test_status_never_exposes_perks_from_another_run(tmp_path):
@@ -1512,14 +1726,18 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 34" in native_compatibility
+    assert "MinimumServerRevision = 35" in native_compatibility
     assert '"confirmed_local_mapping_status_v1"' in native_compatibility
     assert "confirmed_local_mapping_status_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_review_status_v1"' in native_compatibility
     assert "save_mapping_review_status_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_integration_v1"' in native_compatibility
+    assert "save_mapping_integration_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'id="confirmedLocalMappingAlert"' in html
     assert 'x:Name="ConfirmedLocalMappingBanner"' in native_xaml
     assert 'JsonPropertyName("confirmed_local_mappings")' in native_models
+    assert 'x:Name="ReviewSaveMappingsButton"' in native_xaml
+    assert 'Header="Save mapping integration…"' in native_xaml
     assert "RenderConfirmedLocalMappings(status.ConfirmedLocalMappings)" in native_code
     assert '"better_control_model_v2"' in native_compatibility
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
@@ -2028,6 +2246,110 @@ assert.strictEqual(
   model.confirmedLocalMappingPresentation(undefined).visible,
   true,
 );
+const mappingReview = {{
+  schema_version: 1,
+  capability: 'save_mapping_integration_v1',
+  operation: 'review',
+  candidate_record_id: 'a'.repeat(64),
+  reviewed_proposal_fingerprint: 'c'.repeat(64),
+  workspace: {{workspace_id: 'b'.repeat(64)}},
+  prepare: {{available: true, code: '', reason: ''}},
+}};
+assert.strictEqual(
+  model.saveMappingReviewIsCurrent(
+    mappingReview,
+    'a'.repeat(64),
+    'b'.repeat(64),
+  ),
+  true,
+);
+assert.strictEqual(
+  model.saveMappingPrepareAvailability(
+    mappingReview,
+    'a'.repeat(64),
+    'b'.repeat(64),
+  ).available,
+  true,
+);
+assert.strictEqual(
+  model.saveMappingPrepareAvailability(
+    mappingReview,
+    'changed',
+    'b'.repeat(64),
+  ).code,
+  'review_stale',
+);
+assert.strictEqual(model.saveMappingIntegrationCompatible({{
+  api_version: 1,
+  server_revision: 35,
+  capabilities: ['save_mapping_integration_v1'],
+}}), true);
+assert.strictEqual(model.saveMappingIntegrationCompatible({{
+  api_version: 1,
+  server_revision: 34,
+  capabilities: ['save_mapping_integration_v1'],
+}}), false);
+const preparedResult = {{
+  schema_version: 1,
+  capability: 'save_mapping_integration_v1',
+  operation: 'prepare',
+  disposition: 'prepared',
+  idempotent: false,
+  candidate_record_id: 'a'.repeat(64),
+  reviewed_proposal_fingerprint: 'c'.repeat(64),
+  workspace: {{workspace_id: 'b'.repeat(64)}},
+  committed: false,
+  promoted: false,
+  validation_status: 'pending',
+  targets: [{{
+    path: 'config/player_save_versions/data.json',
+    mapping_id: 'data-9-game-1101',
+    before_sha256: 'd'.repeat(64),
+    after_sha256: 'e'.repeat(64),
+    changed: true,
+  }}],
+  validation: ['checkpoint'],
+}};
+assert.strictEqual(model.saveMappingPreparedResultValidation(
+  preparedResult,
+  'a'.repeat(64),
+  'b'.repeat(64),
+  'c'.repeat(64),
+).valid, true);
+assert.match(
+  model.saveMappingPreparedPresentation(
+    preparedResult,
+    'a'.repeat(64),
+    'b'.repeat(64),
+    'c'.repeat(64),
+  ).detail,
+  /Validation, commit, and promotion remain required/,
+);
+for (const invalid of [
+  {{...preparedResult, candidate_record_id: 'f'.repeat(64)}},
+  {{...preparedResult, committed: true}},
+  {{...preparedResult, validation_status: 'passed'}},
+  {{...preparedResult, targets: [{{...preparedResult.targets[0], after_sha256: 'bad'}}]}},
+]) {{
+  assert.strictEqual(model.saveMappingPreparedResultValidation(
+    invalid,
+    'a'.repeat(64),
+    'b'.repeat(64),
+    'c'.repeat(64),
+  ).valid, false);
+}}
+assert.strictEqual(model.saveMappingFailurePresentation({{
+  code: 'workspace_dirty', message: 'dirty',
+}}).uncertain, false);
+assert.strictEqual(model.saveMappingFailurePresentation({{
+  code: 'commit_state_uncertain', message: 'inspect',
+}}).uncertain, true);
+const rolledBack = model.saveMappingFailurePresentation({{
+  code: 'mapping_prepare_write_failed', message: 'Targets were restored.',
+}});
+assert.strictEqual(rolledBack.uncertain, false);
+assert.match(rolledBack.detail, /No prepared changes/);
+assert.doesNotMatch(rolledBack.detail, /Nothing was written/);
 """
     completed = subprocess.run(
         ["node", "-e", script],
@@ -2042,6 +2364,19 @@ assert.strictEqual(
     assert 'openAction !== "request"' in browser
     assert "async function retrySetupCapture()" in browser
     assert 'id="retryCaptureButton"' in html
+    assert 'id="reviewSaveMappingsButton"' in html
+    assert 'id="saveMappingIntegrationDialog"' in html
+    assert 'id="saveMappingWorkspaceSelect"' in html
+    assert "reviewed_proposal_fingerprint" in browser
+    assert "Prepare reviewed change in feature worktree" in html
+    assert "does not test, commit, merge, promote" in browser
+    assert "saveMappingPreparedResultValidation" in browser
+    assert "saveMappingSelectionStillCurrent" in browser
+    assert "Interrupted preparation requires recovery" in browser
+    assert 'byId("saveMappingCandidateSelect").disabled = busy' in browser
+    assert 'byId("saveMappingWorkspaceSelect").disabled = busy' in browser
+    assert "state.saveMappingResult != null" in browser
+    assert 'addEventListener("cancel"' in browser
 
 
 def test_native_incompatible_api_has_prominent_start_mitigation():
@@ -2758,6 +3093,95 @@ def test_http_setup_capture_routes_include_durable_draft_reopen(
             "accepted": True,
             "operation": "request",
         }
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def test_http_save_mapping_integration_routes_catalog_review_and_prepare(
+    tmp_path,
+    monkeypatch,
+):
+    service = _service(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        service,
+        "save_mapping_integration",
+        lambda: {
+            "schema_version": 1,
+            "capability": "save_mapping_integration_v1",
+            "available": True,
+            "workspaces": [],
+            "items": [],
+        },
+    )
+
+    def apply(payload):
+        calls.append(payload)
+        return {"operation": payload["operation"], "accepted": True}
+
+    monkeypatch.setattr(service, "apply_save_mapping_integration", apply)
+    server = ControlSurfaceHTTPServer(
+        ("127.0.0.1", 0),
+        service=service,
+        static_dir=STATIC_DIR,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_port,
+        timeout=3,
+    )
+    try:
+        connection.request("GET", "/api/v1/save-mapping-integration")
+        response = connection.getresponse()
+        catalog = json.loads(response.read())
+        assert response.status == 200
+        assert catalog["capability"] == "save_mapping_integration_v1"
+
+        for payload in (
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+            },
+            {
+                "operation": "prepare",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+                "reviewed_proposal_fingerprint": "c" * 64,
+            },
+        ):
+            body = json.dumps(payload)
+            connection.request(
+                "POST",
+                "/api/v1/save-mapping-integration",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = connection.getresponse()
+            result = json.loads(response.read())
+            assert response.status == 200
+            assert result == {"operation": payload["operation"], "accepted": True}
+        assert calls == [
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+            },
+            {
+                "operation": "prepare",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+                "reviewed_proposal_fingerprint": "c" * 64,
+            },
+        ]
     finally:
         connection.close()
         server.shutdown()

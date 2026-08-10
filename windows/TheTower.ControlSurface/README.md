@@ -177,6 +177,21 @@ Only one control-surface process is allowed per Windows session. Launching the
 application again restores and foregrounds the existing main window, or flashes
 it on the taskbar if Windows declines the foreground request.
 
+**Tools > Save mapping integration…** and the persistent save-mapping banner's
+**Review mappings…** action open the revision-35 canonical preparation UI.
+Choose one durable observation and one server-discovered owned `feature/*`
+worktree, review the exact proposal fingerprint, then accept the separate
+warning before preparation. The client never submits a filesystem path,
+branch, patch operation, or value. Success remains visibly uncommitted,
+unpromoted, and pending validation; the window stays open with target hashes
+and required validation. Reopening the same exact review shows an **Already
+prepared** result instead of offering the write again. While review or Prepare
+is in flight, the selection, refresh, and Close controls are disabled and the
+window cannot be dismissed. Failed or lost requests are never retried
+automatically; the UI distinguishes a proven rejection from an unconfirmed
+outcome and surfaces any audit warning. Preparation does not control
+automation, restart a service, send device input, or change the current battle.
+
 Overview keeps a compact, normally collapsed summary of the most recent
 completed battle without devoting the normal workspace to the full history.
 Select **Tools > Battle history...** to open the separate completed-battles
@@ -844,8 +859,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 32, `current_battle_perks_v1`,
+current Windows build requires revision 35, `current_battle_perks_v1`,
 `better_control_model_v2`, `save_backed_setup_capture_v2`,
+`save_mapping_integration_v1`,
 `terminal_dispositions_v2`,
 `managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`,
@@ -906,6 +922,14 @@ already configured:
 7. With no desired tunnel, close the GUI and confirm the companion exits after
    about 15 seconds. Then start a desired tunnel, sign out of Windows, sign back
    in, and confirm neither the host nor a tunnel starts automatically.
+8. With one durable mapping observation and a disposable clean owned feature
+   worktree available, open save-mapping integration from both **Tools** and
+   the persistent banner. Review the exact proposal, change either selection
+   and confirm preparation disables, then review again. Cancel the warning once
+   and prove all repositories remain clean. Confirm preparation once and verify
+   only the displayed feature targets become unstaged changes; keep the
+   uncommitted/unpromoted/pending-validation result visible and confirm no
+   automatic retry, service restart, runtime-control change, or device input.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).

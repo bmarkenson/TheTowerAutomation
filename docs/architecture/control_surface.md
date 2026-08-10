@@ -460,6 +460,8 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/setup-capture` | Current runtime-issued capture status, availability, inactive captured-draft catalog, Module presets, and comparison Bases |
 | `POST` | `/api/v1/setup-capture` | Request a new forced-save capture, review a fingerprinted captured-versus-Base difference, save through the existing Module/Strategy owner, or cancel; never activate or publish |
 | `GET` | `/api/v1/setup-capture/drafts/{id}` | Reopen one immutable captured Strategy source in the ordinary authoring editor without selecting or activating it |
+| `GET` | `/api/v1/save-mapping-integration` | Durable review candidates, current repository bases, and server-discovered linked feature-worktree snapshots; never mutates a repository |
+| `POST` | `/api/v1/save-mapping-integration` | Review one server-generated canonical proposal or prepare its exact fingerprint in one selected clean `feature/*` worktree; never writes `main`/`develop`, stages, commits, validates, merges, promotes, restarts, or sends input |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -500,6 +502,38 @@ The banner is diagnostic. It never blocks startup, changes Automation state,
 suppresses a UI check, or grants integration/revoke authority. A missing or
 unreadable status contract is shown as a compatibility/error state; canonical
 save mappings and their existing UI fallbacks remain runtime authority.
+
+Server revision 35 advertises `save_mapping_integration_v1`. The banner's
+**Review mappings…** action and the native **Tools > Save mapping
+integration…** item open the same explicit review workflow. The catalog
+contains opaque server-issued workspace IDs for linked `feature/*` worktrees;
+requests cannot carry a filesystem path, branch, patch operation, or mapping
+value. Review is read-only and binds the candidate receipt, current `main` and
+`develop` tips, feature tip, proposal, and rendered before/after hashes into
+one fingerprint. Any selection or repository change invalidates that review.
+
+Prepare requires a second operator confirmation and recomputes every guard
+under a process-shared lock. Production and `develop` must be clean and at
+their branch tips, production must be an ancestor of `develop`, and the clean
+selected feature must descend from both. A successful result changes only the
+allowlisted canonical JSON targets in that feature worktree and explicitly
+reports `committed=false`, `promoted=false`, and pending validation. The
+server reconstructs the same typed `prepared_result` on a later review, so
+refreshing or reopening either GUI cannot turn prepared state back into an
+actionable proposal. Both clients validate that result against the exact
+candidate, workspace, review fingerprint, lifecycle flags, and target hashes
+before showing success.
+
+Preparation publishes a private durable transaction journal before replacing
+the first target and uses compare-before-replace checks for every file and
+mode. A process exit may therefore leave an explicit recovery-required state,
+never an inferred success. The matching reviewed selection offers one manual
+recovery action; other selections remain blocked. The clients disable
+selection, refresh, and dismissal while that request is active, never retry it
+automatically, distinguish a proven pre-write rejection from an unconfirmed
+outcome, and surface audit warnings. The persistent mapping warning remains
+until ordinary review, validation, commit, integration, production promotion,
+and a later fresh canonical decode retire the receipt.
 
 ### Structured Strategy Action Gate status
 

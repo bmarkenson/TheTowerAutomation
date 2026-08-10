@@ -679,9 +679,26 @@ The control surface publishes the combined local-confirmation and candidate
 review queue as a persistent nonmodal warning. Exact canonical integration
 retires the warning. A `compatible_exact_revision` proposal is an atomic
 review artifact for both the authority owner and the exact structural mirror,
-with a base hash and scoped operation for each; runtime never applies that
-proposal. Candidate/local-store failures are diagnostic and do not become
-startup gates.
+with a base hash and scoped operation for each. The runtime decoder never
+applies that proposal. Server revision 35 instead offers an explicit operator
+workflow in both control-surface GUIs: the server discovers current linked
+`feature/*` worktrees, the operator reviews one exact proposal against a
+selected clean feature snapshot, and a second confirmation may prepare only
+that fingerprinted result there. The client cannot supply a path, branch,
+operation, or value.
+
+Preparation binds the current `main`, `develop`, and feature tips plus every
+canonical base/result hash and file mode. It refuses dirty or stale repository
+state and records a durable transaction before the first atomic replacement.
+If the process ends between grouped replacements, only the same reviewed
+candidate/worktree selection can request recovery; unrelated changes are never
+cleaned or overwritten. A completed review later includes the exact typed
+prepared result, allowing either GUI to reopen it without offering the write
+again. Preparation never writes `main` or `develop`, stages, commits, tests,
+merges, promotes, restarts a service, changes runtime authority, or sends
+device input. The result remains visibly unvalidated, uncommitted, and
+unpromoted until the ordinary repository and production procedures complete.
+Candidate/local-store failures are diagnostic and do not become startup gates.
 
 ## Acquisition provenance and temporal authority
 
