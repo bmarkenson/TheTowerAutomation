@@ -41,7 +41,7 @@ canonical document linked by an entry for current behavior.
 
 ### 2026-08-10 bounded interactive-development lease extension
 
-- The server-owned request and heartbeat window increases from 30 to 120
+- The server-owned request and heartbeat window was increased from 30 to 120
   seconds. This leaves room for production to quiesce an
   in-flight background collector, publish the matching acknowledgement, and
   complete fresh visual guards plus bounded helper input without making lease
@@ -53,6 +53,20 @@ canonical document linked by an entry for current behavior.
   suites passed 169 tests. The repository checkpoint passed compilation, state
   definitions, clickmap integrity with zero errors and the established 44
   orphan notices, and all 2,167 tests.
+- The lease-only current-`develop` candidate `d77bca3` passed the supported
+  checkpoint with all 2,190 tests. No native Windows package input changed.
+  Production and `develop` advanced from `785d786` to exact `d77bca3` behind
+  rollback tag `production-before-20260810T232148Z-785d786`; automation and
+  the control-surface service stopped cleanly for the source update.
+- The replacement control-surface PID `2610997` served the existing API
+  revision 35. Replacement automation PID `2611481` acquired the exact
+  `localhost:5555` lock, attached to the preserved battle, re-adopted
+  `farm_t19_ad_assist`, completed save-backed session preflight, and returned
+  to steady `RUNNING` with matching acknowledgements and no Strategy Gate.
+  The input-free lease smoke requested at 16:26:12 PDT carried an expiry of
+  16:28:12, became active with the matching suppressive hold, and released
+  normally at 16:26:36 after a fresh same-battle observation. No development
+  input was dispatched.
 
 ### 2026-08-10 guarded GUI save-mapping integration
 

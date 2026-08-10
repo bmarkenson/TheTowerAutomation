@@ -314,11 +314,14 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         multi-screen operation. The 120-second server policy keeps the lease
         bounded and preserves every existing Pause/Stop, runtime-owner, target,
         battle-boundary, release, acknowledgement, and per-input rejection
-        rule.
-      - [ ] Resume the authorized changed/restored calibration only after
-        the 120-second policy is deployed, its timestamps are verified, and
-        fresh preflight confirms a new steady running battle. The 2026-08-10
-        attempt ended at a natural Game
+        rule. Commit `d77bca3` was promoted behind rollback tag
+        `production-before-20260810T232148Z-785d786`; its input-free smoke
+        request proved an exact 120-second expiry, matching active runtime
+        acknowledgement, suppressive hold, and normal fresh-observation
+        release.
+      - [ ] Resume the authorized changed/restored calibration only after a
+        fresh preflight confirms a steady running battle. The 2026-08-10
+        pre-deployment attempt ended at a natural Game
         Over before the first Orb value mutation; the panel had already been
         closed, the lease was terminal with no external hold, and the last
         authoritative pair remained Extra `30.00m` / Workshop `39.00m`.
