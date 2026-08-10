@@ -39,6 +39,38 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 automatic BlueStacks degradation recovery
+
+- Commit `040ca69` adds a default-off revision-35 recovery path for the
+  operator-observed pattern in which several same-configuration Farm runs lose
+  Coins/hour at near-normal effective speed and performance returns after a
+  BlueStacks restart. The conservative detector requires two degraded runs,
+  sustained exact-run handle growth, stable nonzero BlueStacks processes, and
+  no CPU/memory saturation; one attempt per battle and an eight-hour cooldown
+  bound automatic use. Recovery records never calibrate later decisions.
+- The Linux runtime and Windows client use a durable exact-owner handshake.
+  Linux binds runtime/PID/ADB target/battle scope and installs a no-input hold;
+  Windows resolves the configured ADB listener to one exact
+  `HD-Player.exe` PID/path/start time, revalidates before close/kill, starts the
+  configured instance, and requires a stable replacement listener. Lost
+  responses reconcile idempotently, a pre-acknowledgement request expires after
+  three minutes, and a battle-scope change before host acknowledgement cancels
+  without mutation.
+- Linux reconnects ADB, launches The Tower, handles the distinct Welcome Back
+  modal, and suppresses the five-wave or Intro-Sprint fifty-wave non-earning
+  rollback until the captured wave high-water. Bounded Resume failure selects
+  End run, records the interrupted battle as nonrepresentative, completes the
+  configured Home preflight, starts New Battle, and releases only on fresh
+  `RUNNING` evidence.
+- The final checkpoint passed state-definition validation, Python compilation,
+  `git diff --check`, all 2,183 Python tests in 511.83 seconds, and all 127
+  portable native contract tests. The portable test project compiles the new
+  Windows process controller and coordinator; this Linux SDK lacks the
+  WindowsDesktop targets needed to build the WPF host itself. No live process,
+  BlueStacks, ADB, or game input was used, and the exact Windows shortcut plus
+  first authorized end-to-end recovery remain in the runtime backlog before
+  the opt-in is enabled.
+
 ### 2026-08-10 save-mapping discovery and local confirmation lifecycle
 
 - Commits `eb8a391` and `4cd9f2d` add strict, private, append-only candidate
