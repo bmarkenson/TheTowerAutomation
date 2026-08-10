@@ -84,6 +84,7 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             "/api/v1/process",
             "/api/v1/strategy-authoring",
             "/api/v1/setup-capture",
+            "/api/v1/save-mapping-integration",
             "/api/v1/strategy-profiles",
             "/api/v1/host-performance",
             "/api/v1/interactive-development-lease",
@@ -127,6 +128,10 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 response = self.server.service.apply_strategy_authoring(payload)
             elif parsed.path == "/api/v1/setup-capture":
                 response = self.server.service.apply_setup_capture(payload)
+            elif parsed.path == "/api/v1/save-mapping-integration":
+                response = (
+                    self.server.service.apply_save_mapping_integration(payload)
+                )
             elif parsed.path == "/api/v1/interactive-development-lease":
                 response = (
                     self.server.service.apply_interactive_development_lease(
@@ -162,7 +167,12 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
         try:
             response = self.server.service.discard_battle(battle_id)
         except ControlSurfaceRequestError as exc:
-            self._json_error(exc.status, str(exc))
+            self._json_error(
+                exc.status,
+                str(exc),
+                code=exc.code,
+                details=exc.details,
+            )
             return
         self._send_json(HTTPStatus.OK, response)
 
@@ -191,6 +201,8 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 payload = self.server.service.strategy_authoring()
             elif path == "/api/v1/setup-capture":
                 payload = self.server.service.setup_capture()
+            elif path == "/api/v1/save-mapping-integration":
+                payload = self.server.service.save_mapping_integration()
             elif path.startswith("/api/v1/setup-capture/drafts/"):
                 strategy_id = unquote(
                     path.removeprefix("/api/v1/setup-capture/drafts/")
@@ -235,7 +247,12 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 self._json_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
                 return
         except ControlSurfaceRequestError as exc:
-            self._json_error(exc.status, str(exc))
+            self._json_error(
+                exc.status,
+                str(exc),
+                code=exc.code,
+                details=exc.details,
+            )
             return
         except (TypeError, ValueError):
             self._json_error(HTTPStatus.BAD_REQUEST, "limit must be an integer")

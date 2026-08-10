@@ -31,7 +31,7 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(34);
+        var status = Status(35);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
@@ -42,6 +42,9 @@ public sealed class ControlSurfaceCompatibilityTests
             result.MissingCapabilities);
         Assert.Contains(
             "save_backed_setup_capture_v2",
+            result.MissingCapabilities);
+        Assert.Contains(
+            "save_mapping_integration_v1",
             result.MissingCapabilities);
         Assert.Contains(
             "save_mapping_review_status_v1",
@@ -149,7 +152,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                34,
+                35,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
@@ -166,6 +169,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "observed_game_speed",
                 "selected_strategy_process_start",
                 "save_backed_setup_capture_v2",
+                "save_mapping_integration_v1",
                 "save_mapping_review_status_v1",
                 "strategy_action_gate_v1",
                 "strategy_authoring_local_loadout_editors_v1",
@@ -189,6 +193,8 @@ public sealed class ControlSurfaceCompatibilityTests
 
         Assert.True(
             ControlSurfaceCompatibility.CanOpenSetupCapture(compatible, model));
+        Assert.True(
+            ControlSurfaceCompatibility.CanOpenSaveMappingIntegration(compatible));
         model.SetupCapture.Status = "ready";
         Assert.True(
             ControlSurfaceCompatibility.CanOpenSetupCapture(compatible, model));

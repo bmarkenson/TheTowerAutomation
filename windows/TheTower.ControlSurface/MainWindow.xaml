@@ -77,6 +77,10 @@
                       Header="Capture current setup as…"
                       Click="CaptureSetup_Click"
                       IsEnabled="False" />
+            <MenuItem x:Name="SaveMappingIntegrationMenuItem"
+                      Header="Save mapping integration…"
+                      Click="SaveMappingIntegration_Click"
+                      IsEnabled="False" />
           </MenuItem>
           <MenuItem Header="_Preferences" Click="ShowPreferences_Click" />
         </Menu>
@@ -142,23 +146,37 @@
                 CornerRadius="7"
                 Padding="10,8"
                 Margin="0,0,0,9">
-          <StackPanel>
-            <TextBlock Text="SAVE MAPPING"
-                       Foreground="{StaticResource MutedBrush}"
-                       FontSize="9"
-                       FontWeight="Bold" />
-            <TextBlock x:Name="ConfirmedLocalMappingTitleText"
-                       Text="A locally confirmed save mapping needs integration"
-                       Foreground="#FFD37A"
-                       FontWeight="Bold"
-                       TextWrapping="Wrap"
-                       Margin="0,2,0,0" />
-            <TextBlock x:Name="ConfirmedLocalMappingDetailText"
-                       Text="-"
-                       Foreground="#F7E8C1"
-                       TextWrapping="Wrap"
-                       Margin="0,3,0,0" />
-          </StackPanel>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <TextBlock Text="SAVE MAPPING"
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="9"
+                         FontWeight="Bold" />
+              <TextBlock x:Name="ConfirmedLocalMappingTitleText"
+                         Text="A locally confirmed save mapping needs integration"
+                         Foreground="#FFD37A"
+                         FontWeight="Bold"
+                         TextWrapping="Wrap"
+                         Margin="0,2,0,0" />
+              <TextBlock x:Name="ConfirmedLocalMappingDetailText"
+                         Text="-"
+                         Foreground="#F7E8C1"
+                         TextWrapping="Wrap"
+                         Margin="0,3,0,0" />
+            </StackPanel>
+            <Button Grid.Column="1"
+                    x:Name="ReviewSaveMappingsButton"
+                    Content="Review mappings…"
+                    Click="SaveMappingIntegration_Click"
+                    Margin="12,0,0,0"
+                    VerticalAlignment="Center"
+                    IsEnabled="False"
+                    ToolTipService.ShowOnDisabled="True" />
+          </Grid>
         </Border>
         <Border x:Name="StrategyActionGateBanner"
                 Visibility="Collapsed"

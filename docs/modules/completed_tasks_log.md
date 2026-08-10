@@ -60,6 +60,70 @@ canonical document linked by an entry for current behavior.
   orphan notices, and all 2,162 tests in 488.00 seconds. Natural Game Over
   observation remains queued in the runtime validation backlog.
 
+### 2026-08-10 guarded GUI save-mapping integration
+
+- Commit `5cee9be` adds API revision 35 and
+  `save_mapping_integration_v1`, with the same review-and-prepare workflow in
+  the browser control surface and native Windows client. The server discovers
+  linked `feature/*` worktrees and issues opaque workspace IDs; clients can
+  select a durable receipt and worktree but cannot supply repository paths,
+  branches, target files, operations, or mapping values. Review binds the
+  exact production/develop tips, feature tip, canonical input hashes and
+  modes, rendered output hashes, and proposal fingerprint. Preparation writes
+  only the reviewed clean feature targets and never stages, commits, moves a
+  ref, promotes, or clears the persistent warning.
+- Stale reviews, dirty or non-descended worktrees, symlinked targets, content
+  or mode drift, moved refs, concurrent preparation, ambiguous writes, and
+  interrupted transactions all fail closed. A private durable transaction
+  journal permits one explicit exact-review recovery; neither GUI retries a
+  preparation automatically. Both clients validate the complete prepared
+  response before displaying success and keep uncertain outcomes visible for
+  inspection.
+- Candidate
+  `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`
+  was reviewed through that workflow and prepared as exactly one
+  `infoIndex 10` / `Astral Deliverance` addition in both
+  `data-9-game-1073` authority and the `data-9-game-1101` structural mirror.
+  Commit `dbe3d34` records the canonical mapping and replaces the integration
+  tests' real-candidate assumption with a reserved synthetic fixture so a
+  successful integration cannot invalidate the lifecycle suite.
+- Focused mapping validation passed 102 player-save tests and all 17 guarded
+  integration tests. The final supported checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,190 tests in 357.62 seconds. The portable native
+  suite passed all 132 tests, and a real WPF Release build succeeded with zero
+  errors; only the known read-only NuGet vulnerability-cache warning appeared.
+- Production and `develop` advanced from `b108bac` to exact `dbe3d34` behind
+  rollback tag `production-before-20260810T215539Z-b108bac`. Automation and the
+  control-surface service stopped cleanly for the source update. The complete
+  native package was published from exact `dbe3d34` at 14:57 PDT. Current
+  Control Surface is 72,416,908 bytes with SHA-256
+  `a1938bb3d94833fcc04b5a85ee50157edb8260a35073e7ee9442bfc6e8a210fb`;
+  current Tunnel Host is 35,172,092 bytes with SHA-256
+  `839c290562afb3ceb9e7a43dbb6c9808f66f7f4922364711f32493bf8a8007c5`.
+  Retained slot 1 contains the prior `dd9354f` package: 72,390,981-byte
+  Control Surface
+  `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`
+  and 35,172,109-byte Tunnel Host
+  `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
+  Slot 2 contains the prior `b2d282f` package: 72,385,088-byte Control Surface
+  `3bb666175f7e0b1b5d731f30c92cee8b71581a3979bfc00f49bd018d69e4d0f4`
+  and 35,172,103-byte Tunnel Host
+  `e23aada8aa3992bbc866fcebd3ec2a22d043902e088f2a4cb78abdba0ff63c68`.
+- The promoted API reported revision 35, the new capability, a healthy empty
+  preparation queue, no transaction journal, and the local Astral Deliverance
+  event as `integrated`. Replacement PID `2509189` attached to the preserved
+  battle and returned to steady `RUNNING` at wave 2131 with matching lock,
+  target, acknowledgements, and no Strategy Gate. Its continuity projector
+  rejected battle-history entry 29 at `chainlightningdamage` and safely used
+  Battle History UI, but the independent configuration projection remained
+  authoritative: session preflight used `bound_player_save_preflight` for
+  Modules, Auto Pick, perk order and first choice, loadouts, card modes, and
+  Ultimate Weapons, opened none of those configuration screens, and matched
+  Astral Deliverance with confidence 1.0. The history-value assumption remains
+  queued for diagnosis; Windows-only WPF lifecycle execution remains a
+  separate target-host validation rather than a Linux publication claim.
+
 ### 2026-08-10 save-mapping discovery and local confirmation lifecycle
 
 - Commits `eb8a391` and `4cd9f2d` add strict, private, append-only candidate
@@ -274,6 +338,60 @@ canonical document linked by an entry for current behavior.
   state definitions, and clickmap integrity with zero errors. The defect and
   follow-up validation are recorded in
   [`ISSUE-2026-036`](../issues/resolved-2026.md#reattached-battle-stalled-on-the-terminal-view-perks-opener).
+
+### 2026-08-09 restored-source convergence after guarded serialization
+
+- Commit `7cfad7a` treats successful launcher dispatch as distinct from visible
+  source restoration. After the initial half-second settle, the shared guarded
+  serializer retries stable-source verification while a 12-second budget
+  remains, capped at six attempts. This applies consistently to active-battle
+  attachment, Home preflight, and setup capture.
+- Exact target binding, caller context, and action authority are rechecked
+  before and after every attempt and still block immediately on change. A
+  source that merely remains transitional now receives bounded retries and
+  ends with `restored_source_convergence_timeout`; target, context, and control
+  interruptions have distinct diagnostic reasons. Retry observations remain
+  `DEBUG` detail under the existing single `ACTION`/`RESULT` workflow.
+- The attachment regression reproduces the deployment incident's observable
+  sequence—two initial `RUNNING` frames, one post-restore `UNKNOWN` frame, then
+  two `RUNNING` frames—and completes on the second verification attempt.
+  Separate tests prove bounded timeout and immediate control-authority
+  interruption. Screenshot capture and publication behavior are unchanged.
+- The focused serializer, History, and preflight suite passed 101 tests; the
+  adjacent continuity and control suite passed 233. Its pre-integration
+  checkpoint passed all 2,057 tests in 358.55 seconds. After merging current
+  `develop` and preserving its independently deployed Perk reconciliation, the
+  combined focused slice passed 318 tests. The exact integrated checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,060 tests in 392.75 seconds.
+  No production process, device input, battle transition, or live validation
+  was used for this repair.
+- Forward-port candidate `91339d1` merged current `develop` at `f84f4cb`,
+  preserving the later save-mapping, attached-preflight, control-surface, and
+  Mission reward changes. Its focused serializer, History, preflight, setup-
+  capture, continuity, and control-model slice passed all 296 tests. The exact
+  candidate then passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,165 tests
+  in 358.34 seconds. This revalidation used no production process, device
+  input, battle transition, or live validation.
+- Exact integration candidate `90f36bf` repeated the complete checkpoint on
+  `develop`, passing all 2,165 tests in 386.14 seconds plus compilation, state
+  definitions, and clickmap integrity with zero errors and the established 44
+  orphan notices. Production advanced from `f84f4cb` behind rollback tag
+  `production-before-20260810T205406Z-f84f4cb` to that exact candidate; no
+  native-package input, dependency, installed unit, or persistent-state format
+  changed.
+- Replacement PID `2399537` acquired the exact `localhost:5555` lock and
+  observed the preserved Tier 19 battle while Paused. Its guarded attachment
+  reached `source_not_yet_stable` on restoration attempt 1 at 2.24 seconds,
+  verified the same source on attempt 2 at 8.24 seconds, bound the forced save
+  to the same battle, and completed normally. It then explicitly adopted
+  `farm_t19_ad_assist`, verified the active session requirements—including
+  Astral Deliverance in cannon assist—and returned to steady `RUNNING` at wave
+  3485 without Surrender or a deployment-induced battle transition. That
+  battle then reached natural Game Over at wave 3494; the existing
+  `NEXT_BATTLE` policy saved its record, selected Retry, bound the next run
+  normally, and completed the new run's startup gates.
 
 ### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
 

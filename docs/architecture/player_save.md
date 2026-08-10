@@ -341,8 +341,15 @@ The shared guarded Android-Home serializer requires the exact runtime session,
 activity scope, lifecycle-owned active-battle state, and target/generation to
 survive two stable pre-background `RUNNING` frames, `KEYCODE_HOME`, two
 byte-identical save reads, launcher restoration, and two stable post-restore
-`RUNNING` frames. The fresh resolved snapshot must contain an active-round
-identity. With no prior identity, its newest completed tail becomes the
+`RUNNING` frames. Launcher-command acceptance is dispatch evidence, not proof
+that the source has rendered. After its initial half-second settle, the shared
+serializer therefore retries stable-source verification while a 12-second
+convergence budget remains, capped at six attempts. Exact target binding,
+caller context, and action authority are rechecked before and after every
+attempt; any loss blocks immediately with a distinct diagnostic reason, while
+an unchanged but still-transitioning source blocks only after convergence
+times out. The fresh resolved snapshot must contain an active-round identity.
+With no prior identity, its newest completed tail becomes the
 baseline. A same-source unchanged tail preserves the scope; a changed tail
 starts a later scope. A UI baseline may migrate only through independently
 normalized Tier/Wave/Battle Date, whose save date must be unambiguous .NET
@@ -672,9 +679,26 @@ The control surface publishes the combined local-confirmation and candidate
 review queue as a persistent nonmodal warning. Exact canonical integration
 retires the warning. A `compatible_exact_revision` proposal is an atomic
 review artifact for both the authority owner and the exact structural mirror,
-with a base hash and scoped operation for each; runtime never applies that
-proposal. Candidate/local-store failures are diagnostic and do not become
-startup gates.
+with a base hash and scoped operation for each. The runtime decoder never
+applies that proposal. Server revision 35 instead offers an explicit operator
+workflow in both control-surface GUIs: the server discovers current linked
+`feature/*` worktrees, the operator reviews one exact proposal against a
+selected clean feature snapshot, and a second confirmation may prepare only
+that fingerprinted result there. The client cannot supply a path, branch,
+operation, or value.
+
+Preparation binds the current `main`, `develop`, and feature tips plus every
+canonical base/result hash and file mode. It refuses dirty or stale repository
+state and records a durable transaction before the first atomic replacement.
+If the process ends between grouped replacements, only the same reviewed
+candidate/worktree selection can request recovery; unrelated changes are never
+cleaned or overwritten. A completed review later includes the exact typed
+prepared result, allowing either GUI to reopen it without offering the write
+again. Preparation never writes `main` or `develop`, stages, commits, tests,
+merges, promotes, restarts a service, changes runtime authority, or sends
+device input. The result remains visibly unvalidated, uncommitted, and
+unpromoted until the ordinary repository and production procedures complete.
+Candidate/local-store failures are diagnostic and do not become startup gates.
 
 ## Acquisition provenance and temporal authority
 

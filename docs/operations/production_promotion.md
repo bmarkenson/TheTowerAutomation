@@ -35,6 +35,29 @@ owner work. Complete the repository-change checklist before this procedure and
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
 
+### Prepared save-mapping changes
+
+The control-surface save-mapping action is preparation, not promotion. Start
+with a clean linked `feature/*` worktree that is owned by the outcome and
+descends from the current `develop`. In the browser or native GUI, select the
+durable observation and that server-discovered worktree, review the exact
+proposal and repository fingerprint, then confirm preparation. Inspect the
+resulting unstaged canonical JSON diff and run every validation named by the
+proposal plus the complete supported checkpoint before committing it.
+
+Continue with the ordinary feature-to-`develop` integration and this exact
+production procedure. Do not clear the persistent observation warning merely
+because preparation or commit succeeded: retire it only after the canonical
+change is promoted and a later fresh decode/status proves the production
+mapping owns the value. A stale review, dirty worktree, changed Git tip/base
+hash or mode, write ambiguity, or unconfirmed client response requires
+inspection and a fresh review; never retry preparation automatically. If the
+catalog reports an interrupted transaction, select the candidate and worktree
+named by that transaction, review the recovery notice, and invoke Prepare once
+to recover under the original fingerprint. Do not move refs or edit its target
+files first. A mismatch, changed ref, or unrelated dirty state leaves recovery
+closed and requires manual inspection rather than an automatic retry.
+
 ### Required Windows package publication
 
 Any promotion whose aggregate `M..D` diff changes an input to either published

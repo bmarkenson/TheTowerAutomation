@@ -1685,6 +1685,33 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void SaveMappingIntegration_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (!ControlSurfaceCompatibility.CanOpenSaveMappingIntegration(
+            _serverCompatibility))
+        {
+            ShowError(new InvalidOperationException(
+                "Linux API revision 35 with save_mapping_integration_v1 is required."));
+            return;
+        }
+        try
+        {
+            var dialog = new SaveMappingIntegrationWindow(_api)
+            {
+                Owner = this,
+            };
+            dialog.ShowDialog();
+            await RefreshStatusAsync(force: true);
+            await RefreshActivityAsync(force: true);
+        }
+        catch (Exception exc)
+        {
+            ShowError(exc);
+        }
+    }
+
     private async void GateDecision_Click(object sender, RoutedEventArgs e)
     {
         if (_currentGateDecision is not { Status: "pending" } decision)
@@ -3140,6 +3167,16 @@ public partial class MainWindow : Window
         ConfirmedLocalMappingBanner.Visibility = presentation.Visible
             ? Visibility.Visible
             : Visibility.Collapsed;
+        var compatible =
+            ControlSurfaceCompatibility.CanOpenSaveMappingIntegration(
+                _serverCompatibility);
+        SaveMappingIntegrationMenuItem.IsEnabled = compatible;
+        SaveMappingIntegrationMenuItem.ToolTip = compatible
+            ? "Review exact proposals and prepare one in an owned feature worktree."
+            : "Linux API revision 35 with save_mapping_integration_v1 is required.";
+        ReviewSaveMappingsButton.IsEnabled = compatible;
+        ReviewSaveMappingsButton.ToolTip =
+            SaveMappingIntegrationMenuItem.ToolTip;
         if (!presentation.Visible)
         {
             return;
@@ -3262,7 +3299,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 34 with the required control-surface capabilities is required."
+                    "Linux API revision 35 with the required control-surface capabilities is required."
                 );
             }
             if (model is not null

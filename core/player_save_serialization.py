@@ -33,6 +33,12 @@ class GuardedSerializationStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+RESTORED_SOURCE_INITIAL_SETTLE_SECONDS = 0.5
+RESTORED_SOURCE_CONVERGENCE_TIMEOUT_SECONDS = 12.0
+RESTORED_SOURCE_RETRY_INTERVAL_SECONDS = 0.5
+RESTORED_SOURCE_MAX_ATTEMPTS = 6
+
+
 @dataclass(frozen=True)
 class GuardedSerializationResult:
     status: GuardedSerializationStatus
@@ -84,6 +90,14 @@ class GuardedPlayerSaveSerializer:
         decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
         acquirer: Optional[StablePlayerSaveAcquirer] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
+        monotonic_fn: Callable[[], float] = time.monotonic,
+        restoration_timeout_seconds: float = (
+            RESTORED_SOURCE_CONVERGENCE_TIMEOUT_SECONDS
+        ),
+        restoration_retry_interval_seconds: float = (
+            RESTORED_SOURCE_RETRY_INTERVAL_SECONDS
+        ),
+        restoration_max_attempts: int = RESTORED_SOURCE_MAX_ATTEMPTS,
         input_log_fn: Callable[..., None] = log_input,
         debug_log_fn: Callable[..., None] = log,
         log_prefix: str = "PLAYER_SAVE_SERIALIZATION",
@@ -99,6 +113,20 @@ class GuardedPlayerSaveSerializer:
         self._background_fn = background_fn or background_to_android_home
         self._foreground_fn = foreground_fn or restore_tower_launcher
         self._sleep_fn = sleep_fn
+        self._monotonic_fn = monotonic_fn
+        self._restoration_timeout_seconds = float(
+            restoration_timeout_seconds
+        )
+        self._restoration_retry_interval_seconds = float(
+            restoration_retry_interval_seconds
+        )
+        self._restoration_max_attempts = int(restoration_max_attempts)
+        if self._restoration_timeout_seconds < 0:
+            raise ValueError("restoration timeout must not be negative")
+        if self._restoration_retry_interval_seconds < 0:
+            raise ValueError("restoration retry interval must not be negative")
+        if self._restoration_max_attempts < 1:
+            raise ValueError("restoration max attempts must be positive")
         self._input_log_fn = input_log_fn
         self._debug_log_fn = debug_log_fn
         self._log_prefix = str(log_prefix or "PLAYER_SAVE_SERIALIZATION")
@@ -193,27 +221,12 @@ class GuardedPlayerSaveSerializer:
                     "foreground_restoration_failed",
                     background_dispatched=True,
                 )
-            self._sleep_fn(0.5)
-
-            if not (
-                self._acquirer.binding_matches(expected_binding)
-                and self._context_matches()
-                and self._action_allowed()
-            ):
+            restoration_failure = self._wait_for_source_restoration(
+                expected_binding,
+            )
+            if restoration_failure is not None:
                 return _blocked(
-                    "restored_source_boundary_unverified",
-                    background_dispatched=True,
-                )
-            if not self._source_matches(None, True):
-                return _blocked(
-                    "restored_source_boundary_unverified",
-                    background_dispatched=True,
-                )
-            # Do not let a context/control change during stable restoration
-            # become an apparently verified serialization boundary.
-            if not self._context_matches() or not self._action_allowed():
-                return _blocked(
-                    "restored_source_boundary_unverified",
+                    restoration_failure,
                     background_dispatched=True,
                 )
 
@@ -250,6 +263,129 @@ class GuardedPlayerSaveSerializer:
             return self._source_guard_fn(initial_frame, stable) is True
         except Exception:
             return False
+
+    def _wait_for_source_restoration(
+        self,
+        expected_binding: PlayerSaveTargetBinding,
+    ) -> Optional[str]:
+        """Wait briefly for the foreground source to become stably observable."""
+
+        started = self._monotonic()
+        initial_settle = min(
+            RESTORED_SOURCE_INITIAL_SETTLE_SECONDS,
+            self._restoration_timeout_seconds,
+        )
+        if initial_settle > 0:
+            self._sleep_fn(initial_settle)
+
+        for attempt in range(1, self._restoration_max_attempts + 1):
+            authority_failure = self._restored_authority_failure(
+                expected_binding,
+            )
+            if authority_failure is not None:
+                self._log_restoration_outcome(
+                    authority_failure,
+                    attempt=attempt,
+                    started=started,
+                )
+                return authority_failure
+
+            if self._source_matches(None, True):
+                # Stable observation is evidence only while the exact target,
+                # caller context, and action authority still match.
+                authority_failure = self._restored_authority_failure(
+                    expected_binding,
+                )
+                if authority_failure is not None:
+                    self._log_restoration_outcome(
+                        authority_failure,
+                        attempt=attempt,
+                        started=started,
+                    )
+                    return authority_failure
+                self._log_restoration_outcome(
+                    "verified",
+                    attempt=attempt,
+                    started=started,
+                )
+                return None
+
+            authority_failure = self._restored_authority_failure(
+                expected_binding,
+            )
+            if authority_failure is not None:
+                self._log_restoration_outcome(
+                    authority_failure,
+                    attempt=attempt,
+                    started=started,
+                )
+                return authority_failure
+
+            elapsed = self._elapsed_since(started)
+            exhausted = bool(
+                attempt >= self._restoration_max_attempts
+                or elapsed >= self._restoration_timeout_seconds
+            )
+            self._log_restoration_outcome(
+                (
+                    "restored_source_convergence_timeout"
+                    if exhausted
+                    else "source_not_yet_stable"
+                ),
+                attempt=attempt,
+                started=started,
+            )
+            if exhausted:
+                return "restored_source_convergence_timeout"
+
+            remaining = max(
+                0.0,
+                self._restoration_timeout_seconds - elapsed,
+            )
+            retry_delay = min(
+                self._restoration_retry_interval_seconds,
+                remaining,
+            )
+            if retry_delay > 0:
+                self._sleep_fn(retry_delay)
+
+        return "restored_source_convergence_timeout"
+
+    def _restored_authority_failure(
+        self,
+        expected_binding: PlayerSaveTargetBinding,
+    ) -> Optional[str]:
+        if not self._acquirer.binding_matches(expected_binding):
+            return "restored_target_binding_unverified"
+        if not self._context_matches():
+            return "restored_context_boundary_unverified"
+        if not self._action_allowed():
+            return "restored_control_authority_interrupted"
+        return None
+
+    def _monotonic(self) -> float:
+        try:
+            return float(self._monotonic_fn())
+        except Exception:
+            return 0.0
+
+    def _elapsed_since(self, started: float) -> float:
+        return max(0.0, self._monotonic() - started)
+
+    def _log_restoration_outcome(
+        self,
+        outcome: str,
+        *,
+        attempt: int,
+        started: float,
+    ) -> None:
+        self._debug_log_fn(
+            f"[{self._log_prefix}] restored source convergence "
+            f"result={outcome} attempt={attempt}/"
+            f"{self._restoration_max_attempts} "
+            f"elapsed_s={self._elapsed_since(started):.2f}",
+            "DEBUG",
+        )
 
 
 def background_to_android_home(target: str) -> bool:

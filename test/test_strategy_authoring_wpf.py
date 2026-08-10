@@ -309,7 +309,8 @@ def test_wpf_rebase_and_publish_reviews_explain_next_boundary_use():
     assert "queues its latest definition for the next battle" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 34" in compatibility
+    assert "MinimumServerRevision = 35" in compatibility
+    assert '"save_mapping_integration_v1"' in compatibility
     assert '"better_control_model_v2"' in compatibility
     assert '"current_battle_perks_v1"' in compatibility
     assert '"save_backed_setup_capture_v2"' in compatibility
@@ -325,6 +326,30 @@ def test_wpf_rebase_and_publish_reviews_explain_next_boundary_use():
     assert '"strategy_authoring_profile_lifecycle_v1"' in compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in compatibility
     assert '"strategy_authoring_v1"' in compatibility
+
+
+def test_wpf_save_mapping_integration_requires_review_and_second_confirmation():
+    xaml = _text("SaveMappingIntegrationWindow.xaml")
+    code = _text("SaveMappingIntegrationWindow.xaml.cs")
+    api_client = _text("ApiClient.cs")
+
+    assert 'Text="1. OBSERVATION"' in xaml
+    assert 'Text="2. OWNED FEATURE WORKTREE"' in xaml
+    assert 'Header="3. Exact reviewed proposal"' in xaml
+    assert "ReviewSaveMappingIntegrationAsync" in api_client
+    assert "PrepareSaveMappingIntegrationAsync" in api_client
+    assert "SaveMappingIntegrationViewModels.ReviewMatches" in code
+    assert '"Prepare canonical save mapping"' in code
+    assert "MessageBoxImage.Warning" in code
+    assert "not test, commit, merge, promote" in code
+    assert "ValidatePreparedResult" in code
+    assert "CandidateBox.IsEnabled = !busy" in code
+    assert "WorkspaceBox.IsEnabled = !busy" in code
+    assert "Closing += Window_Closing" in code
+    assert "Interrupted preparation requires recovery" in code
+    assert "do not retry automatically" in _text(
+        "SaveMappingIntegrationViewModels.cs"
+    )
 
 
 def test_wpf_profile_local_loadout_controls_use_only_nested_server_metadata():

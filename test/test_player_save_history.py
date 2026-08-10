@@ -486,7 +486,7 @@ def test_active_attachment_forces_serialization_and_restores_same_running_source
     assert result.running_attachment_context == _attachment_context()
     assert result.acquisition is not None
     assert calls == {
-        "target": 4,
+        "target": 5,
         "context": 5,
         "capture": 4,
         "background": 1,
@@ -494,6 +494,46 @@ def test_active_attachment_forces_serialization_and_restores_same_running_source
         "pull": 1,
     }
     assert len(inputs) == 2
+
+
+def test_active_attachment_waits_for_delayed_running_restoration():
+    states = iter(
+        (
+            {"state": "RUNNING"},
+            {"state": "RUNNING"},
+            {"state": "UNKNOWN"},
+            {"state": "RUNNING"},
+            {"state": "RUNNING"},
+        )
+    )
+    calls = {"capture": 0}
+    diagnostics = []
+
+    def capture():
+        calls["capture"] += 1
+        return object()
+
+    result = _read_active(
+        _reader(
+            capture_fn=capture,
+            detector=lambda _frame: next(states),
+            attachment_context_fn=_attachment_context,
+            background_fn=lambda _target: True,
+            foreground_fn=lambda _target: True,
+            debug_log_fn=lambda message, _level: diagnostics.append(message),
+        )
+    )
+
+    assert result.complete
+    assert calls["capture"] == 5
+    assert any(
+        "result=source_not_yet_stable attempt=1/6" in message
+        for message in diagnostics
+    )
+    assert any(
+        "result=verified attempt=2/6" in message
+        for message in diagnostics
+    )
 
 
 def test_active_attachment_default_pull_uses_two_identical_reads(monkeypatch):
@@ -810,7 +850,11 @@ def test_active_attachment_rechecks_authority_after_stable_restoration(
 
     assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
     assert not result.safe_ui_fallback
-    assert result.reason.endswith("restored_source_boundary_unverified")
+    assert result.reason == (
+        "active_attachment_restored_context_boundary_unverified"
+        if failure_kind == "context"
+        else "active_attachment_restored_control_authority_interrupted"
+    )
     assert lifecycle == ["background", "foreground"]
 
 

@@ -43,7 +43,7 @@ internal static class ControlSurfaceCompatibility
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 34;
+    public const int MinimumServerRevision = 35;
 
     private static readonly string[] RequiredCapabilities =
     [
@@ -63,6 +63,7 @@ internal static class ControlSurfaceCompatibility
         "observed_game_speed",
         "selected_strategy_process_start",
         "save_backed_setup_capture_v2",
+        "save_mapping_integration_v1",
         "save_mapping_review_status_v1",
         "strategy_action_gate_v1",
         "strategy_authoring_local_loadout_editors_v1",
@@ -100,6 +101,10 @@ internal static class ControlSurfaceCompatibility
         }
         return SetupCaptureAction(model) != SetupCaptureOpenAction.Unavailable;
     }
+
+    public static bool CanOpenSaveMappingIntegration(
+        ControlSurfaceCompatibilityResult? compatibility) =>
+        compatibility?.IsCompatible == true;
 
     public static ConfirmedLocalMappingPresentation ConfirmedLocalMapping(
         ConfirmedLocalMappingStatus? status)

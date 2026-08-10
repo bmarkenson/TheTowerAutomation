@@ -2199,7 +2199,7 @@ def test_post_serialization_interruption_terminates_attach_and_pauses(
     app._apply_activity_continuity_outcome(
         SimpleNamespace(
             operator_workflow_interruption_reason=(
-                "active_attachment_restored_source_boundary_unverified"
+                "active_attachment_restored_source_convergence_timeout"
             )
         )
     )

@@ -211,6 +211,178 @@
     };
   }
 
+  function saveMappingSelectionIdentity(candidateRecordId, workspaceId) {
+    const candidate = String(candidateRecordId || "").trim();
+    const workspace = String(workspaceId || "").trim();
+    return candidate && workspace ? `${candidate}:${workspace}` : "";
+  }
+
+  function saveMappingReviewIsCurrent(review, candidateRecordId, workspaceId) {
+    if (!review || typeof review !== "object") return false;
+    return review.schema_version === 1
+      && review.capability === "save_mapping_integration_v1"
+      && review.operation === "review"
+      && saveMappingSelectionIdentity(
+      review.candidate_record_id,
+      review.workspace?.workspace_id,
+    ) === saveMappingSelectionIdentity(candidateRecordId, workspaceId);
+  }
+
+  function saveMappingIntegrationCompatible(status) {
+    return status?.api_version === 1
+      && Number(status?.server_revision) >= 35
+      && (status?.capabilities || []).includes(
+        "save_mapping_integration_v1",
+      );
+  }
+
+  function saveMappingPrepareAvailability(
+    review,
+    candidateRecordId,
+    workspaceId,
+  ) {
+    if (!saveMappingReviewIsCurrent(review, candidateRecordId, workspaceId)) {
+      return {
+        available: false,
+        code: "review_stale",
+        reason: "Select the candidate and feature worktree, then review the exact proposal.",
+      };
+    }
+    if (!/^[0-9a-f]{64}$/.test(review.reviewed_proposal_fingerprint || "")) {
+      return {
+        available: false,
+        code: "review_fingerprint_missing",
+        reason: "The reviewed proposal fingerprint is unavailable.",
+      };
+    }
+    const prepare = review.prepare || {};
+    return {
+      available: prepare.available === true,
+      code: String(prepare.code || ""),
+      reason: String(prepare.reason || ""),
+    };
+  }
+
+  function saveMappingPreparedResultValidation(
+    result,
+    candidateRecordId,
+    workspaceId,
+    reviewedProposalFingerprint,
+  ) {
+    const expectedCandidate = String(candidateRecordId || "").trim();
+    const expectedWorkspace = String(workspaceId || "").trim();
+    const expectedFingerprint = String(
+      reviewedProposalFingerprint || "",
+    ).trim();
+    const targets = Array.isArray(result?.targets) ? result.targets : [];
+    const validTarget = (target) => target
+      && typeof target === "object"
+      && typeof target.path === "string"
+      && target.path.length > 0
+      && typeof target.mapping_id === "string"
+      && target.mapping_id.length > 0
+      && /^[0-9a-f]{64}$/.test(target.before_sha256 || "")
+      && /^[0-9a-f]{64}$/.test(target.after_sha256 || "")
+      && typeof target.changed === "boolean";
+    const valid = result
+      && typeof result === "object"
+      && result.schema_version === 1
+      && result.capability === "save_mapping_integration_v1"
+      && result.operation === "prepare"
+      && result.disposition === "prepared"
+      && typeof result.idempotent === "boolean"
+      && expectedCandidate.length > 0
+      && result.candidate_record_id === expectedCandidate
+      && expectedWorkspace.length > 0
+      && result.workspace?.workspace_id === expectedWorkspace
+      && /^[0-9a-f]{64}$/.test(expectedFingerprint)
+      && result.reviewed_proposal_fingerprint === expectedFingerprint
+      && result.committed === false
+      && result.promoted === false
+      && result.validation_status === "pending"
+      && targets.length > 0
+      && targets.every(validTarget)
+      && targets.some((target) => target.changed)
+      && Array.isArray(result.validation)
+      && result.validation.every((item) => typeof item === "string")
+      && (result.warning === undefined || typeof result.warning === "string");
+    return {
+      valid: Boolean(valid),
+      code: valid ? "" : "prepared_result_invalid",
+      reason: valid
+        ? ""
+        : "The server response did not prove this exact reviewed proposal was prepared.",
+    };
+  }
+
+  function saveMappingPreparedPresentation(
+    result,
+    candidateRecordId,
+    workspaceId,
+    reviewedProposalFingerprint,
+  ) {
+    const validation = saveMappingPreparedResultValidation(
+      result,
+      candidateRecordId,
+      workspaceId,
+      reviewedProposalFingerprint,
+    );
+    if (!validation.valid) {
+      return {
+        success: false,
+        title: "Preparation outcome is unconfirmed",
+        detail: `${validation.reason} Refresh the catalog before taking another action.`,
+        code: validation.code,
+      };
+    }
+    const changed = result.targets.filter((target) => target.changed).length;
+    return {
+      success: true,
+      title: result.idempotent
+        ? "Already prepared in feature worktree"
+        : "Prepared in feature worktree",
+      detail: `${changed} tracked mapping file${changed === 1 ? "" : "s"} prepared. Validation, commit, and promotion remain required.`,
+      code: "",
+    };
+  }
+
+  function saveMappingFailurePresentation(error, prepareRequest = true) {
+    const code = String(error?.code || "");
+    const message = String(error?.message || "Preparation failed.");
+    if (code === "integration_busy") {
+      return {
+        uncertain: false,
+        title: "Another preparation is in progress",
+        detail: `${message} This request did not acquire preparation authority. Refresh after the active request finishes; do not retry automatically.`,
+      };
+    }
+    if (code === "mapping_prepare_write_failed") {
+      return {
+        uncertain: false,
+        title: "Preparation rolled back",
+        detail: `${message} No prepared changes from this request remain. Refresh and review again.`,
+      };
+    }
+    const safelyRejected = [
+      "reviewed_proposal_stale",
+      "workspace_dirty",
+      "proposal_base_changed",
+      "workspace_snapshot_stale",
+    ].includes(code);
+    if (safelyRejected || !prepareRequest) {
+      return {
+        uncertain: false,
+        title: prepareRequest ? "Preparation rejected" : "Review unavailable",
+        detail: `${message} Nothing was written by this request. Refresh and review again.`,
+      };
+    }
+    return {
+      uncertain: true,
+      title: "Preparation outcome is unconfirmed",
+      detail: `${message} Inspect or refresh the selected feature worktree before another action; do not retry automatically.`,
+    };
+  }
+
   return {
     captureCatalogMatches,
     captureIsTerminal,
@@ -218,5 +390,12 @@
     setupCaptureOpenAction,
     workflowPresentation,
     confirmedLocalMappingPresentation,
+    saveMappingFailurePresentation,
+    saveMappingIntegrationCompatible,
+    saveMappingPrepareAvailability,
+    saveMappingPreparedPresentation,
+    saveMappingPreparedResultValidation,
+    saveMappingReviewIsCurrent,
+    saveMappingSelectionIdentity,
   };
 }));
