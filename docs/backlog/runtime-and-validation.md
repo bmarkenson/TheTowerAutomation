@@ -15,6 +15,22 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for incompatible versions, shape
   changes, stale data, mismatches, and unmapped settings.
+  - [x] Add strict same-boundary unmapped-value receipts, deterministic local
+    future-decode confirmation for Module `infoIndex` gaps, effective-mapping
+    provenance, dual-target exact-revision proposals, terminal killed-by and
+    league observation, and a persistent nonmodal review queue. Candidate
+    evidence never self-promotes tracked mappings or grants input authority.
+  - [ ] After promotion, validate receipt/local-confirmation behavior only at
+    ordinary Home, attachment, and terminal boundaries. Review each persistent
+    receipt and integrate accepted values into every required canonical owner
+    and exact structural mirror; do not create or end a battle for evidence.
+  - [ ] Add a guarded operator revoke/reacquire workflow for a locally
+    confirmed Module value. Acquire Pause or otherwise stop new-battle input,
+    revoke with generation/document-fingerprint compare-and-swap, close mapping
+    observation windows, invalidate only affected Module evidence, force a
+    fresh decode, and resume only after the new effective mapping fingerprint
+    is reconciled. The store-level append-only revoke/CAS/capacity contract is
+    implemented; no current UI grants this authority.
   - [ ] Independently validate the version-1101 Tournament generator before
     enabling it, and calibrate the two new per-wave enemy counters only if they
     gain a consumer. Retain scheduled UI audits; any semantic discrepancy in an

@@ -568,7 +568,7 @@ their prior authority until version-specific evidence advances the new rows.
 | `V1073-RUNTIME-007` structural tail identity and complete `BattleHistory` More Stats projection | Source-ordered capped `battleHistory[<=30]`; exact newest 148-field `BattleHistoryEntry` shape | **Shortcut-ready and implemented** for structural activity continuity and causally bound terminal report construction when the cause is mapped. Retained saves prove mixed UTC/local DateTime kinds and capped rollover. The prior 21 UI-captured battles plus the Tier 22 terminal confirm the complete ordered 144-row projection within UI precision; malformed entries and unknown semantic causes fail closed independently. `adGemsThisRound` supplies Ad Gems. | Source-tagged structural identity supplies Home, direct-Retry, guarded replacement-process `RUNNING` continuity, and same-source terminal tail proof. Trust source order rather than cross-kind ticks; keep raw entries, arbitrary fields, and account data unpublished. Unknown `killedBy` still permits structural continuity but forces More Stats for the report. |
 | `V1073-RUNTIME-008` Game Over history serialization timing | Pre-run history tail, Game Over observation, post-run stable save | **Causal and implemented.** The known pre-battle tail changed in the immediate stable post-death save while the natural Tier 22 terminal was preserved, proving publication at the Game Over boundary without an exact timestamp. The first enabled Tier 19 run independently recorded clearing and tail publication before normal Retry. | One immediate stable read at Game Over or Tournament Results supplies profile progression, available Tournament conditions, and the candidate report. An unchanged or unavailable tail preserves the UI fallback. `b137ea4` separately adds guarded same-session direct-Retry baseline rollover; its next ordinary end-to-end receipt confirmation remains pending. |
 | `V1073-RUNTIME-009` terminal history-tail attachment | Pre-boundary structural tail fingerprint plus newest post-boundary entry tier/time/wave | **Causal and implemented.** The pre-battle baseline changed at capped rollover to a newest Tier 22, wave 751, Boss entry whose complete semantic projection agreed with terminal tier/time/wave evidence. | Normal and Tournament report attachment requires a bound current-process terminal, matching activity-scope ID, compatible player-save baseline, exactly one valid append or capped rollover, inactive save, complete semantic entry, matching terminal kind, and no available compact-identity contradiction. A terminal-only restart, UI-sourced or absent baseline, invalid transition, unknown cause, mismatch, or acquisition failure forces More Stats. The independent collector remains observation-only. |
-| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, `3=Boss`, `6=Vampire`, `8=Scatter`, and `99=Surrender`; Tier 22 reconfirmed `3=Boss`, but the whole enum claim remains incomplete. Surrender identifies only the terminal cause, not its initiator. | Extend the allowlist only from naturally observed values. Any future unknown value preserves structural tail evidence but makes the semantic entry unavailable and requires UI evidence; this fail-closed extension does not block `V1073-RUNTIME-013`, and `Enemy N` is never synthesized. |
+| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, `3=Boss`, `6=Vampire`, `8=Scatter`, and `99=Surrender`; Tier 22 reconfirmed `3=Boss`, but the whole enum claim remains incomplete. Surrender identifies only the terminal cause, not its initiator. | An unknown numeric cause preserves structural tail evidence, keeps the semantic report on UI fallback, and may create a durable review receipt only after the same bound terminal supplies a normalized Game Stats/More Stats value. Reviewed canonical integration extends `runtime_save.battle_history.killed_by_ids`; `Enemy N` is never synthesized. |
 | `V1073-RUNTIME-011` passive base/ad coin split augmentation | Compact Game Stats screenshot/OCR; `battleHistory.coinsEarned` total | **Cross-channel and implemented as optional augmentation.** The Tier 22 compact panel showed `28.56T` base plus `14.28T` ad equaling the `42.84T` total. `battleHistory` still contains only total coins. | Keep one passive compact capture when available. Missing compact OCR never invalidates an otherwise authoritative save report; available wave/tier/cause contradictions force UI fallback. The split remains UI-supplied rather than a save claim. |
 | `V1073-RUNTIME-012` forced terminal UI audit/fallback | Existing Game Stats, Perks, clipboard/OCR More Stats, and verified terminal controls | **Shortcut-ready and preserved.** Compact Game Stats remains first and passive; More Stats retains its conditional clipboard/OCR fallback. Perks has three explicit routes: no navigation for proven save finality, newest-viewport-only reconciliation for a usable nonfinal saved prefix, and complete traversal when no usable prefix exists. | The bounded top-prefix route scrolls only toward the newest edge, never through the complete inventory. It may promote a tail row to an exact pick only when complete passive boundaries and terminal recency have one unique correspondence; otherwise the record keeps exact saved picks plus bounded aggregates and unresolved fields. Force the complete Perks traversal on absent, unbound, malformed, or round-conflicted prefix evidence. Force More Stats on its independent audit/fallback conditions. Wait/Retry/Home and mutation/transition confirmation always remain verified UI actions. |
 | `V1073-RUNTIME-013` natural-boundary audit collector | Stable privacy-safe runtime projections plus passive boundary observations | **Structural.** The default-disabled collector, append-only schema, exact-target/session guards, core state machine, and privacy/nonblocking regressions are implemented. The first enabled ordinary Tier 19 run recorded exact Home, first active identity, revisions `46418`–`46465`, terminal clearing, and the wave-5182 Tank tail candidate while the complete UI pipeline remained authoritative and unchanged. Its direct Retry exposed fail-closed old-identity retention and seven missing Perk IDs; `b137ea4` repairs both. The deployed fresh session then accepted revision `46521`, counter 232, wave 290, and a complete mapped two-pick checkpoint without inheriting the terminal-only process's unavailable baseline. | In normal App runtime the collector projects the same typed passive, forced-attachment, and natural-terminal bundles used by other consumers; it no longer owns a duplicate cadence/read. It emits audit candidates only: no attachment, record construction, Strategy fact, input, lifecycle/dispatch change, or independent UI suppression. Normal save-backed timeline picks do not become UI calibration batches. The legacy exact-wave UI/save resolver remains fail-closed for an explicitly supplied UI batch; an unknown ID in ordinary passive monitoring publishes no semantic prefix and preserves terminal UI fallback. Target/process changes clear correlation state. No special battle is required; upgrade and survival components remain unavailable. |
@@ -624,6 +624,57 @@ reviewed classification and count/hash update before entering that exact
 manifest. Incompatible versions or shapes, unknown IDs or values, ambiguity,
 and conflict continue through the UI. Runtime evidence and receipts never edit
 or promote their own authority manifest.
+
+### Runtime mapping discovery and local confirmation
+
+An exact or `compatible_exact_revision` snapshot may retain only a bounded,
+semantic-neutral discriminator for an otherwise unmapped Perk, Guardian,
+Module, Target Priority, orb-calibration, terminal `killedBy`, or Tournament
+league value. The existing UI fallback remains authoritative. Before its first
+repair input, that fallback may pair the discriminator with complete normalized
+UI evidence from the same process, target generation, activity scope, and
+Home, active-round, or completed-tail boundary. Raw save objects, account data,
+raw OCR text, partial inventories, and evidence observed after mutation are not
+eligible.
+
+Every resulting record is an append-only, mode-0600 candidate receipt under
+`logs/player_save_mapping_candidates/`. A receipt is review evidence only: it
+cannot suppress UI, authorize input or repair, change Strategy/configuration,
+or edit a tracked mapping. Home and attachment observers close their pairing
+window on repair or continuity loss. Game Over and Tournament Results reuse the
+single typed natural-boundary acquisition and its already-proved structural
+tail; candidate collection never requests another save read or blocks terminal
+routing. An unknown Tournament league name remains review-only because the
+condition generator has no general league-name mapping owner.
+
+One narrow case receives local future-decode authority automatically: a
+deterministic pre-mutation `module_info_index` pairing from an exact-version
+boundary. The runtime first durably rereads its candidate receipt, then appends
+an accept event to the ignored
+`config/player_save_versions/local/data_<data>_game_<game>.confirmed.json`
+document. Accept and revoke events are locked, atomic, private, append-only,
+generation-counted, and capacity-reserved so every active acceptance remains
+revokable. The global Module mapping is a bijection: the same exact
+`(infoIndex, name)` pair may appear in more than one slot, while either raw ID
+or name paired differently is rejected.
+
+Local authority applies only during a later fresh decode whose exact identity,
+root class, mapping resolution, authority/structural IDs, validation policy,
+revision-compatibility declaration, and canonical Module dependency still
+match. It never changes the snapshot whose UI produced the receipt. Each
+snapshot publishes an effective-mapping fingerprint after the local overlay;
+all carry, setup-capture, attachment, History, and terminal provenance binds to
+that fingerprint. Dependency drift, conflict, malformed local state, or a
+read/write failure leaves canonical values authoritative and the unknown value
+on its existing UI fallback.
+
+The control surface publishes the combined local-confirmation and candidate
+review queue as a persistent nonmodal warning. Exact canonical integration
+retires the warning. A `compatible_exact_revision` proposal is an atomic
+review artifact for both the authority owner and the exact structural mirror,
+with a base hash and scoped operation for each; runtime never applies that
+proposal. Candidate/local-store failures are diagnostic and do not become
+startup gates.
 
 ## Acquisition provenance and temporal authority
 

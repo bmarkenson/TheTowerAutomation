@@ -1719,7 +1719,12 @@ def _normalize_mapping(raw: object) -> dict[str, Any]:
         )
     if (
         normalized["resolution"] == "compatible_exact_revision"
-        and normalized["mapping_id"] != normalized["structural_mapping_id"]
+        and (
+            normalized["mapping_id"]
+            != normalized["structural_mapping_id"]
+            or normalized["authority_mapping_id"]
+            == normalized["structural_mapping_id"]
+        )
     ):
         raise PlayerSaveMappingCandidateError(
             "exact_revision_candidate_structural_mismatch"

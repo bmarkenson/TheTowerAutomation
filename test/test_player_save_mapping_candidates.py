@@ -136,6 +136,72 @@ def _compatible_module_record() -> dict:
     return _record(mapping=mapping)
 
 
+def _module_info_record(
+    *,
+    raw_value: int,
+    semantic: str,
+    known_raw_semantic_value: str | None = None,
+) -> dict:
+    slots = {
+        "cannon_primary": "Amplifying Strike",
+        "armor_primary": "Orbital Augment",
+        "generator_primary": "Project Funding",
+        "core_primary": semantic,
+        "cannon_assist": "Being Annihilator",
+        "armor_assist": "Space Displacer",
+        "generator_assist": "Singularity Harness",
+        "core_assist": "Harmony Conductor",
+    }
+    peers = {
+        locator: value
+        for locator, value in slots.items()
+        if locator != "core_primary"
+    }
+    pending = pending_mapping_candidate(
+        value_kind="module_info_index",
+        raw_value=raw_value,
+        pairing_method="exact_locator",
+        locator="core_primary",
+        expected_observation_count=8,
+        known_semantic_values=(),
+        known_raw_semantic_value=known_raw_semantic_value,
+        peer_locator_values=peers,
+        scope={
+            "slot_key": "core_primary",
+            "family": "core",
+            "role": "primary",
+        },
+    )
+    ui = {
+        "canonical_values": list(slots.values()),
+        "locator_values": slots,
+        "locator_scopes": {
+            locator: {
+                "slot_key": locator,
+                "family": locator.rsplit("_", 1)[0],
+                "role": locator.rsplit("_", 1)[1],
+            }
+            for locator in slots
+        },
+        "complete": True,
+        "pre_mutation": True,
+        "observed_at": OBSERVED_AT,
+        "source_observation_fingerprint": SOURCE_OBSERVATION_FINGERPRINT,
+    }
+    resolved = resolve_mapping_candidates("modules", [pending], ui)[0]
+    return build_mapping_candidate_record(
+        mapping=_mapping(),
+        check_id="modules",
+        candidate=resolved,
+        snapshot_fingerprint=SNAPSHOT_FINGERPRINT,
+        ui_evidence_fingerprint=UI_FINGERPRINT,
+        source_observation_fingerprint=SOURCE_OBSERVATION_FINGERPRINT,
+        workflow_provenance=_workflow(),
+        observed_at=OBSERVED_AT,
+        recorded_at="2026-08-08T12:00:01+00:00",
+    )
+
+
 def test_candidate_resolution_distinguishes_all_review_dispositions():
     ready = _resolved()
     conflict = _resolved(
@@ -784,6 +850,52 @@ def test_module_assist_pairing_persists_family_scope_and_proposes_replace():
             "value": 99,
         }
     ]
+
+
+def test_module_proposal_allows_an_identical_global_pair_in_a_new_scope():
+    proposal = proposed_mapping_patch(
+        _module_info_record(
+            raw_value=39,
+            semantic="Harmony Conductor",
+            known_raw_semantic_value="Harmony Conductor",
+        ),
+        repository_root=ROOT,
+    )
+
+    assert proposal["operations"] == [
+        {
+            "op": "add",
+            "path": "/module_loadout/primary/3/values/-",
+            "value": {
+                "info_index": 39,
+                "name": "Harmony Conductor",
+            },
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "semantic"),
+    (
+        (39, "Future Module"),
+        (777, "Harmony Conductor"),
+    ),
+)
+def test_module_proposal_rejects_both_global_bijection_conflicts(
+    raw_value,
+    semantic,
+):
+    with pytest.raises(
+        PlayerSaveMappingCandidateError,
+        match="conflicts_current_file",
+    ):
+        proposed_mapping_patch(
+            _module_info_record(
+                raw_value=raw_value,
+                semantic=semantic,
+            ),
+            repository_root=ROOT,
+        )
 
 
 def test_same_save_discriminator_with_different_ui_semantics_is_ambiguous():

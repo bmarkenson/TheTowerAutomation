@@ -90,7 +90,7 @@ public sealed class ConfirmedLocalMappingItem
     public string ValueKind { get; set; } = "";
 
     [JsonPropertyName("raw_value")]
-    public double? RawValue { get; set; }
+    public decimal? RawValue { get; set; }
 
     [JsonPropertyName("semantic_value")]
     public string SemanticValue { get; set; } = "";

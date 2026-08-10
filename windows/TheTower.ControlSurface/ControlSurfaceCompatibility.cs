@@ -182,7 +182,7 @@ internal static class ControlSurfaceCompatibility
             && !string.IsNullOrWhiteSpace(slotKey)
                 ? $" {slotKey}"
                 : "";
-        var value = first.RawValue is double rawValue
+        var value = first.RawValue is decimal rawValue
             ? $": save value {rawValue} = "
                 + (string.IsNullOrWhiteSpace(first.SemanticValue)
                     ? "unknown"

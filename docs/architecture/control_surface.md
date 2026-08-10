@@ -190,7 +190,7 @@ expiry attempt.
 
 ## Better Control Model
 
-Server revision 32 retains the revision-30 `better_control_model_v1` and
+Server revision 34 retains the revision-30 `better_control_model_v1` and
 `save_backed_setup_capture_v1` for additive compatibility and advertises
 `better_control_model_v2` plus `save_backed_setup_capture_v2`. The additive
 `control_model` status object
@@ -445,7 +445,7 @@ memory only. The API deliberately sends no CORS permission.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, current save-backed Perks, latest observation, structured Strategy Action Gate, and runtime evidence |
+| `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, current save-backed Perks, persistent save-mapping review status, latest observation, structured Strategy Action Gate, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/interactive-development-lease` | Request, heartbeat, or release the one cooperative development lease; never dispatch device input |
 | `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit independently of battle intent, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
@@ -485,6 +485,21 @@ battle immediately even if the runtime has not yet written the new battle's
 first save checkpoint. This is a read-only projection: the API performs no
 save acquisition, serialization, panel navigation, device input, or action-
 authority decision.
+
+### Save-mapping review status
+
+Server revision 34 advertises `save_mapping_review_status_v1` while retaining
+the additive `confirmed_local_mapping_status_v1` contract. The
+`confirmed_local_mappings` status object combines durable unmapped-value
+candidate receipts with exact-version local Module confirmations. Browser and
+native clients show a persistent nonmodal banner for review, more-evidence,
+local-active, authority/mirror-pending, reconfirmation, ambiguity, or conflict
+states. Integrated and explicitly revoked records disappear from the banner.
+
+The banner is diagnostic. It never blocks startup, changes Automation state,
+suppresses a UI check, or grants integration/revoke authority. A missing or
+unreadable status contract is shown as a compatibility/error state; canonical
+save mappings and their existing UI fallbacks remain runtime authority.
 
 ### Structured Strategy Action Gate status
 

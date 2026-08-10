@@ -64,6 +64,12 @@ input. A trusted mismatch queues only that requirement's existing verified UI
 repair and supplies no mutation authority itself. `force_ui` retains complete
 UI behavior; `comparison_audit` compares while UI stays authoritative.
 
+The persistent save-mapping review banner is not a startup gate. It reports a
+durable unmapped-value receipt or local exact-version Module confirmation that
+still needs canonical review. Leave the banner visible until the mapping is
+integrated; do not use a startup-gate bypass to dismiss it. Candidate status
+does not change the current check's UI fallback or authorize repair.
+
 An exhausted active-session Home-only mismatch may offer a profile-owned repair
 only under
 [`live_action_authority.md`](../live_action_authority.md#configuration-gate-repair).

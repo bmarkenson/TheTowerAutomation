@@ -2154,6 +2154,45 @@ def test_fresh_decode_effective_fingerprint_tracks_local_mapping_generation(
     assert before.as_dict() == before_projection
 
 
+def test_known_global_module_pair_in_a_new_scope_remains_discoverable(
+    monkeypatch,
+):
+    clean = _snapshot(monkeypatch, _decoded_save())
+    decoded = _decoded_save()
+    decoded["moduleEquipped"][3]["infoIndex"] = 39
+
+    snapshot = _snapshot(monkeypatch, decoded)
+    evidence = snapshot.checks["modules"]
+    candidate = evidence.diagnostics["mapping_candidates"][0]
+    locator_values = dict(clean.checks["modules"].value)
+    locator_values["core_primary"] = "Harmony Conductor"
+    locator_scopes = {
+        f"{family}_{role}": {
+            "slot_key": f"{family}_{role}",
+            "family": family,
+            "role": role,
+        }
+        for family in ("cannon", "armor", "generator", "core")
+        for role in ("primary", "assist")
+    }
+    ui = build_mapping_candidate_ui_evidence(
+        "modules",
+        canonical_values=list(locator_values.values()),
+        locator_values=locator_values,
+        locator_scopes=locator_scopes,
+        observed_at=CAPTURED_AT,
+    )
+
+    resolved = resolve_mapping_candidates("modules", [candidate], ui)[0]
+
+    assert evidence.status == "unmapped"
+    assert candidate["raw_discriminator"]["value"] == 39
+    assert candidate["known_raw_semantic_value"] == "Harmony Conductor"
+    assert candidate["scope"]["slot_key"] == "core_primary"
+    assert resolved["status"] == "ready_for_review"
+    assert resolved["semantic_value"] == "Harmony Conductor"
+
+
 def test_ultimate_weapon_components_have_independent_value_scope(monkeypatch):
     snapshot = _snapshot(monkeypatch)
     requirements = {
