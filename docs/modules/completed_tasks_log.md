@@ -39,6 +39,34 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 save-mapping discovery and local confirmation lifecycle
+
+- Commits `eb8a391` and `4cd9f2d` add strict, private, append-only candidate
+  receipts for unmapped Perk, Guardian, Module, Target Priority, orb,
+  terminal-cause, and Tournament-league save values. Existing Home,
+  attachment, and terminal UI fallbacks may pair a discriminator only with
+  complete normalized evidence from the same pre-mutation runtime boundary;
+  collection neither requests another save read nor grants input authority.
+- A deterministic exact-version Module `infoIndex` pairing is durably
+  confirmed for later fresh decodes in an ignored append-only local store.
+  Global ID/name bijection, generation-aware revoke capacity, dependency drift,
+  and an effective-mapping fingerprint keep stale or conflicting local values
+  from entering setup, attachment, History, or terminal provenance. Every
+  other newly observed value remains review evidence until canonical
+  integration.
+- Server revision 34 exposes the combined review state. Browser and native
+  clients keep a nonmodal warning visible for unresolved, locally active,
+  reconfirmation, ambiguity, conflict, and authority/mirror-pending states.
+  Compatible exact-revision proposals cover both canonical owners atomically;
+  runtime never edits those tracked mappings itself.
+- Focused affected Python validation passed 738 tests before the integrated
+  session-gate update and 582 afterward; final hardening passed 137 focused
+  Python tests and all 124 portable native tests. The supported checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,159 tests in 352.93 seconds.
+  No live process or device interaction was used; ordinary-boundary production
+  validation and canonical review remain explicitly queued.
+
 ### 2026-08-09 outcome-aware Mission reward cooldown
 
 - Commit `3046c93` gives a productive Daily/Event/Guild reward sweep a
