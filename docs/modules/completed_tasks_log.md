@@ -39,6 +39,23 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-09 outcome-aware Mission reward cooldown
+
+- Commit `3046c93` gives a productive Daily/Event/Guild reward sweep a
+  two-minute follow-up instead of the same 30-minute delay used after an empty
+  sweep. Persistent alerts that expose no claimable reward retain the
+  30-minute backoff, failures retain their five-minute retry, and interrupted
+  routes continue to preserve cleanup ownership without starting a cooldown.
+- The restored reward hub is measured once more before cleanup and records its
+  residual Daily, Event, and Guild badge evidence at diagnostic level. This
+  adds no input and leaves every navigation and claim under its existing screen
+  and exact-target guards.
+- Focused Mission reward and action-authority suites passed 45 and 24 tests.
+  The repository checkpoint passed compilation, state-definition validation,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,081 tests in 360.75 seconds. The feature was not deployed or live
+  validated; that safe-boundary confirmation remains in the handler backlog.
+
 ### 2026-08-09 save-backed attached-session preflight
 
 - Commit `2a303ba` lets an exact-bound forced attachment save satisfy every
