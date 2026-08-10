@@ -4002,6 +4002,108 @@ def _ready_capture(
     return ready
 
 
+def test_process_boundary_retires_legacy_authority_records(tmp_path):
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    evidence = _evidence(game_state="active_battle")
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+    )
+    for status in ("acknowledged", "validating_save"):
+        store.transition_battle_workflow(
+            workflow["request_id"],
+            status,
+            acknowledgement=evidence,
+        )
+    receipt = _save_receipt(str(workflow["request_id"]), evidence)
+    store.transition_battle_workflow(
+        workflow["request_id"],
+        "ready",
+        save_receipt=receipt,
+    )
+    store.transition_battle_workflow(
+        workflow["request_id"],
+        "completed",
+        acknowledgement=evidence,
+    )
+    manual = store.request_manual_control(evidence=evidence, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    manual_receipt = _save_receipt(
+        str(manual["manual_control_id"]),
+        evidence,
+        kind="return_control_reconciliation",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "completed",
+        save_receipt=manual_receipt,
+    )
+    capture = store.request_setup_capture(evidence=evidence, source="test")
+    _ready_capture(
+        store,
+        capture,
+        _capture_preview(evidence=evidence),
+    )
+
+    def remove_new_mapping_provenance(data):
+        data["battle_workflow"]["save_receipt"]["temporal"].pop(
+            "effective_mapping_fingerprint"
+        )
+        data["manual_control"]["save_receipt"]["temporal"].pop(
+            "effective_mapping_fingerprint"
+        )
+        data["setup_capture"]["preview"].pop(
+            "effective_mapping_fingerprint"
+        )
+        return data
+
+    store.update(remove_new_mapping_provenance)
+    incompatible = store.status()
+    assert incompatible["battle_workflow_error"]
+    assert incompatible["manual_control_error"]
+    assert incompatible["setup_capture_error"]
+
+    store.interrupt_operator_workflows(
+        "a new automation process boundary started",
+        source="test-process-start",
+    )
+
+    retired = store.status()
+    assert retired["battle_workflow_error"] is None
+    assert retired["battle_workflow"]["status"] == "interrupted"
+    assert "save_receipt" not in retired["battle_workflow"]
+    assert retired["manual_control_error"] is None
+    assert retired["manual_control"]["status"] == "interrupted"
+    assert "save_receipt" not in retired["manual_control"]
+    assert retired["setup_capture_error"] is None
+    assert retired["setup_capture"]["status"] == "interrupted"
+    assert "preview" not in retired["setup_capture"]
+    replacement = store.request_battle_workflow(
+        "attach_battle",
+        evidence={
+            **evidence,
+            "observation_id": "runtime-2:1",
+            "runtime_id": "runtime-2",
+        },
+    )
+    assert replacement["status"] == "requested"
+    assert replacement["request_id"] != workflow["request_id"]
+
+
 def test_cli_capture_reviews_saves_and_reopens_a_durable_strategy_draft(
     tmp_path,
     monkeypatch,
