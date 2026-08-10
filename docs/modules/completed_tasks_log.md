@@ -303,7 +303,10 @@ canonical document linked by an entry for current behavior.
   to the same battle, and completed normally. It then explicitly adopted
   `farm_t19_ad_assist`, verified the active session requirements—including
   Astral Deliverance in cannon assist—and returned to steady `RUNNING` at wave
-  3485 without Surrender, Retry, or another battle transition.
+  3485 without Surrender or a deployment-induced battle transition. That
+  battle then reached natural Game Over at wave 3494; the existing
+  `NEXT_BATTLE` policy saved its record, selected Retry, bound the next run
+  normally, and completed the new run's startup gates.
 
 ### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
 
