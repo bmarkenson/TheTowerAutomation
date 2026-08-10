@@ -8,6 +8,41 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Open in-battle side menu suppressed Mission reward scheduling
+
+**Stable ID:** `ISSUE-2026-015` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-07-20 at 13:01 during an active Tier 18 Farm battle.
+- **Symptom:** The in-battle Mission control displayed a red badge with four
+  pending rewards, but the running automation made no Mission reward probe or
+  claim attempt.
+- **Evidence:** Fresh control, owner-PID, ADB, screenshot, and action-log
+  inspection confirmed a live `RUNNING` process on `localhost:5555`. The frame
+  was authoritatively classified as `RUNNING/MENU_OPEN`; the open-menu badge
+  detector reported Daily Missions available, while the scheduler's
+  closed-menu attention-dot detector correctly reported false. Static tracing
+  found that orchestration always used the closed-menu detector even though
+  the reward handler already accepts a verified open side menu.
+- **Safety response:** Diagnosis used read-only capture and process inspection.
+  The active battle was not paused, tapped, restarted, exited, or Surrendered.
+- **Cause:** Mission reward orchestration always consulted the closed-menu
+  attention-dot detector, so an authoritatively open menu suppressed scheduling
+  even when its section badges proved rewards were available.
+- **Resolution:** Commit `2b4315d` selects section-badge evidence for a verified
+  open menu and the attention dot for a verified closed menu while retaining
+  the existing action, state, and exact-target guards.
+- **Regression:** `test/test_mission_reward_handler.py` covers open-menu section
+  badges, closed-menu attention-dot scheduling, and ambiguous-overlay refusal.
+- **Validation:** On 2026-08-09, production PID `804073` remained `RUNNING` on
+  `localhost:5555` with `MENU_OPEN` through the 17:31:45 status observation.
+  At 17:32:42 the scheduler selected the visible Daily and Event section badges
+  from that state, entered its exclusive Mission reward route, and completed at
+  17:35:01 after claiming nine rewards: two Daily rewards, including one weekly
+  chest, and seven Event rewards. It released route ownership, closed the menu,
+  and returned to a fresh running-battle observation without a Surrender or
+  battle transition.
+- **Fixed by:** `2b4315d`.
+
 ### Reattached battle stalled on the terminal View Perks opener
 
 **Stable ID:** `ISSUE-2026-036` · **Lifecycle:** `resolved`

@@ -6,16 +6,12 @@ completion evidence remains in the
 
 ## Mission rewards
 
-- [ ] Integrate and deploy commit `3046c93` at a safe process boundary, then
-  confirm that a productive reward sweep becomes eligible again after two
+- [ ] Live-confirm commit `3046c93`'s outcome-specific scheduling now that it
+  is deployed: a productive reward sweep becomes eligible again after two
   minutes, an empty sweep backs a persistent alert off for 30 minutes, and the
-  residual-badge diagnostic agrees with the restored reward hub. An open-menu
-  claim can also satisfy the separate `ISSUE-2026-015` confirmation below.
-- [ ] Deploy and live-verify commit `2b4315d` at a safe process boundary,
-  confirming that Mission reward scheduling uses section badges while the
-  in-battle menu is verified open and the attention dot while it is closed.
-  Track confirmation in
-  [`ISSUE-2026-015`](../issues/open-2026.md#open-in-battle-side-menu-suppressed-mission-reward-scheduling).
+  residual-badge diagnostic agrees with the restored reward hub. The guarded
+  production smoke had no remaining Mission reward badge with which to exercise
+  these natural-trigger outcomes.
 - [ ] Deploy commit `e14999c` at a safe process boundary and confirm that a
   scheduler-owned Event Mission pass uses overlapping downward viewports. The
   repaired traversal and paused one-off validation are preserved in the

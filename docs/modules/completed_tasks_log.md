@@ -53,8 +53,23 @@ canonical document linked by an entry for current behavior.
 - Focused Mission reward and action-authority suites passed 45 and 24 tests.
   The repository checkpoint passed compilation, state-definition validation,
   clickmap integrity with zero errors and the established 44 orphan notices,
-  and all 2,081 tests in 360.75 seconds. The feature was not deployed or live
-  validated; that safe-boundary confirmation remains in the handler backlog.
+  and all 2,081 tests in 360.75 seconds.
+- The exact integrated candidate `2303e2d` repeated the complete checkpoint on
+  `develop`, passing all 2,081 tests in 355.46 seconds. Production advanced
+  from `9c1435e` to `2303e2d` behind rollback tag
+  `production-before-20260810T003227Z-9c1435e`.
+- Replacement PID `947995` acquired the exact `localhost:5555` lock, completed
+  save-backed same-battle attachment, adopted `farm_t19_ad_assist`, verified
+  all active session requirements, and entered steady state. Fresh observations
+  advanced from wave 3601 to wave 3623; no Surrender, new battle, dependency
+  change, persistent-state migration, or Windows-package publication occurred.
+- The prior runtime's safe-boundary drain also live-confirmed the open-menu
+  scheduler repair in commit `2b4315d`: from `RUNNING/MENU_OPEN`, it selected
+  Daily and Event badges and claimed nine rewards before releasing its route and
+  closing the menu. `ISSUE-2026-015` is now resolved. The promoted runtime did
+  not encounter another natural Mission reward badge during its bounded smoke,
+  so the two-minute/30-minute outcome behavior and residual-badge diagnostic
+  remain queued for natural-trigger confirmation.
 
 ### 2026-08-09 save-backed attached-session preflight
 

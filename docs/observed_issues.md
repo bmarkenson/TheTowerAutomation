@@ -223,17 +223,6 @@ current runtime state.
   for filter/input recurrence or Windows confirmation. Next: verify one-click
   mouse/keyboard behavior across refreshes; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
 
-### Open in-battle side menu suppressed Mission reward scheduling
-
-**Stable ID:** `ISSUE-2026-015` · **Lifecycle:** `repair_awaiting_confirmation`
-
-- Scheduling ignored a verified open-menu badge;
-  dispatch must select badge evidence from the authoritative open/closed overlay
-  and retain normal action guards.
-- Load the [dossier](issues/open-2026.md#open-in-battle-side-menu-suppressed-mission-reward-scheduling)
-  for open-menu claims, recurrence, or scheduler changes. Next: observe one safe
-  claim from that state; [handler backlog](backlog/handlers.md#mission-rewards).
-
 ### Live ADB target move could not be applied by a paused runtime
 
 **Stable ID:** `ISSUE-2026-017` · **Lifecycle:** `repair_awaiting_confirmation`
