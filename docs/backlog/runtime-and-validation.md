@@ -24,6 +24,19 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
     ordinary Home, attachment, and terminal boundaries. Review each persistent
     receipt and integrate accepted values into every required canonical owner
     and exact structural mirror; do not create or end a battle for evidence.
+    - [x] The 2026-08-10 production attachment used bound save evidence for
+      every supported active check except one unresolved Module value. Its
+      pre-mutation UI fallback deterministically confirmed cannon-assist
+      `infoIndex 10` as `Astral Deliverance`; the exact-version local event is
+      active for later fresh decodes and the runtime reached steady state with
+      no gate, repair, Surrender, or new battle.
+    - [ ] Review candidate
+      `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`
+      and apply its atomic proposal to both `data-9-game-1073` authority and
+      the `data-9-game-1101` structural mirror, then confirm at a later natural
+      fresh decode that Modules no longer needs UI. Exercise the remaining
+      Home and terminal candidate paths only when those boundaries occur
+      naturally.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module value. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping

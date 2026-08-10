@@ -61,11 +61,56 @@ canonical document linked by an entry for current behavior.
   runtime never edits those tracked mappings itself.
 - Focused affected Python validation passed 738 tests before the integrated
   session-gate update and 582 afterward; final hardening passed 137 focused
-  Python tests and all 124 portable native tests. The supported checkpoint
-  passed compilation, state definitions, clickmap integrity with zero errors
-  and the established 44 orphan notices, and all 2,159 tests in 352.93 seconds.
-  No live process or device interaction was used; ordinary-boundary production
-  validation and canonical review remain explicitly queued.
+  Python tests and all 124 portable native tests. The first exact checkpoint
+  passed all 2,159 tests in 352.93 seconds. Production then exposed two safe
+  compatibility edges: `fb2b166` retires recognizable prior-schema workflow
+  authority at process start, and `f8786cd` permits an already-enabled exact
+  Attach request to enter save validation without waiting for an intermediate
+  heartbeat. The final exact checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,161 tests in 348.99 seconds; the complete control-model and surface
+  slice passed 192 tests.
+- Production advanced from `bee431a` through `dd9354f` and `fb2b166` to exact
+  `f8786cd`, protected respectively by rollback tags
+  `production-before-20260810T104240Z-bee431a`,
+  `production-before-20260810T110009Z-dd9354f`, and
+  `production-before-20260810T111356Z-fb2b166`. The native package was
+  published at 03:45 PDT from exact `dd9354f`; neither later fix changes a
+  native-package input. Current Control Surface is 72,390,981 bytes with
+  SHA-256 `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`,
+  and current Tunnel Host is 35,172,109 bytes with SHA-256
+  `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
+  Retained slot 1 (`b2d282f`) contains 72,385,088-byte
+  `3bb666175f7e0b1b5d731f30c92cee8b71581a3979bfc00f49bd018d69e4d0f4`
+  and 35,172,103-byte
+  `e23aada8aa3992bbc866fcebd3ec2a22d043902e088f2a4cb78abdba0ff63c68`;
+  slot 2 (`5f93cba`) contains 72,363,007-byte
+  `c13e709f307d32f979dc9fff300cfcfb467133ac2602fce584582f36ed3abe72`
+  and 35,172,117-byte
+  `387a2d5d620b8ced392b2d00dc2628a5a1e8333af866d074b6b3f5ac8286221d`.
+- The first guarded production Attach correctly returned to acknowledged Pause
+  when launcher restoration had not yet produced a stable source boundary. A
+  fast Attach/Enable retry then exposed the missing transition while the
+  exclusive workflow still blocked every strategy and lifecycle action; no
+  fallback, new battle, or Surrender occurred. After `f8786cd`, replacement
+  PID `1676747` accepted back-to-back Attach and Enable at 04:15:24 PDT,
+  serialized and restored the same Tier 19 battle, wrote an exact
+  `data-9-game-1101` reconciliation receipt, adopted it observation-only, and
+  returned itself to acknowledged Pause before explicit Strategy adoption.
+- The resulting session preflight used bound save evidence for Auto Pick,
+  Perk order and first choice, card recharge modes, Cards, Workshop, Bots,
+  Guardians, and Ultimate Weapons. Only Modules used its unresolved-value UI
+  fallback. That pre-mutation inspection paired `infoIndex 10` with
+  `Astral Deliverance`, wrote candidate
+  `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`,
+  activated exact-version local event
+  `1ba2e2e9f3bec3282c60d14a8b558c41fe7aa87139fe3c2fad74c7151828a3d1`
+  for later fresh decodes, and left one persistent nonblocking canonical-review
+  warning. Free Upgrade locks remained deferred as immutable `NEW_BATTLE`
+  evidence rather than receiving an in-battle repair. Preflight completed,
+  consumed the obsolete generic gate request, and entered steady `RUNNING`
+  state with no Strategy Gate. Canonical owner/mirror integration plus ordinary
+  Home and terminal receipt validation remain queued.
 
 ### 2026-08-09 outcome-aware Mission reward cooldown
 
