@@ -139,10 +139,15 @@ canonical document linked by an entry for current behavior.
 - The prior runtime's safe-boundary drain also live-confirmed the open-menu
   scheduler repair in commit `2b4315d`: from `RUNNING/MENU_OPEN`, it selected
   Daily and Event badges and claimed nine rewards before releasing its route and
-  closing the menu. `ISSUE-2026-015` is now resolved. The promoted runtime did
-  not encounter another natural Mission reward badge during its bounded smoke,
-  so the two-minute/30-minute outcome behavior and residual-badge diagnostic
-  remain queued for natural-trigger confirmation.
+  closing the menu. `ISSUE-2026-015` is now resolved.
+- A 2026-08-10 13:00 PDT production-log review closed the remaining natural-
+  trigger validation. Nineteen eligible probes from 2026-08-09 17:44 through
+  2026-08-10 09:33 produced exactly 19 terminal results and 19 exclusive-route
+  releases: five productive sweeps, 14 empty sweeps, and no failure or
+  interruption. Each productive sweep became eligible again in 2:02–2:10;
+  consecutive empty sweeps under a continuing alert repeated in 30:00–30:07.
+  Every route remeasured Daily, Event, and Guild residual badges before cleanup,
+  and every observed post-review residual was clear.
 
 ### 2026-08-09 scoped session-gate evidence and lifecycle
 
