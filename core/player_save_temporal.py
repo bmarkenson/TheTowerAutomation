@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 import hashlib
 import json
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionType,
@@ -65,6 +65,7 @@ class RunningAttachmentTemporalBinding:
     source_activity_scope_id: str = field(repr=False)
     target_binding: PlayerSaveTargetBinding = field(repr=False)
     mapping_id: str
+    effective_mapping_fingerprint: str
     active_round_identity_fingerprint: str
     captured_at: str
     acquisition_type: PlayerSaveAcquisitionType
@@ -75,6 +76,9 @@ class RunningAttachmentTemporalBinding:
             "runtime_session_id": self.runtime_session_id,
             "source_activity_scope_id": self.source_activity_scope_id,
             "mapping_id": self.mapping_id,
+            "effective_mapping_fingerprint": (
+                self.effective_mapping_fingerprint
+            ),
             "active_round_identity_fingerprint": (
                 self.active_round_identity_fingerprint
             ),
@@ -85,6 +89,16 @@ class RunningAttachmentTemporalBinding:
             if not normalized:
                 raise ValueError(f"running attachment requires {name}")
             object.__setattr__(self, name, normalized)
+        if not (
+            len(self.effective_mapping_fingerprint) == 64
+            and all(
+                character in "0123456789abcdef"
+                for character in self.effective_mapping_fingerprint
+            )
+        ):
+            raise ValueError(
+                "running attachment requires effective mapping fingerprint"
+            )
         if not isinstance(self.target_binding, PlayerSaveTargetBinding):
             raise TypeError("running attachment requires a typed target binding")
         if self.acquisition_type is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION:
@@ -110,6 +124,7 @@ class RunningAttachmentTemporalBinding:
         return _fingerprint(
             "round-claim",
             self.mapping_id,
+            self.effective_mapping_fingerprint,
             self.target_binding.fingerprint,
             self.activity_scope_id,
             self.active_round_identity_fingerprint,
@@ -151,6 +166,9 @@ class RunningAttachmentTemporalBinding:
         return {
             "schema_version": 1,
             "mapping_id": self.mapping_id,
+            "effective_mapping_fingerprint": (
+                self.effective_mapping_fingerprint
+            ),
             "runtime_session": _fingerprint(
                 "runtime-session",
                 self.runtime_session_id,
@@ -261,6 +279,7 @@ class BoundRunningAttachmentSaveEvidence:
 
     observations: RunningAttachmentSaveObservations
     context_fn: Callable[[], Any] = field(repr=False)
+    mapping_observer: Any = field(default=None, repr=False)
     _consumed: set[str] = field(default_factory=set, init=False, repr=False)
     _invalidated: bool = field(default=False, init=False, repr=False)
 
@@ -284,6 +303,36 @@ class BoundRunningAttachmentSaveEvidence:
             self._invalidated = True
             return None
         return self.observations.fact(normalized)
+
+    def record_mapping_observation(
+        self,
+        check_id: str,
+        ui_evidence: Mapping[str, Any],
+    ) -> int:
+        """Retain review evidence without making it a consumable save fact."""
+
+        observer = self.mapping_observer
+        callback = getattr(observer, "record_mapping_observation", None)
+        if not callable(callback) or self._invalidated:
+            return 0
+        try:
+            context = self.context_fn()
+        except Exception:
+            self._invalidated = True
+            return 0
+        if not self.observations.matches_context(context):
+            self._invalidated = True
+            close = getattr(observer, "close", None)
+            if callable(close):
+                close("running_attachment_context_changed")
+            return 0
+        return int(callback(check_id, ui_evidence) or 0)
+
+    def close_mapping_candidate_window(self, reason: str) -> None:
+        observer = self.mapping_observer
+        close = getattr(observer, "close", None)
+        if callable(close):
+            close(reason)
 
     def temporal_class(
         self,

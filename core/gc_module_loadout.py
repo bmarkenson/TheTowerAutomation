@@ -282,6 +282,9 @@ def ensure_gc_module_loadout(
     repair_observer_fn: Optional[
         Callable[[tuple[GcModuleSlotEvidence, ...]], None]
     ] = None,
+    initial_evidence_observer_fn: Optional[
+        Callable[[GcModuleLoadoutEvidence], None]
+    ] = None,
     catalog: Optional[ModuleIconCatalog] = None,
 ) -> GcModuleLoadoutEvidence:
     """Correct a GC module loadout while remaining on the Modules screen.
@@ -376,9 +379,21 @@ def ensure_gc_module_loadout(
     equip_action = equip_fn or live_equip
     temporary_action = temporary_equip_fn or live_temporary_equip
     announced = False
+    initial_observed = False
 
     for _step in range(_MAX_CORRECTION_STEPS):
         evidence = evaluate_fn(current, expected, catalog=selected_catalog)
+        if not initial_observed:
+            initial_observed = True
+            if evidence.fully_observed and initial_evidence_observer_fn is not None:
+                try:
+                    initial_evidence_observer_fn(evidence)
+                except Exception as exc:
+                    log(
+                        "[PLAYER_SAVE_MAPPING] Initial Module observation "
+                        f"callback failed: {exc}",
+                        "DEBUG",
+                    )
         if evidence.valid:
             if ancestral_filter_active:
                 current = _set_module_rarity_filter(

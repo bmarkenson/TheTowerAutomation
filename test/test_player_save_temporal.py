@@ -104,3 +104,38 @@ def test_bound_consumer_rejects_target_scope_and_process_changes():
             lambda changed=changed: changed,
         )
         assert candidate.consume("workshop_preset") is None
+
+
+def test_bound_attachment_mapping_observer_rechecks_context_and_closes():
+    observations = running_attachment_observations(
+        {"modules": {"cannon_primary": "Amplifying Strike"}}
+    )
+    calls = []
+
+    class Observer:
+        def record_mapping_observation(self, check_id, evidence):
+            calls.append(("record", check_id, evidence))
+            return 1
+
+        def close(self, reason):
+            calls.append(("close", reason))
+
+    observer = Observer()
+    evidence = BoundRunningAttachmentSaveEvidence(
+        observations,
+        _context,
+        observer,
+    )
+    payload = {"pre_mutation": True}
+
+    assert evidence.record_mapping_observation("modules", payload) == 1
+    assert calls == [("record", "modules", payload)]
+
+    changed = BoundRunningAttachmentSaveEvidence(
+        observations,
+        lambda: _context(target_generation=4),
+        observer,
+    )
+    assert changed.record_mapping_observation("modules", payload) == 0
+    assert calls[-1] == ("close", "running_attachment_context_changed")
+    assert changed.record_mapping_observation("modules", payload) == 0

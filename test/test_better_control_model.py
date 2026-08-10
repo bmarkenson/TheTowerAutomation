@@ -534,6 +534,7 @@ def _running_reconciliation_objects(
         source_activity_scope_id=str(evidence["activity_scope_run_id"]),
         target_binding=binding,
         mapping_id="data-9-game-1073",
+        effective_mapping_fingerprint="9" * 64,
         active_round_identity_fingerprint="b" * 64,
         captured_at=captured.isoformat(),
         acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
@@ -2943,6 +2944,7 @@ def test_terminal_return_uses_supported_ui_when_save_is_unavailable(
                 }
             },
             None,
+            None,
         )
     )
     app._runtime_action_guard = lambda **_kwargs: True
@@ -3929,6 +3931,7 @@ def _capture_preview(
         "status": "partial",
         "mapping_id": "data-9-game-1073",
         "mapping_maturity": "candidate",
+        "effective_mapping_fingerprint": "9" * 64,
         "captured_at": acquisition.captured_at.isoformat(),
         "acquisition": acquisition.redacted_provenance(),
         "settings": settings,

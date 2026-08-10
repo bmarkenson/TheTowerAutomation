@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import hashlib
+import json
 from typing import Any, Mapping, Optional
 
 from core.player_save_acquisition import (
@@ -40,6 +41,7 @@ def unavailable_terminal_save_report(
     terminal_state: Optional[str] = None,
     captured_at: Optional[str] = None,
     mapping_id: Optional[str] = None,
+    effective_mapping_fingerprint: Optional[str] = None,
     save_revision: Optional[int] = None,
 ) -> dict[str, Any]:
     """Return explicit evidence that keeps the verified More Stats fallback."""
@@ -51,6 +53,7 @@ def unavailable_terminal_save_report(
         "reason": _safe_reason(reason),
         "terminal_state": _terminal_state(terminal_state),
         "mapping_id": mapping_id,
+        "effective_mapping_fingerprint": effective_mapping_fingerprint,
         "capture": {
             "captured_at": captured_at,
             "save_revision": save_revision,
@@ -91,6 +94,11 @@ def terminal_save_report_from_acquisition(
             terminal_state=terminal,
             captured_at=getattr(snapshot, "captured_at", None),
             mapping_id=getattr(snapshot, "mapping_id", None),
+            effective_mapping_fingerprint=getattr(
+                snapshot,
+                "effective_mapping_fingerprint",
+                None,
+            ),
             save_revision=getattr(snapshot, "save_revision", None),
         )
 
@@ -116,6 +124,12 @@ def terminal_save_report_from_acquisition(
         return unavailable("terminal_history_transition_kind_mismatch")
     if structural.get("mapping_id") != getattr(snapshot, "mapping_id", None):
         return unavailable("terminal_history_transition_mapping_mismatch")
+    if structural.get("effective_mapping_fingerprint") != getattr(
+        snapshot,
+        "effective_mapping_fingerprint",
+        None,
+    ):
+        return unavailable("terminal_history_transition_authority_mismatch")
     structural_handoff = structural.get("handoff")
     structural_source = (
         structural_handoff.get("source")
@@ -145,6 +159,8 @@ def terminal_save_report_from_acquisition(
         )
         and structural_source.get("mapping_id")
         == getattr(snapshot, "mapping_id", None)
+        and structural_source.get("effective_mapping_fingerprint")
+        == getattr(snapshot, "effective_mapping_fingerprint", None)
         and structural_source.get("source_fingerprint")
         == getattr(snapshot, "source_sha256", None)
         and structural_source.get("target_generation_fingerprint")
@@ -198,6 +214,11 @@ def terminal_save_report_from_acquisition(
         "reason": "",
         "terminal_state": terminal,
         "mapping_id": getattr(snapshot, "mapping_id", None),
+        "effective_mapping_fingerprint": getattr(
+            snapshot,
+            "effective_mapping_fingerprint",
+            None,
+        ),
         "capture": dict(structural.get("capture") or {}),
         "run_binding": dict(structural.get("run_binding") or {}),
         "history_transition": dict(
@@ -233,6 +254,11 @@ def terminal_history_transition_from_acquisition(
             "reason": _safe_reason(reason),
             "terminal_state": terminal,
             "mapping_id": getattr(snapshot, "mapping_id", None),
+            "effective_mapping_fingerprint": getattr(
+                snapshot,
+                "effective_mapping_fingerprint",
+                None,
+            ),
             "capture": {
                 "captured_at": getattr(snapshot, "captured_at", None),
                 "save_revision": getattr(snapshot, "save_revision", None),
@@ -326,6 +352,11 @@ def terminal_history_transition_from_acquisition(
         "history_transition": transition,
         "source": {
             "mapping_id": getattr(snapshot, "mapping_id", None),
+            "effective_mapping_fingerprint": getattr(
+                snapshot,
+                "effective_mapping_fingerprint",
+                None,
+            ),
             "source_fingerprint": source_fingerprint,
             "runtime_session_fingerprint": _redacted_identity(
                 "runtime", acquisition.boundary.runtime_session_id
@@ -345,6 +376,11 @@ def terminal_history_transition_from_acquisition(
         "reason": "",
         "terminal_state": terminal,
         "mapping_id": getattr(snapshot, "mapping_id", None),
+        "effective_mapping_fingerprint": getattr(
+            snapshot,
+            "effective_mapping_fingerprint",
+            None,
+        ),
         "capture": capture,
         "run_binding": {
             "status": "bound",
@@ -404,13 +440,19 @@ def validate_terminal_history_handoff(
         return None, "terminal_history_handoff_target_changed"
 
     mapping_id = str(source.get("mapping_id") or "").strip()
+    effective_mapping_fingerprint = str(
+        source.get("effective_mapping_fingerprint") or ""
+    ).strip()
     fingerprint = str(latest.get("fingerprint") or "").strip()
     if not (
         latest.get("schema_version") == 2
         and latest.get("source") == PLAYER_SAVE_HISTORY_SOURCE
         and latest.get("identity_schema_version") == 1
         and mapping_id
+        and _sha256_fingerprint(effective_mapping_fingerprint)
         and latest.get("mapping_id") == mapping_id
+        and latest.get("effective_mapping_fingerprint")
+        == effective_mapping_fingerprint
         and fingerprint
     ):
         return None, "terminal_history_handoff_identity_invalid"
@@ -530,6 +572,127 @@ def terminal_save_report_complete(value: Any) -> bool:
     )
 
 
+def terminal_mapping_workflow_provenance(
+    acquisition: PlayerSaveAcquisitionBundle,
+    *,
+    terminal_state: str,
+    run_binding: Mapping[str, Any],
+    activity_scope: Optional[Mapping[str, Any]],
+    history_transition: Mapping[str, Any],
+    pid: int,
+) -> Optional[dict[str, Any]]:
+    """Bind terminal UI mapping evidence to one completed save tail."""
+
+    if not (
+        isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        and acquisition.complete
+        and acquisition.snapshot is not None
+        and acquisition.acquisition_type
+        is PlayerSaveAcquisitionType.NATURAL_BOUNDARY
+        and acquisition.boundary is not None
+        and isinstance(run_binding, Mapping)
+        and run_binding.get("status") == "bound"
+        and isinstance(activity_scope, Mapping)
+        and _terminal_history_transition_complete(history_transition)
+        and type(pid) is int
+        and pid > 0
+    ):
+        return None
+    snapshot = acquisition.snapshot
+    terminal = _terminal_state(terminal_state)
+    if terminal not in _SUPPORTED_TERMINALS:
+        return None
+    expected_kind = PlayerSaveBoundaryKind(terminal)
+    scope_id = str(activity_scope.get("run_id") or "").strip()
+    expected_scope = str(
+        run_binding.get("activity_scope_run_id") or ""
+    ).strip()
+    if not (
+        acquisition.boundary.kind is expected_kind
+        and scope_id
+        and scope_id == expected_scope
+        and acquisition.boundary.activity_scope_id == scope_id
+        and getattr(snapshot, "mapping_resolution", None)
+        in {"exact", "compatible_exact_revision"}
+        and _sha256_fingerprint(
+            str(getattr(snapshot, "mapping_semantic_fingerprint", "") or "")
+        )
+        and _sha256_fingerprint(
+            str(getattr(snapshot, "effective_mapping_fingerprint", "") or "")
+        )
+    ):
+        return None
+    handoff = history_transition.get("handoff")
+    source = handoff.get("source") if isinstance(handoff, Mapping) else None
+    latest = history_transition.get("latest_completed_battle")
+    runtime = getattr(snapshot, "runtime_save", None)
+    tail = getattr(runtime, "battle_history_tail", None)
+    identity = getattr(tail, "identity", None)
+    expected_tournament = terminal == "TOURNAMENT_RESULTS"
+    if not (
+        isinstance(source, Mapping)
+        and isinstance(latest, Mapping)
+        and identity is not None
+        and bool(getattr(identity, "is_tournament", False))
+        is expected_tournament
+        and getattr(identity, "fingerprint", None) == latest.get("fingerprint")
+        and history_transition.get("terminal_state") == terminal
+        and history_transition.get("mapping_id")
+        == getattr(snapshot, "mapping_id", None)
+        and history_transition.get("effective_mapping_fingerprint")
+        == getattr(snapshot, "effective_mapping_fingerprint", None)
+        and source.get("mapping_id") == getattr(snapshot, "mapping_id", None)
+        and source.get("effective_mapping_fingerprint")
+        == getattr(snapshot, "effective_mapping_fingerprint", None)
+        and source.get("source_fingerprint")
+        == getattr(snapshot, "source_sha256", None)
+        and source.get("target_generation_fingerprint")
+        == acquisition.binding_fingerprint
+        and source.get("acquisition") == acquisition.redacted_provenance()
+        and terminal_history_handoff_matches_source_scope(handoff, scope_id)
+    ):
+        return None
+    boundary_fingerprint = _json_fingerprint(
+        {
+            "schema_version": 1,
+            "boundary": acquisition.boundary.redacted(),
+            "history_transition": history_transition.get(
+                "history_transition"
+            ),
+            "completed_tail_identity": latest.get("fingerprint"),
+            "effective_mapping_fingerprint": getattr(
+                snapshot,
+                "effective_mapping_fingerprint",
+                None,
+            ),
+        }
+    )
+    source_fingerprint = str(snapshot.source_sha256)
+    return {
+        "capture_request_id": f"terminal-capture-{source_fingerprint[:32]}",
+        "inspection_request_id": (
+            "terminal-game-over-ui-fallback"
+            if terminal == "GAME_OVER"
+            else "terminal-tournament-results-ui-fallback"
+        ),
+        "runtime_session_fingerprint": source[
+            "runtime_session_fingerprint"
+        ],
+        "pid": pid,
+        "target_generation_fingerprint": acquisition.binding_fingerprint,
+        "activity_scope_fingerprint": source[
+            "activity_scope_fingerprint"
+        ],
+        "game_state": (
+            "terminal_game_over"
+            if terminal == "GAME_OVER"
+            else "terminal_tournament_results"
+        ),
+        "active_round_identity_fingerprint": latest["fingerprint"],
+        "boundary_fingerprint": boundary_fingerprint,
+    }
+
+
 def _terminal_history_transition_complete(value: Any) -> bool:
     return bool(
         isinstance(value, Mapping)
@@ -578,6 +741,17 @@ def _redacted_identity(label: str, value: str) -> str:
     ).hexdigest()
 
 
+def _json_fingerprint(value: Mapping[str, Any]) -> str:
+    rendered = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(rendered).hexdigest()
+
+
 def _sha256_fingerprint(value: str) -> bool:
     return bool(
         len(value) == 64
@@ -591,6 +765,7 @@ __all__ = [
     "TERMINAL_SAVE_REPORT_SCHEMA_VERSION",
     "terminal_history_transition_from_acquisition",
     "terminal_history_handoff_matches_source_scope",
+    "terminal_mapping_workflow_provenance",
     "terminal_save_report_complete",
     "terminal_save_report_from_acquisition",
     "unavailable_terminal_save_report",

@@ -868,6 +868,11 @@ def run_read_only_gc_preflight(
             "record_ui_verification",
             None,
         )
+        record_save_mapping_observation = getattr(
+            player_save_preflight,
+            "record_mapping_observation",
+            None,
+        )
 
         def record_ui_verification(check_id: str, *, changed: bool) -> None:
             if callable(record_save_ui_verification) and (
@@ -1427,6 +1432,10 @@ def run_read_only_gc_preflight(
                 validation_args["attachment_report_only_requirements"] = (
                     attachment_report_only_requirements
                 )
+            if callable(record_save_mapping_observation):
+                validation_args["mapping_observation_fn"] = (
+                    record_save_mapping_observation
+                )
             waivers = requirements.get("_gate_waivers")
             if isinstance(waivers, Mapping) and waivers:
                 validation_args["waivers"] = dict(waivers)
@@ -1690,6 +1699,10 @@ def run_read_only_gc_preflight(
         if attachment_report_only_requirements:
             validation_args["attachment_report_only_requirements"] = (
                 attachment_report_only_requirements
+            )
+        if callable(record_save_mapping_observation):
+            validation_args["mapping_observation_fn"] = (
+                record_save_mapping_observation
             )
         waivers = requirements.get("_gate_waivers")
         if isinstance(waivers, Mapping) and waivers:

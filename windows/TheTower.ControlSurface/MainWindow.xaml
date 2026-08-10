@@ -134,6 +134,32 @@
                    FontSize="10"
                    FontWeight="Bold"
                    Margin="2,0,2,7" />
+        <Border x:Name="ConfirmedLocalMappingBanner"
+                Visibility="Collapsed"
+                Background="#302515"
+                BorderBrush="#F1BF5B"
+                BorderThickness="1"
+                CornerRadius="7"
+                Padding="10,8"
+                Margin="0,0,0,9">
+          <StackPanel>
+            <TextBlock Text="SAVE MAPPING"
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="9"
+                       FontWeight="Bold" />
+            <TextBlock x:Name="ConfirmedLocalMappingTitleText"
+                       Text="A locally confirmed save mapping needs integration"
+                       Foreground="#FFD37A"
+                       FontWeight="Bold"
+                       TextWrapping="Wrap"
+                       Margin="0,2,0,0" />
+            <TextBlock x:Name="ConfirmedLocalMappingDetailText"
+                       Text="-"
+                       Foreground="#F7E8C1"
+                       TextWrapping="Wrap"
+                       Margin="0,3,0,0" />
+          </StackPanel>
+        </Border>
         <Border x:Name="StrategyActionGateBanner"
                 Visibility="Collapsed"
                 Background="#302515"

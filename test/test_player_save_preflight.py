@@ -12,6 +12,12 @@ from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
 from core.player_save import PlayerSaveSnapshot, SaveCheckEvidence
 from core.player_save import pull_player_save_bytes
+from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
+from core.player_save_mapping_candidates import (
+    AppendOnlyMappingCandidateStore,
+    build_mapping_candidate_ui_evidence,
+    pending_mapping_candidate,
+)
 from core.player_save_preflight import (
     CarriedEvidenceState,
     PlayerSavePreflightContext,
@@ -162,6 +168,8 @@ def _coordinator(
     foreground_fn=lambda _target: True,
     capture_fn=lambda: object(),
     action_guard_fn=lambda: True,
+    mapping_candidate_store=None,
+    confirmed_local_mapping_store=None,
 ):
     import core.player_save_preflight as module
 
@@ -186,8 +194,235 @@ def _coordinator(
         foreground_fn=foreground_fn,
         pull_fn=pull_fn,
         decode_fn=decode_fn,
+        mapping_candidate_store=mapping_candidate_store,
+        confirmed_local_mapping_store=confirmed_local_mapping_store,
         sleep_fn=lambda _seconds: None,
     )
+
+
+MODULE_ASSIGNMENTS = {
+    "cannon_primary": "Amplifying Strike",
+    "armor_primary": "Orbital Augment",
+    "generator_primary": "Black Hole Digestor",
+    "core_primary": "Multiverse Nexus",
+    "cannon_assist": "Being Annihilator",
+    "armor_assist": "Anti-Cube Portal",
+    "generator_assist": "Singularity Harness",
+    "core_assist": "Magnetic Hook",
+}
+
+
+def _snapshot_with_module_mapping_candidate() -> PlayerSaveSnapshot:
+    candidate = pending_mapping_candidate(
+        value_kind="module_info_index",
+        raw_value=777,
+        pairing_method="exact_locator",
+        locator="core_assist",
+        expected_observation_count=8,
+        known_semantic_values=("Dimension Core", "Harmony Conductor"),
+        peer_locator_values={
+            slot_key: name
+            for slot_key, name in MODULE_ASSIGNMENTS.items()
+            if slot_key != "core_assist"
+        },
+        scope={
+            "slot_key": "core_assist",
+            "family": "core",
+            "role": "assist",
+        },
+    )
+    evidence = SaveCheckEvidence(
+        "modules",
+        "unmapped",
+        None,
+        ("moduleEquipped", "assistModuleSlots"),
+        complete=False,
+        reason="unsupported assist module infoIndex",
+        diagnostics={"mapping_candidates": [candidate]},
+    )
+    snapshot = _snapshot()
+    return replace(
+        snapshot,
+        mapping_authority_id=snapshot.mapping_id,
+        mapping_structural_id=snapshot.mapping_id,
+        mapping_semantic_fingerprint="b" * 64,
+        validated_checks=(*snapshot.validated_checks, "modules"),
+        checks={**snapshot.checks, "modules": evidence},
+    )
+
+
+def _module_mapping_ui_evidence(*, pre_mutation: bool = True):
+    scopes = {
+        slot_key: {
+            "slot_key": slot_key,
+            "family": slot_key.removesuffix("_primary").removesuffix(
+                "_assist"
+            ),
+            "role": "primary" if slot_key.endswith("_primary") else "assist",
+        }
+        for slot_key in MODULE_ASSIGNMENTS
+    }
+    return build_mapping_candidate_ui_evidence(
+        "modules",
+        canonical_values=list(MODULE_ASSIGNMENTS.values()),
+        locator_values=MODULE_ASSIGNMENTS,
+        locator_scopes=scopes,
+        pre_mutation=pre_mutation,
+    )
+
+
+def test_candidate_receipt_and_local_confirmation_preserve_current_ui_fallback(
+    monkeypatch,
+    tmp_path,
+):
+    candidate_store = AppendOnlyMappingCandidateStore(
+        tmp_path / "candidate-receipts.jsonl"
+    )
+    confirmation_store = ConfirmedLocalMappingStore(tmp_path / "local")
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: (
+            _snapshot_with_module_mapping_candidate()
+        ),
+        mapping_candidate_store=candidate_store,
+        confirmed_local_mapping_store=confirmation_store,
+    )
+
+    result = coordinator.acquire(
+        {"modules": MODULE_ASSIGNMENTS},
+        initial_frame=object(),
+    )
+    recorded = coordinator.record_mapping_observation(
+        "modules",
+        _module_mapping_ui_evidence(),
+    )
+
+    assert result.decisions["modules"]["disposition"] == "ui_required"
+    assert result.decisions["modules"]["ui_required"] is True
+    assert result.decisions["modules"]["observed"] is None
+    assert recorded == 1
+    assert coordinator.record_mapping_observation(
+        "modules",
+        _module_mapping_ui_evidence(),
+    ) == 0
+    records = candidate_store.list_records()
+    assert len(records) == 1
+    assert records[0]["candidate"] == {
+        "check_id": "modules",
+        "value_kind": "module_info_index",
+        "raw_discriminator": {"kind": "integer_id", "value": 777},
+        "locator": "core_assist",
+        "scope": {
+            "slot_key": "core_assist",
+            "family": "core",
+            "role": "assist",
+        },
+        "semantic_value": "Magnetic Hook",
+        "observed_semantic_values": list(MODULE_ASSIGNMENTS.values()),
+        "status": "ready_for_review",
+        "reason": (
+            "unique exact-boundary pre-mutation pairing is ready for "
+            "operator review"
+        ),
+    }
+    document = confirmation_store.load(9, 1073)
+    assert document is not None
+    assert document["generation"] == 1
+    assert document["events"][0]["semantic_value"] == "Magnetic Hook"
+    assert document["events"][0]["raw_value"] == 777
+
+
+def test_candidate_correlation_requires_pre_mutation_and_same_context(
+    monkeypatch,
+    tmp_path,
+):
+    current = [_context()]
+    candidate_store = AppendOnlyMappingCandidateStore(
+        tmp_path / "candidate-receipts.jsonl"
+    )
+    coordinator = _coordinator(
+        monkeypatch,
+        context_fn=lambda: current[0],
+        decode_fn=lambda _payload, **_kwargs: (
+            _snapshot_with_module_mapping_candidate()
+        ),
+        mapping_candidate_store=candidate_store,
+        confirmed_local_mapping_store=ConfirmedLocalMappingStore(
+            tmp_path / "local"
+        ),
+    )
+    coordinator.acquire(
+        {"modules": MODULE_ASSIGNMENTS},
+        initial_frame=object(),
+    )
+
+    assert coordinator.record_mapping_observation(
+        "modules",
+        _module_mapping_ui_evidence(pre_mutation=False),
+    ) == 0
+    current[0] = replace(_context(), target_generation=2)
+    assert coordinator.record_mapping_observation(
+        "modules",
+        _module_mapping_ui_evidence(),
+    ) == 0
+    assert candidate_store.list_records() == []
+
+
+def test_ui_repair_closes_candidate_window_without_invalidating_snapshot(
+    monkeypatch,
+    tmp_path,
+):
+    candidate_store = AppendOnlyMappingCandidateStore(
+        tmp_path / "candidate-receipts.jsonl"
+    )
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: (
+            _snapshot_with_module_mapping_candidate()
+        ),
+        mapping_candidate_store=candidate_store,
+        confirmed_local_mapping_store=ConfirmedLocalMappingStore(
+            tmp_path / "local"
+        ),
+    )
+    coordinator.acquire(
+        {"modules": MODULE_ASSIGNMENTS},
+        initial_frame=object(),
+    )
+
+    assert coordinator.record_ui_verification("cards_deck", changed=True)
+    assert not coordinator.snapshot_invalidated
+    assert coordinator.record_mapping_observation(
+        "modules",
+        _module_mapping_ui_evidence(),
+    ) == 0
+    assert candidate_store.list_records() == []
+
+
+def test_candidate_write_failure_is_nonblocking(monkeypatch, tmp_path):
+    candidate_store = Mock()
+    candidate_store.append_once.side_effect = OSError("candidate disk failed")
+    confirmation_store = Mock()
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: (
+            _snapshot_with_module_mapping_candidate()
+        ),
+        mapping_candidate_store=candidate_store,
+        confirmed_local_mapping_store=confirmation_store,
+    )
+    result = coordinator.acquire(
+        {"modules": MODULE_ASSIGNMENTS},
+        initial_frame=object(),
+    )
+
+    assert coordinator.record_mapping_observation(
+        "modules",
+        _module_mapping_ui_evidence(),
+    ) == 0
+    assert result.decisions["modules"]["ui_required"] is True
+    assert coordinator.mapping_candidate_records == ()
+    confirmation_store.accept_candidate.assert_not_called()
 
 
 def test_one_authoritative_snapshot_reconciles_all_checks(monkeypatch):

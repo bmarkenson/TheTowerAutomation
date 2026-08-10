@@ -425,6 +425,51 @@ def test_status_exposes_scope_bound_current_save_perks(tmp_path):
     assert "current_battle_perks_v1" in status["capabilities"]
 
 
+def test_status_exposes_local_mapping_lifecycle_without_blocking_health(tmp_path):
+    mapping_status = {
+        "schema_version": 1,
+        "available": True,
+        "blocks_startup": False,
+        "items": [
+            {
+                "mapping_id": "data-9-game-1101",
+                "check_id": "modules",
+                "value_kind": "module_info_index",
+                "raw_value": 41,
+                "semantic_value": "Being Annihilator",
+                "scope": {
+                    "slot_key": "cannon_assist",
+                    "family": "cannon",
+                    "role": "assist",
+                },
+                "state": "active_local",
+                "reason": "canonical integration is pending",
+            }
+        ],
+        "counts": {"active_local": 1},
+        "reason": "",
+    }
+    lock_handle = _fresh_runtime_lock(tmp_path, state="HOME_SCREEN")
+    try:
+        service = _service(tmp_path)
+        with patch(
+            "core.control_surface.confirmed_local_mapping_status",
+            return_value=mapping_status,
+        ) as status_projection:
+            status = service.status()
+    finally:
+        lock_handle.close()
+
+        status_projection.assert_called_once_with(
+            store=service.confirmed_local_mapping_store,
+            candidate_store=service.mapping_candidate_store,
+            repository_root=service.repository_root,
+        )
+    assert status["confirmed_local_mappings"] == mapping_status
+    assert status["healthy"]
+    assert not status["confirmed_local_mappings"]["blocks_startup"]
+
+
 def test_status_never_exposes_perks_from_another_run(tmp_path):
     _write_current_run_scope(tmp_path, run_id="new-battle")
     timeline_path = (
@@ -1467,7 +1512,15 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 32" in native_compatibility
+    assert "MinimumServerRevision = 34" in native_compatibility
+    assert '"confirmed_local_mapping_status_v1"' in native_compatibility
+    assert "confirmed_local_mapping_status_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_review_status_v1"' in native_compatibility
+    assert "save_mapping_review_status_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert 'id="confirmedLocalMappingAlert"' in html
+    assert 'x:Name="ConfirmedLocalMappingBanner"' in native_xaml
+    assert 'JsonPropertyName("confirmed_local_mappings")' in native_models
+    assert "RenderConfirmedLocalMappings(status.ConfirmedLocalMappings)" in native_code
     assert '"better_control_model_v2"' in native_compatibility
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
@@ -1936,6 +1989,45 @@ for (const status of ['no_op', 'stale', 'rejected', 'unavailable', 'interrupted'
   assert.strictEqual(model.workflowPresentation(status).terminal, true);
 }}
 assert.strictEqual(model.workflowPresentation('rejected').label, 'Rejected');
+const activeMapping = model.confirmedLocalMappingPresentation({{
+  available: true,
+  items: [{{
+    state: 'active_local',
+    mapping_id: 'data-9-game-1101',
+    raw_value: 41,
+    semantic_value: 'Being Annihilator',
+    scope: {{slot_key: 'cannon_assist'}},
+    reason: 'canonical integration is pending',
+  }}],
+}});
+assert.strictEqual(activeMapping.visible, true);
+assert.strictEqual(activeMapping.severity, 'warning');
+assert.match(activeMapping.detail, /cannon_assist/);
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  available: true,
+  items: [{{state: 'integrated'}}],
+}}).visible, false);
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  available: true,
+  items: [{{state: 'canonical_conflict'}}],
+}}).severity, 'danger');
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  available: false,
+  reason: 'malformed local confirmation',
+}}).severity, 'danger');
+const mixedMapping = model.confirmedLocalMappingPresentation({{
+  available: true,
+  items: [
+    {{state: 'active_local', reason: 'pending'}},
+    {{state: 'canonical_conflict', reason: 'conflicting canonical value'}},
+  ],
+}});
+assert.strictEqual(mixedMapping.severity, 'danger');
+assert.match(mixedMapping.detail, /conflicting canonical value/);
+assert.strictEqual(
+  model.confirmedLocalMappingPresentation(undefined).visible,
+  true,
+);
 """
     completed = subprocess.run(
         ["node", "-e", script],

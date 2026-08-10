@@ -38,6 +38,9 @@ public sealed class StatusResponse
     [JsonPropertyName("current_battle_perks")]
     public CurrentBattlePerksStatus CurrentBattlePerks { get; set; } = new();
 
+    [JsonPropertyName("confirmed_local_mappings")]
+    public ConfirmedLocalMappingStatus ConfirmedLocalMappings { get; set; } = new();
+
     [JsonPropertyName("strategy_action_gate")]
     public StrategyActionGateStatus? StrategyActionGate { get; set; }
 
@@ -52,6 +55,54 @@ public sealed class StatusResponse
 
     [JsonPropertyName("request")]
     public RequestStatus? Request { get; set; }
+}
+
+public sealed class ConfirmedLocalMappingStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("available")]
+    public bool Available { get; set; } = true;
+
+    [JsonPropertyName("blocks_startup")]
+    public bool BlocksStartup { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<ConfirmedLocalMappingItem> Items { get; set; } = [];
+
+    [JsonPropertyName("counts")]
+    public Dictionary<string, int> Counts { get; set; } = [];
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+}
+
+public sealed class ConfirmedLocalMappingItem
+{
+    [JsonPropertyName("mapping_id")]
+    public string MappingId { get; set; } = "";
+
+    [JsonPropertyName("check_id")]
+    public string CheckId { get; set; } = "";
+
+    [JsonPropertyName("value_kind")]
+    public string ValueKind { get; set; } = "";
+
+    [JsonPropertyName("raw_value")]
+    public double? RawValue { get; set; }
+
+    [JsonPropertyName("semantic_value")]
+    public string SemanticValue { get; set; } = "";
+
+    [JsonPropertyName("scope")]
+    public Dictionary<string, string> Scope { get; set; } = [];
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
 }
 
 public sealed class StrategyActionGateStatus

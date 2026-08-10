@@ -248,6 +248,8 @@ def test_target_priority_requirement_change_falls_back_without_global_invalidati
 def test_target_priority_ui_repair_preserves_other_carried_checks():
     invalidations = []
     verifications = []
+    mapping_observations = []
+    mapping_windows_closed = []
 
     class BoundSave:
         def consume(self, _check_id):
@@ -259,6 +261,13 @@ def test_target_priority_ui_repair_preserves_other_carried_checks():
         def record_ui_verification(self, check_id, *, changed):
             verifications.append((check_id, changed))
             return True
+
+        def record_mapping_observation(self, check_id, evidence):
+            mapping_observations.append((check_id, evidence))
+            return 1
+
+        def close_mapping_candidate_window(self, reason):
+            mapping_windows_closed.append(reason)
 
         def decision(self, check_id):
             assert check_id == "target_priority"
@@ -272,6 +281,7 @@ def test_target_priority_ui_repair_preserves_other_carried_checks():
     )
 
     def ensure(**kwargs):
+        kwargs["initial_evidence_observer_fn"](tuple(reversed(ORDER)))
         kwargs["repair_observer_fn"]()
         return True
 
@@ -287,7 +297,18 @@ def test_target_priority_ui_repair_preserves_other_carried_checks():
         )
 
     assert invalidations == []
+    assert mapping_windows_closed == ["target_priority_repair_started"]
     assert verifications == [("target_priority", True)]
+    assert len(mapping_observations) == 1
+    check_id, mapping_evidence = mapping_observations[0]
+    assert check_id == "target_priority"
+    assert mapping_evidence["canonical_values"] == list(reversed(ORDER))
+    assert mapping_evidence["locator_values"] == {
+        f"rank:{index}": value
+        for index, value in enumerate(reversed(ORDER))
+    }
+    assert mapping_evidence["complete"] is True
+    assert mapping_evidence["pre_mutation"] is True
     assert ctx.data["mission_vars"]["target_priority_evidence"] == {
         "source": "ui",
         "checked": True,

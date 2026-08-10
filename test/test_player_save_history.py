@@ -99,6 +99,7 @@ def _snapshot(
         captured_at="2026-08-04T20:00:00+00:00",
         game_version=1073,
         mapping_id="data-9-game-1073",
+        effective_mapping_fingerprint="9" * 64,
         mapping_maturity="candidate",
         validated_checks=tuple((profile_checks or {}).keys()),
         shape_valid=True,

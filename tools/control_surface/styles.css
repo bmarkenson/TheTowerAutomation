@@ -126,6 +126,26 @@ main { max-width: 1440px; margin: 0 auto; padding: 0 1.5rem 4rem; }
 .status-strip-meta span { display: block; color: var(--muted); font-size: .7rem; margin-bottom: .18rem; }
 .status-strip-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; font-size: .95rem; }
 
+.persistent-alert {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: .85rem;
+  background: rgba(21, 31, 49, .92);
+  box-shadow: var(--shadow);
+}
+.persistent-alert[hidden] { display: none; }
+.persistent-alert strong { display: block; font-size: .88rem; }
+.persistent-alert p { margin: .35rem 0 0; color: var(--muted); font-size: .76rem; line-height: 1.45; }
+.persistent-alert.warning { border-color: rgba(241, 191, 91, .45); }
+.persistent-alert.warning strong { color: #f7d58f; }
+.persistent-alert.danger { border-color: rgba(255, 113, 135, .5); }
+.persistent-alert.danger strong { color: #ffacb9; }
+.persistent-alert.info { border-color: rgba(98, 213, 255, .38); }
+.persistent-alert.info strong { color: #9ee8ff; }
+
 .dashboard-grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 1rem; }
 .panel {
   min-width: 0;

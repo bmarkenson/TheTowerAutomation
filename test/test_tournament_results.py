@@ -258,6 +258,7 @@ def test_tournament_handler_uses_only_visible_detail_controls_and_never_ok():
     summary = _load("tournament_stats_20260718.png")
     detailed = _load("tournament_more_stats_bottom_20260718.png")
     report = (FIXTURES / "battle_report_clipboard.txt").read_text(encoding="utf-8")
+    mapping_observations = []
 
     def visible(label, *, screenshot):
         if label == "indicators.tournament_stats":
@@ -304,6 +305,11 @@ def test_tournament_handler_uses_only_visible_detail_controls_and_never_ok():
                     game_version=1073,
                 )
             },
+            mapping_observation_fn=(
+                lambda check_id, evidence: mapping_observations.append(
+                    (check_id, evidence)
+                )
+            ),
         )
 
     assert record is not None
@@ -316,6 +322,16 @@ def test_tournament_handler_uses_only_visible_detail_controls_and_never_ok():
         call("buttons.close:more_stats", screenshot=detailed, retries=1),
     ]
     assert not any("ok" in item.args[0].lower() for item in tap.call_args_list)
+    assert [item[0] for item in mapping_observations] == [
+        "tournament_league",
+        "battle_history_killed_by",
+    ]
+    assert mapping_observations[0][1]["locator_values"] == {
+        "league": "Legend League"
+    }
+    assert mapping_observations[1][1]["locator_values"] == {
+        "killed_by": "Boss"
+    }
 
 
 def test_tournament_handler_uses_bound_save_without_opening_more_stats():
@@ -328,6 +344,13 @@ def test_tournament_handler_uses_bound_save_without_opening_more_stats():
     record = {
         "quality": {"valid": True, "retain_source_images": False},
         "tournament_id": "TournamentSave",
+        "summary": {
+            "quality": {"valid": True},
+            "fields": {
+                "league": {"value": "Legend League", "raw": "Legend"},
+                "killed_by": {"value": "Boss", "raw": "B0ss"},
+            }
+        },
     }
     conditions = derive_tournament_conditions(
         283,
@@ -366,6 +389,9 @@ def test_tournament_handler_uses_bound_save_without_opening_more_stats():
                 "terminal_save_report": _complete_terminal_save_report(),
                 "battle_conditions": conditions,
             },
+            mapping_observation_fn=lambda *_args: (_ for _ in ()).throw(
+                RuntimeError("diagnostic write failed")
+            ),
         )
 
     assert result is record

@@ -97,6 +97,8 @@ function renderStatus(payload) {
   const controlModel = payload.control_model || {};
   const directive = control.state || "UNKNOWN";
 
+  renderConfirmedLocalMapping(payload.confirmed_local_mappings);
+
   setText("directiveState", directive);
   byId("directiveState").className = `state-pill ${directive.toLowerCase()}`;
   let directiveDetail = control.updated_at ? `Updated ${formatDate(control.updated_at)}` : "No persisted update time";
@@ -214,6 +216,24 @@ function renderStatus(payload) {
   );
   renderExclusiveValidation(control);
   renderGateDecision(control.gate_decision);
+}
+
+function renderConfirmedLocalMapping(status) {
+  const presentation = clientModel.confirmedLocalMappingPresentation(status);
+  const alert = byId("confirmedLocalMappingAlert");
+  alert.hidden = !presentation.visible;
+  alert.className = `persistent-alert ${presentation.severity}`;
+  const signature = JSON.stringify([
+    presentation.visible,
+    presentation.severity,
+    presentation.title,
+    presentation.detail,
+  ]);
+  if (alert.dataset.presentationSignature !== signature) {
+    alert.dataset.presentationSignature = signature;
+    setText("confirmedLocalMappingTitle", presentation.title);
+    setText("confirmedLocalMappingDetail", presentation.detail);
+  }
 }
 
 function renderBetterControlModel(model, compatible, captureCompatible, controlError) {

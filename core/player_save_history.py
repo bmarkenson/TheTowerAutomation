@@ -197,6 +197,9 @@ def history_metadata_from_acquisition(
             "schema_version": ACTIVITY_HISTORY_METADATA_SCHEMA_VERSION,
             "source": PLAYER_SAVE_HISTORY_SOURCE,
             "mapping_id": identity.mapping_id,
+            "effective_mapping_fingerprint": (
+                snapshot.effective_mapping_fingerprint
+            ),
             "identity_schema_version": (
                 PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION
             ),
@@ -313,13 +316,22 @@ def running_attachment_temporal_binding_from_acquisition(
     mapping_id = str(
         getattr(acquisition.snapshot, "mapping_id", None) or ""
     ).strip()
-    if not mapping_id:
+    effective_mapping_fingerprint = str(
+        getattr(
+            acquisition.snapshot,
+            "effective_mapping_fingerprint",
+            None,
+        )
+        or ""
+    ).strip()
+    if not mapping_id or len(effective_mapping_fingerprint) != 64:
         return None
     return RunningAttachmentTemporalBinding(
         runtime_session_id=context.runtime_session_id,
         source_activity_scope_id=context.activity_scope_id,
         target_binding=acquisition.binding,
         mapping_id=mapping_id,
+        effective_mapping_fingerprint=effective_mapping_fingerprint,
         active_round_identity_fingerprint=(
             str(active_round_identity_fingerprint).strip()
         ),
@@ -717,6 +729,14 @@ def history_sources_compatible(
         == str(second.get("mapping_id") or "")
         and first.get("identity_schema_version")
         == second.get("identity_schema_version")
+        and (
+            str(first.get("source") or "") != PLAYER_SAVE_HISTORY_SOURCE
+            or (
+                str(first.get("effective_mapping_fingerprint") or "")
+                and str(first.get("effective_mapping_fingerprint") or "")
+                == str(second.get("effective_mapping_fingerprint") or "")
+            )
+        )
         and str(first.get("fingerprint") or "")
         and str(second.get("fingerprint") or "")
     )

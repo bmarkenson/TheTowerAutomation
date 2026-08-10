@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -101,6 +102,9 @@ from core.player_save_history import (
     PlayerSaveAttachmentContext,
     PlayerSaveHistoryReader,
 )
+from core.player_save_mapping_observer import (
+    BoundPlayerSaveMappingObserver,
+)
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
@@ -119,6 +123,7 @@ from core.profile_progression import unavailable_profile_progression
 from core.terminal_save_report import (
     terminal_save_report_complete,
     terminal_history_transition_from_acquisition,
+    terminal_mapping_workflow_provenance,
     terminal_save_report_from_acquisition,
     unavailable_terminal_save_report,
 )
@@ -827,7 +832,7 @@ class App:
     ) -> dict[str, Any]:
         """Build terminal context without crossing an unproven run boundary."""
 
-        context, _acquisition = self._terminal_battle_bundle(
+        context, _acquisition, _mapping_observer = self._terminal_battle_bundle(
             terminal_state,
             observed_run_configuration=observed_run_configuration,
         )
@@ -838,7 +843,11 @@ class App:
         terminal_state: str,
         *,
         observed_run_configuration: Optional[Mapping[str, Any]] = None,
-    ) -> tuple[dict[str, Any], Optional[PlayerSaveAcquisitionBundle]]:
+    ) -> tuple[
+        dict[str, Any],
+        Optional[PlayerSaveAcquisitionBundle],
+        Optional[BoundPlayerSaveMappingObserver],
+    ]:
         """Build terminal context and return its one exact typed acquisition."""
 
         terminal = str(terminal_state or "UNKNOWN").upper()
@@ -898,7 +907,9 @@ class App:
                     console=True,
                 )
                 self._last_unbound_terminal_signature = signature
-            return context, typed_acquisition
+            return context, typed_acquisition, terminal_save.get(
+                "_mapping_observer"
+            )
 
         self._last_unbound_terminal_signature = None
         strategy = self._mission_mgr.strategy
@@ -936,7 +947,9 @@ class App:
             context["observed_run_configuration"] = dict(
                 observed_run_configuration
             )
-        return context, typed_acquisition
+        return context, typed_acquisition, terminal_save.get(
+            "_mapping_observer"
+        )
 
     def _capture_terminal_player_save(
         self,
@@ -1095,6 +1108,56 @@ class App:
             activity_continuity.publish_terminal_history_handoff(
                 history_transition
             )
+        mapping_observer = None
+        try:
+            workflow_provenance = terminal_mapping_workflow_provenance(
+                acquisition,
+                terminal_state=terminal,
+                run_binding=run_binding,
+                activity_scope=scope,
+                history_transition=history_transition,
+                pid=max(1, os.getpid()),
+            )
+        except Exception:
+            workflow_provenance = None
+        if workflow_provenance is not None:
+            boundary = acquisition.boundary
+            expected_scope_id = (
+                str(scope.get("run_id") or "")
+                if isinstance(scope, Mapping)
+                else ""
+            )
+
+            def terminal_context_guard() -> bool:
+                try:
+                    current_scope = get_activity_scope()
+                    target_snapshot = session.snapshot()
+                except Exception:
+                    return False
+                return bool(
+                    boundary is not None
+                    and str(
+                        getattr(
+                            self,
+                            "_player_save_runtime_session_id",
+                            "",
+                        )
+                        or ""
+                    )
+                    == boundary.runtime_session_id
+                    and isinstance(current_scope, Mapping)
+                    and str(current_scope.get("run_id") or "")
+                    == expected_scope_id
+                    and acquisition.matches_binding(
+                        PlayerSaveTargetBinding.from_snapshot(target_snapshot)
+                    )
+                )
+
+            mapping_observer = BoundPlayerSaveMappingObserver(
+                snapshot=snapshot,
+                context_guard_fn=terminal_context_guard,
+                workflow_provenance=workflow_provenance,
+            )
         try:
             terminal_report = terminal_save_report_from_acquisition(
                 acquisition,
@@ -1120,6 +1183,7 @@ class App:
             "profile_progression": normalized_progression,
             "terminal_save_report": terminal_report,
             "_acquisition": acquisition,
+            "_mapping_observer": mapping_observer,
         }
         if terminal == "TOURNAMENT_RESULTS":
             try:
@@ -3193,7 +3257,9 @@ class App:
                     self._supervisor.persist_state("PAUSED")
                 return recorded
             self._manual_terminal_claims().pop(manual_id, None)
-        context, acquisition = self._terminal_battle_bundle("GAME_OVER")
+        context, acquisition, _mapping_observer = self._terminal_battle_bundle(
+            "GAME_OVER"
+        )
         report = context.get("terminal_save_report")
         status = "unavailable"
         reason = (
@@ -7638,11 +7704,54 @@ class App:
             attachment_temporal_binding = None
 
         if isinstance(save_observations, RunningAttachmentSaveObservations):
+            mapping_observer = None
+            if (
+                isinstance(attachment_acquisition, PlayerSaveAcquisitionBundle)
+                and attachment_acquisition.snapshot is not None
+                and save_observations.binding.final
+            ):
+                binding = save_observations.binding
+                mapping_observer = BoundPlayerSaveMappingObserver(
+                    snapshot=attachment_acquisition.snapshot,
+                    context_guard_fn=lambda: save_observations.matches_context(
+                        self._current_player_save_attachment_context()
+                    ),
+                    workflow_provenance={
+                        "capture_request_id": (
+                            "capture-" + binding.claim_fingerprint[:32]
+                        ),
+                        "inspection_request_id": (
+                            "running-attachment-ui-fallback"
+                        ),
+                        "runtime_session_fingerprint": hashlib.sha256(
+                            (
+                                "runtime-session\0"
+                                f"{binding.runtime_session_id}"
+                            ).encode("utf-8")
+                        ).hexdigest(),
+                        "pid": max(1, os.getpid()),
+                        "target_generation_fingerprint": hashlib.sha256(
+                            (
+                                f"{binding.target_binding.target}\0"
+                                f"{binding.target_binding.generation}"
+                            ).encode("utf-8")
+                        ).hexdigest(),
+                        "activity_scope_fingerprint": hashlib.sha256(
+                            str(binding.activity_scope_id).encode("utf-8")
+                        ).hexdigest(),
+                        "game_state": "active_battle",
+                        "active_round_identity_fingerprint": (
+                            binding.active_round_identity_fingerprint
+                        ),
+                        "boundary_fingerprint": binding.claim_fingerprint,
+                    },
+                )
             self._mission_mgr.ctx.data[
                 "player_save_attachment_evidence"
             ] = BoundRunningAttachmentSaveEvidence(
                 save_observations,
                 self._current_player_save_attachment_context,
+                mapping_observer,
             )
             strategy_name = self._current_strategy_name()
             if (
@@ -9332,6 +9441,24 @@ class App:
                         setup_kwargs["save_ui_verification_fn"] = (
                             record_ui_verification
                         )
+                    record_mapping_observation = getattr(
+                        coordinator,
+                        "record_mapping_observation",
+                        None,
+                    )
+                    if callable(record_mapping_observation):
+                        setup_kwargs["save_mapping_observation_fn"] = (
+                            record_mapping_observation
+                        )
+                    close_mapping_candidate_window = getattr(
+                        coordinator,
+                        "close_mapping_candidate_window",
+                        None,
+                    )
+                    if callable(close_mapping_candidate_window):
+                        setup_kwargs["save_mapping_window_close_fn"] = (
+                            close_mapping_candidate_window
+                        )
             setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
             if setup.interrupted:
                 self._defer_home_setup_recovery()
@@ -9348,6 +9475,15 @@ class App:
                 return setup
 
             check_id = setup.failed_check or "startup_setup"
+            close_mapping_candidate_window = getattr(
+                coordinator,
+                "close_mapping_candidate_window",
+                None,
+            )
+            if callable(close_mapping_candidate_window):
+                close_mapping_candidate_window(
+                    f"home_setup_retry:{check_id}"
+                )
             log(
                 f"[GC_NO_BATTLE] Home setup attempt {attempt}/"
                 f"{HOME_SETUP_MAX_ATTEMPTS} failed at {check_id}: "
@@ -10499,10 +10635,18 @@ class App:
                     "INFO",
                     console=True,
                 )
+                (
+                    tournament_context,
+                    _tournament_acquisition,
+                    tournament_mapping_observer,
+                ) = self._terminal_battle_bundle("TOURNAMENT_RESULTS")
                 record = handle_tournament_results(
                     img,
-                    battle_context=self._terminal_battle_context(
-                        "TOURNAMENT_RESULTS"
+                    battle_context=tournament_context,
+                    mapping_observation_fn=(
+                        tournament_mapping_observer.record_mapping_observation
+                        if tournament_mapping_observer is not None
+                        else None
                     ),
                     action_guard_fn=lambda: self._runtime_action_guard(
                         action_class=RuntimeActionClass.LIFECYCLE_ACTION,
@@ -10793,6 +10937,7 @@ class App:
                         )
 
             terminal_acquisition = None
+            terminal_mapping_observer = None
             if save_backed_manual_return:
                 terminal_battle_context = dict(
                     manual_terminal_claim["context"]
@@ -10802,6 +10947,7 @@ class App:
                 (
                     terminal_battle_context,
                     terminal_acquisition,
+                    terminal_mapping_observer,
                 ) = self._terminal_battle_bundle(
                     "GAME_OVER",
                     observed_run_configuration=observed_run_configuration,
@@ -11049,6 +11195,11 @@ class App:
                         terminal_acquisition,
                         PlayerSaveAcquisitionBundle,
                     )
+                    else None
+                ),
+                mapping_observation_fn=(
+                    terminal_mapping_observer.record_mapping_observation
+                    if terminal_mapping_observer is not None
                     else None
                 ),
             )

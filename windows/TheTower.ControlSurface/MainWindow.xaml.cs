@@ -2650,6 +2650,7 @@ public partial class MainWindow : Window
         DirectiveRequestText.Text =
             $"Requested: {FormatAutomationState(status.Control)}";
         ModeText.Text = FormatExecutionMode(status.Control.Mode);
+        RenderConfirmedLocalMappings(status.ConfirmedLocalMappings);
         var strategyGate = status.StrategyActionGate;
         var strategyGateVisible = strategyGate is
             { Available: true, Active: true, Stale: false };
@@ -3131,6 +3132,31 @@ public partial class MainWindow : Window
             ?? "";
     }
 
+    private void RenderConfirmedLocalMappings(
+        ConfirmedLocalMappingStatus? status)
+    {
+        var presentation =
+            ControlSurfaceCompatibility.ConfirmedLocalMapping(status);
+        ConfirmedLocalMappingBanner.Visibility = presentation.Visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (!presentation.Visible)
+        {
+            return;
+        }
+        ConfirmedLocalMappingTitleText.Text = presentation.Title;
+        ConfirmedLocalMappingDetailText.Text = presentation.Detail;
+        var color = presentation.Severity switch
+        {
+            "danger" => Color.FromRgb(255, 113, 135),
+            "info" => Color.FromRgb(98, 213, 255),
+            _ => Color.FromRgb(241, 191, 91),
+        };
+        var brush = new SolidColorBrush(color);
+        ConfirmedLocalMappingBanner.BorderBrush = brush;
+        ConfirmedLocalMappingTitleText.Foreground = brush;
+    }
+
     private void RenderCurrentBattlePerks(CurrentBattlePerksStatus? perks)
     {
         perks ??= new CurrentBattlePerksStatus();
@@ -3236,7 +3262,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 32 with the required control-surface capabilities is required."
+                    "Linux API revision 34 with the required control-surface capabilities is required."
                 );
             }
             if (model is not null

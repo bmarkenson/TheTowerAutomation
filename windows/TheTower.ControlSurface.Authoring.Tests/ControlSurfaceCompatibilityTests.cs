@@ -31,14 +31,20 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(32);
+        var status = Status(34);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
         Assert.Contains("better_control_model_v2", result.MissingCapabilities);
         Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
+            "confirmed_local_mapping_status_v1",
+            result.MissingCapabilities);
+        Assert.Contains(
             "save_backed_setup_capture_v2",
+            result.MissingCapabilities);
+        Assert.Contains(
+            "save_mapping_review_status_v1",
             result.MissingCapabilities);
         Assert.Contains(
             "strategy_authoring_preset_local_copy_v1",
@@ -143,11 +149,12 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                32,
+                34,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
                 "completed_battle_discard",
+                "confirmed_local_mapping_status_v1",
                 "current_battle_perks_v1",
                 "current_run_activity_scope",
                 "exclusive_strategy_validation_status",
@@ -159,6 +166,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "observed_game_speed",
                 "selected_strategy_process_start",
                 "save_backed_setup_capture_v2",
+                "save_mapping_review_status_v1",
                 "strategy_action_gate_v1",
                 "strategy_authoring_local_loadout_editors_v1",
                 "strategy_authoring_preset_local_copy_v1",
@@ -184,6 +192,70 @@ public sealed class ControlSurfaceCompatibilityTests
         model.SetupCapture.Status = "ready";
         Assert.True(
             ControlSurfaceCompatibility.CanOpenSetupCapture(compatible, model));
+    }
+
+    [Fact]
+    public void ConfirmedLocalMappingPresentationIsPersistentButNonmodal()
+    {
+        var active = new ConfirmedLocalMappingStatus
+        {
+            Available = true,
+            BlocksStartup = false,
+            Items =
+            [
+                new ConfirmedLocalMappingItem
+                {
+                    MappingId = "data-9-game-1101",
+                    RawValue = 41,
+                    SemanticValue = "Being Annihilator",
+                    Scope = new Dictionary<string, string>
+                    {
+                        ["slot_key"] = "cannon_assist",
+                    },
+                    State = "active_local",
+                    Reason = "canonical integration is pending",
+                },
+            ],
+        };
+
+        var presentation =
+            ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+
+        Assert.True(presentation.Visible);
+        Assert.Equal("warning", presentation.Severity);
+        Assert.Contains("cannon_assist", presentation.Detail);
+        Assert.False(active.BlocksStartup);
+
+        active.Items[0].State = "integrated";
+        Assert.False(
+            ControlSurfaceCompatibility.ConfirmedLocalMapping(active).Visible);
+
+        active.Items[0].State = "canonical_conflict";
+        Assert.Equal(
+            "danger",
+            ControlSurfaceCompatibility.ConfirmedLocalMapping(active).Severity);
+
+        active.Items =
+        [
+            new ConfirmedLocalMappingItem
+            {
+                State = "active_local",
+                Reason = "pending integration",
+            },
+            new ConfirmedLocalMappingItem
+            {
+                State = "canonical_conflict",
+                Reason = "conflicting canonical value",
+                Scope = null!,
+            },
+        ];
+        presentation = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+        Assert.Equal("danger", presentation.Severity);
+        Assert.Contains("conflicting canonical value", presentation.Detail);
+
+        active.Items = null!;
+        Assert.False(
+            ControlSurfaceCompatibility.ConfirmedLocalMapping(active).Visible);
     }
 
     [Fact]

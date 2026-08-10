@@ -100,9 +100,13 @@ def project_forced_save_setup(
     mapping_maturity = str(
         getattr(snapshot, "mapping_maturity", None) or ""
     ).strip()
+    effective_mapping_fingerprint = str(
+        getattr(snapshot, "effective_mapping_fingerprint", None) or ""
+    ).strip()
     checks = getattr(snapshot, "checks", None)
     if (
         not mapping_id
+        or len(effective_mapping_fingerprint) != 64
         or getattr(snapshot, "shape_valid", False) is not True
         or not isinstance(checks, Mapping)
     ):
@@ -346,6 +350,7 @@ def project_forced_save_setup(
         "status": "complete" if not unresolved else "partial",
         "mapping_id": mapping_id,
         "mapping_maturity": mapping_maturity,
+        "effective_mapping_fingerprint": effective_mapping_fingerprint,
         "captured_at": acquisition.captured_at.isoformat(),
         "acquisition": acquisition.redacted_provenance(),
         "settings": deepcopy(settings),

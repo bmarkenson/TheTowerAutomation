@@ -26,6 +26,13 @@ from core.player_save import (
     pull_player_save_bytes,
     reconcile_requirements,
 )
+from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_record,
+    build_mapping_candidate_ui_evidence,
+    fingerprint_json,
+    resolve_mapping_candidates,
+)
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
@@ -714,6 +721,9 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
         "resolution": "compatible_forward_revision",
         "authority_id": "data-9-game-1073",
         "structural_id": "data-9-game-1101",
+        "semantic_fingerprint": snapshot.mapping_semantic_fingerprint,
+        "effective_fingerprint": snapshot.effective_mapping_fingerprint,
+        "confirmed_local": dict(snapshot.confirmed_local_mappings),
     }
     assert "must-not-publish-future-counter" not in json.dumps(
         snapshot.as_dict()
@@ -775,7 +785,7 @@ def test_unknown_incompatible_version_falls_back_to_ui(monkeypatch, mutation):
 def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     snapshot = _snapshot(monkeypatch)
 
-    assert snapshot.as_dict()["schema_version"] == 3
+    assert snapshot.as_dict()["schema_version"] == 5
     assert snapshot.mapping_id == "data-9-game-1073"
     assert snapshot.mapping_maturity == "candidate"
     assert snapshot.validated_checks == (
@@ -1295,6 +1305,47 @@ def test_unknown_killed_by_keeps_structural_tail_identity(monkeypatch):
         "existing_ui_game_stats_perks_more_stats"
     )
     assert runtime.perks_status == "observed"
+    evidence = _snapshot(monkeypatch, decoded).checks[
+        "battle_history_killed_by"
+    ]
+    assert evidence.status == "unmapped"
+    assert evidence.diagnostics["mapping_candidates"] == [
+        {
+            "value_kind": "battle_history_killed_by_id",
+            "raw_discriminator": {"kind": "integer_id", "value": 77},
+            "pairing_method": "exact_locator",
+            "locator": "killed_by",
+            "expected_observation_count": 1,
+            "observation_count_policy": "exact",
+            "minimum_evidence_count": 1,
+            "known_semantic_values": list(
+                VERSION_MAPPING["runtime_save"]["battle_history"][
+                    "killed_by_ids"
+                ].values()
+            ),
+            "known_raw_semantic_value": None,
+            "peer_semantic_values": [],
+            "peer_locator_values": {},
+            "scope": {},
+        }
+    ]
+
+
+def test_unknown_tournament_league_exposes_review_candidate(monkeypatch):
+    decoded = _decoded_save()
+    decoded["leagueID"] = 4
+    decoded["tournamentRecords"][-1]["leagueID"] = 4
+
+    snapshot = _snapshot(monkeypatch, decoded)
+    evidence = snapshot.checks["tournament_league"]
+
+    assert snapshot.checks["tournament_conditions"].reason == (
+        "league_mapping_not_validated"
+    )
+    assert evidence.status == "unmapped"
+    candidate = evidence.diagnostics["mapping_candidates"][0]
+    assert candidate["value_kind"] == "tournament_league_id"
+    assert candidate["raw_discriminator"]["value"] == 4
 
 
 @pytest.mark.parametrize(
@@ -2012,6 +2063,95 @@ def test_malformed_or_unknown_module_structure_fails_closed(
     assert evidence.status == "unmapped"
     assert reason.casefold() in evidence.reason.casefold()
     assert decision["disposition"] == "ui_required"
+
+
+def test_fresh_decode_effective_fingerprint_tracks_local_mapping_generation(
+    monkeypatch,
+    tmp_path,
+):
+    store = ConfirmedLocalMappingStore(tmp_path / "local")
+    monkeypatch.setattr(
+        "core.player_save.ConfirmedLocalMappingStore",
+        lambda: store,
+    )
+    clean = _snapshot(monkeypatch, _decoded_save())
+    decoded = _decoded_save()
+    decoded["assistModuleSlots"][3]["module"]["infoIndex"] = 777
+    before = _snapshot(monkeypatch, decoded)
+    before_projection = copy.deepcopy(before.as_dict())
+    pending = before.checks["modules"].diagnostics["mapping_candidates"]
+    locator_values = dict(clean.checks["modules"].value)
+    locator_values["core_assist"] = "Future Module"
+    locator_scopes = {
+        f"{family}_{role}": {
+            "slot_key": f"{family}_{role}",
+            "family": family,
+            "role": role,
+        }
+        for family in ("cannon", "armor", "generator", "core")
+        for role in ("primary", "assist")
+    }
+    ui = build_mapping_candidate_ui_evidence(
+        "modules",
+        canonical_values=list(locator_values.values()),
+        locator_values=locator_values,
+        locator_scopes=locator_scopes,
+        observed_at=CAPTURED_AT,
+    )
+    resolved = resolve_mapping_candidates("modules", pending, ui)
+    candidate = next(
+        item
+        for item in resolved
+        if item["raw_discriminator"]["value"] == 777
+    )
+    record = build_mapping_candidate_record(
+        mapping={
+            "mapping_id": before.mapping_id,
+            "data_version": before.data_version,
+            "game_version": before.game_version,
+            "root_class": before.root_class,
+            "resolution": before.mapping_resolution,
+            "authority_mapping_id": before.mapping_authority_id,
+            "structural_mapping_id": before.mapping_structural_id,
+            "canonical_dependency_fingerprint": (
+                before.mapping_semantic_fingerprint
+            ),
+        },
+        check_id="modules",
+        candidate=candidate,
+        snapshot_fingerprint=fingerprint_json(before_projection),
+        ui_evidence_fingerprint=fingerprint_json(ui),
+        source_observation_fingerprint=ui[
+            "source_observation_fingerprint"
+        ],
+        workflow_provenance={
+            "capture_request_id": "capture-effective-generation",
+            "inspection_request_id": "inspect-effective-generation",
+            "runtime_session_fingerprint": "1" * 64,
+            "pid": 4242,
+            "target_generation_fingerprint": "2" * 64,
+            "activity_scope_fingerprint": "3" * 64,
+            "game_state": "home_new_battle",
+            "active_round_identity_fingerprint": None,
+            "boundary_fingerprint": "4" * 64,
+        },
+        observed_at=CAPTURED_AT,
+    )
+    accepted = store.accept_candidate(record)
+
+    after = _snapshot(monkeypatch, decoded)
+
+    assert accepted["generation"] == 1
+    assert before.effective_mapping_fingerprint != (
+        after.effective_mapping_fingerprint
+    )
+    assert after.confirmed_local_mappings["generation"] == 1
+    assert after.confirmed_local_mappings["applied_event_ids"] == [
+        accepted["event_id"]
+    ]
+    assert after.checks["modules"].status == "observed"
+    assert after.checks["modules"].value["core_assist"] == "Future Module"
+    assert before.as_dict() == before_projection
 
 
 def test_ultimate_weapon_components_have_independent_value_scope(monkeypatch):

@@ -15,6 +15,9 @@ from core.gc_module_loadout import (
     gc_module_loadout_evidence_from_dict,
 )
 from core.player_save_temporal import ROUND_INVARIANT_ATTACHMENT_CHECKS
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_ui_evidence,
+)
 from core.state_detector import detect_state_and_overlays
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
@@ -23,6 +26,7 @@ from core.workshop_preset import (
     PresetSlotSelection,
     measure_preset_slot_selection,
 )
+from utils.logger import log
 
 
 Detection = Mapping[str, Any]
@@ -996,6 +1000,9 @@ def validate_gc_session_preflight_screens(
     module_boundary_evidence: Optional[Mapping[str, Any]] = None,
     accepted_sections: Optional[Mapping[str, Mapping[str, Any]]] = None,
     deferred_checks: Optional[Sequence[Any]] = None,
+    mapping_observation_fn: Optional[
+        Callable[[str, Mapping[str, Any]], Any]
+    ] = None,
 ) -> GcSessionPreflightEvidence:
     """Validate every currently implemented read-only session requirement."""
 
@@ -1255,6 +1262,59 @@ def validate_gc_session_preflight_screens(
         else:
             raise ValueError(
                 f"module policy {module_mode!r} requires screen or boundary evidence"
+            )
+
+    if mapping_observation_fn is not None:
+        try:
+            if (
+                modules is not None
+                and modules.fully_observed
+                and module_source == "ui"
+            ):
+                module_values = {
+                    str(slot.slot_key): str(slot.actual)
+                    for slot in modules.slots
+                    if slot.actual is not None
+                }
+                module_scopes = {
+                    str(slot.slot_key): {
+                        "slot_key": str(slot.slot_key),
+                        "family": str(slot.family),
+                        "role": str(slot.role),
+                    }
+                    for slot in modules.slots
+                    if slot.actual is not None
+                }
+                if len(module_values) == 8:
+                    mapping_observation_fn(
+                        "modules",
+                        build_mapping_candidate_ui_evidence(
+                            "modules",
+                            canonical_values=list(module_values.values()),
+                            locator_values=module_values,
+                            locator_scopes=module_scopes,
+                        ),
+                    )
+            guardian_states = set(configuration.guardians.detected_secondary)
+            guardian_names = sorted(
+                name
+                for name in ("Attack", "Ally", "Fetch", "Scout", "Summon")
+                if f"GUARDIAN_{name.upper()}_EQUIPPED" in guardian_states
+            )
+            if guardians_screen is not None and len(guardian_names) == 3:
+                mapping_observation_fn(
+                    "guardian_chips",
+                    build_mapping_candidate_ui_evidence(
+                        "guardian_chips",
+                        canonical_values=guardian_names,
+                        locator_values={},
+                    ),
+                )
+        except Exception as exc:
+            log(
+                "[PLAYER_SAVE_MAPPING] Read-only preflight observation "
+                f"callback failed: {exc}",
+                "DEBUG",
             )
 
     section_results = {

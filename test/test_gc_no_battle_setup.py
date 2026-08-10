@@ -2403,6 +2403,10 @@ def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
         save_decisions=preflight.decisions,
         snapshot_invalidation_fn=coordinator.invalidate,
         save_ui_verification_fn=coordinator.record_ui_verification,
+        save_mapping_observation_fn=coordinator.record_mapping_observation,
+        save_mapping_window_close_fn=(
+            coordinator.close_mapping_candidate_window
+        ),
     )
     handle_home.assert_called_once_with(
         restart_enabled=True,
