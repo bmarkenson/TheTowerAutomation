@@ -24,6 +24,8 @@ from core.player_save_mapping_integration import (
 
 ROOT = Path(__file__).resolve().parents[1]
 OBSERVED_AT = "2026-08-10T12:00:00+00:00"
+FIXTURE_INFO_INDEX = 9_000_000_001
+FIXTURE_MODULE_NAME = "Integration Fixture Cannon Assist"
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -42,14 +44,14 @@ def _record() -> dict:
         "armor_primary": "Orbital Augment",
         "generator_primary": "Project Funding",
         "core_primary": "Dimension Core",
-        "cannon_assist": "Astral Deliverance",
+        "cannon_assist": FIXTURE_MODULE_NAME,
         "armor_assist": "Space Displacer",
         "generator_assist": "Singularity Harness",
         "core_assist": "Harmony Conductor",
     }
     pending = pending_mapping_candidate(
         value_kind="module_info_index",
-        raw_value=10,
+        raw_value=FIXTURE_INFO_INDEX,
         pairing_method="exact_locator",
         locator="cannon_assist",
         expected_observation_count=8,
@@ -285,8 +287,8 @@ def test_prepare_changes_only_feature_targets_and_is_idempotent(
             )
         )
         assert mapping["module_loadout"]["assist"][0]["values"][-1] == {
-            "info_index": 10,
-            "name": "Astral Deliverance",
+            "info_index": FIXTURE_INFO_INDEX,
+            "name": FIXTURE_MODULE_NAME,
         }
 
     repeated = manager.prepare(
