@@ -3027,6 +3027,43 @@ def test_attach_stays_pending_before_battle_adoption(tmp_path, monkeypatch):
     assert hold.allowed_auxiliary_collectors == ()
 
 
+def test_enabled_attach_begins_validation_on_first_runtime_sync(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    store.request_battle_workflow("attach_battle", evidence=evidence)
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+
+    workflow = supervisor.battle_workflow
+    assert workflow["status"] == "validating_save"
+    assert workflow["acknowledgement"] == evidence
+    assert "acknowledged_at" in workflow
+
+
 def test_validated_attach_completes_only_after_lifecycle_adoption(
     tmp_path,
     monkeypatch,

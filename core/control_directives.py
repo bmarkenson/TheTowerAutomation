@@ -350,6 +350,7 @@ class ControlDirectiveStore:
             "requested": {
                 "acknowledged",
                 "awaiting_enable",
+                "validating_save",
                 "rejected",
                 "interrupted",
                 "failed",
