@@ -39,6 +39,33 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 bounded Windows host process attribution
+
+- Commit `4b314f7` advances the control-surface API and native compatibility
+  contract to revision 36 with
+  `host_performance_process_attribution_v1`. The Windows sampler arms only
+  after 30 seconds at `>=70%` host CPU, `>=95%` memory use, or `<=1 GiB`
+  available memory, reuses the existing ten-second discovery pass, and keeps
+  collecting through a two-minute healthy recovery window.
+- Each active pass retains at most eight non-BlueStacks PID/name entries: the
+  four highest host-normalized CPU consumers and four largest working sets.
+  Ten-second run-correlated aggregates preserve CPU average/maximum, working
+  set, private bytes, inspected-process count, and the added attribution cost.
+  The optional payload field keeps older native publishers valid.
+- The Host Health strip now separates residual Other Windows CPU from measured
+  BlueStacks and Control Surface CPU, groups retained entries by application
+  name for compact top-CPU and top-memory fields, and preserves per-PID detail
+  in the tooltip. Collection remains observational and records no command
+  lines, window titles, automation intent, or device input.
+- On exact commit `4b314f7`, the supported checkpoint passed compilation,
+  state definitions, clickmap integrity with zero errors and the established
+  44 orphan notices, and all 2,194 tests in 352.97 seconds. The focused
+  post-rebase suite passed 22 tests, the portable native suite passed all 135
+  tests, and a real WPF Release build completed with zero errors. Windows
+  target-host cost measurement remains routed through
+  [`ISSUE-2026-003`](../issues/open-2026.md#windows-performance-telemetry-exceeded-its-client-cpu-budget)
+  as a separate client-budget investigation.
+
 ### 2026-08-10 bounded interactive-development lease extension
 
 - The server-owned request and heartbeat window was increased from 30 to 120
