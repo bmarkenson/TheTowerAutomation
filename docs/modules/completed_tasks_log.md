@@ -289,6 +289,21 @@ canonical document linked by an entry for current behavior.
   with zero errors and the established 44 orphan notices, and all 2,165 tests
   in 358.34 seconds. This revalidation used no production process, device
   input, battle transition, or live validation.
+- Exact integration candidate `90f36bf` repeated the complete checkpoint on
+  `develop`, passing all 2,165 tests in 386.14 seconds plus compilation, state
+  definitions, and clickmap integrity with zero errors and the established 44
+  orphan notices. Production advanced from `f84f4cb` behind rollback tag
+  `production-before-20260810T205406Z-f84f4cb` to that exact candidate; no
+  native-package input, dependency, installed unit, or persistent-state format
+  changed.
+- Replacement PID `2399537` acquired the exact `localhost:5555` lock and
+  observed the preserved Tier 19 battle while Paused. Its guarded attachment
+  reached `source_not_yet_stable` on restoration attempt 1 at 2.24 seconds,
+  verified the same source on attempt 2 at 8.24 seconds, bound the forced save
+  to the same battle, and completed normally. It then explicitly adopted
+  `farm_t19_ad_assist`, verified the active session requirements—including
+  Astral Deliverance in cannon assist—and returned to steady `RUNNING` at wave
+  3485 without Surrender, Retry, or another battle transition.
 
 ### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
 
