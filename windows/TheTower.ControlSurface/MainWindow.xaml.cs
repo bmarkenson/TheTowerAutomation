@@ -2771,6 +2771,9 @@ public partial class MainWindow : Window
                 StringComparer.Ordinal)
             && status.Capabilities.Contains(
                 "host_performance_gpu_v1",
+                StringComparer.Ordinal)
+            && status.Capabilities.Contains(
+                "host_performance_process_attribution_v1",
                 StringComparer.Ordinal));
         ServiceText.Text = service is null
             ? "API restart needed"
@@ -3299,7 +3302,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 35 with the required control-surface capabilities is required."
+                    "Linux API revision 36 with the required control-surface capabilities is required."
                 );
             }
             if (model is not null
@@ -3530,6 +3533,66 @@ public partial class MainWindow : Window
             topGpuCompetitor?.GpuPercentMaximum >= 20.0
                 ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
                 : new SolidColorBrush(Color.FromRgb(237, 242, 247));
+        OtherWindowsCpuText.Text = FormatPercent(
+            snapshot.OtherWindowsCpuPercent);
+        OtherWindowsCpuText.Foreground = snapshot.OtherWindowsCpuPercent >= 50.0
+            ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+            : new SolidColorBrush(Color.FromRgb(237, 242, 247));
+        var attributedApplications = snapshot.ProcessAttribution
+            .GroupBy(
+                process => process.ProcessName,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                ProcessName = group.First().ProcessName,
+                ProcessCount = group.Count(),
+                CpuPercentAverage = group.Any(process =>
+                    process.CpuPercentAverage is not null)
+                    ? group.Sum(process =>
+                        process.CpuPercentAverage ?? 0.0)
+                    : (double?)null,
+                WorkingSetBytes = group.Sum(process =>
+                    process.WorkingSetBytesMaximum),
+            })
+            .ToArray();
+        var topCpuProcess = attributedApplications
+            .Where(process => process.CpuPercentAverage is not null)
+            .OrderByDescending(process => process.CpuPercentAverage)
+            .FirstOrDefault();
+        var topMemoryProcess = attributedApplications
+            .OrderByDescending(process => process.WorkingSetBytes)
+            .FirstOrDefault();
+        var attributionCollecting = snapshot.ProcessAttributionState
+            is HostProcessAttributionState.Active
+                or HostProcessAttributionState.Recovering;
+        TopCpuProcessText.Text = topCpuProcess is null
+            ? attributionCollecting ? "Warming up" : "-"
+            : $"{topCpuProcess.ProcessName} · "
+                + $"{topCpuProcess.CpuPercentAverage:F1}%"
+                + (topCpuProcess.ProcessCount > 1
+                    ? $" · {topCpuProcess.ProcessCount} proc"
+                    : "");
+        TopMemoryProcessText.Text = topMemoryProcess is null
+            ? attributionCollecting ? "Warming up" : "-"
+            : $"{topMemoryProcess.ProcessName} · "
+                + $"{FormatBytes(topMemoryProcess.WorkingSetBytes)} working"
+                + (topMemoryProcess.ProcessCount > 1
+                    ? $" · {topMemoryProcess.ProcessCount} proc"
+                    : "");
+        ProcessAttributionStateText.Text = snapshot.ProcessAttributionState switch
+        {
+            HostProcessAttributionState.Arming => "Pressure detected · arming",
+            HostProcessAttributionState.Active =>
+                $"Active · {snapshot.ProcessAttributionProcessCount} inspected",
+            HostProcessAttributionState.Recovering =>
+                $"Recovery watch · {snapshot.ProcessAttributionProcessCount} inspected",
+            _ => "Idle · threshold-triggered",
+        };
+        ProcessAttributionStateText.Foreground = snapshot.ProcessAttributionState
+            is HostProcessAttributionState.Active
+                or HostProcessAttributionState.Recovering
+            ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+            : (Brush)FindResource("MutedBrush");
         HostTelemetryQueueText.Text = !snapshot.UploadEnabled
             ? $"Local only · {snapshot.PendingAggregateCount} queued"
             : snapshot.PendingAggregateCount == 0
@@ -3551,8 +3614,16 @@ public partial class MainWindow : Window
             snapshot.SampledAtUtc is null
                 ? "No host sample is available yet."
                 : $"Sampled {snapshot.SampledAtUtc.Value.ToLocalTime():T}.",
+            $"Control Surface CPU: "
+                + $"{FormatPercent(snapshot.ControlSurfaceCpuPercent)}; "
+                + $"other Windows CPU: "
+                + $"{FormatPercent(snapshot.OtherWindowsCpuPercent)}.",
             $"Sampler cost: "
                 + $"{snapshot.SampleDurationMilliseconds?.ToString("F2", CultureInfo.InvariantCulture) ?? "-"} ms/sample.",
+            $"Process attribution: {snapshot.ProcessAttributionState}; "
+                + $"{snapshot.ProcessAttributionProcessCount} processes inspected; "
+                + $"scan cost "
+                + $"{snapshot.ProcessAttributionSampleDurationMilliseconds?.ToString("F2", CultureInfo.InvariantCulture) ?? "-"} ms.",
             $"BlueStacks I/O: read "
                 + $"{FormatRate(snapshot.BlueStacksIoReadBytesPerSecond)}, write "
                 + $"{FormatRate(snapshot.BlueStacksIoWriteBytesPerSecond)}.",
@@ -3583,6 +3654,16 @@ public partial class MainWindow : Window
                 + "dedicated, "
                 + $"{FormatBytes(competitor.SharedMemoryBytesMaximum)} "
                 + "shared.");
+        }
+        foreach (var process in snapshot.ProcessAttribution)
+        {
+            details.Add(
+                $"Other process: {process.ProcessName} "
+                + $"(PID {process.ProcessId}) — CPU "
+                + $"{process.CpuPercentAverage?.ToString("F1", CultureInfo.InvariantCulture) ?? "-"}% avg, "
+                + $"{process.CpuPercentMaximum?.ToString("F1", CultureInfo.InvariantCulture) ?? "-"}% max; "
+                + $"{FormatBytes(process.WorkingSetBytesMaximum)} working set, "
+                + $"{FormatBytes(process.PrivateBytesMaximum)} private.");
         }
         if (!string.IsNullOrWhiteSpace(snapshot.GpuError))
         {

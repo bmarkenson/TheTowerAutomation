@@ -18,6 +18,8 @@
     <Compile Include="..\TheTower.ControlSurface\Models.cs" Link="Models.cs" />
     <Compile Include="..\TheTower.ControlSurface\HostPerformanceModels.cs"
              Link="HostPerformanceModels.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostProcessAttribution.cs"
+             Link="HostProcessAttribution.cs" />
     <Compile Include="..\TheTower.ControlSurface\ApiClient.cs" Link="ApiClient.cs" />
     <Compile Include="..\TheTower.ControlSurface\GateDecisionPresentation.cs"
              Link="GateDecisionPresentation.cs" />

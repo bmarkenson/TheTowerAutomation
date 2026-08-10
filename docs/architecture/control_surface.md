@@ -877,6 +877,19 @@ result buffers are reused, and the already scheduled process discovery supplies
 names without another per-sample process scan. The path does not capture the
 screen or launch PowerShell, WMI, `nvidia-smi`, or another process per sample.
 
+Process attribution is dormant during ordinary load. When host CPU remains at
+or above `70%`, memory use remains at or above `95%`, or available physical
+memory remains at or below `1 GiB`, for 30 seconds, the existing ten-second
+process-discovery pass also reads CPU time, working set, and private bytes for
+accessible non-BlueStacks processes other than the control-surface client. The
+first active pass establishes CPU baselines while still supplying memory
+attribution. Collection continues until every pressure condition has remained
+clear for two minutes. Each pass retains
+the union of the four highest CPU consumers and four largest working-set
+consumers, bounded to eight distinct PID/name pairs. It records neither command
+lines nor window titles and does not add another process scan or launch a
+diagnostic provider.
+
 Host and BlueStacks GPU utilization use the busiest-engine convention: values
 from processes sharing a physical engine are combined, then the busiest engine
 is reported and capped at 100%. Adapter-level dedicated/shared usage represents
@@ -886,6 +899,16 @@ Each ten-second aggregate publishes at most five, ranked first by maximum GPU
 use and then GPU memory, with PID, process name, observation count, average and
 maximum utilization, and maximum dedicated/shared memory. No per-process or
 per-engine sample is published individually.
+
+An aggregate produced during active process attribution publishes at most
+eight non-BlueStacks PID/name entries with observation count, average/maximum
+host-normalized CPU, and maximum working-set/private bytes. A dedicated process
+count and scan-duration metric makes the added collection cost measurable. The
+GUI separately derives **Other Windows CPU** by subtracting measured
+BlueStacks and control-surface CPU from total host CPU; this is an explicitly
+unattributed residual, not a sum of the bounded process list. The compact top
+CPU and memory fields group retained PID entries by process name, while the
+tooltip preserves each PID separately.
 
 The client retains 120 raw samples in memory and reduces each ten-sample window
 to averages and extrema. An ADB-port or run-identity transition closes the
@@ -914,11 +937,16 @@ Linux store also records the server's current run at ingest as separate
 diagnostic context, keeps the sample-time run authoritative, and prunes records
 after 30 days by default. Server revision 12 advertises capability
 `host_performance_telemetry_v1`; server revision 13 adds
-`host_performance_gpu_v1`.
+`host_performance_gpu_v1`; server revision 36 adds the optional
+`process_attribution` aggregate field and capability
+`host_performance_process_attribution_v1`. Older native clients remain valid
+publishers because the new field is optional.
 
 The no-frame-telemetry target is below 0.5% average host CPU. Aggregate fields
 include control-surface CPU and sampling duration so the Windows deployment can
 verify that budget. GPU collection also records its own sampling duration.
+Threshold-triggered process attribution records its scan duration separately
+and must be included in clean and contended client profiling.
 Temperature and clock telemetry are not included because Windows does not
 provide them through the same vendor-neutral counters. Continuous frame timing
 is not a planned control-surface telemetry feature. If a specific performance
@@ -1059,10 +1087,12 @@ Process request examples:
   This requires server revision 14 and capability `game_speed_target`.
 - Native Windows host health under **System > Diagnostics** for system CPU,
   memory, processor clock, BlueStacks CPU/RAM/process identity, and local
-  publication state. Hovering
-  the strip shows sampling cost, BlueStacks I/O, last Linux acknowledgement,
-  and any sampler/spool/upload error. The display remains local and current
-  while the API is unavailable.
+  publication state. A third row shows residual Other Windows CPU and bounded
+  top CPU/working-set attribution after sustained host pressure. Hovering
+  the strip shows the attributed PID/name entries, process-scan and total
+  sampling costs, BlueStacks I/O, last Linux acknowledgement, and any
+  sampler/spool/upload error. The display remains local and current while the
+  API is unavailable.
 - Automatic startup-gate decision dialogs for requests published by the
   runtime. The API accepts only an option contained in the matching pending
   request. Retry re-runs the check with fresh evidence; a bypass or configured
