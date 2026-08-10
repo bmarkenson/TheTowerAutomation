@@ -534,6 +534,7 @@ def _running_reconciliation_objects(
         source_activity_scope_id=str(evidence["activity_scope_run_id"]),
         target_binding=binding,
         mapping_id="data-9-game-1073",
+        effective_mapping_fingerprint="9" * 64,
         active_round_identity_fingerprint="b" * 64,
         captured_at=captured.isoformat(),
         acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
@@ -2943,6 +2944,7 @@ def test_terminal_return_uses_supported_ui_when_save_is_unavailable(
                 }
             },
             None,
+            None,
         )
     )
     app._runtime_action_guard = lambda **_kwargs: True
@@ -3023,6 +3025,43 @@ def test_attach_stays_pending_before_battle_adoption(tmp_path, monkeypatch):
     assert hold is not None
     assert hold.hold.value == "operator_workflow"
     assert hold.allowed_auxiliary_collectors == ()
+
+
+def test_enabled_attach_begins_validation_on_first_runtime_sync(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    store.request_battle_workflow("attach_battle", evidence=evidence)
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+
+    workflow = supervisor.battle_workflow
+    assert workflow["status"] == "validating_save"
+    assert workflow["acknowledgement"] == evidence
+    assert "acknowledged_at" in workflow
 
 
 def test_validated_attach_completes_only_after_lifecycle_adoption(
@@ -3929,6 +3968,7 @@ def _capture_preview(
         "status": "partial",
         "mapping_id": "data-9-game-1073",
         "mapping_maturity": "candidate",
+        "effective_mapping_fingerprint": "9" * 64,
         "captured_at": acquisition.captured_at.isoformat(),
         "acquisition": acquisition.redacted_provenance(),
         "settings": settings,
@@ -3997,6 +4037,108 @@ def _ready_capture(
     )
     assert ready is not None
     return ready
+
+
+def test_process_boundary_retires_legacy_authority_records(tmp_path):
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    evidence = _evidence(game_state="active_battle")
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+    )
+    for status in ("acknowledged", "validating_save"):
+        store.transition_battle_workflow(
+            workflow["request_id"],
+            status,
+            acknowledgement=evidence,
+        )
+    receipt = _save_receipt(str(workflow["request_id"]), evidence)
+    store.transition_battle_workflow(
+        workflow["request_id"],
+        "ready",
+        save_receipt=receipt,
+    )
+    store.transition_battle_workflow(
+        workflow["request_id"],
+        "completed",
+        acknowledgement=evidence,
+    )
+    manual = store.request_manual_control(evidence=evidence, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    manual_receipt = _save_receipt(
+        str(manual["manual_control_id"]),
+        evidence,
+        kind="return_control_reconciliation",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "completed",
+        save_receipt=manual_receipt,
+    )
+    capture = store.request_setup_capture(evidence=evidence, source="test")
+    _ready_capture(
+        store,
+        capture,
+        _capture_preview(evidence=evidence),
+    )
+
+    def remove_new_mapping_provenance(data):
+        data["battle_workflow"]["save_receipt"]["temporal"].pop(
+            "effective_mapping_fingerprint"
+        )
+        data["manual_control"]["save_receipt"]["temporal"].pop(
+            "effective_mapping_fingerprint"
+        )
+        data["setup_capture"]["preview"].pop(
+            "effective_mapping_fingerprint"
+        )
+        return data
+
+    store.update(remove_new_mapping_provenance)
+    incompatible = store.status()
+    assert incompatible["battle_workflow_error"]
+    assert incompatible["manual_control_error"]
+    assert incompatible["setup_capture_error"]
+
+    store.interrupt_operator_workflows(
+        "a new automation process boundary started",
+        source="test-process-start",
+    )
+
+    retired = store.status()
+    assert retired["battle_workflow_error"] is None
+    assert retired["battle_workflow"]["status"] == "interrupted"
+    assert "save_receipt" not in retired["battle_workflow"]
+    assert retired["manual_control_error"] is None
+    assert retired["manual_control"]["status"] == "interrupted"
+    assert "save_receipt" not in retired["manual_control"]
+    assert retired["setup_capture_error"] is None
+    assert retired["setup_capture"]["status"] == "interrupted"
+    assert "preview" not in retired["setup_capture"]
+    replacement = store.request_battle_workflow(
+        "attach_battle",
+        evidence={
+            **evidence,
+            "observation_id": "runtime-2:1",
+            "runtime_id": "runtime-2",
+        },
+    )
+    assert replacement["status"] == "requested"
+    assert replacement["request_id"] != workflow["request_id"]
 
 
 def test_cli_capture_reviews_saves_and_reopens_a_durable_strategy_draft(

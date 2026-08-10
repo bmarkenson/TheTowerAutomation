@@ -241,6 +241,9 @@ def ensure_target_priority_order(
     sleep_fn: Callable[[float], None] = time.sleep,
     panel_open: bool = False,
     repair_observer_fn: Optional[Callable[[], None]] = None,
+    initial_evidence_observer_fn: Optional[
+        Callable[[Sequence[str]], None]
+    ] = None,
 ) -> bool:
     """Open or consume the panel, enforce with Up arrows, and verify it."""
     expected_list = validate_target_priority_order(expected)
@@ -280,6 +283,15 @@ def ensure_target_priority_order(
     try:
         actual = read_target_priority_order(capture_fn)
         log(f"[TARGET_PRIORITY] Current order: {actual}", "DEBUG")
+        if initial_evidence_observer_fn is not None:
+            try:
+                initial_evidence_observer_fn(tuple(actual))
+            except Exception as exc:
+                log(
+                    "[PLAYER_SAVE_MAPPING] Initial Target Priority observation "
+                    f"callback failed: {exc}",
+                    "DEBUG",
+                )
         working = list(actual)
         for desired_index, target in enumerate(expected_list):
             current_index = working.index(target)

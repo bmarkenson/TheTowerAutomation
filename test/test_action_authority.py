@@ -701,6 +701,59 @@ def test_success_strategy_change_and_natural_boundary_end_the_scoped_gate():
     assert authority.strategy_gate is None
 
 
+@pytest.mark.parametrize("status", ["pending", "resolved"])
+def test_success_retires_same_strategy_session_preflight_decision(status):
+    app = _terminal_gate_app()
+    authority = app._get_action_authority()
+    _activate_gate(authority)
+    app._mission_mgr.strategy.is_session_preflight_complete.return_value = True
+    app._mission_mgr.ctx.data["mission_vars"].update(
+        gc_session_preflight_completed=True,
+        gc_session_preflight_last_status="complete",
+    )
+    app._supervisor.gate_decision = {
+        "request_id": f"session-{status}",
+        "status": status,
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "modules",
+    }
+
+    app._sync_strategy_action_gate(terminally_blocked=False)
+
+    assert authority.strategy_gate is None
+    app._supervisor.consume_gate_decision.assert_called_once_with(
+        f"session-{status}",
+        completion_reason=(
+            "session preflight subsequently completed successfully"
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("strategy", "phase"),
+    [("tournament", "session_preflight"), ("farm_t18", "home_setup")],
+)
+def test_success_preserves_unrelated_gate_decisions(strategy, phase):
+    app = _terminal_gate_app()
+    app._mission_mgr.strategy.is_session_preflight_complete.return_value = True
+    app._mission_mgr.ctx.data["mission_vars"].update(
+        gc_session_preflight_completed=True,
+        gc_session_preflight_last_status="complete",
+    )
+    app._supervisor.gate_decision = {
+        "request_id": "unrelated-gate",
+        "status": "pending",
+        "strategy": strategy,
+        "phase": phase,
+        "check_id": "modules",
+    }
+
+    app._sync_strategy_action_gate(terminally_blocked=False)
+
+    app._supervisor.consume_gate_decision.assert_not_called()
+
+
 def test_strategy_gate_does_not_make_reward_collectors_due():
     app = _terminal_gate_app()
     app._handler_enabled = Mock(return_value=True)

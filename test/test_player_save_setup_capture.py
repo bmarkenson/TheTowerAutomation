@@ -159,6 +159,7 @@ def _acquisition(
     snapshot = SimpleNamespace(
         mapping_id="data-9-game-1073",
         mapping_maturity="candidate",
+        effective_mapping_fingerprint="9" * 64,
         validated_checks=tuple(validated_checks or selected_checks),
         shape_valid=True,
         checks=selected_checks,

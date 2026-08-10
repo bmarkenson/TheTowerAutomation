@@ -76,6 +76,7 @@ def _save_metadata(
         "schema_version": 2,
         "source": "player_save",
         "mapping_id": "data-9-game-1073",
+        "effective_mapping_fingerprint": "9" * 64,
         "identity_schema_version": 1,
         "fingerprint": fingerprint,
         "tier": tier,
@@ -190,6 +191,9 @@ def _terminal_handoff(
         },
         "source": {
             "mapping_id": latest["mapping_id"],
+            "effective_mapping_fingerprint": latest[
+                "effective_mapping_fingerprint"
+            ],
             "source_fingerprint": "c" * 64,
             "runtime_session_fingerprint": boundary_evidence[
                 "runtime_session"

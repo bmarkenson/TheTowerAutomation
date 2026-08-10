@@ -119,8 +119,9 @@ a glowing Guild contribution chest.
 Claimed and locked chests are negatives. Reward reveals are dismissed through
 their verified `SKIP` control, Event Missions are searched with bounded guarded
 scrolling, and the handler returns to the active battle and closes the menu.
-Persistent unrelated alerts are rate-limited to one inspection every 30
-minutes; failures retry after five minutes.
+A productive sweep can inspect again after two minutes so newly exposed
+rewards are not stranded. A sweep that finds nothing claimable backs persistent
+unrelated alerts off for 30 minutes; failures retry after five minutes.
 
 Ordinary Daily Mission claims are banked on local Sunday until the server's
 Monday 00:00 UTC weekly reset (17:00 PDT / 16:00 PST). Glowing weekly mission

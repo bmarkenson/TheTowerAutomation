@@ -39,6 +39,221 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 save-mapping discovery and local confirmation lifecycle
+
+- Commits `eb8a391` and `4cd9f2d` add strict, private, append-only candidate
+  receipts for unmapped Perk, Guardian, Module, Target Priority, orb,
+  terminal-cause, and Tournament-league save values. Existing Home,
+  attachment, and terminal UI fallbacks may pair a discriminator only with
+  complete normalized evidence from the same pre-mutation runtime boundary;
+  collection neither requests another save read nor grants input authority.
+- A deterministic exact-version Module `infoIndex` pairing is durably
+  confirmed for later fresh decodes in an ignored append-only local store.
+  Global ID/name bijection, generation-aware revoke capacity, dependency drift,
+  and an effective-mapping fingerprint keep stale or conflicting local values
+  from entering setup, attachment, History, or terminal provenance. Every
+  other newly observed value remains review evidence until canonical
+  integration.
+- Server revision 34 exposes the combined review state. Browser and native
+  clients keep a nonmodal warning visible for unresolved, locally active,
+  reconfirmation, ambiguity, conflict, and authority/mirror-pending states.
+  Compatible exact-revision proposals cover both canonical owners atomically;
+  runtime never edits those tracked mappings itself.
+- Focused affected Python validation passed 738 tests before the integrated
+  session-gate update and 582 afterward; final hardening passed 137 focused
+  Python tests and all 124 portable native tests. The first exact checkpoint
+  passed all 2,159 tests in 352.93 seconds. Production then exposed two safe
+  compatibility edges: `fb2b166` retires recognizable prior-schema workflow
+  authority at process start, and `f8786cd` permits an already-enabled exact
+  Attach request to enter save validation without waiting for an intermediate
+  heartbeat. The final exact checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,161 tests in 348.99 seconds; the complete control-model and surface
+  slice passed 192 tests.
+- Production advanced from `bee431a` through `dd9354f` and `fb2b166` to exact
+  `f8786cd`, protected respectively by rollback tags
+  `production-before-20260810T104240Z-bee431a`,
+  `production-before-20260810T110009Z-dd9354f`, and
+  `production-before-20260810T111356Z-fb2b166`. The native package was
+  published at 03:45 PDT from exact `dd9354f`; neither later fix changes a
+  native-package input. Current Control Surface is 72,390,981 bytes with
+  SHA-256 `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`,
+  and current Tunnel Host is 35,172,109 bytes with SHA-256
+  `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
+  Retained slot 1 (`b2d282f`) contains 72,385,088-byte
+  `3bb666175f7e0b1b5d731f30c92cee8b71581a3979bfc00f49bd018d69e4d0f4`
+  and 35,172,103-byte
+  `e23aada8aa3992bbc866fcebd3ec2a22d043902e088f2a4cb78abdba0ff63c68`;
+  slot 2 (`5f93cba`) contains 72,363,007-byte
+  `c13e709f307d32f979dc9fff300cfcfb467133ac2602fce584582f36ed3abe72`
+  and 35,172,117-byte
+  `387a2d5d620b8ced392b2d00dc2628a5a1e8333af866d074b6b3f5ac8286221d`.
+- The first guarded production Attach correctly returned to acknowledged Pause
+  when launcher restoration had not yet produced a stable source boundary. A
+  fast Attach/Enable retry then exposed the missing transition while the
+  exclusive workflow still blocked every strategy and lifecycle action; no
+  fallback, new battle, or Surrender occurred. After `f8786cd`, replacement
+  PID `1676747` accepted back-to-back Attach and Enable at 04:15:24 PDT,
+  serialized and restored the same Tier 19 battle, wrote an exact
+  `data-9-game-1101` reconciliation receipt, adopted it observation-only, and
+  returned itself to acknowledged Pause before explicit Strategy adoption.
+- The resulting session preflight used bound save evidence for Auto Pick,
+  Perk order and first choice, card recharge modes, Cards, Workshop, Bots,
+  Guardians, and Ultimate Weapons. Only Modules used its unresolved-value UI
+  fallback. That pre-mutation inspection paired `infoIndex 10` with
+  `Astral Deliverance`, wrote candidate
+  `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`,
+  activated exact-version local event
+  `1ba2e2e9f3bec3282c60d14a8b558c41fe7aa87139fe3c2fad74c7151828a3d1`
+  for later fresh decodes, and left one persistent nonblocking canonical-review
+  warning. Free Upgrade locks remained deferred as immutable `NEW_BATTLE`
+  evidence rather than receiving an in-battle repair. Preflight completed,
+  consumed the obsolete generic gate request, and entered steady `RUNNING`
+  state with no Strategy Gate. Canonical owner/mirror integration plus ordinary
+  Home and terminal receipt validation remain queued.
+
+### 2026-08-09 outcome-aware Mission reward cooldown
+
+- Commit `3046c93` gives a productive Daily/Event/Guild reward sweep a
+  two-minute follow-up instead of the same 30-minute delay used after an empty
+  sweep. Persistent alerts that expose no claimable reward retain the
+  30-minute backoff, failures retain their five-minute retry, and interrupted
+  routes continue to preserve cleanup ownership without starting a cooldown.
+- The restored reward hub is measured once more before cleanup and records its
+  residual Daily, Event, and Guild badge evidence at diagnostic level. This
+  adds no input and leaves every navigation and claim under its existing screen
+  and exact-target guards.
+- Focused Mission reward and action-authority suites passed 45 and 24 tests.
+  The repository checkpoint passed compilation, state-definition validation,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,081 tests in 360.75 seconds.
+- The exact integrated candidate `2303e2d` repeated the complete checkpoint on
+  `develop`, passing all 2,081 tests in 355.46 seconds. Production advanced
+  from `9c1435e` to `2303e2d` behind rollback tag
+  `production-before-20260810T003227Z-9c1435e`.
+- Replacement PID `947995` acquired the exact `localhost:5555` lock, completed
+  save-backed same-battle attachment, adopted `farm_t19_ad_assist`, verified
+  all active session requirements, and entered steady state. Fresh observations
+  advanced from wave 3601 to wave 3623; no Surrender, new battle, dependency
+  change, persistent-state migration, or Windows-package publication occurred.
+- The prior runtime's safe-boundary drain also live-confirmed the open-menu
+  scheduler repair in commit `2b4315d`: from `RUNNING/MENU_OPEN`, it selected
+  Daily and Event badges and claimed nine rewards before releasing its route and
+  closing the menu. `ISSUE-2026-015` is now resolved.
+- A 2026-08-10 13:00 PDT production-log review closed the remaining natural-
+  trigger validation. Nineteen eligible probes from 2026-08-09 17:44 through
+  2026-08-10 09:33 produced exactly 19 terminal results and 19 exclusive-route
+  releases: five productive sweeps, 14 empty sweeps, and no failure or
+  interruption. Each productive sweep became eligible again in 2:02–2:10;
+  consecutive empty sweeps under a continuing alert repeated in 30:00–30:07.
+  Every route remeasured Daily, Event, and Guild residual badges before cleanup,
+  and every observed post-review residual was clear.
+
+### 2026-08-09 scoped session-gate evidence and lifecycle
+
+- Terminal session-preflight decisions now recover recognized failed checks
+  from retained structured evidence, replace generic mismatch text with concise
+  expected-versus-observed detail, and preserve specific repair failures. An
+  internal failure without a recoverable check remains blocking with Retry as
+  its only choice; it cannot create a useless `session_preflight` waiver or
+  offer repair. Persisted generic requests are replaced safely.
+- A later successful complete preflight consumes only the same Strategy's
+  pending or resolved session-preflight request. Other Strategies and phases
+  remain untouched, preventing the native client from auto-opening a stale
+  failure after recovery.
+- The native decision window now distinguishes running-session and Home startup
+  gates and humanizes raw check IDs through a portable presentation helper. The
+  existing protocol already carried the corrected check, reason, expected
+  value, and options, so no server revision or capability changed.
+- Focused and affected Python suites passed 233 tests, with 23 additional
+  action-executor/run-initialization preflight tests passing. The supported
+  checkpoint then passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,089 tests
+  in 355.60 seconds. All 123 portable native tests passed, including the linked
+  presentation helper; this Linux SDK lacks the WindowsDesktop targets required
+  to build the WPF host itself.
+
+### 2026-08-09 save-backed attached-session preflight
+
+- Commit `2a303ba` lets an exact-bound forced attachment save satisfy every
+  supported active-session requirement it can project. UI verification is now
+  a per-fact fallback for missing, incomplete, or unparseable save evidence;
+  round-invariant Workshop, Bot, Guardian, Module, Free Upgrade-lock, Perk Ban,
+  First Perk, and Perk Auto Pick-order mismatches are report-only during a
+  battle, while existing guarded repairs remain available for mutable settings.
+- The candidate was rebased over production commit `3d25fc2`, including the
+  completed-state Perks opener follow-up, with no overlapping or superseding
+  runtime change. The exact candidate passed the supported checkpoint with all
+  2,075 tests. Its first production smoke safely blocked when a profile-waived
+  Perk Bans mismatch was still admitted to attachment reconciliation.
+- Fix `4b9e7b0` applies profile waivers before save reconciliation and
+  defensively excludes them from attachment validity. It also classifies Perk
+  Bans and First Perk Choice as round-invariant. Focused and affected suites
+  passed 62 and 224 tests; the complete checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,076 tests in 336.92 seconds.
+- Production advanced to `4b9e7b0` behind rollback tag
+  `production-before-20260809T223713Z-2a303ba`. Replacement automation PID
+  `804073` acquired the exact `localhost:5555` lock, completed guarded
+  same-battle attachment from mapping `data-9-game-1101`, adopted
+  `farm_t19_ad_assist`, and completed one attached-session preflight before
+  entering steady state with no Strategy Action Gate.
+- The smoke used bound save evidence for Cards, Workshop, Bots, Guardians,
+  Auto Pick, Card Recharge, Perk order, First Perk, and Ultimate Weapons. The
+  profile-waived Perk Bans check was absent from reconciliation. Modules alone
+  used its existing UI fallback because assist-module IDs were not projectable;
+  Free Upgrade locks were explicitly deferred because no authoritative
+  no-battle boundary fact was available. No Surrender, Home exit, Retry, new
+  battle, or Windows-package publication occurred.
+
+### 2026-08-09 weekly-chest scan coverage reuse
+
+- Commits `3747659`, `7707b69`, and `c43293d` remove redundant weekly-track
+  rewinds in three evidence-backed cases: all unlocked checks are visible, an
+  exact OCRed claimed prefix begins at milestone `5`, or the current route has
+  already completed the left-side search. A whole-track miss is also retained
+  in process for later probes at the same unlock level and UTC weekly cycle.
+- A claim target is always checked first. Shifted or gapped check sequences,
+  incomplete or low-confidence OCR, changed progress, a weekly reset, a claim,
+  an unproved left edge, and an incomplete right search all invalidate or bypass
+  reuse and preserve the bounded normalize-and-search fallback.
+- Retained image and mocked state regressions cover the visual cases,
+  post-claim continuation, repeated-probe reuse, progress/reset invalidation,
+  action authority, and the original offscreen discovery path. Focused suites
+  passed 69 and 139 tests; two complete checkpoints at final runtime commit
+  `c43293d` each passed all 2,063 tests, compilation, state definitions, and
+  clickmap integrity with zero errors and the established 44 orphan notices.
+- Production was tagged at `7707b69`, fast-forwarded to `c43293d`, save-attached
+  to the same active battle, and returned to steady state after session
+  preflight. Its first fresh-process mission pass performed the one required
+  conservative traversal of the shifted `35/35` viewport and retained complete
+  coverage through milestone `35`. The next naturally scheduled probe reused
+  that coverage with `weekly_progress_already_reviewed`, zero swipes, and no
+  weekly-track navigation input. Incident history is recorded in
+  [`ISSUE-2026-035`](../issues/resolved-2026.md#weekly-mission-collector-rewound-an-already-claimed-track).
+
+### 2026-08-09 completed-state Perks opener
+
+- Commit `41fc1fd` teaches `navigation.open_perks` to recognize the completed
+  solid `View Perks` state as well as the numeric in-progress state by using the
+  stable outer frame border. This unblocks the Auto Pick Perks check when an
+  attached-session preflight has no reusable current-battle evidence; it does
+  not add periodic mid-battle preflight.
+- The retained completed-state frame scores above `0.999`, and historical
+  numeric-progress positives remain above `0.993`. Home and the pre-battle
+  Perks configuration screen are explicit negative regressions preserving the
+  0.90 safe-tap boundary; retained Daily Missions and Game Over frames also
+  remain below threshold.
+- Focused navigation and tap-safety coverage passed 85 tests, and the complete
+  checkpoint passed all 2,059 tests. Two later post-deployment attachment
+  preflights verified the completed-state opener before guarded input and
+  completed successfully. After merging the later weekly-chest promotions,
+  the combined Perks/preflight/timeline/mission slice passed 288 tests and the
+  exact merged candidate passed all 2,065 tests in 347.55 seconds, compilation,
+  state definitions, and clickmap integrity with zero errors. The defect and
+  follow-up validation are recorded in
+  [`ISSUE-2026-036`](../issues/resolved-2026.md#reattached-battle-stalled-on-the-terminal-view-perks-opener).
+
 ### 2026-08-09 restored-source convergence after guarded serialization
 
 - Commit `7cfad7a` treats successful launcher dispatch as distinct from visible

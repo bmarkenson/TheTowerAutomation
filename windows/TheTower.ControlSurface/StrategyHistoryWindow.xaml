@@ -16,7 +16,7 @@
 
     <StackPanel>
       <TextBlock Text="Immutable Strategy History" FontSize="22" FontWeight="SemiBold" />
-      <TextBlock Text="Review custom Strategy revisions and retired lineages. Restore always publishes a new latest revision; it never selects or activates a Strategy."
+      <TextBlock Text="Review custom Strategy revisions and retired lineages. Restore publishes a new latest revision for the next active boundary or stopped-process Start, without switching the current battle."
                  Foreground="#93A4BB" TextWrapping="Wrap" Margin="0,5,0,0" />
     </StackPanel>
 
@@ -115,7 +115,7 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <TextBlock Text="Historical review and restore do not Pause, restart, select, or activate automation."
+      <TextBlock Text="Historical review does not write. Restore does not Pause, restart, or switch the current battle."
                  Foreground="#93A4BB" FontSize="11" VerticalAlignment="Center"
                  TextWrapping="Wrap" />
       <Button Grid.Column="1" x:Name="RefreshButton" Content="Refresh"

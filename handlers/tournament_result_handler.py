@@ -33,6 +33,9 @@ from core.tournament_conditions import (
     unavailable_tournament_conditions,
 )
 from core.terminal_save_report import terminal_save_report_complete
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_ui_evidence,
+)
 from utils.logger import log
 
 
@@ -47,6 +50,9 @@ def handle_tournament_results(
     battle_context: Optional[Mapping[str, Any]] = None,
     captured_at: Optional[datetime] = None,
     action_guard_fn: Optional[Callable[[], bool]] = None,
+    mapping_observation_fn: Optional[
+        Callable[[str, Mapping[str, Any]], int]
+    ] = None,
 ) -> Optional[dict[str, Any]]:
     """Persist summary and Round Stats, then restore Tournament Stats.
 
@@ -108,6 +114,11 @@ def handle_tournament_results(
             f"{existing.get('tournament_id')}; skipping duplicate capture",
             "INFO",
             console=True,
+        )
+        _record_tournament_mapping_observations(
+            existing,
+            mapping_observation_fn,
+            observed_at=when,
         )
         return existing
 
@@ -201,6 +212,11 @@ def handle_tournament_results(
             runtime_context=context,
             battle_conditions=battle_conditions,
         )
+        _record_tournament_mapping_observations(
+            record,
+            mapping_observation_fn,
+            observed_at=when,
+        )
         json_path, markdown_path = persist_tournament_result(record)
     except Exception as exc:
         log(
@@ -219,6 +235,54 @@ def handle_tournament_results(
     if record["quality"]["retain_source_images"]:
         _retain_evidence(result_id, summary, detailed_frame)
     return record
+
+
+def _record_tournament_mapping_observations(
+    record: Mapping[str, Any],
+    callback: Optional[Callable[[str, Mapping[str, Any]], int]],
+    *,
+    observed_at: datetime,
+) -> None:
+    """Submit independent league/cause observations from a valid summary."""
+
+    if callback is None:
+        return
+    summary = record.get("summary")
+    fields = summary.get("fields") if isinstance(summary, Mapping) else None
+    quality = summary.get("quality") if isinstance(summary, Mapping) else None
+    if not (
+        isinstance(fields, Mapping)
+        and isinstance(quality, Mapping)
+        and quality.get("valid") is True
+    ):
+        return
+    observations = (
+        ("tournament_league", "league"),
+        ("battle_history_killed_by", "killed_by"),
+    )
+    for check_id, locator in observations:
+        field = fields.get(locator)
+        semantic = (
+            str(field.get("value") or "").strip()
+            if isinstance(field, Mapping)
+            else ""
+        )
+        if not semantic:
+            continue
+        try:
+            evidence = build_mapping_candidate_ui_evidence(
+                check_id,
+                canonical_values=[semantic],
+                locator_values={locator: semantic},
+                observed_at=observed_at,
+            )
+            callback(check_id, evidence)
+        except Exception as exc:
+            log(
+                "[PLAYER_SAVE_MAPPING] Tournament mapping observation "
+                f"failed for {check_id} without affecting result capture: {exc}",
+                "WARN",
+            )
 
 
 def dismiss_tournament_results_to_home(

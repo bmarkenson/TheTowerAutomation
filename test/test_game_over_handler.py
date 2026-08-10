@@ -2,6 +2,7 @@
 # test/test_game_over_handler.py
 
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 import cv2
@@ -11,6 +12,7 @@ from handlers.game_over_handler import (
     _capture_game_over_perk_tail,
     _capture_game_over_perks,
     _game_stats_visible,
+    _record_game_over_mapping_observation,
     _resolve_game_over_perks,
     _save_battle_stats_record,
     _wait_for_game_over_direction,
@@ -851,7 +853,12 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
             "valid": True,
             "retain_source_images": False,
             "warnings": [],
-        }
+        },
+        "game_stats": {
+            "fields": {
+                "killed_by": {"value": "Boss", "raw": "B0ss"},
+            }
+        },
     }
     perks = {
         "selected": [
@@ -869,6 +876,7 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
         "collection": "full_terminal_ui",
         "representative": False,
     }
+    mapping_observations = []
     try:
         with (
             patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
@@ -889,6 +897,11 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
             result = handle_game_over(
                 capture_stats=True,
                 report_disposition=disposition,
+                mapping_observation_fn=(
+                    lambda check_id, evidence: mapping_observations.append(
+                        (check_id, evidence)
+                    )
+                ),
             )
     finally:
         AUTOMATION.mode = original_mode
@@ -900,6 +913,12 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
     assert record["perks"] == perks
     assert record["report_disposition"] == disposition
     assert persist.call_args.kwargs["perks_frames"] == [frame]
+    assert len(mapping_observations) == 1
+    check_id, evidence = mapping_observations[0]
+    assert check_id == "battle_history_killed_by"
+    assert evidence["canonical_values"] == ["Boss"]
+    assert evidence["locator_values"] == {"killed_by": "Boss"}
+    assert "B0ss" not in str(evidence)
     assert [call.args[0] for call in tap.call_args_list] == [
         "buttons.more_stats:game_over",
         "buttons.close:more_stats",
@@ -916,6 +935,9 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
             "warnings": [],
         },
         "more_stats": {"quality": {"row_count": 144}},
+        "game_stats": {
+            "fields": {"killed_by": {"value": "Boss", "raw": "B0ss"}}
+        },
     }
     perks = {
         "selected": [
@@ -960,6 +982,9 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
                     "terminal_save_report": _complete_terminal_save_report(),
                 },
                 report_disposition=disposition,
+                mapping_observation_fn=lambda *_args: (_ for _ in ()).throw(
+                    RuntimeError("diagnostic write failed")
+                ),
             )
     finally:
         AUTOMATION.mode = original_mode
@@ -977,6 +1002,22 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
     assert [call.args[0] for call in tap.call_args_list] == [
         "buttons.home:game_over"
     ]
+
+
+def test_terminal_mapping_observation_never_uses_raw_ocr_text():
+    observations = []
+    _record_game_over_mapping_observation(
+        {
+            "quality": {"valid": True},
+            "game_stats": {
+                "fields": {"killed_by": {"value": None, "raw": "B0ss"}}
+            },
+        },
+        lambda check_id, evidence: observations.append((check_id, evidence)),
+        observed_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+    )
+
+    assert observations == []
 
 
 def run_test():

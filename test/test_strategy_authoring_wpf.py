@@ -278,10 +278,13 @@ def test_portable_view_model_suite_covers_editors_states_and_round_trips():
     )
     assert "OrbLocalEditorEmitsExactlyThreeUnnormalizedTextFields" in tests
     assert "ComputedDisplayPropertiesRemainReadOnly" in tests
-    assert "BasePinReviewCoversFirstAttachmentWithoutImplyingActivation" in tests
+    assert (
+        "BasePinReviewExplainsPublicationQueueWithoutCurrentBattleSwitch"
+        in tests
+    )
 
 
-def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
+def test_wpf_rebase_and_publish_reviews_explain_next_boundary_use():
     xaml = _text("StrategyProfilesWindow.xaml")
     code = _text("StrategyProfilesWindow.xaml.cs")
     view_models = _text("StrategyAuthoringViewModels.cs")
@@ -302,10 +305,11 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert 'builder.AppendLine("BASE PIN REVIEW")' in view_models
     assert "draft's pinned Base reference" in view_models
     assert "StrategyAuthoringReviewFormatter.FormatPublishReview" in code
-    assert "Publishing will not activate this Strategy" in view_models
+    assert "Publishing does not switch the current battle" in view_models
+    assert "queues its latest definition for the next battle" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 32" in compatibility
+    assert "MinimumServerRevision = 34" in compatibility
     assert '"better_control_model_v2"' in compatibility
     assert '"current_battle_perks_v1"' in compatibility
     assert '"save_backed_setup_capture_v2"' in compatibility
@@ -512,10 +516,11 @@ def test_wpf_history_review_restore_conflict_and_retired_lineage_workflow():
 
     assert 'x:Name="HistoryButton"' in authoring_xaml
     assert 'Content="History..."' in authoring_xaml
-    assert "new StrategyHistoryWindow(_api)" in authoring_code
+    assert "new StrategyHistoryWindow(_api, _publishedStrategyHandler)" in authoring_code
     assert "history.StrategyRestored +=" in authoring_code
     assert "await LoadCatalogAsync(selectedKind, selectedId)" in authoring_code
-    assert "Runtime selection and activation are unchanged" in authoring_code
+    assert "args.UseMessage" in authoring_code
+    assert "args.UseSucceeded is false" in authoring_code
 
     assert 'Text="Immutable Strategy History"' in history_xaml
     assert 'x:Name="LineagesList"' in history_xaml
@@ -531,7 +536,12 @@ def test_wpf_history_review_restore_conflict_and_retired_lineage_workflow():
     assert "reviewed_restore_fingerprint = _review.ReviewedRestoreFingerprint" in history_code
     assert "RestoreButton.IsEnabled = false" in history_code
     assert "Any open Strategy draft remains unchanged" in history_code
-    assert "will not select or activate the Strategy" in history_code
+    assert "will select the Strategy" in history_code
+    assert "queues its new latest definition" in history_code
+    assert "uses it for Start Automation" in history_code
+    assert "_publishedStrategyHandler" in history_code
+    assert "useResult?.Succeeded" in history_code
+    assert "useResult?.Message" in history_code
     assert "StrategyHistoryReviewFormatter.FormatComparison" in history_code
     assert "Generated plan fingerprint changed" in view_models
     assert "explicit Ignore changes" in view_models

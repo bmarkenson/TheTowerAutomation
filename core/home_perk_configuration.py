@@ -28,6 +28,9 @@ from core.perk_configuration import (
     perk_entries_match,
     semantic_perk_entry,
 )
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_ui_evidence,
+)
 from core.scrolling import capture_scroll_to_edge, guarded_swipe, scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -178,6 +181,10 @@ def ensure_home_perk_configuration(
     ),
     measure_selection_fn: Callable[..., Any] = measure_preset_slot_selection,
     waived_fields: Sequence[str] = (),
+    mapping_observation_fn: Optional[
+        Callable[[str, Mapping[str, Any]], Any]
+    ] = None,
+    repair_observer_fn: Optional[Callable[[str], None]] = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     operator_workflow: bool = True,
 ) -> HomePerkConfigurationResult:
@@ -226,6 +233,16 @@ def ensure_home_perk_configuration(
     )
 
     changed_fields: set[str] = set()
+    repair_announced = False
+
+    def announce_repair(check_id: str) -> None:
+        nonlocal repair_announced
+        if repair_announced:
+            return
+        repair_announced = True
+        if repair_observer_fn is not None:
+            repair_observer_fn(check_id)
+
     current = perks
     first_choice_evidence: dict[str, Any] | None = None
     if (
@@ -267,6 +284,11 @@ def ensure_home_perk_configuration(
             required_first_choice,
             captured_first,
         )
+        _record_initial_mapping_observation(
+            mapping_observation_fn,
+            "perk_first_choice",
+            captured_first,
+        )
         if first_choice_evidence["valid"] is not True:
             quality = captured_first.get("quality")
             selected = captured_first.get("selected")
@@ -280,6 +302,7 @@ def ensure_home_perk_configuration(
                 raise HomePerkConfigurationError(
                     "First Perk Choice was not authoritative enough to repair"
                 )
+            announce_repair("perk_first_choice")
             _rank, target_frame, target_row = _locate_auto_pick_key(
                 first_top,
                 required_first_choice,
@@ -359,6 +382,11 @@ def ensure_home_perk_configuration(
             row_fn=row_fn,
             sleep_fn=sleep_fn,
         )
+        _record_initial_mapping_observation(
+            mapping_observation_fn,
+            "perk_bans",
+            captured_bans,
+        )
     if not _ban_capture_matches(required_bans, captured_bans):
         ban_quality = captured_bans.get("quality")
         if (
@@ -373,6 +401,7 @@ def ensure_home_perk_configuration(
             "starting guarded repair",
             "DEBUG",
         )
+        announce_repair("perk_bans")
         bans_top, captured_bans = _repair_bans(
             bans_top,
             required_bans,
@@ -417,6 +446,11 @@ def ensure_home_perk_configuration(
                 sleep_fn=sleep_fn,
             )
         )
+        _record_initial_mapping_observation(
+            mapping_observation_fn,
+            "perk_auto_pick_order",
+            captured_auto,
+        )
     evidence = evaluate_profile_perk_configuration(
         requirements,
         bans_frame=bans_top,
@@ -446,6 +480,7 @@ def ensure_home_perk_configuration(
             "strategy; starting guarded repair",
             "DEBUG",
         )
+        announce_repair("perk_auto_pick_order")
         auto_frames, current, captured_auto = _repair_auto_pick_order(
             current,
             required_auto_pick,
@@ -1774,6 +1809,54 @@ def _first_choice_comparison(
         "reason": reason,
         "capture": dict(captured),
     }
+
+
+def _record_initial_mapping_observation(
+    callback: Optional[Callable[[str, Mapping[str, Any]], Any]],
+    check_id: str,
+    captured: Mapping[str, Any],
+) -> None:
+    """Report only complete semantic UI evidence before any repair input."""
+
+    if callback is None:
+        return
+    quality = captured.get("quality")
+    selected = captured.get("selected")
+    if (
+        not isinstance(quality, Mapping)
+        or quality.get("valid") is not True
+        or not isinstance(selected, list)
+        or not selected
+    ):
+        return
+    values: list[str] = []
+    for item in selected:
+        if not isinstance(item, Mapping) or item.get("key") is None:
+            return
+        value = str(item["key"]).strip()
+        if not value:
+            return
+        values.append(value)
+    if check_id == "perk_first_choice":
+        locators = {"selected": values[0]} if len(values) == 1 else {}
+    else:
+        locators = {
+            f"rank:{index}": value for index, value in enumerate(values)
+        }
+    try:
+        evidence = build_mapping_candidate_ui_evidence(
+            check_id,
+            canonical_values=values,
+            locator_values=locators,
+        )
+        callback(check_id, evidence)
+    except Exception as exc:
+        # Discovery is diagnostic only and must not alter setup authority.
+        log(
+            "[PLAYER_SAVE_MAPPING] Initial Perk observation callback failed: "
+            f"check={check_id} reason={exc}",
+            "DEBUG",
+        )
 
 
 def _synthetic_configuration_capture(

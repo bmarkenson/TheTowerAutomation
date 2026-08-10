@@ -1026,7 +1026,7 @@ public sealed class StrategyAuthoringViewModelTests
     }
 
     [Fact]
-    public void BasePinReviewCoversFirstAttachmentWithoutImplyingActivation()
+    public void BasePinReviewExplainsPublicationQueueWithoutCurrentBattleSwitch()
     {
         var review = StrategyAuthoringReviewFormatter.FormatRebaseReview(
             new StrategyAuthoringMutationResponse
@@ -1036,7 +1036,8 @@ public sealed class StrategyAuthoringViewModelTests
 
         Assert.Contains("BASE PIN REVIEW", review);
         Assert.Contains("draft's pinned Base reference", review);
-        Assert.Contains("publishing will not activate it", review);
+        Assert.Contains("does not switch the current battle", review);
+        Assert.Contains("queues the published revision", review);
     }
 
     [Fact]
@@ -1087,7 +1088,7 @@ public sealed class StrategyAuthoringViewModelTests
     }
 
     [Fact]
-    public void RestoreReviewExplainsSemanticChangesAndNeverImpliesActivation()
+    public void RestoreReviewExplainsSemanticChangesAndNextBoundaryUse()
     {
         var review = StrategyHistoryReviewFormatter.FormatComparison(
             new StrategyRevisionSummary { LogicalVersion = 2 },
@@ -1148,9 +1149,14 @@ public sealed class StrategyAuthoringViewModelTests
         Assert.Contains("explicit Ignore changes: 1", review);
         Assert.Contains("rules 12 → 14 (+2)", review);
         Assert.Contains("Current trusted validation: passed", review);
-        Assert.Contains("does not mutate the selected revision", review);
-        Assert.Contains("select or activate", review);
-        Assert.Contains("alter Pause/control state", review);
+        Assert.Contains("without mutating the selected revision", review);
+        Assert.Contains("altering Pause/control state", review);
+        Assert.Contains("switching the current battle", review);
+        Assert.Contains(
+            "without mutating the selected revision, restarting automation, "
+                + "altering Pause/control state, or switching the current battle",
+            review);
+        Assert.Contains("queues its latest definition", review);
     }
 
     [Fact]

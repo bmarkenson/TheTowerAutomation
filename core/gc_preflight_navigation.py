@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
@@ -31,6 +32,7 @@ from core.poison_swamp_stun import (
     ensure_poison_swamp_stun,
 )
 from core.player_save import save_check_matches_requirement
+from core.player_save_temporal import ROUND_INVARIANT_ATTACHMENT_CHECKS
 from core.run_controls import go_home_from_run
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -43,6 +45,14 @@ Frame = np.ndarray
 Capture = Callable[[], Optional[Frame]]
 Detector = Callable[[Frame], Mapping[str, Any]]
 HomeControlDetector = Callable[[Frame], HomeBattleEvidence]
+
+
+_ATTACHMENT_SAVE_ONLY_REQUIREMENT_CHECKS = (
+    "card_recharge_modes",
+    "perk_first_choice",
+    "perk_bans",
+    "perk_auto_pick_order",
+)
 
 
 class GcPreflightNavigationStatus(str, Enum):
@@ -102,10 +112,14 @@ def _log_gc_preflight_workflow(func):
         variation_summary = summarize_gc_preflight_variations(evidence_payload)
         if result.status is GcPreflightNavigationStatus.COMPLETE:
             if variation_summary:
+                variation_kind = (
+                    "immutable attachment mismatch reported"
+                    if evidence_payload.get("reported_attachment_mismatches")
+                    else "module variation observed"
+                )
                 summary = (
                     "Session configuration check complete — required settings "
-                    "verified; module variation observed — "
-                    f"{variation_summary}"
+                    f"verified; {variation_kind} — {variation_summary}"
                 )
                 if result.reason.endswith("boundary checks deferred"):
                     summary += "; boundary checks deferred"
@@ -739,9 +753,124 @@ def run_read_only_gc_preflight(
             )
         )
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
+        consume_save = getattr(player_save_preflight, "consume", None)
+        fallback_save_checks = getattr(
+            player_save_preflight,
+            "fallback_checks",
+            None,
+        )
+        attachment_temporal_class = getattr(
+            player_save_preflight,
+            "temporal_class",
+            None,
+        )
+        attachment_report_only = getattr(
+            player_save_preflight,
+            "mismatch_is_report_only",
+            None,
+        )
+        running_attachment = bool(
+            getattr(player_save_preflight, "is_running_attachment", False)
+        )
+        gate_waivers = requirements.get("_gate_waivers")
+        active_gate_waivers = (
+            gate_waivers if isinstance(gate_waivers, Mapping) else {}
+        )
+        attachment_requirement_checks: dict[str, dict[str, Any]] = {}
+        reported_attachment_mismatches: dict[str, dict[str, Any]] = {}
+        attachment_report_only_requirements = (
+            {
+                check_id: copy.deepcopy(requirements[check_id])
+                for check_id in ROUND_INVARIANT_ATTACHMENT_CHECKS
+                if check_id in requirements
+                and check_id not in active_gate_waivers
+            }
+            if stay_in_battle
+            else {}
+        )
+
+        def fallback_carried_check(check_id: str, reason: str) -> None:
+            if callable(fallback_save_checks):
+                fallback_save_checks(reason, check_ids=(check_id,))
+
+        def temporal_class_name(check_id: str) -> str:
+            if not callable(attachment_temporal_class):
+                return ""
+            temporal_class = attachment_temporal_class(check_id)
+            return str(getattr(temporal_class, "value", temporal_class) or "")
+
+        def record_attachment_save_check(
+            check_id: str,
+            expected: Any,
+            observed: Any,
+            *,
+            matches: Optional[bool],
+            disposition: str,
+            blocking: bool,
+        ) -> dict[str, Any]:
+            payload = {
+                "source": "bound_player_save_preflight",
+                "disposition": disposition,
+                "expected": copy.deepcopy(expected),
+                "observed": copy.deepcopy(observed),
+                "valid": matches,
+                "blocking": bool(blocking),
+                "temporal_class": temporal_class_name(check_id),
+            }
+            attachment_requirement_checks[check_id] = payload
+            if disposition == "save_mismatch_reported":
+                reported_attachment_mismatches[check_id] = dict(payload)
+            return payload
+
+        def record_unavailable_attachment_check(check_id: str) -> None:
+            attachment_requirement_checks[check_id] = {
+                "source": "ui_fallback",
+                "disposition": "unavailable_deferred",
+                "expected": copy.deepcopy(requirements[check_id]),
+                "observed": None,
+                "valid": None,
+                "blocking": False,
+                "temporal_class": "",
+                "reason": "attachment_save_fact_unavailable",
+            }
+
+        def saved_mismatch_disposition(
+            check_id: str,
+            expected: Any,
+            observed: Any,
+        ) -> str:
+            report_only = bool(
+                callable(attachment_report_only)
+                and attachment_report_only(check_id)
+            )
+            disposition = (
+                "save_mismatch_reported" if report_only else "save_mismatch"
+            )
+            record_attachment_save_check(
+                check_id,
+                expected,
+                observed,
+                matches=False,
+                disposition=disposition,
+                blocking=not report_only,
+            )
+            log(
+                "[PLAYER_SAVE_ATTACHMENT] Authoritative saved mismatch "
+                f"check={check_id} disposition={disposition} "
+                f"temporal_class={temporal_class_name(check_id) or 'unknown'}",
+                "WARN",
+                console=True,
+            )
+            return disposition
+
         record_save_ui_verification = getattr(
             player_save_preflight,
             "record_ui_verification",
+            None,
+        )
+        record_save_mapping_observation = getattr(
+            player_save_preflight,
+            "record_mapping_observation",
             None,
         )
 
@@ -766,14 +895,10 @@ def run_read_only_gc_preflight(
             raise _NavigationFailure(
                 "profile supplied an invalid Auto Pick Perks requirement"
             )
-        gate_waivers = requirements.get("_gate_waivers")
-        auto_pick_skipped = (
-            isinstance(gate_waivers, Mapping)
-            and "auto_pick_perks" in gate_waivers
-        )
+        auto_pick_skipped = "auto_pick_perks" in active_gate_waivers
         carried_auto_pick = (
-            player_save_preflight.consume("auto_pick_perks")
-            if callable(getattr(player_save_preflight, "consume", None))
+            consume_save("auto_pick_perks")
+            if callable(consume_save)
             else None
         )
         auto_pick_boundary_evidence = (
@@ -784,6 +909,17 @@ def run_read_only_gc_preflight(
             if carried_auto_pick is True and auto_pick_perks is True
             else None
         )
+        if (
+            running_attachment
+            and carried_auto_pick is not None
+            and auto_pick_boundary_evidence is None
+            and auto_pick_perks is not None
+        ):
+            log(
+                "[PLAYER_SAVE_ATTACHMENT] Auto Pick mismatch requires the "
+                "existing guarded in-battle repair",
+                "INFO",
+            )
         perks = None
         if (
             auto_pick_perks
@@ -842,17 +978,6 @@ def run_read_only_gc_preflight(
             if ultimate_boundary_save_backed
             else {}
         )
-        consume_save = getattr(player_save_preflight, "consume", None)
-        fallback_save_checks = getattr(
-            player_save_preflight,
-            "fallback_checks",
-            None,
-        )
-
-        def fallback_carried_check(check_id: str, reason: str) -> None:
-            if callable(fallback_save_checks):
-                fallback_save_checks(reason, check_ids=(check_id,))
-
         accepted_sections: dict[str, dict[str, Any]] = {}
         carried_module_boundary_evidence = None
         if not use_no_battle_evidence and callable(consume_save):
@@ -873,6 +998,18 @@ def run_read_only_gc_preflight(
                     accepted_sections[section] = {
                         "disposition": "save_match",
                         "source": "bound_player_save_preflight",
+                    }
+                elif carried_value is not None and running_attachment:
+                    disposition = saved_mismatch_disposition(
+                        check_id,
+                        requirements[check_id],
+                        carried_value,
+                    )
+                    accepted_sections[section] = {
+                        "disposition": disposition,
+                        "source": "bound_player_save_preflight",
+                        "expected": copy.deepcopy(requirements[check_id]),
+                        "observed": copy.deepcopy(carried_value),
                     }
                 elif carried_value is not None:
                     fallback_carried_check(
@@ -909,6 +1046,26 @@ def run_read_only_gc_preflight(
                             "checked": False,
                             "reason": "bound_player_save_configuration_observation",
                         }
+                    elif (
+                        carried_module_evidence.fully_observed
+                        and running_attachment
+                    ):
+                        disposition = saved_mismatch_disposition(
+                            "modules",
+                            module_requirements,
+                            carried_modules,
+                        )
+                        if disposition == "save_mismatch_reported":
+                            carried_module_boundary_evidence = {
+                                **carried_module_evidence.as_dict(),
+                                "source": "bound_player_save_preflight",
+                                "status": disposition,
+                                "disposition": disposition,
+                                "checked": False,
+                                "reason": (
+                                    "active_battle_module_loadout_is_immutable"
+                                ),
+                            }
                     else:
                         fallback_carried_check(
                             "modules",
@@ -942,10 +1099,55 @@ def run_read_only_gc_preflight(
                         "valid": True,
                     }
                 elif carried_locks is not None:
-                    fallback_carried_check(
-                        "free_upgrade_locks",
-                        "free_upgrade_lock_boundary_requirement_changed",
+                    if running_attachment:
+                        saved_mismatch_disposition(
+                            "free_upgrade_locks",
+                            free_upgrade_lock_requirements,
+                            carried_locks,
+                        )
+                    else:
+                        fallback_carried_check(
+                            "free_upgrade_locks",
+                            "free_upgrade_lock_boundary_requirement_changed",
+                        )
+            if running_attachment:
+                for check_id in _ATTACHMENT_SAVE_ONLY_REQUIREMENT_CHECKS:
+                    if (
+                        check_id not in requirements
+                        or check_id in active_gate_waivers
+                    ):
+                        continue
+                    carried_value = consume_save(check_id)
+                    if carried_value is None:
+                        record_unavailable_attachment_check(check_id)
+                        continue
+                    matches = save_check_matches_requirement(
+                        check_id,
+                        requirements[check_id],
+                        carried_value,
                     )
+                    if matches:
+                        record_attachment_save_check(
+                            check_id,
+                            requirements[check_id],
+                            carried_value,
+                            matches=True,
+                            disposition="save_match",
+                            blocking=False,
+                        )
+                    else:
+                        saved_mismatch_disposition(
+                            check_id,
+                            requirements[check_id],
+                            carried_value,
+                        )
+        if stay_in_battle and not running_attachment:
+            for check_id in _ATTACHMENT_SAVE_ONLY_REQUIREMENT_CHECKS:
+                if (
+                    check_id in requirements
+                    and check_id not in active_gate_waivers
+                ):
+                    record_unavailable_attachment_check(check_id)
         carried_primaries = (
             consume_save("ultimate_weapon_primaries")
             if callable(consume_save)
@@ -986,14 +1188,42 @@ def run_read_only_gc_preflight(
             if callable(consume_save)
             else None
         )
-        if carried_missiles == "on":
-            ultimate_observations.setdefault("Spotlight", {})["missiles"] = "on"
+        if carried_missiles in {"on", "off"}:
+            ultimate_observations.setdefault("Spotlight", {})["missiles"] = str(
+                carried_missiles
+            )
             save_ultimate_observations.setdefault("Spotlight", {})[
                 "missiles"
-            ] = "on"
-        ultimate_ui_required = not _ultimate_observations_complete(
-            ultimate_requirements,
-            ultimate_observations,
+            ] = str(carried_missiles)
+        poison_swamp_label: Optional[str] = None
+        poison_swamp_stun_required: Optional[str] = None
+        for label, toggles in ultimate_requirements.items():
+            if str(label).strip().lower() != "poison swamp":
+                continue
+            poison_swamp_label = str(label).strip()
+            if isinstance(toggles, Mapping) and "stun" in toggles:
+                poison_swamp_stun_required = str(
+                    toggles.get("stun") or ""
+                ).strip().lower()
+            break
+        saved_stun_repair_required = bool(
+            carried_stun in {"on", "off"}
+            and poison_swamp_stun_required in {"on", "off"}
+            and str(carried_stun) != poison_swamp_stun_required
+        )
+        ultimate_ui_required = bool(
+            not _ultimate_observations_complete(
+                ultimate_requirements,
+                ultimate_observations,
+            )
+            or saved_stun_repair_required
+        )
+        ultimate_weapons_source = (
+            "mixed"
+            if save_ultimate_observations and ultimate_ui_required
+            else "bound_player_save_preflight"
+            if save_ultimate_observations
+            else "ui"
         )
         normalized_save_ultimate_observations = {
             str(label).strip().casefold(): {
@@ -1022,17 +1252,6 @@ def run_read_only_gc_preflight(
                     )
                 swipe_fn("towards_top", "extended")
                 sleep_fn(0.5)
-        poison_swamp_label: Optional[str] = None
-        poison_swamp_stun_required: Optional[str] = None
-        for label, toggles in ultimate_requirements.items():
-            if str(label).strip().lower() != "poison swamp":
-                continue
-            poison_swamp_label = str(label).strip()
-            if isinstance(toggles, Mapping) and "stun" in toggles:
-                poison_swamp_stun_required = str(
-                    toggles.get("stun") or ""
-                ).strip().lower()
-            break
         poison_swamp_stun_observed = (
             poison_swamp_stun_required is None
             or any(
@@ -1194,12 +1413,29 @@ def run_read_only_gc_preflight(
                 module_mode=module_mode,
                 ultimate_requirements=ultimate_requirements,
                 ultimate_observations=ultimate_observations,
+                ultimate_weapons_source=ultimate_weapons_source,
                 configuration_boundary_evidence=(
                     configuration_boundary_evidence
                 ),
                 module_boundary_evidence=module_boundary_evidence,
                 detector=detector,
             )
+            if attachment_requirement_checks:
+                validation_args["attachment_requirement_checks"] = (
+                    attachment_requirement_checks
+                )
+            if reported_attachment_mismatches:
+                validation_args["reported_attachment_mismatches"] = (
+                    reported_attachment_mismatches
+                )
+            if attachment_report_only_requirements:
+                validation_args["attachment_report_only_requirements"] = (
+                    attachment_report_only_requirements
+                )
+            if callable(record_save_mapping_observation):
+                validation_args["mapping_observation_fn"] = (
+                    record_save_mapping_observation
+                )
             waivers = requirements.get("_gate_waivers")
             if isinstance(waivers, Mapping) and waivers:
                 validation_args["waivers"] = dict(waivers)
@@ -1225,6 +1461,10 @@ def run_read_only_gc_preflight(
             )
             if not evidence.valid:
                 reason = "configuration mismatch"
+            elif getattr(evidence, "reported_attachment_mismatches", {}):
+                reason = (
+                    "active requirements checked; immutable mismatches reported"
+                )
             elif getattr(evidence, "deferred_checks", ()):
                 reason = "active requirements verified; boundary checks deferred"
             else:
@@ -1437,6 +1677,7 @@ def run_read_only_gc_preflight(
             module_mode=module_mode,
             ultimate_requirements=ultimate_requirements,
             ultimate_observations=ultimate_observations,
+            ultimate_weapons_source=ultimate_weapons_source,
             detector=detector,
         )
         if deferred_checks:
@@ -1446,6 +1687,22 @@ def run_read_only_gc_preflight(
         if carried_module_boundary_evidence is not None:
             validation_args["module_boundary_evidence"] = (
                 carried_module_boundary_evidence
+            )
+        if attachment_requirement_checks:
+            validation_args["attachment_requirement_checks"] = (
+                attachment_requirement_checks
+            )
+        if reported_attachment_mismatches:
+            validation_args["reported_attachment_mismatches"] = (
+                reported_attachment_mismatches
+            )
+        if attachment_report_only_requirements:
+            validation_args["attachment_report_only_requirements"] = (
+                attachment_report_only_requirements
+            )
+        if callable(record_save_mapping_observation):
+            validation_args["mapping_observation_fn"] = (
+                record_save_mapping_observation
             )
         waivers = requirements.get("_gate_waivers")
         if isinstance(waivers, Mapping) and waivers:
@@ -1469,6 +1726,8 @@ def run_read_only_gc_preflight(
         )
         if not evidence.valid:
             reason = "configuration mismatch"
+        elif getattr(evidence, "reported_attachment_mismatches", {}):
+            reason = "active requirements checked; immutable mismatches reported"
         elif getattr(evidence, "deferred_checks", ()):
             reason = "active requirements verified; boundary checks deferred"
         else:

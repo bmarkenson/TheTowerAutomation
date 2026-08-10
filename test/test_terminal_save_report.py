@@ -15,6 +15,7 @@ from core.player_save_acquisition import (
 )
 from core.terminal_save_report import (
     terminal_history_transition_from_acquisition,
+    terminal_mapping_workflow_provenance,
     terminal_save_report_complete,
     terminal_save_report_from_acquisition,
     validate_terminal_history_handoff,
@@ -54,6 +55,7 @@ def _metadata(*, fingerprint: str, count: int, capacity: int = 30):
         "schema_version": 2,
         "source": "player_save",
         "mapping_id": MAPPING_ID,
+        "effective_mapping_fingerprint": "9" * 64,
         "identity_schema_version": 1,
         "fingerprint": fingerprint,
         "tier": 19,
@@ -83,6 +85,7 @@ def _snapshot(
         fingerprint=fingerprint,
         tier=19,
         wave=5000,
+        is_tournament=is_tournament,
         battle_date=_metadata(fingerprint=fingerprint, count=count)["battle_date"],
     )
     tail = SimpleNamespace(
@@ -104,6 +107,9 @@ def _snapshot(
     return SimpleNamespace(
         captured_at="2026-08-06T11:00:00.001000+00:00",
         mapping_id=MAPPING_ID,
+        mapping_resolution="exact",
+        mapping_semantic_fingerprint="8" * 64,
+        effective_mapping_fingerprint="9" * 64,
         save_revision=48000,
         source_sha256="d" * 64,
         runtime_save=SimpleNamespace(
@@ -172,6 +178,81 @@ def test_terminal_save_report_accepts_one_bound_append():
         "capacity": 30,
     }
     assert report["completed_entry"]["fingerprint"] == "c" * 64
+
+
+def test_terminal_mapping_workflow_binds_semantic_neutral_tail():
+    acquisition = _acquisition(
+        _snapshot(count=30, semantic_status="unavailable")
+    )
+    scope = _scope(_metadata(fingerprint="a" * 64, count=29))
+    transition = terminal_history_transition_from_acquisition(
+        acquisition,
+        terminal_state="GAME_OVER",
+        run_binding=_binding(),
+        activity_scope=scope,
+    )
+
+    workflow = terminal_mapping_workflow_provenance(
+        acquisition,
+        terminal_state="GAME_OVER",
+        run_binding=_binding(),
+        activity_scope=scope,
+        history_transition=transition,
+        pid=4242,
+    )
+
+    assert workflow is not None
+    assert workflow["game_state"] == "terminal_game_over"
+    assert workflow["active_round_identity_fingerprint"] == "b" * 64
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "scope_changed",
+        "target_changed",
+        "effective_authority_changed",
+        "terminal_kind_changed",
+        "non_exact_mapping",
+    ),
+)
+def test_terminal_mapping_workflow_rejects_lost_boundary_authority(mutation):
+    snapshot = _snapshot(count=30, semantic_status="unavailable")
+    acquisition = _acquisition(snapshot)
+    scope = _scope(_metadata(fingerprint="a" * 64, count=29))
+    transition = terminal_history_transition_from_acquisition(
+        acquisition,
+        terminal_state="GAME_OVER",
+        run_binding=_binding(),
+        activity_scope=scope,
+    )
+    binding = _binding()
+    terminal = "GAME_OVER"
+    if mutation == "scope_changed":
+        scope = {**scope, "run_id": "replacement-run"}
+    elif mutation == "target_changed":
+        transition["handoff"]["source"][
+            "target_generation_fingerprint"
+        ] = "f" * 64
+    elif mutation == "effective_authority_changed":
+        transition["handoff"]["source"][
+            "effective_mapping_fingerprint"
+        ] = "e" * 64
+    elif mutation == "terminal_kind_changed":
+        terminal = "TOURNAMENT_RESULTS"
+    else:
+        snapshot.mapping_resolution = "compatible_forward_revision"
+
+    workflow = terminal_mapping_workflow_provenance(
+        acquisition,
+        terminal_state=terminal,
+        run_binding=binding,
+        activity_scope=scope,
+        history_transition=transition,
+        pid=4242,
+    )
+
+    assert workflow is None
 
 
 def test_terminal_save_report_accepts_capacity_rollover_and_tournament_kind():

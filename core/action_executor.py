@@ -36,6 +36,9 @@ from core.target_priority import (
     ensure_target_priority_order,
     observe_target_priority_order,
 )
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_ui_evidence,
+)
 from core.level_skip_initializer import initialize_level_skips
 from core.damage_adjuster import (
     configure_damage_slider,
@@ -481,8 +484,20 @@ def execute_actions(
                     log_mission(f"[EXEC] Skip target_priority_ensure while state={last_state}", "DEBUG")
                     continue
                 expected_order = act.get("order")
+                attachment_context = bool(
+                    ctx is not None
+                    and (
+                        ctx.data.get("startup_gates_deferred") is True
+                        or ctx.data.get("manual_return_reconciliation_active")
+                        is True
+                    )
+                )
                 save_coordinator = (
-                    ctx.data.get("player_save_preflight_coordinator")
+                    ctx.data.get(
+                        "player_save_attachment_evidence"
+                        if attachment_context
+                        else "player_save_preflight_coordinator"
+                    )
                     if ctx is not None
                     else None
                 )
@@ -497,16 +512,56 @@ def execute_actions(
                 def observe_target_repair() -> None:
                     nonlocal target_repaired
                     target_repaired = True
+                    close_mapping_window = getattr(
+                        save_coordinator,
+                        "close_mapping_candidate_window",
+                        None,
+                    )
+                    if callable(close_mapping_window):
+                        close_mapping_window("target_priority_repair_started")
 
                 record_ui_verification = getattr(
                     save_coordinator,
                     "record_ui_verification",
                     None,
                 )
+                record_mapping_observation = getattr(
+                    save_coordinator,
+                    "record_mapping_observation",
+                    None,
+                )
+
+                def observe_initial_target_priority(
+                    actual: Iterable[str],
+                ) -> None:
+                    values = [str(value) for value in actual]
+                    if callable(record_mapping_observation):
+                        try:
+                            record_mapping_observation(
+                                "target_priority",
+                                build_mapping_candidate_ui_evidence(
+                                    "target_priority",
+                                    canonical_values=values,
+                                    locator_values={
+                                        f"rank:{index}": value
+                                        for index, value in enumerate(values)
+                                    },
+                                ),
+                            )
+                        except Exception as exc:
+                            log(
+                                "[PLAYER_SAVE_MAPPING] Initial Target Priority "
+                                f"observation failed: {exc}",
+                                "DEBUG",
+                            )
                 if callable(record_ui_verification) or callable(
                     getattr(save_coordinator, "invalidate", None)
                 ):
                     target_kwargs["repair_observer_fn"] = observe_target_repair
+                if callable(record_mapping_observation):
+                    target_kwargs["initial_evidence_observer_fn"] = (
+                        observe_initial_target_priority
+                    )
                 used_ui = False
                 ui_contradiction = False
                 if (
@@ -584,12 +639,54 @@ def execute_actions(
                     )
                     continue
                 expected_order = act.get("order")
+                attachment_context = bool(
+                    ctx is not None
+                    and (
+                        ctx.data.get("startup_gates_deferred") is True
+                        or ctx.data.get("manual_return_reconciliation_active")
+                        is True
+                    )
+                )
+                save_coordinator = (
+                    ctx.data.get(
+                        "player_save_attachment_evidence"
+                        if attachment_context
+                        else "player_save_preflight_coordinator"
+                    )
+                    if ctx is not None
+                    else None
+                )
                 if expected_order is None:
                     observation = observe_target_priority_order()
                 else:
                     observation = observe_target_priority_order(
                         expected=expected_order
                     )
+                record_mapping_observation = getattr(
+                    save_coordinator,
+                    "record_mapping_observation",
+                    None,
+                )
+                if observation.observed and callable(record_mapping_observation):
+                    values = list(observation.actual)
+                    try:
+                        record_mapping_observation(
+                            "target_priority",
+                            build_mapping_candidate_ui_evidence(
+                                "target_priority",
+                                canonical_values=values,
+                                locator_values={
+                                    f"rank:{index}": value
+                                    for index, value in enumerate(values)
+                                },
+                            ),
+                        )
+                    except Exception as exc:
+                        log(
+                            "[PLAYER_SAVE_MAPPING] Target Priority observation "
+                            f"failed: {exc}",
+                            "DEBUG",
+                        )
                 if mv is not None:
                     mv["target_priority_observed"] = True
                     mv["target_priority_observation"] = observation.as_dict()
@@ -644,13 +741,11 @@ def execute_actions(
                 manual_return_context = bool(
                     ctx.data.get("manual_return_reconciliation_active") is True
                 )
-                attached_route = bool(
-                    (
-                        act.get("stay_in_battle_when_attached") is True
-                        and attached_context
-                    )
-                    or manual_return_context
-                )
+                # A process attachment never owns a current-battle teardown or
+                # Home repair.  Its save-first pass stays in the battle for
+                # every strategy; the action flag remains a source-level
+                # declaration rather than an authority grant.
+                attached_route = bool(attached_context or manual_return_context)
                 if mv is not None:
                     save_coordinator = (
                         ctx.data.get("player_save_attachment_evidence")
@@ -719,8 +814,15 @@ def execute_actions(
                     )
                     completion = "[SESSION_PREFLIGHT] Session validation completed"
                     if variation_summary:
+                        variation_kind = (
+                            "immutable attachment mismatch reported"
+                            if evidence_payload.get(
+                                "reported_attachment_mismatches"
+                            )
+                            else "module variation observed"
+                        )
                         completion += (
-                            "; module variation observed — " + variation_summary
+                            f"; {variation_kind} — " + variation_summary
                         )
                     log_mission(completion, "INFO")
                     log_mission(
@@ -734,7 +836,8 @@ def execute_actions(
                     ).strip().lower()
                     observation_only = mismatch_policy == "notify"
                     home_repair_available = bool(
-                        result.evidence is not None
+                        not attached_route
+                        and result.evidence is not None
                         and getattr(
                             result.evidence,
                             "requires_no_battle_repair",

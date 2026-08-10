@@ -31,7 +31,8 @@ The authoring model must:
 - keep a published strategy stable when a base is edited later;
 - resolve and validate all inheritance before runtime;
 - preserve protected generated rules and action sequences; and
-- publish independently from activation.
+- keep backend publication independent from runtime control; a client may
+  follow confirmed publication with a separate allowlisted selection request.
 
 The first implementation supports zero or one base per strategy. Arbitrary
 inheritance chains, mixins, and automatic propagation are deliberately out of
@@ -201,8 +202,11 @@ historical embedded Base rather than current Base lookup, computes the semantic
 comparison, and returns a review fingerprint without writing. Confirmation
 rechecks all three fingerprints under optimistic concurrency and publishes the
 historical intent as the next immutable revision with origin
-`restore_as_new`. It never mutates the selected revision, selects or activates
-the Strategy, restarts automation, changes Pause, or changes runtime control.
+`restore_as_new`. The endpoint never mutates the selected revision, restarts
+automation, changes Pause, or changes runtime control. After success, the native
+workflow separately selects the Strategy and queues its new latest definition
+for the next boundary when the process is active, or uses it as the visible
+Start selection when stopped, without switching the current battle.
 Ordinary authoring, older facade publication, adoption, and restore origins are
 assigned only by trusted server paths.
 
@@ -294,9 +298,11 @@ cannot publish the new reference until Linux has reviewed the complete
 directives intact; cloning is not required merely to establish its first Base.
 
 Accepting the rebase updates the strategy draft and requires normal validation
-and publication. Canceling it changes nothing. Publication and activation
-remain separate operations, so a newly published revision cannot silently
-replace the active runtime strategy.
+and publication. Canceling it changes nothing. Publication and runtime control
+remain separate operations. The native workflow follows successful Strategy
+publication with a normal next-boundary request when the process is active, or
+a visible Start selection when stopped, so it cannot silently replace the
+Strategy in the current battle.
 
 ## Runtime gates and action authority
 
@@ -389,8 +395,9 @@ The authoring surface uses one editor framework for bases and strategies:
   Base and must accept the same backend semantic review before publication;
   this does not clone, rename, or activate the strategy.
 - Review & Publish displays source changes, resolved changes, validation
-  results, generated-plan identity, and whether the active strategy will remain
-  unchanged after publication.
+  results, generated-plan identity, and that the current battle remains
+  unchanged while the native workflow queues the publication for the next
+  boundary when the process is active or selects it for Start when stopped.
 
 The API returns the same source, policy, resolution, provenance, capability,
 and validation vocabulary so the WPF client does not duplicate resolver rules.
@@ -663,8 +670,9 @@ into the runtime evaluator:
   richer authoring model.
 
 Atomic publication, optimistic fingerprint checks, immutable bundled sources,
-safe IDs, file-size limits, no symlink following, and separate activation are
-existing security and concurrency properties that the new stores must retain.
+safe IDs, file-size limits, no symlink following, and separation between the
+authoring write and any later runtime-control request are existing security and
+concurrency properties that the new stores must retain.
 
 ## Migration and delivery
 

@@ -6,15 +6,21 @@ namespace TheTower.ControlSurface;
 
 public sealed class StrategyRestoredEventArgs(
     string strategyId,
-    int logicalVersion) : EventArgs
+    int logicalVersion,
+    bool? useSucceeded = null,
+    string? useMessage = null) : EventArgs
 {
     public string StrategyId { get; } = strategyId;
     public int LogicalVersion { get; } = logicalVersion;
+    public bool? UseSucceeded { get; } = useSucceeded;
+    public string? UseMessage { get; } = useMessage;
 }
 
 public partial class StrategyHistoryWindow : Window
 {
     private readonly ControlSurfaceApi _api;
+    private readonly Func<StrategyPublicationNotice, Task<StrategyPublicationUseResult>>?
+        _publishedStrategyHandler;
     private StrategyHistoryCatalogResponse? _catalog;
     private StrategyHistoryLineage? _lineage;
     private StrategyRevisionSummary? _revision;
@@ -23,9 +29,18 @@ public partial class StrategyHistoryWindow : Window
     private bool _changingSelection;
 
     public StrategyHistoryWindow(ControlSurfaceApi api)
+        : this(api, null)
+    {
+    }
+
+    internal StrategyHistoryWindow(
+        ControlSurfaceApi api,
+        Func<StrategyPublicationNotice, Task<StrategyPublicationUseResult>>?
+            publishedStrategyHandler)
     {
         InitializeComponent();
         _api = api;
+        _publishedStrategyHandler = publishedStrategyHandler;
         Loaded += async (_, _) => await LoadHistoryAsync();
     }
 
@@ -223,7 +238,8 @@ public partial class StrategyHistoryWindow : Window
             + $"as new latest version {_review.NextLogicalVersion}?\n\n"
             + "The retained historical revision will not be changed or moved. Linux will "
             + "rebuild its exact intent with current trusted code and append a new immutable revision.\n\n"
-            + "This will not select or activate the Strategy, restart automation, Pause, or alter runtime control state.";
+            + "After publication, the Windows client will select the Strategy. An active process queues its new latest definition for the next battle; a stopped process uses it for Start Automation without changing the saved startup default. "
+            + "This will not switch the current battle, restart automation, Pause, or grant runtime input authority.";
         if (MessageBox.Show(
                 this,
                 confirmation,
@@ -262,13 +278,37 @@ public partial class StrategyHistoryWindow : Window
             }
             var restoredVersion = response.Profile.Version;
             await LoadHistoryAsync(strategyId, restoredVersion);
+            StrategyPublicationUseResult? useResult = null;
+            if (_publishedStrategyHandler is not null)
+            {
+                try
+                {
+                    useResult = await _publishedStrategyHandler(
+                        new StrategyPublicationNotice(strategyId, restoredVersion));
+                }
+                catch (Exception exc)
+                {
+                    useResult = new StrategyPublicationUseResult(
+                        false,
+                        "The automatic next-boundary request failed after restore: "
+                            + exc.Message);
+                }
+            }
             StrategyRestored?.Invoke(
                 this,
-                new StrategyRestoredEventArgs(strategyId, restoredVersion));
+                new StrategyRestoredEventArgs(
+                    strategyId,
+                    restoredVersion,
+                    useResult?.Succeeded,
+                    useResult?.Message));
             StatusText.Text =
                 $"Restored historical version {selectedVersion} as new latest version "
-                + $"{restoredVersion}. History and latest catalogs were refreshed; nothing was selected or activated.";
-            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(101, 230, 166));
+                + $"{restoredVersion}. History and latest catalogs were refreshed; "
+                + (useResult?.Message
+                    ?? "the current battle was not switched.");
+            StatusText.Foreground = useResult is { Succeeded: false }
+                ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+                : new SolidColorBrush(Color.FromRgb(101, 230, 166));
         }
         catch (Exception exc)
         {

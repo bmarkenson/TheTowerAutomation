@@ -1268,6 +1268,15 @@ def _normalize_history_metadata(raw: Any) -> Optional[dict[str, Any]]:
             "tier": raw.get("tier"),
             "wave": raw.get("wave"),
         }
+        effective_mapping_fingerprint = str(
+            raw.get("effective_mapping_fingerprint") or ""
+        ).strip()
+        if source == "player_save" and len(effective_mapping_fingerprint) != 64:
+            return None
+        if effective_mapping_fingerprint:
+            result["effective_mapping_fingerprint"] = (
+                effective_mapping_fingerprint
+            )
         for key in (
             "battle_date",
             "entry_count",

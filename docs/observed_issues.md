@@ -179,12 +179,16 @@ current runtime state.
 
 - Native selection lacked accepted/current/pending feedback, and a later
   same-ID publication was incorrectly treated as the definition already
-  loaded; preserve unsent choices and keep queue/adopt actions explicit,
-  definition-aware, and boundary-aware.
+  loaded. Preserve failed choices; genuine active-process dropdown changes and
+  successful active-process publication/restore must queue next-boundary use
+  automatically, while stopped publication/restore updates only the visible
+  Start selection and active-battle adoption stays explicit, definition-aware,
+  and boundary-aware.
 - Load the [dossier](issues/open-2026.md#native-strategy-selection-did-not-report-acceptance-or-live-disposition)
   for native strategy confirmation or recurrence. Next: verify same-ID
-  publication/reload, the dropdown's explicit activation actions, queue/adopt
-  feedback, and Pause preservation on Windows; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
+  publication/reload, automatic dropdown queueing, conditional retry,
+  explicit active adoption, feedback, and Pause preservation on Windows;
+  [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
 
 ### Windows client could not identify or reload a stale Linux control service
 
@@ -218,17 +222,6 @@ current runtime state.
 - Load the [dossier](issues/open-2026.md#battle-history-filter-dropdowns-required-repeated-clicks)
   for filter/input recurrence or Windows confirmation. Next: verify one-click
   mouse/keyboard behavior across refreshes; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
-
-### Open in-battle side menu suppressed Mission reward scheduling
-
-**Stable ID:** `ISSUE-2026-015` · **Lifecycle:** `repair_awaiting_confirmation`
-
-- Scheduling ignored a verified open-menu badge;
-  dispatch must select badge evidence from the authoritative open/closed overlay
-  and retain normal action guards.
-- Load the [dossier](issues/open-2026.md#open-in-battle-side-menu-suppressed-mission-reward-scheduling)
-  for open-menu claims, recurrence, or scheduler changes. Next: observe one safe
-  claim from that state; [handler backlog](backlog/handlers.md#mission-rewards).
 
 ### Live ADB target move could not be applied by a paused runtime
 

@@ -58,6 +58,9 @@ from core.player_save_setup_capture import (
     SetupCaptureError,
     module_preset_source_from_capture,
 )
+from core.player_save import confirmed_local_mapping_status
+from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
+from core.player_save_mapping_candidates import AppendOnlyMappingCandidateStore
 from core.strategy_profiles import (
     STRATEGY_AUTHORING_OPERATIONS,
     StrategyProfileConflictError,
@@ -72,13 +75,14 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 32
+CONTROL_SURFACE_REVISION = 34
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "better_control_model_v1",
     "better_control_model_v2",
     "completed_battle_discard",
+    "confirmed_local_mapping_status_v1",
     "current_battle_perks_v1",
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
@@ -92,6 +96,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "persistent_adb_connection_v1",
     "save_backed_setup_capture_v1",
     "save_backed_setup_capture_v2",
+    "save_mapping_review_status_v1",
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
     "strategy_authoring_profile_lifecycle_v1",
@@ -214,6 +219,9 @@ class ControlSurfaceService:
         adb_connection_manager: Optional[PersistentAdbConnectionManager] = None,
         strategy_profile_dir: Path | str = "config/strategies/custom",
         module_preset_dir: Path | str = "config/loadouts/custom/modules",
+        confirmed_local_mapping_dir: Path | str = (
+            "config/player_save_versions/local"
+        ),
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.control_path = self._resolve_path(control_file)
@@ -243,6 +251,14 @@ class ControlSurfaceService:
         self.stale_after_seconds = max(1, int(stale_after_seconds))
         self.strategy_profile_dir = self._resolve_path(strategy_profile_dir)
         self.module_preset_dir = self._resolve_path(module_preset_dir)
+        self.confirmed_local_mapping_store = ConfirmedLocalMappingStore(
+            self._resolve_path(confirmed_local_mapping_dir)
+        )
+        self.mapping_candidate_store = AppendOnlyMappingCandidateStore(
+            self._resolve_path(
+                "logs/player_save_mapping_candidates/receipts-v2.jsonl"
+            )
+        )
         self.profile_store = StrategyProfileStore(
             profile_directory=self.strategy_profile_dir,
             module_preset_directory=self.module_preset_dir,
@@ -1158,6 +1174,11 @@ class ControlSurfaceService:
         healthy = bool(runtime["active"] and observation and not observation["stale"])
         current_run = self._load_activity_scope()
         current_battle_perks = self._current_battle_perks(current_run)
+        confirmed_local_mappings = confirmed_local_mapping_status(
+            store=self.confirmed_local_mapping_store,
+            candidate_store=self.mapping_candidate_store,
+            repository_root=self.repository_root,
+        )
         control_model = self._better_control_model_status(
             control=control,
             acknowledgements=acknowledgements,
@@ -1188,6 +1209,7 @@ class ControlSurfaceService:
                 else None
             ),
             "current_battle_perks": current_battle_perks,
+            "confirmed_local_mappings": confirmed_local_mappings,
             "strategy_action_gate": strategy_action_gate,
             "interactive_development_lease": interactive_development_lease,
             "control_model": control_model,

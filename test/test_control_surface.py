@@ -425,6 +425,51 @@ def test_status_exposes_scope_bound_current_save_perks(tmp_path):
     assert "current_battle_perks_v1" in status["capabilities"]
 
 
+def test_status_exposes_local_mapping_lifecycle_without_blocking_health(tmp_path):
+    mapping_status = {
+        "schema_version": 1,
+        "available": True,
+        "blocks_startup": False,
+        "items": [
+            {
+                "mapping_id": "data-9-game-1101",
+                "check_id": "modules",
+                "value_kind": "module_info_index",
+                "raw_value": 41,
+                "semantic_value": "Being Annihilator",
+                "scope": {
+                    "slot_key": "cannon_assist",
+                    "family": "cannon",
+                    "role": "assist",
+                },
+                "state": "active_local",
+                "reason": "canonical integration is pending",
+            }
+        ],
+        "counts": {"active_local": 1},
+        "reason": "",
+    }
+    lock_handle = _fresh_runtime_lock(tmp_path, state="HOME_SCREEN")
+    try:
+        service = _service(tmp_path)
+        with patch(
+            "core.control_surface.confirmed_local_mapping_status",
+            return_value=mapping_status,
+        ) as status_projection:
+            status = service.status()
+    finally:
+        lock_handle.close()
+
+        status_projection.assert_called_once_with(
+            store=service.confirmed_local_mapping_store,
+            candidate_store=service.mapping_candidate_store,
+            repository_root=service.repository_root,
+        )
+    assert status["confirmed_local_mappings"] == mapping_status
+    assert status["healthy"]
+    assert not status["confirmed_local_mappings"]["blocks_startup"]
+
+
 def test_status_never_exposes_perks_from_another_run(tmp_path):
     _write_current_run_scope(tmp_path, run_id="new-battle")
     timeline_path = (
@@ -1467,13 +1512,21 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 32" in native_compatibility
+    assert "MinimumServerRevision = 34" in native_compatibility
+    assert '"confirmed_local_mapping_status_v1"' in native_compatibility
+    assert "confirmed_local_mapping_status_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_review_status_v1"' in native_compatibility
+    assert "save_mapping_review_status_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert 'id="confirmedLocalMappingAlert"' in html
+    assert 'x:Name="ConfirmedLocalMappingBanner"' in native_xaml
+    assert 'JsonPropertyName("confirmed_local_mappings")' in native_models
+    assert "RenderConfirmedLocalMappings(status.ConfirmedLocalMappings)" in native_code
     assert '"better_control_model_v2"' in native_compatibility
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"current_battle_perks_v1"' in native_compatibility
     assert "current_battle_perks_v1" in CONTROL_SURFACE_CAPABILITIES
-    assert '<TabItem Header="Perks">' in native_xaml
+    assert '<TabItem x:Name="PerksTab" Header="Perks" Tag="perks">' in native_xaml
     assert 'x:Name="CurrentPerksGrid"' in native_xaml
     assert 'JsonPropertyName("current_battle_perks")' in native_models
     assert "RenderCurrentBattlePerks(status.CurrentBattlePerks)" in native_code
@@ -1510,6 +1563,280 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
     assert '"automatic_battle_attachment"' not in native_compatibility
+
+
+def test_native_dashboard_uses_stable_full_width_pages_and_bounded_system_views():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    for page in (
+        '<TabItem x:Name="OverviewTab" Header="Overview" Tag="overview">',
+        '<TabItem x:Name="ActivityTab" Header="Activity" Tag="activity">',
+        '<TabItem x:Name="PerksTab" Header="Perks" Tag="perks">',
+        '<TabItem x:Name="SystemTab" Header="System" Tag="system">',
+    ):
+        assert page in native_xaml
+    for system_page in (
+        '<TabItem Header="Services" Tag="services">',
+        '<TabItem Header="Connections" Tag="connections">',
+        '<TabItem Header="Diagnostics" Tag="diagnostics">',
+    ):
+        assert system_page in native_xaml
+
+    assert 'Header="_View"' in native_xaml
+    assert 'Header="_Tools"' in native_xaml
+    assert 'Header="_Preferences"' in native_xaml
+    assert 'x:Name="SidebarColumn"' not in native_xaml
+    assert 'x:Name="ProcessStateText"' in native_xaml
+    assert 'x:Name="DirectiveRequestText"' in native_xaml
+    assert 'x:Name="StrategyScopeText"' in native_xaml
+    assert 'x:Name="TargetSpeedText"' in native_xaml
+    assert 'x:Name="LinuxApiServiceStatusText"' in native_xaml
+    assert 'x:Name="ConnectionText"' in native_xaml
+    assert 'x:Name="ApiTunnelTopStatusText"' in native_xaml
+    assert 'x:Name="AdbTunnelTopStatusText"' in native_xaml
+
+    assert 'private const string OverviewPageId = "overview";' in native_code
+    assert 'private const string SystemPageId = "system";' in native_code
+    assert "layout.SidebarTabIndex switch" in native_code
+    assert "SelectedPageId(SidebarTabs, OverviewPageId)" in native_code
+    assert "ReferenceEquals(SidebarTabs.SelectedItem, ActivityTab)" in native_code
+    assert 'public string DashboardPage { get; set; } = "";' in native_models
+    assert 'public string SystemPage { get; set; } = "";' in native_models
+
+
+def test_native_preferences_are_bounded_and_adb_drafts_survive_status_polling():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    preferences_xaml = (native_root / "PreferencesWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    preferences_code = (native_root / "PreferencesWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Title="Preferences"' in preferences_xaml
+    assert 'Text="CONTROL API"' in preferences_xaml
+    assert 'Text="SSH AND FORWARDING DEFAULTS"' in preferences_xaml
+    assert 'Text="PRESENTATION AND LOCAL SAMPLING"' in preferences_xaml
+    for field in (
+        "BaseUrlBox",
+        "TokenBox",
+        "SshDestinationBox",
+        "LocalTunnelPortBox",
+        "RemoteApiPortBox",
+        "WindowsBlueStacksAdbPortBox",
+        "LinuxAdbForwardPortBox",
+    ):
+        assert f'x:Name="{field}"' in preferences_xaml
+        assert f'x:Name="{field}"' not in native_xaml
+    assert "PreferencesResult" in preferences_code
+    assert "requireDestination: false" in preferences_code
+    assert "public string Token" not in native_models
+    assert 'private string _apiToken = "";' in native_code
+    assert "Command = TunnelHostCommand.Configure" in native_code
+    assert "Preferences changes saved defaults only." in native_xaml
+
+    for target_field in (
+        "ConfiguredAdbTargetText",
+        "RequestedAdbTargetText",
+        "ActiveAdbTargetText",
+        "AdbDraftStateText",
+        "RevertAdbPortButton",
+    ):
+        assert f'x:Name="{target_field}"' in native_xaml
+    assert 'TextChanged="AdbPortBox_TextChanged"' in native_xaml
+    assert 'Click="RevertAdbPortDraft_Click"' in native_xaml
+    assert "_adbPortDraftDirty" in native_code
+    assert "if (!_adbPortDraftDirty && _configuredAdbPort is not null)" in native_code
+    assert "Draft retained locally" in native_code
+    assert "!AdbPortBox.IsKeyboardFocusWithin" not in native_code
+    assert 'new { action = "set_adb_port", adb_port = adbPort }' in native_code
+
+
+def test_native_overview_uses_contextual_exact_action_slots_and_compact_status():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Header="Timed pause…"' in native_xaml
+    assert 'x:Name="ManualSurrenderPanel" Visibility="Collapsed"' in native_xaml
+    assert 'x:Name="StartBattleButton"' in native_xaml
+    assert 'x:Name="AttachBattleButton"' in native_xaml
+    assert "StartBattleButton.Visibility = start.Available" in native_code
+    assert "AttachBattleButton.Visibility = attach.Available" in native_code
+    assert "ManualSurrenderPanel.Visibility = showTakeManualControl" in native_code
+    assert (
+        "var showReturnControl = giveBack.Available || manualOngoing;"
+        in native_code
+    )
+
+    for field in (
+        "CurrentStrategyValueText",
+        "NextStrategyLabelText",
+        "NextStrategyValueText",
+        "SelectedStrategyValueText",
+        "TerminalPolicyText",
+        "LatestBattleCompactText",
+    ):
+        assert f'x:Name="{field}"' in native_xaml
+    assert 'x:Name="StrategyActionHelpText"' in native_xaml
+    assert (
+        "StrategyActionHelpText.Visibility = _strategySelection.Dirty"
+        in native_code
+    )
+    assert (
+        "TournamentValidationText.Visibility = validationRelevant"
+        in native_code
+    )
+    assert (
+        "CaptureSetupText.Visibility = model?.SetupCapture is not null"
+        in native_code
+    )
+    assert "ConfigureRunText.Visibility = configuredSkips.Count > 0" in native_code
+    assert "Saved request:" in native_code
+    assert "awaiting acknowledgement" in native_code
+    assert 'new { action = tag }' in native_code
+
+
+def test_native_strategy_selection_auto_queues_and_retains_failed_intent():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(encoding="utf-8")
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(encoding="utf-8")
+    coordinator = (native_root / "StrategySelectionCoordinator.cs").read_text(
+        encoding="utf-8"
+    )
+    profiles = (native_root / "StrategyProfilesWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    history = (native_root / "StrategyHistoryWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    capture = (native_root / "SetupCaptureWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Content="Use next battle"' not in native_xaml
+    assert 'Content="Save startup default"' in native_xaml
+    assert 'Content="Switch this battle"' in native_xaml
+    assert '"Retry next battle"' in native_code
+    assert "QueueStrategyButton.Visibility = !_strategyProcessActive" in native_code
+    assert "private async void StrategySelectionBox_SelectionChanged" in native_code
+    assert "if (_updatingStrategySelection)" in native_code
+    assert "_updatingStrategySelection = true" in native_code
+    assert "userDriven: true" in native_code
+    assert "await SubmitStrategyRequestAsync(attempt" in native_code
+    assert "if (!_strategySelection.Dirty)" in native_code
+    assert "if (!userDriven)" in coordinator
+    assert "IsNextBoundaryNoOp" in coordinator
+    assert "_inFlight?.Token == attempt.Token" in coordinator
+    assert "_failedNextBoundaryStrategy = attempt.Strategy" in coordinator
+    assert "StrategyRequestOrigin.PublishedRevision" in coordinator
+    assert "_handledPublications.Add(notice)" in coordinator
+    assert "HasHandledPublication" in coordinator
+    assert "_deferredPublication = notice" in coordinator
+    assert "response.Request is not { Accepted: true } request" in native_code
+    assert "if (!_strategySelection.CompleteFailed(" in native_code
+    assert "if (!_strategySelection.CompleteAccepted(" in native_code
+    assert "RefreshAfterStrategyResponseAsync" in native_code
+    assert 'new { action = "set_strategy", strategy }' in native_code
+    assert "apply_to_active_run = true" in native_code
+    assert "_strategySelection.Dirty && selected is not null" in native_code
+    assert "UsePublishedStrategyAsync" in native_code
+    assert "_publishedStrategyHandler" in profiles
+    assert "_publishedStrategyHandler" in history
+    assert "_publishedStrategyHandler" in capture
+    publication_handler = native_code.split(
+        "private async Task<StrategyPublicationUseResult> UsePublishedStrategyAsync",
+        maxsplit=1,
+    )[1].split("private void SetStrategyRequestFeedback", maxsplit=1)[0]
+    assert publication_handler.index("HasHandledPublication") < (
+        publication_handler.index("EnsureStrategyOption")
+    )
+    start_handler = native_code.split(
+        "private async void Process_Click", maxsplit=1
+    )[1].split("private void AdbPortBox_TextChanged", maxsplit=1)[0]
+    assert 'action = "start"' in start_handler
+    assert "strategy," in start_handler
+
+
+def test_native_status_uses_only_published_dashboard_metrics():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'JsonPropertyName("server_time")' in native_models
+    assert 'JsonPropertyName("current_run")' in native_models
+    assert 'JsonPropertyName("started_at")' in native_models
+    assert 'x:Name="RunElapsedMetricPanel"' in native_xaml
+    assert 'x:Name="RunElapsedText"' in native_xaml
+    assert 'x:Name="WaveMetricPanel" Visibility="Collapsed"' in native_xaml
+    assert (
+        'x:Name="CoinsMinuteMetricPanel" Visibility="Collapsed"'
+        in native_xaml
+    )
+    assert "FormatRunElapsed(" in native_code
+    assert "status.ServerTime" in native_code
+    assert "RunElapsedMetricPanel.Visibility = processActive" in native_code
+    assert 'GameState: "active_battle"' in native_code
+
+    for unsupported_field in (
+        "ExpectedRunDurationText",
+        "PeakCoinsMinuteText",
+        "RecoveryCountdownText",
+        "ReturnNowButton",
+        "ExtendRecoveryButton",
+        "CancelRecoveryButton",
+    ):
+        assert unsupported_field not in native_xaml
+        assert unsupported_field not in native_code
 
 
 def test_better_control_clients_expose_distinct_workflows_and_capture_review():
@@ -1595,9 +1922,12 @@ def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     assert "startup_gate_policy" not in script
     assert "run_state" not in script
     assert "restart_attached" not in script
-    assert 'Content="Use next battle"' in native_xaml
+    assert 'Content="Use next battle"' not in native_xaml
+    assert 'Content="Save startup default"' in native_xaml
+    assert '"Retry next battle"' in native_code
     assert 'Content="Switch this battle"' in native_xaml
-    assert 'Content="Strategy profiles..."' in native_xaml
+    assert 'x:Name="StrategyProfilesButton"' in native_xaml
+    assert 'Header="Strategy profiles…"' in native_xaml
     assert '"strategy_authoring_v1"' in native_compatibility
     assert '"strategy_authoring_profile_lifecycle_v1"' in native_compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in native_compatibility
@@ -1659,6 +1989,45 @@ for (const status of ['no_op', 'stale', 'rejected', 'unavailable', 'interrupted'
   assert.strictEqual(model.workflowPresentation(status).terminal, true);
 }}
 assert.strictEqual(model.workflowPresentation('rejected').label, 'Rejected');
+const activeMapping = model.confirmedLocalMappingPresentation({{
+  available: true,
+  items: [{{
+    state: 'active_local',
+    mapping_id: 'data-9-game-1101',
+    raw_value: 41,
+    semantic_value: 'Being Annihilator',
+    scope: {{slot_key: 'cannon_assist'}},
+    reason: 'canonical integration is pending',
+  }}],
+}});
+assert.strictEqual(activeMapping.visible, true);
+assert.strictEqual(activeMapping.severity, 'warning');
+assert.match(activeMapping.detail, /cannon_assist/);
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  available: true,
+  items: [{{state: 'integrated'}}],
+}}).visible, false);
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  available: true,
+  items: [{{state: 'canonical_conflict'}}],
+}}).severity, 'danger');
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  available: false,
+  reason: 'malformed local confirmation',
+}}).severity, 'danger');
+const mixedMapping = model.confirmedLocalMappingPresentation({{
+  available: true,
+  items: [
+    {{state: 'active_local', reason: 'pending'}},
+    {{state: 'canonical_conflict', reason: 'conflicting canonical value'}},
+  ],
+}});
+assert.strictEqual(mixedMapping.severity, 'danger');
+assert.match(mixedMapping.detail, /conflicting canonical value/);
+assert.strictEqual(
+  model.confirmedLocalMappingPresentation(undefined).visible,
+  true,
+);
 """
     completed = subprocess.run(
         ["node", "-e", script],

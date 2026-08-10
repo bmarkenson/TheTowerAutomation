@@ -15,6 +15,7 @@ from core.home_perk_configuration import (
     _close_to_home,
     _confirm_auto_pick_local_swap,
     _locate_auto_pick_key,
+    _record_initial_mapping_observation,
     _reacquire_auto_pick_move_context,
     _repair_auto_pick_order,
     _repair_bans,
@@ -49,6 +50,48 @@ LABELS = {
     "max_health": "x1.50 max health",
     "empty_slot": "Empty Slot",
 }
+
+
+def test_initial_perk_mapping_observation_is_canonical_and_pre_mutation():
+    observations = []
+
+    _record_initial_mapping_observation(
+        lambda check_id, evidence: observations.append((check_id, evidence)),
+        "perk_auto_pick_order",
+        {
+            "quality": {"valid": True},
+            "selected": [
+                {"key": "perk_wave_requirement"},
+                {"key": "game_speed"},
+            ],
+        },
+    )
+
+    assert len(observations) == 1
+    check_id, evidence = observations[0]
+    assert check_id == "perk_auto_pick_order"
+    assert evidence["canonical_values"] == [
+        "perk_wave_requirement",
+        "game_speed",
+    ]
+    assert evidence["locator_values"] == {
+        "rank:0": "perk_wave_requirement",
+        "rank:1": "game_speed",
+    }
+    assert evidence["complete"] is True
+    assert evidence["pre_mutation"] is True
+
+
+def test_incomplete_perk_capture_does_not_emit_mapping_observation():
+    callback = Mock()
+
+    _record_initial_mapping_observation(
+        callback,
+        "perk_first_choice",
+        {"quality": {"valid": False}, "selected": []},
+    )
+
+    callback.assert_not_called()
 
 
 def _row(key, index):

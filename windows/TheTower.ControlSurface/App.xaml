@@ -31,6 +31,13 @@
       <Setter Property="Foreground" Value="#FFACB9" />
       <Setter Property="BorderBrush" Value="#8D4050" />
     </Style>
+    <Style x:Key="DashboardCard" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="12" />
+    </Style>
     <Style x:Key="ActiveSelectionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Background" Value="#0E4E67" />
       <Setter Property="Foreground" Value="#BCEEFF" />
@@ -243,6 +250,30 @@
       <Setter Property="Foreground" Value="#93A4BB" />
       <Setter Property="Padding" Value="8" />
       <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style TargetType="Menu">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style TargetType="MenuItem">
+      <Setter Property="Background" Value="#111827" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#263349" />
+      <Setter Property="Padding" Value="10,6" />
+      <Style.Triggers>
+        <Trigger Property="IsHighlighted" Value="True">
+          <Setter Property="Background" Value="#0E4E67" />
+          <Setter Property="Foreground" Value="#BCEEFF" />
+        </Trigger>
+        <Trigger Property="IsSubmenuOpen" Value="True">
+          <Setter Property="Background" Value="#0E4E67" />
+          <Setter Property="Foreground" Value="#BCEEFF" />
+        </Trigger>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Foreground" Value="#5F6F85" />
+        </Trigger>
+      </Style.Triggers>
     </Style>
     <Style TargetType="TabItem">
       <Setter Property="Background" Value="#151F31" />

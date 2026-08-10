@@ -73,15 +73,18 @@ def test_known_wrong_generator_module_is_an_authoritative_mismatch():
 
 
 def test_already_correct_gc_modules_do_not_send_correction_actions():
+    observed = []
     result = ensure_gc_module_loadout(
         GC_MODULES,
         screenshot=_load("gc_modules_overview.png"),
         detector=lambda _frame: {"state": "MODULES"},
         equip_fn=lambda _slot: pytest.fail("must not equip"),
         temporary_equip_fn=lambda *_args: pytest.fail("must not use temporary"),
+        initial_evidence_observer_fn=observed.append,
     )
 
     assert result.valid
+    assert observed == [result]
 
 
 def test_gc_module_requirements_must_cover_each_family_role_once():

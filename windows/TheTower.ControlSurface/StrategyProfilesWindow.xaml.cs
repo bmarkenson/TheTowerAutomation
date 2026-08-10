@@ -21,6 +21,8 @@ public partial class StrategyProfilesWindow : Window
     };
 
     private readonly ControlSurfaceApi _api;
+    private readonly Func<StrategyPublicationNotice, Task<StrategyPublicationUseResult>>?
+        _publishedStrategyHandler;
     private readonly ObservableCollection<AuthoringSettingRowViewModel> _rows = [];
     private readonly ICollectionView _settingsView;
     private StrategyAuthoringCatalogResponse? _catalog;
@@ -40,7 +42,15 @@ public partial class StrategyProfilesWindow : Window
     private StrategyAuthoringResolution? _initialCapturedResolution;
 
     public StrategyProfilesWindow(ControlSurfaceApi api)
-        : this(api, null, null)
+        : this(api, null, null, null)
+    {
+    }
+
+    internal StrategyProfilesWindow(
+        ControlSurfaceApi api,
+        Func<StrategyPublicationNotice, Task<StrategyPublicationUseResult>>
+            publishedStrategyHandler)
+        : this(api, null, null, publishedStrategyHandler)
     {
     }
 
@@ -48,9 +58,20 @@ public partial class StrategyProfilesWindow : Window
         ControlSurfaceApi api,
         StrategyAuthoringSource? initialCapturedSource,
         StrategyAuthoringResolution? initialCapturedResolution)
+        : this(api, initialCapturedSource, initialCapturedResolution, null)
+    {
+    }
+
+    internal StrategyProfilesWindow(
+        ControlSurfaceApi api,
+        StrategyAuthoringSource? initialCapturedSource,
+        StrategyAuthoringResolution? initialCapturedResolution,
+        Func<StrategyPublicationNotice, Task<StrategyPublicationUseResult>>?
+            publishedStrategyHandler)
     {
         InitializeComponent();
         _api = api;
+        _publishedStrategyHandler = publishedStrategyHandler;
         _initialCapturedSource = initialCapturedSource is null
             ? null
             : CloneSource(initialCapturedSource);
@@ -65,8 +86,6 @@ public partial class StrategyProfilesWindow : Window
         TierBox.TextChanged += DraftMetadata_Changed;
         Loaded += async (_, _) => await LoadCatalogAsync();
     }
-
-    public string? PublishedStrategyId { get; private set; }
 
     private async Task LoadCatalogAsync(
         string? selectKind = null,
@@ -516,7 +535,7 @@ public partial class StrategyProfilesWindow : Window
     {
         var selectedKind = _isBase ? "base" : "strategy";
         var selectedId = _isBase ? _selectedBase?.Id : _selectedStrategy?.Id;
-        var history = new StrategyHistoryWindow(_api)
+        var history = new StrategyHistoryWindow(_api, _publishedStrategyHandler)
         {
             Owner = this,
         };
@@ -525,8 +544,12 @@ public partial class StrategyProfilesWindow : Window
             await LoadCatalogAsync(selectedKind, selectedId);
             StatusText.Text =
                 $"Refreshed latest catalogs after restoring {args.StrategyId} "
-                + $"as version {args.LogicalVersion}. Runtime selection and activation are unchanged.";
-            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(101, 230, 166));
+                + $"as version {args.LogicalVersion}. "
+                + (args.UseMessage
+                    ?? "The current battle was not switched.");
+            StatusText.Foreground = args.UseSucceeded is false
+                ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+                : new SolidColorBrush(Color.FromRgb(101, 230, 166));
         };
         history.ShowDialog();
     }
@@ -832,6 +855,7 @@ public partial class StrategyProfilesWindow : Window
 
             var publishedKind = _isBase ? "base" : "strategy";
             string successMessage;
+            StrategyPublicationUseResult? useResult = null;
             if (_isBase)
             {
                 successMessage = $"Published Base {response.Source.DisplayName} revision "
@@ -839,9 +863,28 @@ public partial class StrategyProfilesWindow : Window
             }
             else
             {
-                PublishedStrategyId = response.Profile?.Id ?? response.Source.Id;
+                var publishedStrategyId = response.Profile?.Id ?? response.Source.Id;
+                var publishedVersion = response.Profile?.Version ?? 0;
                 successMessage = $"Published Strategy {response.Source.DisplayName} version "
-                    + $"{response.Profile?.Version}. It was not activated.";
+                    + $"{publishedVersion}. It did not switch the current battle.";
+                if (_publishedStrategyHandler is not null)
+                {
+                    try
+                    {
+                        useResult = await _publishedStrategyHandler(
+                            new StrategyPublicationNotice(
+                                publishedStrategyId,
+                                publishedVersion));
+                    }
+                    catch (Exception exc)
+                    {
+                        useResult = new StrategyPublicationUseResult(
+                            false,
+                            "The automatic next-boundary request failed after publication: "
+                                + exc.Message);
+                    }
+                    successMessage += $" {useResult.Message}";
+                }
             }
             if (!string.IsNullOrWhiteSpace(response.Warning))
             {
@@ -862,7 +905,9 @@ public partial class StrategyProfilesWindow : Window
                     response.Source.Id);
             }
             StatusText.Text = successMessage;
-            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(101, 230, 166));
+            StatusText.Foreground = useResult is { Succeeded: false }
+                ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+                : new SolidColorBrush(Color.FromRgb(101, 230, 166));
         }
         catch (Exception exc)
         {

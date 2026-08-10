@@ -1277,7 +1277,7 @@ public static class StrategyAuthoringReviewFormatter
         builder.AppendLine();
         builder.AppendLine(isBase
             ? "Publishing creates a new immutable Base revision. Bases cannot be activated."
-            : "Publishing will not activate this Strategy. Activation remains a separate action in the main Controls pane.");
+            : "Publishing does not switch the current battle. When the managed process is active, the native dashboard automatically selects the published Strategy and queues its latest definition for the next battle; when stopped, Start Automation uses that selection without changing the saved startup default.");
         return builder.ToString().TrimEnd();
     }
 
@@ -1332,7 +1332,7 @@ public static class StrategyAuthoringReviewFormatter
         builder.AppendLine();
         builder.AppendLine(
             "Accepting this review changes only the draft's pinned Base reference. "
-            + "The Strategy must still be validated and published, and publishing will not activate it.");
+            + "The Strategy must still be validated and published. Publication does not switch the current battle; the native dashboard queues the published revision for the next battle when the managed process is active and uses it for Start Automation when stopped.");
         return builder.ToString().TrimEnd();
     }
 
@@ -1442,7 +1442,7 @@ public static class StrategyHistoryReviewFormatter
                         comparison.Validation.Errors.Select(item => item.Message)));
         builder.AppendLine();
         builder.AppendLine(
-            "Confirming publishes a new immutable latest revision. It does not mutate the selected revision, select or activate the Strategy, restart automation, or alter Pause/control state.");
+            "Confirming publishes a new immutable latest revision without mutating the selected revision, restarting automation, altering Pause/control state, or switching the current battle. The native dashboard automatically selects the Strategy, queues its latest definition for the next battle when the managed process is active, and uses it for Start Automation when stopped.");
         return builder.ToString().TrimEnd();
     }
 

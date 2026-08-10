@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
+import os
 import time
 from typing import Any, Callable, Mapping, Optional
 
@@ -32,6 +33,17 @@ from core.player_save_acquisition import (
     StablePlayerSaveAcquirer,
 )
 from core.player_save_history import history_metadata_from_acquisition
+from core.player_save_confirmed_local_mapping import (
+    ConfirmedLocalMappingError,
+    ConfirmedLocalMappingStore,
+)
+from core.player_save_mapping_candidates import (
+    AppendOnlyMappingCandidateStore,
+    PlayerSaveMappingCandidateError,
+    build_mapping_candidate_record,
+    fingerprint_json,
+    resolve_mapping_candidates,
+)
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
@@ -127,6 +139,7 @@ class CarriedPlayerSaveEvidence:
 
     context: PlayerSavePreflightContext
     snapshot_fingerprint: str
+    effective_mapping_fingerprint: str
     values: dict[str, Any]
     state: CarriedEvidenceState = CarriedEvidenceState.PENDING_LAUNCH
     launch_kind: str = "home_new_battle"
@@ -262,6 +275,9 @@ class CarriedPlayerSaveEvidence:
             "state": self.state.value,
             "provenance": self.context.redacted(),
             "snapshot_fingerprint": self.snapshot_fingerprint,
+            "effective_mapping_fingerprint": (
+                self.effective_mapping_fingerprint
+            ),
             "transition": {
                 "kind": self.launch_kind,
                 "source_activity_scope": (
@@ -390,6 +406,12 @@ class PlayerSavePreflightCoordinator:
         pull_fn: Callable[..., bytes] = pull_player_save_bytes,
         decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
         acquirer: Optional[StablePlayerSaveAcquirer] = None,
+        mapping_candidate_store: Optional[
+            AppendOnlyMappingCandidateStore
+        ] = None,
+        confirmed_local_mapping_store: Optional[
+            ConfirmedLocalMappingStore
+        ] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
     ) -> None:
         self._target_snapshot_fn = target_snapshot_fn
@@ -407,11 +429,25 @@ class PlayerSavePreflightCoordinator:
             pull_fn=pull_fn,
             decode_fn=decode_fn,
         )
+        self._mapping_candidate_store = (
+            mapping_candidate_store or AppendOnlyMappingCandidateStore()
+        )
+        self._confirmed_local_mapping_store = (
+            confirmed_local_mapping_store or ConfirmedLocalMappingStore()
+        )
         self._sleep_fn = sleep_fn
         self._carry: Optional[CarriedPlayerSaveEvidence] = None
         self._decisions: dict[str, dict[str, Any]] = {}
         self._ui_verified_checks: dict[str, str] = {}
         self._snapshot_invalidation_reason = ""
+        self._mapping_candidate_context: Optional[
+            PlayerSavePreflightContext
+        ] = None
+        self._mapping_candidate_snapshot: Optional[PlayerSaveSnapshot] = None
+        self._mapping_candidate_records: list[dict[str, Any]] = []
+        self._mapping_candidate_record_ids: set[str] = set()
+        self._mapping_candidate_observation_keys: set[str] = set()
+        self._mapping_candidate_observation_count = 0
 
     @property
     def carry(self) -> Optional[CarriedPlayerSaveEvidence]:
@@ -424,6 +460,10 @@ class PlayerSavePreflightCoordinator:
     @property
     def ui_verified_checks(self) -> Mapping[str, str]:
         return dict(self._ui_verified_checks)
+
+    @property
+    def mapping_candidate_records(self) -> tuple[Mapping[str, Any], ...]:
+        return tuple(dict(record) for record in self._mapping_candidate_records)
 
     def decision(self, check_id: str) -> Mapping[str, Any]:
         return dict(self._decisions.get(str(check_id), {}))
@@ -443,6 +483,7 @@ class PlayerSavePreflightCoordinator:
         self._decisions = {}
         self._ui_verified_checks = {}
         self._snapshot_invalidation_reason = ""
+        self._reset_mapping_candidate_window()
         provenance: dict[str, Any] = {
             "context": {"status": "not_acquired"},
             "serialization": "not_attempted",
@@ -600,6 +641,9 @@ class PlayerSavePreflightCoordinator:
             f"snapshot\0{snapshot.source_sha256}"
         )
         provenance["mapping_id"] = snapshot.mapping_id
+        provenance["effective_mapping_fingerprint"] = (
+            snapshot.effective_mapping_fingerprint
+        )
         provenance["save_version"] = {
             "data": snapshot.data_version,
             "game": snapshot.game_version,
@@ -624,6 +668,16 @@ class PlayerSavePreflightCoordinator:
             check_id: dict(decision)
             for check_id, decision in decisions.items()
         }
+        if (
+            provenance["snapshot_trust"].get("status") == "trusted"
+            and snapshot.mapping_id is not None
+            and snapshot.data_version is not None
+            and snapshot.game_version is not None
+            and snapshot.mapping_resolution
+            in {"exact", "compatible_exact_revision"}
+        ):
+            self._mapping_candidate_context = context
+            self._mapping_candidate_snapshot = snapshot
         try:
             history_observation = history_metadata_from_acquisition(acquisition)
         except Exception:
@@ -649,6 +703,9 @@ class PlayerSavePreflightCoordinator:
                     context=context,
                     snapshot_fingerprint=str(
                         provenance["source_fingerprint"]
+                    ),
+                    effective_mapping_fingerprint=str(
+                        snapshot.effective_mapping_fingerprint or ""
                     ),
                     values=values,
                 )
@@ -687,6 +744,7 @@ class PlayerSavePreflightCoordinator:
         self._decisions = {}
         self._ui_verified_checks = {}
         self._snapshot_invalidation_reason = ""
+        self._reset_mapping_candidate_window()
         context: Optional[PlayerSavePreflightContext]
         try:
             context = self._context_fn()
@@ -740,6 +798,9 @@ class PlayerSavePreflightCoordinator:
                     source_fingerprint=_redacted(
                         f"snapshot\0{acquisition.snapshot.source_sha256}"
                     ),
+                    effective_mapping_fingerprint=(
+                        acquisition.snapshot.effective_mapping_fingerprint
+                    ),
                     snapshot_trust=dict(plan.get("snapshot_trust") or {}),
                     authority=str(plan.get("authority") or ""),
                 )
@@ -764,6 +825,10 @@ class PlayerSavePreflightCoordinator:
                 carry = CarriedPlayerSaveEvidence(
                     context=context,
                     snapshot_fingerprint=str(provenance["source_fingerprint"]),
+                    effective_mapping_fingerprint=str(
+                        acquisition.snapshot.effective_mapping_fingerprint
+                        or ""
+                    ),
                     values=values,
                     state=CarriedEvidenceState.LAUNCH_DISPATCHED,
                     launch_kind="game_over_direct_retry",
@@ -863,6 +928,7 @@ class PlayerSavePreflightCoordinator:
         first_invalidation = not self._snapshot_invalidation_reason
         if first_invalidation:
             self._snapshot_invalidation_reason = normalized_reason
+            self.close_mapping_candidate_window(normalized_reason)
         carry = self._carry
         if carry is not None:
             carry.invalidate(normalized_reason)
@@ -915,6 +981,8 @@ class PlayerSavePreflightCoordinator:
             status = "ui_verified_after_repair"
         if changed or normalized not in self._ui_verified_checks:
             self._ui_verified_checks[normalized] = status
+        if changed:
+            self.close_mapping_candidate_window(f"ui_repair:{normalized}")
         log(
             "[PLAYER_SAVE_PREFLIGHT] Current UI evidence recorded: "
             f"check={normalized} disposition={status} "
@@ -924,6 +992,194 @@ class PlayerSavePreflightCoordinator:
             "INFO",
         )
         return True
+
+    def _reset_mapping_candidate_window(self) -> None:
+        self._mapping_candidate_context = None
+        self._mapping_candidate_snapshot = None
+        self._mapping_candidate_records = []
+        self._mapping_candidate_record_ids = set()
+        self._mapping_candidate_observation_keys = set()
+        self._mapping_candidate_observation_count = 0
+
+    def close_mapping_candidate_window(self, reason: str) -> None:
+        """Prevent a pre-action save from pairing with later UI evidence."""
+
+        if self._mapping_candidate_context is None:
+            return
+        self._mapping_candidate_context = None
+        self._mapping_candidate_snapshot = None
+        log(
+            "[PLAYER_SAVE_MAPPING] Candidate correlation window closed: "
+            f"reason={str(reason or 'ui_mutation')}",
+            "DEBUG",
+        )
+
+    def record_mapping_observation(
+        self,
+        check_id: str,
+        ui_evidence: Mapping[str, Any],
+    ) -> int:
+        """Persist same-boundary discoveries and accept narrow safe values."""
+
+        normalized = str(check_id)
+        context = self._mapping_candidate_context
+        snapshot = self._mapping_candidate_snapshot
+        if (
+            context is None
+            or snapshot is None
+            or self._snapshot_invalidation_reason
+            or not self._same_context(context)
+        ):
+            self.close_mapping_candidate_window("context_changed")
+            return 0
+        decision = self._decisions.get(normalized, {})
+        diagnostics = decision.get("diagnostics")
+        pending = (
+            diagnostics.get("mapping_candidates")
+            if isinstance(diagnostics, Mapping)
+            else None
+        )
+        if (
+            decision.get("snapshot_trusted") is not True
+            or decision.get("ui_required") is not True
+            or not isinstance(pending, list)
+            or not pending
+            or not isinstance(ui_evidence, Mapping)
+            or ui_evidence.get("pre_mutation") is not True
+        ):
+            return 0
+        try:
+            resolved = resolve_mapping_candidates(
+                normalized,
+                pending,
+                ui_evidence,
+            )
+        except PlayerSaveMappingCandidateError:
+            log(
+                "[PLAYER_SAVE_MAPPING] Candidate pairing rejected: "
+                f"check={normalized} reason=unsafe_or_malformed_evidence",
+                "DEBUG",
+            )
+            return 0
+
+        self._mapping_candidate_observation_count += 1
+        workflow = _mapping_candidate_workflow_provenance(
+            context,
+            snapshot,
+            check_id=normalized,
+            observation_number=self._mapping_candidate_observation_count,
+        )
+        mapping = {
+            "mapping_id": snapshot.mapping_id,
+            "data_version": snapshot.data_version,
+            "game_version": snapshot.game_version,
+            "root_class": snapshot.root_class,
+            "resolution": snapshot.mapping_resolution,
+            "authority_mapping_id": snapshot.mapping_authority_id,
+            "structural_mapping_id": snapshot.mapping_structural_id,
+            "canonical_dependency_fingerprint": (
+                snapshot.mapping_semantic_fingerprint
+            ),
+        }
+        snapshot_fingerprint = _full_fingerprint(
+            "mapping-candidate-snapshot",
+            snapshot.source_sha256,
+            snapshot.mapping_semantic_fingerprint,
+        )
+        ui_fingerprint = fingerprint_json(dict(ui_evidence))
+        source_fingerprint = ui_evidence.get(
+            "source_observation_fingerprint"
+        )
+        recorded = 0
+        for candidate in resolved:
+            observation_key = fingerprint_json(
+                {
+                    "check_id": normalized,
+                    "source_observation_fingerprint": source_fingerprint,
+                    "candidate": candidate,
+                }
+            )
+            if observation_key in self._mapping_candidate_observation_keys:
+                continue
+            try:
+                record = build_mapping_candidate_record(
+                    mapping=mapping,
+                    check_id=normalized,
+                    candidate=candidate,
+                    snapshot_fingerprint=snapshot_fingerprint,
+                    ui_evidence_fingerprint=ui_fingerprint,
+                    source_observation_fingerprint=source_fingerprint,
+                    workflow_provenance=workflow,
+                    observed_at=ui_evidence.get("observed_at"),
+                )
+            except PlayerSaveMappingCandidateError:
+                continue
+            record_id = str(record["record_id"])
+            if record_id in self._mapping_candidate_record_ids:
+                continue
+            try:
+                appended = self._mapping_candidate_store.append_once(record)
+            except Exception:
+                log(
+                    "[PLAYER_SAVE_MAPPING] Candidate receipt write failed: "
+                    f"check={normalized} reason=append_failed; UI fallback "
+                    "and action authority are unchanged",
+                    "WARN",
+                    console=True,
+                )
+                continue
+            self._mapping_candidate_record_ids.add(record_id)
+            self._mapping_candidate_observation_keys.add(observation_key)
+            self._mapping_candidate_records.append(record)
+            if appended:
+                recorded += 1
+            payload = record["candidate"]
+            log(
+                "[PLAYER_SAVE_MAPPING] Candidate observation recorded: "
+                f"mapping_id={record['mapping']['mapping_id']} "
+                f"check={normalized} value_kind={payload['value_kind']} "
+                f"raw={payload['raw_discriminator']['value']} "
+                f"semantic={payload['semantic_value']!r} "
+                f"status={payload['status']} disposition=candidate_only",
+                "INFO",
+                console=True,
+            )
+            if not (
+                payload["status"] == "ready_for_review"
+                and payload["check_id"] == "modules"
+                and payload["value_kind"] == "module_info_index"
+                and snapshot.mapping_semantic_fingerprint is not None
+            ):
+                continue
+            try:
+                durable_record = self._mapping_candidate_store.get(record_id)
+                accepted = self._confirmed_local_mapping_store.accept_candidate(
+                    durable_record
+                )
+            except (
+                ConfirmedLocalMappingError,
+                PlayerSaveMappingCandidateError,
+                OSError,
+            ) as exc:
+                log(
+                    "[PLAYER_SAVE_MAPPING] Local confirmation write failed: "
+                    f"check={normalized} reason={exc}; the durable candidate "
+                    "receipt remains pending and UI fallback is unchanged",
+                    "WARN",
+                    console=True,
+                )
+                continue
+            log(
+                "[PLAYER_SAVE_MAPPING] Exact-version local confirmation "
+                f"{'accepted' if accepted['changed'] else 'already active'}: "
+                f"event_id={accepted['event_id']} generation="
+                f"{accepted['generation']}; it becomes eligible only on a "
+                "later fresh save decode and canonical integration remains "
+                "pending",
+                "WARN",
+                console=True,
+            )
+        return recorded
 
     def mark_runtime_launch(
         self,
@@ -1266,6 +1522,57 @@ def _history_ui_decision(
         "safe_ui_fallback": safe_ui_fallback,
         "fallback": "existing_battle_history_ui",
     }
+
+
+def _mapping_candidate_workflow_provenance(
+    context: PlayerSavePreflightContext,
+    snapshot: PlayerSaveSnapshot,
+    *,
+    check_id: str,
+    observation_number: int,
+) -> dict[str, Any]:
+    capture_identity = _full_fingerprint(
+        "home-save-capture",
+        context.runtime_session_id,
+        context.preflight_session_id,
+        snapshot.source_sha256,
+    )
+    return {
+        "capture_request_id": f"capture-{capture_identity[:32]}",
+        "inspection_request_id": (
+            f"inspection-{str(check_id)[:64]}-{observation_number}"
+        ),
+        "runtime_session_fingerprint": _full_fingerprint(
+            "runtime-session", context.runtime_session_id
+        ),
+        "pid": max(1, os.getpid()),
+        "target_generation_fingerprint": _full_fingerprint(
+            "target-generation",
+            context.target,
+            context.target_generation,
+        ),
+        "activity_scope_fingerprint": _full_fingerprint(
+            "activity-scope", context.activity_scope_id
+        ),
+        "game_state": "home_new_battle",
+        "active_round_identity_fingerprint": None,
+        "boundary_fingerprint": _full_fingerprint(
+            "home-new-battle-boundary",
+            context.runtime_session_id,
+            context.preflight_session_id,
+            context.activity_scope_id,
+            context.strategy_name,
+            context.configuration_fingerprint,
+            context.target,
+            context.target_generation,
+            snapshot.source_sha256,
+        ),
+    }
+
+
+def _full_fingerprint(label: str, *values: Any) -> str:
+    rendered = "\0".join([str(label), *(str(value) for value in values)])
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
 def _redacted(value: Any) -> str:

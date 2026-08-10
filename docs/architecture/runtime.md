@@ -813,30 +813,45 @@ battle gains validation-battle Surrender authority.
 Automatic validation of an already-running Tournament does not use the
 exclusive validation receipt. Any still-pending pre-Tournament request is
 cancelled before attachment work begins. The same guarded attachment
-acquisition supplies a one-use temporal carrier for round-invariant Workshop,
-Bot, Guardian, and Module facts. Exact Workshop, Bot, and Guardian matches omit
-their redundant UI sections. A complete Module fact also omits Modules UI when
-it matches an enforced loadout or when the policy is observation-only; an
-observation-only variation remains visible in session evidence. Missing,
-mismatched, or rebound Bot, Guardian, or enforced Module evidence retains its
-existing UI check. Missing or mismatched Workshop evidence remains explicitly
-deferred because the attachment never invokes Exit Battle → Go Home → Resume
-Battle. Cards and Ultimate Weapons retain their in-battle UI paths because
-their attachment facts do not have round-invariant authority. This adds no
-game-Home route, Android lifecycle action, or second save read. Once that
-selective inventory pass reaches a conclusive result, the explicitly
+acquisition supplies one exact-bound, one-use carrier for every complete
+validated configuration fact projected from that forced save. Process, target
+generation, activity scope, and active-battle ownership are rechecked at each
+consumption. Temporal class determines mismatch handling; it no longer makes a
+complete fact ineligible for this attachment check.
+
+An exact saved match omits the corresponding Cards, Workshop, Bot, Guardian,
+Module, Free Upgrade-lock, Auto Pick, Card Recharge, Perk configuration, Target
+Priority, or Ultimate Weapon UI route. A missing, incomplete, unsupported, or
+unparseable fact retains only that field's supported UI fallback; a field with
+no current-battle UI route remains explicitly deferred or unavailable, as does
+an unresolved Home-only Workshop fact. A complete
+saved mismatch is not sent to UI merely for confirmation. Workshop, Free
+Upgrade locks, selected Bot preset, equipped Guardians, equipped Modules,
+First Perk Choice, Perk Bans, and Perk Auto Pick order are immutable for the
+active battle, so their mismatch is
+logged as nonblocking session evidence and the pass continues. The same rule
+applies when a fallback UI produces a fully observed mismatch for one of those
+immutable fields. A mutable mismatch follows its existing guarded in-battle
+repair when one exists, such as Auto Pick, or the strategy's mismatch decision
+without a redundant confirmation traversal. Profile and run waivers are
+applied before attachment reconciliation; a waived fact is not consumed,
+warned, or made blocking. Ultimate Weapon component
+evidence records its save/UI source explicitly.
+
+Every process attachment stays in the current battle. It gains no game-Home
+route, Android lifecycle action, second save read, Home-repair request, or
+Surrender authority. Once that selective inventory pass reaches a conclusive
+result, the explicitly
 `run_when_attached` battle-only rules enforce Damage Slider `100%` and the
 configured Orb Distance for an authoritative configured Attack Range; a
 readable unconfigured Range is preserved without opening Distance Adjuster.
-The attachment path never selects a Home preset, equips a loadout, requests
-Home repair, or gains Surrender authority. The separate guarded process-reload
+The attachment path never selects a Home preset or equips a loadout. The
+separate guarded process-reload
 workflow retains its explicit `next_run` compatibility policy; it is not the
 user-facing validation choice.
-A mismatch is retained as session evidence but cannot request Home repair or
-block result capture. Observation-only mismatches complete the one-shot pass
-without an operator decision or run-scoped waiver; they cannot make the
-inventory traversal repeat. This attachment path never gains Surrender
-authority.
+Observation-only and immutable mismatches complete the one-shot pass without
+an operator decision or run-scoped waiver; they cannot make the inventory
+traversal repeat or block result capture.
 
 In-battle side-menu destinations and Event/Guild tabs require visible template
 matches and tap the matched bounding box. Their static coordinates are not
@@ -909,12 +924,14 @@ implying that a No Strategy inventory pass occurred. Their declared intent and
 verified values remain under `run_configuration` and
 `runtime.session_preflight_evidence`, respectively.
 
-The actual-loadout merge classifies Workshop, equipped Guardians, selected Bot
-preset, and equipped Modules as round-invariant. It keeps a complete save claim
+The actual-loadout merge classifies Workshop, Free Upgrade locks, equipped
+Guardians, selected Bot preset, equipped Modules, First Perk Choice, Perk Bans,
+and Perk Auto Pick order as round-invariant. It keeps a complete save claim
 when later Guardian or Module UI evidence is partial, and any differing
-complete same-round invariant fails closed as `unavailable` instead of using
-the latest value. Cards remain point-in-time, while Bot progression remains a
-separate fact from the selected preset. Every published save field carries
+complete same-round invariant fails
+closed as `unavailable` instead of using the latest value. Cards remain
+point-in-time, while Bot progression remains a separate fact from the selected
+preset. Every published save field carries
 redacted exact mapping, target-generation, final-scope, round, capture, and
 temporal provenance.
 
@@ -1281,6 +1298,19 @@ warning text in `actions.log`.
   stop/repair/restart sequence. Ambiguous or unknown module identity and other
   non-Home repair classes remain blocked. The matcher reports evidence but
   never directly authorizes an equipment action.
+- A terminal running-session decision is scoped to the first recognized failed
+  requirement retained in structured session-preflight evidence, falling back
+  to the manager's retained failed-check list only when needed. A generic
+  validator reason is replaced with the evidence summary, including normalized
+  expected and observed save-backed values when available; a specific repair or
+  transition failure remains authoritative. If neither source identifies a
+  recognized requirement, the blocking diagnostic decision offers Retry only:
+  it cannot write a synthetic `session_preflight` waiver or authorize repair.
+  Persisted generic or unscoped decisions are consumed before a corrected
+  request replaces them. Once the same Strategy subsequently records a
+  successful complete session preflight, its pending or resolved
+  `session_preflight` decision is consumed; decisions for another Strategy or
+  phase remain untouched.
 - A guarded configuration repair must reach verified Home `NEW_BATTLE`, use
   fresh detail/name and action guards for module changes, reapply the complete
   profile-owned no-battle setup, start the next battle, and require fresh

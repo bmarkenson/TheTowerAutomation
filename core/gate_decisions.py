@@ -166,6 +166,7 @@ def build_gate_decision_options(
     *,
     advisory: bool = False,
     allow_repair_restart: bool = False,
+    allow_waive: bool = True,
 ) -> list[dict[str, str]]:
     """Return safe operator choices for one failed requirement."""
 
@@ -177,30 +178,31 @@ def build_gate_decision_options(
         (str, bytes),
     ):
         configured_fallbacks = ()
-    for raw in configured_fallbacks:
-        if not isinstance(raw, Mapping):
-            continue
-        option_id = str(raw.get("id") or "").strip().lower()
-        label = str(raw.get("label") or "").strip()
-        description = str(raw.get("description") or "").strip()
-        if not option_id or not label or option_id in seen:
-            continue
-        option = {
-            "id": option_id,
-            "label": label,
-            "action": "waive",
-            "kind": "fallback",
-        }
-        if description:
-            option["description"] = description
-        value = str(raw.get("value") or "").strip()
-        if value:
-            option["value"] = value
-        options.append(option)
-        seen.add(option_id)
+    if allow_waive:
+        for raw in configured_fallbacks:
+            if not isinstance(raw, Mapping):
+                continue
+            option_id = str(raw.get("id") or "").strip().lower()
+            label = str(raw.get("label") or "").strip()
+            description = str(raw.get("description") or "").strip()
+            if not option_id or not label or option_id in seen:
+                continue
+            option = {
+                "id": option_id,
+                "label": label,
+                "action": "waive",
+                "kind": "fallback",
+            }
+            if description:
+                option["description"] = description
+            value = str(raw.get("value") or "").strip()
+            if value:
+                option["value"] = value
+            options.append(option)
+            seen.add(option_id)
 
     if advisory:
-        return [
+        advisory_options = [
             {
                 "id": "pause_for_changes",
                 "label": "Pause for manual changes",
@@ -218,17 +220,21 @@ def build_gate_decision_options(
                 "action": "retry",
                 "kind": "standard",
             },
-            {
-                "id": "continue_observing",
-                "label": f"Continue despite {normalized_check}",
-                "description": (
-                    "Acknowledge only this mismatch; Tournament result capture "
-                    "continues."
-                ),
-                "action": "waive",
-                "kind": "standard",
-            },
         ]
+        if allow_waive:
+            advisory_options.append(
+                {
+                    "id": "continue_observing",
+                    "label": f"Continue despite {normalized_check}",
+                    "description": (
+                        "Acknowledge only this mismatch; Tournament result "
+                        "capture continues."
+                    ),
+                    "action": "waive",
+                    "kind": "standard",
+                }
+            )
+        return advisory_options
 
     if allow_repair_restart:
         options.append(
@@ -246,7 +252,7 @@ def build_gate_decision_options(
         )
         seen.add("restart_and_repair")
 
-    defaults = (
+    defaults = [
         {
             "id": "retry",
             "label": "Retry the required check",
@@ -254,14 +260,19 @@ def build_gate_decision_options(
             "action": "retry",
             "kind": "standard",
         },
-        {
-            "id": "bypass_once",
-            "label": f"Bypass {normalized_check} for this run",
-            "description": "Waive only this check; every other startup check still runs.",
-            "action": "waive",
-            "kind": "standard",
-        },
-    )
+    ]
+    if allow_waive:
+        defaults.append(
+            {
+                "id": "bypass_once",
+                "label": f"Bypass {normalized_check} for this run",
+                "description": (
+                    "Waive only this check; every other startup check still runs."
+                ),
+                "action": "waive",
+                "kind": "standard",
+            }
+        )
     for option in defaults:
         if option["id"] not in seen:
             options.append(dict(option))

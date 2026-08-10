@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -101,6 +102,9 @@ from core.player_save_history import (
     PlayerSaveAttachmentContext,
     PlayerSaveHistoryReader,
 )
+from core.player_save_mapping_observer import (
+    BoundPlayerSaveMappingObserver,
+)
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
@@ -119,6 +123,7 @@ from core.profile_progression import unavailable_profile_progression
 from core.terminal_save_report import (
     terminal_save_report_complete,
     terminal_history_transition_from_acquisition,
+    terminal_mapping_workflow_provenance,
     terminal_save_report_from_acquisition,
     unavailable_terminal_save_report,
 )
@@ -149,8 +154,10 @@ from core.gc_no_battle_setup import (
     recover_gc_no_battle_setup_home,
     run_gc_no_battle_setup,
 )
+from core.gc_preflight import summarize_gc_preflight_mismatch
 from core.game_speed import GameSpeedGuard
 from core.gate_decisions import (
+    STARTUP_GATE_CHECK_LABELS,
     build_gate_decision_options,
     merge_profile_skip_waivers,
     startup_gate_check_catalog,
@@ -166,6 +173,7 @@ from core.menu_reward_badges import (
 )
 from core.mission_reward_scheduler import (
     MissionRewardScheduler,
+    WeeklyChestReviewState,
     daily_mission_claims_allowed,
 )
 from core.run_state import AUTOMATION, ExecMode, RunState
@@ -218,6 +226,13 @@ Frame = NDArray[np.uint8]
 HOME_SETUP_MAX_ATTEMPTS = 3
 BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS = 20.0
 _BATTLE_SCOPE_UNSET = object()
+_GENERIC_SESSION_PREFLIGHT_REASONS = frozenset(
+    {
+        "configuration mismatch",
+        "session preflight mismatch",
+        "running-battle strategy validation failed",
+    }
+)
 
 
 class App:
@@ -449,6 +464,7 @@ class App:
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
         self._mission_reward_scheduler = MissionRewardScheduler()
+        self._weekly_chest_review_state = WeeklyChestReviewState()
         event_mission_state = (
             Path(config.control_file).parent / "event_mission_tracker.json"
         )
@@ -825,7 +841,7 @@ class App:
     ) -> dict[str, Any]:
         """Build terminal context without crossing an unproven run boundary."""
 
-        context, _acquisition = self._terminal_battle_bundle(
+        context, _acquisition, _mapping_observer = self._terminal_battle_bundle(
             terminal_state,
             observed_run_configuration=observed_run_configuration,
         )
@@ -836,7 +852,11 @@ class App:
         terminal_state: str,
         *,
         observed_run_configuration: Optional[Mapping[str, Any]] = None,
-    ) -> tuple[dict[str, Any], Optional[PlayerSaveAcquisitionBundle]]:
+    ) -> tuple[
+        dict[str, Any],
+        Optional[PlayerSaveAcquisitionBundle],
+        Optional[BoundPlayerSaveMappingObserver],
+    ]:
         """Build terminal context and return its one exact typed acquisition."""
 
         terminal = str(terminal_state or "UNKNOWN").upper()
@@ -896,7 +916,9 @@ class App:
                     console=True,
                 )
                 self._last_unbound_terminal_signature = signature
-            return context, typed_acquisition
+            return context, typed_acquisition, terminal_save.get(
+                "_mapping_observer"
+            )
 
         self._last_unbound_terminal_signature = None
         strategy = self._mission_mgr.strategy
@@ -934,7 +956,9 @@ class App:
             context["observed_run_configuration"] = dict(
                 observed_run_configuration
             )
-        return context, typed_acquisition
+        return context, typed_acquisition, terminal_save.get(
+            "_mapping_observer"
+        )
 
     def _capture_terminal_player_save(
         self,
@@ -1093,6 +1117,56 @@ class App:
             activity_continuity.publish_terminal_history_handoff(
                 history_transition
             )
+        mapping_observer = None
+        try:
+            workflow_provenance = terminal_mapping_workflow_provenance(
+                acquisition,
+                terminal_state=terminal,
+                run_binding=run_binding,
+                activity_scope=scope,
+                history_transition=history_transition,
+                pid=max(1, os.getpid()),
+            )
+        except Exception:
+            workflow_provenance = None
+        if workflow_provenance is not None:
+            boundary = acquisition.boundary
+            expected_scope_id = (
+                str(scope.get("run_id") or "")
+                if isinstance(scope, Mapping)
+                else ""
+            )
+
+            def terminal_context_guard() -> bool:
+                try:
+                    current_scope = get_activity_scope()
+                    target_snapshot = session.snapshot()
+                except Exception:
+                    return False
+                return bool(
+                    boundary is not None
+                    and str(
+                        getattr(
+                            self,
+                            "_player_save_runtime_session_id",
+                            "",
+                        )
+                        or ""
+                    )
+                    == boundary.runtime_session_id
+                    and isinstance(current_scope, Mapping)
+                    and str(current_scope.get("run_id") or "")
+                    == expected_scope_id
+                    and acquisition.matches_binding(
+                        PlayerSaveTargetBinding.from_snapshot(target_snapshot)
+                    )
+                )
+
+            mapping_observer = BoundPlayerSaveMappingObserver(
+                snapshot=snapshot,
+                context_guard_fn=terminal_context_guard,
+                workflow_provenance=workflow_provenance,
+            )
         try:
             terminal_report = terminal_save_report_from_acquisition(
                 acquisition,
@@ -1118,6 +1192,7 @@ class App:
             "profile_progression": normalized_progression,
             "terminal_save_report": terminal_report,
             "_acquisition": acquisition,
+            "_mapping_observer": mapping_observer,
         }
         if terminal == "TOURNAMENT_RESULTS":
             try:
@@ -3191,7 +3266,9 @@ class App:
                     self._supervisor.persist_state("PAUSED")
                 return recorded
             self._manual_terminal_claims().pop(manual_id, None)
-        context, acquisition = self._terminal_battle_bundle("GAME_OVER")
+        context, acquisition, _mapping_observer = self._terminal_battle_bundle(
+            "GAME_OVER"
+        )
         report = context.get("terminal_save_report")
         status = "unavailable"
         reason = (
@@ -6836,6 +6913,7 @@ class App:
         expected: object,
         blocking: bool = True,
         allow_repair_restart: bool = False,
+        allow_waive: bool = True,
     ) -> Optional[Dict[str, Any]]:
         repair_authority = None
         if allow_repair_restart:
@@ -6850,9 +6928,14 @@ class App:
                 allow_repair_restart = False
         options = build_gate_decision_options(
             check_id,
-            self._mission_mgr.gate_fallbacks(check_id),
+            (
+                self._mission_mgr.gate_fallbacks(check_id)
+                if allow_waive
+                else ()
+            ),
             advisory=not blocking,
             allow_repair_restart=allow_repair_restart,
+            allow_waive=allow_waive,
         )
         directive = self._supervisor.publish_gate_decision(
             strategy=self._current_strategy_name(),
@@ -6900,6 +6983,8 @@ class App:
     def _matching_gate_decision(
         self,
         phase: str,
+        *,
+        prompt_pending: bool = True,
     ) -> Optional[Dict[str, Any]]:
         directive = self._gate_decision_directive()
         if not directive or directive.get("status") == "consumed":
@@ -6910,7 +6995,7 @@ class App:
             or str(directive.get("phase") or "").lower() != phase
         ):
             return None
-        if directive.get("status") == "pending":
+        if directive.get("status") == "pending" and prompt_pending:
             directive = self._prompt_for_gate_decision(directive) or directive
         return directive
 
@@ -6931,6 +7016,11 @@ class App:
             return False
         action = str(selected.get("action") or "").lower()
         if action == "waive":
+            if (
+                phase == "session_preflight"
+                and check_id not in STARTUP_GATE_CHECK_LABELS
+            ):
+                return False
             waiver = {
                 "request_id": request_id,
                 "decision_id": str(directive.get("decision_id") or ""),
@@ -7008,29 +7098,146 @@ class App:
         )
         return True
 
+    def _session_preflight_gate_context(
+        self,
+    ) -> Tuple[list[str], str]:
+        """Return scoped failed checks and the best retained operator reason."""
+
+        mission_vars = self._mission_mgr.ctx.data.get("mission_vars", {})
+        if not isinstance(mission_vars, Mapping):
+            mission_vars = {}
+        raw_evidence = mission_vars.get("gc_session_preflight_evidence")
+        evidence: Mapping[str, Any] = (
+            raw_evidence if isinstance(raw_evidence, Mapping) else {}
+        )
+
+        def scoped_checks(raw: object) -> list[str]:
+            if not isinstance(raw, (list, tuple)):
+                return []
+            checks: list[str] = []
+            for value in raw:
+                check_id = str(value or "").strip()
+                if (
+                    check_id in STARTUP_GATE_CHECK_LABELS
+                    and check_id not in checks
+                ):
+                    checks.append(check_id)
+            return checks
+
+        evidence_checks = scoped_checks(evidence.get("failed_checks"))
+        manager_checks = scoped_checks(
+            self._mission_mgr.session_preflight_failure_checks()
+        )
+        checks = evidence_checks or manager_checks
+
+        stored_reason = str(
+            mission_vars.get("gc_session_preflight_last_reason") or ""
+        ).strip()
+        if (
+            not stored_reason
+            or stored_reason.lower() in _GENERIC_SESSION_PREFLIGHT_REASONS
+        ):
+            if checks:
+                summary_evidence = dict(evidence)
+                summary_evidence["failed_checks"] = checks
+                reason = summarize_gc_preflight_mismatch(summary_evidence)
+            else:
+                reason = (
+                    "Session preflight failed without a scoped requirement; "
+                    "retry to collect fresh evidence"
+                )
+        else:
+            reason = stored_reason
+        return checks, reason[:1000]
+
+    @staticmethod
+    def _unscoped_session_gate_is_safe(
+        directive: Mapping[str, Any],
+    ) -> bool:
+        options = directive.get("options")
+        return bool(
+            isinstance(options, (list, tuple))
+            and options
+            and all(
+                isinstance(option, Mapping)
+                and str(option.get("action") or "").lower() in {"retry", "pause"}
+                for option in options
+            )
+        )
+
+    def _retire_successful_session_preflight_decision(self) -> None:
+        """Consume only this Strategy's stale running-session decision."""
+
+        mission_vars = self._mission_mgr.ctx.data.get("mission_vars", {})
+        if not isinstance(mission_vars, Mapping) or not (
+            mission_vars.get("gc_session_preflight_completed") is True
+            and mission_vars.get("gc_session_preflight_last_status") == "complete"
+        ):
+            return
+        directive = self._gate_decision_directive()
+        if not directive or directive.get("status") not in {
+            "pending",
+            "resolved",
+        }:
+            return
+        if (
+            str(directive.get("strategy") or "").lower()
+            != self._current_strategy_name()
+            or str(directive.get("phase") or "").lower()
+            != "session_preflight"
+        ):
+            return
+        request_id = str(directive.get("request_id") or "")
+        if request_id:
+            self._supervisor.consume_gate_decision(
+                request_id,
+                completion_reason=(
+                    "session preflight subsequently completed successfully"
+                ),
+            )
+
     def _handle_terminal_session_gate_decision(self) -> None:
-        checks = self._mission_mgr.session_preflight_failure_checks()
+        checks, reason = self._session_preflight_gate_context()
         check_id = checks[0] if checks else "session_preflight"
-        directive = self._matching_gate_decision("session_preflight")
-        if directive is None:
-            requirements = self._mission_mgr.strategy.session_preflight_requirements()
-            reason = str(
-                self._mission_mgr.ctx.data.get("mission_vars", {}).get(
-                    "gc_session_preflight_last_reason",
-                    "session preflight mismatch",
+        directive = self._matching_gate_decision(
+            "session_preflight",
+            prompt_pending=False,
+        )
+        if directive is not None:
+            directive_check = str(directive.get("check_id") or "").strip()
+            refresh_required = bool(
+                directive_check != check_id
+                or str(directive.get("reason") or "").strip() != reason
+                or (
+                    not checks
+                    and not self._unscoped_session_gate_is_safe(directive)
                 )
             )
+            if refresh_required:
+                retired = self._supervisor.consume_gate_decision(
+                    str(directive.get("request_id") or ""),
+                    completion_reason=(
+                        "superseded by refreshed session preflight evidence"
+                    ),
+                )
+                if not retired:
+                    return
+                directive = None
+        if directive is None:
+            requirements = self._mission_mgr.strategy.session_preflight_requirements()
             directive = self._publish_gate_decision(
                 phase="session_preflight",
                 check_id=check_id,
                 reason=reason,
-                expected=requirements.get(check_id),
+                expected=(requirements.get(check_id) if checks else None),
                 allow_repair_restart=(
-                    self._mission_mgr.session_preflight_restart_available()
+                    bool(checks)
+                    and self._mission_mgr.session_preflight_restart_available()
                 ),
+                allow_waive=bool(checks),
             )
-            if directive and directive.get("status") == "pending":
-                directive = self._prompt_for_gate_decision(directive) or directive
+        if directive and directive.get("status") == "pending":
+            directive = self._prompt_for_gate_decision(directive) or directive
         if directive:
             self._apply_gate_decision(directive, phase="session_preflight")
 
@@ -7234,20 +7441,7 @@ class App:
                 # replacing it; the new preflight evidence remains available
                 # through its own gate-decision ledger.
                 return
-            mission_vars = self._mission_mgr.ctx.data.setdefault(
-                "mission_vars",
-                {},
-            )
-            checks = self._mission_mgr.session_preflight_failure_checks()
-            evidence = mission_vars.get("gc_session_preflight_evidence")
-            if not checks and isinstance(evidence, Mapping):
-                raw_checks = evidence.get("failed_checks")
-                if isinstance(raw_checks, (list, tuple)):
-                    checks = [str(value) for value in raw_checks]
-            reason = str(
-                mission_vars.get("gc_session_preflight_last_reason")
-                or "running-battle strategy validation failed"
-            )
+            checks, reason = self._session_preflight_gate_context()
             authority.activate_strategy_gate(
                 strategy=self._current_strategy_name(),
                 battle_scope=self._current_run_scope_id(),
@@ -7258,15 +7452,21 @@ class App:
             )
             return
 
+        strategy = self._mission_mgr.strategy
+        session_preflight_complete = bool(
+            strategy is not None
+            and strategy.requires_session_preflight()
+            and strategy.is_session_preflight_complete(self._mission_mgr.ctx)
+        )
+        if session_preflight_complete:
+            self._retire_successful_session_preflight_decision()
+
         gate = authority.strategy_gate
         if gate is None:
             return
-        strategy = self._mission_mgr.strategy
         if (
             gate.source == "session_preflight"
-            and strategy is not None
-            and strategy.requires_session_preflight()
-            and strategy.is_session_preflight_complete(self._mission_mgr.ctx)
+            and session_preflight_complete
         ):
             authority.clear_strategy_gate(
                 event=StrategyGateExitEvent.SUCCESSFUL_VALIDATION,
@@ -7636,11 +7836,54 @@ class App:
             attachment_temporal_binding = None
 
         if isinstance(save_observations, RunningAttachmentSaveObservations):
+            mapping_observer = None
+            if (
+                isinstance(attachment_acquisition, PlayerSaveAcquisitionBundle)
+                and attachment_acquisition.snapshot is not None
+                and save_observations.binding.final
+            ):
+                binding = save_observations.binding
+                mapping_observer = BoundPlayerSaveMappingObserver(
+                    snapshot=attachment_acquisition.snapshot,
+                    context_guard_fn=lambda: save_observations.matches_context(
+                        self._current_player_save_attachment_context()
+                    ),
+                    workflow_provenance={
+                        "capture_request_id": (
+                            "capture-" + binding.claim_fingerprint[:32]
+                        ),
+                        "inspection_request_id": (
+                            "running-attachment-ui-fallback"
+                        ),
+                        "runtime_session_fingerprint": hashlib.sha256(
+                            (
+                                "runtime-session\0"
+                                f"{binding.runtime_session_id}"
+                            ).encode("utf-8")
+                        ).hexdigest(),
+                        "pid": max(1, os.getpid()),
+                        "target_generation_fingerprint": hashlib.sha256(
+                            (
+                                f"{binding.target_binding.target}\0"
+                                f"{binding.target_binding.generation}"
+                            ).encode("utf-8")
+                        ).hexdigest(),
+                        "activity_scope_fingerprint": hashlib.sha256(
+                            str(binding.activity_scope_id).encode("utf-8")
+                        ).hexdigest(),
+                        "game_state": "active_battle",
+                        "active_round_identity_fingerprint": (
+                            binding.active_round_identity_fingerprint
+                        ),
+                        "boundary_fingerprint": binding.claim_fingerprint,
+                    },
+                )
             self._mission_mgr.ctx.data[
                 "player_save_attachment_evidence"
             ] = BoundRunningAttachmentSaveEvidence(
                 save_observations,
                 self._current_player_save_attachment_context,
+                mapping_observer,
             )
             strategy_name = self._current_strategy_name()
             if (
@@ -9330,6 +9573,24 @@ class App:
                         setup_kwargs["save_ui_verification_fn"] = (
                             record_ui_verification
                         )
+                    record_mapping_observation = getattr(
+                        coordinator,
+                        "record_mapping_observation",
+                        None,
+                    )
+                    if callable(record_mapping_observation):
+                        setup_kwargs["save_mapping_observation_fn"] = (
+                            record_mapping_observation
+                        )
+                    close_mapping_candidate_window = getattr(
+                        coordinator,
+                        "close_mapping_candidate_window",
+                        None,
+                    )
+                    if callable(close_mapping_candidate_window):
+                        setup_kwargs["save_mapping_window_close_fn"] = (
+                            close_mapping_candidate_window
+                        )
             setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
             if setup.interrupted:
                 self._defer_home_setup_recovery()
@@ -9346,6 +9607,15 @@ class App:
                 return setup
 
             check_id = setup.failed_check or "startup_setup"
+            close_mapping_candidate_window = getattr(
+                coordinator,
+                "close_mapping_candidate_window",
+                None,
+            )
+            if callable(close_mapping_candidate_window):
+                close_mapping_candidate_window(
+                    f"home_setup_retry:{check_id}"
+                )
             log(
                 f"[GC_NO_BATTLE] Home setup attempt {attempt}/"
                 f"{HOME_SETUP_MAX_ATTEMPTS} failed at {check_id}: "
@@ -10497,10 +10767,18 @@ class App:
                     "INFO",
                     console=True,
                 )
+                (
+                    tournament_context,
+                    _tournament_acquisition,
+                    tournament_mapping_observer,
+                ) = self._terminal_battle_bundle("TOURNAMENT_RESULTS")
                 record = handle_tournament_results(
                     img,
-                    battle_context=self._terminal_battle_context(
-                        "TOURNAMENT_RESULTS"
+                    battle_context=tournament_context,
+                    mapping_observation_fn=(
+                        tournament_mapping_observer.record_mapping_observation
+                        if tournament_mapping_observer is not None
+                        else None
                     ),
                     action_guard_fn=lambda: self._runtime_action_guard(
                         action_class=RuntimeActionClass.LIFECYCLE_ACTION,
@@ -10791,6 +11069,7 @@ class App:
                         )
 
             terminal_acquisition = None
+            terminal_mapping_observer = None
             if save_backed_manual_return:
                 terminal_battle_context = dict(
                     manual_terminal_claim["context"]
@@ -10800,6 +11079,7 @@ class App:
                 (
                     terminal_battle_context,
                     terminal_acquisition,
+                    terminal_mapping_observer,
                 ) = self._terminal_battle_bundle(
                     "GAME_OVER",
                     observed_run_configuration=observed_run_configuration,
@@ -11047,6 +11327,11 @@ class App:
                         terminal_acquisition,
                         PlayerSaveAcquisitionBundle,
                     )
+                    else None
+                ),
+                mapping_observation_fn=(
+                    terminal_mapping_observer.record_mapping_observation
+                    if terminal_mapping_observer is not None
                     else None
                 ),
             )
@@ -12014,6 +12299,14 @@ class App:
             self._blind_tapper_suspended = True
         wall_now = datetime.now(timezone.utc)
         claim_daily_missions = daily_mission_claims_allowed(wall_now)
+        weekly_review_kwargs = {}
+        weekly_review_state = getattr(
+            self,
+            "_weekly_chest_review_state",
+            None,
+        )
+        if weekly_review_state is not None:
+            weekly_review_kwargs["weekly_review_state"] = weekly_review_state
         lease = None
         if new_state == "RUNNING":
             lease = self._begin_auxiliary_route(
@@ -12041,6 +12334,7 @@ class App:
                 route_state_callback=self._auxiliary_route_state_callback(
                     lease
                 ),
+                **weekly_review_kwargs,
             )
         else:
             result = handle_mission_rewards(
@@ -12049,11 +12343,16 @@ class App:
                 event_inventory_callback=(
                     self._event_mission_tracker.record_inventory
                 ),
+                **weekly_review_kwargs,
             )
         if result == MissionRewardResult.FAILED:
             self._mission_reward_scheduler.mark_failed(wall_now=wall_now)
-        elif result != MissionRewardResult.INTERRUPTED:
-            self._mission_reward_scheduler.mark_completed(wall_now=wall_now)
+        elif result == MissionRewardResult.CLAIMED:
+            self._mission_reward_scheduler.mark_claimed(wall_now=wall_now)
+        elif result == MissionRewardResult.NOTHING_AVAILABLE:
+            self._mission_reward_scheduler.mark_nothing_available(
+                wall_now=wall_now
+            )
         if lease is not None:
             route_state = self._get_action_authority().auxiliary_route
             cleanup_pending = bool(

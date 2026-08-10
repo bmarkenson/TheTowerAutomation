@@ -2403,6 +2403,10 @@ def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
         save_decisions=preflight.decisions,
         snapshot_invalidation_fn=coordinator.invalidate,
         save_ui_verification_fn=coordinator.record_ui_verification,
+        save_mapping_observation_fn=coordinator.record_mapping_observation,
+        save_mapping_window_close_fn=(
+            coordinator.close_mapping_candidate_window
+        ),
     )
     handle_home.assert_called_once_with(
         restart_enabled=True,
@@ -3380,6 +3384,152 @@ def test_terminal_session_bypass_rearms_only_the_failed_auto_pick_check():
         "gate-auto-pick",
         completion_reason="waived auto_pick_perks for this run",
     )
+
+
+def test_terminal_session_gate_recovers_scoped_check_and_evidence_summary():
+    manager = Mock()
+    manager.strategy = SimpleNamespace(
+        name="farm_t18",
+        session_preflight_requirements=lambda: {
+            "modules": {"generator_assist": "Singularity Harness"},
+        },
+    )
+    manager.session_preflight_failure_checks.return_value = []
+    manager.session_preflight_restart_available.return_value = False
+    manager.gate_fallbacks.return_value = []
+    manager.ctx.data = {
+        "mission_vars": {
+            "gc_session_preflight_last_reason": "configuration mismatch",
+            "gc_session_preflight_evidence": {
+                "failed_checks": ["modules"],
+                "modules": {
+                    "slots": [
+                        {
+                            "slot_key": "generator_assist",
+                            "expected": "Singularity Harness",
+                            "actual": "Galaxy Compressor",
+                            "valid": False,
+                        }
+                    ]
+                },
+            },
+        }
+    }
+    supervisor = Mock()
+    supervisor.gate_decision = None
+
+    def publish(**payload):
+        return {
+            "request_id": "gate-modules",
+            "status": "pending",
+            **payload,
+        }
+
+    supervisor.publish_gate_decision.side_effect = publish
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._gate_decision_prompt = lambda _decision: None
+    app._gate_prompted_request_id = None
+
+    app._handle_terminal_session_gate_decision()
+
+    published = supervisor.publish_gate_decision.call_args.kwargs
+    assert published["check_id"] == "modules"
+    assert published["reason"] == (
+        "Generator Assist module: expected Singularity Harness, observed "
+        "Galaxy Compressor"
+    )
+    assert published["expected"] == {
+        "generator_assist": "Singularity Harness"
+    }
+    assert {option["action"] for option in published["options"]} == {
+        "retry",
+        "waive",
+    }
+
+
+def test_terminal_session_gate_keeps_specific_failure_reason():
+    manager = Mock()
+    manager.ctx.data = {
+        "mission_vars": {
+            "gc_session_preflight_last_reason": (
+                "guarded repair could not reach verified Home"
+            ),
+            "gc_session_preflight_evidence": {
+                "failed_checks": ["modules"],
+            },
+        }
+    }
+    manager.session_preflight_failure_checks.return_value = ["modules"]
+    app = App.__new__(App)
+    app._mission_mgr = manager
+
+    checks, reason = app._session_preflight_gate_context()
+
+    assert checks == ["modules"]
+    assert reason == "guarded repair could not reach verified Home"
+
+
+def test_unscoped_session_failure_replaces_unsafe_bypass_with_retry_only():
+    manager = Mock()
+    manager.strategy = SimpleNamespace(
+        name="farm_t18",
+        session_preflight_requirements=lambda: {"modules": {}},
+    )
+    manager.session_preflight_failure_checks.return_value = []
+    manager.ctx.data = {
+        "mission_vars": {
+            "gc_session_preflight_last_reason": "configuration mismatch",
+            "gc_session_preflight_evidence": {"failed_checks": []},
+        }
+    }
+    unsafe = {
+        "request_id": "old-unscoped-gate",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "session_preflight",
+        "reason": "configuration mismatch",
+        "options": build_gate_decision_options("session_preflight"),
+    }
+    supervisor = Mock()
+    supervisor.gate_decision = unsafe
+    supervisor.consume_gate_decision.return_value = {
+        **unsafe,
+        "status": "consumed",
+    }
+
+    def publish(**payload):
+        return {
+            "request_id": "safe-unscoped-gate",
+            "status": "pending",
+            **payload,
+        }
+
+    supervisor.publish_gate_decision.side_effect = publish
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._gate_decision_prompt = lambda _decision: None
+    app._gate_prompted_request_id = None
+
+    app._handle_terminal_session_gate_decision()
+
+    supervisor.consume_gate_decision.assert_called_once_with(
+        "old-unscoped-gate",
+        completion_reason="superseded by refreshed session preflight evidence",
+    )
+    published = supervisor.publish_gate_decision.call_args.kwargs
+    assert published["check_id"] == "session_preflight"
+    assert published["expected"] is None
+    assert published["reason"] == (
+        "Session preflight failed without a scoped requirement; retry to "
+        "collect fresh evidence"
+    )
+    assert [option["action"] for option in published["options"]] == ["retry"]
+    manager.gate_fallbacks.assert_not_called()
+    manager.waive_session_preflight_check.assert_not_called()
 
 
 def test_attached_session_mismatch_restarts_only_after_operator_authorization():

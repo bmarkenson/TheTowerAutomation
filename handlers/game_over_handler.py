@@ -29,6 +29,9 @@ from core.perk_save_monitor import (
     merge_terminal_perk_tail,
 )
 from core.terminal_save_report import terminal_save_report_complete
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_ui_evidence,
+)
 
 
 MORE_STATS_INDICATOR = "indicators.more_stats"
@@ -82,6 +85,9 @@ def handle_game_over(
     report_disposition: Optional[Mapping[str, Any]] = None,
     captured_at: Optional[datetime] = None,
     battle_id: Optional[str] = None,
+    mapping_observation_fn: Optional[
+        Callable[[str, Mapping[str, Any]], int]
+    ] = None,
 ):
     """
     Handle the GAME OVER flow: collect best-effort stats and follow its route.
@@ -159,6 +165,7 @@ def handle_game_over(
                 session_id=session_id,
                 disposition=disposition,
                 action_guard_fn=action_guard_fn,
+                mapping_observation_fn=mapping_observation_fn,
             )
         except Exception as exc:
             # Data extraction is deliberately subordinate to the selected
@@ -318,6 +325,9 @@ def _capture_game_over_stats(
     session_id: str,
     disposition: Optional[Mapping[str, Any]],
     action_guard_fn: Optional[Callable[[], bool]],
+    mapping_observation_fn: Optional[
+        Callable[[str, Mapping[str, Any]], int]
+    ],
 ) -> _GameOverStatsCaptureOutcome:
     """Attempt terminal collection without owning the Home/Retry decision."""
 
@@ -359,6 +369,11 @@ def _capture_game_over_stats(
         captured_at=captured_at,
     )
     if record is not None:
+        _record_game_over_mapping_observation(
+            record,
+            mapping_observation_fn,
+            observed_at=captured_at,
+        )
         attach_battle_perks(record, perks)
         if disposition is not None:
             record["report_disposition"] = copy.deepcopy(dict(disposition))
@@ -473,6 +488,13 @@ def _capture_game_over_stats(
                 report_disposition=disposition,
             )
 
+    if completed_record is not None:
+        _record_game_over_mapping_observation(
+            completed_record,
+            mapping_observation_fn,
+            observed_at=captured_at,
+        )
+
     # More Stats is optional, but leaving its modal open would block the
     # authoritative Home/Retry control. Close it under the same live guard and
     # verify Game Stats before reporting the collection route complete.
@@ -494,6 +516,67 @@ def _capture_game_over_stats(
         )
     time.sleep(1.2)
     return _GameOverStatsCaptureOutcome(record=completed_record)
+
+
+def _record_game_over_mapping_observation(
+    record: Mapping[str, Any],
+    callback: Optional[Callable[[str, Mapping[str, Any]], int]],
+    *,
+    observed_at: datetime,
+) -> None:
+    """Submit the normalized terminal cause before leaving its UI boundary."""
+
+    if callback is None:
+        return
+    quality = record.get("quality")
+    if not isinstance(quality, Mapping) or quality.get("valid") is not True:
+        return
+    killed_by = _terminal_record_killed_by(record)
+    if not killed_by:
+        return
+    try:
+        evidence = build_mapping_candidate_ui_evidence(
+            "battle_history_killed_by",
+            canonical_values=[killed_by],
+            locator_values={"killed_by": killed_by},
+            observed_at=observed_at,
+        )
+        callback("battle_history_killed_by", evidence)
+    except Exception as exc:
+        log(
+            "[PLAYER_SAVE_MAPPING] Game Over mapping observation failed "
+            f"without affecting terminal routing: {exc}",
+            "WARN",
+        )
+
+
+def _terminal_record_killed_by(record: Mapping[str, Any]) -> str:
+    game_stats = record.get("game_stats")
+    fields = game_stats.get("fields") if isinstance(game_stats, Mapping) else None
+    value = fields.get("killed_by") if isinstance(fields, Mapping) else None
+    if isinstance(value, Mapping):
+        normalized = str(value.get("value") or "").strip()
+        if normalized:
+            return normalized
+    more_stats = record.get("more_stats")
+    sections = (
+        more_stats.get("sections")
+        if isinstance(more_stats, Mapping)
+        else None
+    )
+    if not isinstance(sections, list):
+        return ""
+    for section in sections:
+        if not (
+            isinstance(section, Mapping)
+            and section.get("key") == "battle_report"
+            and isinstance(section.get("rows"), list)
+        ):
+            continue
+        for row in section["rows"]:
+            if isinstance(row, Mapping) and row.get("key") == "killed_by":
+                return str(row.get("value") or "").strip()
+    return ""
 
 
 def restore_game_stats_for_terminal_route(

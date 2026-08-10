@@ -77,9 +77,13 @@ agnostic.
   acknowledged-paused ADB-port configuration, and fixed managed-service
   start/stop. Active strategy
   requests are declarative runtime configuration, not direct tap authority.
-  Profile publication writes only a fixed-name file beneath
+  The profile-publication endpoint writes only a fixed-name file beneath
   `config/strategies/custom`; it does not select, queue, adopt, start, restart,
-  stop, pause, enable, or otherwise apply that profile.
+  stop, pause, enable, or otherwise apply that profile. After that endpoint
+  confirms a Strategy publication or restore, the native client separately
+  submits the ordinary `set_strategy` request for the next boundary when the
+  process is active; when stopped it selects the Strategy for Start without
+  changing the saved default. Base publication submits no control request.
   There is no arbitrary tap, shell command, process kill, direct Surrender,
   file-path, or ADB endpoint.
 - Complete Stop persists `STOPPED` before asking the fixed systemd user service
@@ -131,7 +135,10 @@ agnostic.
   `NEW_BATTLE` and Workshop are authoritative no-battle boundaries, including
   while paused. Home `RESUME_BATTLE` never authorizes a boundary switch.
   Selecting the current strategy replaces and thereby cancels a different
-  pending request.
+  pending request. When no different request is pending, a same-ID request is a
+  no-op only when the latest resolved definition matches the loaded definition;
+  a newly published same-ID revision remains pending for the same guarded
+  boundary installation.
 - Every explicit Tournament selection, including a stopped process Start with
   Tournament selected, also creates a one-use exclusive-validation receipt
   bound to that strategy request and generated-plan fingerprint. Status exposes
@@ -183,7 +190,7 @@ expiry attempt.
 
 ## Better Control Model
 
-Server revision 32 retains the revision-30 `better_control_model_v1` and
+Server revision 34 retains the revision-30 `better_control_model_v1` and
 `save_backed_setup_capture_v1` for additive compatibility and advertises
 `better_control_model_v2` plus `save_backed_setup_capture_v2`. The additive
 `control_model` status object
@@ -438,7 +445,7 @@ memory only. The API deliberately sends no CORS permission.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, current save-backed Perks, latest observation, structured Strategy Action Gate, and runtime evidence |
+| `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, current save-backed Perks, persistent save-mapping review status, latest observation, structured Strategy Action Gate, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/interactive-development-lease` | Request, heartbeat, or release the one cooperative development lease; never dispatch device input |
 | `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit independently of battle intent, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
@@ -449,7 +456,7 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/strategy-authoring/history` | Newest-first immutable custom-Strategy lineage and revision summaries, including retired lineages, without expanded plans |
 | `GET` | `/api/v1/strategy-authoring/history/{id}` | One custom Strategy lineage and its ordered revision summaries |
 | `GET` | `/api/v1/strategy-authoring/history/{id}/{version}` | One retained revision's review-safe source, Base snapshot, resolution, fingerprints, audit identity, and validation state without its generated plan |
-| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, materialize a catalog-bound normalized preset copy, create an immutable custom Module preset, compare retained revisions, or review/confirm restore-as-new, without activation |
+| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, materialize a catalog-bound normalized preset copy, create an immutable custom Module preset, compare retained revisions, or review/confirm restore-as-new, without runtime-control mutation |
 | `GET` | `/api/v1/setup-capture` | Current runtime-issued capture status, availability, inactive captured-draft catalog, Module presets, and comparison Bases |
 | `POST` | `/api/v1/setup-capture` | Request a new forced-save capture, review a fingerprinted captured-versus-Base difference, save through the existing Module/Strategy owner, or cancel; never activate or publish |
 | `GET` | `/api/v1/setup-capture/drafts/{id}` | Reopen one immutable captured Strategy source in the ordinary authoring editor without selecting or activating it |
@@ -478,6 +485,21 @@ battle immediately even if the runtime has not yet written the new battle's
 first save checkpoint. This is a read-only projection: the API performs no
 save acquisition, serialization, panel navigation, device input, or action-
 authority decision.
+
+### Save-mapping review status
+
+Server revision 34 advertises `save_mapping_review_status_v1` while retaining
+the additive `confirmed_local_mapping_status_v1` contract. The
+`confirmed_local_mappings` status object combines durable unmapped-value
+candidate receipts with exact-version local Module confirmations. Browser and
+native clients show a persistent nonmodal banner for review, more-evidence,
+local-active, authority/mirror-pending, reconfirmation, ambiguity, or conflict
+states. Integrated and explicitly revoked records disappear from the banner.
+
+The banner is diagnostic. It never blocks startup, changes Automation state,
+suppresses a UI check, or grants integration/revoke authority. A missing or
+unreadable status contract is shown as a compatibility/error state; canonical
+save mappings and their existing UI fallbacks remain runtime authority.
 
 ### Structured Strategy Action Gate status
 
@@ -567,9 +589,15 @@ revision.
 Custom publications live under `config/strategies/custom` and are ignored by
 Git as operator-owned configuration. Profile IDs are restricted to fixed-name
 lowercase identifiers and cannot collide with bundled or legacy names. There is
-no delete or arbitrary-path operation on the older profile endpoint. Selecting
-or applying a published profile remains a separate explicit action through the
-existing process API and its normal next-boundary or active-battle semantics.
+no delete or arbitrary-path operation on the older profile endpoint.
+Publication and control remain separate API operations. In the native workflow,
+a successful Strategy publication during an active process automatically
+triggers the existing process API's normal next-boundary request; it never
+triggers active-battle adoption. When stopped, the client selects it for Start
+without persisting a different startup default. If the active request fails,
+the publication remains committed and the selected Strategy remains available
+for Retry. Other clients may still select or apply a published profile
+explicitly through the same process API.
 
 ## Sparse strategy authoring
 
@@ -706,8 +734,10 @@ The preview also supports attaching the first compatible Base to an existing
 editable Strategy whose current source has no Base. The native client exposes
 that choice, restores the published no-Base source when requesting the preview,
 and blocks publication of the changed pin until the returned review fingerprint
-is present. The published Strategy keeps its ID and receives a new version;
-selection and activation remain unchanged.
+is present. The authoring endpoint keeps the Strategy ID and publishes a new
+version without changing control state. The native workflow then selects that
+Strategy and separately queues its latest definition for the next boundary; it
+does not switch the current battle.
 
 ### Immutable Strategy history and restore
 
@@ -756,9 +786,11 @@ code using its embedded historical Base snapshot, then binds the semantic
 review to a third fingerprint. Only an explicit confirmation can publish that
 intent as the lineage's next version. A stale latest, changed history revision,
 or changed review returns HTTP 409; WPF preserves the open authoring draft and
-refreshes history/latest catalogs only after a successful restore. Restore
-never mutates history, selects or activates the Strategy, restarts automation,
-changes Pause, or changes any control directive.
+refreshes history/latest catalogs only after a successful restore. The restore
+endpoint never mutates history, restarts automation, changes Pause, or changes
+a control directive. After success, the native workflow selects the restored
+Strategy and separately queues its newly published latest definition for the
+next boundary without switching the current battle.
 
 ## Activity log audiences
 
@@ -892,6 +924,32 @@ Process request examples:
 
 ## Current GUI capabilities
 
+- The native operational window uses full-width **Overview**, **Activity**,
+  **Perks**, and **System** pages instead of a permanently narrow control
+  sidebar. Overview keeps current control and run-configuration decisions
+  together, while service/tunnel operations, host telemetry, and runtime
+  evidence live under bounded System subpages. Stable API/SSH/forwarding and
+  local-sampling defaults live in a modal **Preferences** surface; saving them
+  never starts, stops, or restarts automation or a tunnel. The application
+  header groups four separately labelled Linux service, HTTP, API SSH, and ADB
+  SSH signals and routes routine navigation through **View**, **Tools**, and
+  **Preferences** menus.
+- Overview uses one server-authoritative battle-action slot and one contextual
+  manual-authority slot: only the matching **Start Battle**/**Attach to
+  Battle** and **Take Manual Control**/**Return Control** action is shown. The
+  manual Surrender collection choice appears with Take, timed Pause is a
+  secondary expansion, and routine explanatory prose collapses unless a
+  request, draft, workflow, validation, or error needs attention. Run
+  configuration labels current, pending-next/startup, and locally selected
+  Strategy separately; the latest completed battle remains useful as a compact
+  one-line summary when its detail is collapsed.
+- The global status derives run elapsed only from the published current-run
+  activity-scope start and the atomic server timestamp. Wave and Coins/min are
+  absent outside a fresh active-battle observation instead of presenting stale
+  values or placeholder dashes. Expected duration, active Peak Coins/min,
+  expected-versus-observed requirement detail, recovery countdowns, and
+  Return/Extend/Cancel recovery actions remain absent until their owning
+  runtime status fields and guarded directives exist.
 - Persistent indefinite and timed Pause, explicit Automation Enabled, and
   requested-versus-acknowledged state. The text defines Paused as zero
   automated input while observation continues and does not describe Enabled
@@ -903,8 +961,9 @@ Process request examples:
   was introduced in server revision 30; the current client requires revision
   32 and capability `better_control_model_v2`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
-- A read-only **Perks** tab showing the current run's monitor-validated saved
-  inventory, level, and last selection wave in most-recent-first order. It
+- A read-only full-width **Perks** page showing the current run's
+  monitor-validated saved inventory, level, and last selection wave in
+  most-recent-first order. It
   shows the checkpoint wave and local capture time, preserves an unchanged
   scroll position across ordinary five-second status refreshes, and clears on
   an unavailable or changed activity scope. The current native client requires
@@ -964,8 +1023,9 @@ Process request examples:
   warning visible and confirm before starting a managed runtime under it; the
   native client also distinguishes saved intent from runtime acknowledgement.
   This requires server revision 14 and capability `game_speed_target`.
-- Native Windows host health for system CPU, memory, processor clock,
-  BlueStacks CPU/RAM/process identity, and local publication state. Hovering
+- Native Windows host health under **System > Diagnostics** for system CPU,
+  memory, processor clock, BlueStacks CPU/RAM/process identity, and local
+  publication state. Hovering
   the strip shows sampling cost, BlueStacks I/O, last Linux acknowledgement,
   and any sampler/spool/upload error. The display remains local and current
   while the API is unavailable.
@@ -974,7 +1034,15 @@ Process request examples:
   request. Retry re-runs the check with fresh evidence; a bypass or configured
   fallback waives only the named requirement for the current run, so unrelated
   checks such as Auto Pick Perks remain authoritative. Closing the dialog
-  leaves automation blocked and the request pending.
+  leaves automation blocked and the request pending. Running-session requests
+  use a phase-specific **Session preflight needs direction** title, a humanized
+  requirement label, and the runtime's concise evidence summary instead of a
+  generic configuration-mismatch message. If the runtime cannot recover a
+  recognized failed requirement, the dialog offers Retry only; it never offers
+  an unscoped bypass or repair. A later successful preflight consumes only the
+  matching Strategy's session-preflight request so the client cannot auto-open
+  a stale failure. These are presentation and lifecycle corrections within the
+  existing gate-decision fields and require no protocol revision or capability.
 - Non-blocking attached-Tournament warning dialogs use the same scoped decision
   channel. They offer persistent Pause for manual changes, a fresh read-only
   retry, or continuation with only the displayed mismatch waived. Closing the
@@ -995,20 +1063,32 @@ Process request examples:
   observed speed for mid-run analysis. This requires server revision 16 and
   capability `observed_game_speed`.
 - Persistent ADB-port selection for the next managed start, plus live handoff
-  while the runtime has acknowledged `PAUSED`. The API accepts only an integer
-  TCP port; the runtime keeps Pause and its former target if new-target
-  connection or screenshot validation fails.
-- Validated strategy selection (`farm_t18`, `farm_t19`,
-  `tournament`, or `none`). A stopped selection is saved for the next start;
-  an active selection is queued for a confirmed run boundary by default. The
-  native GUI separates a strategy dropdown from explicit **Use next battle**
-  and **Switch this battle** actions while active. When stopped, **Save startup
-  default** only persists the selection; Start already uses the visible
-  selection. **Switch this battle** applies normal behavior and report identity
-  after fresh active-battle evidence while deferring new-run gates. The
-  dropdown preserves an unsent selection across
-  status refreshes, action buttons disable requests that would be no-ops, and
-  status reports selected, current, and pending strategies separately.
+  while the runtime has acknowledged indefinite `PAUSED`. **System >
+  Services** shows configured next-start, requested/acknowledged, active
+  runtime, and local-draft targets separately. Polling never replaces a dirty
+  draft; an invalid or ineligible draft remains visible until explicit
+  **Revert** or a successful apply. The existing Linux API remains the only
+  apply authority and accepts only an integer TCP port; its validated handoff
+  keeps Pause and the former target if new-target connection or screenshot
+  validation fails.
+- Validated strategy selection (`farm_t18`, `farm_t19`, `tournament`, or
+  `none`). For an active process, a genuine dropdown change immediately submits
+  one ordinary next-boundary request. Programmatic polling/render changes never
+  submit. Selecting Current replaces a different pending Strategy, while
+  already-current with no pending request and already-pending next-boundary
+  selections are no-ops. Acceptance clears dirty state; transport or explicit
+  rejection retains the selected value across polling and exposes **Retry next
+  battle** without allowing another in-flight request. **Switch this battle** is
+  the separate explicit active-adoption request and keeps its fresh-evidence and
+  deferred-new-run-gate semantics. When stopped, Start already uses and saves
+  the visible selection; **Save startup default** remains the explicit way to
+  persist it without starting.
+  Successful Strategy publication and restore-as-new select the published ID.
+  While the process is active, they automatically submit the same next-boundary
+  request, including when the stable ID equals Current; when stopped, they only
+  update the visible Start selection. Base publication never submits a process
+  request. Publication success is not rolled back if queueing fails. Status
+  reports selected, current, and pending Strategies separately.
 - Durable Tournament-validation status in both clients. It distinguishes Home
   preflight pending, ordinary-battle ownership, battle-only checks, cleanup,
   launch confirmation, and a failed/cancelled result with its reason. A ready
@@ -1028,28 +1108,34 @@ Process request examples:
 - Current wave, coins/minute, menu, secondary states, and overlays from the
   latest status report.
 - Target, owner PID, lock state, and runtime-start evidence.
-- A live process PID in the top banner plus systemd MainPID/runtime-lock PID
-  comparison in the detailed evidence view; stale lock PIDs are never promoted
-  as live process identity.
-- Most-recent completed-battle summary in the operational window, with unified
-  completed-run history in a separate native window. The history includes
+- A live process PID under **System > Services** plus systemd
+  MainPID/runtime-lock PID comparison in Diagnostics; stale lock PIDs are never
+  promoted as live process identity.
+- A compact, normally collapsed most-recent completed-battle summary on
+  Overview, with unified completed-run history in a separate native window.
+  The history includes
   Farm/Tournament/Milestone classification, strategy, tier, wave, duration,
   Coins/hour, Cells/hour, capture quality, full sections, captured perks,
   resolved settings, game-speed target/timeline, and preflight evidence.
 - Local filters for type, Tier, minimum/maximum wave, strategy, and quality.
 - Local export of the currently filtered completed-battle summaries as UTF-8
   CSV.
-- Draggable layout dividers across the operational control sections and between
-  the history list and selected-battle report.
+- A draggable layout divider between the history list and selected-battle
+  report; the main operational pages no longer depend on persisted sidebar or
+  latest-battle splitter sizes.
 - Local persistence of the main and Battle History window positions, sizes, and
-  maximized states. Invalid or off-screen placement is ignored, and minimized
+  maximized states, plus stable string IDs for the selected dashboard and
+  System pages and expansion state for optional diagnostic/summary detail.
+  Legacy numeric sidebar selections are migrated once; obsolete pane sizes are
+  safely ignored. Invalid or off-screen placement is ignored, and minimized
   state is never restored.
 - A per-Windows-session instance guard. A repeated launch restores and activates
   the existing operational window rather than creating competing clients.
-- Independently refreshed recent activity that defaults to concise operational
-  entries in the explicit current-run scope, with newest-entry following,
-  non-destructive local clear/restore, and server-side diagnostic/all-level
-  filters, without granting general log-file access.
+- A full-width, independently refreshed **Activity** page that defaults to
+  concise operational entries in the explicit current-run scope, with
+  newest-entry following, non-destructive local clear/restore, and server-side
+  diagnostic/all-level filters, without granting general log-file access.
+  Hidden-page refresh does not scroll the grid until Activity is selected.
 - A responsive browser fallback served by the Linux adapter.
 
 ## Deliberately deferred capabilities

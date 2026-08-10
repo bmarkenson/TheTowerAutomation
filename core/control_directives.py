@@ -350,6 +350,7 @@ class ControlDirectiveStore:
             "requested": {
                 "acknowledged",
                 "awaiting_enable",
+                "validating_save",
                 "rejected",
                 "interrupted",
                 "failed",
@@ -1038,7 +1039,17 @@ class ControlDirectiveStore:
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _timestamp_at(now)
-            workflow = validate_battle_workflow(data.get("battle_workflow"))
+            raw_workflow = data.get("battle_workflow")
+            workflow = validate_battle_workflow(raw_workflow)
+            if workflow is None and raw_workflow is not None:
+                workflow = _interrupted_battle_workflow_from_envelope(
+                    raw_workflow,
+                    reason=normalized_reason,
+                    source=source,
+                    timestamp=timestamp,
+                )
+                if workflow is not None:
+                    data["battle_workflow"] = workflow
             if (
                 workflow is not None
                 and workflow["status"] not in BATTLE_WORKFLOW_TERMINAL_STATUSES
@@ -1053,7 +1064,17 @@ class ControlDirectiveStore:
                     }
                 )
                 data["battle_workflow"] = workflow
-            manual = validate_manual_control(data.get("manual_control"))
+            raw_manual = data.get("manual_control")
+            manual = validate_manual_control(raw_manual)
+            if manual is None and raw_manual is not None:
+                manual = _interrupted_manual_control_from_envelope(
+                    raw_manual,
+                    reason=normalized_reason,
+                    source=source,
+                    timestamp=timestamp,
+                )
+                if manual is not None:
+                    data["manual_control"] = manual
             if (
                 manual is not None
                 and manual["status"] not in MANUAL_CONTROL_TERMINAL_STATUSES
@@ -1068,7 +1089,17 @@ class ControlDirectiveStore:
                     }
                 )
                 data["manual_control"] = manual
-            capture = validate_setup_capture(data.get("setup_capture"))
+            raw_capture = data.get("setup_capture")
+            capture = validate_setup_capture(raw_capture)
+            if capture is None and raw_capture is not None:
+                capture = _interrupted_setup_capture_from_envelope(
+                    raw_capture,
+                    reason=normalized_reason,
+                    source=source,
+                    timestamp=timestamp,
+                )
+                if capture is not None:
+                    data["setup_capture"] = capture
             if capture is not None and capture["status"] in {
                 "requested",
                 "acknowledged",
@@ -2621,6 +2652,109 @@ def _valid_game_speed_target(value: object) -> float:
         return normalize_game_speed_target(value)
     except ValueError:
         return MAXIMUM_GAME_SPEED_TARGET
+
+
+def _interrupted_battle_workflow_from_envelope(
+    value: object,
+    *,
+    reason: str,
+    source: str,
+    timestamp: str,
+) -> Optional[dict[str, Any]]:
+    """Retire a recognizable workflow whose old authority payload is invalid."""
+
+    if not isinstance(value, Mapping):
+        return None
+    candidate = {
+        "schema_version": value.get("schema_version"),
+        "request_id": value.get("request_id"),
+        "intent": value.get("intent"),
+        "status": "interrupted",
+        "requested_at": value.get("requested_at"),
+        "evidence": value.get("evidence"),
+        "updated_at": timestamp,
+        "completed_at": timestamp,
+        "reason": _bounded_text(
+            f"{reason}; prior workflow authority no longer matches the "
+            "current schema",
+            512,
+        ),
+        "updated_by": source,
+    }
+    return validate_battle_workflow(candidate)
+
+
+def _interrupted_setup_capture_from_envelope(
+    value: object,
+    *,
+    reason: str,
+    source: str,
+    timestamp: str,
+) -> Optional[dict[str, Any]]:
+    """Retire a recognizable capture whose old preview is no longer valid."""
+
+    if not isinstance(value, Mapping):
+        return None
+    candidate: dict[str, Any] = {
+        "schema_version": value.get("schema_version"),
+        "request_id": value.get("request_id"),
+        "status": "interrupted",
+        "requested_at": value.get("requested_at"),
+        "evidence": value.get("evidence"),
+        "acquisition_source": value.get(
+            "acquisition_source",
+            "new_setup_capture_refresh",
+        ),
+        "updated_at": timestamp,
+        "completed_at": timestamp,
+        "reason": _bounded_text(
+            f"{reason}; prior setup preview no longer matches the current "
+            "schema",
+            512,
+        ),
+        "updated_by": source,
+    }
+    if value.get("source_manual_control_id") is not None:
+        candidate["source_manual_control_id"] = value.get(
+            "source_manual_control_id"
+        )
+    authority_outcome = value.get("authority_outcome")
+    if authority_outcome in SETUP_CAPTURE_AUTHORITY_OUTCOMES:
+        candidate["authority_outcome"] = authority_outcome
+    return validate_setup_capture(candidate)
+
+
+def _interrupted_manual_control_from_envelope(
+    value: object,
+    *,
+    reason: str,
+    source: str,
+    timestamp: str,
+) -> Optional[dict[str, Any]]:
+    """Retire recognizable manual ownership with an obsolete receipt schema."""
+
+    if not isinstance(value, Mapping):
+        return None
+    candidate: dict[str, Any] = {
+        "schema_version": value.get("schema_version"),
+        "manual_control_id": value.get("manual_control_id"),
+        "status": "interrupted",
+        "reason": value.get("reason", "operator"),
+        "requested_at": value.get("requested_at"),
+        "starting_evidence": value.get("starting_evidence"),
+        "updated_at": timestamp,
+        "completed_at": timestamp,
+        "detail": _bounded_text(
+            f"{reason}; prior manual-control authority no longer matches the "
+            "current schema",
+            512,
+        ),
+        "updated_by": source,
+    }
+    surrender_collection = value.get("surrender_collection")
+    if surrender_collection in MANUAL_SURRENDER_COLLECTIONS:
+        candidate["surrender_collection"] = surrender_collection
+    return validate_manual_control(candidate)
 
 
 def _timestamp_at(value: Optional[float] = None) -> str:

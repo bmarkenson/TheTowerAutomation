@@ -2595,7 +2595,7 @@ class GcFarmProfileTests(unittest.TestCase):
         acquisition = _repair_terminal_acquisition()
         terminal_context = {"terminal_save_report": {}}
         app._terminal_battle_bundle = MagicMock(
-            return_value=(terminal_context, acquisition)
+            return_value=(terminal_context, acquisition, None)
         )
         events = []
         app._persist_minimal_surrender_record = MagicMock(
@@ -2670,7 +2670,7 @@ class GcFarmProfileTests(unittest.TestCase):
         )
         acquisition = _repair_terminal_acquisition()
         app._terminal_battle_bundle = MagicMock(
-            return_value=({"terminal_save_report": {}}, acquisition)
+            return_value=({"terminal_save_report": {}}, acquisition, None)
         )
         app._persist_minimal_surrender_record = MagicMock(
             side_effect=OSError("record store unavailable")
