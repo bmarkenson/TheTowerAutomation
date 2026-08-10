@@ -39,6 +39,21 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 bounded interactive-development lease extension
+
+- The server-owned request and heartbeat window increases from 30 to 120
+  seconds. This leaves room for production to quiesce an
+  in-flight background collector, publish the matching acknowledgement, and
+  complete fresh visual guards plus bounded helper input without making lease
+  duration client-controlled or indefinite.
+- Pause/Stop precedence, runtime/PID/target ownership, fresh acknowledgement,
+  suppressive authority, battle-boundary termination, explicit release, and
+  the development input helper's per-command expiry reserve remain unchanged.
+- The expanded lease, control-surface, combined-coordination, and input-helper
+  suites passed 169 tests. The repository checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,167 tests.
+
 ### 2026-08-10 guarded GUI save-mapping integration
 
 - Commit `5cee9be` adds API revision 35 and

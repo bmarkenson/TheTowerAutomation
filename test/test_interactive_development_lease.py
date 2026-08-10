@@ -20,7 +20,10 @@ from core.app import App
 from core.adb_connection import AdbConnectionCoordinator
 from core.automation_supervisor import AutomationSupervisor
 from core.battle_lifecycle import HomeBattleControl
-from core.control_directives import ControlDirectiveStore
+from core.control_directives import (
+    ControlDirectiveStore,
+    INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
+)
 from core.run_state import AUTOMATION
 from core.watchdog import _watchdog_process_check_once
 import handlers.ad_gem_handler as ad_gems
@@ -156,7 +159,9 @@ def test_control_directive_lease_lifecycle_preserves_unrelated_fields(tmp_path):
         now=1_005.0,
     )
     assert heartbeat["heartbeat_at"] == _timestamp(1_005.0)
-    assert heartbeat["expires_at"] == _timestamp(1_035.0)
+    assert heartbeat["expires_at"] == _timestamp(
+        1_005.0 + INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS
+    )
     released = store.release_interactive_development_lease(
         lease["lease_id"],
         now=1_006.0,
@@ -527,7 +532,9 @@ def test_heartbeat_expiry_waits_for_fresh_observation_then_restores_production(
 
     supervisor.apply_control()
     with patch("core.app.stop_blind_gem_tapper", return_value=False):
-        app._sync_interactive_development_control_boundary(now=1_031.0)
+        app._sync_interactive_development_control_boundary(
+            now=1_000.0 + INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS + 1
+        )
     assert app._interactive_development_ack["state"] == "expiry_pending"
     assert app._external_development_hold_active
 
@@ -537,7 +544,7 @@ def test_heartbeat_expiry_waits_for_fresh_observation_then_restores_production(
     ):
         app._sync_interactive_development_observation(
             {"state": "RUNNING"},
-            now=1_032.0,
+            now=1_000.0 + INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS + 2,
         )
     terminal = store.status()["interactive_development_lease"]
     assert terminal["terminal_disposition"] == "expired"

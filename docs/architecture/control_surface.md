@@ -572,7 +572,7 @@ secret, action, or command. The server derives the binding from a fresh
 runtime-owned authority snapshot that matches the active OS lock. A live
 conflict returns HTTP 409 with code `busy`; expired, terminal, or wrong-ID
 heartbeats and releases are rejected, and a heartbeat additionally requires
-fresh matching runtime ownership. Heartbeats extend the fixed 30-second expiry
+fresh matching runtime ownership. Heartbeats extend the fixed 120-second expiry
 without adding an action-log entry.
 
 `GET /api/v1/status` exposes `interactive_development_lease.request` from the

@@ -23,6 +23,7 @@ from core.action_authority import (
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
+    INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
     VALID_GAME_SPEED_TARGETS,
 )
 from core.development_adb_input import validate_active_lease_status
@@ -979,6 +980,9 @@ def test_interactive_development_status_separates_request_and_fresh_ack(
         )
         lease = requested["interactive_development_lease"]["request"]
         assert lease["runtime"] == owner
+        assert lease["expires_at"] == (
+            now + timedelta(seconds=INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS)
+        ).isoformat(timespec="seconds")
         assert lease["starting_evidence"] == {
             "screen_state": "RUNNING",
             "battle_active": True,
