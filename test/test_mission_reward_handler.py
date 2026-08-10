@@ -16,9 +16,10 @@ from core.menu_reward_badges import (
     menu_reward_alert_visible,
 )
 from core.mission_reward_scheduler import (
+    CLAIMED_RETRY_SECONDS,
     FAILURE_RETRY_SECONDS,
     MissionRewardScheduler,
-    PROBE_COOLDOWN_SECONDS,
+    NOTHING_AVAILABLE_COOLDOWN_SECONDS,
     WeeklyChestReviewState,
     daily_mission_claims_allowed,
     seconds_until_daily_mission_release,
@@ -679,29 +680,39 @@ def test_guild_claim_reselects_members_before_matching_retained_tab():
     assert tap.call_args_list[1].kwargs == {"screenshot": members}
 
 
-def test_scheduler_bounds_persistent_attention_and_failed_attempts():
+def test_scheduler_uses_outcome_aware_reward_probe_delays():
     scheduler = MissionRewardScheduler()
 
     assert not scheduler.should_attempt(alert_visible=False, now=100.0)
     assert scheduler.should_attempt(alert_visible=True, now=100.0)
-    scheduler.mark_completed(now=100.0)
+    scheduler.mark_claimed(now=100.0)
     assert not scheduler.should_attempt(
         alert_visible=True,
-        now=100.0 + PROBE_COOLDOWN_SECONDS - 0.1,
+        now=100.0 + CLAIMED_RETRY_SECONDS - 0.1,
     )
     assert scheduler.should_attempt(
         alert_visible=True,
-        now=100.0 + PROBE_COOLDOWN_SECONDS,
+        now=100.0 + CLAIMED_RETRY_SECONDS,
     )
 
-    scheduler.mark_failed(now=1000.0)
+    scheduler.mark_nothing_available(now=1000.0)
     assert not scheduler.should_attempt(
         alert_visible=True,
-        now=1000.0 + FAILURE_RETRY_SECONDS - 0.1,
+        now=1000.0 + NOTHING_AVAILABLE_COOLDOWN_SECONDS - 0.1,
     )
     assert scheduler.should_attempt(
         alert_visible=True,
-        now=1000.0 + FAILURE_RETRY_SECONDS,
+        now=1000.0 + NOTHING_AVAILABLE_COOLDOWN_SECONDS,
+    )
+
+    scheduler.mark_failed(now=3000.0)
+    assert not scheduler.should_attempt(
+        alert_visible=True,
+        now=3000.0 + FAILURE_RETRY_SECONDS - 0.1,
+    )
+    assert scheduler.should_attempt(
+        alert_visible=True,
+        now=3000.0 + FAILURE_RETRY_SECONDS,
     )
 
 
@@ -731,7 +742,7 @@ def test_scheduler_cooldown_does_not_straddle_weekly_reset():
     scheduler = MissionRewardScheduler()
     before_reset = datetime(2026, 7, 19, 23, 59, 50, tzinfo=timezone.utc)
 
-    scheduler.mark_completed(now=100.0, wall_now=before_reset)
+    scheduler.mark_nothing_available(now=100.0, wall_now=before_reset)
     assert not scheduler.should_attempt(alert_visible=True, now=109.9)
     assert scheduler.should_attempt(alert_visible=True, now=110.0)
 
@@ -1054,9 +1065,12 @@ def test_app_dispatches_alert_probe_and_records_success():
     )
     assert callable(handler_kwargs["action_guard_fn"])
     assert callable(handler_kwargs["route_state_callback"])
-    assert app._mission_reward_scheduler.mark_completed.call_count == 1
-    wall_now = app._mission_reward_scheduler.mark_completed.call_args.kwargs["wall_now"]
+    assert app._mission_reward_scheduler.mark_claimed.call_count == 1
+    wall_now = (
+        app._mission_reward_scheduler.mark_claimed.call_args.kwargs["wall_now"]
+    )
     assert wall_now.tzinfo is timezone.utc
+    app._mission_reward_scheduler.mark_nothing_available.assert_not_called()
     app._mission_reward_scheduler.mark_failed.assert_not_called()
     assert app._blind_tapper_suspended
 
@@ -1102,7 +1116,8 @@ def test_app_dispatches_reward_probe_from_verified_open_menu_badge():
     )
     assert callable(handler_kwargs["action_guard_fn"])
     assert callable(handler_kwargs["route_state_callback"])
-    app._mission_reward_scheduler.mark_completed.assert_called_once()
+    app._mission_reward_scheduler.mark_claimed.assert_called_once()
+    app._mission_reward_scheduler.mark_nothing_available.assert_not_called()
     app._mission_reward_scheduler.mark_failed.assert_not_called()
 
 
@@ -1134,7 +1149,8 @@ def test_app_dispatches_home_badge_probe_before_home_state_handling():
         claim_daily_missions=False,
         event_inventory_callback=app._event_mission_tracker.record_inventory,
     )
-    assert app._mission_reward_scheduler.mark_completed.call_count == 1
+    assert app._mission_reward_scheduler.mark_nothing_available.call_count == 1
+    app._mission_reward_scheduler.mark_claimed.assert_not_called()
     app._mission_reward_scheduler.mark_failed.assert_not_called()
 
 
@@ -1200,17 +1216,23 @@ def test_running_reward_handler_preserves_side_menu_navigation_and_cleanup():
     daily = np.ones((2, 2, 3), dtype=np.uint8)
     event = np.full((2, 2, 3), 2, dtype=np.uint8)
     badges = MenuRewardBadges(True, True, False)
+    residual_badges = MenuRewardBadges(True, False, False)
 
     with (
         patch.object(rewards, "_reward_source_state", return_value="RUNNING"),
         patch.object(rewards, "_ensure_reward_hub", return_value=menu),
-        patch.object(rewards, "measure_menu_reward_badges", return_value=badges),
+        patch.object(
+            rewards,
+            "measure_menu_reward_badges",
+            side_effect=[badges, residual_badges],
+        ),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(rewards, "_wait_for_state", side_effect=[daily, event]),
         patch.object(rewards, "_claim_daily_rewards", return_value=(True, 0)),
         patch.object(rewards, "_claim_event_rewards", return_value=(True, 0)),
         patch.object(rewards, "_return_to_reward_hub", return_value=menu),
         patch.object(rewards, "_close_menu", return_value=True) as close_menu,
+        patch.object(rewards, "log") as debug_log,
         patch.object(rewards, "log_result") as result_log,
     ):
         result = rewards.handle_mission_rewards(menu)
@@ -1221,6 +1243,11 @@ def test_running_reward_handler_preserves_side_menu_navigation_and_cleanup():
         "navigation.menu_event",
     ]
     close_menu.assert_called_once_with(menu)
+    debug_log.assert_any_call(
+        "[MISSION_REWARDS] Residual badges source=RUNNING: "
+        "daily=True event=False guild=False",
+        "DEBUG",
+    )
     result_log.assert_called_once_with(
         "Mission reward review complete — no claimable rewards found",
         detail=(

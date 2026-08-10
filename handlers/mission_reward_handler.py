@@ -472,6 +472,20 @@ def _handle_mission_rewards_route(
             success = False
             break
 
+    if success and reward_hub is not None:
+        residual_badges = (
+            measure_menu_reward_badges(reward_hub)
+            if source_state == "RUNNING"
+            else measure_home_reward_badges(reward_hub)
+        )
+        log(
+            f"[MISSION_REWARDS] Residual badges source={source_state}: "
+            f"daily={residual_badges.daily_missions} "
+            f"event={residual_badges.event_missions} "
+            f"guild={residual_badges.guild_chests}",
+            "DEBUG",
+        )
+
     if (
         source_state == "RUNNING"
         and reward_hub is not None

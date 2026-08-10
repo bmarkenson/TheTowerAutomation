@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 
-PROBE_COOLDOWN_SECONDS = 30 * 60
+CLAIMED_RETRY_SECONDS = 2 * 60
+NOTHING_AVAILABLE_COOLDOWN_SECONDS = 30 * 60
 FAILURE_RETRY_SECONDS = 5 * 60
 LOCAL_TIMEZONE = ZoneInfo("America/Los_Angeles")
 
@@ -107,7 +108,7 @@ class WeeklyChestReviewState:
 
 
 class MissionRewardScheduler:
-    """In-process cooldown for badge-triggered Daily/Event/Guild inspection."""
+    """Outcome-aware cooldown for badge-triggered reward inspection."""
 
     def __init__(self) -> None:
         self._not_before = 0.0
@@ -121,14 +122,31 @@ class MissionRewardScheduler:
         current = time.monotonic() if now is None else float(now)
         return bool(alert_visible and current >= self._not_before)
 
-    def mark_completed(
+    def mark_claimed(
         self,
         *,
         now: float | None = None,
         wall_now: datetime | None = None,
     ) -> None:
+        """Permit one short follow-up after a productive reward sweep."""
+
         current = time.monotonic() if now is None else float(now)
-        self._set_cooldown(current, PROBE_COOLDOWN_SECONDS, wall_now)
+        self._set_cooldown(current, CLAIMED_RETRY_SECONDS, wall_now)
+
+    def mark_nothing_available(
+        self,
+        *,
+        now: float | None = None,
+        wall_now: datetime | None = None,
+    ) -> None:
+        """Back off a persistent alert after no claim target was found."""
+
+        current = time.monotonic() if now is None else float(now)
+        self._set_cooldown(
+            current,
+            NOTHING_AVAILABLE_COOLDOWN_SECONDS,
+            wall_now,
+        )
 
     def mark_failed(
         self,
@@ -136,6 +154,8 @@ class MissionRewardScheduler:
         now: float | None = None,
         wall_now: datetime | None = None,
     ) -> None:
+        """Retry a failed route after its bounded recovery interval."""
+
         current = time.monotonic() if now is None else float(now)
         self._set_cooldown(current, FAILURE_RETRY_SECONDS, wall_now)
 
@@ -154,10 +174,11 @@ class MissionRewardScheduler:
 
 
 __all__ = [
+    "CLAIMED_RETRY_SECONDS",
     "FAILURE_RETRY_SECONDS",
     "LOCAL_TIMEZONE",
     "MissionRewardScheduler",
-    "PROBE_COOLDOWN_SECONDS",
+    "NOTHING_AVAILABLE_COOLDOWN_SECONDS",
     "WeeklyChestReviewState",
     "daily_mission_claims_allowed",
     "seconds_until_daily_mission_release",

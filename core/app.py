@@ -12064,8 +12064,12 @@ class App:
             )
         if result == MissionRewardResult.FAILED:
             self._mission_reward_scheduler.mark_failed(wall_now=wall_now)
-        elif result != MissionRewardResult.INTERRUPTED:
-            self._mission_reward_scheduler.mark_completed(wall_now=wall_now)
+        elif result == MissionRewardResult.CLAIMED:
+            self._mission_reward_scheduler.mark_claimed(wall_now=wall_now)
+        elif result == MissionRewardResult.NOTHING_AVAILABLE:
+            self._mission_reward_scheduler.mark_nothing_available(
+                wall_now=wall_now
+            )
         if lease is not None:
             route_state = self._get_action_authority().auxiliary_route
             cleanup_pending = bool(
