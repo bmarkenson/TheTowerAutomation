@@ -39,6 +39,70 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 guarded GUI save-mapping integration
+
+- Commit `5cee9be` adds API revision 35 and
+  `save_mapping_integration_v1`, with the same review-and-prepare workflow in
+  the browser control surface and native Windows client. The server discovers
+  linked `feature/*` worktrees and issues opaque workspace IDs; clients can
+  select a durable receipt and worktree but cannot supply repository paths,
+  branches, target files, operations, or mapping values. Review binds the
+  exact production/develop tips, feature tip, canonical input hashes and
+  modes, rendered output hashes, and proposal fingerprint. Preparation writes
+  only the reviewed clean feature targets and never stages, commits, moves a
+  ref, promotes, or clears the persistent warning.
+- Stale reviews, dirty or non-descended worktrees, symlinked targets, content
+  or mode drift, moved refs, concurrent preparation, ambiguous writes, and
+  interrupted transactions all fail closed. A private durable transaction
+  journal permits one explicit exact-review recovery; neither GUI retries a
+  preparation automatically. Both clients validate the complete prepared
+  response before displaying success and keep uncertain outcomes visible for
+  inspection.
+- Candidate
+  `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`
+  was reviewed through that workflow and prepared as exactly one
+  `infoIndex 10` / `Astral Deliverance` addition in both
+  `data-9-game-1073` authority and the `data-9-game-1101` structural mirror.
+  Commit `dbe3d34` records the canonical mapping and replaces the integration
+  tests' real-candidate assumption with a reserved synthetic fixture so a
+  successful integration cannot invalidate the lifecycle suite.
+- Focused mapping validation passed 102 player-save tests and all 17 guarded
+  integration tests. The final supported checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,190 tests in 357.62 seconds. The portable native
+  suite passed all 132 tests, and a real WPF Release build succeeded with zero
+  errors; only the known read-only NuGet vulnerability-cache warning appeared.
+- Production and `develop` advanced from `b108bac` to exact `dbe3d34` behind
+  rollback tag `production-before-20260810T215539Z-b108bac`. Automation and the
+  control-surface service stopped cleanly for the source update. The complete
+  native package was published from exact `dbe3d34` at 14:57 PDT. Current
+  Control Surface is 72,416,908 bytes with SHA-256
+  `a1938bb3d94833fcc04b5a85ee50157edb8260a35073e7ee9442bfc6e8a210fb`;
+  current Tunnel Host is 35,172,092 bytes with SHA-256
+  `839c290562afb3ceb9e7a43dbb6c9808f66f7f4922364711f32493bf8a8007c5`.
+  Retained slot 1 contains the prior `dd9354f` package: 72,390,981-byte
+  Control Surface
+  `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`
+  and 35,172,109-byte Tunnel Host
+  `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
+  Slot 2 contains the prior `b2d282f` package: 72,385,088-byte Control Surface
+  `3bb666175f7e0b1b5d731f30c92cee8b71581a3979bfc00f49bd018d69e4d0f4`
+  and 35,172,103-byte Tunnel Host
+  `e23aada8aa3992bbc866fcebd3ec2a22d043902e088f2a4cb78abdba0ff63c68`.
+- The promoted API reported revision 35, the new capability, a healthy empty
+  preparation queue, no transaction journal, and the local Astral Deliverance
+  event as `integrated`. Replacement PID `2509189` attached to the preserved
+  battle and returned to steady `RUNNING` at wave 2131 with matching lock,
+  target, acknowledgements, and no Strategy Gate. Its continuity projector
+  rejected battle-history entry 29 at `chainlightningdamage` and safely used
+  Battle History UI, but the independent configuration projection remained
+  authoritative: session preflight used `bound_player_save_preflight` for
+  Modules, Auto Pick, perk order and first choice, loadouts, card modes, and
+  Ultimate Weapons, opened none of those configuration screens, and matched
+  Astral Deliverance with confidence 1.0. The history-value assumption remains
+  queued for diagnosis; Windows-only WPF lifecycle execution remains a
+  separate target-host validation rather than a Linux publication claim.
+
 ### 2026-08-10 save-mapping discovery and local confirmation lifecycle
 
 - Commits `eb8a391` and `4cd9f2d` add strict, private, append-only candidate

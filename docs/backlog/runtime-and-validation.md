@@ -30,13 +30,22 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       `infoIndex 10` as `Astral Deliverance`; the exact-version local event is
       active for later fresh decodes and the runtime reached steady state with
       no gate, repair, Surrender, or new battle.
-    - [ ] Review candidate
+    - [x] Candidate
       `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`
-      and apply its atomic proposal to both `data-9-game-1073` authority and
-      the `data-9-game-1101` structural mirror, then confirm at a later natural
-      fresh decode that Modules no longer needs UI. Exercise the remaining
-      Home and terminal candidate paths only when those boundaries occur
-      naturally.
+      was reviewed and atomically integrated into both `data-9-game-1073`
+      authority and the `data-9-game-1101` structural mirror by `dbe3d34`.
+      The first production attachment afterward reported Modules, including
+      cannon-assist `infoIndex 10` as `Astral Deliverance`, from
+      `bound_player_save_preflight` without opening Modules; the durable local
+      event now reports `integrated` because canonical owner and mirror agree.
+    - [ ] Exercise the remaining Home and terminal candidate paths only when
+      those boundaries occur naturally.
+    - [ ] Diagnose why that production attachment's continuity projector
+      rejected battle-history entry 29 at `chainlightningdamage` as a malformed
+      value. Determine whether the game emitted a valid negative/sentinel stat
+      before relaxing any invariant. The guarded Battle History fallback
+      completed safely, and independent configuration projections—including
+      Modules, Auto Pick, perk order, and Ultimate Weapons—remained save-backed.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module value. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
