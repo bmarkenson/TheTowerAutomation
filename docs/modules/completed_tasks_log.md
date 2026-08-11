@@ -76,8 +76,23 @@ canonical document linked by an entry for current behavior.
   `session_preflight` degradation carrying `perk_bans` and deferred
   `free_upgrade_locks` evidence. It performed no active-battle repair and
   automation continued through fresh wave-2531 observation and ordinary ad-gem
-  handling without a Pause, gate, Surrender, battle start, terminal action, or
-  manufactured battle boundary.
+  handling without a Pause, authority hold, Surrender, battle start, terminal
+  action, or manufactured battle boundary.
+- That first live smoke exposed repeated advisory publication rather than an
+  automation halt: the completed-but-degraded session state consumed and
+  recreated the same nonblocking `free_upgrade_locks` decision on every
+  heartbeat. Commit `6ace273` now preserves one pending advisory while the
+  degradation remains and records one recovery when the condition actually
+  clears. Its 33 direct and 68 broader focused tests passed, followed by the
+  complete supported checkpoint with all 2,262 tests in 362.07 seconds.
+  Production advanced from `b37d067` behind rollback tag
+  `production-before-20260811T185644Z-b37d067`. Replacement PID `4053109`,
+  runtime `b7e28ff366194434bf27260be0d50653`, reattached through request
+  `1595513062e84353bb259d6e0a904617`; advisory
+  `0125c7e3be55422a923d2c2eca258fa7` stayed pending with its original
+  11:58:23 timestamp and exactly one transition warning through fresh wave-2746
+  observation at 11:59:22. Automation remained `RUNNING` with current receipts
+  and no repair or manufactured boundary.
 - The complete Windows package was published from exact `775da5f` at 11:43 PDT.
   Current Control Surface is 72,430,251 bytes with SHA-256
   `f1a3fa677c7ead967a512184dc56f28d8b76028d3578dfb9eba1b2cad93f2b28`;
@@ -92,6 +107,8 @@ canonical document linked by an entry for current behavior.
   `beb030f58bca4c960fb2141961034f73591d54fef31daf9ce73b0f9ded695941`
   and 35,172,115-byte Tunnel Host
   `383b833a993385de52fee4768bda70c1afb64f6e0940a1f0a815e9e31226c388`.
+  The later `6ace273` hotfix changes only runtime Python and tests, so this
+  package still matches every promoted native input and was not rebuilt.
   Cross-publication and portable tests do not claim Windows WPF runtime
   validation; the revision-38 lifecycle checks remain in the existing native
   client validation backlog.
