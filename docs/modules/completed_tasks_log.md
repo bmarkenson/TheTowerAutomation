@@ -39,6 +39,25 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 ELS-first startup continuity
+
+- Commit `349b369` keeps EHLS and EALS ahead of every deferrable running-start
+  task. Activity Continuity preserves its pending Home source but performs no
+  save serialization or Battle History UI route until both level-skip boxes
+  are complete; an already gold-boxed pair retires that priority immediately.
+- Save-backed Battle History now retains finite signed report statistics as
+  exact game evidence, including the observed negative large-number overflow,
+  while identity fields remain positive and shape, type, and non-finite
+  failures still fail closed. UI fallback attribution and successful
+  `GC_NO_BATTLE` diagnostics now report their actual outcome without
+  failure-only fields.
+- The affected file suite passed all 255 tests and the expanded
+  startup/save/control suite passed all 388 tests. The supported checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,213 tests in 361.77
+  seconds. Feature validation used repository evidence and fixtures without
+  device interaction.
+
 ### 2026-08-10 durable control acknowledgements and Strategy Scope
 
 - Commit `3460d5c` advances the server/native contract to revision 37 with
