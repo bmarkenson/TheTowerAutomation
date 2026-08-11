@@ -35,18 +35,25 @@ and actionable work lives in
   restore the source after lifecycle input, or an uncertain dispatched-input
   result may automatically Pause. Return now applies profile skips; active
   mismatches complete degraded, and Home repair exhaustion also releases the
-  workflow with its exact failure.
+  workflow with its exact failure. When Continue is already selected as a
+  degraded strategy battle ends, terminal handling now returns Home, rearms the
+  next profile's ordinary setup, and repairs before its one-shot continuation;
+  navigation retries retain that route and repair exhaustion still continues
+  degraded.
 - **Regression:** `test/test_runtime_failure_policy.py` proves that only the
   four catastrophic classes select Pause and statically forbids generic App
   Pause/Strategy-Gate calls. Better Control, Home setup, action-authority,
   Tournament, session-preflight, and terminal tests cover degraded release,
-  profile skips, legacy-gate migration, and catastrophic restoration loss.
+  profile skips, legacy-gate migration, catastrophic restoration loss,
+  retained Home-route retry, repair-before-launch ordering, and the fact that
+  `WAIT` is not overridden.
 - **Validation:** The affected combined suite passed 470 tests. The supported
   checkpoint passed compilation, state definitions, clickmap integrity with
   zero errors and the established 44 orphan notices, and all 2,225 tests in
-  360.86 seconds. The fix has not yet been deployed or validated against a
-  post-fix live boundary.
-- **Fixed by:** `1b16db9`.
+  360.86 seconds. The Home-first follow-up passed 535 affected tests and a
+  second supported checkpoint with all 2,232 tests in 362.15 seconds. The fix
+  has not yet been deployed or validated against a post-fix live boundary.
+- **Fixed by:** `1b16db9`, `4ac5237`.
 
 ### Open in-battle side menu suppressed Mission reward scheduling
 

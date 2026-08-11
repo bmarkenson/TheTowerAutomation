@@ -75,8 +75,12 @@ battle and runs a read-only strategy validation:
 ```
 
 Validation never repairs, restarts, or Surrenders the attached battle on its
-own. A mismatch is logged as degraded evidence and the battle continues; the
-next already-safe Home boundary may repair it. When the Current-run ledger
+own. A mismatch is logged as degraded evidence and the battle continues. If
+**Continue automatically** is already selected when that degraded battle ends,
+terminal handling returns Home instead of tapping Retry, runs the next
+profile's normal bounded setup, and then continues. Exhausted Home repair is
+flagged and the next battle still starts degraded; it never becomes a global
+Pause. When the Current-run ledger
 contains a matching completed-check receipt and Battle History proves that
 attachment returned to that same battle, automation reuses the receipt instead
 of repeating its session configuration checks. A missing or configuration-

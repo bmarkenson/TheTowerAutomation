@@ -833,10 +833,20 @@ stages:
       repairs at the current safe boundary and releases degraded if evidence or
       repair exhausts. Recoverable setup-capture, terminal reporting, legacy
       gate, and orphan-validation outcomes likewise release their owners.
+    - [x] Follow-up commit `4ac5237` makes the next safe boundary actionable:
+      when Continue is already selected for a configuration-degraded strategy
+      battle, Game Over returns Home rather than Retry, retains that route
+      across a failed terminal tap, applies the next Strategy, and runs ordinary
+      bounded profile setup before an exact one-shot continuation. Exhausted
+      repair still launches degraded, and `WAIT` is not overridden.
     - [x] The affected combined suite passed 470 tests. The supported
       checkpoint passed compilation, state-definition validation, clickmap
       validation with zero errors and the established 44 orphan notices, and
       all 2,225 tests in 360.86 seconds.
+    - [x] The Home-first affected suite passed 535 tests. A second supported
+      checkpoint passed compilation, state-definition validation, clickmap
+      integrity with zero errors and the established 44 orphan notices, and all
+      2,232 tests in 362.15 seconds.
     - [ ] Promotion and a natural-boundary post-deployment observation remain
       separate operator-authorized work. This checkpoint did not restart a
       service, change live control, or issue device input.

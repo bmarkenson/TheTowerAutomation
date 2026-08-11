@@ -54,10 +54,18 @@ canonical document linked by an entry for current behavior.
   unavailable. Legacy session blocks/gates and recoverable capture, terminal,
   and validation-ledger failures are released rather than retaining global
   authority.
+- Commit `4ac5237` adds the terminal lifecycle counterpart. A strategy battle
+  with carried configuration degradation and already-selected Continue returns
+  Home instead of tapping Retry, preserves that route across navigation retry,
+  applies the next Strategy, runs ordinary bounded profile setup, and only then
+  consumes its exact one-shot continuation. Repair exhaustion launches the
+  next battle degraded, while `WAIT` remains untouched.
 - The affected combined suite passed 470 tests. The supported checkpoint
   passed compilation, state definitions, clickmap integrity with zero errors
   and the established 44 orphan notices, and all 2,225 tests in 360.86 seconds.
-  No post-fix service restart, deployment, or device input was performed.
+  The Home-first follow-up passed 535 affected tests and a second supported
+  checkpoint with all 2,232 tests in 362.15 seconds. No post-fix service
+  restart, deployment, or device input was performed.
 
 ### 2026-08-10 durable control acknowledgements and Strategy Scope
 

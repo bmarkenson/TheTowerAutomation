@@ -60,16 +60,20 @@ releases automation. Cached evidence cannot satisfy Return, and an unsafe
 source or authority boundary cannot authorize UI input.
 
 `NEXT_BATTLE`, `WAIT`, and `HOME` are terminal dispositions. `NEXT_BATTLE`
-uses the next authorized Retry/Battle/Resume path after terminal capture;
-`WAIT` holds Game Over or Home; `HOME` goes Home and suppresses automatic
-Battle/Resume input. Pause blocks terminal navigation and Stop exits without a
-terminal tap. Game Over statistics and record enrichment are best effort; the
-selected terminal route is still attempted. A failed route tap stays pending
-for a fresh-evidence retry without changing action authority or the selected
-policy. Tournament Results satisfies `WAIT` by retaining the screen;
-`NEXT_BATTLE` and `HOME` persist the result and retry the verified dismissal
-route under the same authority-preserving rule. Legacy `RETRY` normalizes to
-`NEXT_BATTLE`.
+normally uses the next authorized Retry/Battle/Resume path after terminal
+capture. When a strategy battle ends with repairable configuration degradation,
+`NEXT_BATTLE` first goes Home, rearms the next profile's normal setup, and runs
+that bounded repair before its exact one-shot launch. Failed Home navigation
+stays pending; exhausted repair records the new failure and still launches
+degraded. `WAIT` holds Game Over or Home; `HOME` goes Home and suppresses
+automatic Battle/Resume input. Pause blocks terminal navigation and Stop exits
+without a terminal tap. Game Over statistics and record enrichment are best
+effort; the selected terminal route is still attempted. A failed route tap
+stays pending for a fresh-evidence retry without changing action authority or
+the selected policy. Tournament Results satisfies `WAIT` by retaining the
+screen; `NEXT_BATTLE` and `HOME` persist the result and retry the verified
+dismissal route under the same authority-preserving rule. Legacy `RETRY`
+normalizes to `NEXT_BATTLE`.
 
 A persistent game-speed target is independent of Pause. Acknowledged values
 `x0.0`–`x6.0` are exact; `max`/`x6.3` means maximum available. It persists
@@ -81,8 +85,11 @@ Configuration mismatch, unavailable validation/evidence, exhausted repair,
 reporting failure, and expired workflow evidence are recoverable. Repair them
 only at an already-safe boundary; otherwise flag the exact problem and continue
 degraded. They cannot create a global Pause, Stop, Strategy Action Gate, or
-indefinite authority hold. Legacy session-preflight gates are cleared when the
-runtime encounters them.
+indefinite authority hold. For running configuration degradation, a Game Over
+handled under already-selected Continue is the next repair boundary: go Home,
+run ordinary profile setup, and continue whether that setup succeeds or
+exhausts. Legacy session-preflight gates are cleared when the runtime encounters
+them.
 
 Automatic Pause is reserved for catastrophic safety failures: lost/corrupt
 control authority, lost exact-target ownership, failure to prove source

@@ -976,11 +976,12 @@ for continued battle retry.
 ## State and battle lifecycle
 
 - The persistent post-run dispositions are `NEXT_BATTLE`, `WAIT`, and `HOME`.
-  `NEXT_BATTLE` takes the next authorized direct Retry, Battle, or Resume Battle
-  route; `WAIT` holds the current terminal/Home boundary; `HOME` returns Home
-  after Game Over and never authorizes automatic Battle or Resume Battle input.
-  Legacy `RETRY` control values normalize to `NEXT_BATTLE` at the persistence
-  boundary.
+  `NEXT_BATTLE` normally takes the next authorized direct Retry, Battle, or
+  Resume Battle route; repairable configuration degradation first inserts the
+  global Home-setup boundary described below. `WAIT` holds the current
+  terminal/Home boundary; `HOME` returns Home after Game Over and never
+  authorizes automatic Battle or Resume Battle input. Legacy `RETRY` control
+  values normalize to `NEXT_BATTLE` at the persistence boundary.
 - Visible navigation and battle lifecycle are separate. Home
   `RESUME_BATTLE` preserves the current battle identity; `GAME_OVER`,
   `TOURNAMENT_RESULTS`, or a verified Home `NEW_BATTLE` ends it.
@@ -1056,6 +1057,20 @@ workflow evidence. At a boundary where correction is already safe, the runtime
 tries the bounded repair immediately. Otherwise it skips only the unsafe or
 unsupported action, records the exact problem as degraded evidence, and keeps
 unrelated strategy, handler, collector, and lifecycle automation eligible.
+
+Configuration degradation carried by a running battle has one global terminal
+rule. When `NEXT_BATTLE` is already in force as its Game Over is handled,
+the runtime snapshots the current mismatch/unavailable-validation/Home-setup
+failure, returns Home instead of tapping Retry, applies any pending Strategy
+boundary change, and rearms that next profile's complete no-battle setup. A
+terminal-navigation failure retains both the Home route and the degradation for
+a fresh-evidence retry. Verified Home then runs the ordinary bounded repair
+before consuming the exact terminal-bound one-shot continuation. Successful
+setup clears the carried degradation and requires fresh in-battle validation;
+exhausted setup records its new exact failure and still releases the next
+battle degraded. `WAIT` is not overridden, `HOME` grants no automatic launch,
+and reporting-only or other non-configuration warnings do not manufacture Home
+repair work.
 
 Only four catastrophic classes may automatically persist `PAUSED`:
 

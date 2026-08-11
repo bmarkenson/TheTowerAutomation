@@ -269,7 +269,8 @@ override an authoritative scope.
 | Live | capture owns a forced refresh | fresh Home New evidence contradicts the requested boundary, or an attempted lifecycle transition cannot prove source restoration | no additional request | report `failed` and persist Automation Paused because the safe input source is unproven |
 | Live | capture owns or completed a forced refresh | ready/terminal ledger write fails | no additional request | retain the exact process-local result and retry only its atomic receipt without changing action authority or serializing again |
 | Live | capture has a terminal result | `saved`, `cancelled`, `unavailable`, `interrupted`, or `failed` | reopen Capture | inspect the prior result only; a new serialization requires the separate explicit **Try capture again** action |
-| Live | enabled | Game Over | selected future terminal policy | collect terminal data best effort, then follow Retry/Home; if the route fails, retain it for a fresh-evidence retry without changing authority |
+| Live | enabled | Game Over after a configuration-degraded strategy battle | Continue was already selected for this terminal | snapshot the degradation, collect terminal data best effort, return Home, apply any pending Strategy, run its ordinary bounded setup, and consume one exact continuation; failed Home navigation retries and exhausted setup launches degraded without changing global authority |
+| Live | enabled | any other Game Over | selected future terminal policy | collect terminal data best effort, then follow Retry/Home; if the route fails, retain it for a fresh-evidence retry without changing authority |
 | Live | enabled | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result and use the verified dismissal route; failure retries from fresh evidence without changing authority; only Continue already selected for that terminal boundary can carry one exact launch through verified New Battle Home |
 | Live/stopped | already satisfied | any | repeated Pause, Enable, Start Automation, Stop Automation, terminal policy, or Take Manual Control where defined | return a visible no-op instead of fabricating a transition |
 
@@ -291,17 +292,21 @@ retained result can dismiss that result, but it does not retroactively create a
 Home launch claim.
 
 Managed Home launch authority is deliberately narrower than terminal policy.
-An ordinary Game Over under Continue uses its direct Retry control. A route
-that must pass through Home—No Strategy post-run collection, an explicitly
-authorized configuration-repair return, or Tournament Results dismissal—may
-carry a one-shot claim created from the exact terminal observation. The claim
-is bound to runtime/PID, ADB target and generation, activity scope, and the
-state and mode request identities in force at that terminal. It survives only
-its owned Home work, requires fresh `NEW_BATTLE`, and is consumed only after a
-verified dispatch. Policy or authority request changes, manual/workflow
-supersession, Resume Battle, owner/target/scope change, process replacement, or
-unexpected manual activity discard it. Being at Home, selecting a Strategy,
-or changing **When this battle ends** never creates one.
+An ordinary healthy Game Over under Continue uses its direct Retry control. A
+configuration-degraded strategy battle instead returns Home, rearms the next
+profile's normal setup, and attempts that bounded repair before launch; repair
+exhaustion flags the new failure but does not suppress continued automation. A
+route that must pass through Home—degraded-battle repair, No Strategy post-run
+collection, an explicitly authorized configuration-repair return, or
+Tournament Results dismissal—may carry a one-shot claim created from the exact
+terminal observation. The claim is bound to runtime/PID, ADB target and
+generation, activity scope, and the state and mode request identities in force
+at that terminal. It survives only its owned Home work, requires fresh
+`NEW_BATTLE`, and is consumed only after a verified dispatch. Policy or
+authority request changes, manual/workflow supersession, Resume Battle,
+owner/target/scope change, process replacement, or unexpected manual activity
+discard it. Being at Home, selecting a Strategy, or changing **When this battle
+ends** never creates one.
 
 The API retains `resume` as a deprecated alias for `enable` and the old
 directive-only `stop` for internal coordination compatibility. The latter sets
@@ -1077,10 +1082,13 @@ Process request examples:
   return/stay Home. The compatible `NEXT_BATTLE`, `WAIT`, and `HOME` values
   remain visible only as runtime representation; none is presented as an
   immediate battle command. Continue normally owns direct Retry at the next
-  Game Over. A terminal route that necessarily returns Home can create the
-  exact one-shot continuation described above; the selected value alone never
-  does. Legacy `RETRY` normalizes to `NEXT_BATTLE`. This contract retains
-  capability `terminal_dispositions_v2`.
+  Game Over. If that strategy battle carries repairable configuration
+  degradation, Continue instead owns the Home-first repair route described
+  above. `WAIT` does not trigger that route, and `HOME` cannot launch the next
+  battle. A terminal route that necessarily returns Home can create the exact
+  one-shot continuation described above; the selected value alone never does.
+  Legacy `RETRY` normalizes to `NEXT_BATTLE`. This contract retains capability
+  `terminal_dispositions_v2`.
 - Legacy running-battle Strategy Action Gate status remains readable for
   compatibility with server revision 22 and capability
   `strategy_action_gate_v1`. Current runtimes clear legacy session-preflight

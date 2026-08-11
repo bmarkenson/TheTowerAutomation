@@ -46,14 +46,19 @@ replacement, inspect fresh observation and issue a new exact battle intent.
 
 **When this battle ends** is future policy, not a Home command. **Continue
 automatically** normally taps Retry directly when the next ordinary Game Over
-is handled. **Wait** retains the supported terminal boundary, and **Return to /
-stay Home** follows its verified Home route. Selecting Continue while already
-at Home records and acknowledges only that future policy; it does not run save
+is handled. If that strategy battle carries a flagged configuration problem at
+Game Over, Continue instead returns Home, applies any pending next Strategy,
+and runs that profile's normal bounded setup before starting another battle. A
+failed Go Home action retries from fresh terminal evidence; exhausted setup is
+reported and the next battle still starts degraded. **Wait** retains the
+supported terminal boundary, and **Return to / stay Home** follows its verified
+Home route without authorizing a launch. Selecting Continue while already at
+Home records and acknowledges only that future policy; it does not run save
 preflight, repair configuration, tap Battle, or tap Resume.
 
 Some completed-terminal workflows must reach Home before another battle can
-start: No Strategy post-run inventory and Tournament Results dismissal. If
-Continue was already selected
+start: degraded-battle repair, No Strategy post-run inventory, and Tournament
+Results dismissal. If Continue was already selected
 for that exact terminal boundary, the runtime may carry one process-local
 continuation through the owned Home work. It is bound to the exact runtime,
 target generation, activity scope, and terminal-time state/policy request IDs;
