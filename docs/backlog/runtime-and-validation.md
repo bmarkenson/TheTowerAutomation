@@ -939,13 +939,27 @@ stages:
       validation, clickmap integrity with zero errors and the established 44
       orphan candidates, and all 2,211 Python tests in 353.14 seconds after
       rebasing onto current `develop` at `adf2176`.
+    - [x] Production and `develop` advanced from `adf2176` to exact `3460d5c`
+      behind rollback tag `production-before-20260811T025615Z-adf2176`.
+      Control-surface PID `2864662` served revision 37. Replacement automation
+      PID `2866425` acquired the exact runtime/target/generation-1 lock while
+      preserving the operator-owned Pause; all five current receipts matched
+      their values and request IDs, Action Authority remained `paused`, the
+      terminal policy was acknowledged, and Strategy Scope contained no false
+      pending state. No device input or control refresh request was used.
+    - [x] The complete revision-37 Windows package was published from exact
+      `3460d5c`. Current Control Surface is 72,429,586 bytes with SHA-256
+      `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`;
+      current Tunnel Host is 35,172,117 bytes with SHA-256
+      `cabad7e7fadb26f29c494a54eea8ed0fa717e6035376b6805b25d19457aec828`.
+      Retained slots contain exact prior packages `d836532` and `dbe3d34`.
     - [ ] Run the revision-37 Windows checks in
       [`../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation`](../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation):
       preserve every indicator across long noisy output and rotation without a
       refresh request, and verify authoritative Strategy current/pending/startup
       rendering plus dirty/retry/same-ID/stopped/active-adoption behavior. No
-      Windows runtime, live process, or device validation is claimed here; see
-      [ISSUE-2026-037](../issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending).
+      Windows runtime or device validation is claimed here; see
+      [ISSUE-2026-038](../issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending).
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

@@ -192,13 +192,15 @@ current runtime state.
 
 ### Long action-log retention made current controls appear pending
 
-**Stable ID:** `ISSUE-2026-037` · **Lifecycle:** `repair_awaiting_confirmation`
+**Stable ID:** `ISSUE-2026-038` · **Lifecycle:** `repair_awaiting_confirmation`
 
 - A healthy exact-owner runtime reported correct Strategy Scope and authority,
   but current acknowledgements disappeared after their audit lines aged beyond
   the adapter's 262 KiB tail. The repair publishes exact state, mode, speed,
   ADB, and Strategy receipts in the atomic runtime channel and makes WPF render
-  authoritative Strategy Scope; action logs remain audit-only.
+  authoritative Strategy Scope; revision 37 is deployed on Linux and its
+  Windows package is published, while Windows runtime confirmation remains
+  pending. Action logs remain audit-only.
 - Load the [dossier](issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending)
   for a recurrence, acknowledgement-channel change, or Windows confirmation.
   Next: verify long-run and rotated-log presentation, Strategy current/pending,

@@ -39,6 +39,58 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-10 durable control acknowledgements and Strategy Scope
+
+- Commit `3460d5c` advances the server/native contract to revision 37 with
+  `runtime_control_acknowledgements_v1`. State, terminal policy, speed, ADB,
+  and Strategy receipts now live in the existing atomically replaced runtime
+  authority snapshot and are accepted only for the active lock's exact runtime
+  ID, PID, target, target generation, request ID, and value. Action logging
+  remains audit evidence and no current authority depends on log retention.
+- WPF now presents the Linux-owned `control_model.strategy_scope` for startup,
+  active-battle, pending-next-boundary, and pending-active-adoption state.
+  Compatibility reconstruction is limited to servers without the Better
+  Control capability, while dirty selection, retry, same-ID publication,
+  stopped-process, and explicit active-adoption behavior remain coordinated by
+  the existing selection owner.
+- The expanded affected Python suite passed 465 tests, the concurrent Game
+  Over/Perk/activity/save boundary suite passed 203, and all 139 portable
+  native tests passed. A Release WPF cross-build completed with zero errors.
+  The supported checkpoint passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,211 tests in 353.14 seconds after rebasing onto `adf2176`.
+- Production and `develop` advanced from `adf2176` to exact `3460d5c` behind
+  rollback tag `production-before-20260811T025615Z-adf2176`. The existing
+  operator-owned Pause/manual-control boundary was preserved: PID `2837669`
+  stopped cleanly without device input, control-surface PID `2864662` served
+  revision 37, and replacement automation PID `2866425` acquired
+  `localhost:5555` as runtime `92ec71023a6f4bf39bfdcc61abe0132e`, target
+  generation 1. Its five exact receipts were `PAUSED` /
+  `22676a4e912b44db8a72474427e3fdae`, `NEXT_BATTLE` /
+  `c0230ac46c044ee89f3a09f7c8b49c95`, `2.0` /
+  `54f95c535899442f9af50b22fd9f6de4`, ADB port `5555` /
+  `0ddfbb6e09a04f46a9f304ea3d54623b`, and
+  `farm_t19_ad_assist` / `460165104dcf474ebf3f10f0e2eedcb8`.
+  Action Authority remained `paused`, terminal policy was acknowledged, and
+  authoritative Strategy Scope contained no false pending state.
+- The complete Windows package was published from exact `3460d5c` at 19:58
+  PDT. Current Control Surface is 72,429,586 bytes with SHA-256
+  `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`;
+  current Tunnel Host is 35,172,117 bytes with SHA-256
+  `cabad7e7fadb26f29c494a54eea8ed0fa717e6035376b6805b25d19457aec828`.
+  Retained slot 1 contains the prior `d836532` package: 72,427,793-byte
+  Control Surface
+  `beb030f58bca4c960fb2141961034f73591d54fef31daf9ce73b0f9ded695941`
+  and 35,172,115-byte Tunnel Host
+  `383b833a993385de52fee4768bda70c1afb64f6e0940a1f0a815e9e31226c388`.
+  Slot 2 contains the prior `dbe3d34` package: 72,416,908-byte Control Surface
+  `a1938bb3d94833fcc04b5a85ee50157edb8260a35073e7ee9442bfc6e8a210fb`
+  and 35,172,092-byte Tunnel Host
+  `839c290562afb3ceb9e7a43dbb6c9808f66f7f4922364711f32493bf8a8007c5`.
+  The package was not executed on Windows; revision-37 WPF runtime validation
+  remains tracked by
+  [`ISSUE-2026-038`](../issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending).
+
 ### 2026-08-10 terminal Perk reconciliation
 
 - Commit `47a0508` distinguishes the already-promoted completed-state opener
