@@ -108,10 +108,15 @@ longer freezes combat, waits for the running wave to advance, and retries from
 fresh panel evidence. The wait and every new panel session recheck runtime
 action authority. Damage Slider `observe` and `enforce` policies resolve an
 explicit percentage; Tier 18 enforces `1E-22%` during every new-run
-initialization after the time-sensitive EHLS/EALS setup. `YamlStrategy`
-exposes the plan's resolved `run_configuration` generically, and Game Over
-records copy that snapshot into the versioned battle JSON. Runtime code does
-not inherit configuration or branch on a Farm strategy name.
+initialization after the time-sensitive EHLS/EALS setup. While either Farm
+level-skip completion flag remains false, the same priority hold defers
+Activity Continuity's running save serialization and Battle History UI route;
+it preserves any pending Home source and resumes continuity after both boxes
+are complete. An already gold-boxed pair therefore retires the priority
+immediately. `YamlStrategy` exposes the plan's resolved `run_configuration`
+generically, and Game Over records copy that snapshot into the versioned battle
+JSON. Runtime code does not inherit configuration or branch on a Farm strategy
+name.
 
 ### Player-save observation channel
 

@@ -1292,6 +1292,10 @@ def test_home_preflight_logs_concise_check_results_for_operator_activity():
     assert result_log.call_args.args[0] == (
         "Home-only run configuration complete — verified without changes"
     )
+    detail = result_log.call_args.kwargs["detail"]
+    assert "[GC_NO_BATTLE] outcome=success result=complete" in detail
+    assert "failed_check=" not in detail
+    assert "retryable_from_home=" not in detail
 
 
 def test_save_accepted_mapping_and_list_logs_render_normalized_values():

@@ -1395,6 +1395,31 @@ def test_malformed_history_entry_never_publishes_partial_projection(
     assert tail.entry is None
 
 
+def test_finite_negative_history_stat_preserves_identity_and_report(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded["battleHistory"][-1]["damageDealt"] = -3.510034714589e36
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    tail = runtime.battle_history_tail
+    assert tail.structural_status == "observed"
+    assert tail.identity is not None
+    assert tail.completed_entry_status == "observed"
+    assert tail.entry is not None
+    damage_dealt = next(
+        row
+        for section in tail.entry.sections
+        for row in section.rows
+        if row.key == "damage_dealt"
+    )
+    assert damage_dealt.value == -3.510034714589e36
+    assert damage_dealt.value_decimal is not None
+    assert damage_dealt.value_decimal.startswith("-")
+
+
 def test_mixed_datetime_kinds_do_not_use_cross_kind_tick_ordering(monkeypatch):
     decoded = _decoded_save()
     decoded["battleHistory"] = [
