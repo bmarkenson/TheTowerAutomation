@@ -261,12 +261,11 @@ override an authoritative scope.
 | Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; prefer a new forced save (or a bound natural Game Over save), then automatically use the supported active/Home/terminal UI route if that save is unusable after safe restoration |
 | Live | reconciling Return | source restoration, owner, target, scope, or authority binding is lost after lifecycle input | no additional request | persist Automation Paused and terminalize that Return as failed/interrupted; do not repeat lifecycle input or open UI from an unsafe boundary |
 | Live | enabled, adopted active battle | active battle | apply selected Strategy to this battle | adopt only after explicit selection; preserve battle identity and defer new-run/Home-only gates; Surrender remains unauthorized |
-| Live | enabled, adopted active battle | repair-only mismatch | choose **Surrender this battle and repair setup** in the runtime gate | grant one exact-battle, exact-reason Surrender; write the nonrepresentative disposition before verified Home, then let normal Home repair and the separately selected future-battle policy continue without an implicit Pause |
+| Live | enabled, adopted active battle | recoverable configuration mismatch | no additional request | record exact degraded evidence and continue the battle; do not create a Strategy Gate, Pause, or Surrender permission |
 | Live | enabled | Home New, Home Resume, or active battle with exact binding | Capture current setup as… | force a new save, present captured and unresolved fields for review, then save a new inactive Module preset or Strategy draft without selecting, queueing, publishing, or applying it |
-| Live | paused, Return awaiting trusted-mismatch review | same exact active battle with its process-local forced acquisition retained | Capture current setup as… | project the Return acquisition without new input, label that provenance explicitly, and leave Return Control Paused and unresolved after any capture save |
 | Live | capture owns a forced refresh | compatible exact/forward save revision | no additional request | use only the resolved mapping's explicit compatibility allowlist; preserve every other setup field as unresolved |
 | Live | capture owns a forced refresh | source restored, but mapping/projection/acquisition is unavailable or round identity is incomplete | no additional request | report `unavailable`, open no configuration UI, and preserve the prior action-authority state |
-| Live | capture owns a forced refresh | fresh active/resumable evidence contradicts the requested battle identity | no additional request | report `failed` and enter a running-battle Strategy Gate so observation and safe gem collectors continue while strategy/lifecycle input yields |
+| Live | capture owns a forced refresh | source restored, but fresh active/resumable evidence contradicts the requested battle identity | no additional request | report `failed`, release capture ownership, and preserve the prior action-authority state |
 | Live | capture owns a forced refresh | fresh Home New evidence contradicts the requested boundary, or an attempted lifecycle transition cannot prove source restoration | no additional request | report `failed` and persist Automation Paused because the safe input source is unproven |
 | Live | capture owns or completed a forced refresh | ready/terminal ledger write fails | no additional request | retain the exact process-local result and retry only its atomic receipt without changing action authority or serializing again |
 | Live | capture has a terminal result | `saved`, `cancelled`, `unavailable`, `interrupted`, or `failed` | reopen Capture | inspect the prior result only; a new serialization requires the separate explicit **Try capture again** action |
@@ -324,14 +323,11 @@ A loss of restoration, owner, target, scope, or action authority terminates
 the exact workflow and leaves Automation Paused rather than opening UI from
 cached data. Home New terminalizes that unsafe outcome once, so later
 heartbeats do not background the game again. A trusted mapped mismatch remains
-distinct from unusable save data and requires explicit review and another
-Enable before a new refresh.
-If a bounded Home configuration repair then cannot make stable progress, the
-manual-control ledger advances to `awaiting_manual_correction` with the exact
-failed check, reason, retryability, and retained forced-save receipt. Clients
-show that failure while Automation remains Paused. After the operator makes
-the reported correction, a new explicit Enable discards prior private claims
-and requests another serialization; a heartbeat never retries it on its own.
+distinct from unusable save data but is recoverable. Active/resumable Return
+completes with exact degraded evidence. Home New repairs it immediately at the
+already-safe boundary and, if bounded repair exhausts, completes with the exact
+failed check and reason. Neither outcome restores Pause, retains Return capture
+authority, or waits for another Enable.
 A Pause, Stop, or Take Manual Control that arrives during Home setup yields at
 the first denied input without cleanup. Only a later same-owner Enable may
 restore Home from that yielded route.
@@ -559,6 +555,10 @@ until ordinary review, validation, commit, integration, production promotion,
 and a later fresh canonical decode retire the receipt.
 
 ### Structured Strategy Action Gate status
+
+This field is a compatibility surface. Current runtimes do not activate it for
+recoverable configuration, validation, evidence, repair, or reporting failures;
+they migrate a legacy session-preflight gate to degraded evidence instead.
 
 `GET /api/v1/status` exposes `strategy_action_gate` separately from
 `control.state`, state acknowledgement, and the latest observation. The object
@@ -1070,10 +1070,9 @@ Process request examples:
   rows, and a fingerprinted Strategy/Base review, then saves only an inactive
   artifact. Captured Strategy drafts remain reopenable in the ordinary native
   authoring catalog together with their own immutable origin, difference, and
-  unresolved review—not whichever capture happens to be current. A trusted-
-  mismatch Return Control may supply its exact
-  still-retained forced acquisition without a second refresh; the client shows
-  that provenance, and capture completion does not complete Return Control.
+  unresolved review—not whichever capture happens to be current. Return
+  Control never retains a mismatch-owned capture route; Capture always owns a
+  separate explicit refresh.
 - **When this battle ends** selects continue automatically, wait, or
   return/stay Home. The compatible `NEXT_BATTLE`, `WAIT`, and `HOME` values
   remain visible only as runtime representation; none is presented as an
@@ -1082,14 +1081,12 @@ Process request examples:
   exact one-shot continuation described above; the selected value alone never
   does. Legacy `RETRY` normalizes to `NEXT_BATTLE`. This contract retains
   capability `terminal_dispositions_v2`.
-- A distinct running-battle Strategy Action Gate banner based only on fresh,
-  owner-matched structured status. It reads “Strategy actions blocked —
-  observation and safe collectors remain active.” and shows the reason, failed
-  checks, and collectors that currently retain authority. The Automation field
-  and Pause coloring continue to show only requested/acknowledged control
-  state; an active Strategy Gate is never labelled globally Paused. This gate
-  status was introduced in server revision 22 with capability
-  `strategy_action_gate_v1`.
+- Legacy running-battle Strategy Action Gate status remains readable for
+  compatibility with server revision 22 and capability
+  `strategy_action_gate_v1`. Current runtimes clear legacy session-preflight
+  gates and expose their reason as degraded validation evidence; recoverable
+  mismatches never create a new gate or Pause. The Automation field and Pause
+  coloring continue to show only requested/acknowledged control state.
 - A discoverable custom Strategy **History** window for active and retired
   lineages. It shows immutable revision identity and current validation,
   requests Linux-computed semantic restore reviews, and enables restore-as-new
@@ -1127,24 +1124,17 @@ Process request examples:
   sampling costs, BlueStacks I/O, last Linux acknowledgement, and any
   sampler/spool/upload error. The display remains local and current while the
   API is unavailable.
-- Automatic startup-gate decision dialogs for requests published by the
-  runtime. The API accepts only an option contained in the matching pending
-  request. Retry re-runs the check with fresh evidence; a bypass or configured
-  fallback waives only the named requirement for the current run, so unrelated
-  checks such as Auto Pick Perks remain authoritative. Closing the dialog
-  leaves automation blocked and the request pending. Running-session requests
-  use a phase-specific **Session preflight needs direction** title, a humanized
-  requirement label, and the runtime's concise evidence summary instead of a
-  generic configuration-mismatch message. If the runtime cannot recover a
-  recognized failed requirement, the dialog offers Retry only; it never offers
-  an unscoped bypass or repair. A later successful preflight consumes only the
-  matching Strategy's session-preflight request so the client cannot auto-open
-  a stale failure. These are presentation and lifecycle corrections within the
-  existing gate-decision fields and require no protocol revision or capability.
+- Advisory startup-check dialogs for requests published by the runtime. The API
+  accepts only an option contained in the matching pending request. Retry uses
+  fresh evidence; a configured fallback or continuation applies only to the
+  named requirement, so unrelated checks remain authoritative. Closing the
+  dialog never changes Automation authority or leaves a recoverable error
+  blocking. Later success consumes the matching Strategy request so a stale
+  warning cannot reopen.
 - Non-blocking attached-Tournament warning dialogs use the same scoped decision
-  channel. They offer persistent Pause for manual changes, a fresh read-only
-  retry, or continuation with only the displayed mismatch waived. Closing the
-  dialog leaves the warning pending but does not block terminal observation.
+  channel. They offer a fresh read-only retry or continuation with only the
+  displayed mismatch flagged. Persistent Pause remains a separate explicit
+  operator action, not a failure-dialog disposition.
 - An optional **Configure run...** dialog populated from the selected
   strategy's actual preflight requirements. Unchecked checks retain their
   defaults; checked checks create strategy-bound one-run waivers. The dialog
@@ -1265,7 +1255,7 @@ These are the next useful additions, in approximate priority order:
 4. Add battle comparisons, trend charts, and aggregate rates by strategy, tier,
    profile, battle type, and date range.
 5. Add opt-in notifications for battle completion, invalid capture quality,
-   stale runtime, control acknowledgement timeout, and blocked preflight.
+   stale runtime, control acknowledgement timeout, and degraded preflight.
 
 Repository implementation of save-backed Attach/Return reconciliation and
 **Capture current setup as…** is included in revision 29. Revision 30 adds the

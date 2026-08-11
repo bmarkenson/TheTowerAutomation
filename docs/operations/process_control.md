@@ -54,9 +54,10 @@ starts an exclusive reconciliation hold. A newly forced save, or the exact
 bound natural Game Over save, is preferred. When that save is unusable after a
 safe source restoration, the same hold automatically uses the supported
 active/Home/terminal UI discovery route and a target/scope-bound UI receipt.
-A trusted mapped mismatch remains Paused for explicit operator review; cached
-evidence cannot satisfy Return, and an unsafe source or authority boundary
-cannot authorize UI input.
+A trusted mapped mismatch completes Return with exact degraded evidence; at
+Home it is repaired immediately when possible, and exhausted repair still
+releases automation. Cached evidence cannot satisfy Return, and an unsafe
+source or authority boundary cannot authorize UI input.
 
 `NEXT_BATTLE`, `WAIT`, and `HOME` are terminal dispositions. `NEXT_BATTLE`
 uses the next authorized Retry/Battle/Resume path after terminal capture;
@@ -74,16 +75,21 @@ A persistent game-speed target is independent of Pause. Acknowledged values
 `x0.0`–`x6.0` are exact; `max`/`x6.3` means maximum available. It persists
 across battles and process starts until changed.
 
-## Strategy Action Gate
+## Runtime failure policy
 
-An active-battle validation mismatch may raise a Strategy Action Gate while
-control remains `RUNNING`. This is not a failed Pause acknowledgement. Capture,
-detection, OCR, status, and explicitly allowlisted independent collectors may
-continue; strategy and lifecycle actions remain blocked. Resolve it only with
-the published retry, run-scoped waiver, explicit Pause/manual change, or
-offered guarded repair decision. The gate itself never authorizes Surrender,
-Home, restart, or a new battle. See
-[`architecture/runtime.md`](../architecture/runtime.md#typed-runtime-action-authority).
+Configuration mismatch, unavailable validation/evidence, exhausted repair,
+reporting failure, and expired workflow evidence are recoverable. Repair them
+only at an already-safe boundary; otherwise flag the exact problem and continue
+degraded. They cannot create a global Pause, Stop, Strategy Action Gate, or
+indefinite authority hold. Legacy session-preflight gates are cleared when the
+runtime encounters them.
+
+Automatic Pause is reserved for catastrophic safety failures: lost/corrupt
+control authority, lost exact-target ownership, failure to prove source
+restoration after lifecycle input, or a dispatched input whose result is
+uncertain. Explicit operator Pause, Stop, and Take Manual Control are separate
+intent. See
+[`architecture/runtime.md`](../architecture/runtime.md#global-runtime-failure-policy).
 
 ## Process replacement and terminal recovery
 

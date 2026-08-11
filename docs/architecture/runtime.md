@@ -72,7 +72,7 @@ assigns one of these policies:
 
 | Policy | Runtime contract |
 | --- | --- |
-| `enforce` | Inspect and require the resolved value; a mismatch blocks unless an explicit safe repair contract owns the transition. |
+| `enforce` | Inspect and require the resolved value. Repair a mismatch immediately when the current boundary already makes that safe; otherwise flag the exact difference and continue degraded. |
 | `observe` | Require authoritative observation and record the resolved reference and evidence; confident differences do not block or change the setting. |
 | `preserve` | Do not inspect or change the setting. |
 
@@ -99,7 +99,8 @@ are checked after the new run reaches `RUNNING`. Each generated Orb Distance
 action carries the complete configured preset set. The authoritative observed
 Attack Range selects its matching Extra/Workshop pair; a readable Range
 outside that set is preserved as an operator experiment without opening
-Distance Adjuster. Unreadable Range evidence still blocks. Tier 18 Farm binds
+Distance Adjuster. Unreadable Range evidence skips that adjustment and is
+retained as degraded validation evidence. Tier 18 Farm binds
 Range `30.00m` to Extra `30.00m` and Workshop `39.00m`; Tier 18 and Tier 19
 Farm both enforce the observed configured Range pair. If a
 freshly matched arrow is unavailable or one verified tap leaves its value
@@ -137,7 +138,7 @@ The implemented Home-preflight decision is per check:
 
 ```text
 verified NEW_BATTLE -> proven app-pause flush -> stable exact-version pull
-    global trust failure                 -> invalidate the snapshot; UI or block by failure class
+    global trust failure                 -> invalidate the snapshot; use UI or continue degraded
     complete + allowlisted + exact match -> accept the saved state; skip that UI route
     complete + allowlisted + mismatch    -> queue only that check's existing UI path
                                                |-- UI also mismatches: guarded repair + UI verify
@@ -1046,6 +1047,30 @@ for continued battle retry.
 
 ## Matching and action authority
 
+### Global runtime failure policy
+
+Recoverable runtime problems never own a global Pause, Stop, Strategy Gate, or
+indefinite authority hold. This includes configuration mismatch, unavailable
+validation or evidence, exhausted bounded repair, reporting failure, and stale
+workflow evidence. At a boundary where correction is already safe, the runtime
+tries the bounded repair immediately. Otherwise it skips only the unsafe or
+unsupported action, records the exact problem as degraded evidence, and keeps
+unrelated strategy, handler, collector, and lifecycle automation eligible.
+
+Only four catastrophic classes may automatically persist `PAUSED`:
+
+- control authority is lost or corrupt;
+- ownership of the exact ADB target is lost;
+- a lifecycle input was attempted and the original source cannot be proved
+  restored; or
+- an input was dispatched but its result cannot be determined safely.
+
+Explicit operator Pause, Stop, and Take Manual Control remain separate intent,
+not failure handling. A bounded exclusive owner may still hold input while its
+currently executing action is being repaired or reconciled, but a recoverable
+result must release that owner. Legacy session-preflight blocks and gates are
+migrated to completed degraded evidence when encountered.
+
 ### Typed runtime action authority
 
 `core/action_authority.py` is the central runtime owner for action decisions.
@@ -1059,7 +1084,7 @@ routed through an input guard.
 | Normal | Always continues | Existing screen, handler, and scheduler policy | Existing strategy policy | Existing lifecycle policy |
 | Global Pause or Stop | Continues | Blocked | Blocked | Blocked |
 | Enabled initial Start/Attach wait at fresh Home | Continues | Only the visible `home_ad_gem` claim | Blocked | Blocked |
-| Running-battle Strategy Gate | Continues | Only the explicit safe allowlist | Blocked | Blocked |
+| Legacy running-battle Strategy Gate | Continues | Only the explicit safe allowlist | Released after migration to degraded evidence | Released after migration to degraded evidence |
 | Continuity, initialization, validation, or exclusive screen hold | Continues | Blocked | Matching bounded owner only | Matching bounded owner only |
 | `external_development` hold | Continues | Blocked | Blocked for every owner | Blocked for every owner |
 
@@ -1084,18 +1109,12 @@ installation. An already-authorized recovery retains that guard through its
 last mutation; production cannot install the hold or acknowledge quiescence
 until it finishes.
 
-An active Strategy Gate is distinct from Pause and never mutates the control
-file or `AUTOMATION.state`. It is scoped to the current activity/run identity
-when available and persists while the same battle visits Store, Mission,
-Event, Guild, reward-reveal, side-menu, and other temporary screens. Entry and
-changed evidence are logged once per transition rather than once per frame.
-The gate is released only by successful validation, accepted retry, a
-run-scoped waiver, an explicit active-battle strategy change, an explicitly
-authorized repair transition, changed authoritative run identity, or a natural
-battle boundary. Notification-only/`observe` mismatches retain evidence without
-activating the blocking gate. Natural Game Over releases it before normal
-terminal handling, but the gate can neither authorize nor dispatch Surrender,
-Exit Battle, Go Home, restart, or New Battle.
+Structured Strategy Gate state remains readable for compatibility with older
+receipts and clients, but current configuration, validation, evidence, repair,
+and reporting failures do not activate it. If the runtime encounters a legacy
+session-preflight gate, it clears that gate and converts the retained failure
+to completed degraded evidence. The gate never authorizes Surrender, Exit
+Battle, Go Home, restart, or New Battle.
 
 The gate's auxiliary allowlist is explicit: in-battle ad-gem collection and its
 bounded floating-gem scan, Daily Gem Store, Daily and Weekly Mission rewards,
@@ -1106,16 +1125,14 @@ collector cannot navigate to Home or cross a battle boundary merely to collect.
 Home ad gems retain ordinary Home handling outside this running-battle gate.
 
 Minimum continuity is deliberate. Recoverable setup-capture, data-collection,
-configuration-validation, and repair-record failures do not manufacture a
-global Pause. A running-battle contradiction or mismatch uses the Strategy
-Gate so safe gem collection continues, and natural Game Over releases that
-gate before terminal handling. Game Over statistics collection is best effort;
+configuration-validation, repair, and receipt failures are flagged without
+changing global authority. Game Over statistics collection is best effort;
 the selected Retry/Home route is still attempted and a failed terminal tap is
 retried from fresh terminal evidence with action authority unchanged.
 Tournament Results dismissal follows the same retry rule. Explicit Pause,
-Take Manual Control, Stop, changed workflow ownership, and inability to prove
-restoration after an attempted lifecycle transition remain fail-closed
-boundaries.
+Take Manual Control, and Stop remain operator boundaries. Changed workflow or
+target ownership, unproved restoration after lifecycle input, and uncertain
+input results are catastrophic safety boundaries and may Pause automatically.
 
 Daily Gem and mission collectors claim an exclusive auxiliary-route lease from
 a freshly detected same-battle `RUNNING` frame before their first input. While
@@ -1200,16 +1217,16 @@ warning text in `actions.log`.
   authoritative for the computed batch. The runtime then reacquires settled
   OCR evidence, recomputes any remaining gap, requires strict progress and a
   verified final value, and returns to `RUNNING/ATTACK_MENU`. Unknown sequences
-  fall back to single-step feedback; unknown or incomplete evidence remains
-  blocked.
+  fall back to single-step feedback; unknown or incomplete evidence skips that
+  correction and completes the check degraded.
 - Orb Distance enforcement first locates the Attack Range tile and requires
   authoritative OCR, with one adaptive-threshold retry for the dim value on a
   Maxed tile. The observed Range selects a matching entry from the complete
   generated preset set. A readable unconfigured Range records
   `unconfigured_range_preserved` and completes without Distance Adjuster input;
-  unreadable evidence remains blocked. For a configured Range, the runtime
-  opens the freshly matched in-run Distance Adjuster, OCRs both values, and
-  matches each direction arrow immediately before one tap. Every step
+  unreadable evidence is flagged and skips Distance Adjuster. For a configured
+  Range, the runtime opens the freshly matched in-run Distance Adjuster, OCRs
+  both values, and matches each direction arrow immediately before one tap. Every step
   reacquires the panel, requires the selected row to move strictly closer to
   its target, and stops on unknown, unchanged, cycling, or non-progressing
   evidence. An unavailable arrow or unchanged value closes the automatically
@@ -1262,9 +1279,10 @@ warning text in `actions.log`.
   resynchronization path, which restarts planning at rank one. Cached frames
   never authorize an input. Final authoritative Ban and Auto Pick readbacks
   remain mandatory and are reused by their callers. An unavailable perk,
-  unresolved ambiguity, or non-progress blocks New Battle. A locally exhausted
-  Perk repair returns to Home once and is marked non-retryable there; other
-  recoverable Home setup failures retain the complete fresh-Home retry policy.
+  unresolved ambiguity, or non-progress ends only that bounded repair, records
+  the exact failure, and releases the Home route to continue degraded. Other
+  recoverable Home setup failures retain the complete fresh-Home retry policy
+  before receiving the same degraded result.
   Persistent control is synchronized before every Home setup tap or swipe.
   The first denied input boundary yields the synchronous setup immediately so
   Pause, Stop, Take Manual Control, capture/detection, and acknowledgements do
@@ -1272,10 +1290,9 @@ warning text in `actions.log`.
   later explicit Enable may restore verified Home and start a fresh setup pass
   only when the same runtime, target, activity scope, and original workflow
   owner still match; Stop or a manual-control handoff discards that recovery.
-  A Return-Control setup that exhausts its bounded repair publishes
-  `awaiting_manual_correction` with the exact failed check and reason while
-  retaining its forced-save receipt and Pause. Only another explicit Enable
-  after the manual correction requests a new save. The setup retains exact
+  A Return-Control setup that exhausts its bounded repair completes Return in
+  degraded mode with the exact failed check and reason; it does not restore the
+  manual Pause or wait for another Enable. The setup retains exact
   UI- or save-derived configuration evidence for session preflight.
   Save-derived sections, including the exact current eight-slot Farm Module
   assignment, are accepted there only after their typed carry binds to the
@@ -1290,31 +1307,20 @@ warning text in `actions.log`.
   Home repair, or Surrender request; Poison Swamp Stun falls back to its guarded
   in-battle detail check; Home `RESUME_BATTLE` preserves the attachment, and
   the Home-owned gates rearm at the next genuine `NEW_BATTLE` boundary.
-- A confident Home-only mismatch does not immediately authorize repair. The
-  generated Farm plan declares a three-attempt threshold; the read-only
-  session preflight retries after its existing cooldown while the failed-check
-  identity is unchanged. Success clears the series, and changed failure
-  identity restarts it. Only an exhausted series may request one app-owned
-  stop/repair/restart sequence. Ambiguous or unknown module identity and other
-  non-Home repair classes remain blocked. The matcher reports evidence but
-  never directly authorizes an equipment action.
-- A terminal running-session decision is scoped to the first recognized failed
-  requirement retained in structured session-preflight evidence, falling back
-  to the manager's retained failed-check list only when needed. A generic
-  validator reason is replaced with the evidence summary, including normalized
-  expected and observed save-backed values when available; a specific repair or
-  transition failure remains authoritative. If neither source identifies a
-  recognized requirement, the blocking diagnostic decision offers Retry only:
-  it cannot write a synthetic `session_preflight` waiver or authorize repair.
-  Persisted generic or unscoped decisions are consumed before a corrected
-  request replaces them. Once the same Strategy subsequently records a
-  successful complete session preflight, its pending or resolved
-  `session_preflight` decision is consumed; decisions for another Strategy or
-  phase remain untouched.
-- A guarded configuration repair must reach verified Home `NEW_BATTLE`, use
-  fresh detail/name and action guards for module changes, reapply the complete
-  profile-owned no-battle setup, start the next battle, and require fresh
-  session preflight evidence before normal handlers regain authority.
+- A confident mismatch is repaired only at an already-safe boundary such as
+  verified Home `NEW_BATTLE`. An active-battle or otherwise unsafe mismatch is
+  recorded once as completed degraded validation; it cannot request Surrender,
+  stop/repair/restart, a Strategy Gate, or an operator decision. The matcher
+  reports evidence but never directly authorizes an equipment action.
+- Running-session validation stores normalized expected/observed evidence and
+  the failed requirement IDs. A conclusive mismatch or unavailable validator
+  completes the one-shot pass in degraded mode so it cannot repeat every
+  heartbeat. Later successful validation clears the degraded state. Legacy
+  blocking decisions are consumed rather than re-published.
+- A guarded Home repair uses fresh detail/name and action guards and reapplies
+  the complete profile-owned no-battle setup. Success records verified
+  evidence. Exhaustion records the exact failure and continues; it does not
+  retain global action authority merely because configuration is imperfect.
 
 ## Process and control ownership
 

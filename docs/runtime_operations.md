@@ -71,11 +71,11 @@ Use [`operations/interactive_development.md`](operations/interactive_development
 
 Use [`operations/interactive_development.md`](operations/interactive_development.md#one-exact-target-input).
 
-### Strategy Action Gate is not Pause
+### Recoverable runtime failures do not Pause
 
-Use [`operations/process_control.md`](operations/process_control.md#strategy-action-gate).
+Use [`operations/process_control.md`](operations/process_control.md#runtime-failure-policy).
 
-### Resolve a blocked startup gate
+### Review a startup-check advisory
 
 Use [`operations/startup_gates.md`](operations/startup_gates.md).
 

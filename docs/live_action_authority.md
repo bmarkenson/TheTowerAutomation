@@ -35,14 +35,15 @@ evidence excludes Tournament identity. A later unrelated `RUNNING` battle,
 terminal-persistence failure, or ownership ambiguity closes the receipt and
 performs no Retry or Surrender.
 
-## Configuration-gate repair
+## Configuration repair
 
-Runtime automation may Surrender only through an implemented profile-declared
-recovery for an authoritative Home-only configuration mismatch. The same
-guarded workflow must own the complete stop, Game Over → Home transition,
-repair, restart, and fresh revalidation. Unsupported, uncertain, non-Home, or
-operator-owned conditions remain blocked. A repair Surrender is a control
-transition, not a completed battle record.
+A recoverable configuration mismatch never grants Surrender, Exit Battle,
+Go Home, restart, Pause, or another manufactured-boundary authority. Repair is
+allowed only when the current boundary already makes that setting transition
+safe, such as verified Home `NEW_BATTLE`; otherwise retain the exact degraded
+evidence and continue. Exhausted or unavailable repair releases its bounded
+owner. This does not alter the separately owned validation-battle exception
+above.
 
 Poison Swamp Stun, Damage Slider, Orb Distance, and other supported in-battle
 changes use their typed, freshly verified safe-transition contracts in

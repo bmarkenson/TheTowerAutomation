@@ -77,8 +77,9 @@ current runtime state.
 **Stable ID:** `ISSUE-2026-005` · **Lifecycle:** `unresolved_pending_recurrence_evidence`
 
 - One authorized source tap yielded only `unknown`
-  post-tap evidence although Retry verified Stun off; the gate must still block
-  Battle start without a waiver.
+  post-tap evidence although Retry verified Stun off. Preserve the diagnostic
+  evidence, but a bounded verifier failure must release Battle launch in
+  degraded mode under the global runtime failure policy.
 - Load the [dossier](issues/open-2026.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap)
   on recurrence or before changing this verifier. Next: retain the final frame
   and detail/off/on confidences; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).

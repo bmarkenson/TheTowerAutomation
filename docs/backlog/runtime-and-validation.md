@@ -816,6 +816,30 @@ stages:
       09:33:44, observed the overlay removed at 09:33:53, and completed its
       bounded floating-gem scan at 09:33:57. No Surrender or test battle
       boundary was used.
+  - Global runtime failure-policy checkpoint (2026-08-11, feature branch):
+    - [x] Commit `1b16db9` makes configuration mismatch, unavailable
+      validation/evidence, exhausted bounded repair, reporting failure, and
+      expired workflow evidence globally recoverable. An already-safe boundary
+      repairs immediately; otherwise the exact problem is flagged and
+      automation continues degraded.
+    - [x] Only lost/corrupt control authority, lost exact-target ownership,
+      failure to restore the source after lifecycle input, or an uncertain
+      dispatched-input result may automatically persist Pause. Explicit
+      operator Pause, Stop, and Take Manual Control remain independent intent.
+      Static regression prevents App from using generic state persistence or
+      creating a session-preflight Strategy Gate.
+    - [x] Return Control now applies profile skips before comparison. Active or
+      resumable mismatches complete degraded and release Return; Home New
+      repairs at the current safe boundary and releases degraded if evidence or
+      repair exhausts. Recoverable setup-capture, terminal reporting, legacy
+      gate, and orphan-validation outcomes likewise release their owners.
+    - [x] The affected combined suite passed 470 tests. The supported
+      checkpoint passed compilation, state-definition validation, clickmap
+      validation with zero errors and the established 44 orphan notices, and
+      all 2,225 tests in 360.86 seconds.
+    - [ ] Promotion and a natural-boundary post-deployment observation remain
+      separate operator-authorized work. This checkpoint did not restart a
+      service, change live control, or issue device input.
   - Home launch-authority correction checkpoint (2026-08-08, feature branch):
     - [x] Commit `b36f878` requires fresh `RUNNING`, an active No Strategy
       observation, and lifecycle-owned active-battle evidence before granting

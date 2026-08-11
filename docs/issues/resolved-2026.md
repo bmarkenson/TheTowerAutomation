@@ -8,6 +8,46 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Return Control re-Paused automation for a skipped configuration mismatch
+
+**Stable ID:** `ISSUE-2026-039` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-08-11 at approximately 01:08 PDT while returning from
+  manual control on `localhost:5555`.
+- **Symptom:** Explicit Enable reached `RUNNING` twice, but Return Control's
+  save reconciliation then restored global Pause. The only reported mismatch
+  was `perk_bans`, even though active Strategy `farm_t19_ad_assist` explicitly
+  skipped that check. The operator could therefore appear unable to re-enable
+  automation.
+- **Evidence:** Fresh revision-37 status showed the manual workflow in
+  `awaiting_configuration` with `refresh_status=trusted_mismatch_paused`, Home
+  New Battle observation, and `perk_bans` as the sole mismatch. The deployed
+  interrupted-workflow Enable fix `5ce801b` was present, and both Enable
+  requests had been acknowledged as `RUNNING`; the later reconciliation path,
+  not a stale Windows click or server acknowledgement, caused the Pause.
+- **Cause:** Return reconciliation did not subtract profile-owned skipped
+  checks before comparing configuration. More broadly, recoverable mismatch,
+  validation, repair, evidence, and reporting paths could still create or
+  retain global Pause, Strategy Gate, or terminal authority holds.
+- **Resolution:** A global typed failure policy now repairs recoverable
+  problems at an already-safe boundary or flags them and continues degraded.
+  Only lost/corrupt control authority, lost exact-target ownership, failure to
+  restore the source after lifecycle input, or an uncertain dispatched-input
+  result may automatically Pause. Return now applies profile skips; active
+  mismatches complete degraded, and Home repair exhaustion also releases the
+  workflow with its exact failure.
+- **Regression:** `test/test_runtime_failure_policy.py` proves that only the
+  four catastrophic classes select Pause and statically forbids generic App
+  Pause/Strategy-Gate calls. Better Control, Home setup, action-authority,
+  Tournament, session-preflight, and terminal tests cover degraded release,
+  profile skips, legacy-gate migration, and catastrophic restoration loss.
+- **Validation:** The affected combined suite passed 470 tests. The supported
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan notices, and all 2,225 tests in
+  360.86 seconds. The fix has not yet been deployed or validated against a
+  post-fix live boundary.
+- **Fixed by:** `1b16db9`.
+
 ### Open in-battle side menu suppressed Mission reward scheduling
 
 **Stable ID:** `ISSUE-2026-015` · **Lifecycle:** `resolved`

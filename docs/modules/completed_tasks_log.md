@@ -39,6 +39,26 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-11 global nonblocking runtime-failure policy
+
+- Commit `1b16db9` introduces one typed disposition policy for runtime
+  failures. Recoverable configuration, validation, evidence, repair,
+  reporting, and stale-workflow problems either repair at an already-safe
+  boundary or retain exact degraded evidence while automation continues.
+  Automatic Pause is restricted to lost control authority, lost exact-target
+  ownership, unproved source restoration after lifecycle input, or an
+  uncertain dispatched-input result.
+- Return Control applies profile skips before comparing saved configuration.
+  Active/resumable mismatches now complete degraded; Home New attempts bounded
+  repair immediately and still completes degraded if repair or evidence is
+  unavailable. Legacy session blocks/gates and recoverable capture, terminal,
+  and validation-ledger failures are released rather than retaining global
+  authority.
+- The affected combined suite passed 470 tests. The supported checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,225 tests in 360.86 seconds.
+  No post-fix service restart, deployment, or device input was performed.
+
 ### 2026-08-10 durable control acknowledgements and Strategy Scope
 
 - Commit `3460d5c` advances the server/native contract to revision 37 with
