@@ -4509,6 +4509,48 @@ class App:
             return False
         return value is True
 
+    def _preserved_game_over_recovery_allowed(
+        self,
+        state: str,
+        *,
+        owner: Optional[AuthorityHold],
+    ) -> bool:
+        """Allow only the documented WAIT-bound terminal replacement route."""
+
+        if (
+            str(state or "").upper() != "GAME_OVER"
+            or owner is not AuthorityHold.OPERATOR_WORKFLOW
+            or AUTOMATION.mode is not ExecMode.WAIT
+            or not self._awaiting_initial_battle_intent()
+        ):
+            return False
+        supervisor = getattr(self, "_supervisor", None)
+        workflow = getattr(supervisor, "battle_workflow", None)
+        if (
+            isinstance(workflow, Mapping)
+            and workflow.get("status")
+            not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+        ):
+            return False
+        manual = getattr(supervisor, "manual_control", None)
+        if (
+            isinstance(manual, Mapping)
+            and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+        ):
+            return False
+        evidence = self._current_control_workflow_evidence()
+        return bool(
+            isinstance(evidence, Mapping)
+            and evidence.get("game_state") == "game_over"
+            and str(evidence.get("runtime_id") or "").strip()
+            and type(evidence.get("pid")) is int
+            and int(evidence["pid"]) > 0
+            and str(evidence.get("adb_target") or "").strip()
+            and type(evidence.get("target_generation")) is int
+            and int(evidence["target_generation"]) > 0
+            and str(evidence.get("activity_scope_run_id") or "").strip()
+        )
+
     @staticmethod
     def _interactive_development_timestamp(
         now: Optional[float] = None,
@@ -9121,8 +9163,14 @@ class App:
                         new_state == "HOME_SCREEN"
                         or (
                             new_state == "GAME_OVER"
-                            and operator_action_owner
-                            is AuthorityHold.MANUAL_CONTROL_RETURN
+                            and (
+                                operator_action_owner
+                                is AuthorityHold.MANUAL_CONTROL_RETURN
+                                or self._preserved_game_over_recovery_allowed(
+                                    new_state,
+                                    owner=operator_action_owner,
+                                )
+                            )
                         )
                         or (
                             new_state == "RUNNING"
@@ -10936,7 +10984,23 @@ class App:
             manual_return = bool(
                 save_backed_manual_return or ui_backed_manual_return
             )
-            if operator_workflow_only and not manual_return:
+            preserved_terminal_recovery = bool(
+                operator_workflow_only
+                and not manual_return
+                and self._preserved_game_over_recovery_allowed(
+                    new_state,
+                    owner=getattr(
+                        self,
+                        "_active_action_authority_owner",
+                        None,
+                    ),
+                )
+            )
+            if (
+                operator_workflow_only
+                and not manual_return
+                and not preserved_terminal_recovery
+            ):
                 log(
                     "[MANUAL_CONTROL] Return Control reached Game Over without "
                     "a safe save or UI fallback boundary; terminal input remains "
@@ -10945,6 +11009,13 @@ class App:
                     console=True,
                 )
                 return
+            if preserved_terminal_recovery:
+                log(
+                    "[GAME_OVER] Recovering the fresh preserved terminal under "
+                    "the explicit WAIT policy without attaching stale run state",
+                    "INFO",
+                    console=True,
+                )
             if ui_backed_manual_return:
                 log(
                     "[MANUAL_CONTROL] Terminal save evidence is unavailable; "

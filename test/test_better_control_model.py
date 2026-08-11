@@ -2986,6 +2986,102 @@ def test_terminal_return_uses_supported_ui_when_save_is_unavailable(
     assert game_over.call_args.kwargs["capture_stats"] is True
 
 
+def test_preserved_game_over_recovery_requires_wait_and_terminal_workflow():
+    terminal = _evidence(game_state="game_over")
+    app = App.__new__(App)
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.awaiting_initial_battle_intent.return_value = True
+    app._supervisor = SimpleNamespace(
+        battle_workflow={"status": "interrupted"},
+        manual_control=None,
+    )
+    app._current_control_workflow_evidence = lambda: terminal
+    AUTOMATION.mode = ExecMode.WAIT
+
+    assert app._preserved_game_over_recovery_allowed(
+        "GAME_OVER",
+        owner=AuthorityHold.OPERATOR_WORKFLOW,
+    )
+
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    assert not app._preserved_game_over_recovery_allowed(
+        "GAME_OVER",
+        owner=AuthorityHold.OPERATOR_WORKFLOW,
+    )
+
+    AUTOMATION.mode = ExecMode.WAIT
+    app._supervisor.battle_workflow = {"status": "validating_save"}
+    assert not app._preserved_game_over_recovery_allowed(
+        "GAME_OVER",
+        owner=AuthorityHold.OPERATOR_WORKFLOW,
+    )
+
+    app._supervisor.battle_workflow = {"status": "interrupted"}
+    app._current_control_workflow_evidence = lambda: {
+        **terminal,
+        "target_generation": None,
+    }
+    assert not app._preserved_game_over_recovery_allowed(
+        "GAME_OVER",
+        owner=AuthorityHold.OPERATOR_WORKFLOW,
+    )
+
+
+def test_preserved_game_over_recovery_runs_only_terminal_handler(monkeypatch):
+    terminal = _evidence(game_state="game_over")
+    manager = MagicMock()
+    manager.strategy = SimpleNamespace(name="farm")
+    manager.awaiting_initial_battle_intent.return_value = True
+    manager.session_preflight_repair_in_progress.return_value = False
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        battle_workflow={"status": "interrupted"},
+        manual_control=None,
+        apply_control=MagicMock(),
+    )
+    app._mission_mgr = manager
+    app._status_reporter = MagicMock()
+    app._fast_game_over = False
+    app._pending_game_over_route = None
+    app._current_control_workflow_evidence = lambda: terminal
+    app._advance_pending_game_over_route_recovery = lambda *_args: False
+    app._handler_enabled = lambda name: name == "game_over"
+    app._handle_exclusive_validation_game_over = lambda: False
+    app._terminal_battle_bundle = MagicMock(
+        return_value=({"terminal_save_report": {}}, None, None)
+    )
+    app._runtime_action_guard = MagicMock(return_value=True)
+    app._apply_pending_strategy = MagicMock()
+    app._strategy_boundary_confirmed = False
+    app._active_action_authority_owner = AuthorityHold.OPERATOR_WORKFLOW
+    game_over = MagicMock(
+        return_value=GameOverHandlingOutcome(
+            True,
+            "wait",
+            None,
+            "saved",
+        )
+    )
+    monkeypatch.setattr("core.app.handle_game_over", game_over)
+    AUTOMATION.mode = ExecMode.WAIT
+
+    app._handle_primary_states(
+        "GAME_OVER",
+        set(),
+        object(),
+        operator_workflow_only=True,
+    )
+
+    game_over.assert_called_once()
+    assert game_over.call_args.kwargs["capture_stats"] is True
+    guard = game_over.call_args.kwargs["action_guard_fn"]
+    assert guard() is True
+    app._runtime_action_guard.assert_called_with(
+        action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=AuthorityHold.OPERATOR_WORKFLOW,
+    )
+
+
 def test_attach_stays_pending_before_battle_adoption(tmp_path, monkeypatch):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
     path = tmp_path / "automation_ctl.json"
