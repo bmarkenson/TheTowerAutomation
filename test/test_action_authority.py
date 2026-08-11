@@ -761,6 +761,64 @@ def test_success_retires_same_strategy_session_preflight_decision(status):
     )
 
 
+def test_degraded_completion_preserves_session_preflight_advisory():
+    app = _terminal_gate_app()
+    app._mission_mgr.strategy.is_session_preflight_complete.return_value = True
+    app._mission_mgr.session_preflight_degraded.return_value = True
+    app._mission_mgr.ctx.data["mission_vars"].update(
+        gc_session_preflight_completed=True,
+        gc_session_preflight_last_status="complete",
+        gc_session_preflight_degraded=True,
+    )
+    app._supervisor.gate_decision = {
+        "request_id": "degraded-session",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "free_upgrade_locks",
+        "blocking": False,
+    }
+
+    app._sync_strategy_action_gate(terminally_blocked=False)
+
+    app._supervisor.consume_gate_decision.assert_not_called()
+
+
+def test_recovered_completion_retires_advisory_and_records_recovery():
+    app = _terminal_gate_app()
+    app._mission_mgr.strategy.is_session_preflight_complete.return_value = True
+    app._mission_mgr.session_preflight_degraded.return_value = False
+    app._mission_mgr.ctx.data["mission_vars"].update(
+        gc_session_preflight_completed=True,
+        gc_session_preflight_last_status="complete",
+        gc_session_preflight_degraded=False,
+    )
+    app._supervisor.gate_decision = {
+        "request_id": "recovered-session",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "free_upgrade_locks",
+        "blocking": False,
+    }
+
+    with patch("core.app.log") as runtime_log:
+        app._sync_strategy_action_gate(terminally_blocked=False)
+
+    app._supervisor.consume_gate_decision.assert_called_once_with(
+        "recovered-session",
+        completion_reason=(
+            "session preflight subsequently completed successfully"
+        ),
+    )
+    runtime_log.assert_called_once_with(
+        "[RUNTIME_ADVISORY] Session configuration recovered; "
+        "the persistent advisory is cleared",
+        "INFO",
+        console=True,
+    )
+
+
 @pytest.mark.parametrize(
     ("strategy", "phase"),
     [("tournament", "session_preflight"), ("farm_t18", "home_setup")],

@@ -8473,6 +8473,13 @@ class App:
             and mission_vars.get("gc_session_preflight_last_status") == "complete"
         ):
             return
+        degraded_fn = getattr(
+            self._mission_mgr,
+            "session_preflight_degraded",
+            None,
+        )
+        if callable(degraded_fn) and degraded_fn() is True:
+            return
         directive = self._gate_decision_directive()
         if not directive or directive.get("status") not in {
             "pending",
@@ -8488,12 +8495,19 @@ class App:
             return
         request_id = str(directive.get("request_id") or "")
         if request_id:
-            self._supervisor.consume_gate_decision(
+            retired = self._supervisor.consume_gate_decision(
                 request_id,
                 completion_reason=(
                     "session preflight subsequently completed successfully"
                 ),
             )
+            if retired and directive.get("blocking") is False:
+                log(
+                    "[RUNTIME_ADVISORY] Session configuration recovered; "
+                    "the persistent advisory is cleared",
+                    "INFO",
+                    console=True,
+                )
 
     def _handle_terminal_session_gate_decision(self) -> None:
         checks, reason = self._session_preflight_gate_context()
