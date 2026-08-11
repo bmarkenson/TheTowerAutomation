@@ -1730,7 +1730,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 35" in native_compatibility
+    assert "MinimumServerRevision = 36" in native_compatibility
     assert '"confirmed_local_mapping_status_v1"' in native_compatibility
     assert "confirmed_local_mapping_status_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_review_status_v1"' in native_compatibility
@@ -1784,6 +1784,11 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
+    assert '"host_performance_process_attribution_v1"' in native_compatibility
+    assert (
+        "host_performance_process_attribution_v1"
+        in CONTROL_SURFACE_CAPABILITIES
+    )
     assert '"automatic_battle_attachment"' not in native_compatibility
 
 

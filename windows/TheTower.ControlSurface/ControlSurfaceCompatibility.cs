@@ -43,7 +43,7 @@ internal static class ControlSurfaceCompatibility
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 35;
+    public const int MinimumServerRevision = 36;
 
     private static readonly string[] RequiredCapabilities =
     [
@@ -58,6 +58,7 @@ internal static class ControlSurfaceCompatibility
         "explicit_strategy_disposition",
         "game_speed_target",
         "host_performance_gpu_v1",
+        "host_performance_process_attribution_v1",
         "host_performance_telemetry_v1",
         "managed_custom_module_presets_v1",
         "observed_game_speed",

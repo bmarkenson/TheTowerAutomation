@@ -799,6 +799,19 @@ interfaces are vendor-specific. Continuous frame telemetry is not a planned
 control-surface provider; use a bounded, issue-specific diagnostic trace only
 when the retained counters cannot answer a concrete performance anomaly.
 
+The strip's third line separates residual **Other Windows CPU** from measured
+BlueStacks and Control Surface CPU. If host CPU remains at least `70%`, memory
+use remains at least `95%`, or free physical memory remains at most `1 GiB`,
+for 30 seconds, the existing
+ten-second process-discovery pass begins bounded attribution. It retains the
+four highest non-BlueStacks CPU consumers plus the four largest working-set
+consumers, at most eight distinct PID/name pairs, and continues through two
+minutes of healthy recovery. The first pass may show memory while CPU says
+**Warming up** because it establishes the rate baseline. Hover over the strip
+for average/maximum CPU, working set, private bytes, inspected-process count,
+and scan cost. The collector records no command lines or window titles and
+never changes automation or game state.
+
 The compact **Pause sampling** control remains visible in the health strip at
 the window's minimum supported size. Pausing flushes the current partial
 aggregate and stops new samples, while the independent uploader continues
@@ -815,9 +828,11 @@ aggregates are queued in
 API or tunnel outage does not discard recent telemetry. The bounded queue keeps
 the newest nominal 24 hours and reconnects automatically. Linux stores
 idempotent aggregates in `logs/host_performance.sqlite3` with sample-time host,
-ADB-port, UTC, and fresh current-run correlation. This requires server revision
-13 and capabilities `host_performance_telemetry_v1` and
-`host_performance_gpu_v1`.
+ADB-port, UTC, and fresh current-run correlation. Base and GPU publication
+require server revision 13 and capabilities `host_performance_telemetry_v1`
+and `host_performance_gpu_v1`. Process attribution requires revision 36 and
+`host_performance_process_attribution_v1`; older queued aggregates remain
+valid because the added field is optional.
 
 **System > Services** shows the managed localhost ADB target as four distinct
 values: configured next start, requested/acknowledged directive, active
@@ -859,9 +874,10 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 35, `current_battle_perks_v1`,
+current Windows build requires revision 36, `current_battle_perks_v1`,
 `better_control_model_v2`, `save_backed_setup_capture_v2`,
 `save_mapping_integration_v1`,
+`host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,
 `managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`,

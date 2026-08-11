@@ -31,7 +31,7 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(35);
+        var status = Status(36);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
@@ -51,6 +51,9 @@ public sealed class ControlSurfaceCompatibilityTests
             result.MissingCapabilities);
         Assert.Contains(
             "strategy_authoring_preset_local_copy_v1",
+            result.MissingCapabilities);
+        Assert.Contains(
+            "host_performance_process_attribution_v1",
             result.MissingCapabilities);
     }
 
@@ -152,7 +155,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                35,
+                36,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
@@ -164,6 +167,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "explicit_strategy_disposition",
                 "game_speed_target",
                 "host_performance_gpu_v1",
+                "host_performance_process_attribution_v1",
                 "host_performance_telemetry_v1",
                 "managed_custom_module_presets_v1",
                 "observed_game_speed",
