@@ -266,13 +266,19 @@ def handle_game_over(
         )
     if before_terminal_action is not None:
         before_terminal_action()
+    selected_mode = mode
+    terminal_action_guard = _terminal_route_action_guard(
+        selected_mode,
+        control_sync=control_sync,
+        action_guard_fn=action_guard_fn,
+    )
     if return_home_after_battle:
         mode = ExecMode.HOME
     if mode == ExecMode.HOME:
         if not tap_if_visible(
             "buttons.home:game_over",
             retries=1,
-            action_guard_fn=action_guard_fn,
+            action_guard_fn=terminal_action_guard,
         ):
             return _abort_handler(
                 "Go Home from Game Stats",
@@ -288,7 +294,7 @@ def handle_game_over(
         if not tap_if_visible(
             "buttons.retry:game_over",
             retries=1,
-            action_guard_fn=action_guard_fn,
+            action_guard_fn=terminal_action_guard,
         ):
             return _abort_handler(
                 "Retry Game",
@@ -628,6 +634,34 @@ def _wait_for_game_over_direction(
             time.sleep(1)
             continue
         return AUTOMATION.mode
+
+
+def _terminal_route_action_guard(
+    selected_mode: ExecMode,
+    *,
+    control_sync: Optional[Callable[[], None]],
+    action_guard_fn: Optional[Callable[[], bool]],
+) -> Callable[[], bool]:
+    """Keep one terminal tap bound to the direction selected for it."""
+
+    def allowed() -> bool:
+        try:
+            if control_sync is not None:
+                control_sync()
+            if (
+                AUTOMATION.state is not RunState.RUNNING
+                or AUTOMATION.mode is not selected_mode
+            ):
+                return False
+            return action_guard_fn is None or bool(action_guard_fn())
+        except Exception as exc:
+            log(
+                f"[GAME_OVER] Terminal-route authority check failed: {exc}",
+                "ERROR",
+            )
+            return False
+
+    return allowed
 
 
 def _capture_game_over_perks(

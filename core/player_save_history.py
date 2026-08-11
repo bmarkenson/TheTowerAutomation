@@ -468,12 +468,16 @@ class PlayerSaveHistoryReader:
                 action_guard_fn=action_guard_fn,
             )
 
+        # Control/action authority is checked outside the exact-target lock so
+        # every path keeps the global mutation -> target lock order.  Binding,
+        # scope, and source are revalidated while handoff is excluded.
+        if not _action_allowed(action_guard_fn):
+            return _blocked("history_source_binding_unverified")
         with self._acquirer.locked_operation():
             binding = self._acquirer.current_binding()
             if (
                 binding is None
                 or not _scope_matches(self._scope_fn, expected_scope_id)
-                or not _action_allowed(action_guard_fn)
                 or not self._source_matches(
                     normalized_source,
                     expected_home_control,
@@ -507,14 +511,15 @@ class PlayerSaveHistoryReader:
                 }
                 or not self._acquirer.binding_matches(binding)
                 or not _scope_matches(self._scope_fn, expected_scope_id)
-                or not _action_allowed(action_guard_fn)
                 or not self._source_matches(
                     normalized_source,
                     expected_home_control,
                 )
             ):
                 return _blocked("history_source_binding_lost")
-            return observed
+        if not _action_allowed(action_guard_fn):
+            return _blocked("history_source_binding_lost")
+        return observed
 
     def _read_serialized_active_attachment(
         self,
@@ -563,6 +568,20 @@ class PlayerSaveHistoryReader:
             stable_initial_source=True,
         )
         if serialized.status is GuardedSerializationStatus.BLOCKED:
+            if (
+                serialized.reason
+                == "background_serialization_dispatch_unavailable"
+                and not serialized.lifecycle_input_attempted
+                and not serialized.background_dispatched
+            ):
+                # The host proved KEYCODE_HOME never started, so the attached
+                # battle remains safely on-screen.  Save serialization is
+                # unavailable, but that is recoverable evidence loss: let the
+                # established guarded UI/degraded path finish the attachment
+                # instead of retaining its input hold indefinitely.
+                return _ui_fallback(
+                    "active_attachment_background_serialization_dispatch_unavailable"
+                )
             return _blocked(
                 f"active_attachment_{serialized.reason}",
                 background_dispatched=serialized.background_dispatched,

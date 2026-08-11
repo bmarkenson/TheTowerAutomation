@@ -25,7 +25,6 @@ defaults:
 
 from contextlib import contextmanager
 import re
-import threading
 import time
 from typing import Callable, Iterator, Optional
 
@@ -67,28 +66,37 @@ class CooperativeMutationGuard:
 
     def __init__(self, action_allowed: Callable[[], bool]):
         self._action_allowed = action_allowed
-        self._lock = threading.RLock()
+
+    def _allowed(self) -> bool:
+        try:
+            return bool(self._action_allowed())
+        except Exception as exc:
+            log(
+                f"[WATCHDOG] Mutating recovery authority check failed: {exc}",
+                "ERROR",
+            )
+            return False
 
     @contextmanager
     def authorize_mutation(self) -> Iterator[bool]:
         """Yield one final fail-closed authority decision under the guard."""
 
-        with self._lock:
-            try:
-                allowed = bool(self._action_allowed())
-            except Exception as exc:
-                log(
-                    f"[WATCHDOG] Mutating recovery authority check failed: {exc}",
-                    "ERROR",
-                )
-                allowed = False
+        with AUTOMATION.authorize_mutation(
+            self._allowed,
+            defer_dispatch_boundary=True,
+        ) as allowed:
             yield allowed
+
+    def refresh_mutation_authority(self) -> bool:
+        """Consume a Pause persisted during passive recovery revalidation."""
+
+        return AUTOMATION.refresh_mutation_authority(self._allowed)
 
     @contextmanager
     def quiescence_boundary(self) -> Iterator[None]:
         """Wait for an authorized mutation to finish and exclude new ones."""
 
-        with self._lock:
+        with AUTOMATION.quiescence_boundary():
             yield
 
 
@@ -189,7 +197,7 @@ def is_game_foregrounded():
         return False
 
 
-def bring_to_foreground():
+def bring_to_foreground() -> bool:
     """
     spec:
       name: bring_to_foreground
@@ -200,43 +208,96 @@ def bring_to_foreground():
       notes:
         - Sends a single monkey LAUNCHER intent for GAME_PACKAGE and waits ~5s.
     """
-    adb_shell([
-        "monkey", "-p", GAME_PACKAGE,
-        "-c", "android.intent.category.LAUNCHER", "1"
-    ], check=False)
+    outcome = adb_shell(
+        [
+            "monkey", "-p", GAME_PACKAGE,
+            "-c", "android.intent.category.LAUNCHER", "1",
+        ],
+        check=False,
+        return_dispatch_outcome=True,
+    )
+    if not bool(getattr(outcome, "accepted", False)):
+        return False
     log("[WATCHDOG] Sent monkey event to foreground game.", "INFO")
     time.sleep(5)
+    return True
 
 
-def restart_game():
+def restart_game() -> bool:
     """
     spec:
       name: restart_game
       signature: restart_game() -> None
       r: null
-      s: [adb][state][log][sleep]
+      s: [adb][log][sleep]
       e: none (best-effort; uses check=False)
       notes:
-        - Force-stops GAME_PACKAGE, relaunches via monkey, then sets AUTOMATION.state=UNKNOWN.
+        - Force-stops GAME_PACKAGE and relaunches it as one guarded mutation.
         - Sleeps ~6s after relaunch to allow surface creation.
     """
     log("[WATCHDOG] Restarting game via monkey intent", "INFO")
 
     # Hard-stop first to avoid stale process/session on emulators
-    adb_shell(["am", "force-stop", GAME_PACKAGE], check=False)
+    pending_interrupt: Optional[BaseException] = None
+    try:
+        stopped = adb_shell(
+            ["am", "force-stop", GAME_PACKAGE],
+            check=False,
+            return_dispatch_outcome=True,
+            defer_uncertain_reporting=True,
+        )
+        stop_attempted = bool(getattr(stopped, "attempted", False))
+        stop_accepted = bool(getattr(stopped, "accepted", False))
+    except BaseException as exc:
+        # The child may have delivered force-stop before interruption. Keep
+        # shutdown pending until launcher restoration has been attempted.
+        pending_interrupt = exc
+        stop_attempted = True
+        stop_accepted = False
+    if not stop_accepted and not stop_attempted:
+        return False
 
-    # Launch the game (monkey keeps us activity-agnostic)
-    adb_shell([
-        "monkey", "-p", GAME_PACKAGE,
-        "-c", "android.intent.category.LAUNCHER", "1"
-    ], check=False)
+    # Launch the game (monkey keeps us activity-agnostic). An interrupted or
+    # uncertain first launch gets one bounded retry while the outer mutation
+    # transaction retains Pause exclusion and exact-target ownership.
+    launched = False
+    for _attempt in range(2):
+        try:
+            launch_outcome = adb_shell(
+                [
+                    "monkey", "-p", GAME_PACKAGE,
+                    "-c", "android.intent.category.LAUNCHER", "1",
+                ],
+                check=False,
+                return_dispatch_outcome=True,
+                defer_uncertain_reporting=True,
+            )
+        except BaseException as exc:
+            if pending_interrupt is None:
+                pending_interrupt = exc
+            continue
+        if bool(getattr(launch_outcome, "accepted", False)):
+            launched = True
+            break
+    if not launched:
+        # Force-stop may already have completed.  A launcher failure is now a
+        # failed mandatory restoration, even when host provenance proves a
+        # launcher attempt itself never started.
+        AUTOMATION.report_uncertain_mutation(
+            "Watchdog restart may have stopped The Tower but launcher "
+            "restoration was not accepted"
+        )
+        if pending_interrupt is not None:
+            raise pending_interrupt.with_traceback(
+                pending_interrupt.__traceback__
+            )
+        return False
     time.sleep(6)
 
-    # Set state to unknown — main loop will detect screen state
-    from core.run_state import AUTOMATION, RunState
-    AUTOMATION.state = RunState.UNKNOWN
-
     log("[WATCHDOG] Game launched — deferring to main loop for state detection", "INFO")
+    if pending_interrupt is not None:
+        raise pending_interrupt.with_traceback(pending_interrupt.__traceback__)
+    return True
 
 
 def _pid_running(package: str) -> bool:
@@ -266,21 +327,18 @@ def _pid_running(package: str) -> bool:
 
 
 def _dispatch_mutating_recovery(
-    action: Callable[[], None],
+    action: Callable[[], object],
     *,
     warning: str,
     mutation_guard: Optional[CooperativeMutationGuard],
+    action_still_required: Callable[[], bool] = lambda: True,
 ) -> bool:
     """Run one watchdog mutation only under a final cooperative check."""
 
-    if mutation_guard is None:
-        if AUTOMATION.state in {RunState.PAUSED, RunState.STOPPED}:
-            return False
-        log(warning, "WARN")
-        action()
-        return True
-
-    with mutation_guard.authorize_mutation() as allowed:
+    guard = mutation_guard or CooperativeMutationGuard(
+        lambda: AUTOMATION.state is RunState.RUNNING
+    )
+    with guard.authorize_mutation() as allowed:
         # Keep operator control authoritative even if a caller supplies a
         # permissive or stale callback.  This is the final check immediately
         # before the mutating dispatch.
@@ -289,9 +347,19 @@ def _dispatch_mutating_recovery(
             or AUTOMATION.state in {RunState.PAUSED, RunState.STOPPED}
         ):
             return False
-        log(warning, "WARN")
-        action()
-        return True
+        # Canonical lock order is mutation -> exact target. Revalidate the
+        # observed process/foreground condition while target handoff is
+        # excluded, then retain both locks through lifecycle dispatch.
+        with ADB_TARGET_OPERATION_LOCK:
+            if not action_still_required():
+                return False
+            log(warning, "WARN")
+            # The passive revalidation above may itself overlap or trigger a
+            # newly persisted Pause.  Re-read the runtime-owned durable guard
+            # at the last point before the first lifecycle dispatch.
+            if not guard.refresh_mutation_authority():
+                return False
+            return action() is not False
 
 
 def _watchdog_process_check_once(
@@ -302,8 +370,9 @@ def _watchdog_process_check_once(
 ) -> None:
     """Run one fail-closed watchdog inspection for the current target."""
 
-    # Serialize against a target migration. Failure to reach ADB is not
-    # evidence that the Android game process is absent.
+    # Passive observation may hold the target lock without mutation authority.
+    # If recovery is indicated, release it before acquiring the mutation
+    # boundary and reacquire it only in canonical mutation -> target order.
     with ADB_TARGET_OPERATION_LOCK:
         connected = connection_coordinator.ensure_connected()
         if not connected:
@@ -319,20 +388,31 @@ def _watchdog_process_check_once(
         pid_running = _pid_running(GAME_PACKAGE)
         foregrounded = is_game_foregrounded()
 
-        if not pid_running:
-            _dispatch_mutating_recovery(
-                restart_game,
-                warning="[WATCHDOG] Game process not running. Restarting.",
-                mutation_guard=mutation_guard,
-            )
-        elif not foregrounded:
-            _dispatch_mutating_recovery(
-                bring_to_foreground,
-                warning=(
-                    "[WATCHDOG] Game is backgrounded. Bringing to foreground."
-                ),
-                mutation_guard=mutation_guard,
-            )
+    if not pid_running:
+        _dispatch_mutating_recovery(
+            restart_game,
+            warning="[WATCHDOG] Game process not running. Restarting.",
+            mutation_guard=mutation_guard,
+            action_still_required=lambda: bool(
+                connection_coordinator.ensure_connected()
+                and AUTOMATION.state is RunState.RUNNING
+                and not _pid_running(GAME_PACKAGE)
+            ),
+        )
+    elif not foregrounded:
+        _dispatch_mutating_recovery(
+            bring_to_foreground,
+            warning=(
+                "[WATCHDOG] Game is backgrounded. Bringing to foreground."
+            ),
+            mutation_guard=mutation_guard,
+            action_still_required=lambda: bool(
+                connection_coordinator.ensure_connected()
+                and AUTOMATION.state is RunState.RUNNING
+                and _pid_running(GAME_PACKAGE)
+                and not is_game_foregrounded()
+            ),
+        )
 
 
 def watchdog_process_check(

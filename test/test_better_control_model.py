@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -25,6 +26,7 @@ from core.app import App
 from core.automation_supervisor import AutomationSupervisor
 from core.battle_lifecycle import HomeBattleControl
 from core.control_directives import ControlDirectiveStore
+from core.dispatch_control_boundary import dispatch_control_boundary
 from core.control_model import (
     build_home_ui_reconciliation_receipt,
     build_running_ui_reconciliation_receipt,
@@ -721,6 +723,7 @@ def _publish_runtime_observation(
     explicit_home_intent_required: bool = False,
     terminal_home_continuation: dict[str, object] | None = None,
     acknowledgements: dict[str, object] | None = None,
+    catastrophic_pause_hold: bool = False,
 ) -> None:
     owner = {
         "runtime_id": evidence["runtime_id"],
@@ -746,6 +749,14 @@ def _publish_runtime_observation(
         acknowledgements=acknowledgements,
         control_model={
             "schema_version": 1,
+            "catastrophic_pause_hold": {
+                "active": catastrophic_pause_hold,
+                "reason": (
+                    "test catastrophic hold"
+                    if catastrophic_pause_hold
+                    else None
+                ),
+            },
             "observation": {
                 key: value
                 for key, value in evidence.items()
@@ -999,6 +1010,90 @@ def test_directive_store_rejects_mismatched_intent_and_serializes_workflows(
     ) is None
     with pytest.raises(ValueError, match="cannot transition"):
         store.transition_battle_workflow(first["request_id"], "completed")
+
+
+@pytest.mark.parametrize("request_kind", ("battle", "setup_capture"))
+def test_input_owner_request_waits_for_current_dispatch(tmp_path, request_kind):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    evidence = _evidence()
+    request_started = threading.Event()
+    request_completed = threading.Event()
+    failures = []
+
+    def request_owner():
+        request_started.set()
+        try:
+            if request_kind == "battle":
+                store.request_battle_workflow(
+                    "start_battle",
+                    evidence=evidence,
+                    source="test",
+                )
+            else:
+                store.request_setup_capture(
+                    evidence=evidence,
+                    source="test",
+                )
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+        finally:
+            request_completed.set()
+
+    request_thread = threading.Thread(target=request_owner)
+    with dispatch_control_boundary(store.dispatch_lock_path):
+        request_thread.start()
+        assert request_started.wait(timeout=2)
+        assert not request_completed.wait(timeout=0.05)
+
+    request_thread.join(timeout=2)
+    assert not request_thread.is_alive()
+    assert request_completed.is_set()
+    assert failures == []
+
+
+def test_terminal_policy_change_waits_for_current_dispatch(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    store.set_mode("NEXT_BATTLE", source="test")
+    request_started = threading.Event()
+    request_completed = threading.Event()
+    failures = []
+
+    def select_wait():
+        request_started.set()
+        try:
+            store.set_mode("WAIT", source="test")
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+        finally:
+            request_completed.set()
+
+    request_thread = threading.Thread(target=select_wait)
+    # This boundary represents a terminal input that has passed its last
+    # policy check and is being dispatched.  The policy write may complete
+    # before or after that atomic input, but never in the middle of it.
+    with dispatch_control_boundary(store.dispatch_lock_path):
+        request_thread.start()
+        assert request_started.wait(timeout=2)
+        assert not request_completed.wait(timeout=0.05)
+
+    request_thread.join(timeout=2)
+    assert not request_thread.is_alive()
+    assert request_completed.is_set()
+    assert failures == []
+    assert store.status()["mode"] == "WAIT"
+
+
+def test_direct_manual_request_cannot_weaken_stopped_authority(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    store.set_state("STOPPED", source="test")
+
+    with pytest.raises(ValueError, match="Start Automation"):
+        store.request_manual_control(
+            evidence=_evidence(game_state="active_battle"),
+            source="test",
+        )
+
+    assert store.status()["state"] == "STOPPED"
 
 
 def test_attach_atomically_snapshots_accepted_strategy_selection(tmp_path):
@@ -2334,6 +2429,111 @@ def test_home_return_uses_ui_when_restored_save_is_unavailable(
     app._run_home_setup_attempts.assert_called_once()
 
 
+def test_home_return_report_failure_releases_hold_and_retries_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="home_new_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=evidence, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = SimpleNamespace(
+        session_preflight_requirements=lambda: {}
+    )
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    context = object()
+    app._current_player_save_preflight_context = lambda: context
+    captured = datetime.now(timezone.utc)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="captured",
+        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        acquisition_started_at=captured - timedelta(milliseconds=1),
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=SimpleNamespace(),
+    )
+    result = SimpleNamespace(
+        ready=True,
+        acquisition=acquisition,
+        context=context,
+        decisions={},
+        as_dict=lambda: {"ready": True},
+    )
+    app._flag_recoverable_runtime_failure = MagicMock()
+    original_transition = supervisor.transition_manual_control
+
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        return_value=None,
+    ):
+        assert app._complete_home_return_reconciliation(
+            result,
+            screenshot=object(),
+        ) is True
+
+    current_manual = supervisor.manual_control
+    claim = app._pending_return_reconciliation_claims()[
+        current_manual["manual_control_id"]
+    ]
+    assert current_manual["status"] == "reconciling"
+    assert claim["semantic_completion_applied"] is True
+    assert claim["completion_kind"] == "home"
+    assert app._operator_workflow_authority_hold() is None
+    app._mission_mgr.finish_manual_return_reconciliation.assert_called_once_with()
+
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        wraps=original_transition,
+    ):
+        assert app._retry_pending_return_completion_report(
+            current_manual,
+            claim,
+        ) is True
+
+    assert supervisor.manual_control["status"] == "completed"
+    assert app._pending_return_reconciliation_claims() == {}
+
+
 def test_home_return_reports_nonretryable_setup_for_manual_correction(
     tmp_path,
     monkeypatch,
@@ -2617,6 +2817,68 @@ def test_running_return_trusted_save_mismatch_completes_degraded(
         reason="Return Control found: workshop_preset",
         failed_checks=("workshop_preset",),
     )
+
+
+def test_running_return_report_failure_releases_hold_and_retries_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    (
+        app,
+        supervisor,
+        manager,
+        _evidence_value,
+        acquisition,
+        temporal,
+        observations,
+        context,
+    ) = _running_return_fixture(
+        tmp_path,
+        snapshot=_player_save_snapshot("workshop_preset", "Farm"),
+        observed_value="Farm",
+    )
+    app._flag_recoverable_runtime_failure = MagicMock()
+    original_transition = supervisor.transition_manual_control
+
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        return_value=None,
+    ):
+        assert app._complete_save_backed_operator_reconciliation(
+            outcome=SimpleNamespace(
+                confirmed_same_battle_scope_id="scope-1",
+                confirmed_later_battle_scope_id=None,
+            ),
+            acquisition=acquisition,
+            temporal_binding=temporal,
+            observations=observations,
+            context=context,
+        ) is True
+
+    manual = supervisor.manual_control
+    claim = app._pending_return_reconciliation_claims()[
+        manual["manual_control_id"]
+    ]
+    assert manual["status"] == "reconciling"
+    assert claim["semantic_completion_applied"] is True
+    assert app._operator_workflow_authority_hold() is None
+    manager.finish_manual_return_reconciliation.assert_called_once_with()
+    app._flag_recoverable_runtime_failure.assert_called_once()
+
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        wraps=original_transition,
+    ):
+        assert app._retry_pending_return_completion_report(
+            manual,
+            claim,
+        ) is True
+
+    assert supervisor.manual_control["status"] == "completed"
+    assert app._pending_return_reconciliation_claims() == {}
 
 
 def test_unusable_running_return_save_starts_supported_ui_reconciliation(
@@ -3204,6 +3466,96 @@ def test_terminal_ui_fallback_completion_retry_preserves_enabled_authority(
     assert app._manual_terminal_claims() == {}
 
 
+def test_terminal_completion_report_failure_does_not_retain_manual_hold(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    starting = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    starting["pid"] = owner["pid"]
+    evidence = _evidence(
+        game_state="game_over",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=starting, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=starting,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "awaiting_enable",
+    )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._manual_return_reconciliation_claims = {}
+    receipt = build_terminal_ui_reconciliation_receipt(
+        workflow_id=manual["manual_control_id"],
+        observation_id=str(evidence["observation_id"]),
+        evidence=evidence,
+        killed_by="Boss",
+        reason="terminal_save_report_unavailable",
+    )
+    app._manual_terminal_save_claims = {
+        manual["manual_control_id"]: {
+            "semantic_completion_applied": True,
+            "pending_completion": {
+                "detail": "terminal route complete",
+                "refresh_status": "terminal_reconciliation_complete",
+                "save_receipt": receipt,
+            },
+        }
+    }
+    app._flag_recoverable_runtime_failure = MagicMock()
+    current_manual = supervisor.manual_control
+
+    assert app._operator_workflow_authority_hold() is None
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        return_value=None,
+    ):
+        assert app._retry_pending_manual_terminal_completion(
+            current_manual,
+            None,
+        ) is None
+
+    assert app._operator_workflow_authority_hold() is None
+    assert app._flag_recoverable_runtime_failure.call_count == 1
+    completed = app._retry_pending_manual_terminal_completion(
+        current_manual,
+        None,
+    )
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert app._manual_terminal_claims() == {}
+
+
 def test_terminal_return_uses_supported_ui_when_save_is_unavailable(
     tmp_path,
     monkeypatch,
@@ -3542,6 +3894,68 @@ def test_attach_strategy_decision_uses_exact_tier_and_fresh_battle_kind():
     assert changed_definition["attachment_mode"] == "observation_only"
     assert changed_definition["applicability"] == "unverifiable"
     assert "changed after Attach" in changed_definition["reason"]
+
+
+def test_attach_strategy_decision_excludes_profile_skipped_configuration():
+    app = App.__new__(App)
+    app._strategy_session_requirements = lambda _strategy: {
+        "perk_bans": [],
+        "profile_skips": ["perk_bans"],
+    }
+    evidence = _evidence(game_state="active_battle")
+    acquisition, temporal, _context = _running_reconciliation_objects(
+        evidence,
+        snapshot=SimpleNamespace(
+            runtime_save=SimpleNamespace(
+                active_round_identity=SimpleNamespace(current_tier=19)
+            )
+        ),
+    )
+    strategy = get_strategy("farm_t19")
+    assert strategy is not None
+    observations = RunningAttachmentSaveObservations(
+        binding=temporal,
+        facts=(
+            RunningAttachmentSaveFact(
+                check_id="perk_bans",
+                temporal_class=PlayerSaveTemporalClass.ROUND_INVARIANT,
+                value=["interest"],
+                source_fields=("field",),
+            ),
+        ),
+    )
+
+    with patch(
+        "core.app.reconcile_acquired_requirements",
+        return_value={
+            "checks": {
+                "perk_bans": {
+                    "disposition": "save_mismatch",
+                    "expected": [],
+                    "observed": ["interest"],
+                }
+            }
+        },
+    ):
+        decision = app._attachment_strategy_decision(
+            {
+                "strategy": "farm_t19",
+                "strategy_request_id": "strategy-1",
+                "strategy_definition_fingerprint": (
+                    strategy.definition_fingerprint()
+                ),
+            },
+            acquisition=acquisition,
+            observations=observations,
+        )
+
+    assert decision["attachment_mode"] == "strategy"
+    assert decision["degraded"] is False
+    assert decision["failed_checks"] == []
+    assert "perk_bans" not in decision["_requirements"]
+    assert decision["_requirements"]["_gate_waivers"]["perk_bans"][
+        "source"
+    ] == "strategy_profile"
 
 
 def test_attach_strategy_decision_distinguishes_none_and_unverifiable():
@@ -4112,6 +4526,9 @@ def test_malformed_manual_control_fails_closed_without_overwrite(
         with pytest.raises(ControlSurfaceRequestError) as invalid:
             service.apply_control({"action": action})
         assert invalid.value.code == "manual_control_invalid"
+    assert model["actions"]["pause"]["available"] is True
+    paused = service.apply_control({"action": "pause"})
+    assert paused["control"]["state"] == "PAUSED"
     assert service.control_store.read()["manual_control"] == raw_manual
 
     supervisor = AutomationSupervisor(
@@ -4224,7 +4641,7 @@ def test_manual_handoff_hold_survives_concurrent_running_directive(
     assert hold.hold.value == "manual_control_return"
 
 
-def test_repeated_return_enable_is_pending_and_keeps_request_identity(
+def test_repeated_return_enable_refreshes_unacknowledged_request_identity(
     tmp_path,
 ):
     service = ControlSurfaceService(repository_root=tmp_path)
@@ -4251,9 +4668,80 @@ def test_repeated_return_enable_is_pending_and_keeps_request_identity(
     second = service.apply_control({"action": "enable"})
 
     assert first["request"]["disposition"] == "requested"
-    assert second["request"]["disposition"] == "pending"
-    assert second["control"]["state_request_id"] == request_id
+    assert second["request"]["disposition"] == "requested"
+    assert second["control"]["state_request_id"] != request_id
     assert second["control_model"]["manual_control"]["updated_at"] == updated_at
+
+
+def test_return_reconciliation_can_be_paused_and_reenabled(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(service, evidence, paused=False)
+    manual = service.control_store.request_manual_control(
+        evidence=evidence,
+        source="test",
+    )
+    manual_id = manual["manual_control_id"]
+    service.control_store.transition_manual_control(
+        manual_id,
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    service.control_store.request_return_control(
+        manual_id,
+        evidence=evidence,
+        source="test",
+    )
+    service.control_store.enable_after_return_control(
+        manual_id,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual_id,
+        "reconciling",
+    )
+
+    assert service.status()["control_model"]["actions"]["pause"]["available"]
+    paused = service.apply_control({"action": "pause"})
+    pause_request_id = paused["control"]["state_request_id"]
+    assert paused["control_model"]["manual_control"]["status"] == "reconciling"
+
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=True,
+        acknowledgements=_runtime_acknowledgements(
+            state=(pause_request_id, "PAUSED")
+        ),
+    )
+    enabled = service.apply_control({"action": "enable"})
+
+    assert enabled["control"]["state"] == "RUNNING"
+    assert enabled["control"]["state_request_id"] != pause_request_id
+    assert enabled["control_model"]["manual_control"]["status"] == "reconciling"
+
+
+def test_pause_does_not_wait_for_process_lifecycle_lock(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    _publish_runtime_observation(service, _evidence(), paused=False)
+    completed = threading.Event()
+    response = []
+
+    service._process_action_lock.acquire()
+    try:
+        worker = threading.Thread(
+            target=lambda: (
+                response.append(service.apply_control({"action": "pause"})),
+                completed.set(),
+            )
+        )
+        worker.start()
+        assert completed.wait(timeout=1)
+    finally:
+        service._process_action_lock.release()
+        worker.join(timeout=2)
+
+    assert response[0]["control"]["state"] == "PAUSED"
 
 
 def test_runtime_awaiting_enable_while_paused_starts_enable_request(tmp_path):
@@ -4289,6 +4777,103 @@ def test_runtime_awaiting_enable_while_paused_starts_enable_request(tmp_path):
     resumed = response["control_model"]["manual_control"]
     assert resumed["status"] == "awaiting_enable"
     assert resumed["refresh_status"] == "save_refresh_pending_after_enable"
+
+
+def test_enable_replaces_running_request_when_runtime_is_effectively_paused(
+    tmp_path,
+):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    running = service.control_store.set_state("RUNNING", source="test")
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=True,
+        acknowledgements=_runtime_acknowledgements(
+            state=("RUNNING", running["state_request_id"]),
+        ),
+    )
+
+    before = service.status()
+    response = service.apply_control({"action": "enable"})
+
+    assert (
+        before["control_model"]["action_authority"]["effective"]
+        == "paused"
+    )
+    assert before["acknowledgements"]["state"]["acknowledges_current"] is True
+    assert response["request"]["disposition"] == "requested"
+    assert response["control"]["state"] == "RUNNING"
+    assert response["control"]["state_request_id"] != running["state_request_id"]
+
+
+def test_catastrophic_hold_without_ack_can_be_released_by_enable(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    running = service.control_store.set_state("RUNNING", source="old-running")
+    supervisor = AutomationSupervisor(
+        control_file=str(service.control_path),
+        auto_return_enabled=False,
+    )
+    supervisor.apply_control()
+    supervisor._latch_catastrophic_pause("test authority loss")
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=True,
+        acknowledgements=None,
+        catastrophic_pause_hold=True,
+    )
+
+    response = service.apply_control({"action": "enable"})
+    supervisor.apply_control()
+
+    assert response["request"]["disposition"] == "requested"
+    assert response["control"]["state_request_id"] != running["state_request_id"]
+    assert not supervisor.is_paused
+    assert supervisor.catastrophic_pause_hold["active"] is False
+
+
+def test_catastrophic_hold_refreshes_running_enable_during_return_control(
+    tmp_path,
+):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    evidence = _evidence(game_state="active_battle")
+    manual = service.control_store.request_manual_control(
+        evidence=evidence,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    service.control_store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "awaiting_enable",
+        refresh_status="save_validation_pending",
+    )
+    running = service.control_store.set_state("RUNNING", source="old-running")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=True,
+        acknowledgements=None,
+        catastrophic_pause_hold=True,
+    )
+
+    response = service.apply_control({"action": "enable"})
+
+    assert response["request"]["disposition"] == "requested"
+    assert response["control"]["state_request_id"] != running["state_request_id"]
+    assert response["control_model"]["manual_control"]["status"] == (
+        "awaiting_enable"
+    )
 
 
 def test_same_value_state_ack_requires_the_exact_request_identity(tmp_path):

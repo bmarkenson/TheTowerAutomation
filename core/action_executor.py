@@ -1251,8 +1251,18 @@ def execute_actions(
                             f"; {variation_kind} — " + variation_summary
                         )
                     if attachment_degraded:
+                        deferred_only = bool(
+                            not reported_mismatches
+                            and attached_route
+                            and isinstance(deferred_checks, (list, tuple))
+                            and deferred_checks
+                        )
                         completion = (
-                            "[SESSION_PREFLIGHT] Attachment validation flagged "
+                            "[SESSION_PREFLIGHT] Attachment validation could not "
+                            "verify Home-only checks; Automation continues "
+                            "degraded and verification/repair is deferred to Home"
+                            if deferred_only
+                            else "[SESSION_PREFLIGHT] Attachment validation flagged "
                             "configuration gaps; Automation continues degraded "
                             "and repair is deferred to Home"
                         )

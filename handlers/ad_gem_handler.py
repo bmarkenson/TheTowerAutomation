@@ -120,7 +120,13 @@ def _blind_floating_gem_tapper(
                 )
                 break
             try:
-                if not tap_now(x, y, label=label, log_it=True):
+                if not tap_now(
+                    x,
+                    y,
+                    label=label,
+                    log_it=True,
+                    action_guard_fn=action_guard_fn,
+                ):
                     failure_reason = "tap dispatch failed"
                     break
                 taps += 1

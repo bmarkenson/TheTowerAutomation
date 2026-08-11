@@ -60,7 +60,12 @@ def test_safe_tap_records_input_summary_and_coordinate_detail(
             ),
         )
 
-    dispatch.assert_called_once_with(10, 20, label="test_target", dispatch="queue")
+    dispatch.assert_called_once_with(
+        10,
+        20,
+        label="test_target",
+        dispatch="queue",
+    )
     lines = action_log.read_text(encoding="utf-8").splitlines()
     assert lines[0].startswith("[INPUT ")
     assert lines[0].endswith("] Tap queued: Test target")
@@ -172,7 +177,13 @@ def test_safe_long_press_uses_fresh_template_geometry_and_configured_offset():
         "buttons.card_inventory:demon_mode",
         screenshot=screenshot,
     )
-    dispatch.assert_called_once_with(415, 1280, 415, 1280, 800)
+    dispatch.assert_called_once_with(
+        415,
+        1280,
+        415,
+        1280,
+        800,
+    )
     input_log.assert_called_once()
     assert input_log.call_args.args == (
         "Long press requested: Card inventory (demon mode)",

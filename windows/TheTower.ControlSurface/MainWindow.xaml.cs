@@ -31,6 +31,7 @@ public partial class MainWindow : Window
         Interval = TimeSpan.FromSeconds(15),
     };
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly SemaphoreSlim _controlMutationGate = new(1, 1);
     private readonly SemaphoreSlim _battleRefreshGate = new(1, 1);
     private readonly SemaphoreSlim _activityRefreshGate = new(1, 1);
     private readonly SemaphoreSlim _serviceStatusGate = new(1, 1);
@@ -1541,8 +1542,20 @@ public partial class MainWindow : Window
         {
             return;
         }
+        var enteredControlGate = false;
+        var enteredRefreshGate = false;
+        var reconcileAfterFailure = false;
+        Exception? requestFailure = null;
+        var requestSucceeded = false;
         try
         {
+            // Control POSTs are serialized independently from status GETs.
+            // Cancel an older GET and transmit the mutation immediately; only
+            // response rendering waits for that GET to drain, so stale status
+            // cannot overwrite the authoritative POST response.
+            await _controlMutationGate.WaitAsync();
+            enteredControlGate = true;
+            _refreshCancellation?.Cancel();
             StatusResponse response;
             if (tag.StartsWith("pause:", StringComparison.Ordinal))
             {
@@ -1571,12 +1584,42 @@ public partial class MainWindow : Window
                         new { action = tag },
                         CancellationToken.None);
             }
+            await _refreshGate.WaitAsync();
+            enteredRefreshGate = true;
             RenderStatus(response);
-            await RefreshActivityAsync(force: true);
+            requestSucceeded = true;
         }
         catch (Exception exc)
         {
-            ShowError(exc);
+            // The server may have durably committed the request even when its
+            // response was lost.  Reconcile immediately instead of leaving a
+            // modal error as the only visible outcome until the next poll.
+            requestFailure = exc;
+            reconcileAfterFailure = true;
+        }
+        finally
+        {
+            if (enteredRefreshGate)
+            {
+                _refreshGate.Release();
+            }
+        }
+        if (reconcileAfterFailure)
+        {
+            await RefreshStatusAsync(force: true);
+        }
+        if (enteredControlGate)
+        {
+            _controlMutationGate.Release();
+        }
+        if (requestFailure is not null)
+        {
+            ShowError(requestFailure);
+            return;
+        }
+        if (requestSucceeded)
+        {
+            await RefreshActivityAsync(force: true);
         }
     }
 
@@ -2899,13 +2942,16 @@ public partial class MainWindow : Window
                 $"{decision.CheckId}: {decision.DecisionId}; waiting for runtime.",
             _ => "No preflight decision is waiting for direction.",
         };
-        if (pendingGate is not null
+        if (pendingGate is { Blocking: true }
             && pendingGate.RequestId != _autoPromptedGateRequestId)
         {
             _autoPromptedGateRequestId = pendingGate.RequestId;
             Dispatcher.BeginInvoke(new Action(async () =>
                 await ShowGateDecisionAsync(pendingGate)));
         }
+        GateDecisionButton.Content = pendingGate is { Blocking: false }
+            ? "Review preflight advisory"
+            : "Review preflight decision";
         var adbTargetPending = processActive
             && status.Control.AdbPort is not null
             && status.Acknowledgements.AdbTarget is not

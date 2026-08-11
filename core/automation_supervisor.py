@@ -24,6 +24,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import math
 import os
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -47,7 +48,7 @@ from core.control_model import (
     validate_setup_capture,
 )
 from core.strategy_profiles import is_configurable_strategy
-from utils.logger import log, log_action_intent, log_result
+from utils.logger import log as _write_log, log_action_intent, log_result
 from core.run_state import AUTOMATION
 from core.runtime_failure_policy import (
     RuntimeFailureDisposition,
@@ -67,6 +68,15 @@ Frame = NDArray[np.uint8]
 _ALLOWED_STATES = {"RUNNING", "PAUSED", "STOPPED"}
 
 
+def log(*args, **kwargs):
+    """Keep control authority independent of recoverable log I/O failure."""
+
+    try:
+        return _write_log(*args, **kwargs)
+    except Exception:
+        return None
+
+
 class AutomationSupervisor:
     def __init__(
         self,
@@ -83,6 +93,12 @@ class AutomationSupervisor:
     ) -> None:
         self.control_file = Path(control_file)
         self._control_store = ControlDirectiveStore(self.control_file)
+        self._control_apply_lock = threading.RLock()
+        self._control_read_failed = False
+        self._control_read_failure_logged = False
+        self._catastrophic_pause_latched = False
+        self._catastrophic_pause_state_revision: object = None
+        self._catastrophic_pause_reason: Optional[str] = None
         try:
             added_request_ids = (
                 self._control_store.ensure_request_identities()
@@ -101,6 +117,15 @@ class AutomationSupervisor:
                 "INFO",
             )
         initial_directives = self._load_control_directive()
+        initial_state = initial_directives.get("state")
+        if (
+            isinstance(initial_state, str)
+            and initial_state.strip().upper() in _ALLOWED_STATES
+        ):
+            # Close the startup window before App wiring, ADB connection, or
+            # acknowledgement publication. Exact receipts are still recorded
+            # only when apply_control() consumes the directive normally.
+            AUTOMATION.state = initial_state.strip().upper()
         self._strategy_request = self._parse_strategy_request(initial_directives)
         self._game_speed_target = self._parse_game_speed_target(
             initial_directives.get("game_speed_target")
@@ -116,6 +141,10 @@ class AutomationSupervisor:
             normalize_interactive_development_lease(
                 initial_directives.get("interactive_development_lease")
             )
+        )
+        self._interactive_development_lease_error = bool(
+            initial_directives.get("interactive_development_lease") is not None
+            and self._interactive_development_lease is None
         )
         self._battle_workflow = validate_battle_workflow(
             initial_directives.get("battle_workflow")
@@ -241,6 +270,29 @@ class AutomationSupervisor:
         )
 
     @property
+    def interactive_development_lease_error(self) -> bool:
+        """Return whether external-development input authority is malformed."""
+
+        return bool(self._interactive_development_lease_error)
+
+    @property
+    def input_authority_error(self) -> Optional[str]:
+        """Return the malformed directive that makes input ownership unknown."""
+
+        for label, present in (
+            (
+                "interactive-development-lease",
+                self._interactive_development_lease_error,
+            ),
+            ("manual-control", self._manual_control_error),
+            ("battle-workflow", self._battle_workflow_error),
+            ("setup-capture", self._setup_capture_error),
+        ):
+            if present:
+                return label
+        return None
+
+    @property
     def battle_workflow(self) -> Optional[Dict[str, object]]:
         """Return the latest validated explicit battle workflow directive."""
 
@@ -289,6 +341,12 @@ class AutomationSupervisor:
         """Return this supervisor's process-lifetime runtime identity."""
 
         return self._runtime_id
+
+    @property
+    def dispatch_control_lock_path(self) -> str:
+        """Return the shared ordering boundary for control and device input."""
+
+        return str(self._control_store.dispatch_lock_path)
 
     @property
     def control_acknowledgements(self) -> Dict[str, object]:
@@ -376,10 +434,42 @@ class AutomationSupervisor:
 
         return bool(self._unexpected_manual_yield_emergency)
 
+    @property
+    def catastrophic_pause_hold(self) -> Dict[str, object]:
+        """Describe the local hold that requires one newer Enable request."""
+
+        return {
+            "active": bool(self._catastrophic_pause_latched),
+            "reason": self._catastrophic_pause_reason,
+        }
+
     def apply_control(self) -> bool:
         """Apply directives and report whether tracked control intent changed."""
 
+        with AUTOMATION.quiescence_boundary():
+            with self._control_apply_lock:
+                return self._apply_control_locked()
+
+    def _apply_control_locked(self) -> bool:
+        """Apply one serialized persistent-control snapshot."""
+
         directives = self._load_control_directive()
+        if self._control_read_failed:
+            # Durable control is the sole operator authority.  If it cannot be
+            # read, fail closed locally before any later device mutation; do
+            # not manufacture an acknowledgement for unknown intent.  Keep a
+            # process-local catastrophic hold so recovery of an older RUNNING
+            # directive cannot silently resume input; a fresh Enable request
+            # is required after control authority was unavailable.
+            if self.control_state == "STOPPED":
+                return False
+            changed = self.control_state != "PAUSED"
+            self._latch_catastrophic_pause(
+                "durable control authority became unreadable"
+            )
+            self._last_applied_state = None
+            self._apply_state("PAUSED")
+            return changed
         control_directive_changed = False
         if directives:
             state_revision = (
@@ -391,6 +481,34 @@ class AutomationSupervisor:
                 state_revision is not None
                 and state_revision != self._last_state_directive_revision
             )
+            requested_state = str(directives.get("state") or "").upper()
+            if self._catastrophic_pause_latched and requested_state == "RUNNING":
+                if self._catastrophic_pause_state_revision is None:
+                    # The first readable RUNNING snapshot after authority was
+                    # lost is the stale baseline, not proof of a new Enable.
+                    self._catastrophic_pause_state_revision = state_revision
+                elif (
+                    state_revision is not None
+                    and state_revision
+                    != self._catastrophic_pause_state_revision
+                ):
+                    self._catastrophic_pause_latched = False
+                    self._catastrophic_pause_state_revision = None
+                    self._catastrophic_pause_reason = None
+                    log(
+                        "[RUNTIME_POLICY] Fresh Enable request released the "
+                        "catastrophic control hold",
+                        "INFO",
+                        console=True,
+                    )
+            elif (
+                self._catastrophic_pause_latched
+                and requested_state == "PAUSED"
+                and state_revision is not None
+            ):
+                # A successfully persisted catastrophic Pause becomes the
+                # baseline that the later explicit Enable must replace.
+                self._catastrophic_pause_state_revision = state_revision
             self._last_state_directive_revision = state_revision
             mode_revision = (
                 directives.get("mode_request_id")
@@ -439,6 +557,10 @@ class AutomationSupervisor:
                     directives.get("interactive_development_lease")
                 )
             )
+            self._interactive_development_lease_error = bool(
+                directives.get("interactive_development_lease") is not None
+                and self._interactive_development_lease is None
+            )
             self._battle_workflow = validate_battle_workflow(
                 directives.get("battle_workflow")
             )
@@ -462,10 +584,20 @@ class AutomationSupervisor:
             )
             if self._unexpected_manual_yield_emergency and self._manual_control:
                 self._unexpected_manual_yield_emergency = False
+            held_running = bool(
+                self._catastrophic_pause_latched
+                and requested_state == "RUNNING"
+            )
             self._apply_state(
-                directives.get("state"),
-                acknowledge_unchanged=state_directive_changed,
-                request_id=directives.get("state_request_id"),
+                "PAUSED" if held_running else directives.get("state"),
+                acknowledge_unchanged=(
+                    state_directive_changed and not held_running
+                ),
+                request_id=(
+                    None
+                    if held_running
+                    else directives.get("state_request_id")
+                ),
             )
             self._apply_mode(
                 directives.get("mode"),
@@ -1096,15 +1228,73 @@ class AutomationSupervisor:
             raise ValueError(
                 f"{kind.value} is recoverable and cannot globally Pause automation"
             )
-        log(
-            "[RUNTIME_POLICY] Catastrophic failure Paused automation: "
-            f"kind={kind.value} reason={str(reason or 'unavailable').strip()}",
-            "ERROR",
-        )
-        return self._persist_runtime_state(
-            "PAUSED",
-            source="runtime-catastrophic-failure",
-        )
+        # The local safety latch must precede every fallible diagnostic or
+        # persistence operation.  Otherwise a logger failure could let the
+        # next guard reapply stale durable RUNNING authority.
+        self._latch_catastrophic_pause(reason)
+        try:
+            saved = self._control_store.set_paused_unless_stopped(
+                source="runtime-catastrophic-failure"
+            )
+        except ControlDirectiveError as exc:
+            try:
+                log(f"[CTRL] Failed writing control file: {exc}", "WARN")
+            except Exception:
+                pass
+            return False
+
+        saved_state = str(saved.get("state") or "").strip().upper()
+        request_id = saved.get("state_request_id")
+        self._last_state_directive_revision = request_id
+        self._last_applied_state = None
+        if saved_state == "STOPPED":
+            # Explicit Stop always outranks automatic Pause, including when a
+            # command reports uncertainty after Stop was persisted.
+            self._catastrophic_pause_latched = False
+            self._catastrophic_pause_state_revision = None
+            self._catastrophic_pause_reason = None
+            self._apply_state("STOPPED", request_id=request_id)
+            try:
+                log(
+                    "[RUNTIME_POLICY] Catastrophic result arrived after "
+                    "explicit Stop; STOPPED authority was preserved",
+                    "ERROR",
+                )
+            except Exception:
+                pass
+            return True
+
+        self._apply_state("PAUSED", request_id=request_id)
+        self._catastrophic_pause_state_revision = request_id
+        try:
+            log(
+                "[RUNTIME_POLICY] Catastrophic failure Paused automation: "
+                f"kind={kind.value} "
+                f"reason={str(reason or 'unavailable').strip()}",
+                "ERROR",
+            )
+        except Exception:
+            pass
+        return True
+
+    def _latch_catastrophic_pause(self, reason: str) -> None:
+        """Require a newer explicit RUNNING request after an unsafe gap."""
+
+        if self.control_state == "STOPPED":
+            # An explicit Stop is stricter than a catastrophic Pause and must
+            # never be weakened when durable authority or reporting fails.
+            return
+        if not self._catastrophic_pause_latched:
+            self._catastrophic_pause_state_revision = getattr(
+                self,
+                "_last_state_directive_revision",
+                None,
+            )
+        self._catastrophic_pause_latched = True
+        self._catastrophic_pause_reason = str(reason or "catastrophic failure")
+        # This is deliberately independent of the control-file write.  A
+        # failed persistence attempt must still stop this process immediately.
+        AUTOMATION.state = "PAUSED"
 
     def transition_battle_workflow(
         self,
@@ -1557,10 +1747,79 @@ class AutomationSupervisor:
     # ------------------------------ helpers ---------------------------------
     def _load_control_directive(self) -> Dict[str, object]:
         try:
-            return self._control_store.read()
+            directives = self._control_store.read()
         except ControlDirectiveError as exc:
-            log(f"[CTRL] Failed reading control file: {exc}", "WARN")
+            self._control_read_failed = True
+            self._latch_catastrophic_pause(
+                "durable control authority became unreadable"
+            )
+            if not self._control_read_failure_logged:
+                log(
+                    "[CTRL] Failed reading control file; device mutation is "
+                    f"blocked until authority recovers: {exc}",
+                    "WARN",
+                )
+                self._control_read_failure_logged = True
             return {}
+        authority_error = self._core_state_authority_error(directives)
+        if authority_error is not None:
+            self._control_read_failed = True
+            raw_state = directives.get("state")
+            if (
+                isinstance(raw_state, str)
+                and raw_state.strip().upper() == "STOPPED"
+            ):
+                # A malformed identity cannot authorize action, but the
+                # stricter durable STOPPED value is still safe to honor. Do
+                # not acknowledge the malformed request envelope.
+                AUTOMATION.state = "STOPPED"
+            else:
+                self._latch_catastrophic_pause(authority_error)
+            if not self._control_read_failure_logged:
+                log(
+                    "[CTRL] Durable state authority is missing or malformed; "
+                    f"device mutation is blocked: {authority_error}",
+                    "WARN",
+                )
+                self._control_read_failure_logged = True
+            return {}
+        if self._control_read_failure_logged:
+            log(
+                "[CTRL] Control-file authority recovered; applying the "
+                "current durable directive",
+                "INFO",
+            )
+        self._control_read_failed = False
+        self._control_read_failure_logged = False
+        return directives
+
+    @staticmethod
+    def _core_state_authority_error(
+        directives: Mapping[str, object],
+    ) -> Optional[str]:
+        """Validate the exact durable Pause/Stop authority identity."""
+
+        state = directives.get("state")
+        normalized_state = (
+            state.strip().upper() if isinstance(state, str) else ""
+        )
+        if normalized_state not in _ALLOWED_STATES:
+            return "durable control state is missing or unsupported"
+        raw_request_id = directives.get("state_request_id")
+        request_id = (
+            raw_request_id.strip() if isinstance(raw_request_id, str) else ""
+        )
+        if (
+            not request_id
+            or len(request_id) > 128
+            or any(
+                not character.isascii()
+                or not (character.isalnum() or character in "._:-")
+                for character in request_id
+            )
+        ):
+            return "durable control state request identity is missing or malformed"
+        return None
 
     def _record_control_acknowledgement(
         self,
@@ -1608,22 +1867,16 @@ class AutomationSupervisor:
             if str(request_id or "").strip()
             else ""
         )
-        if normalized == self._last_applied_state:
-            if acknowledge_unchanged:
-                log(
-                    f"[CTRL] State set to {normalized} via control file"
-                    f"{request_suffix}",
-                    "INFO",
-                    console=True,
-                )
-                self._record_control_acknowledgement(
-                    "state",
-                    normalized,
-                    request_id,
-                )
+        actual_matches = self.control_state == normalized
+        if (
+            normalized == self._last_applied_state
+            and actual_matches
+            and not acknowledge_unchanged
+        ):
             return
         try:
-            AUTOMATION.state = normalized
+            if not actual_matches:
+                AUTOMATION.state = normalized
             log(
                 f"[CTRL] State set to {normalized} via control file"
                 f"{request_suffix}",
@@ -1637,7 +1890,10 @@ class AutomationSupervisor:
                 request_id,
             )
         except Exception as exc:
-            log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
+            try:
+                log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
+            except Exception:
+                pass
 
     def _apply_mode(
         self,
@@ -1834,7 +2090,12 @@ class AutomationSupervisor:
 
     def _auto_resume_if_needed(self) -> None:
         deadline = self._pause_resume_at
-        if not self.is_paused or deadline is None or time.time() < deadline:
+        if (
+            self._catastrophic_pause_latched
+            or not self.is_paused
+            or deadline is None
+            or time.time() < deadline
+        ):
             return
 
         try:

@@ -1589,11 +1589,11 @@ def _capture_default():
     return capture_adb_screenshot()
 
 
-def _background_default(target: str) -> bool:
+def _background_default(target: str) -> Any:
     return background_to_android_home(target)
 
 
-def _foreground_default(target: str) -> bool:
+def _foreground_default(target: str) -> Any:
     return restore_tower_launcher(target)
 
 

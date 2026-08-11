@@ -40,6 +40,11 @@ from core.control_model import (
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
+from core.dispatch_control_boundary import (
+    DispatchControlBoundaryError,
+    dispatch_control_boundary,
+    dispatch_lock_path_for,
+)
 from core.strategy_profiles import (
     BUILTIN_STRATEGY_IDS,
     configurable_strategy_ids,
@@ -112,6 +117,7 @@ class ControlDirectiveStore:
     ) -> None:
         self.path = Path(path)
         self.lock_path = self.path.with_name(f".{self.path.name}.write.lock")
+        self.dispatch_lock_path = dispatch_lock_path_for(self.path)
         self.strategy_profile_dir = strategy_profile_directory(
             strategy_profile_dir
         )
@@ -126,7 +132,7 @@ class ControlDirectiveStore:
         """Return normalized state, mode, target, and timed-pause information."""
 
         data = self.read()
-        state = str(data.get("state") or "RUNNING").upper()
+        state = str(data.get("state") or "PAUSED").upper()
         mode = str(data.get("mode") or "NEXT_BATTLE").upper()
         resume_at = _finite_number(data.get("resume_at"))
         current_time = float(now) if now is not None else datetime.now().timestamp()
@@ -223,13 +229,18 @@ class ControlDirectiveStore:
             ("strategy", "strategy_request_id"),
         )
         implicit_defaults: dict[str, object] = {
-            "state": "RUNNING",
+            # An absent legacy control file has no proven action authority.
+            # Materialize a safe Pause and require one explicit Enable rather
+            # than manufacturing RUNNING authority during process startup.
+            "state": "PAUSED",
             "mode": "NEXT_BATTLE",
             "game_speed_target": MAXIMUM_GAME_SPEED_TARGET,
         }
 
         def valid_request_id(value: object) -> bool:
-            normalized = str(value or "").strip()
+            if not isinstance(value, str):
+                return False
+            normalized = value.strip()
             return bool(
                 normalized
                 and len(normalized) <= 128
@@ -240,22 +251,47 @@ class ControlDirectiveStore:
                 )
             )
 
-        with self._lock():
-            current = self._read_unlocked()
-            added: dict[str, str] = {}
-            for value_field, identity_field in fields:
-                if value_field not in current or current.get(value_field) is None:
-                    if value_field not in implicit_defaults:
+        with self._dispatch_boundary():
+            with self._lock():
+                current = self._read_unlocked()
+                added: dict[str, str] = {}
+                for value_field, identity_field in fields:
+                    if value_field not in current:
+                        if value_field not in implicit_defaults:
+                            continue
+                        current[value_field] = implicit_defaults[value_field]
+                    elif current.get(value_field) is None:
+                        # A present malformed value must reach validation. Do
+                        # not silently turn damaged authority into permission.
                         continue
-                    current[value_field] = implicit_defaults[value_field]
-                if valid_request_id(current.get(identity_field)):
-                    continue
-                request_id = uuid4().hex
-                current[identity_field] = request_id
-                added[identity_field] = request_id
-            if added:
-                self._write_unlocked(current)
-            return added
+
+                    identity_present = identity_field in current
+                    identity_value = current.get(identity_field)
+                    if valid_request_id(identity_value):
+                        continue
+                    if identity_present and identity_value is not None:
+                        # Preserve malformed-present identities so startup
+                        # rejects them instead of laundering them into a new
+                        # request that appears operator-authored.
+                        continue
+                    if (
+                        value_field == "state"
+                        and isinstance(current.get(value_field), str)
+                        and str(current[value_field]).strip().upper()
+                        == "RUNNING"
+                    ):
+                        # A legacy RUNNING value without an exact request ID is
+                        # not enough authority for a fresh process to act.
+                        # Convert it to a new explicit safe Pause; the operator
+                        # can then issue a real Enable with its own identity.
+                        current[value_field] = "PAUSED"
+                        current.pop("resume_at", None)
+                    request_id = uuid4().hex
+                    current[identity_field] = request_id
+                    added[identity_field] = request_id
+                if added:
+                    self._write_unlocked(current)
+                return added
 
     def request_battle_workflow(
         self,
@@ -410,7 +446,8 @@ class ControlDirectiveStore:
                 data["updated_by"] = source
             return data
 
-        saved = self.update(mutate)
+        with self._dispatch_boundary():
+            saved = self.update(mutate)
         return dict(saved["battle_workflow"])
 
     def transition_battle_workflow(
@@ -568,6 +605,10 @@ class ControlDirectiveStore:
             )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            if str(data.get("state") or "").strip().upper() == "STOPPED":
+                raise ValueError(
+                    "Start Automation before requesting manual control"
+                )
             raw_manual = data.get("manual_control")
             current = validate_manual_control(raw_manual)
             if raw_manual is not None and current is None:
@@ -627,7 +668,8 @@ class ControlDirectiveStore:
             data["updated_by"] = source or "operator"
             return data
 
-        saved = self.update(mutate)
+        with self._dispatch_boundary():
+            saved = self.update(mutate)
         return dict(saved["manual_control"])
 
     def request_setup_capture(
@@ -735,7 +777,8 @@ class ControlDirectiveStore:
             data["updated_by"] = source or "operator"
             return data
 
-        saved = self.update(mutate)
+        with self._dispatch_boundary():
+            saved = self.update(mutate)
         return dict(saved["setup_capture"])
 
     def transition_setup_capture(
@@ -937,7 +980,8 @@ class ControlDirectiveStore:
             data["updated_by"] = source or "operator"
             return data
 
-        saved = self.update(mutate)
+        with self._dispatch_boundary():
+            saved = self.update(mutate)
         return dict(saved["manual_control"])
 
     def transition_manual_control(
@@ -1107,8 +1151,99 @@ class ControlDirectiveStore:
             data["updated_by"] = source or "operator"
             return data
 
-        saved = self.update(mutate)
+        with self._dispatch_boundary():
+            saved = self.update(mutate)
         return dict(saved["manual_control"])
+
+    @staticmethod
+    def _interrupt_operator_workflows_data(
+        data: dict[str, Any],
+        *,
+        reason: str,
+        source: str,
+        timestamp: str,
+    ) -> dict[str, Any]:
+        """Apply workflow interruption inside an existing atomic update."""
+
+        raw_workflow = data.get("battle_workflow")
+        workflow = validate_battle_workflow(raw_workflow)
+        if workflow is None and raw_workflow is not None:
+            workflow = _interrupted_battle_workflow_from_envelope(
+                raw_workflow,
+                reason=reason,
+                source=source,
+                timestamp=timestamp,
+            )
+            if workflow is not None:
+                data["battle_workflow"] = workflow
+        if (
+            workflow is not None
+            and workflow["status"] not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+        ):
+            workflow.update(
+                {
+                    "status": "interrupted",
+                    "reason": reason,
+                    "updated_at": timestamp,
+                    "completed_at": timestamp,
+                    "updated_by": source,
+                }
+            )
+            data["battle_workflow"] = workflow
+        raw_manual = data.get("manual_control")
+        manual = validate_manual_control(raw_manual)
+        if manual is None and raw_manual is not None:
+            manual = _interrupted_manual_control_from_envelope(
+                raw_manual,
+                reason=reason,
+                source=source,
+                timestamp=timestamp,
+            )
+            if manual is not None:
+                data["manual_control"] = manual
+        if (
+            manual is not None
+            and manual["status"] not in MANUAL_CONTROL_TERMINAL_STATUSES
+        ):
+            manual.update(
+                {
+                    "status": "interrupted",
+                    "detail": reason,
+                    "updated_at": timestamp,
+                    "completed_at": timestamp,
+                    "updated_by": source,
+                }
+            )
+            data["manual_control"] = manual
+        raw_capture = data.get("setup_capture")
+        capture = validate_setup_capture(raw_capture)
+        if capture is None and raw_capture is not None:
+            capture = _interrupted_setup_capture_from_envelope(
+                raw_capture,
+                reason=reason,
+                source=source,
+                timestamp=timestamp,
+            )
+            if capture is not None:
+                data["setup_capture"] = capture
+        if capture is not None and capture["status"] in {
+            "requested",
+            "acknowledged",
+            "capturing",
+        }:
+            capture.update(
+                {
+                    "status": "interrupted",
+                    "reason": reason,
+                    "updated_at": timestamp,
+                    "completed_at": timestamp,
+                    "updated_by": source,
+                }
+            )
+            data["setup_capture"] = capture
+        data["updated_at"] = timestamp
+        data["updated_by"] = source
+        return data
 
     def interrupt_operator_workflows(
         self,
@@ -1122,88 +1257,15 @@ class ControlDirectiveStore:
         normalized_reason = _bounded_text(reason, 512)
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
-            timestamp = _timestamp_at(now)
-            raw_workflow = data.get("battle_workflow")
-            workflow = validate_battle_workflow(raw_workflow)
-            if workflow is None and raw_workflow is not None:
-                workflow = _interrupted_battle_workflow_from_envelope(
-                    raw_workflow,
-                    reason=normalized_reason,
-                    source=source,
-                    timestamp=timestamp,
-                )
-                if workflow is not None:
-                    data["battle_workflow"] = workflow
-            if (
-                workflow is not None
-                and workflow["status"] not in BATTLE_WORKFLOW_TERMINAL_STATUSES
-            ):
-                workflow.update(
-                    {
-                        "status": "interrupted",
-                        "reason": normalized_reason,
-                        "updated_at": timestamp,
-                        "completed_at": timestamp,
-                        "updated_by": source,
-                    }
-                )
-                data["battle_workflow"] = workflow
-            raw_manual = data.get("manual_control")
-            manual = validate_manual_control(raw_manual)
-            if manual is None and raw_manual is not None:
-                manual = _interrupted_manual_control_from_envelope(
-                    raw_manual,
-                    reason=normalized_reason,
-                    source=source,
-                    timestamp=timestamp,
-                )
-                if manual is not None:
-                    data["manual_control"] = manual
-            if (
-                manual is not None
-                and manual["status"] not in MANUAL_CONTROL_TERMINAL_STATUSES
-            ):
-                manual.update(
-                    {
-                        "status": "interrupted",
-                        "detail": normalized_reason,
-                        "updated_at": timestamp,
-                        "completed_at": timestamp,
-                        "updated_by": source,
-                    }
-                )
-                data["manual_control"] = manual
-            raw_capture = data.get("setup_capture")
-            capture = validate_setup_capture(raw_capture)
-            if capture is None and raw_capture is not None:
-                capture = _interrupted_setup_capture_from_envelope(
-                    raw_capture,
-                    reason=normalized_reason,
-                    source=source,
-                    timestamp=timestamp,
-                )
-                if capture is not None:
-                    data["setup_capture"] = capture
-            if capture is not None and capture["status"] in {
-                "requested",
-                "acknowledged",
-                "capturing",
-            }:
-                capture.update(
-                    {
-                        "status": "interrupted",
-                        "reason": normalized_reason,
-                        "updated_at": timestamp,
-                        "completed_at": timestamp,
-                        "updated_by": source,
-                    }
-                )
-                data["setup_capture"] = capture
-            data["updated_at"] = timestamp
-            data["updated_by"] = source
-            return data
+            return self._interrupt_operator_workflows_data(
+                data,
+                reason=normalized_reason,
+                source=source,
+                timestamp=_timestamp_at(now),
+            )
 
-        return self.update(mutate)
+        with self._dispatch_boundary():
+            return self.update(mutate)
 
     def request_interactive_development_lease(
         self,
@@ -1407,7 +1469,75 @@ class ControlDirectiveStore:
                 data["updated_by"] = source
             return data
 
-        return self.update(mutate)
+        with self._dispatch_boundary():
+            return self.update(mutate)
+
+    def set_paused_unless_stopped(
+        self,
+        *,
+        resume_at: Optional[float] = None,
+        source: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Persist Pause without ever overriding explicit Stop."""
+
+        deadline = _finite_number(resume_at)
+        if resume_at is not None and deadline is None:
+            raise ValueError("resume_at must be a finite timestamp")
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            if str(data.get("state") or "").strip().upper() == "STOPPED":
+                return data
+            timestamp = _updated_at()
+            data["state"] = "PAUSED"
+            data.pop("resume_at", None)
+            if deadline is not None:
+                data["resume_at"] = deadline
+            data["updated_at"] = timestamp
+            data["state_updated_at"] = timestamp
+            data["state_request_id"] = uuid4().hex
+            if source:
+                data["updated_by"] = source
+            return data
+
+        with self._dispatch_boundary():
+            return self.update(mutate)
+
+    def set_state_and_interrupt_operator_workflows(
+        self,
+        state: str,
+        reason: str,
+        *,
+        source: str,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Atomically stop input authority and retire unfinished workflows."""
+
+        normalized = str(state).strip().upper()
+        if normalized not in VALID_STATES:
+            raise ValueError(
+                f"Unsupported automation state {state!r}; "
+                f"expected one of {sorted(VALID_STATES)}"
+            )
+        normalized_reason = _bounded_text(reason, 512)
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            timestamp = _timestamp_at(now)
+            self._interrupt_operator_workflows_data(
+                data,
+                reason=normalized_reason,
+                source=source,
+                timestamp=timestamp,
+            )
+            data["state"] = normalized
+            data.pop("resume_at", None)
+            data["state_updated_at"] = timestamp
+            data["state_request_id"] = uuid4().hex
+            data["updated_at"] = timestamp
+            data["updated_by"] = source
+            return data
+
+        with self._dispatch_boundary():
+            return self.update(mutate)
 
     def set_adb_port(
         self,
@@ -1449,7 +1579,11 @@ class ControlDirectiveStore:
                 data["updated_by"] = source
             return data
 
-        return self.update(mutate)
+        # A terminal-policy transition and the final guarded input dispatch
+        # share one linearization boundary.  Once this write returns, no tap
+        # authorized by the previous policy can begin.
+        with self._dispatch_boundary():
+            return self.update(mutate)
 
     def set_game_speed_target(
         self,
@@ -2644,8 +2778,9 @@ class ControlDirectiveStore:
         """Atomically replace the mapping after validating its shape."""
 
         replacement = dict(directives)
-        with self._lock():
-            self._write_unlocked(replacement)
+        with self._dispatch_boundary():
+            with self._lock():
+                self._write_unlocked(replacement)
         return replacement
 
     def update(
@@ -2673,25 +2808,39 @@ class ControlDirectiveStore:
         """
 
         current_time = datetime.now().timestamp() if now is None else float(now)
-        with self._lock():
-            current = self._read_unlocked()
-            state = str(current.get("state") or "").upper()
-            deadline = _finite_number(current.get("resume_at"))
-            if (
-                state != "PAUSED"
-                or deadline != float(expected_resume_at)
-                or current_time < deadline
-            ):
-                return None
-            current["state"] = "RUNNING"
-            current.pop("resume_at", None)
-            timestamp = _updated_at()
-            current["updated_at"] = timestamp
-            current["state_updated_at"] = timestamp
-            current["state_request_id"] = uuid4().hex
-            current["updated_by"] = "timed-pause-expiry"
-            self._write_unlocked(current)
-            return current
+        with self._dispatch_boundary():
+            with self._lock():
+                current = self._read_unlocked()
+                state = str(current.get("state") or "").upper()
+                deadline = _finite_number(current.get("resume_at"))
+                if (
+                    state != "PAUSED"
+                    or deadline != float(expected_resume_at)
+                    or current_time < deadline
+                ):
+                    return None
+                current["state"] = "RUNNING"
+                current.pop("resume_at", None)
+                timestamp = _updated_at()
+                current["updated_at"] = timestamp
+                current["state_updated_at"] = timestamp
+                current["state_request_id"] = uuid4().hex
+                current["updated_by"] = "timed-pause-expiry"
+                self._write_unlocked(current)
+                return current
+
+    @contextmanager
+    def _dispatch_boundary(self) -> Iterator[None]:
+        """Order durable authority writes against device dispatch."""
+
+        try:
+            with dispatch_control_boundary(self.dispatch_lock_path):
+                yield
+        except DispatchControlBoundaryError as exc:
+            raise ControlDirectiveError(
+                "Unable to acquire the device dispatch/control boundary for "
+                f"{self.path}: {exc}"
+            ) from exc
 
     @contextmanager
     def _lock(self) -> Iterator[None]:

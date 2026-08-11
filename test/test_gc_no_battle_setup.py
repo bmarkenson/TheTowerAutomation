@@ -3442,7 +3442,7 @@ def test_terminal_session_bypass_rearms_only_the_failed_auto_pick_check():
         "strategy": "farm_t18",
         "phase": "session_preflight",
         "check_id": "auto_pick_perks",
-        "reason": "configuration mismatch",
+        "reason": "Modules",
         "expected": "True",
         "options": options,
     }
@@ -3665,3 +3665,59 @@ def test_attached_session_mismatch_advisory_never_offers_restart():
         for option in published["options"]
     )
     manager.authorize_session_preflight_restart.assert_not_called()
+
+
+def test_legacy_blocking_session_gate_is_republished_as_advisory():
+    manager = Mock()
+    manager.strategy = SimpleNamespace(
+        name="farm_t18",
+        session_preflight_requirements=lambda: {"modules": {"cannon": "Farm"}},
+    )
+    manager.session_preflight_failure_checks.return_value = ["modules"]
+    manager.gate_fallbacks.return_value = []
+    manager.ctx.data = {
+        "mission_vars": {
+            "gc_session_preflight_last_reason": "configuration mismatch",
+        }
+    }
+    legacy = {
+        "request_id": "legacy-blocking-session-gate",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "modules",
+        "reason": "configuration mismatch",
+        "blocking": True,
+        "options": build_gate_decision_options("modules"),
+    }
+    supervisor = Mock()
+    supervisor.gate_decision = legacy
+    supervisor.consume_gate_decision.return_value = {
+        **legacy,
+        "status": "consumed",
+    }
+
+    def publish(**payload):
+        return {
+            "request_id": "replacement-session-advisory",
+            "status": "pending",
+            **payload,
+        }
+
+    supervisor.publish_gate_decision.side_effect = publish
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._gate_decision_prompt = lambda _decision: None
+    app._gate_prompted_request_id = None
+
+    app._handle_terminal_session_gate_decision()
+
+    supervisor.consume_gate_decision.assert_called_once_with(
+        "legacy-blocking-session-gate",
+        completion_reason="superseded by refreshed session preflight evidence",
+    )
+    published = supervisor.publish_gate_decision.call_args.kwargs
+    assert published["blocking"] is False
+    assert published["check_id"] == "modules"
+    assert published["reason"] == "Modules"

@@ -259,12 +259,19 @@ class App:
             RuntimeFailureDisposition.CONTINUE_DEGRADED
         ):
             raise ValueError(f"{kind.value} requires catastrophic handling")
-        log(
-            "[RUNTIME_POLICY] Automation continues degraded: "
-            f"kind={kind.value} reason={str(reason or 'unavailable').strip()}",
-            "WARN",
-            console=True,
-        )
+        try:
+            log(
+                "[RUNTIME_POLICY] Automation continues degraded: "
+                f"kind={kind.value} "
+                f"reason={str(reason or 'unavailable').strip()}",
+                "WARN",
+                console=True,
+            )
+        except OSError:
+            # Reporting is diagnostic, not action authority.  A full or
+            # temporarily unavailable log destination must not turn a
+            # recoverable runtime failure into an automation shutdown.
+            pass
         return decision
 
     def __init__(
@@ -383,6 +390,7 @@ class App:
                 else None
             )
         )
+        self._runtime_shutting_down = False
         log(
             f"[RUN_INIT] Startup gate policy={config.startup_gate_policy}",
             "INFO",
@@ -1533,6 +1541,11 @@ class App:
             ),
             control_model={
                 "schema_version": 1,
+                "catastrophic_pause_hold": (
+                    supervisor.catastrophic_pause_hold
+                    if supervisor is not None
+                    else {"active": False, "reason": None}
+                ),
                 "startup_gate_policy": str(
                     getattr(
                         getattr(self, "_config", None),
@@ -2248,6 +2261,15 @@ class App:
                 label
                 for label, present in (
                     (
+                        "interactive-development-lease",
+                        getattr(
+                            self._supervisor,
+                            "interactive_development_lease_error",
+                            False,
+                        )
+                        is True,
+                    ),
+                    (
                         "manual-control",
                         self._supervisor.manual_control_error is True,
                     ),
@@ -2265,7 +2287,7 @@ class App:
             None,
         )
         if malformed_authority is not None:
-            if not self._supervisor.is_paused:
+            if self._supervisor.control_state not in {"PAUSED", "STOPPED"}:
                 self._supervisor.pause_for_catastrophic_failure(
                     RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
                     reason=(
@@ -2281,6 +2303,33 @@ class App:
         if manual is not None and manual.get("status") not in (
             MANUAL_CONTROL_TERMINAL_STATUSES
         ):
+            manual_id = str(manual.get("manual_control_id") or "")
+            return_claim = self._pending_return_reconciliation_claims().get(
+                manual_id
+            )
+            if (
+                isinstance(return_claim, Mapping)
+                and return_claim.get("semantic_completion_applied") is True
+            ):
+                self._retry_pending_return_completion_report(
+                    manual,
+                    return_claim,
+                )
+                return
+            terminal_claim = self._manual_terminal_claims().get(manual_id)
+            if (
+                isinstance(terminal_claim, Mapping)
+                and terminal_claim.get("semantic_completion_applied") is True
+                and isinstance(
+                    terminal_claim.get("pending_completion"),
+                    Mapping,
+                )
+            ):
+                self._retry_pending_manual_terminal_completion(
+                    manual,
+                    current,
+                )
+                return
             retried_terminal = self._retry_pending_manual_terminal_completion(
                 manual,
                 current,
@@ -2317,7 +2366,6 @@ class App:
                 )
                 if recorded is not None:
                     manual = recorded
-            manual_id = str(manual.get("manual_control_id") or "")
             status = str(manual.get("status") or "")
             starting = manual.get("starting_evidence")
             if current is not None and isinstance(starting, Mapping):
@@ -3791,6 +3839,9 @@ class App:
         )
         if not isinstance(pending, Mapping):
             return None
+        semantic_completion_applied = bool(
+            claim.get("semantic_completion_applied") is True
+        )
         acquisition = claim.get("acquisition")
         evidence = claim.get("evidence")
         ui_fallback = claim.get("ui_fallback") is True
@@ -3823,7 +3874,13 @@ class App:
             and acquisition.acquisition_type
             is PlayerSaveAcquisitionType.NATURAL_BOUNDARY
         )
-        if not same_runtime_binding or not (valid_ui_claim or valid_save_claim):
+        if (
+            not semantic_completion_applied
+            and (
+                not same_runtime_binding
+                or not (valid_ui_claim or valid_save_claim)
+            )
+        ):
             self._manual_terminal_claims().pop(manual_id, None)
             self._supervisor.transition_manual_control(
                 manual_id,
@@ -3859,7 +3916,12 @@ class App:
             ),
         )
         if completed is None or completed.get("status") != "completed":
-            if not ui_fallback:
+            mutable_claim = self._manual_terminal_claims().get(manual_id)
+            if (
+                isinstance(mutable_claim, dict)
+                and mutable_claim.get("reporting_failure_flagged") is not True
+            ):
+                mutable_claim["reporting_failure_flagged"] = True
                 self._flag_recoverable_runtime_failure(
                     RuntimeFailureKind.REPORTING_FAILURE,
                     "manual terminal completion receipt could not be persisted; retry retained",
@@ -3883,6 +3945,92 @@ class App:
             claims = {}
             self._manual_return_reconciliation_claims = claims
         return claims
+
+    def _retry_pending_return_completion_report(
+        self,
+        manual: Mapping[str, object],
+        claim: Mapping[str, object],
+    ) -> bool:
+        """Retry only a Return receipt after local reconciliation released."""
+
+        workflow_id = str(manual.get("manual_control_id") or "")
+        pending = claim.get("pending_completion")
+        if not workflow_id or not isinstance(pending, Mapping):
+            return False
+        completed = self._supervisor.transition_manual_control(
+            workflow_id,
+            "completed",
+            detail=str(pending.get("detail") or "Return Control completed"),
+            refresh_status=str(
+                pending.get("refresh_status")
+                or "return_reconciliation_complete"
+            ),
+            save_receipt=(
+                dict(pending["save_receipt"])
+                if isinstance(pending.get("save_receipt"), Mapping)
+                else None
+            ),
+            configuration=(
+                dict(pending["configuration"])
+                if isinstance(pending.get("configuration"), Mapping)
+                else None
+            ),
+        )
+        if completed is None or completed.get("status") != "completed":
+            mutable_claim = self._pending_return_reconciliation_claims().get(
+                workflow_id
+            )
+            if (
+                isinstance(mutable_claim, dict)
+                and mutable_claim.get("reporting_failure_flagged") is not True
+            ):
+                mutable_claim["reporting_failure_flagged"] = True
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.REPORTING_FAILURE,
+                    "Return Control completion receipt could not be persisted; "
+                    "automation continued and reporting retry was retained",
+                )
+            return False
+        self._pending_return_reconciliation_claims().pop(workflow_id, None)
+        return True
+
+    def _stage_return_semantic_completion(
+        self,
+        manual: Mapping[str, object],
+        completion_payload: Mapping[str, object],
+        *,
+        completion_kind: str,
+    ) -> bool:
+        """Release local Return authority before retryable ledger reporting."""
+
+        workflow_id = str(manual.get("manual_control_id") or "")
+        if not workflow_id:
+            return False
+        claims = self._pending_return_reconciliation_claims()
+        mutable_claim = claims.get(workflow_id)
+        if not isinstance(mutable_claim, dict):
+            mutable_claim = {}
+            claims[workflow_id] = mutable_claim
+        mutable_claim["semantic_completion_applied"] = True
+        mutable_claim["completion_kind"] = str(completion_kind)
+        mutable_claim["pending_completion"] = copy.deepcopy(
+            dict(completion_payload)
+        )
+        self._mission_mgr.finish_manual_return_reconciliation()
+        if (
+            getattr(
+                self,
+                "_manual_return_configuration_authorized_id",
+                None,
+            )
+            == workflow_id
+        ):
+            self._manual_return_configuration_authorized_id = None
+        # A failed durable receipt is recoverable reporting loss.  The exact
+        # process-local claim remains only for retry and must not retain the
+        # device-input hold after reconciliation is semantically complete.
+        self._retry_pending_return_completion_report(manual, mutable_claim)
+        return True
 
     def _pending_setup_capture_claims(
         self,
@@ -4208,10 +4356,8 @@ class App:
                 )
                 degraded = True
                 final_receipt = dict(receipt)
-        completed = self._supervisor.transition_manual_control(
-            workflow_id,
-            "completed",
-            detail=(
+        completion_payload = {
+            "detail": (
                 "Return Control released automation with configuration problems "
                 "flagged for the next safe Home repair"
                 if degraded
@@ -4221,34 +4367,25 @@ class App:
                 else "fresh forced save confirmed battle identity and active "
                 "Strategy configuration after manual control"
             ),
-            refresh_status=(
+            "refresh_status": (
                 "reconciliation_complete_degraded"
                 if degraded
                 else "ui_fallback_reconciliation_complete"
                 if ui_fallback
                 else "save_reconciliation_complete"
             ),
-            save_receipt=final_receipt,
-            configuration=self._return_configuration_report(
+            "save_receipt": final_receipt,
+            "configuration": self._return_configuration_report(
                 final_receipt,
                 check_sets,
                 stage="complete_degraded" if degraded else "complete",
             ),
+        }
+        return self._stage_return_semantic_completion(
+            manual,
+            completion_payload,
+            completion_kind="active_battle",
         )
-        if completed is None or completed.get("status") != "completed":
-            return False
-        self._pending_return_reconciliation_claims().pop(workflow_id, None)
-        self._mission_mgr.finish_manual_return_reconciliation()
-        if (
-            getattr(
-                self,
-                "_manual_return_configuration_authorized_id",
-                None,
-            )
-            == workflow_id
-        ):
-            self._manual_return_configuration_authorized_id = None
-        return True
 
     def _advance_running_return_configuration(
         self,
@@ -5100,6 +5237,15 @@ class App:
                 AuthorityHold.MANUAL_CONTROL_RETURN,
                 "malformed manual-control authority is blocking all input",
             )
+        if getattr(
+            self._supervisor,
+            "interactive_development_lease_error",
+            False,
+        ) is True:
+            return AuthorityHoldState(
+                AuthorityHold.EXTERNAL_DEVELOPMENT,
+                "malformed interactive-development authority is blocking all input",
+            )
         if self._supervisor.battle_workflow_error is True:
             return AuthorityHoldState(
                 AuthorityHold.OPERATOR_WORKFLOW,
@@ -5125,6 +5271,20 @@ class App:
             isinstance(manual, Mapping)
             and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
         ):
+            manual_id = str(manual.get("manual_control_id") or "")
+            return_claim = self._pending_return_reconciliation_claims().get(
+                manual_id
+            )
+            terminal_claim = self._manual_terminal_claims().get(manual_id)
+            if any(
+                isinstance(claim, Mapping)
+                and claim.get("semantic_completion_applied") is True
+                for claim in (return_claim, terminal_claim)
+            ):
+                # Reconciliation/terminal UI work is already complete.  A
+                # failed durable receipt remains retryable reporting only and
+                # cannot retain global device-input authority.
+                return None
             manual_status = str(manual.get("status") or "unknown")
             return AuthorityHoldState(
                 AuthorityHold.MANUAL_CONTROL_RETURN,
@@ -6569,10 +6729,8 @@ class App:
                             resolved_check_ids=all_checks,
                         )
 
-        completed = self._supervisor.transition_manual_control(
-            workflow_id,
-            "completed",
-            detail=(
+        completion_payload = {
+            "detail": (
                 f"Home Return released automation with a flagged problem: {degraded_reason}"
                 if degraded
                 else "verified Home UI discovery replaced unusable save evidence "
@@ -6581,15 +6739,15 @@ class App:
                 else "fresh Home save confirmed there is no active battle and "
                 "reconciled current configuration evidence"
             ),
-            refresh_status=(
+            "refresh_status": (
                 "home_reconciliation_complete_degraded"
                 if degraded
                 else "home_ui_fallback_reconciliation_complete"
                 if ui_backed
                 else "home_save_reconciliation_complete"
             ),
-            save_receipt=receipt,
-            configuration={
+            "save_receipt": receipt,
+            "configuration": {
                 **self._return_configuration_report(
                     receipt,
                     check_sets,
@@ -6597,17 +6755,12 @@ class App:
                 ),
                 **repair_failure,
             },
+        }
+        return self._stage_return_semantic_completion(
+            manual,
+            completion_payload,
+            completion_kind="home",
         )
-        complete = bool(
-            completed is not None and completed.get("status") == "completed"
-        )
-        if complete and getattr(
-            self,
-            "_manual_return_configuration_authorized_id",
-            None,
-        ) == workflow_id:
-            self._manual_return_configuration_authorized_id = None
-        return complete
 
     def _active_strategy_session_requirements(self) -> Dict[str, Any]:
         """Return only the active battle Strategy's current requirements.
@@ -6813,11 +6966,24 @@ class App:
                 return decision
 
         requirements = self._strategy_session_requirements(strategy)
+        profile_waivers = merge_profile_skip_waivers(requirements)
+        if profile_waivers:
+            # Applicability must compare the same effective Strategy contract
+            # used by ordinary runtime validation.  A profile-owned permanent
+            # skip is unmanaged configuration, not an attached-battle
+            # mismatch merely because a placeholder expectation exists in the
+            # raw source requirements.
+            for check_id in profile_waivers:
+                requirements.pop(str(check_id), None)
+            requirements["_gate_waivers"] = profile_waivers
         check_sets: Dict[str, tuple[str, ...]] = {
             "accepted": (),
             "mismatched": (),
             "ui_required": (),
         }
+        requested_check_ids = set(
+            requested_player_save_check_ids(requirements)
+        )
         if requirements and isinstance(
             acquisition,
             PlayerSaveAcquisitionBundle,
@@ -6835,13 +7001,21 @@ class App:
                         reconciliation,
                         observations=observations,
                     )
+                    check_sets = {
+                        category: tuple(
+                            check_id
+                            for check_id in check_ids
+                            if check_id in requested_check_ids
+                        )
+                        for category, check_ids in check_sets.items()
+                    }
                 else:
                     check_sets = {
                         "accepted": (),
                         "mismatched": (),
                         "ui_required": tuple(
                             sorted(
-                                requested_player_save_check_ids(requirements)
+                                requested_check_ids
                             )
                         ),
                     }
@@ -6856,7 +7030,7 @@ class App:
                 "accepted": (),
                 "mismatched": (),
                 "ui_required": tuple(
-                    sorted(requested_player_save_check_ids(requirements))
+                    sorted(requested_check_ids)
                 ),
             }
 
@@ -7740,13 +7914,18 @@ class App:
         outcome = str(receipt.get("pending_outcome") or "failed")
         reason = str(receipt.get("pending_reason") or "validation completed")
         if not returned_home:
-            outcome = "failed"
             reason += "; the owned battle ended, but verified NEW_BATTLE Home was not reached"
-            self._exclusive_validation_terminal_hold = request_id
-            self._supervisor.pause_for_catastrophic_failure(
-                RuntimeFailureKind.SOURCE_RESTORATION_LOST,
-                reason=reason,
-            )
+            # The source is still a known Game Over boundary and the cleanup
+            # lease remains exact.  Failure to tap Home is retryable—not loss
+            # of input authority.  Retain cleanup and try again on a later
+            # fresh frame without globally Pausing automation.
+            self._exclusive_validation_terminal_hold = None
+            if not self._supervisor.is_paused:
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                    reason,
+                )
+            return True
         else:
             self._exclusive_validation_terminal_hold = None
         result = self._supervisor.finish_exclusive_validation(
@@ -8521,6 +8700,7 @@ class App:
             refresh_required = bool(
                 directive_check != check_id
                 or str(directive.get("reason") or "").strip() != reason
+                or directive.get("blocking") is not False
                 or (
                     not checks
                     and not self._unscoped_session_gate_is_safe(directive)
@@ -9833,20 +10013,28 @@ class App:
                 self._blind_tapper_suspended = True
         self._update_action_authority()
         self._publish_action_authority()
-        if self._adb_connection_coordinator.ensure_connected():
-            time.sleep(2)
-
-        threading.Thread(
-            target=watchdog_process_check,
-            args=(
-                30,
-                self._adb_connection_coordinator,
-                self._get_watchdog_mutation_guard(),
+        mutation_guard_token = AUTOMATION.install_mutation_guard(
+            self._runtime_control_mutation_guard,
+            uncertain_result_handler=self._runtime_uncertain_mutation_result,
+            guard_failure_handler=self._runtime_mutation_guard_failure,
+            dispatch_control_lock_path=(
+                self._supervisor.dispatch_control_lock_path
             ),
-            daemon=True,
-        ).start()
-
+        )
         try:
+            if self._adb_connection_coordinator.ensure_connected():
+                time.sleep(2)
+
+            threading.Thread(
+                target=watchdog_process_check,
+                args=(
+                    30,
+                    self._adb_connection_coordinator,
+                    self._get_watchdog_mutation_guard(),
+                ),
+                daemon=True,
+            ).start()
+
             while True:
                 self._prune_generated_artifacts()
                 # Control synchronization must not depend on a working ADB
@@ -10742,6 +10930,12 @@ class App:
         except KeyboardInterrupt:
             log("KeyboardInterrupt — shutting down.", "INFO")
         finally:
+            # The daemon watchdog, tap queue, and collector workers can outlive
+            # this method briefly.  Latch mutation shutdown before any cleanup
+            # and retain the deny-all state after the callback is removed.
+            self._runtime_shutting_down = True
+            AUTOMATION.shutdown_mutations(mutation_guard_token)
+            stop_blind_gem_tapper()
             lease = getattr(
                 getattr(self, "_supervisor", None),
                 "interactive_development_lease",
@@ -10758,7 +10952,6 @@ class App:
                     abnormal=True,
                 )
             self._update_action_authority(shutting_down=True)
-            stop_blind_gem_tapper()
             self._publish_action_authority(runtime_active=False)
             scheduler = getattr(self, "_player_save_passive_scheduler", None)
             if scheduler is not None:
@@ -10772,6 +10965,7 @@ class App:
                     collector.close(wait=False)
                 except Exception:
                     pass
+            AUTOMATION.clear_mutation_guard(mutation_guard_token)
             log("Exited cleanly.", "INFO")
 
     def _capture_frame(self) -> Optional[Frame]:
@@ -11300,6 +11494,67 @@ class App:
         )
         refreshed = self._operator_workflow_authority_hold()
         return current + ((refreshed,) if refreshed is not None else ())
+
+    def _runtime_control_mutation_guard(self) -> bool:
+        """Refresh durable Pause/Stop intent at the final ADB boundary."""
+
+        if getattr(self, "_runtime_shutting_down", False):
+            return False
+        if self._supervisor.apply_control():
+            reporter = getattr(self, "_status_reporter", None)
+            if reporter is not None:
+                reporter.request_immediate_report()
+        malformed_authority = getattr(
+            self._supervisor,
+            "input_authority_error",
+            None,
+        )
+        if malformed_authority is not None:
+            if self._supervisor.control_state not in {"PAUSED", "STOPPED"}:
+                self._supervisor.pause_for_catastrophic_failure(
+                    RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                    reason=(
+                        f"malformed {malformed_authority} directive made "
+                        "device-input ownership unknowable"
+                    ),
+                )
+            return False
+        lease = self._supervisor.interactive_development_lease
+        development_requested = bool(
+            isinstance(lease, Mapping)
+            and lease.get("request_state") != "terminal"
+        )
+        return bool(
+            self._supervisor.control_state == "RUNNING"
+            and not development_requested
+            and not getattr(self, "_runtime_shutting_down", False)
+        )
+
+    def _runtime_uncertain_mutation_result(self, reason: str) -> None:
+        """Persist the catastrophic result of a timed-out ADB mutation."""
+
+        self._supervisor.pause_for_catastrophic_failure(
+            RuntimeFailureKind.INPUT_RESULT_UNCERTAIN,
+            reason=reason,
+        )
+        self._update_action_authority()
+        self._publish_action_authority()
+        reporter = getattr(self, "_status_reporter", None)
+        if reporter is not None:
+            reporter.request_immediate_report()
+
+    def _runtime_mutation_guard_failure(self, reason: str) -> None:
+        """Persist loss of the final durable-control authority check."""
+
+        self._supervisor.pause_for_catastrophic_failure(
+            RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+            reason=reason,
+        )
+        self._update_action_authority()
+        self._publish_action_authority()
+        reporter = getattr(self, "_status_reporter", None)
+        if reporter is not None:
+            reporter.request_immediate_report()
 
     def _runtime_action_guard(
         self,
@@ -13096,6 +13351,7 @@ class App:
                                 "receipt": copy.deepcopy(ui_receipt),
                                 "evidence": dict(current_manual_evidence),
                                 "ui_fallback": True,
+                                "semantic_completion_applied": True,
                                 "pending_completion": copy.deepcopy(
                                     completion_payload
                                 ),
@@ -13164,10 +13420,18 @@ class App:
                     retained_claim = self._manual_terminal_claims().get(manual_id)
                     if isinstance(retained_claim, Mapping):
                         retained_claim = dict(retained_claim)
-                        retained_claim["pending_completion"] = copy.deepcopy(
-                            completion_payload
-                        )
-                        self._manual_terminal_claims()[manual_id] = retained_claim
+                    else:
+                        retained_claim = {
+                            "receipt": copy.deepcopy(
+                                completion_payload["save_receipt"]
+                            ),
+                            "evidence": dict(current_manual_evidence),
+                        }
+                    retained_claim["semantic_completion_applied"] = True
+                    retained_claim["pending_completion"] = copy.deepcopy(
+                        completion_payload
+                    )
+                    self._manual_terminal_claims()[manual_id] = retained_claim
                     completed_manual = (
                         self._supervisor.transition_manual_control(
                             manual_id,

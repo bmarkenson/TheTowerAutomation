@@ -1250,8 +1250,10 @@ def test_status_serializes_fresh_runtime_owned_strategy_gate(tmp_path):
         authority.snapshot(now=now.timestamp()),
         now=now.timestamp(),
     )
+    service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
-        status = _service(tmp_path).status(now=now.timestamp())
+        status = service.status(now=now.timestamp())
     finally:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
         lock_handle.close()
@@ -1451,6 +1453,7 @@ def test_interactive_development_status_separates_request_and_fresh_ack(
         now=now.timestamp(),
     )
     service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
         requested = service.apply_interactive_development_lease(
             {
@@ -1594,6 +1597,7 @@ def test_interactive_development_heartbeat_rejects_stale_or_wrong_lease(
     )
     publisher.publish(authority.snapshot(), now=now.timestamp())
     service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
         response = service.apply_interactive_development_lease(
             {"operation": "request", "owner_label": "heartbeat test"},
@@ -1646,9 +1650,11 @@ def test_http_interactive_development_endpoint_returns_busy_and_id_errors(
         },
     )
     publisher.publish(authority.snapshot(), now=now.timestamp())
+    service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     server = ControlSurfaceHTTPServer(
         ("127.0.0.1", 0),
-        service=_service(tmp_path),
+        service=service,
         static_dir=STATIC_DIR,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -3182,6 +3188,7 @@ def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):
     )
     assert defaults["control"]["startup_gate_waivers"] == {}
 
+    service.control_store.set_state("RUNNING", source="test")
     with patch.object(
         service,
         "_runtime_evidence",

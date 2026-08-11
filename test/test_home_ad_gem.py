@@ -286,6 +286,7 @@ def test_blind_floating_gem_taps_retain_input_logging():
         1200,
         label="floating_gem_blind_tap",
         log_it=True,
+        action_guard_fn=None,
     )
     action_log.assert_called_once_with(
         "Scanning for floating gems",
@@ -330,6 +331,10 @@ def test_blind_floating_gem_rechecks_authority_before_every_tap():
 
     assert guard.call_count == 4  # start check plus one check per attempted tap
     assert tap.call_count == 2
+    assert all(
+        call.kwargs["action_guard_fn"] is guard
+        for call in tap.call_args_list
+    )
     assert not ad_gems.is_blind_gem_tapper_active()
     assert "result=interrupted taps=2" in result_log.call_args.kwargs["detail"]
     assert "authority_lost=True" in result_log.call_args.kwargs["detail"]

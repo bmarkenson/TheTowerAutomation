@@ -266,6 +266,7 @@ class ControlSurfaceService:
         self.process_manager = process_manager
         self.adb_connection_manager = adb_connection_manager
         self._process_action_lock = threading.Lock()
+        self._control_mutation_lock = threading.Lock()
         self._battle_mutation_lock = threading.RLock()
 
     def strategy_profiles(self) -> dict[str, Any]:
@@ -1585,7 +1586,7 @@ class ControlSurfaceService:
 
         if not isinstance(request, Mapping):
             raise ControlSurfaceRequestError("Request body must be a JSON object")
-        with self._process_action_lock:
+        with self._control_mutation_lock:
             return self._apply_control_locked(request)
 
     def _apply_control_locked(
@@ -1697,30 +1698,14 @@ class ControlSurfaceService:
                     "Requested Return Control reconciliation; automation remains Paused"
                 )
             elif action == "pause":
-                current = self.status()
-                availability = (
-                    current.get("control_model", {})
-                    .get("actions", {})
-                    .get("pause", {})
-                )
-                if availability.get("available") is not True:
+                runtime_live = bool(self._runtime_evidence().get("active"))
+                if not runtime_live and self.process_manager is not None:
+                    runtime_live = bool(self.process_manager.status().get("active"))
+                if not runtime_live:
                     raise ControlSurfaceRequestError(
-                        str(availability.get("reason") or "Pause is unavailable"),
+                        "Start Automation before pausing action authority",
                         status=409,
-                        code=str(availability.get("code") or "unavailable"),
-                    )
-                active_manual = current.get("control_model", {}).get(
-                    "manual_control"
-                )
-                if (
-                    isinstance(active_manual, Mapping)
-                    and active_manual.get("status")
-                    not in MANUAL_CONTROL_TERMINAL_STATUSES
-                ):
-                    raise ControlSurfaceRequestError(
-                        "Take/Return Control owns the indefinite Pause",
-                        status=409,
-                        code="manual_control_active",
+                        code="process_stopped",
                     )
                 minutes = request.get("minutes")
                 resume_at = None
@@ -1745,30 +1730,28 @@ class ControlSurfaceService:
                         )
                     resume_at = datetime.now().timestamp() + (parsed_minutes * 60)
                     description = f"for {parsed_minutes:g} minutes"
-                if (
-                    minutes is None
-                    and current["control"].get("state") == "PAUSED"
-                    and current["control"].get("resume_at") is None
-                ):
-                    state_ack = current.get("acknowledgements", {}).get("state")
-                    if (
-                        isinstance(state_ack, Mapping)
-                        and state_ack.get("acknowledges_current") is True
-                    ):
-                        disposition = "no_op"
-                        audit = "Automation is already indefinitely Paused"
-                    else:
-                        disposition = "pending"
-                        audit = "Automation Pause is awaiting runtime acknowledgement"
-                else:
-                    self.control_store.set_state(
-                        "PAUSED",
+                try:
+                    saved = self.control_store.set_paused_unless_stopped(
                         resume_at=resume_at,
                         source="control-surface",
                     )
+                except ControlDirectiveError as exc:
+                    raise ControlSurfaceRequestError(
+                        str(exc), status=409, code="control_invalid"
+                    ) from exc
+                if str(saved.get("state") or "").upper() == "STOPPED":
+                    disposition = "no_op"
+                    audit = "Automation is already STOPPED; Pause did not override Stop"
+                else:
                     audit = f"Requested PAUSED {description}"
             elif action == "enable":
                 current = self.status()
+                effective_authority = str(
+                    current.get("control_model", {})
+                    .get("action_authority", {})
+                    .get("effective")
+                    or "unknown"
+                ).lower()
                 availability = (
                     current.get("control_model", {})
                     .get("actions", {})
@@ -1792,6 +1775,14 @@ class ControlSurfaceService:
                         status=409,
                         code="manual_control_invalid",
                     )
+                state_ack = current.get("acknowledgements", {}).get("state")
+                durable_state = str(
+                    current.get("control", {}).get("state") or ""
+                ).upper()
+                runtime_requires_fresh_enable = bool(
+                    durable_state == "RUNNING"
+                    and effective_authority != "enabled"
+                )
                 manual = current.get("control_model", {}).get("manual_control")
                 if (
                     isinstance(manual, Mapping)
@@ -1801,6 +1792,7 @@ class ControlSurfaceService:
                     if manual.get("status") not in {
                         "return_requested",
                         "awaiting_enable",
+                        "reconciling",
                         "awaiting_configuration",
                         "awaiting_manual_correction",
                     }:
@@ -1816,6 +1808,7 @@ class ControlSurfaceService:
                         ).upper()
                         == "RUNNING"
                         and current.get("control", {}).get("resume_at") is None
+                        and not runtime_requires_fresh_enable
                     )
                     if enable_already_requested:
                         disposition = "pending"
@@ -1826,23 +1819,78 @@ class ControlSurfaceService:
                             "awaiting_configuration",
                             "awaiting_manual_correction",
                         }
-                        manual_control = (
-                            self.control_store.enable_after_return_control(
-                                str(manual.get("manual_control_id") or ""),
+                        if manual.get("status") == "reconciling":
+                            if durable_state == "RUNNING":
+                                if runtime_requires_fresh_enable:
+                                    self.control_store.set_state(
+                                        "RUNNING",
+                                        source="control-surface",
+                                    )
+                                    audit = (
+                                        "Requested a fresh Automation Enable "
+                                        "while Return Control reporting remains "
+                                        "pending"
+                                    )
+                                else:
+                                    disposition = "no_op"
+                                    audit = (
+                                        "Automation is already Enabled; Return "
+                                        "Control reporting remains pending"
+                                    )
+                            else:
+                                self.control_store.set_state(
+                                    "RUNNING",
+                                    source="control-surface",
+                                )
+                                audit = (
+                                    "Requested Automation Enabled while Return "
+                                    "Control reporting remains pending"
+                                )
+                            manual_control = dict(manual)
+                        elif (
+                            runtime_requires_fresh_enable
+                            and manual.get("status") == "awaiting_enable"
+                            and str(
+                                current.get("control", {}).get("state") or ""
+                            ).upper()
+                            == "RUNNING"
+                        ):
+                            self.control_store.set_state(
+                                "RUNNING",
                                 source="control-surface",
                             )
-                        )
-                        audit = (
-                            "Requested Automation Enabled for a new Return "
-                            "Control configuration refresh"
-                            if retrying_configuration
-                            else "Requested Automation Enabled; Return Control "
-                            "must refresh save evidence before ordinary input"
-                        )
+                            manual_control = dict(manual)
+                            audit = (
+                                "Requested a fresh Automation Enable after "
+                                "the runtime remained safely Paused during "
+                                "Return Control"
+                            )
+                        else:
+                            manual_control = (
+                                self.control_store.enable_after_return_control(
+                                    str(manual.get("manual_control_id") or ""),
+                                    source="control-surface",
+                                )
+                            )
+                            audit = (
+                                "Requested Automation Enabled for a new Return "
+                                "Control configuration refresh"
+                                if retrying_configuration
+                                else "Requested Automation Enabled; Return Control "
+                                "must refresh save evidence before ordinary input"
+                            )
                 else:
-                    state_ack = current.get("acknowledgements", {}).get("state")
                     if current["control"].get("state") == "RUNNING":
-                        if (
+                        if runtime_requires_fresh_enable:
+                            self.control_store.set_state(
+                                "RUNNING",
+                                source="control-surface",
+                            )
+                            audit = (
+                                "Requested a fresh Automation Enable after "
+                                "the runtime remained safely Paused"
+                            )
+                        elif (
                             isinstance(state_ack, Mapping)
                             and state_ack.get("acknowledges_current") is True
                         ):
@@ -1870,12 +1918,10 @@ class ControlSurfaceService:
                     disposition = "no_op"
                     audit = "Automation input is already STOPPED"
                 else:
-                    self.control_store.interrupt_operator_workflows(
+                    self.control_store.set_state_and_interrupt_operator_workflows(
+                        "STOPPED",
                         "legacy STOPPED authority directive requested",
                         source="control-surface",
-                    )
-                    self.control_store.set_state(
-                        "STOPPED", source="control-surface"
                     )
                     audit = (
                         "Requested legacy STOPPED authority directive; process "
@@ -2205,15 +2251,12 @@ class ControlSurfaceService:
                             apply_mode="next_boundary",
                             source="control-surface-process-start",
                         )
-                    self.control_store.interrupt_operator_workflows(
-                        "a new automation process boundary started",
-                        source="control-surface-process-start",
-                    )
-                    # Process lifecycle and input authority are separate.  A
-                    # new process starts Paused and waits for explicit intent.
-                    self.control_store.set_state(
-                        "PAUSED", source="control-surface-process-start"
-                    )
+                    with self._control_mutation_lock:
+                        self.control_store.set_state_and_interrupt_operator_workflows(
+                            "PAUSED",
+                            "a new automation process boundary started",
+                            source="control-surface-process-start",
+                        )
                     if self.adb_connection_manager is not None:
                         self.adb_connection_manager.ensure_target(
                             before.get("adb_target"),
@@ -2228,9 +2271,11 @@ class ControlSurfaceService:
                 after = manager.status()
                 if not after.get("active"):
                     try:
-                        self.control_store.set_state(
-                            "STOPPED", source="control-surface-start-failure"
-                        )
+                        with self._control_mutation_lock:
+                            self.control_store.set_state(
+                                "STOPPED",
+                                source="control-surface-start-failure",
+                            )
                     except ControlDirectiveError:
                         pass
                 self._append_audit(f"Failed to start service: {exc}")
@@ -2250,14 +2295,13 @@ class ControlSurfaceService:
                 else:
                     # Persist intent before systemd signals the process so any live
                     # loop that observes the transition stops dispatching actions.
-                    self.control_store.interrupt_operator_workflows(
-                        "automation process stopped",
-                        source="control-surface-process-stop",
-                    )
-                    self.control_store.set_state(
-                        "STOPPED", source="control-surface-process-stop"
-                    )
-                    stopped = manager.stop()
+                    with self._control_mutation_lock:
+                        self.control_store.set_state_and_interrupt_operator_workflows(
+                            "STOPPED",
+                            "automation process stopped",
+                            source="control-surface-process-stop",
+                        )
+                        stopped = manager.stop()
                     if self.adb_connection_manager is not None:
                         self.adb_connection_manager.ensure_target(
                             stopped.get("adb_target"),
@@ -3901,6 +3945,7 @@ class ControlSurfaceService:
         runtime_observation = None
         runtime_lifecycle: Mapping[str, Any] = {}
         runtime_strategy_scope: Mapping[str, Any] = {}
+        runtime_catastrophic_pause_hold: Mapping[str, Any] = {}
         runtime_startup_gate_policy: Optional[str] = None
         runtime_model = runtime_authority.get("control_model")
         if isinstance(runtime_model, Mapping):
@@ -3918,6 +3963,11 @@ class ControlSurfaceService:
             raw_strategy_scope = runtime_model.get("strategy_scope")
             if isinstance(raw_strategy_scope, Mapping):
                 runtime_strategy_scope = raw_strategy_scope
+            raw_catastrophic_hold = runtime_model.get(
+                "catastrophic_pause_hold"
+            )
+            if isinstance(raw_catastrophic_hold, Mapping):
+                runtime_catastrophic_pause_hold = raw_catastrophic_hold
         observation_age_seconds: Optional[int] = None
         if runtime_observation is not None:
             observed_at = _parse_timestamp(runtime_observation.get("observed_at"))
@@ -4103,6 +4153,7 @@ class ControlSurfaceService:
         take_manual_available = bool(
             not control_error
             and process_live
+            and state_request != "STOPPED"
             and evidence is not None
             and not manual_busy
             and not manual_error
@@ -4118,18 +4169,22 @@ class ControlSurfaceService:
                     "control_invalid"
                     if control_error
                     else (
-                        "manual_control_invalid"
-                        if manual_error
+                        "process_stopping"
+                        if state_request == "STOPPED"
                         else (
-                            "manual_control_active"
-                            if manual_busy
+                            "manual_control_invalid"
+                            if manual_error
                             else (
-                                "setup_capture_active"
-                                if setup_capture_input_busy
+                                "manual_control_active"
+                                if manual_busy
                                 else (
-                                    "fresh_observation_unavailable"
-                                    if process_live
-                                    else "process_stopped"
+                                    "setup_capture_active"
+                                    if setup_capture_input_busy
+                                    else (
+                                        "fresh_observation_unavailable"
+                                        if process_live
+                                        else "process_stopped"
+                                    )
                                 )
                             )
                         )
@@ -4143,15 +4198,19 @@ class ControlSurfaceService:
                     control_error
                     if control_error
                     else (
-                        manual_error
-                        if manual_error
+                        "Start Automation before requesting manual control"
+                        if state_request == "STOPPED"
                         else (
-                            "manual control is already in progress"
-                            if manual_busy
+                            manual_error
+                            if manual_error
                             else (
-                                "save-backed setup capture currently owns device input"
-                                if setup_capture_input_busy
-                                else "fresh live observation is required"
+                                "manual control is already in progress"
+                                if manual_busy
+                                else (
+                                    "save-backed setup capture currently owns device input"
+                                    if setup_capture_input_busy
+                                    else "fresh live observation is required"
+                                )
                             )
                         )
                     )
@@ -4366,6 +4425,7 @@ class ControlSurfaceService:
         enable_available = bool(
             not control_error
             and process_live
+            and state_request != "STOPPED"
             and not manual_error
             and not terminal_evidence_unavailable
             and (
@@ -4374,6 +4434,7 @@ class ControlSurfaceService:
                 in {
                     "return_requested",
                     "awaiting_enable",
+                    "reconciling",
                     "awaiting_configuration",
                     "awaiting_manual_correction",
                 }
@@ -4384,6 +4445,9 @@ class ControlSurfaceService:
             enable_reason = control_error
         elif not process_live:
             enable_code = "process_stopped"
+            enable_reason = "Start Automation before enabling actions"
+        elif state_request == "STOPPED":
+            enable_code = "process_stopping"
             enable_reason = "Start Automation before enabling actions"
         elif manual_error:
             enable_code = "manual_control_invalid"
@@ -4397,6 +4461,7 @@ class ControlSurfaceService:
         elif manual_busy and manual.get("status") not in {
             "return_requested",
             "awaiting_enable",
+            "reconciling",
             "awaiting_configuration",
             "awaiting_manual_correction",
         }:
@@ -4418,8 +4483,6 @@ class ControlSurfaceService:
         pause_available = bool(
             not control_error
             and process_live
-            and not manual_error
-            and not manual_busy
         )
         if control_error:
             pause_code = "control_invalid"
@@ -4427,15 +4490,12 @@ class ControlSurfaceService:
         elif not process_live:
             pause_code = "process_stopped"
             pause_reason = "Start Automation before pausing action authority"
-        elif manual_error:
-            pause_code = "manual_control_invalid"
-            pause_reason = manual_error
-        elif manual_busy:
-            pause_code = "manual_control_active"
-            pause_reason = "Take/Return Control already owns action authority"
         else:
             pause_code = "available"
-            pause_reason = "request zero automated device input"
+            pause_reason = (
+                "request zero automated device input; Pause remains available "
+                "during every workflow"
+            )
 
         manage_active_battle_available = bool(
             not control_error
@@ -4644,6 +4704,13 @@ class ControlSurfaceService:
                 "acknowledged": state_ack_current,
                 "effective": effective_authority,
                 "observation_continues_while_paused": True,
+                "catastrophic_hold": bool(
+                    runtime_catastrophic_pause_hold.get("active") is True
+                ),
+                "catastrophic_hold_reason": (
+                    str(runtime_catastrophic_pause_hold.get("reason") or "")
+                    or None
+                ),
                 "meaning": (
                     "Paused means zero automated device input; observation may continue. "
                     "Enabled permits guarded actions and does not assert that the game is RUNNING."

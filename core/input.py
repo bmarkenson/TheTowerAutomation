@@ -76,15 +76,54 @@ def _compute_offset(entry: Dict[str, Any]) -> Optional[Tuple[int, int]]:
     return None
 
 
-def _dispatch_tap(x: int, y: int, *, label: Optional[str], dispatch: DispatchMode) -> None:
+def _dispatch_tap(
+    x: int,
+    y: int,
+    *,
+    label: Optional[str],
+    dispatch: DispatchMode,
+    action_guard_fn: ActionGuard = None,
+) -> bool:
     if dispatch == "queue":
-        enqueue_tap(x, y, label=label, log_it=False)
-    else:
-        input_tap(x, y, check=False)
+        if action_guard_fn is None:
+            enqueue_tap(x, y, label=label, log_it=False)
+        else:
+            enqueue_tap(
+                x,
+                y,
+                label=label,
+                log_it=False,
+                action_guard_fn=action_guard_fn,
+            )
+        return True
+    if action_guard_fn is None:
+        return input_tap(x, y, check=False) is not None
+    return input_tap(
+        x, y, check=False, action_guard_fn=action_guard_fn
+    ) is not None
 
 
-def _dispatch_swipe(x1: int, y1: int, x2: int, y2: int, duration_ms: int) -> None:
-    input_swipe(x1, y1, x2, y2, duration_ms, check=False)
+def _dispatch_swipe(
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    duration_ms: int,
+    action_guard_fn: ActionGuard = None,
+) -> bool:
+    if action_guard_fn is None:
+        return input_swipe(
+            x1, y1, x2, y2, duration_ms, check=False
+        ) is not None
+    return input_swipe(
+        x1,
+        y1,
+        x2,
+        y2,
+        duration_ms,
+        check=False,
+        action_guard_fn=action_guard_fn,
+    ) is not None
 
 
 def _operator_label(label: str) -> str:
@@ -187,8 +226,19 @@ def safe_tap(
                         f"attempt={attempt+1}/{attempts}"
                     ),
                 )
-                _dispatch_tap(tap_x, tap_y, label=str(label), dispatch=dispatch)
-                return True
+                dispatch_kwargs = (
+                    {"action_guard_fn": action_guard_fn}
+                    if action_guard_fn is not None
+                    else {}
+                )
+                dispatched = _dispatch_tap(
+                    tap_x,
+                    tap_y,
+                    label=str(label),
+                    dispatch=dispatch,
+                    **dispatch_kwargs,
+                )
+                return dispatched is not False
             except Exception as exc:
                 last_err = exc
                 if attempt < attempts - 1:
@@ -256,8 +306,19 @@ def safe_tap(
             f"at ({tap_x},{tap_y}) verified={verification.description}"
         ),
     )
-    _dispatch_tap(tap_x, tap_y, label=str(label), dispatch=dispatch)
-    return True
+    dispatch_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
+    dispatched = _dispatch_tap(
+        tap_x,
+        tap_y,
+        label=str(label),
+        dispatch=dispatch,
+        **dispatch_kwargs,
+    )
+    return dispatched is not False
 
 
 def tap_if_visible(
@@ -289,6 +350,7 @@ def safe_long_press(
     retry_delay: float = 0.5,
     screenshot=None,
     log_label: Optional[str] = None,
+    action_guard_fn: ActionGuard = None,
 ) -> bool:
     """Long-press a freshly template-matched target.
 
@@ -329,6 +391,11 @@ def safe_long_press(
             offset = _compute_offset(entry)
             press_x = x + (offset[0] if offset else width // 2)
             press_y = y + (offset[1] if offset else height // 2)
+            if not _input_authority_available(
+                action_guard_fn,
+                label=str(label),
+            ):
+                return False
             log_input(
                 f"Long press requested: {_operator_label(str(label))}",
                 detail=(
@@ -337,14 +404,20 @@ def safe_long_press(
                     f"attempt={attempt+1}/{attempts}"
                 ),
             )
-            _dispatch_swipe(
+            dispatch_kwargs = (
+                {"action_guard_fn": action_guard_fn}
+                if action_guard_fn is not None
+                else {}
+            )
+            dispatched = _dispatch_swipe(
                 press_x,
                 press_y,
                 press_x,
                 press_y,
                 duration,
+                **dispatch_kwargs,
             )
-            return True
+            return dispatched is not False
         except Exception as exc:
             last_err = exc
             if attempt < attempts - 1:
@@ -368,11 +441,16 @@ def tap_unchecked_for_tooling(name: str, *, reason: str) -> bool:
         f"Unchecked tooling tap requested: {_operator_label(name)}",
         detail=f"TAP_TOOLING: {name} at {coords} reason={reason}",
     )
-    _dispatch_tap(coords[0], coords[1], label=name, dispatch="now")
-    return True
+    dispatched = _dispatch_tap(
+        coords[0],
+        coords[1],
+        label=name,
+        dispatch="now",
+    )
+    return dispatched is not False
 
 
-def swipe_now(name: str) -> bool:
+def swipe_now(name: str, *, action_guard_fn: ActionGuard = None) -> bool:
     swipe = get_swipe(name)
     if not swipe:
         log(f"[INPUT] swipe_now: missing swipe data for '{name}'", "ERROR")
@@ -388,8 +466,22 @@ def swipe_now(name: str) -> bool:
         f"Swipe requested: {_operator_label(name)}",
         detail=f"SWIPE_NOW: {name} ({x1},{y1})→({x2},{y2}) in {duration}ms",
     )
-    _dispatch_swipe(x1, y1, x2, y2, duration)
-    return True
+    if not _input_authority_available(action_guard_fn, label=name):
+        return False
+    dispatch_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
+    dispatched = _dispatch_swipe(
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        **dispatch_kwargs,
+    )
+    return dispatched is not False
 
 
 __all__ = [

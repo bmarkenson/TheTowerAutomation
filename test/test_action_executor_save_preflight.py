@@ -299,7 +299,7 @@ def test_malformed_preflight_completes_degraded_instead_of_stranding_attach():
     assert variables["gc_session_preflight_disposition"] == "continue_degraded"
 
 
-def test_attachment_reported_and_deferred_checks_remain_degraded():
+def test_attachment_retains_mismatches_and_unverified_deferrals():
     ctx = MissionContext(
         data={
             "startup_gates_deferred": True,
@@ -353,6 +353,105 @@ def test_attachment_reported_and_deferred_checks_remain_degraded():
         "gaps; Automation continues degraded and repair is deferred to Home",
         "WARN",
     )
+
+
+def test_attachment_home_only_deferral_is_not_a_configuration_mismatch():
+    ctx = MissionContext(
+        data={
+            "startup_gates_deferred": True,
+            "mission_vars": {"last_detection_state": "RUNNING"},
+        }
+    )
+    evidence = SimpleNamespace(
+        as_dict=lambda: {
+            "valid": True,
+            "reported_attachment_mismatches": {},
+            "deferred_checks": ["free_upgrade_locks"],
+        }
+    )
+    result = GcLivePreflightResult(
+        GcPreflightNavigationStatus.COMPLETE,
+        "active requirements verified; boundary checks deferred",
+        evidence,
+    )
+
+    with (
+        patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            return_value=result,
+        ),
+        patch("core.action_executor.log_mission") as mission_log,
+    ):
+        execute_actions(
+            object(),
+            [
+                {
+                    "type": "gc_session_preflight",
+                    "requirements": {"free_upgrade_locks": ["Shockwave Size"]},
+                    "_strategy": True,
+                }
+            ],
+            ctx,
+        )
+
+    variables = ctx.data["mission_vars"]
+    assert variables["gc_session_preflight_completed"] is True
+    assert variables["gc_session_preflight_degraded"] is True
+    assert variables["gc_session_preflight_disposition"] == "continue_degraded"
+    assert variables["gc_session_preflight_failed_checks"] == [
+        "free_upgrade_locks"
+    ]
+    assert any(
+        "could not verify Home-only checks" in call.args[0]
+        for call in mission_log.call_args_list
+    )
+
+
+def test_manual_return_keeps_deferred_checks_unresolved_and_degraded():
+    ctx = MissionContext(
+        data={
+            "manual_return_reconciliation_active": True,
+            "mission_vars": {"last_detection_state": "RUNNING"},
+        }
+    )
+    evidence = SimpleNamespace(
+        as_dict=lambda: {
+            "valid": True,
+            "reported_attachment_mismatches": {},
+            "deferred_checks": ["free_upgrade_locks"],
+        }
+    )
+    result = GcLivePreflightResult(
+        GcPreflightNavigationStatus.COMPLETE,
+        "active requirements checked; Home-only evidence deferred",
+        evidence,
+    )
+
+    with patch(
+        "core.action_executor.run_read_only_gc_preflight",
+        return_value=result,
+    ):
+        execute_actions(
+            object(),
+            [
+                {
+                    "type": "gc_session_preflight",
+                    "requirements": {
+                        "free_upgrade_locks": ["Shockwave Size"]
+                    },
+                    "_strategy": True,
+                }
+            ],
+            ctx,
+        )
+
+    variables = ctx.data["mission_vars"]
+    assert variables["gc_session_preflight_completed"] is True
+    assert variables["gc_session_preflight_degraded"] is True
+    assert variables["gc_session_preflight_disposition"] == "continue_degraded"
+    assert variables["gc_session_preflight_failed_checks"] == [
+        "free_upgrade_locks"
+    ]
 
 
 def test_attached_battle_controls_are_observed_without_repair_and_complete_degraded():

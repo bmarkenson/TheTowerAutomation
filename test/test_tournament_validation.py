@@ -51,6 +51,7 @@ def _app_for_pending_validation(tmp_path, *, home_preflight_complete=True):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
     store.set_strategy("tournament", source="test")
+    store.set_state("RUNNING", source="test")
     supervisor = AutomationSupervisor(control_file=str(control_file))
     strategy = get_strategy("tournament")
     assert strategy is not None
@@ -110,6 +111,7 @@ def _app_for_ready_launch(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
     ready, definition = _ready_validation(store)
+    store.set_state("RUNNING", source="test")
     supervisor = AutomationSupervisor(control_file=str(control_file))
     strategy = get_strategy("tournament")
     assert strategy is not None
@@ -801,7 +803,7 @@ def test_exclusive_validation_observes_modules_without_a_waiver(tmp_path):
     assert store.status()["startup_gate_waivers"] == {}
 
 
-def test_failed_validation_home_restore_uses_catastrophic_pause_policy():
+def test_failed_validation_home_navigation_retries_without_pausing():
     receipt = {
         "request_id": "validation-1",
         "status": "cleanup",
@@ -816,29 +818,27 @@ def test_failed_validation_home_restore_uses_catastrophic_pause_policy():
     app = App.__new__(App)
     app._exclusive_validation_terminal_hold = None
     app._supervisor = Mock()
+    app._supervisor.is_paused = False
     app._supervisor.owns_exclusive_validation.return_value = True
     app._supervisor.finish_exclusive_validation.return_value = result
     app._reconcile_exclusive_validation = Mock(return_value=receipt)
     app._announce_exclusive_validation_result = Mock()
-
-    with patch("core.app.return_home_from_game_over", return_value=False):
-        assert app._handle_exclusive_validation_game_over() is True
+    app._flag_recoverable_runtime_failure = Mock()
 
     reason = (
         "validation checks completed; the owned battle ended, but verified "
         "NEW_BATTLE Home was not reached"
     )
-    app._supervisor.pause_for_catastrophic_failure.assert_called_once_with(
-        RuntimeFailureKind.SOURCE_RESTORATION_LOST,
-        reason=reason,
+    with patch("core.app.return_home_from_game_over", return_value=False):
+        assert app._handle_exclusive_validation_game_over() is True
+
+    app._flag_recoverable_runtime_failure.assert_called_once_with(
+        RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+        reason,
     )
-    assert app._exclusive_validation_terminal_hold == "validation-1"
-    app._supervisor.finish_exclusive_validation.assert_called_once_with(
-        "validation-1",
-        outcome="failed",
-        reason=reason,
-        allowed_statuses=("cleanup",),
-    )
+    app._supervisor.pause_for_catastrophic_failure.assert_not_called()
+    assert app._exclusive_validation_terminal_hold is None
+    app._supervisor.finish_exclusive_validation.assert_not_called()
 
 
 def test_claimed_validation_timeout_fails_without_surrender(tmp_path):

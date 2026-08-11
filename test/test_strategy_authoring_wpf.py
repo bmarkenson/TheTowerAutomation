@@ -10,6 +10,32 @@ def _text(name: str) -> str:
     return (WPF / name).read_text(encoding="utf-8")
 
 
+def test_wpf_nonblocking_preflight_advisories_do_not_auto_open():
+    code = _text("MainWindow.xaml.cs")
+    presentation = _text("GateDecisionPresentation.cs")
+
+    assert "if (pendingGate is { Blocking: true }" in code
+    assert '"Review preflight advisory"' in code
+    assert '"A nonblocking preflight advisory is available"' in presentation
+    assert '"No decision is required;' in presentation
+
+
+def test_wpf_control_posts_are_ordered_against_status_refreshes():
+    code = _text("MainWindow.xaml.cs")
+    control_handler = code.split(
+        "private async void Control_Click", 1
+    )[1].split("private async void Mode_Click", 1)[0]
+
+    assert "_controlMutationGate = new(1, 1)" in code
+    cancel = control_handler.index("_refreshCancellation?.Cancel();")
+    post = control_handler.index("PostControlAsync")
+    render_gate = control_handler.index("await _refreshGate.WaitAsync();")
+    assert cancel < post < render_gate
+    assert "await _controlMutationGate.WaitAsync();" in control_handler
+    assert "_controlMutationGate.Release();" in control_handler
+    assert "await RefreshStatusAsync(force: true);" in control_handler
+
+
 def test_wpf_authoring_shell_groups_catalogs_and_registry_sections():
     xaml = _text("StrategyProfilesWindow.xaml")
     code = _text("StrategyProfilesWindow.xaml.cs")
