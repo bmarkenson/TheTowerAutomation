@@ -345,6 +345,77 @@ class StartupLoggingTests(unittest.TestCase):
 
 
 class RunBoundaryTests(unittest.TestCase):
+    def test_degraded_battle_rearms_profile_setup_for_terminal_home_repair(self):
+        manager = MissionManager(None, get_strategy("farm_t19"))
+        manager.start()
+        mv = manager.ctx.data["mission_vars"]
+        mv["gc_no_battle_setup_completed"] = True
+        mv["gc_session_preflight_attempted"] = True
+        mv["gc_session_preflight_completed"] = True
+        mv["gc_session_preflight_degraded"] = True
+        mv["gc_session_preflight_last_reason"] = "modules do not match"
+        mv["gc_session_preflight_failed_checks"] = ["modules"]
+        manager.mark_running_configuration_degraded(
+            source="return_control",
+            reason="Return Control found: workshop_preset",
+            failed_checks=("workshop_preset",),
+        )
+
+        degradation = manager.running_configuration_degradation()
+
+        self.assertEqual(
+            degradation,
+            {
+                "schema_version": 1,
+                "sources": ["return_control", "session_preflight"],
+                "reason": (
+                    "Return Control found: workshop_preset; "
+                    "modules do not match"
+                ),
+                "failed_checks": ["modules", "workshop_preset"],
+            },
+        )
+        self.assertTrue(manager.prepare_degraded_home_repair(degradation))
+        self.assertFalse(mv["gc_no_battle_setup_completed"])
+        self.assertTrue(manager.no_battle_setup_requirements())
+        self.assertFalse(mv["gc_session_preflight_completed"])
+        self.assertIn("gc_degraded_home_repair", mv)
+
+        manager.mark_no_battle_setup_complete({"modules": {"valid": True}})
+
+        self.assertIsNone(manager.running_configuration_degradation())
+        self.assertNotIn("gc_degraded_home_repair", mv)
+        self.assertTrue(mv["gc_no_battle_setup_completed"])
+        self.assertFalse(mv["gc_session_preflight_completed"])
+
+    def test_exhausted_terminal_home_repair_keeps_next_battle_degraded(self):
+        manager = MissionManager(None, get_strategy("farm_t19"))
+        manager.start()
+        degradation = {
+            "schema_version": 1,
+            "sources": ["session_preflight"],
+            "reason": "modules do not match",
+            "failed_checks": ["modules"],
+        }
+
+        self.assertTrue(manager.prepare_degraded_home_repair(degradation))
+        manager.mark_no_battle_setup_degraded(
+            {},
+            failed_check="modules",
+            reason="bounded Home repair exhausted",
+        )
+
+        self.assertEqual(
+            manager.running_configuration_degradation(),
+            {
+                "schema_version": 1,
+                "sources": ["home_setup"],
+                "reason": "bounded Home repair exhausted",
+                "failed_checks": ["modules"],
+            },
+        )
+        self.assertNotIn("gc_degraded_home_repair", manager.ctx.data["mission_vars"])
+
     def test_strategy_replacement_clears_old_owned_state_and_starts_new_strategy(self):
         old_strategy = _BoundaryStrategy("farm_t18", "old_owned")
         new_strategy = _BoundaryStrategy("tournament", "new_owned")
@@ -2987,6 +3058,17 @@ class GcFarmProfileTests(unittest.TestCase):
             self.assertTrue(mv["gc_session_preflight_degraded"])
             self.assertFalse(mv["gc_session_preflight_repair_required"])
             self.assertTrue(mv["gc_no_battle_setup_completed"])
+            mv["gc_no_battle_setup_degraded"] = True
+            mv["gc_no_battle_setup_failure"] = {
+                "failed_check": "perk_configuration",
+                "reason": "prior Home repair exhausted",
+            }
+            mv["gc_degraded_home_repair"] = {
+                "status": "pending_home_repair"
+            }
+            mv["gc_running_configuration_degradation"] = {
+                "source": "return_control"
+            }
             execute_actions(object(), [{**action, "_strategy": True}], ctx)
 
         self.assertTrue(mv["gc_session_preflight_completed"])
@@ -2997,6 +3079,10 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertEqual(mv["gc_session_preflight_repair_attempts"], 0)
         self.assertEqual(mv["gc_session_preflight_repair_failure_key"], "")
         self.assertTrue(mv["gc_no_battle_setup_completed"])
+        self.assertFalse(mv["gc_no_battle_setup_degraded"])
+        self.assertEqual(mv["gc_no_battle_setup_failure"], {})
+        self.assertNotIn("gc_degraded_home_repair", mv)
+        self.assertNotIn("gc_running_configuration_degradation", mv)
 
     def test_mismatches_do_not_accumulate_automatic_repair_attempts(self):
         strategy = get_strategy("farm_t19")

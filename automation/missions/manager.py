@@ -689,6 +689,8 @@ class MissionManager:
         self._clear_restored_session_preflight_report()
         old_vars = getattr(self.strategy, "vars", {}) if self.strategy else {}
         mission_vars = self.ctx.data.setdefault("mission_vars", {})
+        mission_vars.pop("gc_running_configuration_degradation", None)
+        mission_vars.pop("gc_degraded_home_repair", None)
         if isinstance(old_vars, Mapping):
             for key in old_vars:
                 mission_vars.pop(str(key), None)
@@ -801,6 +803,114 @@ class MissionManager:
             and mv.get("gc_session_preflight_degraded")
         )
 
+    def mark_running_configuration_degraded(
+        self,
+        *,
+        source: str,
+        reason: str,
+        failed_checks: Iterable[str] = (),
+    ) -> None:
+        """Retain a repairable current-battle configuration degradation."""
+
+        checks = sorted(
+            {
+                str(check).strip()
+                for check in failed_checks
+                if str(check).strip()
+            }
+        )
+        self.ctx.data.setdefault("mission_vars", {})[
+            "gc_running_configuration_degradation"
+        ] = {
+            "schema_version": 1,
+            "source": str(source or "runtime_validation").strip(),
+            "reason": str(reason or "configuration validation degraded").strip(),
+            "failed_checks": checks,
+        }
+
+    def running_configuration_degradation(self) -> Optional[dict[str, object]]:
+        """Return the current battle's Home-repairable degraded evidence."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        sources: list[str] = []
+        reasons: list[str] = []
+        failed_checks: set[str] = set()
+
+        explicit = mv.get("gc_running_configuration_degradation")
+        if isinstance(explicit, Mapping):
+            sources.append(str(explicit.get("source") or "runtime_validation"))
+            reasons.append(
+                str(explicit.get("reason") or "configuration validation degraded")
+            )
+            raw_checks = explicit.get("failed_checks")
+            if isinstance(raw_checks, (list, tuple, set)):
+                failed_checks.update(
+                    str(check).strip()
+                    for check in raw_checks
+                    if str(check).strip()
+                )
+
+        if self.session_preflight_degraded():
+            sources.append("session_preflight")
+            reasons.append(
+                str(
+                    mv.get("gc_session_preflight_last_reason")
+                    or "session configuration validation degraded"
+                )
+            )
+            failed_checks.update(self.session_preflight_failure_checks())
+
+        if mv.get("gc_no_battle_setup_degraded") is True:
+            sources.append("home_setup")
+            failure = mv.get("gc_no_battle_setup_failure")
+            if isinstance(failure, Mapping):
+                failed_check = str(failure.get("failed_check") or "").strip()
+                if failed_check:
+                    failed_checks.add(failed_check)
+                reasons.append(
+                    str(failure.get("reason") or "Home configuration repair degraded")
+                )
+            else:
+                reasons.append("Home configuration repair degraded")
+
+        if not sources:
+            return None
+        return {
+            "schema_version": 1,
+            "sources": sorted(set(sources)),
+            "reason": "; ".join(dict.fromkeys(reasons)),
+            "failed_checks": sorted(failed_checks),
+        }
+
+    def prepare_degraded_home_repair(
+        self,
+        degradation: Mapping[str, object],
+    ) -> bool:
+        """Re-arm ordinary Home setup for one terminal degraded continuation."""
+
+        if not isinstance(degradation, Mapping) or self.strategy is None:
+            return False
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_degraded_home_repair"] = {
+            "schema_version": 1,
+            "status": "pending_home_repair",
+            "degradation": copy.deepcopy(dict(degradation)),
+        }
+        mv["gc_no_battle_setup_completed"] = False
+        mv["gc_no_battle_setup_degraded"] = False
+        mv["gc_no_battle_setup_failure"] = {}
+        mv["gc_no_battle_setup_evidence"] = {}
+        mv["gc_session_preflight_attempted"] = False
+        mv["gc_session_preflight_completed"] = False
+        mv["gc_session_preflight_degraded"] = False
+        mv["gc_session_preflight_disposition"] = ""
+        mv["gc_session_preflight_blocked"] = False
+        mv["gc_session_preflight_failed_checks"] = []
+        mv["gc_session_preflight_waivers"] = {}
+        mv.pop("gc_running_configuration_degradation", None)
+        self._reset_session_preflight_repair_attempts()
+        return True
+
     def attached_validation_requested(self) -> bool:
         """Return whether this process adopted and is validating a live battle."""
 
@@ -901,6 +1011,7 @@ class MissionManager:
         mv["gc_session_preflight_repair_in_progress"] = False
         mv["gc_session_preflight_restart_available"] = False
         mv.pop("gc_session_preflight_repair_authority", None)
+        mv.pop("gc_running_configuration_degradation", None)
         mv["gc_session_preflight_failed_checks"] = []
         self._reset_session_preflight_repair_attempts()
 
@@ -992,6 +1103,7 @@ class MissionManager:
         repairing = bool(
             mv.get("gc_session_preflight_repair_required")
             or mv.get("gc_session_preflight_repair_in_progress")
+            or isinstance(mv.get("gc_degraded_home_repair"), Mapping)
         )
         mv["gc_no_battle_setup_completed"] = True
         mv["gc_no_battle_setup_degraded"] = False
@@ -1029,6 +1141,8 @@ class MissionManager:
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
         mv["gc_session_preflight_restart_available"] = False
+        mv.pop("gc_running_configuration_degradation", None)
+        mv.pop("gc_degraded_home_repair", None)
         if repairing:
             # The next battle must establish fresh session evidence for the
             # corrected no-battle settings.

@@ -1757,6 +1757,7 @@ class App:
         expected_game_state = {
             "no_strategy_post_run": "game_over",
             "session_preflight_repair": "game_over",
+            "degraded_battle_repair": "game_over",
             "tournament_results": "tournament_results",
         }.get(str(source))
         if expected_game_state is None:
@@ -3847,6 +3848,11 @@ class App:
                 RuntimeFailureKind.CONFIGURATION_MISMATCH,
                 "Return Control found: " + ", ".join(mismatched),
             )
+            self._mission_mgr.mark_running_configuration_degraded(
+                source="return_control",
+                reason="Return Control found: " + ", ".join(mismatched),
+                failed_checks=mismatched,
+            )
             return self._complete_running_return_claim(
                 transitioned,
                 current,
@@ -3865,6 +3871,15 @@ class App:
                 RuntimeFailureKind.VALIDATION_UNAVAILABLE,
                 "the active Strategy did not expose a running Return check",
             )
+            if unresolved:
+                self._mission_mgr.mark_running_configuration_degraded(
+                    source="return_control",
+                    reason=(
+                        "Return Control could not validate: "
+                        + ", ".join(unresolved)
+                    ),
+                    failed_checks=unresolved,
+                )
             return self._complete_running_return_claim(
                 transitioned,
                 current,
@@ -11313,6 +11328,38 @@ class App:
                 ):
                     self._pending_game_over_route = None
                     pending_terminal_route = None
+            degradation_snapshot = None
+            if isinstance(pending_terminal_route, Mapping):
+                raw_degradation = pending_terminal_route.get(
+                    "degraded_home_repair"
+                )
+                if isinstance(raw_degradation, Mapping):
+                    degradation_snapshot = dict(raw_degradation)
+            elif (
+                not no_strategy_run
+                and AUTOMATION.mode is ExecMode.NEXT_BATTLE
+            ):
+                degradation_fn = getattr(
+                    self._mission_mgr,
+                    "running_configuration_degradation",
+                    None,
+                )
+                candidate = (
+                    degradation_fn() if callable(degradation_fn) else None
+                )
+                if isinstance(candidate, Mapping):
+                    degradation_snapshot = dict(candidate)
+                    log(
+                        "[RUNTIME_POLICY] Continue automatically will return "
+                        "Home before the next battle to repair degraded "
+                        "configuration",
+                        "INFO",
+                        console=True,
+                    )
+            degraded_home_repair = isinstance(
+                degradation_snapshot,
+                Mapping,
+            )
             if isinstance(pending_terminal_route, Mapping):
                 raw_terminal_continuation = pending_terminal_route.get(
                     "terminal_home_continuation"
@@ -11333,6 +11380,13 @@ class App:
                         evidence=current_manual_evidence,
                     )
                 )
+            elif degraded_home_repair:
+                terminal_continuation_claim = (
+                    self._build_terminal_home_continuation_claim(
+                        source="degraded_battle_repair",
+                        evidence=current_manual_evidence,
+                    )
+                )
             else:
                 terminal_continuation_claim = None
             boundary_finalized = bool(
@@ -11348,6 +11402,18 @@ class App:
                 self._status_reporter.reset_coin_rate_samples()
                 self._strategy_boundary_confirmed = True
                 self._apply_pending_strategy()
+                if (
+                    degraded_home_repair
+                    and self._mission_mgr.strategy is not None
+                ):
+                    prepared = self._mission_mgr.prepare_degraded_home_repair(
+                        degradation_snapshot
+                    )
+                    if not prepared:
+                        self._flag_recoverable_runtime_failure(
+                            RuntimeFailureKind.REPORTING_FAILURE,
+                            "degraded Home repair state could not be prepared",
+                        )
                 boundary_finalized = True
 
             def sync_terminal_control() -> None:
@@ -11550,6 +11616,9 @@ class App:
                             "terminal_home_continuation": (
                                 copy.deepcopy(terminal_continuation_claim)
                             ),
+                            "degraded_home_repair": copy.deepcopy(
+                                degradation_snapshot
+                            ),
                             "retry_at": 0.0,
                         }
                         log(
@@ -11633,7 +11702,11 @@ class App:
                         None,
                     ),
                 ),
-                return_home_after_battle=(repair_in_progress or no_strategy_run),
+                return_home_after_battle=(
+                    repair_in_progress
+                    or no_strategy_run
+                    or degraded_home_repair
+                ),
                 battle_context=terminal_battle_context,
                 report_disposition=manual_full_disposition,
                 captured_at=(
@@ -11709,6 +11782,7 @@ class App:
                         "home"
                         if repair_in_progress
                         or no_strategy_run
+                        or degraded_home_repair
                         or AUTOMATION.mode is ExecMode.HOME
                         else "retry"
                     ),
@@ -11719,6 +11793,9 @@ class App:
                     "terminal_home_continuation": (
                         copy.deepcopy(terminal_continuation_claim)
                     ),
+                    "degraded_home_repair": copy.deepcopy(
+                        degradation_snapshot
+                    ),
                     "retry_at": 0.0,
                 }
                 return
@@ -11727,6 +11804,14 @@ class App:
                 self._commit_terminal_home_continuation(
                     terminal_continuation_claim
                 )
+                if degraded_home_repair:
+                    log(
+                        "[RUNTIME_POLICY] Degraded battle returned Home; "
+                        "normal profile setup will repair before automatic "
+                        "continuation",
+                        "INFO",
+                        console=True,
+                    )
             if repair_terminal_failure_reason is not None:
                 self._mission_mgr.fail_session_preflight_repair(
                     repair_terminal_failure_reason

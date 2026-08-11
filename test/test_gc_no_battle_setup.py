@@ -1954,6 +1954,64 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     manager.on_home.assert_called_once_with()
 
 
+def test_degraded_terminal_continuation_repairs_before_next_battle_launch():
+    frame = object()
+    manager = Mock()
+    manager.strategy = None
+    manager.awaiting_initial_battle_intent.return_value = False
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    app = App.__new__(App)
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = Mock()
+    app._supervisor.battle_workflow = None
+    app._supervisor.manual_control = None
+    app._terminal_home_continuation = {
+        "source": "degraded_battle_repair"
+    }
+    app._terminal_home_continuation_ready = Mock(return_value=True)
+    app._consume_terminal_home_continuation = Mock(return_value=True)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._report_home_policy = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "repaired",
+        {"modules": {"valid": True}},
+    )
+    events = []
+
+    def run_setup(*_args, **_kwargs):
+        events.append("repair")
+        return setup
+
+    def launch(**_kwargs):
+        events.append("launch")
+        return True
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup", side_effect=run_setup),
+        patch("core.app.handle_home_screen", side_effect=launch) as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    assert events == ["repair", "launch"]
+    manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
+    assert handle_home.call_args.kwargs["restart_enabled"] is True
+    assert handle_home.call_args.kwargs["require_new_battle"] is True
+    app._consume_terminal_home_continuation.assert_called_once_with()
+
+
 def test_home_setup_does_not_transfer_launch_to_a_replacement_start_request():
     frame = object()
     manager = Mock()

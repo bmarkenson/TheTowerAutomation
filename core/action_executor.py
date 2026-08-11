@@ -787,6 +787,10 @@ def execute_actions(
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
+                        mv["gc_no_battle_setup_degraded"] = False
+                        mv["gc_no_battle_setup_failure"] = {}
+                        mv.pop("gc_running_configuration_degradation", None)
+                        mv.pop("gc_degraded_home_repair", None)
                         _reset_repair_mismatch_attempts(mv)
                     variation_summary = summarize_gc_preflight_variations(
                         evidence_payload
@@ -832,6 +836,8 @@ def execute_actions(
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
+                        mv.pop("gc_running_configuration_degradation", None)
+                        mv.pop("gc_degraded_home_repair", None)
                         _reset_repair_mismatch_attempts(mv)
                     log_mission(
                         "[SESSION_PREFLIGHT] Configuration mismatch flagged — "
@@ -866,6 +872,9 @@ def execute_actions(
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
                         mv["gc_session_preflight_failed_checks"] = []
+                        if not battle_ended:
+                            mv.pop("gc_running_configuration_degradation", None)
+                            mv.pop("gc_degraded_home_repair", None)
                         _reset_repair_mismatch_attempts(mv)
                     interrupted_level = "INFO" if battle_ended else "WARN"
                     log_mission(

@@ -194,6 +194,115 @@ def test_no_strategy_terminal_retry_arms_continuation_only_after_home():
     )
 
 
+def test_degraded_continue_retries_home_then_arms_profile_repair_launch():
+    app = _app_without_strategy()
+    app._runtime_policy = MagicMock(return_value={})
+    app._mission_mgr.strategy = SimpleNamespace(name="farm_t19")
+    degradation = {
+        "schema_version": 1,
+        "sources": ["session_preflight"],
+        "reason": "modules do not match",
+        "failed_checks": ["modules"],
+    }
+    app._mission_mgr.running_configuration_degradation.return_value = degradation
+    binding = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "activity_scope_run_id": "run-1",
+        "game_state": "game_over",
+    }
+    app._current_control_workflow_evidence = MagicMock(return_value=binding)
+    app._terminal_battle_bundle = MagicMock(return_value=({}, None, None))
+    continuation = {
+        "schema_version": 1,
+        "source": "degraded_battle_repair",
+    }
+    app._build_terminal_home_continuation_claim = MagicMock(
+        return_value=continuation
+    )
+    app._commit_terminal_home_continuation = MagicMock(return_value=True)
+    outcomes = iter(
+        (
+            GameOverHandlingOutcome(
+                False,
+                "pending_retry",
+                None,
+                "unavailable",
+                "Go Home from Game Stats",
+            ),
+            GameOverHandlingOutcome(True, "home", None, "unavailable"),
+        )
+    )
+
+    def handle_terminal(**kwargs):
+        kwargs["before_terminal_action"]()
+        return next(outcomes)
+
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        with patch("core.app.handle_game_over", side_effect=handle_terminal) as game_over:
+            app._handle_primary_states("GAME_OVER", set(), object())
+            assert app._pending_game_over_route["desired_route"] == "home"
+            assert app._pending_game_over_route["degraded_home_repair"] == (
+                degradation
+            )
+            app._commit_terminal_home_continuation.assert_not_called()
+
+            app._handle_primary_states("GAME_OVER", set(), object())
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert game_over.call_count == 2
+    assert all(
+        call_args.kwargs["return_home_after_battle"] is True
+        for call_args in game_over.call_args_list
+    )
+    app._build_terminal_home_continuation_claim.assert_called_once_with(
+        source="degraded_battle_repair",
+        evidence=binding,
+    )
+    app._mission_mgr.prepare_degraded_home_repair.assert_called_once_with(
+        degradation
+    )
+    app._commit_terminal_home_continuation.assert_called_once_with(continuation)
+
+
+def test_degraded_battle_does_not_force_home_when_future_policy_is_wait():
+    app = _app_without_strategy()
+    app._runtime_policy = MagicMock(return_value={})
+    app._mission_mgr.strategy = SimpleNamespace(name="farm_t19")
+    app._mission_mgr.running_configuration_degradation.return_value = {
+        "schema_version": 1,
+        "sources": ["session_preflight"],
+        "reason": "modules do not match",
+        "failed_checks": ["modules"],
+    }
+    app._terminal_battle_bundle = MagicMock(return_value=({}, None, None))
+
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.WAIT
+    try:
+        with patch(
+            "core.app.handle_game_over",
+            return_value=GameOverHandlingOutcome(
+                True,
+                "wait",
+                None,
+                "unavailable",
+            ),
+        ) as game_over:
+            app._handle_primary_states("GAME_OVER", set(), object())
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert game_over.call_args.kwargs["return_home_after_battle"] is False
+    app._mission_mgr.running_configuration_degradation.assert_not_called()
+    app._mission_mgr.prepare_degraded_home_repair.assert_not_called()
+
+
 def test_save_resolved_post_run_fields_skip_home_configuration_navigation():
     app = _app_without_strategy()
     resolved = {

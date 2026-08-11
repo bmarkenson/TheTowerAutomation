@@ -115,10 +115,15 @@ def _evidence(
 
 
 @pytest.mark.parametrize("request_change", ("policy_cycle", "authority_cycle"))
+@pytest.mark.parametrize(
+    "continuation_source",
+    ("no_strategy_post_run", "degraded_battle_repair"),
+)
 def test_terminal_home_continuation_requires_unchanged_exact_requests(
     tmp_path,
     monkeypatch,
     request_change,
+    continuation_source,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
     path = tmp_path / "automation_ctl.json"
@@ -143,7 +148,7 @@ def test_terminal_home_continuation_requires_unchanged_exact_requests(
     }
 
     claim = app._build_terminal_home_continuation_claim(
-        source="no_strategy_post_run"
+        source=continuation_source
     )
 
     assert claim is not None
@@ -2367,6 +2372,11 @@ def test_running_return_trusted_save_mismatch_completes_degraded(
     assert manual["configuration"]["ui_required_check_ids"] == []
     assert supervisor.is_paused is False
     manager.begin_manual_return_reconciliation.assert_not_called()
+    manager.mark_running_configuration_degraded.assert_called_once_with(
+        source="return_control",
+        reason="Return Control found: workshop_preset",
+        failed_checks=("workshop_preset",),
+    )
 
 
 def test_unusable_running_return_save_starts_supported_ui_reconciliation(
