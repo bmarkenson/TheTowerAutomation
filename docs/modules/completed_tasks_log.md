@@ -86,6 +86,37 @@ canonical document linked by an entry for current behavior.
   target-host cost measurement remains routed through
   [`ISSUE-2026-003`](../issues/open-2026.md#windows-performance-telemetry-exceeded-its-client-cpu-budget)
   as a separate client-budget investigation.
+- Integration commit `d836532` preserved the contemporaneous terminal-Perk
+  repair while merging this feature into `develop`. The exact combined
+  candidate passed the supported checkpoint with all 2,195 tests in 370.03
+  seconds, all 135 portable native tests, and a real WPF Release build with
+  zero errors. Production and `develop` advanced from `139d276` to exact
+  `d836532` behind rollback tag
+  `production-before-20260811T020359Z-139d276`. Automation was already stopped
+  with no held runtime lock and remained stopped; only the control-surface API
+  was stopped for the source fast-forward. Replacement PID `2802001` served
+  revision 36 with `host_performance_process_attribution_v1` while preserving
+  the operator's `STOPPED` control state.
+- The complete Windows package was published from exact `d836532` at 19:06
+  PDT. Current Control Surface is 72,427,793 bytes with SHA-256
+  `beb030f58bca4c960fb2141961034f73591d54fef31daf9ce73b0f9ded695941`;
+  current Tunnel Host is 35,172,115 bytes with SHA-256
+  `383b833a993385de52fee4768bda70c1afb64f6e0940a1f0a815e9e31226c388`.
+  Retained slot 1 contains the prior `dbe3d34` package: 72,416,908-byte
+  Control Surface
+  `a1938bb3d94833fcc04b5a85ee50157edb8260a35073e7ee9442bfc6e8a210fb`
+  and 35,172,092-byte Tunnel Host
+  `839c290562afb3ceb9e7a43dbb6c9808f66f7f4922364711f32493bf8a8007c5`.
+  Slot 2 contains the prior `dd9354f` package: 72,390,981-byte Control Surface
+  `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`
+  and 35,172,109-byte Tunnel Host
+  `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
+- By 19:07 PDT, a connected revision-36-compatible native publisher was
+  supplying fresh optional `process_attribution` arrays through the promoted
+  API into the production SQLite store. The empty arrays and absent attribution
+  cost under sub-threshold load confirmed the intended dormant path. This
+  compatibility smoke does not replace the bounded Windows lifecycle and
+  target-host cost validation still routed through `ISSUE-2026-003`.
 
 ### 2026-08-10 bounded interactive-development lease extension
 
