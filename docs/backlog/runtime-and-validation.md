@@ -847,9 +847,16 @@ stages:
       checkpoint passed compilation, state-definition validation, clickmap
       integrity with zero errors and the established 44 orphan notices, and all
       2,232 tests in 362.15 seconds.
-    - [ ] Promotion and a natural-boundary post-deployment observation remain
-      separate operator-authorized work. This checkpoint did not restart a
-      service, change live control, or issue device input.
+    - [x] Exact candidate `12ad795` passed a fresh 2,232-test promotion
+      checkpoint and was deployed on 2026-08-11 behind rollback tag
+      `production-before-20260811T162652Z-d9305fc`. Replacement runtime
+      `c7408508ab0a421a98f724e4474d9ba0` completed save-backed Attach, active
+      `farm_t19_ad_assist` adoption, session validation, and a steady-state
+      smoke without Pause or an authority hold.
+    - [ ] Observe the original Return Control mismatch or degraded Game
+      Over/Home-first repair at a natural post-deployment boundary. The
+      deployment smoke preserved an already-running battle and did not
+      manufacture either boundary.
   - Home launch-authority correction checkpoint (2026-08-08, feature branch):
     - [x] Commit `b36f878` requires fresh `RUNNING`, an active No Strategy
       observation, and lifecycle-owned active-battle evidence before granting

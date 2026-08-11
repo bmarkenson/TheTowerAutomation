@@ -51,8 +51,13 @@ and actionable work lives in
   checkpoint passed compilation, state definitions, clickmap integrity with
   zero errors and the established 44 orphan notices, and all 2,225 tests in
   360.86 seconds. The Home-first follow-up passed 535 affected tests and a
-  second supported checkpoint with all 2,232 tests in 362.15 seconds. The fix
-  has not yet been deployed or validated against a post-fix live boundary.
+  second supported checkpoint with all 2,232 tests in 362.15 seconds. Exact
+  candidate `12ad795` passed a fresh promotion checkpoint with all 2,232 tests
+  in 357.50 seconds and was deployed on 2026-08-11 behind rollback tag
+  `production-before-20260811T162652Z-d9305fc`. A replacement-runtime Attach
+  and active-Strategy smoke preserved the existing battle and reached steady
+  `RUNNING`; the original Return Control mismatch and degraded Game Over/Home
+  repair paths still await natural post-fix boundary observation.
 - **Fixed by:** `1b16db9`, `4ac5237`.
 
 ### Open in-battle side menu suppressed Mission reward scheduling

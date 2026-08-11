@@ -64,8 +64,26 @@ canonical document linked by an entry for current behavior.
   passed compilation, state definitions, clickmap integrity with zero errors
   and the established 44 orphan notices, and all 2,225 tests in 360.86 seconds.
   The Home-first follow-up passed 535 affected tests and a second supported
-  checkpoint with all 2,232 tests in 362.15 seconds. No post-fix service
-  restart, deployment, or device input was performed.
+  checkpoint with all 2,232 tests in 362.15 seconds. Exact candidate
+  `12ad7953225e8c67094a0c4bbbca881a0a8df1e0` then passed a fresh promotion
+  checkpoint with all 2,232 tests in 357.50 seconds. Production and `develop`
+  advanced from `d9305fc` behind annotated rollback tag
+  `production-before-20260811T162652Z-d9305fc`.
+- The shared control surface reloaded at revision 37. Replacement automation
+  PID `3809087`, runtime `c7408508ab0a421a98f724e4474d9ba0`, acquired the
+  held `localhost:5555` lock and observed the existing Tier 19 battle while
+  Paused. Explicit Attach used one guarded forced serialization to prove the
+  same battle, explicit Enable restored action authority, and the separate
+  active-battle Strategy request adopted `farm_t19_ad_assist`. Its session
+  configuration passed and the runtime entered steady state at wave 4332,
+  x6.3, under `NEXT_BATTLE`, with all five control receipts current and no
+  Pause, gate, or authority hold. A recoverable No Strategy inventory
+  navigation mismatch was warned and released without halting the Strategy
+  adoption. No Surrender, battle start, or terminal action was used.
+- The change has no native Windows package inputs or API compatibility change,
+  so no Windows package was rebuilt. The live smoke did not manufacture the
+  original Return Control mismatch or a degraded Game Over boundary; those
+  natural-boundary confirmations remain separately tracked.
 
 ### 2026-08-10 durable control acknowledgements and Strategy Scope
 
