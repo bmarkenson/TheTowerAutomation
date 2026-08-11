@@ -291,12 +291,13 @@ it does not claim the game is Running. **When this battle ends** separately
 selects Continue automatically, Wait, or Return/stay Home; those choices never
 act as an immediate Start/Resume command. The buttons apply immediately, which
 prevents a periodic status refresh from replacing an unsaved selection.
-Control writes have their own serialization gate: a click cancels an older
-status request and sends its POST immediately, then waits to render until the
-old response has drained. Linux orders the accepted write with the final input
-dispatch boundary. An ADB command already past that boundary, or mandatory
-restoration after lifecycle input, may finish; no later compound step or new
-automated input may begin after Pause is accepted.
+Automation-authority, manual-control, and terminal-policy writes have their own
+serialization gate: a click cancels an older status request and sends its POST
+immediately, then waits to render until the old response has drained. Linux
+orders the accepted write with the final input-dispatch boundary. An ADB
+command already past that boundary, or mandatory restoration after lifecycle
+input, may finish; no later compound step or new automated input may begin
+after Pause is accepted.
 State and terminal-policy acknowledgements match an exact Linux request ID;
 same-value requests remain visibly pending without being rewritten.
 Revision 35 extends that exact receipt contract to state, terminal policy,
@@ -753,15 +754,15 @@ still requires the complete visible smoke below.
    current battle. The real
    operator profile catalog and control state remain byte-for-byte untouched.
 
-When a startup requirement fails, the runtime publishes the failed check,
-expected value, and allowed responses. The app opens **Startup check needs a
-decision** automatically; **Review preflight decision** reopens the current
-request. **Apply choice** resolves only that request, while **Decide later**
-leaves automation blocked without changing anything. **Retry check** captures
-fresh evidence. A configured fallback or **Bypass only this check for this
-run** waives only the displayed requirement for the current run; all unrelated
-preflight checks still execute. The same pending decision is visible to the
-browser and CLI because the Linux control file remains authoritative.
+When a recoverable startup requirement fails, the runtime publishes the failed
+check, expected value, and any scoped responses as a nonblocking advisory. It
+does not open automatically and does not halt automation. **Review preflight
+advisory** opens the current evidence; closing or deciding later leaves it
+visible while automation continues degraded and sends no input. **Retry check**
+captures fresh evidence. A configured fallback or **Bypass only this check for
+this run** waives only the displayed requirement for the current run; all
+unrelated preflight checks still execute. The same pending advisory is visible
+to the browser and CLI because the Linux control file remains authoritative.
 
 An attached-battle mismatch is a nonblocking preflight advisory, not a decision
 gate. It does not open a popup automatically and requires no action;

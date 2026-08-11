@@ -48,8 +48,9 @@ and actionable work lives in
   bounded and return typed attempt/uncertainty outcomes; forced-save and
   watchdog owners defer catastrophic judgment until restoration is resolved.
   Recoverable reporting remains nonblocking. The native client cancels a stale
-  status GET and sends control POSTs immediately, while nonblocking attachment
-  advisories no longer open automatically and are labeled as optional review.
+  status GET and sends Automation-authority, manual-control, and terminal-policy
+  POSTs immediately, while nonblocking attachment advisories no longer open
+  automatically and are labeled as optional review.
 - **Regression:** Cross-process/thread races prove that Pause waits for at most
   the currently atomic dispatch and blocks the next input, can persist during
   passive lifecycle prechecks, and cannot strand forced-save restoration.

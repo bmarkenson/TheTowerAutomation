@@ -25,15 +25,21 @@ def test_wpf_control_posts_are_ordered_against_status_refreshes():
     control_handler = code.split(
         "private async void Control_Click", 1
     )[1].split("private async void Mode_Click", 1)[0]
+    mode_handler = code.split(
+        "private async void Mode_Click", 1
+    )[1].split(
+        "private async void GameSpeedTargetBox_SelectionChanged", 1
+    )[0]
 
     assert "_controlMutationGate = new(1, 1)" in code
-    cancel = control_handler.index("_refreshCancellation?.Cancel();")
-    post = control_handler.index("PostControlAsync")
-    render_gate = control_handler.index("await _refreshGate.WaitAsync();")
-    assert cancel < post < render_gate
-    assert "await _controlMutationGate.WaitAsync();" in control_handler
-    assert "_controlMutationGate.Release();" in control_handler
-    assert "await RefreshStatusAsync(force: true);" in control_handler
+    for handler in (control_handler, mode_handler):
+        cancel = handler.index("_refreshCancellation?.Cancel();")
+        post = handler.index("PostControlAsync")
+        render_gate = handler.index("await _refreshGate.WaitAsync();")
+        assert cancel < post < render_gate
+        assert "await _controlMutationGate.WaitAsync();" in handler
+        assert "_controlMutationGate.Release();" in handler
+        assert "await RefreshStatusAsync(force: true);" in handler
 
 
 def test_wpf_authoring_shell_groups_catalogs_and_registry_sections():

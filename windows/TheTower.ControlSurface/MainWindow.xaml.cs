@@ -1629,17 +1629,50 @@ public partial class MainWindow : Window
         {
             return;
         }
+        var enteredControlGate = false;
+        var enteredRefreshGate = false;
+        Exception? requestFailure = null;
+        var requestSucceeded = false;
         try
         {
+            await _controlMutationGate.WaitAsync();
+            enteredControlGate = true;
+            _refreshCancellation?.Cancel();
             var response = await _api.PostControlAsync(
                 new { action = "terminal_policy", policy = mode },
                 CancellationToken.None);
+            await _refreshGate.WaitAsync();
+            enteredRefreshGate = true;
             RenderStatus(response);
-            await RefreshActivityAsync(force: true);
+            requestSucceeded = true;
         }
         catch (Exception exc)
         {
-            ShowError(exc);
+            requestFailure = exc;
+        }
+        finally
+        {
+            if (enteredRefreshGate)
+            {
+                _refreshGate.Release();
+            }
+        }
+        if (requestFailure is not null)
+        {
+            await RefreshStatusAsync(force: true);
+        }
+        if (enteredControlGate)
+        {
+            _controlMutationGate.Release();
+        }
+        if (requestFailure is not null)
+        {
+            ShowError(requestFailure);
+            return;
+        }
+        if (requestSucceeded)
+        {
+            await RefreshActivityAsync(force: true);
         }
     }
 

@@ -55,9 +55,10 @@ canonical document linked by an entry for current behavior.
   selected Strategy still owns attached-battle behavior, mismatched or
   unprovable Attach remains a degraded observer, and Continue still goes Home
   first for repairable degradation.
-- Native control writes now cancel stale status reads and transmit immediately.
-  Nonblocking attached-battle advisories require no response, do not open
-  automatically, and remain available through **Review preflight advisory**.
+- Native Automation-authority, manual-control, and terminal-policy writes now
+  cancel stale status reads and transmit immediately. Nonblocking
+  attached-battle advisories require no response, do not open automatically,
+  and remain available through **Review preflight advisory**.
   The exact implementation passed all 2,339 Python tests, all 143 portable
   native tests, a zero-error Release WPF cross-build, and two independent final
   safety/policy reviews. Exact documented candidate `bde889e` passed the
