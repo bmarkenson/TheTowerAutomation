@@ -1810,7 +1810,15 @@ class ControlSurfaceService:
                             status=409,
                             code="return_control_required",
                         )
-                    if manual.get("status") == "awaiting_enable":
+                    enable_already_requested = bool(
+                        manual.get("status") == "awaiting_enable"
+                        and str(
+                            current.get("control", {}).get("state") or ""
+                        ).upper()
+                        == "RUNNING"
+                        and current.get("control", {}).get("resume_at") is None
+                    )
+                    if enable_already_requested:
                         disposition = "pending"
                         manual_control = dict(manual)
                         audit = "Automation Enable is already pending acknowledgement"
