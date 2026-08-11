@@ -57,6 +57,12 @@ canonical document linked by an entry for current behavior.
   and the established 44 orphan notices, and all 2,213 tests in 361.77
   seconds. Feature validation used repository evidence and fixtures without
   device interaction.
+- Live preflight exposed the separate Return Control race fixed by commit
+  `bcc3a6c`: when runtime reconciliation reached `awaiting_enable` before the
+  operator's first Enable request, the control surface incorrectly treated it
+  as a duplicate despite the durable state remaining `PAUSED`. The control
+  suite passed all 308 tests, and a second supported checkpoint passed all
+  2,214 tests in 353.20 seconds with the same clean integrity results.
 
 ### 2026-08-10 durable control acknowledgements and Strategy Scope
 
