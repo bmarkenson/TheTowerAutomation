@@ -986,7 +986,10 @@ stages:
     approximately `0.83%` process CPU clean and `1.9%` under contention,
     exceeding the `<0.5%` non-frame telemetry target. Profile sampler work
     separately from UI and other process activity, retain complete evidence
-    cadence, and validate both clean and contended cases. Track evidence in
+    cadence, and validate both clean and contended cases. Include the dedicated
+    threshold-triggered process-attribution scan-duration metric, confirm the
+    dormant path adds no second process enumeration, and distinguish scan cost
+    from the already measured total client CPU. Track evidence in
     [`ISSUE-2026-003`](../issues/open-2026.md#windows-performance-telemetry-exceeded-its-client-cpu-budget).
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a

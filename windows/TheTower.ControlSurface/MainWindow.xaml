@@ -1296,6 +1296,7 @@
                     <Grid.RowDefinitions>
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="1.1*" />
@@ -1366,6 +1367,30 @@
                       <StackPanel Grid.Column="3">
                         <TextBlock Text="TOP OTHER GPU PROCESS" Foreground="{StaticResource MutedBrush}" FontSize="9" />
                         <TextBlock x:Name="GpuCompetitorText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                    </Grid>
+                    <Grid Grid.Row="2" Grid.ColumnSpan="8" Margin="0,7,0,0">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="0.9*" />
+                        <ColumnDefinition Width="1.35*" />
+                        <ColumnDefinition Width="1.35*" />
+                        <ColumnDefinition Width="1.4*" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                        <TextBlock Text="OTHER WINDOWS CPU" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                        <TextBlock x:Name="OtherWindowsCpuText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                        <TextBlock Text="TOP OTHER CPU" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                        <TextBlock x:Name="TopCpuProcessText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="2" Margin="0,0,8,0">
+                        <TextBlock Text="TOP OTHER RAM" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                        <TextBlock x:Name="TopMemoryProcessText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="3">
+                        <TextBlock Text="PROCESS ATTRIBUTION" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                        <TextBlock x:Name="ProcessAttributionStateText" Text="Idle" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
                       </StackPanel>
                     </Grid>
                   </Grid>
