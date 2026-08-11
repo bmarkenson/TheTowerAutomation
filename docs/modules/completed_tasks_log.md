@@ -39,6 +39,52 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-11 immediate Pause and global input authority hardening
+
+- Commit `9add674` gives every durable Pause, Stop, Take Manual Control,
+  terminal-policy, and input-owner transition the same cross-process boundary
+  as final mutating ADB dispatch. Passive prechecks no longer delay Pause; one
+  atomic command already past its guard may finish, and mandatory lifecycle
+  restoration may complete, but no later compound step can begin after the
+  control write is accepted. Missing or identity-less startup authority now
+  fails closed to Paused.
+- Low-level ADB commands are bounded and return typed attempt/uncertainty
+  outcomes. Forced-save serialization and watchdog recovery defer
+  catastrophic judgment until their required source restoration resolves;
+  recoverable reporting and configuration evidence continue degraded. The
+  selected Strategy still owns attached-battle behavior, mismatched or
+  unprovable Attach remains a degraded observer, and Continue still goes Home
+  first for repairable degradation.
+- Native control writes now cancel stale status reads and transmit immediately.
+  Nonblocking attached-battle advisories require no response, do not open
+  automatically, and remain available through **Review preflight advisory**.
+  The exact implementation passed all 2,339 Python tests, all 143 portable
+  native tests, a zero-error Release WPF cross-build, and two independent final
+  safety/policy reviews. Exact documented candidate `bde889e` passed the
+  supported checkpoint with all 2,339 tests in 368.10 seconds.
+- Production and `develop` advanced from `822afaa` to `bde889e` behind rollback
+  tag `production-before-20260811T220159Z-822afaa`. The operator-owned Pause
+  was preserved with no device input. Replacement runtime PID `148448`, runtime
+  `36e6f4290f6c4eba8b4fe0458b02f1db`, acquired `localhost:5555`, acknowledged
+  all five current control requests, and freshly observed the existing battle
+  at wave 2093 with effective authority still Paused.
+- The complete Windows package was published from exact `bde889e` at 15:03
+  PDT. Current Control Surface is 72,430,549 bytes with SHA-256
+  `3c6be626e29600ef24719db127e0c9e04fa6d3249741d0a730a176847a368774`;
+  current Tunnel Host is 35,172,075 bytes with SHA-256
+  `3c331280ea93ec34ceb6a95b7a655e32366e22ac477c2a2e798e39ab8bfafa58`.
+  Retained slot 1 contains the prior `775da5f` package: 72,430,251-byte
+  Control Surface
+  `f1a3fa677c7ead967a512184dc56f28d8b76028d3578dfb9eba1b2cad93f2b28`
+  and 35,172,129-byte Tunnel Host
+  `bacb3c7a062ca431455bcd89bf5caeedf0e8cfb8a1f60493f5900d1b958b794b`.
+  Slot 2 contains the prior `3460d5c` package: 72,429,586-byte Control Surface
+  `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`
+  and 35,172,117-byte Tunnel Host
+  `cabad7e7fadb26f29c494a54eea8ed0fa717e6035376b6805b25d19457aec828`.
+  Publication is not Windows execution; an older running GUI must be fully
+  closed and relaunched before it uses this build.
+
 ### 2026-08-11 strategy-aware Attach and nonblocking degradation
 
 - Commit `775da5f` freezes the accepted Strategy ID, request ID, and resolved

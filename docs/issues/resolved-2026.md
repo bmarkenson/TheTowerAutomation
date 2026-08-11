@@ -61,11 +61,28 @@ and actionable work lives in
   seconds, all 143 portable native compatibility tests, and a Release
   `win-x64` WPF cross-build with zero errors. The only .NET warning was the
   sandbox's read-only NuGet vulnerability cache. Two independent final reviews
-  found no remaining runtime-safety or global-policy blocker.
-- **Deployment:** Awaiting promotion of the exact documented candidate and
-  publication of a replacement Windows package. An already-running older
-  Windows executable must be fully closed and relaunched after publication to
-  receive the immediate-POST and advisory behavior.
+  found no remaining runtime-safety or global-policy blocker. Exact documented
+  candidate `bde889e` then passed the supported checkpoint: compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,339 tests in 368.10 seconds.
+- **Deployment:** Production and `develop` advanced from `822afaa` to exact
+  `bde889e` behind annotated rollback tag
+  `production-before-20260811T220159Z-822afaa`. The rollout preserved the
+  operator Pause and sent no device input. Updated control-surface PID `148078`
+  started replacement automation PID `148448`, runtime
+  `36e6f4290f6c4eba8b4fe0458b02f1db`, on the held `localhost:5555` target.
+  At 15:04:15 PDT it freshly observed the existing battle at wave 2093; all
+  five exact receipts were current, effective authority was `paused`, and no
+  catastrophic hold or Strategy Gate was active. The complete Windows package
+  was published from `bde889e` at 15:03 PDT. Current Control Surface is
+  72,430,549 bytes with SHA-256
+  `3c6be626e29600ef24719db127e0c9e04fa6d3249741d0a730a176847a368774`;
+  current Tunnel Host is 35,172,075 bytes with SHA-256
+  `3c331280ea93ec34ceb6a95b7a655e32366e22ac477c2a2e798e39ab8bfafa58`.
+  Retained slot 1 is the prior `775da5f` package and slot 2 is the prior
+  `3460d5c` package. An already-running older Windows executable must be fully
+  closed and relaunched to receive the immediate-POST and advisory behavior;
+  cross-publication is not Windows runtime execution.
 - **Fixed by:** `9add674`.
 
 ### Return Control re-Paused automation for a skipped configuration mismatch
