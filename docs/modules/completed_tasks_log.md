@@ -39,6 +39,63 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-11 strategy-aware Attach and nonblocking degradation
+
+- Commit `775da5f` freezes the accepted Strategy ID, request ID, and resolved
+  definition fingerprint at the Attach boundary. A proved compatible battle
+  adopts that exact Strategy; an incompatible or unprovable battle continues
+  as a degraded observer with the selected Strategy queued for the next real
+  boundary. No Strategy remains intentional observation rather than false
+  degradation. Attached-battle checks report configuration gaps without
+  repairing the current battle, and recoverable validation or reporting
+  failures release their workflow authority instead of stopping automation.
+- The control-surface contract advances to revision 38 with
+  `strategy_aware_attach_v1`. The native client blocks Attach while its visible
+  Strategy selection is dirty or in flight, displays Linux-authored
+  degradation in Strategy Scope, and prevents **Switch this battle** from
+  bypassing a degraded observation-only attachment. A degraded Continue still
+  follows the global Home-first repair path at the natural terminal boundary;
+  only catastrophic authority or ownership failures may halt automation.
+- Exact integration commit `775da5ffd03f0e582578298f660977e62aa971cb`
+  passed the supported checkpoint: compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,260 tests in 360.82 seconds. All 143 portable native compatibility tests
+  also passed; the only .NET warning was the sandbox's read-only NuGet
+  vulnerability cache.
+- Production and `develop` advanced from `07ff895` behind annotated rollback
+  tag `production-before-20260811T184145Z-07ff895`. Replacement control-surface
+  PID `4034265` served the new capability, and automation PID `4034563` acquired
+  the held `localhost:5555` lock as runtime
+  `90ed36233fbd436b82400bfc3b9c4337`. All control acknowledgements were current
+  for `RUNNING`, `NEXT_BATTLE`, x6.3, the exact ADB target, and
+  `farm_t19_ad_assist`.
+- Attach request `10fecc3ee0b04968bf0253be4b2992bf` used fresh exact-owner
+  evidence and one guarded background/restore serialization. It proved an
+  ordinary Tier 19 battle, adopted the snapshotted `farm_t19_ad_assist`, and
+  completed while reporting `attachment_configuration` and
+  `session_preflight` degradation carrying `perk_bans` and deferred
+  `free_upgrade_locks` evidence. It performed no active-battle repair and
+  automation continued through fresh wave-2531 observation and ordinary ad-gem
+  handling without a Pause, gate, Surrender, battle start, terminal action, or
+  manufactured battle boundary.
+- The complete Windows package was published from exact `775da5f` at 11:43 PDT.
+  Current Control Surface is 72,430,251 bytes with SHA-256
+  `f1a3fa677c7ead967a512184dc56f28d8b76028d3578dfb9eba1b2cad93f2b28`;
+  current Tunnel Host is 35,172,129 bytes with SHA-256
+  `bacb3c7a062ca431455bcd89bf5caeedf0e8cfb8a1f60493f5900d1b958b794b`.
+  Retained slot 1 contains the prior `3460d5c` package: 72,429,586-byte
+  Control Surface
+  `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`
+  and 35,172,117-byte Tunnel Host
+  `cabad7e7fadb26f29c494a54eea8ed0fa717e6035376b6805b25d19457aec828`.
+  Slot 2 contains the prior `d836532` package: 72,427,793-byte Control Surface
+  `beb030f58bca4c960fb2141961034f73591d54fef31daf9ce73b0f9ded695941`
+  and 35,172,115-byte Tunnel Host
+  `383b833a993385de52fee4768bda70c1afb64f6e0940a1f0a815e9e31226c388`.
+  Cross-publication and portable tests do not claim Windows WPF runtime
+  validation; the revision-38 lifecycle checks remain in the existing native
+  client validation backlog.
+
 ### 2026-08-11 global nonblocking runtime-failure policy
 
 - Commit `1b16db9` introduces one typed disposition policy for runtime
