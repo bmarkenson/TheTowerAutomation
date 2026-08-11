@@ -8,6 +8,66 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Pause allowed the remainder of an already-authorized compound action
+
+**Stable ID:** `ISSUE-2026-040` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-08-11 at 12:08 PDT while an enabled running-battle action
+  was adjusting Damage Slider on `localhost:5555`.
+- **Symptom:** The operator clicked **Automation Paused**, but automated input
+  continued. The durable Pause request was created at 12:08:19; Damage Slider
+  inputs still dispatched at approximately 12:08:31, 12:08:36, and 12:08:39,
+  the compound action completed at 12:08:44, and the runtime acknowledged
+  Pause at 12:08:46. No input followed acknowledgement, but the roughly
+  27-second click-to-acknowledgement interval violated the expected immediate
+  stop at the next input boundary.
+- **Evidence:** The exact state request ID and action log put the control write,
+  three later `INPUT` records, compound completion, and acknowledgement in that
+  order. Static tracing showed that process-local action guards could retain a
+  stale authorization across later taps, while a separate Control Surface
+  process wrote the control file without sharing the runtime's final dispatch
+  lock. The native client also serialized the control POST behind a status GET,
+  making the click slower to reach Linux. The reported misconfiguration popup
+  was consistent with the deployed older native behavior, which automatically
+  opened a nonblocking attached-battle advisory even though no decision was
+  required.
+- **Cause:** Control persistence and device-input dispatch had no common
+  cross-process linearization point. A compound route could therefore start
+  its next input using authority checked before Pause existed. Low-level ADB
+  mutations also lacked a uniform timeout/outcome contract, so forced-save and
+  watchdog transactions could classify an intermediate timeout before giving
+  their required restoration a chance to prove the final source safe.
+- **Resolution:** Commit `9add674` adds one reentrant file-backed boundary shared
+  by every mutating ADB dispatch and durable Pause, Stop, Take Manual Control,
+  terminal-policy, and input-owner write. Passive prechecks do not hold it; the
+  exact first input refreshes authority under it, and a lifecycle transaction
+  that has already changed the source retains it only through mandatory source
+  restoration. Thus one already-dispatched atomic command may finish, but no
+  later compound step can begin after Pause is accepted. Missing control state
+  and legacy identity-less `RUNNING` now initialize Paused. ADB calls are
+  bounded and return typed attempt/uncertainty outcomes; forced-save and
+  watchdog owners defer catastrophic judgment until restoration is resolved.
+  Recoverable reporting remains nonblocking. The native client cancels a stale
+  status GET and sends control POSTs immediately, while nonblocking attachment
+  advisories no longer open automatically and are labeled as optional review.
+- **Regression:** Cross-process/thread races prove that Pause waits for at most
+  the currently atomic dispatch and blocks the next input, can persist during
+  passive lifecycle prechecks, and cannot strand forced-save restoration.
+  Stop/Enable, Stop/Take Manual Control, terminal-policy, input-owner, startup
+  identity, serializer timeout/restoration, watchdog interruption/retry, and
+  diagnostic-log failures have dedicated coverage. Native presentation tests
+  require a nonblocking advisory to say that no decision is required.
+- **Validation:** The implementation passed all 2,339 Python tests in 361.32
+  seconds, all 143 portable native compatibility tests, and a Release
+  `win-x64` WPF cross-build with zero errors. The only .NET warning was the
+  sandbox's read-only NuGet vulnerability cache. Two independent final reviews
+  found no remaining runtime-safety or global-policy blocker.
+- **Deployment:** Awaiting promotion of the exact documented candidate and
+  publication of a replacement Windows package. An already-running older
+  Windows executable must be fully closed and relaunched after publication to
+  receive the immediate-POST and advisory behavior.
+- **Fixed by:** `9add674`.
+
 ### Return Control re-Paused automation for a skipped configuration mismatch
 
 **Stable ID:** `ISSUE-2026-039` · **Lifecycle:** `resolved`

@@ -1093,6 +1093,29 @@ currently executing action is being repaired or reconciled, but a recoverable
 result must release that owner. Legacy session-preflight blocks and gates are
 migrated to completed degraded evidence when encountered.
 
+Durable control changes and Android mutation dispatch use one companion
+cross-process boundary beside the control file. A mutation refreshes the exact
+control request while holding that boundary immediately before its first
+input. Pause, Stop, Take Manual Control, terminal-policy changes, and requests
+that acquire input ownership take the same boundary for their atomic write.
+Consequently, a control write and an input have a single order: an input that
+already crossed its final guard may finish, but after the control write is
+accepted no later input or compound-action step can begin. Passive save,
+capture, and watchdog prechecks do not hold this boundary, so Pause can persist
+while they run. Once a lifecycle transaction has sent input, it retains the
+boundary only through mandatory source restoration; this prevents Pause from
+stranding the game backgrounded or on Android Home.
+
+All low-level ADB subprocesses used by runtime observation or mutation are
+bounded. Mutations return typed `attempted` and `uncertain` outcomes. A plain
+mutation timeout is an uncertain-input catastrophe; a transaction owner that
+can still prove its required final restoration defers that judgment until the
+transaction completes. Forced-save serialization and watchdog restart use
+that rule, retry their bounded restoration/launch where defined, and report a
+catastrophic hold only when the final game source remains unproved. Diagnostic
+logging for an already-classified recoverable failure is best effort and
+cannot itself terminate the main loop.
+
 ### Typed runtime action authority
 
 `core/action_authority.py` is the central runtime owner for action decisions.
@@ -1347,6 +1370,10 @@ warning text in `actions.log`.
 ## Process and control ownership
 
 - The persistent control file is authoritative operator intent.
+- A missing control file materializes as `PAUSED`. A legacy `RUNNING` record
+  without a valid state request ID is also converted to a fresh `PAUSED`
+  request. Malformed present identities remain visible as invalid evidence;
+  they are never repaired into implicit input authority.
 - A non-blocking OS lock keyed by ADB target prevents competing runtimes from
   acting on the same device. Its metadata is `held` with an owner PID while
   acquired and is rewritten to `released` with no PID on a clean release. A

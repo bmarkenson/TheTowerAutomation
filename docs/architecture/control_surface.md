@@ -42,6 +42,13 @@ agnostic.
   detection, lifecycle observation, and status reporting may continue.
   Automation **Enabled** permits guarded actions; it does not assert that the
   observed game state is `RUNNING`. Home observation changes neither state.
+- Native Pause/Enable/policy clicks serialize independently from polling. The
+  client cancels a stale status GET and sends the control POST immediately,
+  then waits to render until the older response is drained. On Linux, that
+  write shares the final cross-process boundary with input dispatch. One ADB
+  command that already crossed its last guard, or mandatory restoration after
+  lifecycle input, may finish; once the write is accepted no next compound
+  step or new input can start.
 - The GUI distinguishes a saved directive from runtime acknowledgement. It
   never presents a control-file write alone as proof that the runtime applied
   it.
@@ -1148,10 +1155,12 @@ Process request examples:
   dialog never changes Automation authority or leaves a recoverable error
   blocking. Later success consumes the matching Strategy request so a stale
   warning cannot reopen.
-- Non-blocking attached-Tournament warning dialogs use the same scoped decision
-  channel. They offer a fresh read-only retry or continuation with only the
-  displayed mismatch flagged. Persistent Pause remains a separate explicit
-  operator action, not a failure-dialog disposition.
+- Non-blocking attached-battle advisories use the same scoped evidence channel
+  without becoming a decision gate. They do not open automatically and require
+  no response: observation and automation continue degraded. **Review
+  preflight advisory** exposes any optional fresh read-only retry or scoped
+  continuation already authored by Linux. Persistent Pause remains a separate
+  explicit operator action, not an advisory disposition.
 - An optional **Configure run...** dialog populated from the selected
   strategy's actual preflight requirements. Unchecked checks retain their
   defaults; checked checks create strategy-bound one-run waivers. The dialog

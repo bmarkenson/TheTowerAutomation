@@ -26,6 +26,18 @@ strategy, handler, recovery, and terminal action. An agent-owned work Pause
 must be reconciled under
 [`live_action_authority.md`](../live_action_authority.md#cleanup-and-reporting).
 
+Pause, Stop, Take Manual Control, input-owner acquisition, and terminal-policy
+writes share the runtime's final cross-process input-dispatch boundary. The
+native client cancels an older status read and transmits a control write
+immediately. If a request races an input that has already crossed its final
+guard, that one atomic ADB command may finish; a lifecycle transaction that has
+already changed the source may also perform only the restoration needed to
+leave the game in a proved state. The control write cannot be delayed by
+passive prechecks, and after it is durably accepted no later compound step or
+new automated input may begin. A missing control file, or legacy `RUNNING`
+state without a valid request identity, initializes as `PAUSED` rather than
+granting implicit input authority.
+
 State and terminal-policy acknowledgement is request-ID exact. A repeated
 same-value request remains pending without changing its ID until that exact
 request is applied; an already acknowledged or stopped-policy repeat is a
@@ -102,6 +114,13 @@ restoration after lifecycle input, or a dispatched input whose result is
 uncertain. Explicit operator Pause, Stop, and Take Manual Control are separate
 intent. See
 [`architecture/runtime.md`](../architecture/runtime.md#global-runtime-failure-policy).
+
+Low-level ADB mutations and screenshots have bounded subprocess timeouts.
+Lifecycle owners such as forced save and watchdog recovery retain typed
+attempt/uncertainty evidence across their complete transaction: a timed-out
+intermediate command is catastrophic only if the required final source cannot
+be freshly proved restored. Recoverable status/report persistence remains
+diagnostic and cannot convert a degraded continuation into a shutdown.
 
 ## Process replacement and terminal recovery
 

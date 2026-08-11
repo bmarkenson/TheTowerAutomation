@@ -291,6 +291,12 @@ it does not claim the game is Running. **When this battle ends** separately
 selects Continue automatically, Wait, or Return/stay Home; those choices never
 act as an immediate Start/Resume command. The buttons apply immediately, which
 prevents a periodic status refresh from replacing an unsaved selection.
+Control writes have their own serialization gate: a click cancels an older
+status request and sends its POST immediately, then waits to render until the
+old response has drained. Linux orders the accepted write with the final input
+dispatch boundary. An ADB command already past that boundary, or mandatory
+restoration after lifecycle input, may finish; no later compound step or new
+automated input may begin after Pause is accepted.
 State and terminal-policy acknowledgements match an exact Linux request ID;
 same-value requests remain visibly pending without being rewritten.
 Revision 35 extends that exact receipt contract to state, terminal policy,
@@ -757,15 +763,14 @@ run** waives only the displayed requirement for the current run; all unrelated
 preflight checks still execute. The same pending decision is visible to the
 browser and CLI because the Linux control file remains authoritative.
 
-An attached Tournament mismatch uses the same dialog as a non-blocking
-preflight warning. **Pause for manual changes** persists Pause without ending
-the Tournament, **Retry the read-only check** captures fresh evidence, and
-**Continue despite...** waives only the displayed mismatch for the current
-run. **Decide later** leaves the warning pending while Tournament result
-observation continues. The attached Tournament check remains strictly inside
-the battle; it never uses Exit Battle → Go Home → Resume Battle. Its Home-only
-Workshop preset is reported as deferred unless exact bound save evidence is
-already available.
+An attached-battle mismatch is a nonblocking preflight advisory, not a decision
+gate. It does not open a popup automatically and requires no action;
+observation and automation continue while the battle is marked degraded.
+**Review preflight advisory** opens the retained evidence and any optional
+fresh read-only retry or scoped continuation Linux supplied. Pause remains an
+ordinary explicit Automation control. The attached check stays strictly inside
+the battle and never uses Exit Battle → Go Home → Resume Battle; Home-only work
+is reported as deferred unless exact bound save evidence is already available.
 
 Recent Activity refreshes independently once per second, follows the newest
 entry, and defaults to the concise `ACTION`, `RESULT`, `WARN`, `ERROR`, and
