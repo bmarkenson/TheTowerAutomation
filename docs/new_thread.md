@@ -6,14 +6,18 @@ adding another only if scope expands.
 
 ## Choose the startup path
 
-- **Read-only question:** inspect relevant current source, configuration,
-  callers, tests, or documentation. Skip other preflight unless needed.
+- **Read-only or retained-evidence work:** inspect relevant current source,
+  configuration, callers, tests, documentation, closed battle records,
+  historical log ranges, or retained telemetry and fixtures. Historical
+  production artifacts do not require live preflight when used only as
+  retained evidence, and they do not prove current runtime state.
 - **Repository change, project Python, or tests:** complete the repository and
   development-environment sections below.
-- **Live work:** before process/device interaction, runtime diagnosis, live
-  validation, or a volatile-state claim, complete
-  [`live_preflight.md`](live_preflight.md). Repository-local code changes do
-  not require live access by default.
+- **Live work:** before process/device interaction, diagnosis that depends on
+  current or changing runtime evidence, live validation, or a volatile-state
+  claim, complete
+  [`live_preflight.md`](live_preflight.md). Repository-local changes do not
+  require live access by default.
 - **Documentation or lifecycle change:** also read
   [`documentation_maintenance.md`](documentation_maintenance.md).
 - **Handoff:** read [`handoff_template.md`](handoff_template.md) only when
@@ -44,8 +48,9 @@ subagents, and report that the coordinator is ready to archive.
 
 ## Repository-change preflight
 
-1. Verify the checkout, branch, working tree, and recent commits. Implementation
-   belongs in an assigned feature worktree, not production `main`.
+1. Verify the checkout, branch, working tree, and recent commits. Every tracked
+   outcome change, including documentation-only maintenance, belongs in an
+   assigned feature worktree, not production `main` or integration `develop`.
 2. Inspect staged and unstaged changes for every target. Preserve unrelated
    work and recheck each target immediately before editing, staging, and
    committing.

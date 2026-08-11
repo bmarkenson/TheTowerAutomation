@@ -16,9 +16,10 @@ changes this model.
   supported bootstrap in `docs/new_thread.md` and must never execute, copy,
   link, or mutate production's environment. Run project Python and tests only
   through the selected `.venv/bin/python`.
-- `main` is production, `develop` is integration, and implementation belongs on
-  feature branches. Only the operator or an explicitly assigned integration
-  owner updates `develop` or promotes to `main` through the
+- `main` is production, `develop` is integration, and all tracked outcome
+  changes, including documentation-only maintenance, are made in feature
+  worktrees. Only the operator or an explicitly assigned integration owner
+  updates `develop` or promotes to `main` through the
   [production procedure](docs/operations/production_promotion.md).
 - Treat unrelated tracked and untracked changes as another participant's work.
   Do not overwrite, delete, stage, or incorporate them. Recheck status and each
@@ -39,8 +40,10 @@ changes this model.
 ## Live safeguards
 
 - Complete [`docs/live_preflight.md`](docs/live_preflight.md) before process or
-  device interaction, live validation or diagnosis, or any claim about
-  volatile runtime state. A handoff or old screenshot is not current evidence.
+  device interaction, live validation, diagnosis that depends on current or
+  changing runtime state, or any claim about volatile runtime state. Historical
+  production artifacts used only as retained evidence do not trigger live
+  preflight and do not prove current state.
 - A sandbox-negative PID, process, systemd, socket, or ADB result is not proof
   of host absence. Use the relevant
   [sandbox boundary](docs/sandbox_boundaries.md) and host-backed evidence.

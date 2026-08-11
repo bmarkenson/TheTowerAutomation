@@ -1,9 +1,11 @@
 # Runtime Operations
 
 This file is the routing index for live and production procedures. Before any
-process or device interaction, runtime diagnosis, live validation, or claim
-about volatile state, complete [`live_preflight.md`](live_preflight.md). Then
-load only the operation that matches the task.
+process or device interaction, diagnosis that depends on current or changing
+runtime state, live validation, or claim about volatile state, complete
+[`live_preflight.md`](live_preflight.md). Historical production artifacts used
+only as retained evidence do not require this router and do not prove current
+state. For live work, load only the operation that matches the task.
 
 | Need | Canonical procedure |
 | --- | --- |
