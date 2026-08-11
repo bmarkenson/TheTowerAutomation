@@ -85,6 +85,52 @@ and actionable work lives in
   2,065 tests in 347.55 seconds.
 - **Fixed by:** `41fc1fd`.
 
+### Replacement runtime could not recover a fresh preserved Game Over
+
+**Stable ID:** `ISSUE-2026-037` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-08-10 during the production rollout of terminal Perk
+  reconciliation, after a natural Tier 19 battle ended while replacement
+  runtime boundaries were being exercised.
+- **Symptom:** A replacement process freshly and exactly observed `GAME_OVER`
+  with `WAIT` acknowledged, but the initial-intent operator-workflow hold kept
+  the normal terminal handler from dispatching. A later Take/Return Control
+  attempt left a durable `interrupted` manual workflow whose unavailable
+  terminal evidence then made ordinary Enable unavailable on subsequent
+  replacements.
+- **Evidence:** Runtime and control-surface state agreed on the current PID,
+  `localhost:5555`, target generation, fresh Game Over observation, and
+  explicit `WAIT`; logs nevertheless contained no terminal-handler action.
+  After the process boundary, the manual workflow was terminalized as
+  `interrupted`, but its preserved `terminal_evidence.status=unavailable`
+  continued to participate in the active-manual uncertainty gate.
+- **Safety response:** Recovery did not seed completion state, attach the
+  replacement to the stale battle, bypass a startup gate, or Surrender. The
+  terminal handler remained limited to fresh exact runtime/PID/target,
+  generation, observation, scope, owner, control, and workflow evidence.
+- **Cause:** Terminal dispatch did not recognize the narrow case where the
+  initial-intent `OPERATOR_WORKFLOW` hold preserves a fresh Game Over under the
+  explicit `WAIT` policy. Separately, Enable availability treated unavailable
+  terminal evidence as blocking without first requiring the associated manual
+  workflow to still be active.
+- **Resolution:** Commit `909d2d5` adds the exact preserved-Game-Over recovery
+  predicate and revalidates it inside the handler before any terminal action.
+  Commit `5ce801b` retains fail-closed behavior for active manual workflows but
+  excludes terminalized `interrupted` records from that live uncertainty
+  gate.
+- **Regression:** `test/test_better_control_model.py` covers every recovery
+  predicate boundary, preserved-terminal dispatch, active unavailable manual
+  evidence blocking Enable, and the same record becoming nonblocking after it
+  is interrupted.
+- **Validation:** Exact candidate `5ce801b` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,198 tests in 350.13 seconds. In production,
+  replacement PID `2837669` recovered the fresh preserved terminal, completed
+  the top-to-bottom 27-Perk and 144-row Stats capture, obeyed `WAIT`, returned
+  Home only after explicit `HOME`, and then completed an explicit Start Battle
+  workflow to fresh `RUNNING` at wave 20 with `farm_t19_ad_assist` active.
+- **Fixed by:** `909d2d5`, `5ce801b`.
+
 ### Weekly Mission collector rewound an already-claimed track
 
 **Stable ID:** `ISSUE-2026-035` · **Lifecycle:** `resolved`

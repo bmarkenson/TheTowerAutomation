@@ -57,8 +57,30 @@ canonical document linked by an entry for current behavior.
 - Focused Perk tests passed all 100 cases, the wider Perks/Game Over/scrolling
   slice passed all 147, and the supported checkpoint passed compilation, state
   definitions, clickmap integrity with zero errors and the established 44
-  orphan notices, and all 2,162 tests in 488.00 seconds. Natural Game Over
-  observation remains queued in the runtime validation backlog.
+  orphan notices, and all 2,162 tests in 488.00 seconds.
+- Production rollout exposed two replacement-runtime control-boundary defects
+  rather than a Perks-capture defect. Commit `909d2d5` permits a replacement to
+  recover only a fresh, exact `GAME_OVER` observation preserved under the
+  explicit `WAIT` policy and initial-intent operator-workflow hold, without
+  attaching stale run state. Commit `5ce801b` keeps active manual-control
+  terminal uncertainty blocking, but stops a terminalized `interrupted` manual
+  record from permanently disabling ordinary Enable.
+- After reconciling the parallel host-attribution promotion at `a37d8bb`, exact
+  candidate `5ce801b` passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,198 tests
+  in 350.13 seconds. Production and `develop` advanced to that exact commit;
+  the immediate rollback point is
+  `production-before-20260811T023406Z-3809122`. Earlier rollout boundaries are
+  retained as `production-before-20260811T013204Z-9ca5fb9` and
+  `production-before-20260811T022304Z-a37d8bb`.
+- Replacement automation PID `2837669` then recovered the preserved Game Over
+  under `WAIT`, proved the Perks top edge with three upward swipes, traversed
+  seven distinct viewports to the actual bottom edge with eight downward
+  swipes, captured 27 ordered Perks, copied 144 exact More Stats rows, and
+  saved `Battle20260810T193611-0700`. The operator-directed `HOME` route
+  returned to verified Home `NEW_BATTLE`; an explicit Start Battle workflow
+  completed normally, adopted `farm_t19_ad_assist`, and reached fresh
+  `RUNNING` observation at wave 20 under `NEXT_BATTLE`.
 
 ### 2026-08-10 bounded Windows host process attribution
 
