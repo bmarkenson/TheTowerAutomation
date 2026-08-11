@@ -4310,7 +4310,8 @@ class ControlSurfaceService:
             else None
         )
         terminal_evidence_unavailable = bool(
-            isinstance(manual_terminal, Mapping)
+            manual_busy
+            and isinstance(manual_terminal, Mapping)
             and manual_terminal.get("status") == "unavailable"
         )
         enable_available = bool(

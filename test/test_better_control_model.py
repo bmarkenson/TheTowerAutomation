@@ -2516,6 +2516,54 @@ def test_api_enable_retries_configuration_with_fresh_save_boundary(
     assert service.control_store.status()["state"] == "RUNNING"
 
 
+def test_interrupted_manual_terminal_evidence_does_not_block_enable(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    terminal = _evidence(game_state="game_over")
+    manual = service.control_store.request_manual_control(
+        evidence=terminal,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=terminal,
+    )
+    service.control_store.request_return_control(
+        manual["manual_control_id"],
+        evidence=terminal,
+        source="test",
+    )
+    service.control_store.record_manual_terminal_evidence(
+        manual["manual_control_id"],
+        {
+            "schema_version": 1,
+            "status": "unavailable",
+            "observation_id": terminal["observation_id"],
+            "activity_scope_fingerprint": "a" * 64,
+            "reason": "terminal_run_unbound",
+        },
+    )
+    _publish_runtime_observation(service, terminal, paused=True)
+
+    blocked = service.status()["control_model"]["actions"]["enable"]
+    assert blocked["available"] is False
+    assert blocked["code"] == "manual_terminal_evidence_unavailable"
+
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "interrupted",
+        detail="automation process stopped",
+    )
+
+    available = service.status()["control_model"]["actions"]["enable"]
+    response = service.apply_control({"action": "enable"})
+
+    assert available["available"] is True
+    assert available["code"] == "available"
+    assert response["request"]["accepted"] is True
+    assert service.control_store.status()["state"] == "RUNNING"
+
+
 def test_manual_correction_enable_discards_prior_claim_before_new_home_save(
     tmp_path,
     monkeypatch,
