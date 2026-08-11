@@ -73,6 +73,14 @@ canonical document linked by an entry for current behavior.
   `farm_t19_ad_assist` / `460165104dcf474ebf3f10f0e2eedcb8`.
   Action Authority remained `paused`, terminal policy was acknowledged, and
   authoritative Strategy Scope contained no false pending state.
+- At 20:02 PDT, a separately issued Start Battle request completed the normal
+  new-run boundary on that same runtime. A 20:05 read-only status showed fresh
+  `RUNNING` observation at wave 70 with replacement state receipt `RUNNING` /
+  `ff267f3e5aa943309d5334c8aba26aa7` and replacement Strategy receipt
+  `farm_t19_ad_assist` / `fe5be90a521b40b5946d6047efb3e0fd`; all five
+  receipts acknowledged their current IDs, Action Authority was `enabled`,
+  and authoritative Strategy Scope still had no pending value. That separate
+  workflow was observed but was not issued as part of this promotion.
 - The complete Windows package was published from exact `3460d5c` at 19:58
   PDT. Current Control Surface is 72,429,586 bytes with SHA-256
   `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`;

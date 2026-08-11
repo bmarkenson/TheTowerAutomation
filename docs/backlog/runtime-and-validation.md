@@ -946,7 +946,11 @@ stages:
       preserving the operator-owned Pause; all five current receipts matched
       their values and request IDs, Action Authority remained `paused`, the
       terminal policy was acknowledged, and Strategy Scope contained no false
-      pending state. No device input or control refresh request was used.
+      pending state. The promotion smoke used no device input or control
+      refresh request. A separately issued Start Battle request then completed
+      at 20:02 PDT; a read-only follow-up found the same runtime healthy and
+      `RUNNING`, with exact replacement state and Strategy receipts and all
+      five current acknowledgements true.
     - [x] The complete revision-37 Windows package was published from exact
       `3460d5c`. Current Control Surface is 72,429,586 bytes with SHA-256
       `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`;
