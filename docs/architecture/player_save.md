@@ -771,7 +771,7 @@ degraded evidence.
 
 | Workflow | Acquisition and binding | Failure/authority result |
 | --- | --- | --- |
-| Active or resumable **Attach to Battle** | After exact intent and explicit Enable where needed, the guarded serializer backgrounds the verified active battle, requests one stable `forced_serialization` bundle for the exact target generation, restores `RUNNING`, and asks Activity Continuity to bind the final persisted scope. | A usable save binds active-round and structural History identity. If the source is restored but the save or mapping is unusable, Activity Continuity opens Battle History and Attach completes observation-only with a bound UI receipt; No Strategy and its supported UI monitors remain Enabled. Before-background loss or any restoration, owner, target, scope, or authority loss blocks input and leaves the workflow Paused. |
+| Active or resumable **Attach to Battle** | The request freezes the accepted selected Strategy definition. After exact intent and explicit Enable where needed, the guarded serializer backgrounds the verified active battle, requests one stable `forced_serialization` bundle for the exact target generation, restores `RUNNING`, and asks Activity Continuity to bind the final persisted scope. | A usable save binds active-round and structural History identity. If the source is restored but the save or mapping is unusable, Activity Continuity opens Battle History. No Strategy becomes an intentional observer; a kind/tier-compatible selection becomes active; and an incompatible or unprovable selection becomes a degraded observer pending the next safe boundary. Configuration and reporting failures complete degraded without repair or a global hold. Before-background loss or any restoration, owner, target, scope, authority, or uncertain-input loss is catastrophic and leaves the workflow Paused. |
 | **Return Control** from active or Home Resume | Return first refreshes passive observation while the acknowledged indefinite Pause remains authoritative. A later explicit Enable grants only the guarded Return hold; Home Resume is restored to the same battle, then the running attachment serializer and exact binding above are attempted. | A usable save reconciles mapped checks after profile and one-run skips are removed from the effective requirements. A mismatch completes Return with exact degraded evidence and releases automation; it does not re-Pause or retain capture authority. If the save is unusable after safe restoration, Battle History plus every supported active-Strategy UI verifier becomes the reconciliation source and follows the same nonblocking rule. |
 | **Return Control** at Home New | The existing Home preflight owner requests a new forced serialization for the same target and activity scope. | A usable save proves no active round and resolves mapped checks. A safely restored unusable save automatically runs every supported Home configuration check. Mismatches are repaired immediately at this safe boundary; unavailable or exhausted repair completes Return with the exact degraded failure and releases automation. Only catastrophic loss of control authority or exact-target ownership, unproved source restoration after lifecycle input, or an uncertain input result terminalizes the exact Return Paused. |
 | **Return Control** at Game Over, including manual Surrender | The preferred route consumes the lifecycle-issued current-process `natural_boundary` bundle, binding exact target generation, activity scope, terminal observation, structural History transition, and mapped cause. | If that save evidence is unavailable or unusable at the still-bound Game Over boundary, Return uses the full Game Stats, Perks, and More Stats UI collector and preserves the selected terminal route and action authority. Conflicting owner/target/scope evidence still blocks input. Tournament Results and unknown evidence are not advertised as Return boundaries. |
@@ -788,6 +788,10 @@ A full UI fallback instead rechecks the live runtime, target generation,
 activity scope, observation, and process-local claim before each continuation.
 If that context or private claim is gone, the workflow stops safely instead of
 opening UI from ledger or cached data.
+A terminal Attach record with `reporting_status: unavailable` is not a replay
+receipt. It records that the exact process-local adoption succeeded while the
+durable receipt could not be written; a restarted process cannot reconstruct
+input authority from that marker.
 
 The terminal History projector now proves the structural append or capped
 rollover once, independently of completed-report semantics. A successful
@@ -878,11 +882,12 @@ First Perk Choice, Perk Bans, and Perk Auto Pick order retain their
 round-invariant class: a mismatch is
 recorded and reported but is nonblocking because it cannot be repaired for the
 active battle. A fully observed UI fallback mismatch for one of those fields
-has the same result. Point-in-time and current-configuration mismatches use an
-available guarded in-battle repair or the strategy mismatch policy. Every
-profile or run waiver is applied before attachment reconciliation, so a waived
-fact is neither consumed nor reported as a mismatch. Every source and
-disposition remains explicit in session evidence. No attachment
+has the same result. Point-in-time and current-configuration mismatches are
+also observational during Attach: supported validators measure but do not
+change the current battle. Every profile or run waiver is applied before
+attachment reconciliation, so a waived fact is neither consumed nor reported
+as a mismatch. Every source and disposition remains explicit in session
+evidence. No attachment
 path adds game-Home repair, another Android lifecycle action, another save
 read, or Surrender authority.
 

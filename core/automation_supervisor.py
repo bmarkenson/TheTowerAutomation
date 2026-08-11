@@ -321,6 +321,42 @@ class AutomationSupervisor:
             normalized_request_id,
         )
 
+    def defer_strategy_request_to_next_boundary(
+        self,
+        strategy: str,
+        request_id: object,
+        *,
+        source: str = "runtime-strategy-deferral",
+    ) -> bool:
+        """Persistently downshift one exact active-battle request."""
+
+        normalized_strategy = str(strategy or "").strip().lower()
+        normalized_request_id = str(request_id or "").strip()
+        try:
+            directives = self._control_store.defer_strategy_request_to_next_boundary(
+                normalized_strategy,
+                normalized_request_id,
+                source=source,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[CTRL] Could not defer active-battle Strategy request to "
+                f"the next boundary: {exc}",
+                "WARN",
+            )
+            return False
+        if directives is None:
+            return False
+        parsed = self._parse_strategy_request(directives)
+        if parsed != (
+            normalized_strategy,
+            normalized_request_id,
+            "next_boundary",
+        ):
+            return False
+        self._strategy_request = parsed
+        return True
+
     @property
     def control_request_identity(self) -> Dict[str, object]:
         """Return the exact state and terminal-policy directives in force."""

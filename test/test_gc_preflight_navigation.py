@@ -1233,7 +1233,7 @@ def test_complete_mutable_save_mismatch_blocks_without_confirmation_ui():
     assert "navigation.menu_modules" not in ui.visible_taps
 
 
-def test_saved_poison_stun_mismatch_drives_guarded_in_battle_repair():
+def test_saved_poison_stun_mismatch_is_reported_without_attached_repair():
     ui = _FakeUi()
     carried = {
         "cards_deck": "Farm",
@@ -1299,14 +1299,16 @@ def test_saved_poison_stun_mismatch_drives_guarded_in_battle_repair():
         ensure_poison_swamp_stun_fn=ensure_stun,
         player_save_preflight=bound,
         stay_in_battle=True,
+        allow_repair=False,
         sleep_fn=lambda _seconds: None,
     )
 
-    assert result.status is GcPreflightNavigationStatus.COMPLETE
-    assert result.evidence is not None and result.evidence.valid
-    assert repairs == ["off"]
+    assert result.status is GcPreflightNavigationStatus.MISMATCH
+    assert result.evidence is not None and not result.evidence.valid
+    assert repairs == []
     assert result.evidence.as_dict()["ultimate_weapons"]["source"] == "mixed"
-    assert ui.swipes == [("towards_top", "extended")] * 3
+    assert ui.swipes[:3] == [("towards_top", "extended")] * 3
+    assert ui.swipes[3:] == [("towards_bottom", "medium")] * 5
 
 
 def test_saved_spotlight_missiles_off_blocks_without_confirmation_ui():
@@ -1376,7 +1378,7 @@ def test_saved_spotlight_missiles_off_blocks_without_confirmation_ui():
     assert ui.swipes == []
 
 
-def test_saved_auto_pick_mismatch_drives_guarded_in_battle_repair():
+def test_saved_auto_pick_mismatch_is_measured_without_attached_repair():
     ui = _FakeUi()
     carried = {
         "modules": dict(MODULE_REQUIREMENTS),
@@ -1422,16 +1424,17 @@ def test_saved_auto_pick_mismatch_drives_guarded_in_battle_repair():
         measure_auto_pick_fn=measure,
         player_save_preflight=bound,
         stay_in_battle=True,
+        allow_repair=False,
         sleep_fn=lambda _seconds: None,
         validate_fn=lambda **_kwargs: SimpleNamespace(
-            valid=True,
+            valid=False,
             deferred_checks=(),
             reported_attachment_mismatches={},
         ),
     )
 
-    assert result.status is GcPreflightNavigationStatus.COMPLETE
-    assert ui.static_taps.count("buttons.perks:auto_pick") == 1
+    assert result.status is GcPreflightNavigationStatus.MISMATCH
+    assert ui.static_taps.count("buttons.perks:auto_pick") == 0
     assert "navigation.open_perks" in ui.static_taps
     assert ui.swipes == []
 

@@ -302,7 +302,10 @@ handler activity, or an allowed authority flag, so a noisy or rotated action
 log cannot turn a healthy long-running runtime into false `pending` state.
 
 **Start Battle** is enabled only for fresh verified Home New Battle evidence;
-**Attach to Battle** is enabled only for fresh active or resumable evidence.
+**Attach to Battle** is enabled only for fresh active or resumable evidence and
+only after the visible Strategy selection has been accepted by Linux. A dirty
+selection or an in-flight Strategy request disables Attach so the operator can
+never request one profile while the server snapshots another.
 Linux revalidates the exact runtime, target, activity scope, and boundary and
 reports unavailable, requested, awaiting-enable, acknowledged, rejected, or
 interrupted state. A verified Home tap appears as `action_dispatched` and keeps
@@ -317,12 +320,22 @@ at Tournament Results, unknown state, or without exact target/scope binding
 rather than advertising an incomplete workflow. A failed Home New refresh is
 recorded once as failed/interrupted and does not repeat background/foreground
 input on later status frames.
-A Home UI repair that exhausts after a successful save appears as
-`awaiting_manual_correction` with the failed check and reason. Automation stays
-Paused; after making that manual correction, Enable requests a new save rather
-than replaying the retained receipt. Pause, Stop, or Take Manual Control during
-Home setup yields before cleanup input, and only the same original workflow
-may restore Home on a later Enabled observation.
+A Home UI repair that exhausts after a successful save appears as degraded
+with the failed check and reason, then releases automation. A later safe Home
+boundary can retry normal profile setup. Pause, Stop, or Take Manual Control
+during Home setup yields before cleanup input, and only the same original
+workflow may restore Home on a later Enabled observation.
+
+Attach snapshots the accepted Strategy definition. No Strategy intentionally
+observes; a proved compatible selection becomes active; and an incompatible or
+unprovable selection observes degraded while remaining pending for the next
+safe boundary. **Switch this battle** is disabled for that degraded observer;
+Linux also downshifts any raced request to the next safe boundary. Intentional
+No Strategy observation remains eligible for a later explicit switch. The
+attached validation pass never repairs configuration. A
+recoverable validation or reporting failure keeps automation enabled and marks
+the battle degraded; only a catastrophic authority, target, restoration, or
+uncertain-input failure Pauses.
 
 The manual Surrender selector belongs to Take Manual Control. The default
 excludes manual Surrender stats and writes only a save-backed nonrepresentative
@@ -353,7 +366,8 @@ and Home-only gates wait for the next genuine boundary. Selected, current, and
 pending values remain separate.
 
 Current, pending-next-boundary, pending-active-adoption, and next-start Strategy
-labels come from Linux `control_model.strategy_scope`. Missing or contradictory
+labels, plus the current battle's degradation marker, come from Linux
+`control_model.strategy_scope`. Missing or contradictory
 legacy Strategy acknowledgements do not reconstruct or override that scope.
 Acknowledgement-based reconstruction is retained only for a server that does
 not advertise `better_control_model_v2`. A stopped process still shows the
@@ -893,8 +907,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 37, `current_battle_perks_v1`,
+current Windows build requires revision 38, `current_battle_perks_v1`,
 `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
+`strategy_aware_attach_v1`,
 `save_backed_setup_capture_v2`, `save_mapping_integration_v1`,
 `host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,
@@ -965,18 +980,21 @@ already configured:
    only the displayed feature targets become unstaged changes; keep the
    uncommitted/unpromoted/pending-validation result visible and confirm no
    automatic retry, service restart, runtime-control change, or device input.
-9. For revision 37, connect to a fresh exact-owner runtime snapshot after the
+9. For revision 38, connect to a fresh exact-owner runtime snapshot after the
    relevant acknowledgement lines have moved more than 262 KiB behind the log
    tail, then after log rotation. Confirm Action Authority, terminal policy,
    speed, ADB, setup-capture availability, and an acknowledged indefinite Pause
    remain stable without issuing a control request to refresh the display.
 10. Confirm Strategy Scope shows the Linux-authored startup default, current
-   battle, pending next boundary, and explicit pending active adoption even when
+   battle, current degradation, pending next boundary, and explicit pending
+   active adoption even when
    compatibility acknowledgements are absent or contradictory. Repeat with a
    stopped process, a dirty local selection, a failed/retried request, and a
-   same-ID publication; polling must preserve those existing behaviors.
+   same-ID publication; polling must preserve those existing behaviors. Confirm
+   Attach is disabled while the visible selection is dirty or its request is in
+   flight, then enabled after exact acknowledgement.
 
-Revision-37 items 9 and 10 remain pending until they are actually exercised in
+Revision-38 items 9 and 10 remain pending until they are actually exercised in
 a Windows WPF session. Linux cross-builds and portable compatibility tests do
 not count as that runtime validation, and no live control or device request is
 needed merely to refresh these displays.

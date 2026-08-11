@@ -81,7 +81,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 37
+CONTROL_SURFACE_REVISION = 38
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -108,6 +108,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
+    "strategy_aware_attach_v1",
     "strategy_authoring_profile_lifecycle_v1",
     "strategy_authoring_local_loadout_editors_v1",
     "strategy_authoring_preset_local_copy_v1",
@@ -1628,8 +1629,6 @@ class ControlSurfaceService:
                         current.get("control_model", {})
                         .get("strategy_scope", {})
                         .get("startup_default")
-                        if action == "start_battle"
-                        else None
                     ),
                     source="control-surface",
                 )
@@ -4084,7 +4083,13 @@ class ControlSurfaceService:
             return {
                 "available": True,
                 "code": "available",
-                "reason": "the explicit intent matches fresh observation",
+                "reason": (
+                    "Attach will use the accepted selected Strategy; a battle "
+                    "that is incompatible or cannot be verified will continue "
+                    "observation-only and degraded"
+                    if action_key == "attach_battle"
+                    else "the explicit intent matches fresh observation"
+                ),
             }
 
         take_manual_available = bool(
@@ -4645,6 +4650,14 @@ class ControlSurfaceService:
                 "request_id": control.get("strategy_request_id"),
                 "observation_only": bool(
                     runtime_strategy_scope.get("observation_only") is True
+                ),
+                "degradation": (
+                    dict(runtime_strategy_scope["degradation"])
+                    if isinstance(
+                        runtime_strategy_scope.get("degradation"),
+                        Mapping,
+                    )
+                    else None
                 ),
             },
             "when_battle_ends": {

@@ -46,6 +46,12 @@ and later successful validation clears that degraded state. If an old blocking
 dialog remains visible after status refresh, close it without choosing an
 option; current runtimes consume that legacy request automatically.
 
+For Attach, every configuration rule is observational even when its ordinary
+in-battle contract can repair a value. A mismatch, missing validator result,
+unsupported action, or validator exception completes degraded and releases the
+attachment hold. The attached battle is never changed to make its selected
+Strategy match.
+
 ## Authority and save-first behavior
 
 Every choice is requirement-scoped. Retry and waiver recapture current

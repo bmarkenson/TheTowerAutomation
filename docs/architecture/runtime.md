@@ -294,7 +294,7 @@ independent projections:
 | Boundary | Acquisition or reuse | Consumers | Failure policy |
 | --- | --- | --- | --- |
 | Home `NEW_BATTLE` under `save_first` | Consume a valid one-use terminal History handoff when present. If current configuration is requested, or an authoritative History baseline has no handoff, perform one guarded `forced_serialization` even when the configuration requirement set is empty. | Configuration reconciliation, structural History baseline, and every eligible Home projection. | A safely restored acquisition failure may use the existing guarded UI fallback. Restoration, ownership, context, or control ambiguity blocks later input. |
-| Replacement process attached at `RUNNING` | Prefer one guarded `forced_serialization`; when its source is safely restored but its data or mapping is unusable, bind the established Battle History/UI route instead. | Save-backed active identity, structural History continuity, temporally classified actual-loadout observations, Perk prefix, and optional audit projection; otherwise UI continuity plus supported UI monitoring. | Data, revision, mapping, or projection failure automatically selects UI and completes observation-only attachment. Source-restoration, owner, target, scope, or control ambiguity blocks input. |
+| Replacement process attached at `RUNNING` | Freeze the accepted selected Strategy definition, then prefer one guarded `forced_serialization`; when its source is safely restored but its data or mapping is unusable, bind the established Battle History/UI route instead. | Save-backed active identity, structural History continuity, temporally classified actual-loadout observations, Perk prefix, and optional audit projection; otherwise UI continuity plus supported UI monitoring. The final attachment is intentional No Strategy observation, an exact compatible Strategy, or incompatible/unprovable degraded observation. | Data, revision, mapping, projection, validation, or reporting failure completes degraded and releases automation. Source-restoration, owner, target, scope, control, or uncertain-input ambiguity is catastrophic and may Pause. |
 | `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, optional audit projection, and Tournament conditions. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
 | Ordinary monitoring | Scheduled `passive_stable_read`, independent of audit opt-in. | The Perk monitor and, when enabled, audit receipts consume the same immutable bundle; other consumers require their own lag-tolerant temporal class. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
@@ -832,19 +832,22 @@ First Perk Choice, Perk Bans, and Perk Auto Pick order are immutable for the
 active battle, so their mismatch is
 logged as nonblocking session evidence and the pass continues. The same rule
 applies when a fallback UI produces a fully observed mismatch for one of those
-immutable fields. A mutable mismatch follows its existing guarded in-battle
-repair when one exists, such as Auto Pick, or the strategy's mismatch decision
-without a redundant confirmation traversal. Profile and run waivers are
-applied before attachment reconciliation; a waived fact is not consumed,
-warned, or made blocking. Ultimate Weapon component
+immutable fields. A mutable mismatch is also observational at this attachment
+boundary. Auto Pick, Poison Swamp Stun, Damage Slider, Orb Distance, and every
+other configuration action are downshifted to measurement; an unavailable
+result, validator exception, or mismatch records degraded evidence and
+completes the one-shot check. Profile and run waivers are applied before
+attachment reconciliation; a waived fact is not consumed, warned, or made
+blocking. Ultimate Weapon component
 evidence records its save/UI source explicitly.
 
 Every process attachment stays in the current battle. It gains no game-Home
 route, Android lifecycle action, second save read, Home-repair request, or
 Surrender authority. Once that selective inventory pass reaches a conclusive
 result, the explicitly
-`run_when_attached` battle-only rules enforce Damage Slider `100%` and the
-configured Orb Distance for an authoritative configured Attack Range; a
+`run_when_attached` battle-only rules observe Damage Slider and the configured
+Orb Distance pair for an authoritative configured Attack Range; they do not
+change either value. A
 readable unconfigured Range is preserved without opening Distance Adjuster.
 The attachment path never selects a Home preset or equips a loadout. The
 separate guarded process-reload
@@ -1057,6 +1060,10 @@ workflow evidence. At a boundary where correction is already safe, the runtime
 tries the bounded repair immediately. Otherwise it skips only the unsafe or
 unsupported action, records the exact problem as degraded evidence, and keeps
 unrelated strategy, handler, collector, and lifecycle automation eligible.
+An Attach request follows that policy after it has safely restored and adopted
+the exact battle: attachment-validation or receipt-reporting failure cannot
+retain the global workflow hold. The exact process-local claim remains
+authoritative while status reporting retries.
 
 Configuration degradation carried by a running battle has one global terminal
 rule. When `NEXT_BATTLE` is already in force as its Game Over is handled,
@@ -1410,8 +1417,8 @@ warning text in `actions.log`.
   `next_run` adopts the first active/resumable battle and structurally
   suppresses plan rules tagged `run_initialization` or `session_preflight`,
   except explicitly declared `run_when_attached` checks. Tournament stages its
-  read-only inventory check first, then permits its guarded battle-only Damage
-  Slider and Orb Distance rules.
+  read-only inventory check first, then measures its battle-only Damage Slider
+  and Orb Distance rules without changing the attached battle.
   It does not seed their completion variables. Game Over, Tournament Results,
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
@@ -1428,9 +1435,12 @@ warning text in `actions.log`.
   reads with an exact active-round identity. If source restoration succeeds but
   the save is absent, unsupported, structurally incompatible, or otherwise
   unprojectable, the owner immediately opens the guarded Battle History route
-  and completes observation-only attachment with a target/scope-bound UI
-  receipt. A save baseline uses its source-specific fingerprint and
-  append/rollover evidence. A UI baseline bridges only through normalized
+  and completes continuity with a target/scope-bound UI receipt. The frozen
+  selected Strategy is then classified independently: No Strategy observes
+  intentionally, a proven compatible selection becomes active, and an
+  incompatible or unprovable selection observes degraded while remaining
+  pending for the next safe boundary. A save baseline uses its source-specific
+  fingerprint and append/rollover evidence. A UI baseline bridges only through normalized
   Tier/Wave/Battle Date; agreement migrates it, explicit mismatch proves a
   later scope, and ambiguous or insufficient evidence starts an unverified
   conservative scope. Source fingerprints are never compared across mappings.
@@ -1481,13 +1491,19 @@ warning text in `actions.log`.
   restoration, attachment fails toward a conservative new scope; if
   restoration itself is unverified, the route retries without releasing other
   inputs.
-- Explicit mid-run strategy adoption uses the same attachment boundary. Fresh
-  `RUNNING` or Home `RESUME_BATTLE` evidence may replace normal strategy
-  behavior and report identity without a restart, but run initialization,
-  session preflight, and Home-only checks stay deferred, except for an
-  explicitly declared `run_when_attached` check. A request encountered at Home
-  `NEW_BATTLE` follows normal boundary replacement instead and runs the
-  complete startup-gate sequence.
+- Attach owns an immutable Strategy request snapshot through terminalization.
+  A later Strategy selection cannot overwrite it; the later request remains a
+  next-safe-boundary change. After Attach completes, an incompatible or
+  unprovable degraded observer cannot be converted by an active-battle request;
+  the exact durable request is downshifted to the next boundary. A separate
+  explicit mid-run adoption for an intentional observer or an already
+  Strategy-run battle may replace normal strategy behavior and report identity
+  without a restart, but run initialization, session preflight, and Home-only
+  checks stay deferred. Any current-battle degradation remains attached to the
+  run. Its explicitly declared
+  `run_when_attached` configuration checks are observational. A request
+  encountered at Home `NEW_BATTLE` follows normal boundary replacement instead
+  and runs the complete startup-gate sequence.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.

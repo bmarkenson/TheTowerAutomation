@@ -345,6 +345,96 @@ class StartupLoggingTests(unittest.TestCase):
 
 
 class RunBoundaryTests(unittest.TestCase):
+    def test_running_degradation_merges_sources_checks_and_attachment_details(self):
+        manager = MissionManager(None, get_strategy("farm_t19"))
+        manager.start()
+
+        manager.mark_running_configuration_degraded(
+            source="attachment_applicability",
+            reason="selected Tier does not match",
+            failed_checks=("battle_tier",),
+            details={"selected_strategy": "farm_t19", "observed_tier": 18},
+        )
+        manager.mark_running_configuration_degraded(
+            source="attachment_observation",
+            reason="damage slider could not be verified",
+            failed_checks=("damage_slider",),
+        )
+
+        self.assertEqual(
+            manager.running_configuration_degradation(),
+            {
+                "schema_version": 1,
+                "sources": [
+                    "attachment_applicability",
+                    "attachment_observation",
+                ],
+                "reason": (
+                    "selected Tier does not match; "
+                    "damage slider could not be verified"
+                ),
+                "failed_checks": ["battle_tier", "damage_slider"],
+                "details": {
+                    "selected_strategy": "farm_t19",
+                    "observed_tier": 18,
+                },
+            },
+        )
+
+    def test_resolved_reporting_degradation_preserves_configuration_problem(self):
+        manager = MissionManager(None, get_strategy("farm_t19"))
+        manager.start()
+        manager.mark_running_configuration_degraded(
+            source="attachment_reporting",
+            reason="workflow report is pending",
+            failed_checks=("workflow_reporting",),
+            details={"reporting_status": "retrying"},
+        )
+        manager.mark_running_configuration_degraded(
+            source="attachment_applicability",
+            reason="selected Tier does not match",
+            failed_checks=("battle_tier",),
+            details={"observed_tier": 18},
+        )
+
+        self.assertTrue(
+            manager.resolve_running_configuration_degradation(
+                source="attachment_reporting",
+                failed_checks=("workflow_reporting",),
+                detail_keys=("reporting_status",),
+            )
+        )
+
+        self.assertEqual(
+            manager.running_configuration_degradation(),
+            {
+                "schema_version": 1,
+                "sources": ["attachment_applicability"],
+                "reason": "selected Tier does not match",
+                "failed_checks": ["battle_tier"],
+                "details": {"observed_tier": 18},
+            },
+        )
+
+    def test_active_battle_strategy_switch_preserves_running_degradation(self):
+        manager = MissionManager(None, get_strategy("farm_t19"))
+        manager.start()
+        manager.mark_running_configuration_degraded(
+            source="attachment_configuration",
+            reason="attached controls do not match",
+            failed_checks=("damage_slider",),
+        )
+
+        manager.adopt_strategy_for_active_battle(get_strategy("farm_t18"))
+
+        degradation = manager.running_configuration_degradation()
+        self.assertIsNotNone(degradation)
+        self.assertEqual(
+            degradation["sources"],
+            ["attachment_configuration"],
+        )
+        self.assertEqual(degradation["failed_checks"], ["damage_slider"])
+
     def test_degraded_battle_rearms_profile_setup_for_terminal_home_repair(self):
         manager = MissionManager(None, get_strategy("farm_t19"))
         manager.start()
@@ -669,6 +759,66 @@ class RunBoundaryTests(unittest.TestCase):
         )
         app._mission_mgr.replace_strategy_at_boundary.assert_not_called()
 
+    def test_active_strategy_request_cannot_replace_an_inflight_attach_snapshot(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._supervisor = MagicMock()
+        app._supervisor.battle_workflow = {
+            "intent": "attach_battle",
+            "status": "ready",
+        }
+        app._pending_strategy_request = (
+            "farm_t18",
+            "request-after-attach",
+            "active_battle",
+        )
+        app._strategy_boundary_confirmed = False
+
+        app._process_strategy_boundary({"state": "RUNNING"})
+
+        app._mission_mgr.adopt_strategy_for_active_battle.assert_not_called()
+        self.assertEqual(
+            app._pending_strategy_request,
+            ("farm_t18", "request-after-attach", "active_battle"),
+        )
+
+    def test_active_strategy_request_cannot_convert_degraded_attach_observer(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._mission_mgr.strategy = None
+        app._mission_mgr.running_configuration_degradation.return_value = {
+            "sources": ["attachment_applicability"],
+            "failed_checks": ["battle_tier"],
+        }
+        app._supervisor = MagicMock()
+        app._supervisor.battle_workflow = {
+            "intent": "attach_battle",
+            "status": "completed",
+        }
+        app._supervisor.defer_strategy_request_to_next_boundary.return_value = (
+            True
+        )
+        app._pending_strategy_request = (
+            "farm_t18",
+            "request-after-attach",
+            "active_battle",
+        )
+        app._strategy_boundary_confirmed = False
+
+        with patch("core.app.log"):
+            app._process_strategy_boundary({"state": "RUNNING"})
+
+        app._mission_mgr.adopt_strategy_for_active_battle.assert_not_called()
+        app._supervisor.defer_strategy_request_to_next_boundary.assert_called_once_with(
+            "farm_t18",
+            "request-after-attach",
+            source="runtime-attachment-strategy-deferral",
+        )
+        self.assertEqual(
+            app._pending_strategy_request,
+            ("farm_t18", "request-after-attach", "next_boundary"),
+        )
+
     def test_active_adoption_request_at_new_battle_uses_boundary_replacement(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()
@@ -894,6 +1044,69 @@ class DeferredStartupGateTests(unittest.TestCase):
             }
         )
 
+    def test_attached_strategy_without_preflight_has_no_synthetic_hold(self):
+        strategy = YamlStrategy(
+            {
+                "meta": {"name": "passive_strategy", "family": "farm"},
+                "vars": {},
+                "rules": [],
+            }
+        )
+        manager = MissionManager(
+            None,
+            None,
+            await_initial_battle_intent=True,
+        )
+        manager.start()
+
+        self.assertTrue(
+            manager.authorize_initial_battle_intent(
+                "attach_battle",
+                request_id="attach-passive",
+                strategy=strategy,
+            )
+        )
+        manager.maybe_run_start({"state": "RUNNING"})
+
+        self.assertTrue(manager.active_battle_observed())
+        self.assertFalse(manager.attached_validation_requested())
+        self.assertFalse(manager.session_preflight_pending())
+
+    def test_attached_gate_action_carries_read_only_provenance_and_stays_done(self):
+        strategy = self._strategy()
+        session_rule = next(
+            rule for rule in strategy.rules if rule["name"] == "session_gate"
+        )
+        session_rule["run_when_attached"] = True
+        session_rule["do"] = [{"type": "ultimate_ensure_state"}]
+        ctx = MissionContext(
+            data={
+                "startup_gates_deferred": True,
+                "mission_vars": {},
+            }
+        )
+        strategy.on_start(ctx)
+
+        actions = strategy.tick(ctx, object(), {"state": "RUNNING"})
+
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "ultimate_ensure_state",
+                    "_attachment_validation": True,
+                    "_attachment_rule_id": "session_gate",
+                }
+            ],
+        )
+        ctx.data["mission_vars"]["attached_validation_rule_dispositions"] = {
+            "session_gate": {"disposition": "suppressed_degraded"}
+        }
+        self.assertEqual(
+            strategy.tick(ctx, object(), {"state": "RUNNING"}),
+            [{"type": "normal_action"}],
+        )
+
     @classmethod
     def _v2_receipt(cls, strategy, *, run_id="current-run"):
         fingerprint = strategy.session_preflight_fingerprint()
@@ -956,6 +1169,10 @@ class DeferredStartupGateTests(unittest.TestCase):
                     "requirements": {"cards_deck": "Farm"},
                     "allow_repair": False,
                     "mismatch_policy": "block",
+                    "_attachment_validation": True,
+                    "_attachment_rule_id": (
+                        "validate_requested_attached_session_preflight"
+                    ),
                 }
             ],
         )
@@ -1003,6 +1220,25 @@ class DeferredStartupGateTests(unittest.TestCase):
             ),
             evidence=evidence,
         )
+
+    def test_degraded_attached_check_is_never_persisted_for_restart_reuse(self):
+        strategy = self._strategy()
+        manager = MissionManager(None, strategy)
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        mission_vars = manager.ctx.data["mission_vars"]
+        mission_vars["session_gate_done"] = True
+        mission_vars["gc_session_preflight_completed"] = True
+        mission_vars["gc_session_preflight_degraded"] = True
+        mission_vars["gc_session_preflight_evidence"] = self._report_evidence()
+
+        with patch(
+            "automation.missions.manager.record_activity_scope_session_preflight"
+        ) as record:
+            persisted = manager.persist_session_preflight_completion()
+
+        self.assertFalse(persisted)
+        record.assert_not_called()
 
     def test_unsafe_completed_report_is_not_persisted_or_warned_each_tick(self):
         strategy = self._strategy()
@@ -1376,28 +1612,10 @@ class DeferredStartupGateTests(unittest.TestCase):
         mission_vars["gc_session_preflight_completed"] = True
         actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
 
-        self.assertEqual(
-            actions,
-            [
-                {
-                    "type": "damage_slider_configure",
-                    "mode": "enforce",
-                    "value": "1E2%",
-                }
-            ],
-        )
-
-        mission_vars["damage_slider_checked"] = True
-        actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
-
         self.assertEqual(len(actions), 1)
-        self.assertEqual(actions[0]["type"], "orb_distance_configure")
-
-        mission_vars["orb_distance_checked"] = True
+        self.assertEqual(actions[0]["type"], "damage_slider_configure")
         self.assertFalse(manager.session_preflight_pending())
-        self.assertIsNone(
-            strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
-        )
+        self.assertFalse(strategy.is_session_preflight_complete(manager.ctx))
 
     def test_new_battle_home_ignores_attached_battle_choice(self):
         manager = MissionManager(

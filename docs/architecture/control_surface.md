@@ -112,9 +112,16 @@ agnostic.
   available only from fresh Home `RESUME_BATTLE` or active-battle evidence and
   never falls back to Start Battle. Attachment stays input-blocked before
   battle adoption while its exact forced-save identity validation is
-  unresolved. A valid save advances it to `ready` as observation-only; the
-  battle is adopted only after lifecycle confirmation. Selecting a Strategy
-  for that battle is a later explicit action and never grants Surrender.
+  unresolved. The accepted request freezes the complete selected Strategy
+  definition. After lifecycle confirmation, No Strategy becomes an intentional
+  observer; a proven kind/tier-compatible selection becomes the active
+  Strategy; and an incompatible or unprovable selection becomes a degraded
+  observer while remaining pending for the next safe boundary. Attachment
+  never grants Surrender or current-battle configuration repair. A later
+  active-battle Strategy request cannot convert that degraded observer: Linux
+  atomically retains the same request identity but changes its apply mode to
+  the next boundary, and the native client disables **Switch this battle**
+  while that observer state is reported.
 - Automation Enable alone never substitutes for that initial battle intent.
   While the process is waiting for Start Battle or Attach to Battle, Home
   observation may continue but ordinary Home save/configuration preflight,
@@ -190,18 +197,19 @@ expiry attempt.
 
 ## Better Control Model
 
-Server revision 37 retains the revision-30 `better_control_model_v1` and
+Server revision 38 retains the revision-30 `better_control_model_v1` and
 `save_backed_setup_capture_v1` for additive compatibility and advertises
 `better_control_model_v2`, `save_backed_setup_capture_v2`, and
-`runtime_control_acknowledgements_v1`. The additive `control_model` status object
-keeps five dimensions independent:
+`runtime_control_acknowledgements_v1`. Revision 38 additionally advertises
+`strategy_aware_attach_v1`. The additive `control_model` status object keeps
+five dimensions independent:
 
 | Dimension | Values and authority |
 | --- | --- |
 | Process lifecycle | `stopped`, `live`, or `unavailable`; only Start/Stop Automation changes it |
 | Action authority | requested directive, runtime acknowledgement, and effective `paused`, `enabled`, `pending`, `stopped`, `unknown`, or `unavailable` |
 | Observed game | fresh/stale/unavailable evidence classed as Home New Battle, Home Resume Battle, active battle, Game Over, Tournament Results, or unknown |
-| Strategy scope | startup default, active-battle Strategy, and pending next-boundary Strategy |
+| Strategy scope | startup default, active-battle Strategy, pending next-boundary Strategy, and the active run's degradation status/reasons |
 | When this battle ends | continue automatically, wait, or return/stay Home; `NEXT_BATTLE`, `WAIT`, and `HOME` remain compatibility values only |
 
 The status also carries exact workflow evidence, durable battle/manual-control
@@ -235,8 +243,9 @@ authority flag.
 
 The runtime also authors `control_model.strategy_scope` with the startup
 default, active-battle Strategy, pending next-boundary Strategy, optional
-pending active-battle adoption, and current Strategy request ID. The native
-client uses that scope for current/next/startup presentation whenever
+pending active-battle adoption, current Strategy request ID, and the active
+run's merged degradation sources, checks, reasons, and details. The native
+client uses that scope for current/next/startup/degraded presentation whenever
 `better_control_model_v2` is advertised. It reconstructs the older
 acknowledgement-based presentation only when that capability is genuinely
 absent; a missing or contradictory compatibility acknowledgement cannot
@@ -253,7 +262,7 @@ override an authoritative scope.
 | Live | enabled | Home New Battle with a terminal-bound continuation | no new request | revalidate the exact terminal-time state/policy request IDs, runtime, target generation, activity scope, and New Battle control; run normal new-run gates, dispatch exactly one verified New Battle, and consume the claim only after successful dispatch |
 | Live | enabled | verified Home control was tapped | acknowledged Start or ready resumable Attach | record `action_dispatched`; keep unrelated automation suppressed until the same battle is adopted, a definitive mismatch interrupts, or the 20-second launch window fails |
 | Live | paused | Home Resume Battle or active battle | Attach to Battle | `requested` → `awaiting_enable`; explicit Enable enters `validating_save` without adopting the battle |
-| Live | enabled | Home Resume Battle or active battle | Attach to Battle | prefer a stable exact-target save; if its source is safely restored but the data/mapping is unusable, bind guarded Battle History instead; then become observation-only `ready` without selecting a Strategy |
+| Live | enabled | Home Resume Battle or active battle | Attach to Battle | freeze the accepted Strategy definition; prefer a stable exact-target save and use guarded Battle History after safely restored unusable data; adopt as intentional No Strategy observer, compatible exact Strategy, or incompatible/unprovable degraded observer; never repair the attached battle |
 | Live | either | Game Over, Tournament Results, unknown, stale, or mismatched evidence | Start Battle or Attach to Battle | reject as unavailable/mismatched; never substitute the other workflow |
 | Live | enabled or paused | any fresh exact state | Take Manual Control | atomically request indefinite Pause; become `active` only after runtime acknowledgement |
 | Live | paused and manual control `active` | Home New, Home Resume, active battle, or Game Over with exact target/scope binding | Return Control | remain Paused; record passive observation; await explicit Enable |
@@ -1059,8 +1068,8 @@ Process request examples:
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  35 plus `better_control_model_v2` and
-  `runtime_control_acknowledgements_v1`;
+  38 plus `better_control_model_v2`,
+  `runtime_control_acknowledgements_v1`, and `strategy_aware_attach_v1`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
 - A read-only full-width **Perks** page showing the current run's
   monitor-validated saved inventory, level, and last selection wave in

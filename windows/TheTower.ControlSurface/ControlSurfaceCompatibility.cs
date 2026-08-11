@@ -28,7 +28,8 @@ internal sealed record StrategyScopePresentation(
     string? CurrentStrategy,
     string? PendingNextBoundary,
     string? PendingActiveBattle,
-    bool Authoritative)
+    bool Authoritative,
+    bool Degraded)
 {
     public string? PendingStrategy =>
         PendingActiveBattle ?? PendingNextBoundary;
@@ -58,7 +59,7 @@ internal static class ControlSurfaceCompatibility
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 37;
+    public const int MinimumServerRevision = 38;
 
     private static readonly string[] RequiredCapabilities =
     [
@@ -82,6 +83,7 @@ internal static class ControlSurfaceCompatibility
         "save_backed_setup_capture_v2",
         "save_mapping_integration_v1",
         "save_mapping_review_status_v1",
+        "strategy_aware_attach_v1",
         "strategy_action_gate_v1",
         "strategy_authoring_local_loadout_editors_v1",
         "strategy_authoring_preset_local_copy_v1",
@@ -123,6 +125,36 @@ internal static class ControlSurfaceCompatibility
         ControlSurfaceCompatibilityResult? compatibility) =>
         compatibility?.IsCompatible == true;
 
+    public static BetterControlActionAvailability ResolveAttachAvailability(
+        BetterControlActionAvailability serverAvailability,
+        bool strategySelectionDirty,
+        bool strategyRequestInFlight)
+    {
+        if (!serverAvailability.Available)
+        {
+            return serverAvailability;
+        }
+        if (strategyRequestInFlight)
+        {
+            return new BetterControlActionAvailability
+            {
+                Available = false,
+                Code = "strategy_selection_pending",
+                Reason = "Wait for Linux to accept the selected Strategy before attaching.",
+            };
+        }
+        if (strategySelectionDirty)
+        {
+            return new BetterControlActionAvailability
+            {
+                Available = false,
+                Code = "strategy_selection_unaccepted",
+                Reason = "Attach uses the accepted Strategy, so retry this selection or reselect the accepted Strategy first.",
+            };
+        }
+        return serverAvailability;
+    }
+
     public static StrategyScopePresentation ResolveStrategyScope(
         StatusResponse status,
         bool processActive,
@@ -145,7 +177,8 @@ internal static class ControlSurfaceCompatibility
                 processActive
                     ? NormalizeStrategy(scope?.PendingActiveBattle)
                     : null,
-                true);
+                true,
+                processActive && scope?.Degradation is not null);
         }
 
         var configured = NormalizeStrategy(configuredStrategy);
@@ -171,6 +204,7 @@ internal static class ControlSurfaceCompatibility
             current,
             pending && !activeRequest ? requested : null,
             activeRequest ? requested : null,
+            false,
             false);
     }
 

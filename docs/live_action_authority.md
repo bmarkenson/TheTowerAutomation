@@ -45,6 +45,12 @@ evidence and continue. Exhausted or unavailable repair releases its bounded
 owner. This does not alter the separately owned validation-battle exception
 above.
 
+Attach is always a read-only configuration boundary. Even a setting that is
+normally safe to change in battle is measured without mutation while Attach is
+adopting an existing battle. The selected compatible Strategy may continue its
+ordinary non-attachment behavior after adoption, but the attachment pass
+itself grants no repair authority.
+
 Poison Swamp Stun, Damage Slider, Orb Distance, and other supported in-battle
 changes use their typed, freshly verified safe-transition contracts in
 [`architecture/runtime.md`](architecture/runtime.md#matching-and-action-authority).

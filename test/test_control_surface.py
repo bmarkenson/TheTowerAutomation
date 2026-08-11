@@ -427,6 +427,49 @@ def test_control_store_persists_active_battle_strategy_adoption(tmp_path):
     )
 
 
+def test_control_store_defers_only_exact_active_battle_strategy_request(tmp_path):
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    accepted = store.set_strategy(
+        "farm_t18",
+        apply_mode="active_battle",
+        source="test",
+    )
+    request_id = accepted["strategy_request_id"]
+
+    assert store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        "stale-request",
+        source="test-deferral",
+    ) is None
+    assert store.status()["strategy_apply_mode"] == "active_battle"
+
+    deferred = store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        request_id,
+        source="test-deferral",
+    )
+
+    assert deferred is not None
+    assert deferred["strategy_apply_mode"] == "next_boundary"
+    assert deferred["strategy_request_id"] == request_id
+    assert deferred["updated_by"] == "test-deferral"
+
+    replacement = store.set_strategy(
+        "farm_t19",
+        apply_mode="active_battle",
+        source="newer-request",
+    )
+    assert store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        request_id,
+    ) is None
+    assert store.status()["strategy_request_id"] == replacement[
+        "strategy_request_id"
+    ]
+    assert store.status()["strategy_apply_mode"] == "active_battle"
+
+
 def test_control_store_rejects_unknown_strategy_apply_mode(tmp_path):
     with pytest.raises(ValueError, match="Strategy apply mode"):
         ControlDirectiveStore(tmp_path / "automation_ctl.json").set_strategy(
@@ -596,6 +639,7 @@ def test_runtime_acknowledgements_survive_more_than_tail_window_of_log_output(
         "pending_active_battle": None,
         "request_id": control["strategy_request_id"],
         "observation_only": False,
+        "degradation": None,
     }
 
 
@@ -705,6 +749,7 @@ def test_authoritative_strategy_scope_wins_over_legacy_acknowledgements(
         "pending_active_battle": None,
         "request_id": control["strategy_request_id"],
         "observation_only": False,
+        "degradation": None,
     }
 
 
@@ -2168,7 +2213,8 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 37" in native_compatibility
+    assert "MinimumServerRevision = 38" in native_compatibility
+    assert '"strategy_aware_attach_v1"' in native_compatibility
     assert '"confirmed_local_mapping_status_v1"' in native_compatibility
     assert "confirmed_local_mapping_status_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_review_status_v1"' in native_compatibility
@@ -2426,6 +2472,9 @@ def test_native_strategy_selection_auto_queues_and_retains_failed_intent():
     assert 'Content="Save startup default"' in native_xaml
     assert 'Content="Switch this battle"' in native_xaml
     assert '"Retry next battle"' in native_code
+    assert "private bool _strategyDegradedObserver;" in native_code
+    assert "&& !_strategyDegradedObserver" in native_code
+    assert "This attached battle must remain a degraded observer" in native_code
     assert "QueueStrategyButton.Visibility = !_strategyProcessActive" in native_code
     assert "private async void StrategySelectionBox_SelectionChanged" in native_code
     assert "if (_updatingStrategySelection)" in native_code

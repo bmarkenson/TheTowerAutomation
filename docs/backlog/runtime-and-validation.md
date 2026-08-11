@@ -572,6 +572,21 @@ stages:
 
 ## Runtime control
 
+- [ ] Complete the strategy-aware Attach production rollout.
+  - [x] Freeze the accepted resolved Strategy definition at the Attach request
+    boundary; adopt compatible battles under that exact Strategy and adopt
+    incompatible or unprovable battles as degraded observers without changing
+    the current battle.
+  - [x] Make attached configuration checks read-only, release recoverable
+    validation/reporting failures as degraded, publish degradation through the
+    control surface, and preserve Home-first repair for degraded Continue.
+  - [x] Require server revision 38 plus `strategy_aware_attach_v1` in the native
+    client, prevent Attach while the visible Strategy selection is dirty or in
+    flight, display active degradation in Strategy Scope, and prevent a
+    degraded Attach observer from being converted by **Switch this battle**.
+  - [ ] Complete repository validation, promote through `develop` and `main`,
+    restart production, publish the matching Windows build, and record fresh
+    live evidence without manufacturing a battle boundary.
 - [ ] Live-confirm the deployed paused Home manual-start repair from `8cf5548`:
   from verified `NEW_BATTLE`, keep Pause through
   the manual start, require passive `RUNNING`, then Resume. Confirm one guarded

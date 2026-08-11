@@ -96,18 +96,35 @@ guarded exact-target serialization and restores the source. A usable save
 binds active-round identity to the final activity scope. If the save is absent,
 uses an unsupported revision, has an incompatible shape, or cannot be
 projected after safe restoration, the runtime automatically uses guarded
-Battle History instead and writes a target/scope-bound UI receipt. `ready`
-means the existing battle is validated for observation-only attachment through
-one of those routes; it does not select a Strategy. A changed owner, target,
-scope, action authority, or unproved restoration still blocks input and leaves
-Automation Paused.
+Battle History instead. The Attach request freezes the complete accepted
+Strategy definition at the request boundary, so a later selection cannot
+change the battle being attached:
 
-To monitor and collect without changing the battle, leave the active Strategy
-as **No Strategy** after attachment. To apply the selected Strategy, use the
-separate **Switch this battle** action only after attachment completes. That
-adoption does not authorize Surrender. If the Strategy reports a configuration
-problem, the runtime records exact degraded evidence and continues the battle;
-it does not create a repair gate or Surrender permission.
+- **No Strategy** intentionally adopts the battle as an observer and is not by
+  itself degraded.
+- A selected Strategy whose battle kind and, for Farm, tier are proved
+  compatible becomes the active Strategy for that battle. A configuration
+  mismatch is recorded as degraded, but Attach does not repair the running
+  battle.
+- An incompatible or unprovable selected Strategy adopts the battle as a
+  degraded observer. The selection remains pending for the next safe battle
+  boundary.
+
+That degraded observer cannot later be turned into a Strategy-run battle with
+**Switch this battle**. The client disables the action when it has authoritative
+status; Linux independently downshifts any raced or older active-battle request
+to the next boundary without changing its request identity. Intentional **No
+Strategy** observation remains eligible for a later explicit switch.
+
+All attached-battle configuration checks are observational. They may inspect
+supported UI, but cannot change Damage Slider, Orb Distance, Auto Pick, Poison
+Swamp Stun, a preset, a loadout, or any other configuration. A check failure,
+unsupported field, unusable save after safe restoration, or status-reporting
+failure completes degraded and releases automation. Only loss of the exact
+owner, target, scope, action authority, source restoration, or certainty about
+a dispatched input is catastrophic and leaves Automation Paused. A failed
+receipt write never turns a successfully adopted battle into a global input
+hold; the runtime retains its exact process-local claim and retries reporting.
 
 ## Take and return manual control
 

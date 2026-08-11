@@ -79,6 +79,197 @@ def _reset_repair_mismatch_attempts(mv: Dict[str, Any]) -> None:
     mv["gc_session_preflight_repair_failure_key"] = ""
 
 
+def _record_attached_rule_disposition(
+    mv: Dict[str, Any],
+    *,
+    rule_id: str,
+    disposition: str,
+    action: str,
+) -> None:
+    """Make one attached-validation rule terminal for this attachment."""
+
+    if not rule_id:
+        return
+    dispositions = mv.setdefault("attached_validation_rule_dispositions", {})
+    if isinstance(dispositions, dict):
+        dispositions[rule_id] = {
+            "disposition": disposition,
+            "action": action,
+        }
+
+
+def _record_attached_observation_result(
+    mv: Dict[str, Any],
+    *,
+    check_id: str,
+    matched: bool,
+    reason: str,
+) -> None:
+    """Complete one attached read-only check and retain any degradation."""
+
+    mv[f"{check_id}_checked"] = True
+    if matched:
+        return
+
+    raw_failed_checks = mv.get("gc_session_preflight_failed_checks", ())
+    if not isinstance(raw_failed_checks, (list, tuple, set, frozenset)):
+        raw_failed_checks = ()
+    failed_checks = {
+        str(value).strip()
+        for value in raw_failed_checks
+        if str(value).strip()
+    }
+    failed_checks.add(check_id)
+    detail = str(reason or "attached observation unavailable").strip()
+    message = f"{check_id} attached observation: {detail}"
+    prior_reason = str(mv.get("gc_session_preflight_last_reason") or "").strip()
+    mv["gc_session_preflight_degraded"] = True
+    mv["gc_session_preflight_disposition"] = "continue_degraded"
+    mv["gc_session_preflight_failed_checks"] = sorted(failed_checks)
+    mv["gc_session_preflight_last_reason"] = (
+        "; ".join(dict.fromkeys((prior_reason, message)))
+        if prior_reason
+        else message
+    )
+    report = mv.get("gc_session_preflight_evidence")
+    report_payload = dict(report) if isinstance(report, Mapping) else {}
+    raw_report_checks = report_payload.get("failed_checks", ())
+    if not isinstance(raw_report_checks, (list, tuple, set, frozenset)):
+        raw_report_checks = ()
+    report_checks = {
+        str(value).strip()
+        for value in raw_report_checks
+        if str(value).strip()
+    }
+    report_checks.add(check_id)
+    attached_controls = report_payload.get("attached_control_checks")
+    attached_control_payload = (
+        dict(attached_controls)
+        if isinstance(attached_controls, Mapping)
+        else {}
+    )
+    attached_control_payload[check_id] = {
+        "valid": False,
+        "disposition": "continue_degraded",
+        "reason": detail,
+    }
+    report_payload.update(
+        {
+            "valid": False,
+            "degraded": True,
+            "disposition": "continue_degraded",
+            "failed_checks": sorted(report_checks),
+            "attached_control_checks": attached_control_payload,
+        }
+    )
+    mv["gc_session_preflight_evidence"] = report_payload
+
+    existing = mv.get("gc_running_configuration_degradation")
+    existing_payload = dict(existing) if isinstance(existing, Mapping) else {}
+    raw_explicit_checks = existing_payload.get("failed_checks", ())
+    if not isinstance(raw_explicit_checks, (list, tuple, set, frozenset)):
+        raw_explicit_checks = ()
+    explicit_checks = {
+        str(value).strip()
+        for value in raw_explicit_checks
+        if str(value).strip()
+    }
+    explicit_checks.add(check_id)
+    explicit_reason = str(existing_payload.get("reason") or "").strip()
+    raw_sources = existing_payload.get("sources", ())
+    if not isinstance(raw_sources, (list, tuple, set, frozenset)):
+        raw_sources = ()
+    explicit_sources = {
+        str(value).strip()
+        for value in raw_sources
+        if str(value).strip()
+    }
+    existing_source = str(existing_payload.get("source") or "").strip()
+    if existing_source:
+        explicit_sources.add(existing_source)
+    explicit_sources.add("attachment_observation")
+    raw_reasons_by_source = existing_payload.get("reasons_by_source")
+    reasons_by_source = (
+        {
+            str(key).strip(): str(value).strip()
+            for key, value in raw_reasons_by_source.items()
+            if str(key).strip() and str(value).strip()
+        }
+        if isinstance(raw_reasons_by_source, Mapping)
+        else {}
+    )
+    if (
+        existing_source
+        and explicit_reason
+        and existing_source not in reasons_by_source
+    ):
+        reasons_by_source[existing_source] = explicit_reason
+    prior_observation_reason = reasons_by_source.get(
+        "attachment_observation",
+        "",
+    )
+    reasons_by_source["attachment_observation"] = (
+        "; ".join(
+            dict.fromkeys((prior_observation_reason, message))
+        )
+        if prior_observation_reason
+        else message
+    )
+    existing_payload.update(
+        {
+            "schema_version": 1,
+            "source": "attachment_observation",
+            "sources": sorted(explicit_sources),
+            "reason": "; ".join(
+                dict.fromkeys(reasons_by_source.values())
+            ),
+            "reasons_by_source": reasons_by_source,
+            "failed_checks": sorted(explicit_checks),
+        }
+    )
+    mv["gc_running_configuration_degradation"] = existing_payload
+
+
+def _complete_session_preflight_degraded(
+    mv: Optional[Dict[str, Any]],
+    *,
+    reason: str,
+    failed_checks: Iterable[str] = (),
+) -> None:
+    """Release a recoverable validation failure under the global policy."""
+
+    if mv is None:
+        return
+    normalized_reason = str(reason or "validation unavailable").strip()
+    checks = sorted(
+        {
+            str(check_id).strip()
+            for check_id in failed_checks
+            if str(check_id).strip()
+        }
+    )
+    decision = decide_runtime_failure(RuntimeFailureKind.VALIDATION_UNAVAILABLE)
+    mv["gc_session_preflight_attempted"] = True
+    mv["gc_session_preflight_completed"] = True
+    mv["gc_session_preflight_blocked"] = False
+    mv["gc_session_preflight_degraded"] = True
+    mv["gc_session_preflight_disposition"] = decision.disposition.value
+    mv["gc_session_preflight_last_status"] = "unavailable"
+    mv["gc_session_preflight_last_reason"] = normalized_reason
+    mv["gc_session_preflight_failed_checks"] = checks
+    mv["gc_session_preflight_repair_required"] = False
+    mv["gc_session_preflight_repair_in_progress"] = False
+    mv["gc_session_preflight_restart_available"] = False
+    mv["gc_session_preflight_evidence"] = {
+        "valid": False,
+        "degraded": True,
+        "disposition": decision.disposition.value,
+        "failed_checks": checks,
+        "reason": normalized_reason,
+    }
+    _reset_repair_mismatch_attempts(mv)
+
+
 def _bind_save_backed_home_evidence(
     setup_evidence: Mapping[str, Any],
     player_save_preflight: Any,
@@ -221,12 +412,33 @@ def execute_actions(
     mv = None
     if ctx is not None:
         mv = ctx.data.setdefault("mission_vars", {})
+    attachment_context = bool(
+        ctx is not None
+        and (
+            ctx.data.get("startup_gates_deferred") is True
+            or ctx.data.get("manual_return_reconciliation_active") is True
+        )
+    )
     for act in actions or []:
+        t = None
+        attachment_validation = False
+        attachment_rule_id = ""
         try:
             t = (act or {}).get("type")
             is_strategy_action = bool((act or {}).get("_strategy"))
             if is_strategy_action and isinstance(act, dict):
                 act.pop("_strategy", None)
+            if isinstance(act, dict):
+                attachment_validation = bool(
+                    act.pop("_attachment_validation", False)
+                )
+                attachment_rule_id = str(
+                    act.pop("_attachment_rule_id", "") or ""
+                ).strip()
+            if attachment_validation and t == "target_priority_ensure":
+                # Attach may inspect this normally repairable setting, but the
+                # accepted battle must remain untouched.
+                t = "target_priority_observe"
 
             last_state = mv.get("last_detection_state") if mv is not None else None
 
@@ -254,6 +466,40 @@ def execute_actions(
                 log_mission(
                     f"[EXEC] Skip {t or 'unknown'} because action authority was lost",
                     "DEBUG",
+                )
+                continue
+
+            attachment_safe_actions = {
+                "damage_slider_configure",
+                "gc_session_preflight",
+                "orb_distance_configure",
+                "session_preflight",
+                "sleep",
+                "target_priority_observe",
+            }
+            if attachment_validation and t not in attachment_safe_actions:
+                action_name = str(t or "unknown").strip().lower() or "unknown"
+                check_id = f"attached_action_{action_name}"
+                if mv is not None:
+                    _record_attached_observation_result(
+                        mv,
+                        check_id=check_id,
+                        matched=False,
+                        reason=(
+                            f"action {action_name!r} has no read-only Attach "
+                            "disposition and was suppressed"
+                        ),
+                    )
+                    _record_attached_rule_disposition(
+                        mv,
+                        rule_id=attachment_rule_id,
+                        disposition="suppressed_degraded",
+                        action=action_name,
+                    )
+                log_mission(
+                    "[ATTACH] Suppressed non-read-only attached-validation "
+                    f"action {action_name!r}; Automation continues degraded",
+                    "WARN",
                 )
                 continue
 
@@ -390,7 +636,12 @@ def execute_actions(
                         "DEBUG",
                     )
                     continue
-                mode = str(act.get("mode") or "").strip().lower()
+                requested_mode = str(act.get("mode") or "").strip().lower()
+                mode = (
+                    "observe"
+                    if attachment_context and requested_mode == "enforce"
+                    else requested_mode
+                )
                 result = configure_damage_slider(
                     act.get("value"),
                     mode=mode,
@@ -402,6 +653,13 @@ def execute_actions(
                         mv["damage_slider_checked"] = result.success
                     elif mode == "observe":
                         mv["damage_slider_observed"] = True
+                        if attachment_context:
+                            _record_attached_observation_result(
+                                mv,
+                                check_id="damage_slider",
+                                matched=bool(result.success),
+                                reason=str(result.reason),
+                            )
                 log_mission(
                     "[DAMAGE_SLIDER] "
                     f"mode={mode} "
@@ -410,7 +668,7 @@ def execute_actions(
                     f"final={format_damage_percentage(result.final)} "
                     f"steps={result.steps} success={result.success} "
                     f"reason={result.reason}",
-                    "INFO" if result.success or mode == "observe" else "WARN",
+                    "INFO" if result.success else "WARN",
                 )
             elif t == "orb_distance_configure":
                 if is_strategy_action and last_state not in allowed_states:
@@ -420,7 +678,12 @@ def execute_actions(
                         "DEBUG",
                     )
                     continue
-                mode = str(act.get("mode") or "").strip().lower()
+                requested_mode = str(act.get("mode") or "").strip().lower()
+                mode = (
+                    "observe"
+                    if attachment_context and requested_mode == "enforce"
+                    else requested_mode
+                )
                 orb_distance_kwargs = {
                     "range_basis": act.get("range_basis"),
                     "extra": act.get("extra"),
@@ -443,6 +706,13 @@ def execute_actions(
                         mv["orb_distance_checked"] = result.success
                     elif mode == "observe":
                         mv["orb_distance_observed"] = True
+                        if attachment_context:
+                            _record_attached_observation_result(
+                                mv,
+                                check_id="orb_distance",
+                                matched=bool(result.success),
+                                reason=str(result.reason),
+                            )
                 log_mission(
                     "[ORB_DISTANCE] "
                     f"mode={mode} range={result.range_observed}/"
@@ -454,7 +724,7 @@ def execute_actions(
                     f"final=({result.final_extra},{result.final_workshop}) "
                     f"steps=({result.extra_steps},{result.workshop_steps}) "
                     f"success={result.success} reason={result.reason}",
-                    "INFO" if result.success or mode == "observe" else "WARN",
+                    "INFO" if result.success else "WARN",
                 )
             elif t == "target_priority_ensure":
                 if is_strategy_action and last_state not in allowed_states:
@@ -667,6 +937,24 @@ def execute_actions(
                 if mv is not None:
                     mv["target_priority_observed"] = True
                     mv["target_priority_observation"] = observation.as_dict()
+                    if attachment_validation:
+                        matched = bool(
+                            observation.observed
+                            and (
+                                observation.matches is True
+                                or expected_order is None
+                            )
+                        )
+                        _record_attached_observation_result(
+                            mv,
+                            check_id="target_priority",
+                            matched=matched,
+                            reason=(
+                                "the observed Target Priority did not match"
+                                if observation.observed
+                                else "Target Priority could not be observed"
+                            ),
+                        )
                 log_mission(
                     "[EXEC] target_priority_observe "
                     f"observed={observation.observed} matches={observation.matches}",
@@ -681,16 +969,30 @@ def execute_actions(
                     continue
                 requirements = act.get("requirements")
                 if not isinstance(requirements, dict):
+                    reason = "session preflight profile requirements are missing"
+                    _complete_session_preflight_degraded(
+                        mv,
+                        reason=reason,
+                        failed_checks=("session_preflight",),
+                    )
                     log_mission(
-                        "[SESSION_PREFLIGHT] Missing profile requirements",
-                        "ERROR",
+                        "[SESSION_PREFLIGHT] Missing profile requirements; "
+                        "Automation continues degraded",
+                        "WARN",
                     )
                     continue
                 validator = str(act.get("validator") or "farm").strip().lower()
                 if validator not in {"farm", "tournament"}:
+                    reason = f"unsupported session preflight validator {validator!r}"
+                    _complete_session_preflight_degraded(
+                        mv,
+                        reason=reason,
+                        failed_checks=("session_preflight",),
+                    )
                     log_mission(
-                        f"[SESSION_PREFLIGHT] Unsupported validator {validator!r}",
-                        "ERROR",
+                        "[SESSION_PREFLIGHT] Unsupported validator "
+                        f"{validator!r}; Automation continues degraded",
+                        "WARN",
                     )
                     continue
                 if mv is not None:
@@ -758,39 +1060,180 @@ def execute_actions(
                         )
                 if attached_route:
                     preflight_kwargs["stay_in_battle"] = True
-                if validator == "tournament":
-                    result = run_read_only_gc_preflight(
-                        effective_requirements,
-                        validate_fn=validate_tournament_session_preflight_screens,
-                        **preflight_kwargs,
+                if attached_route or "allow_repair" in act:
+                    preflight_kwargs["allow_repair"] = bool(
+                        act.get("allow_repair", True)
+                    ) and not attached_route
+                try:
+                    if validator == "tournament":
+                        result = run_read_only_gc_preflight(
+                            effective_requirements,
+                            validate_fn=(
+                                validate_tournament_session_preflight_screens
+                            ),
+                            **preflight_kwargs,
+                        )
+                    else:
+                        result = run_read_only_gc_preflight(
+                            effective_requirements,
+                            **preflight_kwargs,
+                        )
+                except Exception as exc:
+                    reason = f"session preflight validator failed: {exc}"
+                    _complete_session_preflight_degraded(
+                        mv,
+                        reason=reason,
+                        failed_checks=("session_preflight",),
                     )
-                else:
-                    result = run_read_only_gc_preflight(
-                        effective_requirements,
-                        **preflight_kwargs,
+                    log_mission(
+                        "[SESSION_PREFLIGHT] Validator failed; Automation "
+                        f"continues degraded: {exc}",
+                        "WARN",
                     )
+                    continue
                 evidence_payload = (
                     result.evidence.as_dict()
                     if result.evidence is not None
                     else {}
+                )
+                previous_evidence_payload = (
+                    mv.get("gc_session_preflight_evidence")
+                    if mv is not None
+                    else None
                 )
                 if mv is not None:
                     mv["gc_session_preflight_last_status"] = result.status.value
                     mv["gc_session_preflight_last_reason"] = result.reason
                     mv["gc_session_preflight_evidence"] = evidence_payload
                 if result.status is GcPreflightNavigationStatus.COMPLETE:
+                    reported_mismatches = evidence_payload.get(
+                        "reported_attachment_mismatches"
+                    )
+                    deferred_checks = evidence_payload.get("deferred_checks")
+                    attachment_degraded = bool(
+                        attached_route
+                        and (
+                            (
+                                isinstance(reported_mismatches, Mapping)
+                                and reported_mismatches
+                            )
+                            or (
+                                isinstance(deferred_checks, (list, tuple))
+                                and deferred_checks
+                            )
+                        )
+                    )
+                    attachment_failed_checks: set[str] = set()
+                    if isinstance(reported_mismatches, Mapping):
+                        attachment_failed_checks.update(
+                            str(check_id) for check_id in reported_mismatches
+                        )
+                    if isinstance(deferred_checks, (list, tuple)):
+                        attachment_failed_checks.update(
+                            str(check_id) for check_id in deferred_checks
+                        )
+                    existing_degradation = (
+                        mv.get("gc_running_configuration_degradation")
+                        if mv is not None
+                        else None
+                    )
+                    degradation_sources: set[str] = set()
+                    if isinstance(existing_degradation, Mapping):
+                        source = str(
+                            existing_degradation.get("source") or ""
+                        ).strip()
+                        if source:
+                            degradation_sources.add(source)
+                        raw_sources = existing_degradation.get("sources", ())
+                        if isinstance(
+                            raw_sources,
+                            (list, tuple, set, frozenset),
+                        ):
+                            degradation_sources.update(
+                                str(value).strip()
+                                for value in raw_sources
+                                if str(value).strip()
+                            )
+                    retained_attachment_observation = bool(
+                        attached_route
+                        and "attachment_observation" in degradation_sources
+                    )
+                    if retained_attachment_observation:
+                        attachment_degraded = True
+                        raw_existing_checks = existing_degradation.get(
+                            "failed_checks",
+                            (),
+                        )
+                        if isinstance(
+                            raw_existing_checks,
+                            (list, tuple, set, frozenset),
+                        ):
+                            attachment_failed_checks.update(
+                                str(check_id)
+                                for check_id in raw_existing_checks
+                                if str(check_id).strip()
+                            )
+                        if isinstance(previous_evidence_payload, Mapping):
+                            attached_controls = previous_evidence_payload.get(
+                                "attached_control_checks"
+                            )
+                            if isinstance(attached_controls, Mapping):
+                                evidence_payload[
+                                    "attached_control_checks"
+                                ] = copy.deepcopy(dict(attached_controls))
+                        evidence_payload.update(
+                            {
+                                "valid": False,
+                                "degraded": True,
+                                "disposition": "continue_degraded",
+                            }
+                        )
+                    sorted_attachment_failed_checks = sorted(
+                        attachment_failed_checks
+                    )
+                    if sorted_attachment_failed_checks:
+                        evidence_payload["failed_checks"] = (
+                            sorted_attachment_failed_checks
+                        )
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = True
-                        mv["gc_session_preflight_degraded"] = False
-                        mv["gc_session_preflight_disposition"] = "verified"
-                        mv["gc_session_preflight_failed_checks"] = []
+                        mv["gc_session_preflight_degraded"] = (
+                            attachment_degraded
+                        )
+                        mv["gc_session_preflight_disposition"] = (
+                            "continue_degraded"
+                            if attachment_degraded
+                            else "verified"
+                        )
+                        mv["gc_session_preflight_failed_checks"] = (
+                            sorted_attachment_failed_checks
+                        )
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
                         mv["gc_no_battle_setup_degraded"] = False
                         mv["gc_no_battle_setup_failure"] = {}
-                        mv.pop("gc_running_configuration_degradation", None)
-                        mv.pop("gc_degraded_home_repair", None)
+                        if not attachment_degraded:
+                            existing_source = str(
+                                (
+                                    existing_degradation.get("source")
+                                    if isinstance(
+                                        existing_degradation,
+                                        Mapping,
+                                    )
+                                    else ""
+                                )
+                                or ""
+                            ).strip()
+                            if existing_source not in {
+                                "attachment_applicability",
+                                "attachment_observation",
+                            }:
+                                mv.pop(
+                                    "gc_running_configuration_degradation",
+                                    None,
+                                )
+                                mv.pop("gc_degraded_home_repair", None)
                         _reset_repair_mismatch_attempts(mv)
                     variation_summary = summarize_gc_preflight_variations(
                         evidence_payload
@@ -807,7 +1250,16 @@ def execute_actions(
                         completion += (
                             f"; {variation_kind} — " + variation_summary
                         )
-                    log_mission(completion, "INFO")
+                    if attachment_degraded:
+                        completion = (
+                            "[SESSION_PREFLIGHT] Attachment validation flagged "
+                            "configuration gaps; Automation continues degraded "
+                            "and repair is deferred to Home"
+                        )
+                    log_mission(
+                        completion,
+                        "WARN" if attachment_degraded else "INFO",
+                    )
                     log_mission(
                         "[SESSION_PREFLIGHT] completed_evidence="
                         + json.dumps(evidence_payload, sort_keys=True),
@@ -836,8 +1288,6 @@ def execute_actions(
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
-                        mv.pop("gc_running_configuration_degradation", None)
-                        mv.pop("gc_degraded_home_repair", None)
                         _reset_repair_mismatch_attempts(mv)
                     log_mission(
                         "[SESSION_PREFLIGHT] Configuration mismatch flagged — "
@@ -872,9 +1322,6 @@ def execute_actions(
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
                         mv["gc_session_preflight_failed_checks"] = []
-                        if not battle_ended:
-                            mv.pop("gc_running_configuration_degradation", None)
-                            mv.pop("gc_degraded_home_repair", None)
                         _reset_repair_mismatch_attempts(mv)
                     interrupted_level = "INFO" if battle_ended else "WARN"
                     log_mission(
@@ -920,7 +1367,67 @@ def execute_actions(
                         mv["ultimate_targets"] = targets
             else:
                 log(f"[EXEC] Unknown action: {act}", "WARN")
+            if attachment_validation and mv is not None:
+                _record_attached_rule_disposition(
+                    mv,
+                    rule_id=attachment_rule_id,
+                    disposition="observed",
+                    action=str(t or "unknown"),
+                )
         except Exception as e:
+            if mv is not None and t in {
+                "gc_session_preflight",
+                "session_preflight",
+            }:
+                _complete_session_preflight_degraded(
+                    mv,
+                    reason=f"session preflight failed unexpectedly: {e}",
+                    failed_checks=("session_preflight",),
+                )
+                log(
+                    "[EXEC] Session preflight failed unexpectedly; Automation "
+                    f"continues degraded: {e}",
+                    "WARN",
+                )
+                continue
+            if (
+                attachment_context
+                and mv is not None
+                and (
+                    t in {
+                        "damage_slider_configure",
+                        "orb_distance_configure",
+                    }
+                    or (
+                        attachment_validation
+                        and t == "target_priority_observe"
+                    )
+                )
+            ):
+                check_id = {
+                    "damage_slider_configure": "damage_slider",
+                    "orb_distance_configure": "orb_distance",
+                    "target_priority_observe": "target_priority",
+                }[str(t)]
+                _record_attached_observation_result(
+                    mv,
+                    check_id=check_id,
+                    matched=False,
+                    reason=f"observer failed: {e}",
+                )
+                log(
+                    f"[EXEC] Attached {check_id} observation failed; "
+                    f"Automation continues degraded: {e}",
+                    "WARN",
+                )
+                if attachment_validation:
+                    _record_attached_rule_disposition(
+                        mv,
+                        rule_id=attachment_rule_id,
+                        disposition="observer_failed_degraded",
+                        action=str(t),
+                    )
+                continue
             log(f"[EXEC] Exception during action {act}: {e}", "ERROR")
 
 

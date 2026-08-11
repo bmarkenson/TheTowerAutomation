@@ -33,10 +33,12 @@ than repeated on later heartbeats. Recoverable mismatch, unavailable evidence,
 and exhausted repair are flagged while automation continues. The
 future terminal policy does not repair or replace this continuity step.
 
-Attachment is observation-only by default: the configured startup Strategy is
-not silently applied to the existing battle. Remain on No Strategy to monitor
-and collect, or use the separate active-battle Strategy action when explicitly
-warranted. Strategy adoption never grants Surrender authority.
+Selecting No Strategy before Attach deliberately requests observation-only
+adoption and is not a degraded condition. Other selections use the
+strategy-aware Attach contract: a compatible snapshotted Strategy becomes
+active, while an incompatible or unprovable selection observes the current
+battle as degraded and remains pending for the next safe boundary. Strategy
+adoption never grants Surrender or current-battle repair authority.
 
 When taking manual control, choose whether a save-confirmed manual Surrender
 uses the default minimal excluded record with no terminal UI or opts into full

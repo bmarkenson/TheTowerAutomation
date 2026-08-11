@@ -270,6 +270,68 @@ def test_degraded_continue_retries_home_then_arms_profile_repair_launch():
     app._commit_terminal_home_continuation.assert_called_once_with(continuation)
 
 
+def test_degraded_observer_applies_pending_strategy_before_home_repair():
+    app = _app_without_strategy()
+    app._runtime_policy = MagicMock(return_value={})
+    degradation = {
+        "schema_version": 1,
+        "sources": ["attachment_applicability"],
+        "reason": "selected Strategy expects Tier 19, active battle is Tier 18",
+        "failed_checks": ["battle_tier"],
+    }
+    app._mission_mgr.running_configuration_degradation.return_value = degradation
+    app._pending_strategy_request = (
+        "farm_t19",
+        "strategy-request-1",
+        "next_boundary",
+    )
+
+    def apply_pending_strategy():
+        app._mission_mgr.strategy = SimpleNamespace(name="farm_t19")
+        return True
+
+    app._apply_pending_strategy.side_effect = apply_pending_strategy
+    binding = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "activity_scope_run_id": "run-1",
+        "game_state": "game_over",
+    }
+    app._current_control_workflow_evidence = MagicMock(return_value=binding)
+    app._terminal_battle_bundle = MagicMock(return_value=({}, None, None))
+    continuation = {
+        "schema_version": 1,
+        "source": "degraded_battle_repair",
+    }
+    app._build_terminal_home_continuation_claim = MagicMock(
+        return_value=continuation
+    )
+    app._commit_terminal_home_continuation = MagicMock(return_value=True)
+
+    def handle_terminal(**kwargs):
+        kwargs["before_terminal_action"]()
+        return GameOverHandlingOutcome(True, "home", None, "unavailable")
+
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        with patch("core.app.handle_game_over", side_effect=handle_terminal):
+            app._handle_primary_states("GAME_OVER", set(), object())
+    finally:
+        AUTOMATION.mode = original_mode
+
+    app._build_terminal_home_continuation_claim.assert_called_once_with(
+        source="degraded_battle_repair",
+        evidence=binding,
+    )
+    app._apply_pending_strategy.assert_called_once()
+    app._mission_mgr.prepare_degraded_home_repair.assert_called_once_with(
+        degradation
+    )
+
+
 def test_degraded_battle_does_not_force_home_when_future_policy_is_wait():
     app = _app_without_strategy()
     app._runtime_policy = MagicMock(return_value={})
@@ -739,6 +801,34 @@ def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():
     assert cards["value"] == {"label": "Farm"}
     assert cards["source"] == "guarded_active_attachment_player_save"
     assert "Applied guarded attachment save" in logged.call_args.args[0]
+
+
+def test_managed_strategy_clears_stale_observer_before_later_no_strategy_run():
+    app = App.__new__(App)
+    app._no_strategy_observer = NoStrategyRunObserver()
+    app._no_strategy_observation_active = False
+    app._no_strategy_attachment_boundary_id = None
+    app._no_strategy_inventory_complete = False
+    app._no_strategy_inventory_retry_at = 0.0
+    app._pending_no_strategy_record = None
+    observations = running_attachment_observations(
+        {"cards_deck": {"value": "Farm"}}
+    )
+
+    app._begin_no_strategy_observation_boundary(
+        "attach-1",
+        observations=observations,
+    )
+    assert app._no_strategy_observer.snapshot()["fields"]["cards_deck"][
+        "status"
+    ] == "observed"
+
+    app._end_no_strategy_observation_boundary()
+    app._begin_no_strategy_observation_boundary("attach-2")
+
+    cards = app._no_strategy_observer.snapshot()["fields"]["cards_deck"]
+    assert cards["status"] == "not_observed"
+    assert cards["value"] is None
 
 
 def test_activity_continuity_accepts_expected_scope_transition_before_recapture():

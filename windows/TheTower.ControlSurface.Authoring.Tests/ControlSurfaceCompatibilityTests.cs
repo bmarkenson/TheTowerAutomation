@@ -31,7 +31,7 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(37);
+        var status = Status(38);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
@@ -55,6 +55,44 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Contains(
             "host_performance_process_attribution_v1",
             result.MissingCapabilities);
+        Assert.Contains(
+            "strategy_aware_attach_v1",
+            result.MissingCapabilities);
+    }
+
+    [Fact]
+    public void StrategyAwareAttachRequiresRevisionThirtyEight()
+    {
+        var result = ControlSurfaceCompatibility.Evaluate(
+            Status(
+                37,
+                "strategy_aware_attach_v1"));
+
+        Assert.False(result.IsCompatible);
+        Assert.False(result.ServerRevisionSupported);
+    }
+
+    [Theory]
+    [InlineData(true, false, "strategy_selection_unaccepted")]
+    [InlineData(false, true, "strategy_selection_pending")]
+    public void AttachWaitsForTheVisibleStrategySelectionToBeAccepted(
+        bool dirty,
+        bool requestInFlight,
+        string expectedCode)
+    {
+        var availability = ControlSurfaceCompatibility.ResolveAttachAvailability(
+            new BetterControlActionAvailability
+            {
+                Available = true,
+                Code = "available",
+                Reason = "Attach is available.",
+            },
+            dirty,
+            requestInFlight);
+
+        Assert.False(availability.Available);
+        Assert.Equal(expectedCode, availability.Code);
+        Assert.Contains("Strategy", availability.Reason);
     }
 
     [Fact]
@@ -113,6 +151,31 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Equal("farm_t18", presentation.CurrentStrategy);
         Assert.Equal("farm_t19", presentation.PendingStrategy);
         Assert.Equal("Pending boundary", presentation.PendingLabel);
+    }
+
+    [Fact]
+    public void AuthoritativeStrategyScopeFlagsRunningDegradation()
+    {
+        var status = Status(38, "better_control_model_v2");
+        status.ControlModel = new BetterControlModelStatus
+        {
+            StrategyScope = new BetterControlStrategyScopeStatus
+            {
+                StartupDefault = "farm_t19",
+                ActiveBattle = null,
+                Degradation = new Dictionary<string, object?>
+                {
+                    ["reason"] = "attached Tier mismatch",
+                },
+            },
+        };
+
+        var presentation = ControlSurfaceCompatibility.ResolveStrategyScope(
+            status,
+            processActive: true,
+            configuredStrategy: "farm_t19");
+
+        Assert.True(presentation.Degraded);
     }
 
     [Fact]
@@ -282,7 +345,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                37,
+                38,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
@@ -303,6 +366,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "save_backed_setup_capture_v2",
                 "save_mapping_integration_v1",
                 "save_mapping_review_status_v1",
+                "strategy_aware_attach_v1",
                 "strategy_action_gate_v1",
                 "strategy_authoring_local_loadout_editors_v1",
                 "strategy_authoring_preset_local_copy_v1",

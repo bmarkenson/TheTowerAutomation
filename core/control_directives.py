@@ -333,6 +333,9 @@ class ControlDirectiveStore:
             }:
                 raise ValueError("Setup capture currently owns device input")
             timestamp = _timestamp_at(now)
+            workflow_strategy: Optional[str] = None
+            workflow_strategy_request_id: Optional[str] = None
+            workflow_strategy_definition_fingerprint: Optional[str] = None
             if normalized_intent == "start_battle":
                 effective_strategy = (
                     normalized_strategy
@@ -357,6 +360,30 @@ class ControlDirectiveStore:
                             f"{effective_strategy}"
                         ),
                     )
+                    workflow_strategy = effective_strategy
+                    workflow_strategy_request_id = strategy_request_id
+            else:
+                # Attach adopts the Strategy that the control store has
+                # accepted at this exact write boundary.  The caller's value
+                # is only a fallback for older/empty stores; it must never
+                # override a newer accepted selection observed under the lock.
+                accepted_strategy = self._valid_strategy(data.get("strategy"))
+                workflow_strategy = accepted_strategy or normalized_strategy
+                if accepted_strategy == workflow_strategy:
+                    candidate_request_id = str(
+                        data.get("strategy_request_id") or ""
+                    ).strip()
+                    if candidate_request_id:
+                        workflow_strategy_request_id = candidate_request_id
+                if (
+                    workflow_strategy not in {None, "none"}
+                    and workflow_strategy_request_id is not None
+                ):
+                    workflow_strategy_definition_fingerprint = (
+                        self._strategy_definition_fingerprint(
+                            workflow_strategy
+                        )
+                    )
             workflow = {
                 "schema_version": 1,
                 "request_id": uuid4().hex,
@@ -367,6 +394,16 @@ class ControlDirectiveStore:
                 "evidence": normalized_evidence,
                 "updated_by": source or "operator",
             }
+            if workflow_strategy is not None:
+                workflow["strategy"] = workflow_strategy
+            if workflow_strategy_request_id is not None:
+                workflow["strategy_request_id"] = (
+                    workflow_strategy_request_id
+                )
+            if workflow_strategy_definition_fingerprint is not None:
+                workflow["strategy_definition_fingerprint"] = (
+                    workflow_strategy_definition_fingerprint
+                )
             data["battle_workflow"] = workflow
             data["updated_at"] = timestamp
             if source:
@@ -422,6 +459,7 @@ class ControlDirectiveStore:
             "validating_save": {
                 "awaiting_configuration",
                 "ready",
+                "completed",
                 "action_dispatched",
                 "interrupted",
                 "failed",
@@ -1571,6 +1609,53 @@ class ControlDirectiveStore:
 
         return self.update(mutate)
 
+    def defer_strategy_request_to_next_boundary(
+        self,
+        strategy: str,
+        request_id: object,
+        *,
+        source: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Downshift only the exact current active-battle Strategy request.
+
+        The request identity is retained because this changes only where an
+        already accepted selection may be applied. A newer concurrent Strategy
+        request always wins the compare-and-set.
+        """
+
+        normalized_strategy = str(strategy or "").strip().lower()
+        normalized_request_id = str(request_id or "").strip()
+        if not is_configurable_strategy(
+            normalized_strategy,
+            self.strategy_profile_dir,
+            allow_legacy_aliases=False,
+        ):
+            raise ValueError("Strategy request is invalid")
+        if not normalized_request_id or len(normalized_request_id) > 128:
+            raise ValueError("Strategy request identity is invalid")
+
+        with self._lock():
+            current = self._read_unlocked()
+            if (
+                self._valid_strategy(current.get("strategy"))
+                != normalized_strategy
+                or str(current.get("strategy_request_id") or "").strip()
+                != normalized_request_id
+            ):
+                return None
+            apply_mode = _valid_strategy_apply_mode(
+                current.get("strategy_apply_mode")
+            )
+            if apply_mode == "next_boundary":
+                return dict(current)
+            timestamp = _updated_at()
+            current["strategy_apply_mode"] = "next_boundary"
+            current["strategy_updated_at"] = timestamp
+            current["updated_at"] = timestamp
+            current["updated_by"] = source or "runtime-strategy-deferral"
+            self._write_unlocked(current)
+            return dict(current)
+
     def _valid_strategy(self, value: object) -> Optional[str]:
         normalized = str(value or "").strip().lower()
         return normalized if is_configurable_strategy(
@@ -1578,6 +1663,26 @@ class ControlDirectiveStore:
             self.strategy_profile_dir,
             allow_legacy_aliases=False,
         ) else None
+
+    def _strategy_definition_fingerprint(
+        self,
+        strategy_name: str,
+    ) -> Optional[str]:
+        """Resolve one complete plan while the workflow writer lock is held."""
+
+        try:
+            from automation.strategies import get_strategy
+
+            strategy = get_strategy(
+                strategy_name,
+                profile_directory=self.strategy_profile_dir,
+            )
+            fingerprint = str(
+                strategy.definition_fingerprint() if strategy else ""
+            ).strip()
+        except Exception:
+            return None
+        return fingerprint if len(fingerprint) == 64 else None
 
     def claim_exclusive_validation(
         self,

@@ -309,7 +309,7 @@ def test_wpf_rebase_and_publish_reviews_explain_next_boundary_use():
     assert "queues its latest definition for the next battle" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 37" in compatibility
+    assert "MinimumServerRevision = 38" in compatibility
     assert '"save_mapping_integration_v1"' in compatibility
     assert '"better_control_model_v2"' in compatibility
     assert '"runtime_control_acknowledgements_v1"' in compatibility

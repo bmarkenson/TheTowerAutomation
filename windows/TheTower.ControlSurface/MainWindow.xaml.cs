@@ -38,6 +38,11 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<ActivityEntry> _activity = [];
     private readonly ObservableCollection<CurrentBattlePerkItem> _currentBattlePerks = [];
     private readonly StrategySelectionCoordinator _strategySelection = new();
+    private BetterControlActionAvailability _attachBattleAvailability = new()
+    {
+        Available = false,
+        Reason = "Better Control Model status is unavailable.",
+    };
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
     private CancellationTokenSource? _refreshCancellation;
@@ -53,6 +58,7 @@ public partial class MainWindow : Window
     private bool _updatingStrategySelection;
     private bool _strategyLifecycleAvailable;
     private bool _strategyProcessActive;
+    private bool _strategyDegradedObserver;
     private string? _configuredStrategy;
     private string? _currentStrategy;
     private string? _requestedStrategy;
@@ -3001,6 +3007,11 @@ public partial class MainWindow : Window
         _requestedStrategy = requestedStrategy;
         _pendingStrategy = pendingStrategy;
         _strategyApplyMode = status.Control.StrategyApplyMode;
+        _strategyDegradedObserver = strategyScope.Degraded
+            && string.Equals(
+                currentStrategy,
+                "none",
+                StringComparison.OrdinalIgnoreCase);
         if (!_strategySelection.Dirty)
         {
             SelectStrategy(
@@ -3026,6 +3037,10 @@ public partial class MainWindow : Window
                         : "Pending next: ")
                     + StrategyDisplayName(pendingStrategy)
                 : $"Current: {currentStrategyLabel}";
+        if (strategyScope.Degraded)
+        {
+            StrategyScopeText.Text += " · Degraded";
+        }
         CurrentStrategyValueText.Text = processActive
             ? currentStrategyLabel
             : "No active process";
@@ -3303,7 +3318,7 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 37 with the required control-surface capabilities is required."
+                    "Linux API revision 38 with the required control-surface capabilities is required."
                 );
             }
             if (model is not null
@@ -3318,8 +3333,8 @@ public partial class MainWindow : Window
         StartBattleButton.IsEnabled = start.Available;
         StartBattleButton.ToolTip = start.Reason;
         var attach = Action("attach_battle");
-        AttachBattleButton.IsEnabled = attach.Available;
-        AttachBattleButton.ToolTip = attach.Reason;
+        _attachBattleAvailability = attach;
+        UpdateAttachBattleAvailability();
         StartBattleButton.Visibility = start.Available
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -4004,6 +4019,7 @@ public partial class MainWindow : Window
                 : !queueAlreadyRequested);
         AdoptStrategyButton.IsEnabled = _strategyLifecycleAvailable
             && _strategyProcessActive
+            && !_strategyDegradedObserver
             && _serverCompatibility?.IsCompatible == true
             && hasSelection
             && !string.Equals(
@@ -4017,15 +4033,19 @@ public partial class MainWindow : Window
             : Visibility.Collapsed;
         Grid.SetColumn(AdoptStrategyButton, retryAvailable ? 1 : 0);
         Grid.SetColumnSpan(AdoptStrategyButton, retryAvailable ? 1 : 2);
-        AdoptStrategyButton.ToolTip =
-            "Request this strategy for the current battle. New-run setup still waits for a genuine boundary.";
+        AdoptStrategyButton.ToolTip = _strategyDegradedObserver
+            ? "This attached battle must remain a degraded observer. The selected Strategy is queued for the next battle."
+            : "Request this strategy for the current battle. New-run setup still waits for a genuine boundary.";
         SelectedStrategyValueText.Text = StrategyDisplayName(selected);
-        StrategyActionHelpText.Text = _strategyProcessActive
+        StrategyActionHelpText.Text = _strategyDegradedObserver
+            ? "This attached battle remains observation-only because its Strategy compatibility was not proved. Changes apply at the next safe battle boundary."
+            : _strategyProcessActive
             ? retryAvailable
                 ? "The automatic next-boundary request failed. The selection is retained for Retry; Switch this battle remains a separate action."
                 : "Changing the selection queues it for the next battle. Switch this battle changes normal strategy behavior now; startup setup still waits for the next real boundary."
             : "Start already uses this selection. Save startup default only if it should be remembered without starting automation.";
         StrategyActionHelpText.Visibility = _strategySelection.Dirty
+            || _strategyDegradedObserver
             ? Visibility.Visible
             : Visibility.Collapsed;
         if (string.IsNullOrWhiteSpace(_strategyRequestMessage)
@@ -4033,6 +4053,17 @@ public partial class MainWindow : Window
         {
             StrategySelectionText.Visibility = Visibility.Collapsed;
         }
+        UpdateAttachBattleAvailability();
+    }
+
+    private void UpdateAttachBattleAvailability()
+    {
+        var availability = ControlSurfaceCompatibility.ResolveAttachAvailability(
+            _attachBattleAvailability,
+            _strategySelection.Dirty,
+            _strategySelection.RequestInFlight);
+        AttachBattleButton.IsEnabled = availability.Available;
+        AttachBattleButton.ToolTip = availability.Reason;
     }
 
     private StrategySelectionContext CurrentStrategySelectionContext() =>

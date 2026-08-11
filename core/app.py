@@ -137,7 +137,11 @@ from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
     run_no_strategy_in_battle_inventory,
 )
-from core.no_strategy_observer import NoStrategyRunObserver
+from core.no_strategy_observer import (
+    DISSONANCE_BADGE_REGION,
+    NoStrategyRunObserver,
+    detect_dissonance_badge,
+)
 from core.no_strategy_post_run import (
     NoStrategyPostRunError,
     NoStrategyPostRunPaused,
@@ -467,8 +471,10 @@ class App:
         self._tournament_results_captured = False
         self._tournament_terminal_continuation_bound = False
         self._tournament_terminal_continuation_claim = None
+        self._tournament_degradation_snapshot = None
         self._no_strategy_observer = NoStrategyRunObserver()
         self._no_strategy_observation_active = False
+        self._no_strategy_attachment_boundary_id: Optional[str] = None
         self._no_strategy_inventory_complete = False
         self._no_strategy_inventory_retry_at = 0.0
         self._pending_no_strategy_record: Optional[Dict[str, Any]] = None
@@ -981,6 +987,18 @@ class App:
             context["session_preflight_evidence"] = copy.deepcopy(
                 dict(session_preflight_report)
             )
+        degradation_fn = getattr(
+            self._mission_mgr,
+            "running_configuration_degradation",
+            None,
+        )
+        running_degradation = (
+            degradation_fn() if callable(degradation_fn) else None
+        )
+        if isinstance(running_degradation, Mapping):
+            context["running_configuration_degradation"] = copy.deepcopy(
+                dict(running_degradation)
+            )
         if isinstance(observed_run_configuration, Mapping):
             context["observed_run_configuration"] = dict(
                 observed_run_configuration
@@ -1491,6 +1509,14 @@ class App:
             and len(strategy_request) >= 1
             else current_strategy
         )
+        degradation_fn = getattr(
+            manager,
+            "running_configuration_degradation",
+            None,
+        )
+        running_degradation = (
+            degradation_fn() if callable(degradation_fn) else None
+        )
         return publisher.publish(
             self._get_action_authority().snapshot(),
             runtime_active=runtime_active,
@@ -1576,6 +1602,11 @@ class App:
                         callable(active_battle_observed)
                         and active_battle_observed()
                         and current_strategy == "none"
+                    ),
+                    "degradation": (
+                        copy.deepcopy(dict(running_degradation))
+                        if isinstance(running_degradation, Mapping)
+                        else None
                     ),
                 },
             },
@@ -1735,6 +1766,37 @@ class App:
             "state_request_id": identity.get("state_request_id"),
             "mode_request_id": identity.get("mode_request_id"),
         }
+
+    @staticmethod
+    def _degradation_requires_home_repair(
+        degradation: object,
+    ) -> bool:
+        """Return whether a degraded run contains configuration work for Home."""
+
+        if not isinstance(degradation, Mapping):
+            return False
+        raw_sources = degradation.get("sources", ())
+        sources = {
+            str(value).strip()
+            for value in raw_sources
+            if str(value).strip()
+        } if isinstance(raw_sources, (list, tuple, set, frozenset)) else set()
+        source = str(degradation.get("source") or "").strip()
+        if source:
+            sources.add(source)
+        raw_checks = degradation.get("failed_checks", ())
+        checks = {
+            str(value).strip()
+            for value in raw_checks
+            if str(value).strip()
+        } if isinstance(raw_checks, (list, tuple, set, frozenset)) else set()
+        reporting_sources = {"attachment_reporting"}
+        reporting_checks = {"workflow_reporting"}
+        return not bool(
+            sources
+            and sources.issubset(reporting_sources)
+            and checks.issubset(reporting_checks)
+        )
 
     def _build_terminal_home_continuation_claim(
         self,
@@ -2181,7 +2243,6 @@ class App:
     ) -> None:
         """Acknowledge and revalidate Better Control Model directives."""
 
-        del detection  # the exact normalized observation is already recorded
         malformed_authority = next(
             (
                 label
@@ -2467,6 +2528,22 @@ class App:
                 self._reconcile_dispatched_battle_workflow(workflow, current)
             return
         if status == "ready" and intent == "attach_battle":
+            retained_claim = self._running_reconciliation_claims().get(
+                request_id
+            )
+            if (
+                isinstance(retained_claim, Mapping)
+                and retained_claim.get("semantic_completion_applied") is True
+            ):
+                # Local adoption already released action authority. Retrying
+                # the exact durable report must run before terminal/current
+                # evidence can invalidate the active-battle reconciliation
+                # inputs that originally authorized that adoption.
+                self._retry_attachment_completion_report(
+                    workflow,
+                    retained_claim,
+                )
+                return
             if current is None:
                 return
             claim = self._matching_running_reconciliation_claim(
@@ -2499,11 +2576,41 @@ class App:
                 if matches:
                     if self._mission_mgr.active_battle_observed():
                         return
-                    if not self._mission_mgr.authorize_initial_battle_intent(
+                    raw_decision = claim.get("attachment_strategy")
+                    decision = (
+                        dict(raw_decision)
+                        if isinstance(raw_decision, Mapping)
+                        else self._attachment_strategy_decision(
+                            workflow,
+                            acquisition=claim.get("acquisition"),
+                        )
+                    )
+                    decision = self._resolve_ready_attachment_strategy(
+                        decision,
+                        detection,
+                        frame,
+                    )
+                    retained_claim = self._running_reconciliation_claims().get(
+                        request_id
+                    )
+                    if isinstance(retained_claim, dict):
+                        retained_claim["attachment_strategy"] = decision
+                    selected_strategy = decision.get("_strategy")
+                    observation_only = bool(
+                        decision.get("attachment_mode") != "strategy"
+                        or selected_strategy is None
+                    )
+                    authorized = self._mission_mgr.authorize_initial_battle_intent(
                         intent,
                         request_id=request_id,
-                        observation_only=True,
-                    ):
+                        observation_only=observation_only,
+                        strategy=(
+                            selected_strategy
+                            if not observation_only
+                            else None
+                        ),
+                    )
+                    if not authorized:
                         self._supervisor.transition_battle_workflow(
                             request_id,
                             "interrupted",
@@ -2513,6 +2620,13 @@ class App:
                             ),
                             acknowledgement=current,
                         )
+                    elif observation_only:
+                        self._begin_no_strategy_observation_boundary(
+                            request_id,
+                            observations=decision.get("_observations"),
+                        )
+                    else:
+                        self._end_no_strategy_observation_boundary()
                 else:
                     self._mission_mgr.revoke_initial_battle_intent(
                         intent,
@@ -4241,6 +4355,7 @@ class App:
         temporal_binding: RunningAttachmentTemporalBinding,
         context: PlayerSaveAttachmentContext,
         evidence: Mapping[str, object],
+        strategy_decision: Optional[Mapping[str, object]] = None,
     ) -> None:
         """Retain typed process-local proof; the durable receipt is report-only."""
 
@@ -4268,13 +4383,16 @@ class App:
             raise ValueError(
                 "durable receipt does not match the retained typed acquisition"
             )
-        self._running_reconciliation_claims()[str(workflow_id)] = {
+        claim: Dict[str, object] = {
             "receipt": copy.deepcopy(dict(receipt)),
             "acquisition": acquisition,
             "temporal_binding": temporal_binding,
             "context": context,
             "evidence": dict(evidence),
         }
+        if isinstance(strategy_decision, Mapping):
+            claim["attachment_strategy"] = dict(strategy_decision)
+        self._running_reconciliation_claims()[str(workflow_id)] = claim
 
     def _matching_running_reconciliation_claim(
         self,
@@ -4292,15 +4410,34 @@ class App:
         context = claim.get("context")
         evidence = claim.get("evidence")
         receipt = claim.get("receipt")
+        reporting_unavailable = claim.get("reporting_unavailable") is True
         if claim.get("ui_fallback") is True:
+            ui_receipt_bound = bool(
+                (
+                    reporting_unavailable
+                    and (
+                        receipt is None
+                        or (
+                            isinstance(receipt, Mapping)
+                            and ui_reconciliation_receipt_matches_evidence(
+                                receipt,
+                                current,
+                            )
+                        )
+                    )
+                )
+                or (
+                    isinstance(receipt, Mapping)
+                    and receipt == workflow.get("save_receipt")
+                    and ui_reconciliation_receipt_matches_evidence(
+                        receipt,
+                        current,
+                    )
+                )
+            )
             if not (
                 isinstance(evidence, Mapping)
-                and isinstance(receipt, Mapping)
-                and receipt == workflow.get("save_receipt")
-                and ui_reconciliation_receipt_matches_evidence(
-                    receipt,
-                    current,
-                )
+                and ui_receipt_bound
                 and all(
                     evidence.get(field) == current.get(field)
                     for field in (
@@ -4316,6 +4453,13 @@ class App:
                 self._running_reconciliation_claims().pop(workflow_id, None)
                 return None
             return dict(claim)
+        receipt_bound = bool(
+            reporting_unavailable
+            or (
+                isinstance(receipt, Mapping)
+                and receipt == workflow.get("save_receipt")
+            )
+        )
         if not (
             isinstance(acquisition, PlayerSaveAcquisitionBundle)
             and acquisition.complete
@@ -4327,7 +4471,7 @@ class App:
             and evidence.get("game_state") == "active_battle"
             and temporal.matches_context(context)
             and acquisition.binding == temporal.target_binding
-            and receipt == workflow.get("save_receipt")
+            and receipt_bound
             and self._workflow_evidence_matches_runtime(
                 evidence,
                 current,
@@ -4380,11 +4524,29 @@ class App:
         """Complete Attach only after lifecycle adoption of the validated battle."""
 
         workflow = self._supervisor.battle_workflow
+        if (
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "attach_battle"
+            and workflow.get("status")
+            in {"ready", "validating_save", "action_dispatched"}
+        ):
+            retained = self._running_reconciliation_claims().get(
+                str(workflow.get("request_id") or "")
+            )
+            if (
+                isinstance(retained, Mapping)
+                and retained.get("semantic_completion_applied") is True
+            ):
+                return self._retry_attachment_completion_report(
+                    workflow,
+                    retained,
+                )
         current = self._current_control_workflow_evidence()
         if not (
             isinstance(workflow, Mapping)
             and workflow.get("intent") == "attach_battle"
-            and workflow.get("status") == "ready"
+            and workflow.get("status")
+            in {"ready", "validating_save", "action_dispatched"}
             and isinstance(current, Mapping)
             and current.get("game_state") == "active_battle"
             and self._mission_mgr.active_battle_observed()
@@ -4394,53 +4556,287 @@ class App:
         if claim is None:
             self._interrupt_unbacked_ready_attachment(workflow, current)
             return False
+        reporting_unavailable = claim.get("reporting_unavailable") is True
+        if workflow.get("status") != "ready" and not reporting_unavailable:
+            return False
         ui_fallback = claim.get("ui_fallback") is True
+        raw_decision = claim.get("attachment_strategy")
+        decision = (
+            dict(raw_decision)
+            if isinstance(raw_decision, Mapping)
+            else self._attachment_strategy_decision(workflow)
+        )
+        attachment_mode = str(
+            decision.get("attachment_mode") or "observation_only"
+        )
+        selected_strategy = str(
+            decision.get("selected_strategy") or ""
+        ).strip().lower()
+        degraded = decision.get("degraded") is True
+        receipt = workflow.get("save_receipt")
+        configuration = (
+            self._attachment_reporting_unavailable_configuration(decision)
+            if reporting_unavailable
+            else self._attachment_configuration_report(
+                receipt,
+                decision,
+                stage="completed",
+            )
+            if isinstance(receipt, Mapping)
+            else None
+        )
         completed = self._supervisor.transition_battle_workflow(
             str(workflow.get("request_id") or ""),
             "completed",
             reason=(
-                "the supported UI fallback adopted the active battle and "
-                "released normal UI monitoring"
-                if ui_fallback
-                else "validated battle was adopted for observation after the same "
-                "active-battle boundary was observed"
+                "the active battle was adopted for degraded observation; its "
+                "durable reconciliation report was unavailable"
+                if reporting_unavailable
+                else "the snapshotted selected Strategy was compatible and adopted "
+                "without repairing the active battle"
+                if attachment_mode == "strategy"
+                else "the active battle was adopted for intentional observation"
+                if decision.get("applicability") == "intentional_observation"
+                else "the active battle was adopted for degraded observation "
+                "because Strategy applicability was incompatible or unverifiable"
             ),
             acknowledgement=current,
+            configuration=configuration,
+        )
+        reporting_pending = bool(
+            completed is None or completed.get("status") != "completed"
+        )
+        if reporting_pending:
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.REPORTING_FAILURE,
+                "Attach adoption completed, but its terminal workflow report "
+                "could not be persisted",
+            )
+            self._mission_mgr.mark_running_configuration_degraded(
+                source="attachment_reporting",
+                reason=(
+                    "Attach adoption completed, but its terminal workflow "
+                    "report is still pending"
+                ),
+                failed_checks=("workflow_reporting",),
+                details={"reporting_status": "retrying"},
+            )
+        if degraded and not reporting_unavailable:
+            self._mission_mgr.mark_running_configuration_degraded(
+                source=(
+                    "attachment_configuration"
+                    if attachment_mode == "strategy"
+                    else "attachment_applicability"
+                ),
+                reason=str(
+                    decision.get("reason")
+                    or "attached battle is running in degraded mode"
+                ),
+                failed_checks=decision.get("failed_checks", ()),
+                details={
+                    key: decision.get(key)
+                    for key in (
+                        "selected_strategy",
+                        "strategy_request_id",
+                        "attachment_mode",
+                        "applicability",
+                        "expected_family",
+                        "expected_tier",
+                        "observed_tier",
+                        "observed_kind",
+                    )
+                    if decision.get(key) is not None
+                },
+            )
+            log(
+                "[ATTACH] Battle is running degraded without active-battle "
+                f"repair: {decision.get('reason')}",
+                "WARN",
+                console=True,
+            )
+
+        snapshot_request_id = str(
+            decision.get("strategy_request_id") or ""
+        ).strip()
+        current_strategy_request = self._supervisor.strategy_request
+        current_matches_snapshot = bool(
+            selected_strategy
+            and isinstance(current_strategy_request, tuple)
+            and len(current_strategy_request) in {2, 3}
+            and str(current_strategy_request[0] or "").strip().lower()
+            == selected_strategy
+            and (
+                not snapshot_request_id
+                or str(current_strategy_request[1] or "").strip()
+                == snapshot_request_id
+            )
+        )
+        pending_strategy = getattr(self, "_pending_strategy_request", None)
+        pending_matches_snapshot = bool(
+            isinstance(pending_strategy, tuple)
+            and len(pending_strategy) == 3
+            and str(pending_strategy[0] or "").strip().lower()
+            == selected_strategy
+            and (
+                not snapshot_request_id
+                or str(pending_strategy[1] or "").strip()
+                == snapshot_request_id
+            )
+        )
+        if (
+            isinstance(pending_strategy, tuple)
+            and len(pending_strategy) == 3
+            and pending_strategy[2] == "active_battle"
+            and not pending_matches_snapshot
+        ):
+            self._defer_active_strategy_request_to_boundary(
+                pending_strategy,
+                reason=(
+                    "a later request cannot change the immutable Attach "
+                    "Strategy snapshot"
+                ),
+            )
+            pending_strategy = self._pending_strategy_request
+        if attachment_mode == "strategy" and (
+            current_matches_snapshot and pending_matches_snapshot
+        ):
+            self._complete_strategy_application(
+                selected_strategy,
+                request_id=current_strategy_request[1],
+            )
+        elif (
+            attachment_mode != "strategy"
+            and selected_strategy
+            and selected_strategy != "none"
+            and current_matches_snapshot
+            and (
+                pending_strategy is None or pending_matches_snapshot
+            )
+        ):
+            self._pending_strategy_request = (
+                selected_strategy,
+                current_strategy_request[1],
+                "next_boundary",
+            )
+        elif (
+            decision.get("applicability") == "intentional_observation"
+            and selected_strategy == "none"
+            and current_matches_snapshot
+            and pending_matches_snapshot
+        ):
+            self._complete_strategy_application(
+                "none",
+                request_id=current_strategy_request[1],
+            )
+
+        if attachment_mode == "strategy":
+            result = (
+                f"Battle attached with {selected_strategy}; Automation remains "
+                "Enabled and attachment validation will report mismatches "
+                "without repairing this battle"
+            )
+            purpose = "Completing strategy-aware battle attachment"
+        elif decision.get("applicability") == "intentional_observation":
+            result = (
+                "Battle attached for intentional No Strategy observation; "
+                "Automation remains Enabled"
+            )
+            purpose = "Completing intentional observation attachment"
+        else:
+            result = (
+                "Battle attached for degraded observation; Automation remains "
+                "Enabled and the selected Strategy is reserved for the next "
+                "safe boundary"
+            )
+            purpose = "Completing degraded observation attachment"
+        self._log_operator_workflow_result(
+            str(workflow.get("request_id") or "") + ":completed",
+            purpose=purpose,
+            reason=(
+                "continue with supported UI monitoring after fallback continuity"
+                if ui_fallback
+                else "adopt the exact save-backed active-battle identity"
+            ),
+            result=result,
+        )
+        workflow_id = str(workflow.get("request_id") or "")
+        if reporting_pending:
+            retained = self._running_reconciliation_claims().get(workflow_id)
+            if isinstance(retained, dict):
+                retained["semantic_completion_applied"] = True
+                retained["completion_acknowledgement"] = dict(current)
+        else:
+            self._running_reconciliation_claims().pop(workflow_id, None)
+        return True
+
+    def _retry_attachment_completion_report(
+        self,
+        workflow: Mapping[str, object],
+        claim: Mapping[str, object],
+    ) -> bool:
+        """Retry only the durable terminal report after local adoption finished."""
+
+        raw_decision = claim.get("attachment_strategy")
+        decision = (
+            dict(raw_decision)
+            if isinstance(raw_decision, Mapping)
+            else self._attachment_strategy_decision(workflow)
+        )
+        reporting_unavailable = claim.get("reporting_unavailable") is True
+        receipt = workflow.get("save_receipt")
+        configuration = (
+            self._attachment_reporting_unavailable_configuration(decision)
+            if reporting_unavailable
+            else self._attachment_configuration_report(
+                receipt,
+                decision,
+                stage="completed",
+            )
+            if isinstance(receipt, Mapping)
+            else None
+        )
+        acknowledgement = claim.get("completion_acknowledgement")
+        if not isinstance(acknowledgement, Mapping):
+            acknowledgement = claim.get("evidence")
+        if not isinstance(acknowledgement, Mapping):
+            return False
+        attachment_mode = str(
+            decision.get("attachment_mode") or "observation_only"
+        )
+        completed = self._supervisor.transition_battle_workflow(
+            str(workflow.get("request_id") or ""),
+            "completed",
+            reason=(
+                "the active battle was adopted for degraded observation; its "
+                "durable reconciliation report was unavailable"
+                if reporting_unavailable
+                else "the snapshotted selected Strategy was compatible and adopted "
+                "without repairing the active battle"
+                if attachment_mode == "strategy"
+                else "the active battle was adopted for intentional observation"
+                if decision.get("applicability") == "intentional_observation"
+                else "the active battle was adopted for degraded observation "
+                "because Strategy applicability was incompatible or unverifiable"
+            ),
+            acknowledgement=acknowledgement,
+            configuration=configuration,
         )
         if completed is None or completed.get("status") != "completed":
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.REPORTING_FAILURE,
+                "Attach terminal workflow reporting remains pending; local "
+                "adoption and automation continue",
+            )
             return False
+        if not reporting_unavailable:
+            self._mission_mgr.resolve_running_configuration_degradation(
+                source="attachment_reporting",
+                failed_checks=("workflow_reporting",),
+                detail_keys=("reporting_status",),
+            )
         self._running_reconciliation_claims().pop(
             str(workflow.get("request_id") or ""),
             None,
-        )
-        startup_request = self._supervisor.strategy_request
-        if (
-            self._mission_mgr.strategy is None
-            and isinstance(startup_request, tuple)
-            and len(startup_request) in {2, 3}
-            and str(startup_request[0] or "").strip().lower() != "none"
-        ):
-            self._pending_strategy_request = (
-                str(startup_request[0]).strip().lower(),
-                startup_request[1],
-                "next_boundary",
-            )
-        self._log_operator_workflow_result(
-            str(workflow.get("request_id") or "") + ":completed",
-            purpose="Completing observation-only battle attachment",
-            reason=(
-                "continue with supported UI monitoring after unusable save evidence"
-                if ui_fallback
-                else "continue observation and safe collectors after save-backed identity adoption"
-            ),
-            result=(
-                "Battle attached through the UI fallback — Automation remains "
-                "Enabled for supported monitoring and safe collectors; no Strategy "
-                "was adopted"
-                if ui_fallback
-                else "Battle attached for observation — Automation remains Enabled; "
-                "choose a Strategy explicitly to manage it"
-            ),
         )
         return True
 
@@ -4764,6 +5160,28 @@ class App:
                 ),
             )
         workflow = self._supervisor.battle_workflow
+        attachment_claim = (
+            self._running_reconciliation_claims().get(
+                str(workflow.get("request_id") or "")
+            )
+            if isinstance(workflow, Mapping)
+            else None
+        )
+        if (
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "attach_battle"
+            and workflow.get("status")
+            in {"validating_save", "action_dispatched", "ready"}
+            and isinstance(attachment_claim, Mapping)
+            and (
+                self._mission_mgr.active_battle_observed()
+                or attachment_claim.get("semantic_completion_applied") is True
+            )
+        ):
+            # Exact process-local evidence already authorized lifecycle
+            # adoption. A durable status write may keep retrying, but reporting
+            # is recoverable and cannot retain the global input hold.
+            return None
         if isinstance(workflow, Mapping) and workflow.get("status") in {
             "requested",
             "awaiting_enable",
@@ -6200,17 +6618,9 @@ class App:
         """
 
         strategy = self._mission_mgr.strategy
-        requirement_fn = getattr(
-            strategy,
-            "session_preflight_requirements",
-            None,
-        )
-        if not callable(requirement_fn):
+        effective = self._strategy_session_requirements(strategy)
+        if not effective:
             return {}
-        requirements = requirement_fn()
-        if not isinstance(requirements, Mapping):
-            return {}
-        effective = dict(requirements)
         runtime_waivers_fn = getattr(
             self._mission_mgr,
             "session_preflight_waivers",
@@ -6228,6 +6638,477 @@ class App:
                 effective.pop(str(check_id), None)
             effective["_gate_waivers"] = waivers
         return effective
+
+    @staticmethod
+    def _strategy_session_requirements(strategy: object) -> Dict[str, Any]:
+        """Return one resolved Strategy's requirements without runtime state."""
+
+        requirement_fn = getattr(
+            strategy,
+            "session_preflight_requirements",
+            None,
+        )
+        if not callable(requirement_fn):
+            return {}
+        requirements = requirement_fn()
+        if not isinstance(requirements, Mapping):
+            return {}
+        return dict(requirements)
+
+    def _attachment_strategy_decision(
+        self,
+        workflow: Mapping[str, object],
+        *,
+        acquisition: object = None,
+        observations: object = None,
+        ui_fallback_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Classify the immutable Attach Strategy before lifecycle adoption."""
+
+        raw_strategy = workflow.get("strategy")
+        strategy_name = str(raw_strategy or "").strip().lower()
+        strategy_request_id = str(
+            workflow.get("strategy_request_id") or ""
+        ).strip()
+        strategy_definition_fingerprint = str(
+            workflow.get("strategy_definition_fingerprint") or ""
+        ).strip()
+        decision: Dict[str, Any] = {
+            "schema_version": 1,
+            "selected_strategy": strategy_name or None,
+            "strategy_request_id": strategy_request_id or None,
+            "strategy_definition_fingerprint": (
+                strategy_definition_fingerprint or None
+            ),
+            "attachment_mode": "observation_only",
+            "applicability": "unverifiable",
+            "degraded": True,
+            "reason": "Attach has no immutable selected Strategy snapshot",
+            "failed_checks": ["strategy_applicability"],
+            "trusted_mismatch_check_ids": [],
+            "ui_required_check_ids": [],
+            "_strategy": None,
+            "_requirements": {},
+            "_observations": (
+                observations
+                if isinstance(observations, RunningAttachmentSaveObservations)
+                else None
+            ),
+            "_check_sets": {
+                "accepted": (),
+                "mismatched": (),
+                "ui_required": (),
+            },
+        }
+        if not strategy_name:
+            return decision
+        if strategy_name == "none":
+            decision.update(
+                {
+                    "attachment_mode": "observation_only",
+                    "applicability": "intentional_observation",
+                    "degraded": False,
+                    "reason": "No Strategy was selected for this attachment",
+                    "failed_checks": [],
+                }
+            )
+            return decision
+        if not strategy_request_id or len(strategy_definition_fingerprint) != 64:
+            decision["reason"] = (
+                "Attach has no immutable accepted Strategy definition identity"
+            )
+            return decision
+        try:
+            strategy = get_strategy(strategy_name)
+        except Exception:
+            decision["reason"] = (
+                f"selected Strategy {strategy_name} could not be resolved"
+            )
+            return decision
+        if strategy is None:
+            decision["reason"] = (
+                f"selected Strategy {strategy_name} resolved to observation-only"
+            )
+            return decision
+        actual_definition_fingerprint = str(
+            strategy.definition_fingerprint()
+        ).strip()
+        if actual_definition_fingerprint != strategy_definition_fingerprint:
+            decision["reason"] = (
+                f"selected Strategy {strategy_name} changed after Attach was "
+                "requested"
+            )
+            return decision
+
+        run_configuration_fn = getattr(strategy, "run_configuration", None)
+        run_configuration = (
+            run_configuration_fn()
+            if callable(run_configuration_fn)
+            else {}
+        )
+        if not isinstance(run_configuration, Mapping):
+            run_configuration = {}
+        strategy_config = getattr(strategy, "config", None)
+        meta = (
+            strategy_config.get("meta")
+            if isinstance(strategy_config, Mapping)
+            else None
+        )
+        meta = meta if isinstance(meta, Mapping) else {}
+        family = str(
+            meta.get("family") or run_configuration.get("profile") or ""
+        ).strip().lower()
+        raw_tier = run_configuration.get("tier", meta.get("tier"))
+        expected_tier = (
+            raw_tier
+            if type(raw_tier) is int and raw_tier >= 0
+            else None
+        )
+        decision.update(
+            {
+                "expected_family": family or None,
+                "expected_tier": expected_tier,
+                "_strategy": strategy,
+            }
+        )
+        if family not in {"farm", "tournament"}:
+            decision["reason"] = (
+                f"selected Strategy {strategy_name} has no supported battle "
+                "applicability declaration"
+            )
+            return decision
+        if ui_fallback_reason is not None and family == "farm":
+            decision["reason"] = (
+                "the UI continuity fallback cannot prove the active farming Tier"
+            )
+            decision["ui_fallback_reason"] = str(ui_fallback_reason)
+            return decision
+
+        observed_tier: Optional[int] = None
+        if isinstance(acquisition, PlayerSaveAcquisitionBundle):
+            snapshot = acquisition.snapshot
+            runtime = getattr(snapshot, "runtime_save", None)
+            active_identity = getattr(runtime, "active_round_identity", None)
+            candidate_tier = getattr(active_identity, "current_tier", None)
+            if type(candidate_tier) is int and candidate_tier >= 0:
+                observed_tier = candidate_tier
+        decision["observed_tier"] = observed_tier
+        if family == "farm":
+            if expected_tier is None or observed_tier is None:
+                decision["reason"] = (
+                    "the active battle Tier or selected farming Tier is unavailable"
+                )
+                return decision
+            if expected_tier != observed_tier:
+                decision.update(
+                    {
+                        "applicability": "incompatible",
+                        "reason": (
+                            f"selected Strategy expects Tier {expected_tier}, "
+                            f"but the active battle is Tier {observed_tier}"
+                        ),
+                        "failed_checks": ["battle_tier"],
+                    }
+                )
+                return decision
+
+        requirements = self._strategy_session_requirements(strategy)
+        check_sets: Dict[str, tuple[str, ...]] = {
+            "accepted": (),
+            "mismatched": (),
+            "ui_required": (),
+        }
+        if requirements and isinstance(
+            acquisition,
+            PlayerSaveAcquisitionBundle,
+        ):
+            try:
+                reconciliation = reconcile_acquired_requirements(
+                    acquisition,
+                    requirements,
+                )
+                if isinstance(
+                    observations,
+                    RunningAttachmentSaveObservations,
+                ):
+                    check_sets = self._save_reconciliation_check_sets(
+                        reconciliation,
+                        observations=observations,
+                    )
+                else:
+                    check_sets = {
+                        "accepted": (),
+                        "mismatched": (),
+                        "ui_required": tuple(
+                            sorted(
+                                requested_player_save_check_ids(requirements)
+                            )
+                        ),
+                    }
+            except (TypeError, ValueError):
+                decision["reason"] = (
+                    "selected Strategy configuration could not be reconciled "
+                    "against the attached save"
+                )
+                return decision
+        elif requirements:
+            check_sets = {
+                "accepted": (),
+                "mismatched": (),
+                "ui_required": tuple(
+                    sorted(requested_player_save_check_ids(requirements))
+                ),
+            }
+
+        mismatched = list(check_sets["mismatched"])
+        ui_required = list(check_sets["ui_required"])
+        decision.update(
+            {
+                "attachment_mode": "strategy",
+                "applicability": "pending_battle_kind",
+                "degraded": bool(mismatched),
+                "reason": (
+                    "battle applicability matched; saved configuration "
+                    "mismatches were flagged without repair"
+                    if mismatched
+                    else "battle applicability matched; selected Strategy "
+                    "configuration validation is non-mutating"
+                ),
+                "failed_checks": mismatched,
+                "trusted_mismatch_check_ids": mismatched,
+                "ui_required_check_ids": ui_required,
+                "_requirements": requirements,
+                "_check_sets": check_sets,
+            }
+        )
+        return decision
+
+    @staticmethod
+    def _attachment_configuration_report(
+        receipt: Mapping[str, object],
+        decision: Mapping[str, object],
+        *,
+        stage: str,
+    ) -> Dict[str, Any]:
+        """Publish the Attach outcome without process-local strategy objects."""
+
+        configuration = receipt.get("configuration")
+        report = dict(configuration) if isinstance(configuration, Mapping) else {}
+        for key in (
+            "selected_strategy",
+            "strategy_request_id",
+            "strategy_definition_fingerprint",
+            "attachment_mode",
+            "applicability",
+            "degraded",
+            "reason",
+            "failed_checks",
+            "expected_family",
+            "expected_tier",
+            "observed_tier",
+            "observed_kind",
+            "trusted_mismatch_check_ids",
+            "ui_required_check_ids",
+            "ui_fallback_reason",
+        ):
+            if key in decision:
+                report[key] = copy.deepcopy(decision[key])
+        report.update({"schema_version": 1, "stage": str(stage)})
+        return report
+
+    def _attachment_reporting_failure_decision(
+        self,
+        workflow: Mapping[str, object],
+        *,
+        reason: str,
+        observations: object = None,
+    ) -> Dict[str, Any]:
+        """Fall back to a marked observer when only durable reporting failed."""
+
+        decision = self._attachment_strategy_decision(
+            workflow,
+            observations=observations,
+        )
+        failed_checks = {
+            str(check_id).strip()
+            for check_id in decision.get("failed_checks", ())
+            if str(check_id).strip()
+        }
+        failed_checks.add("workflow_reporting")
+        decision.update(
+            {
+                "attachment_mode": "observation_only",
+                "applicability": "unverifiable",
+                "degraded": True,
+                "reason": str(reason or "Attach reporting is unavailable"),
+                "failed_checks": sorted(failed_checks),
+                "_strategy": None,
+            }
+        )
+        return decision
+
+    @staticmethod
+    def _attachment_reporting_unavailable_configuration(
+        decision: Mapping[str, object],
+    ) -> Dict[str, Any]:
+        """Return a terminal flag that cannot be mistaken for a replay receipt."""
+
+        configuration: Dict[str, Any] = {
+            "schema_version": 1,
+            "stage": "completed",
+            "reporting_status": "unavailable",
+            "selected_strategy": decision.get("selected_strategy"),
+            "strategy_request_id": decision.get("strategy_request_id"),
+            "attachment_mode": "observation_only",
+            "applicability": "unverifiable",
+            "degraded": True,
+            "reason": str(
+                decision.get("reason") or "Attach reporting is unavailable"
+            ),
+            "failed_checks": list(decision.get("failed_checks", ())),
+        }
+        for key in (
+            "expected_family",
+            "expected_tier",
+            "observed_tier",
+            "observed_kind",
+        ):
+            if decision.get(key) is not None:
+                configuration[key] = decision.get(key)
+        return configuration
+
+    def _authorize_reporting_degraded_attachment(
+        self,
+        workflow: Mapping[str, object],
+        decision: Mapping[str, object],
+    ) -> bool:
+        """Adopt a proven battle as observer when its report cannot persist."""
+
+        request_id = str(workflow.get("request_id") or "")
+        authorized = self._mission_mgr.authorize_initial_battle_intent(
+            "attach_battle",
+            request_id=request_id,
+            observation_only=True,
+        )
+        if not authorized:
+            return False
+        self._begin_no_strategy_observation_boundary(
+            request_id,
+            observations=decision.get("_observations"),
+        )
+        self._mission_mgr.mark_running_configuration_degraded(
+            source="attachment_reporting",
+            reason=str(decision.get("reason") or "Attach reporting failed"),
+            failed_checks=decision.get("failed_checks", ()),
+            details={
+                key: decision.get(key)
+                for key in (
+                    "selected_strategy",
+                    "strategy_request_id",
+                    "attachment_mode",
+                    "applicability",
+                )
+                if decision.get(key) is not None
+            },
+        )
+        self._flag_recoverable_runtime_failure(
+            RuntimeFailureKind.REPORTING_FAILURE,
+            str(decision.get("reason") or "Attach reporting failed"),
+        )
+        return True
+
+    def _resolve_ready_attachment_strategy(
+        self,
+        decision: Mapping[str, object],
+        detection: Mapping[str, object],
+        frame: Optional[Frame],
+    ) -> Dict[str, Any]:
+        """Finish battle-kind applicability from the fresh ready frame."""
+
+        resolved = dict(decision)
+        if resolved.get("attachment_mode") != "strategy":
+            return resolved
+        tournament = self._tournament_battle_guard(detection)
+        if tournament:
+            observed_kind = "tournament"
+        else:
+            x, y, width, height = DISSONANCE_BADGE_REGION
+            if not (
+                isinstance(frame, np.ndarray)
+                and frame.ndim == 3
+                and y + height <= frame.shape[0]
+                and x + width <= frame.shape[1]
+            ):
+                resolved.update(
+                    {
+                        "attachment_mode": "observation_only",
+                        "applicability": "unverifiable",
+                        "degraded": True,
+                        "reason": (
+                            "a complete fresh battle frame was unavailable "
+                            "for battle-kind classification"
+                        ),
+                        "failed_checks": ["battle_kind"],
+                        "_strategy": None,
+                    }
+                )
+                return resolved
+            try:
+                badge = detect_dissonance_badge(frame)
+            except Exception:
+                resolved.update(
+                    {
+                        "attachment_mode": "observation_only",
+                        "applicability": "unverifiable",
+                        "degraded": True,
+                        "reason": (
+                            "battle-kind classification failed on the fresh "
+                            "attachment frame"
+                        ),
+                        "failed_checks": ["battle_kind"],
+                        "_strategy": None,
+                    }
+                )
+                return resolved
+            if badge.get("observed") is True:
+                observed_kind = "dissonance"
+            elif str(detection.get("state") or "").upper() == "RUNNING":
+                observed_kind = "ordinary"
+            else:
+                resolved.update(
+                    {
+                        "attachment_mode": "observation_only",
+                        "applicability": "unverifiable",
+                        "degraded": True,
+                        "reason": (
+                            "the fresh attachment frame did not show an "
+                            "unobstructed running-battle HUD"
+                        ),
+                        "failed_checks": ["battle_kind"],
+                        "_strategy": None,
+                    }
+                )
+                return resolved
+        resolved["observed_kind"] = observed_kind
+        family = str(resolved.get("expected_family") or "").strip().lower()
+        expected_kind = "tournament" if family == "tournament" else "ordinary"
+        if observed_kind != expected_kind:
+            resolved.update(
+                {
+                    "attachment_mode": "observation_only",
+                    "applicability": "incompatible",
+                    "degraded": True,
+                    "reason": (
+                        f"selected Strategy expects an {expected_kind} battle, "
+                        f"but the active battle is {observed_kind}"
+                    ),
+                    "failed_checks": ["battle_kind"],
+                    "_strategy": None,
+                }
+            )
+            return resolved
+        resolved["applicability"] = "compatible"
+        return resolved
 
     @staticmethod
     def _save_reconciliation_check_sets(
@@ -6306,6 +7187,61 @@ class App:
     def _current_strategy_name(self) -> str:
         strategy = self._mission_mgr.strategy
         return str(strategy.name if strategy else "none").strip().lower()
+
+    def _begin_no_strategy_observation_boundary(
+        self,
+        boundary_id: str,
+        *,
+        observations: object = None,
+    ) -> None:
+        """Start one clean observer boundary and apply its exact save facts."""
+
+        if getattr(self, "_pending_no_strategy_record", None) is not None:
+            return
+        normalized_id = str(boundary_id or "no-strategy").strip()
+        observer = getattr(self, "_no_strategy_observer", None)
+        if observer is None:
+            return
+        if (
+            getattr(self, "_no_strategy_attachment_boundary_id", None)
+            != normalized_id
+        ):
+            observer.reset()
+            self._no_strategy_attachment_boundary_id = normalized_id
+        self._no_strategy_observation_active = True
+        self._no_strategy_inventory_complete = False
+        self._no_strategy_inventory_retry_at = 0.0
+        if isinstance(observations, RunningAttachmentSaveObservations):
+            try:
+                applied = observer.record_player_save_observations(observations)
+            except (TypeError, ValueError) as exc:
+                log(
+                    "[NO_STRATEGY] Guarded attachment save observations "
+                    f"were rejected: {exc}",
+                    "WARN",
+                )
+            else:
+                if applied:
+                    log(
+                        "[NO_STRATEGY] Applied guarded attachment save "
+                        f"observations for {len(applied)} fields: "
+                        + ", ".join(applied),
+                        "INFO",
+                        console=True,
+                    )
+
+    def _end_no_strategy_observation_boundary(self) -> None:
+        """Discard passive state when a managed Strategy takes ownership."""
+
+        if getattr(self, "_pending_no_strategy_record", None) is not None:
+            return
+        self._no_strategy_observation_active = False
+        self._no_strategy_attachment_boundary_id = None
+        self._no_strategy_inventory_complete = False
+        self._no_strategy_inventory_retry_at = 0.0
+        observer = getattr(self, "_no_strategy_observer", None)
+        if observer is not None:
+            observer.reset()
 
     def _current_strategy_definition_matches(self, requested_name: str) -> bool:
         """Return whether the latest named definition is already loaded."""
@@ -7816,6 +8752,71 @@ class App:
                 reason="the running-battle strategy checks completed successfully",
             )
 
+    def _attach_workflow_in_progress(self) -> bool:
+        """Return whether the immutable Attach snapshot still owns selection."""
+
+        workflow = self._supervisor.battle_workflow
+        return bool(
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "attach_battle"
+            and workflow.get("status") not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+        )
+
+    def _defer_active_strategy_request_to_boundary(
+        self,
+        request: Tuple[str, object, str],
+        *,
+        reason: str,
+    ) -> bool:
+        """Keep one exact active-battle request out of the current battle."""
+
+        requested_name, request_id, _apply_mode = request
+        deferred = self._supervisor.defer_strategy_request_to_next_boundary(
+            requested_name,
+            request_id,
+            source="runtime-attachment-strategy-deferral",
+        )
+        self._pending_strategy_request = (
+            requested_name,
+            request_id,
+            "next_boundary",
+        )
+        if not deferred:
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.REPORTING_FAILURE,
+                "the active-battle Strategy request was kept locally for the "
+                "next boundary, but its durable apply mode could not be updated",
+            )
+        log(
+            "[ATTACH] Active-battle Strategy request queued for the next safe "
+            f"boundary: {reason}",
+            "WARN",
+            console=True,
+        )
+        return deferred
+
+    def _attached_observer_requires_strategy_boundary(self) -> bool:
+        """Keep incompatible or unverifiable Attach observers read-only."""
+
+        if self._mission_mgr.strategy is not None:
+            return False
+        degradation = self._mission_mgr.running_configuration_degradation()
+        if not isinstance(degradation, Mapping):
+            return False
+        raw_sources = degradation.get("sources", ())
+        if not isinstance(raw_sources, (list, tuple, set, frozenset)):
+            raw_sources = ()
+        sources = {
+            str(source or "").strip()
+            for source in raw_sources
+            if str(source or "").strip()
+        }
+        return bool(
+            sources.intersection(
+                {"attachment_applicability", "attachment_reporting"}
+            )
+        )
+
     def _process_strategy_boundary(self, detection: Mapping[str, Any]) -> None:
         state = str(detection.get("state") or "UNKNOWN").upper()
         control = HomeBattleControl.parse(
@@ -7893,6 +8894,17 @@ class App:
         request = getattr(self, "_pending_strategy_request", None)
         if request is None or request[2] != "active_battle":
             return False
+        if self._attach_workflow_in_progress():
+            return False
+        if self._attached_observer_requires_strategy_boundary():
+            self._defer_active_strategy_request_to_boundary(
+                request,
+                reason=(
+                    "the attached battle is an incompatible or unverifiable "
+                    "observer and cannot be converted into a Strategy-run battle"
+                ),
+            )
+            return False
         requested_name = request[0]
         try:
             strategy = get_strategy(requested_name)
@@ -7953,6 +8965,12 @@ class App:
         self._startup_gate_waivers = {}
         self._no_strategy_inventory_complete = False
         self._no_strategy_inventory_retry_at = 0.0
+        if str(requested_name or "").strip().lower() == "none":
+            self._begin_no_strategy_observation_boundary(
+                f"strategy:{str(request_id or requested_name)}"
+            )
+        else:
+            self._end_no_strategy_observation_boundary()
         self._active_exclusive_validation_request_id = None
         self._active_exclusive_validation_launch_request_id = None
         self._exclusive_validation_terminal_hold = None
@@ -8271,9 +9289,21 @@ class App:
                 mapping_observer,
             )
             strategy_name = self._current_strategy_name()
+            battle_workflow = getattr(
+                getattr(self, "_supervisor", None),
+                "battle_workflow",
+                None,
+            )
+            attach_strategy_pending = bool(
+                isinstance(battle_workflow, Mapping)
+                and battle_workflow.get("intent") == "attach_battle"
+                and battle_workflow.get("status")
+                not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            )
             if (
                 strategy_name == "none"
                 and getattr(self, "_no_strategy_observation_active", False)
+                and not attach_strategy_pending
             ):
                 try:
                     applied = (
@@ -8402,6 +9432,32 @@ class App:
             and workflow.get("status") in {"validating_save", "action_dispatched"}
         ):
             workflow_id = str(workflow.get("request_id") or "")
+            strategy_decision = self._attachment_strategy_decision(
+                workflow,
+                acquisition=acquisition,
+                observations=observations,
+            )
+            check_sets = strategy_decision.get("_check_sets")
+            if not isinstance(check_sets, Mapping):
+                check_sets = {}
+            strategy_selected = (
+                strategy_decision.get("attachment_mode") == "strategy"
+            )
+            resolved_checks = (
+                check_sets.get("accepted", ()) if strategy_selected else ()
+            )
+            unresolved_checks = (
+                tuple(
+                    sorted(
+                        {
+                            *check_sets.get("mismatched", ()),
+                            *check_sets.get("ui_required", ()),
+                        }
+                    )
+                )
+                if strategy_selected
+                else ()
+            )
             try:
                 receipt = build_running_save_reconciliation_receipt(
                     kind="running_attachment_reconciliation",
@@ -8410,23 +9466,40 @@ class App:
                     acquisition=acquisition,
                     temporal_binding=temporal_binding,
                     disposition=disposition,
-                    # Initial Attach is observation-only.  The save facts are
-                    # retained for a later explicit Strategy adoption, but no
-                    # configured policy has been selected for this battle yet.
-                    resolved_check_ids=(),
+                    resolved_check_ids=resolved_checks,
+                    unresolved_check_ids=unresolved_checks,
                 )
             except (TypeError, ValueError) as exc:
-                self._flag_recoverable_runtime_failure(
-                    RuntimeFailureKind.REPORTING_FAILURE,
-                    f"Attach reconciliation receipt failed: {exc}",
+                reporting_decision = (
+                    self._attachment_reporting_failure_decision(
+                        workflow,
+                        reason=(
+                            "Attach reconciliation reporting failed; the "
+                            f"battle continues in degraded observation: {exc}"
+                        ),
+                        observations=observations,
+                    )
                 )
-                self._supervisor.transition_battle_workflow(
-                    workflow_id,
-                    "failed",
-                    reason=f"typed save reconciliation failed: {exc}",
-                    acknowledgement=current,
+                self._running_reconciliation_claims()[workflow_id] = {
+                    "receipt": None,
+                    "evidence": dict(current),
+                    "ui_fallback": True,
+                    "reporting_unavailable": True,
+                    "attachment_strategy": reporting_decision,
+                }
+                return self._authorize_reporting_degraded_attachment(
+                    workflow,
+                    reporting_decision,
                 )
-                return False
+            self._retain_running_reconciliation_claim(
+                workflow_id,
+                receipt=receipt,
+                acquisition=acquisition,
+                temporal_binding=temporal_binding,
+                context=context,
+                evidence=current,
+                strategy_decision=strategy_decision,
+            )
             ready = self._supervisor.transition_battle_workflow(
                 workflow_id,
                 "ready",
@@ -8436,18 +9509,32 @@ class App:
                 ),
                 acknowledgement=current,
                 save_receipt=receipt,
-                configuration=receipt["configuration"],
+                configuration=self._attachment_configuration_report(
+                    receipt,
+                    strategy_decision,
+                    stage="ready",
+                ),
             )
             if ready is None or ready.get("status") != "ready":
-                return False
-            self._retain_running_reconciliation_claim(
-                workflow_id,
-                receipt=receipt,
-                acquisition=acquisition,
-                temporal_binding=temporal_binding,
-                context=context,
-                evidence=current,
-            )
+                reporting_decision = (
+                    self._attachment_reporting_failure_decision(
+                        workflow,
+                        reason=(
+                            "Attach reconciliation was proven, but its durable "
+                            "ready report could not be persisted; the battle "
+                            "continues in degraded observation"
+                        ),
+                        observations=observations,
+                    )
+                )
+                retained = self._running_reconciliation_claims().get(workflow_id)
+                if isinstance(retained, dict):
+                    retained["reporting_unavailable"] = True
+                    retained["attachment_strategy"] = reporting_decision
+                return self._authorize_reporting_degraded_attachment(
+                    workflow,
+                    reporting_decision,
+                )
             return True
 
         manual = self._supervisor.manual_control
@@ -8565,6 +9652,10 @@ class App:
             in {"validating_save", "action_dispatched"}
         ):
             workflow_id = str(workflow.get("request_id") or "")
+            strategy_decision = self._attachment_strategy_decision(
+                workflow,
+                ui_fallback_reason=reason,
+            )
             try:
                 receipt = build_running_ui_reconciliation_receipt(
                     kind="running_attachment_reconciliation",
@@ -8576,12 +9667,32 @@ class App:
                     fallback_complete=fallback_complete,
                 )
             except (TypeError, ValueError) as exc:
-                log(
-                    "[PLAYER_SAVE] Could not bind the running UI fallback "
-                    f"receipt: {exc}",
-                    "ERROR",
+                reporting_decision = (
+                    self._attachment_reporting_failure_decision(
+                        workflow,
+                        reason=(
+                            "Attach UI reconciliation reporting failed; the "
+                            f"battle continues in degraded observation: {exc}"
+                        ),
+                    )
                 )
-                return False
+                self._running_reconciliation_claims()[workflow_id] = {
+                    "receipt": None,
+                    "evidence": dict(current),
+                    "ui_fallback": True,
+                    "reporting_unavailable": True,
+                    "attachment_strategy": reporting_decision,
+                }
+                return self._authorize_reporting_degraded_attachment(
+                    workflow,
+                    reporting_decision,
+                )
+            self._running_reconciliation_claims()[workflow_id] = {
+                "receipt": copy.deepcopy(receipt),
+                "evidence": dict(current),
+                "ui_fallback": True,
+                "attachment_strategy": strategy_decision,
+            }
             ready = self._supervisor.transition_battle_workflow(
                 workflow_id,
                 "ready",
@@ -8591,15 +9702,31 @@ class App:
                 ),
                 acknowledgement=current,
                 save_receipt=receipt,
-                configuration=receipt["configuration"],
+                configuration=self._attachment_configuration_report(
+                    receipt,
+                    strategy_decision,
+                    stage="ready",
+                ),
             )
             if ready is None or ready.get("status") != "ready":
-                return False
-            self._running_reconciliation_claims()[workflow_id] = {
-                "receipt": copy.deepcopy(receipt),
-                "evidence": dict(current),
-                "ui_fallback": True,
-            }
+                reporting_decision = (
+                    self._attachment_reporting_failure_decision(
+                        workflow,
+                        reason=(
+                            "Attach UI continuity was proven, but its durable "
+                            "ready report could not be persisted; the battle "
+                            "continues in degraded observation"
+                        ),
+                    )
+                )
+                retained = self._running_reconciliation_claims().get(workflow_id)
+                if isinstance(retained, dict):
+                    retained["reporting_unavailable"] = True
+                    retained["attachment_strategy"] = reporting_decision
+                return self._authorize_reporting_degraded_attachment(
+                    workflow,
+                    reporting_decision,
+                )
             return True
 
         manual = self._supervisor.manual_control
@@ -10873,6 +12000,7 @@ class App:
         self._no_strategy_post_run_stage = None
         self._no_strategy_post_run_retry_at = 0.0
         self._no_strategy_observation_active = False
+        self._no_strategy_attachment_boundary_id = None
         self._no_strategy_inventory_complete = False
         self._no_strategy_inventory_retry_at = 0.0
         self._no_strategy_observer.reset()
@@ -11002,6 +12130,7 @@ class App:
             self._tournament_results_captured = False
             self._tournament_terminal_continuation_bound = False
             self._tournament_terminal_continuation_claim = None
+            self._tournament_degradation_snapshot = None
         if (
             not operator_workflow_only
             and self._handler_enabled("daily_gem")
@@ -11048,6 +12177,27 @@ class App:
                 "_tournament_terminal_continuation_bound",
                 False,
             ):
+                degradation_snapshot = None
+                if AUTOMATION.mode is ExecMode.NEXT_BATTLE:
+                    degradation_fn = getattr(
+                        self._mission_mgr,
+                        "running_configuration_degradation",
+                        None,
+                    )
+                    candidate = (
+                        degradation_fn()
+                        if callable(degradation_fn)
+                        else None
+                    )
+                    if self._degradation_requires_home_repair(candidate):
+                        degradation_snapshot = dict(candidate)
+                        log(
+                            "[RUNTIME_POLICY] Continue automatically will "
+                            "repair degraded Tournament configuration at Home",
+                            "INFO",
+                            console=True,
+                        )
+                self._tournament_degradation_snapshot = degradation_snapshot
                 self._tournament_terminal_continuation_claim = (
                     self._build_terminal_home_continuation_claim(
                         source="tournament_results"
@@ -11084,11 +12234,26 @@ class App:
                     "INFO",
                     console=True,
                 )
+                tournament_observed_configuration = (
+                    self._no_strategy_observer.snapshot(finalized=True)
+                    if self._mission_mgr.strategy is None
+                    and getattr(
+                        self,
+                        "_no_strategy_observation_active",
+                        False,
+                    )
+                    else None
+                )
                 (
                     tournament_context,
                     _tournament_acquisition,
                     tournament_mapping_observer,
-                ) = self._terminal_battle_bundle("TOURNAMENT_RESULTS")
+                ) = self._terminal_battle_bundle(
+                    "TOURNAMENT_RESULTS",
+                    observed_run_configuration=(
+                        tournament_observed_configuration
+                    ),
+                )
                 record = handle_tournament_results(
                     img,
                     battle_context=tournament_context,
@@ -11115,10 +12280,30 @@ class App:
                     )
                     return
                 self._tournament_results_captured = True
+                if tournament_observed_configuration is not None:
+                    self._end_no_strategy_observation_boundary()
                 self._mission_mgr.on_game_over()
                 self._status_reporter.reset_coin_rate_samples()
                 self._strategy_boundary_confirmed = True
                 self._apply_pending_strategy()
+                degradation_snapshot = getattr(
+                    self,
+                    "_tournament_degradation_snapshot",
+                    None,
+                )
+                if (
+                    isinstance(degradation_snapshot, Mapping)
+                    and self._mission_mgr.strategy is not None
+                ):
+                    prepared = self._mission_mgr.prepare_degraded_home_repair(
+                        degradation_snapshot
+                    )
+                    if not prepared:
+                        self._flag_recoverable_runtime_failure(
+                            RuntimeFailureKind.REPORTING_FAILURE,
+                            "degraded Tournament Home repair state could not "
+                            "be prepared",
+                        )
                 if terminal_policy == ExecMode.WAIT.value:
                     log_result(
                         "Tournament finished — result saved; Tournament Results "
@@ -11188,6 +12373,7 @@ class App:
             )
             self._tournament_terminal_continuation_claim = None
             self._tournament_terminal_continuation_bound = False
+            self._tournament_degradation_snapshot = None
             return
 
         if (
@@ -11335,10 +12521,7 @@ class App:
                 )
                 if isinstance(raw_degradation, Mapping):
                     degradation_snapshot = dict(raw_degradation)
-            elif (
-                not no_strategy_run
-                and AUTOMATION.mode is ExecMode.NEXT_BATTLE
-            ):
+            elif AUTOMATION.mode is ExecMode.NEXT_BATTLE:
                 degradation_fn = getattr(
                     self._mission_mgr,
                     "running_configuration_degradation",
@@ -11347,7 +12530,7 @@ class App:
                 candidate = (
                     degradation_fn() if callable(degradation_fn) else None
                 )
-                if isinstance(candidate, Mapping):
+                if self._degradation_requires_home_repair(candidate):
                     degradation_snapshot = dict(candidate)
                     log(
                         "[RUNTIME_POLICY] Continue automatically will return "
@@ -11369,6 +12552,13 @@ class App:
                     if isinstance(raw_terminal_continuation, Mapping)
                     else None
                 )
+            elif degraded_home_repair:
+                terminal_continuation_claim = (
+                    self._build_terminal_home_continuation_claim(
+                        source="degraded_battle_repair",
+                        evidence=current_manual_evidence,
+                    )
+                )
             elif not manual_return and (repair_in_progress or no_strategy_run):
                 terminal_continuation_claim = (
                     self._build_terminal_home_continuation_claim(
@@ -11377,13 +12567,6 @@ class App:
                             if repair_in_progress
                             else "no_strategy_post_run"
                         ),
-                        evidence=current_manual_evidence,
-                    )
-                )
-            elif degraded_home_repair:
-                terminal_continuation_claim = (
-                    self._build_terminal_home_continuation_claim(
-                        source="degraded_battle_repair",
                         evidence=current_manual_evidence,
                     )
                 )
@@ -12022,6 +13205,7 @@ class App:
                     console=True,
                 )
                 self._no_strategy_observation_active = False
+                self._no_strategy_attachment_boundary_id = None
                 self._no_strategy_inventory_complete = False
                 self._no_strategy_inventory_retry_at = 0.0
                 self._no_strategy_observer.reset()

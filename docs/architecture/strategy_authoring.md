@@ -305,6 +305,12 @@ publication with a normal next-boundary request when the process is active, or
 a visible Start selection when stopped, so it cannot silently replace the
 Strategy in the current battle.
 
+Attach is the exception only when the operator explicitly requests it. The
+server snapshots the accepted Strategy ID, request ID, and complete resolved
+definition fingerprint under the control-writer lock. That immutable snapshot
+owns compatibility and adoption for the in-flight Attach; later draft,
+publication, or selection changes apply only at a later safe boundary.
+
 ## Runtime validation and action authority
 
 At an already-safe Home/new-run boundary, an enforced mismatch selects its

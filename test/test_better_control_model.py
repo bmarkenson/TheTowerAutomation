@@ -8,9 +8,11 @@ import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from automation.missions.manager import MissionManager
+from automation.strategies import get_strategy
 from core.action_authority import (
     AuthorityHold,
     AuthorityHoldState,
@@ -39,6 +41,7 @@ from core.gc_no_battle_setup import (
     GcNoBattleSetupResult,
     GcNoBattleSetupStatus,
 )
+from core.no_strategy_observer import NoStrategyRunObserver
 from core.player_save import PlayerSaveSnapshot, SaveCheckEvidence
 from core.player_save_preflight import CarriedEvidenceState
 from core.player_save_acquisition import (
@@ -998,6 +1001,42 @@ def test_directive_store_rejects_mismatched_intent_and_serializes_workflows(
         store.transition_battle_workflow(first["request_id"], "completed")
 
 
+def test_attach_atomically_snapshots_accepted_strategy_selection(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    selected = store.set_strategy("farm_t19", source="test")
+    evidence = _evidence(game_state="active_battle")
+
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+        strategy="farm_t18",
+        source="test",
+    )
+
+    assert workflow["strategy"] == "farm_t19"
+    assert workflow["strategy_request_id"] == selected["strategy_request_id"]
+    assert len(workflow["strategy_definition_fingerprint"]) == 64
+
+    store.set_strategy("farm_t18", source="later-selection")
+    retained = store.status()["battle_workflow"]
+    assert retained["strategy"] == "farm_t19"
+    assert retained["strategy_request_id"] == selected["strategy_request_id"]
+
+
+def test_attach_without_a_strategy_snapshot_remains_valid_for_safe_legacy_fallback(
+    tmp_path,
+):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=_evidence(game_state="active_battle"),
+    )
+
+    assert workflow["status"] == "requested"
+    assert "strategy" not in workflow
+
+
 def test_take_manual_control_atomically_requests_indefinite_pause(tmp_path):
     store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
     store.set_state("RUNNING", source="test")
@@ -1770,6 +1809,110 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
     assert supervisor.battle_workflow["status"] == "completed"
 
 
+def test_attach_completion_report_failure_never_reclaims_terminal_hold(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+    )
+    for status in ("acknowledged", "validating_save"):
+        store.transition_battle_workflow(
+            workflow["request_id"],
+            status,
+            acknowledgement=evidence,
+        )
+    claim = _running_save_claim(workflow["request_id"], evidence)
+    store.transition_battle_workflow(
+        workflow["request_id"],
+        "ready",
+        acknowledgement=evidence,
+        save_receipt=claim[0],
+    )
+    later_strategy = store.set_strategy(
+        "farm_t18",
+        apply_mode="active_battle",
+        source="request-after-attach",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    _retain_running_save_claim(
+        app,
+        workflow["request_id"],
+        evidence,
+        claim,
+    )
+    app._pending_strategy_request = supervisor.strategy_request
+
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+    manager.maybe_run_start({"state": "RUNNING"})
+    with patch.object(
+        supervisor,
+        "transition_battle_workflow",
+        return_value=None,
+    ):
+        assert app._complete_ready_attachment_after_adoption() is True
+
+    retained = app._running_reconciliation_claims()[workflow["request_id"]]
+    assert retained["semantic_completion_applied"] is True
+    assert app._pending_strategy_request == (
+        "farm_t18",
+        later_strategy["strategy_request_id"],
+        "next_boundary",
+    )
+    assert store.status()["strategy_request_id"] == later_strategy[
+        "strategy_request_id"
+    ]
+    assert store.status()["strategy_apply_mode"] == "next_boundary"
+    assert app._operator_workflow_authority_hold() is None
+    degradation = manager.running_configuration_degradation()
+    assert degradation is not None
+    assert "attachment_reporting" in degradation["sources"]
+    assert "workflow_reporting" in degradation["failed_checks"]
+
+    terminal_evidence = _evidence(
+        game_state="game_over",
+        observation_id="runtime-1:terminal",
+    )
+    app._control_observation = {
+        key: value
+        for key, value in terminal_evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._sync_operator_control_workflows({"state": "GAME_OVER"})
+    assert supervisor.battle_workflow["status"] == "completed"
+    manager.maybe_run_start({"state": "GAME_OVER"})
+    assert manager.active_battle_observed() is False
+    assert app._operator_workflow_authority_hold() is None
+    repaired_degradation = manager.running_configuration_degradation()
+    assert repaired_degradation is not None
+    assert "attachment_reporting" not in repaired_degradation["sources"]
+    assert "attachment_applicability" in repaired_degradation["sources"]
+    assert "workflow_reporting" not in repaired_degradation["failed_checks"]
+
+
 def test_unusable_attach_save_releases_enabled_ui_monitoring(
     tmp_path,
     monkeypatch,
@@ -1832,6 +1975,103 @@ def test_unusable_attach_save_releases_enabled_ui_monitoring(
     assert app._complete_ready_attachment_after_adoption() is True
     assert supervisor.battle_workflow["status"] == "completed"
     assert supervisor.is_paused is False
+
+
+def test_attach_reporting_failure_adopts_degraded_observer_and_completes(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    store.set_strategy("none", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+        source="test",
+    )
+    for status in ("acknowledged", "validating_save"):
+        store.transition_battle_workflow(
+            workflow["request_id"],
+            status,
+            acknowledgement=evidence,
+        )
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._no_strategy_observer = NoStrategyRunObserver()
+    app._no_strategy_observation_active = False
+    app._no_strategy_attachment_boundary_id = None
+    app._no_strategy_inventory_complete = False
+    app._no_strategy_inventory_retry_at = 0.0
+    app._pending_no_strategy_record = None
+
+    with patch(
+        "core.app.build_running_ui_reconciliation_receipt",
+        side_effect=ValueError("report serializer unavailable"),
+    ):
+        handled = app._complete_ui_backed_operator_reconciliation(
+            SimpleNamespace(
+                ui_fallback_complete=True,
+                ui_fallback_reason="unsupported_save_version",
+                confirmed_same_battle_scope_id="scope-1",
+                confirmed_later_battle_scope_id=None,
+            )
+        )
+
+    assert handled is True
+    assert manager.awaiting_initial_battle_intent() is False
+    degradation = manager.running_configuration_degradation()
+    assert degradation is not None
+    assert "attachment_reporting" in degradation["sources"]
+    assert degradation["failed_checks"] == ["workflow_reporting"]
+
+    assert manager.maybe_run_start({"state": "RUNNING"}) is False
+    assert manager.active_battle_observed() is True
+    assert app._operator_workflow_authority_hold() is None
+    assert app._complete_ready_attachment_after_adoption() is True
+    assert supervisor.battle_workflow["status"] == "completed"
+    assert supervisor.battle_workflow["configuration"]["reporting_status"] == (
+        "unavailable"
+    )
+    completed_degradation = manager.running_configuration_degradation()
+    assert completed_degradation is not None
+    assert completed_degradation["sources"] == ["attachment_reporting"]
+    assert completed_degradation["failed_checks"] == ["workflow_reporting"]
+    assert App._degradation_requires_home_repair(completed_degradation) is False
+    assert supervisor.is_paused is False
+
+
+def test_reporting_only_degradation_does_not_manufacture_home_repair():
+    assert App._degradation_requires_home_repair(
+        {
+            "sources": ["attachment_reporting"],
+            "failed_checks": ["workflow_reporting"],
+        }
+    ) is False
+    assert App._degradation_requires_home_repair(
+        {
+            "sources": ["attachment_reporting", "attachment_configuration"],
+            "failed_checks": ["workflow_reporting", "modules"],
+        }
+    ) is True
 
 
 def test_return_control_stays_input_blocked_during_reconciliation(
@@ -3219,6 +3459,123 @@ def test_attach_stays_pending_before_battle_adoption(tmp_path, monkeypatch):
     assert hold.allowed_auxiliary_collectors == ()
 
 
+def test_attach_strategy_decision_uses_exact_tier_and_fresh_battle_kind():
+    app = App.__new__(App)
+    app._strategy_session_requirements = lambda _strategy: {}
+    evidence = _evidence(game_state="active_battle")
+    acquisition, _temporal, _context = _running_reconciliation_objects(
+        evidence,
+        snapshot=SimpleNamespace(
+            runtime_save=SimpleNamespace(
+                active_round_identity=SimpleNamespace(current_tier=19)
+            )
+        ),
+    )
+
+    farm_t19 = get_strategy("farm_t19")
+    assert farm_t19 is not None
+    matching = app._attachment_strategy_decision(
+        {
+            "strategy": "farm_t19",
+            "strategy_request_id": "strategy-1",
+            "strategy_definition_fingerprint": (
+                farm_t19.definition_fingerprint()
+            ),
+        },
+        acquisition=acquisition,
+    )
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    compatible = app._resolve_ready_attachment_strategy(
+        matching,
+        {"state": "RUNNING", "secondary_states": []},
+        frame,
+    )
+    unverified = app._resolve_ready_attachment_strategy(
+        matching,
+        {"state": "RUNNING", "secondary_states": []},
+        None,
+    )
+    wrong_kind = app._resolve_ready_attachment_strategy(
+        matching,
+        {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]},
+        None,
+    )
+    covered_hud = app._resolve_ready_attachment_strategy(
+        matching,
+        {"state": "CARDS", "secondary_states": []},
+        frame,
+    )
+    wrong_tier = app._attachment_strategy_decision(
+        {
+            "strategy": "farm_t18",
+            "strategy_request_id": "strategy-2",
+            "strategy_definition_fingerprint": (
+                get_strategy("farm_t18").definition_fingerprint()
+            ),
+        },
+        acquisition=acquisition,
+    )
+    changed_definition = app._attachment_strategy_decision(
+        {
+            "strategy": "farm_t19",
+            "strategy_request_id": "strategy-1",
+            "strategy_definition_fingerprint": "0" * 64,
+        },
+        acquisition=acquisition,
+    )
+
+    assert compatible["attachment_mode"] == "strategy"
+    assert compatible["applicability"] == "compatible"
+    assert compatible["observed_kind"] == "ordinary"
+    assert unverified["attachment_mode"] == "observation_only"
+    assert unverified["applicability"] == "unverifiable"
+    assert unverified["failed_checks"] == ["battle_kind"]
+    assert wrong_kind["attachment_mode"] == "observation_only"
+    assert wrong_kind["applicability"] == "incompatible"
+    assert wrong_kind["failed_checks"] == ["battle_kind"]
+    assert covered_hud["attachment_mode"] == "observation_only"
+    assert covered_hud["applicability"] == "unverifiable"
+    assert covered_hud["failed_checks"] == ["battle_kind"]
+    assert wrong_tier["attachment_mode"] == "observation_only"
+    assert wrong_tier["applicability"] == "incompatible"
+    assert wrong_tier["failed_checks"] == ["battle_tier"]
+    assert changed_definition["attachment_mode"] == "observation_only"
+    assert changed_definition["applicability"] == "unverifiable"
+    assert "changed after Attach" in changed_definition["reason"]
+
+
+def test_attach_strategy_decision_distinguishes_none_and_unverifiable():
+    app = App.__new__(App)
+    app._strategy_session_requirements = lambda _strategy: {}
+
+    no_strategy = app._attachment_strategy_decision({"strategy": "none"})
+    legacy = app._attachment_strategy_decision({})
+    tournament_strategy = get_strategy("tournament")
+    assert tournament_strategy is not None
+    tournament = app._attachment_strategy_decision(
+        {
+            "strategy": "tournament",
+            "strategy_request_id": "strategy-1",
+            "strategy_definition_fingerprint": (
+                tournament_strategy.definition_fingerprint()
+            ),
+        },
+        ui_fallback_reason="unsupported_save_version",
+    )
+    compatible_tournament = app._resolve_ready_attachment_strategy(
+        tournament,
+        {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]},
+        None,
+    )
+
+    assert no_strategy["applicability"] == "intentional_observation"
+    assert no_strategy["degraded"] is False
+    assert legacy["applicability"] == "unverifiable"
+    assert legacy["degraded"] is True
+    assert compatible_tournament["attachment_mode"] == "strategy"
+    assert compatible_tournament["applicability"] == "compatible"
+
+
 def test_enabled_attach_begins_validation_on_first_runtime_sync(
     tmp_path,
     monkeypatch,
@@ -3611,6 +3968,31 @@ def test_battle_intent_authorization_can_change_after_a_natural_boundary(
         {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
     )
     assert manager.maybe_run_start({"state": "RUNNING"}) is True
+
+
+def test_attach_authorization_adopts_only_the_resolved_snapshot_strategy():
+    selected = get_strategy("farm_t19")
+    assert selected is not None
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+
+    assert manager.authorize_initial_battle_intent(
+        "attach_battle",
+        request_id="attach-1",
+        strategy=selected,
+    )
+    assert manager.strategy is selected
+
+    manager.revoke_initial_battle_intent(
+        "attach_battle",
+        request_id="attach-1",
+    )
+    assert manager.authorize_initial_battle_intent(
+        "attach_battle",
+        request_id="attach-2",
+        observation_only=True,
+    )
+    assert manager.strategy is None
 
 
 def test_operator_workflow_is_interrupted_when_boundary_changes_before_enable(

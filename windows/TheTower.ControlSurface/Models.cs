@@ -562,6 +562,9 @@ public sealed class BetterControlStrategyScopeStatus
 
     [JsonPropertyName("pending_active_battle")]
     public string? PendingActiveBattle { get; set; }
+
+    [JsonPropertyName("degradation")]
+    public Dictionary<string, object?>? Degradation { get; set; }
 }
 
 public sealed class BetterControlTerminalPolicyStatus

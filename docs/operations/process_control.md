@@ -43,10 +43,15 @@ other route. Attach remains input-blocked at `validating_save` until one
 guarded exact-target serialization proves source restoration and either binds
 usable save evidence or selects the established Battle History UI fallback.
 An absent, unsupported, incompatible, or unprojectable save after safe
-restoration therefore still adopts the battle for observation only and keeps
-supported UI monitoring available. Owner, target, scope, authority, or
-restoration loss blocks input. Applying a Strategy remains a separate explicit
-action.
+restoration therefore still adopts the battle and keeps supported UI
+monitoring available. Attach freezes the accepted selected Strategy definition
+with the request. No Strategy becomes an intentional observer; a proven
+kind/tier-compatible Strategy becomes active; and an incompatible or
+unprovable selection becomes a degraded observer while the selection remains
+pending for the next safe boundary. Attached checks never repair the current
+battle. Recoverable check, data, and reporting failures complete degraded and
+release automation. Only owner, target, scope, authority, restoration, or
+uncertain-input loss is catastrophic and leaves input Paused.
 
 Take Manual Control first requests an indefinite Pause and becomes active only
 after runtime acknowledgement. Return Control remains Paused; explicit Enable
