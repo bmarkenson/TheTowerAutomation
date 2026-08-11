@@ -323,7 +323,10 @@ minimal record contains:
 control surface binds a request to the fresh runtime-owned session ID, PID, ADB
 target, screen, and battle evidence it has already verified against the held
 runtime lock. A conflicting live request returns `busy`/HTTP 409. The fixed
-30-second heartbeat expiry is server policy rather than client negotiation.
+120-second heartbeat expiry is server policy rather than client negotiation.
+This window includes production quiescence and acknowledgement time, leaving a
+bounded interval for guarded multi-screen development work without relying on
+client timing or an indefinite hold.
 
 There is no source registration, complete worktree fingerprint, secret bearer
 token, client authentication handshake, service epoch, capability negotiation,

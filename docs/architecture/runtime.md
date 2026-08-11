@@ -1334,7 +1334,7 @@ warning text in `actions.log`.
   background input, obtains a fresh known observation, and only then publishes
   the separate acknowledgement. The watchdog may continue passive observation,
   but restart and foreground recovery make their final typed lifecycle check
-  under that shared guard. A 30-second heartbeat deadline, Pause/Stop,
+  under that shared guard. A 120-second heartbeat deadline, Pause/Stop,
   runtime/PID/target replacement, or an authoritative battle boundary makes
   status inactive and terminates the lease. Resume never revives the terminal
   request. The development input helper consumes that composite `active`

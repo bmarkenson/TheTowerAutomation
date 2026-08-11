@@ -18,7 +18,7 @@ curl --fail --silent --show-error \
 
 A successful write is only a request. Inspect
 `interactive_development_lease` in `/api/v1/status` and require `active: true`.
-That composite value must prove `RUNNING` control, an unexpired 30-second
+That composite value must prove `RUNNING` control, an unexpired 120-second
 heartbeat, matching request/runtime/session/PID/target/lock acknowledgement,
 and production's installed `external_development` hold. Capture, detection,
 and status continue; production input, recovery, initialization, validation,
@@ -52,8 +52,11 @@ composite `active` value. It acquires native geometry from that target and
 revalidates the complete binding immediately before one bounded ADB command.
 Tap coordinates use half-open canonical bounds; swipe duration is 1–5000 ms.
 
-The acknowledged expiry must leave the selected ADB timeout plus two seconds
-for timestamp precision and dispatch. A tap needs at least 7 seconds; a 5000 ms
+The server-owned 120-second window leaves acknowledgement and guarded
+multi-screen work enough time without making the lease indefinite. Each
+heartbeat resets that fixed window. The acknowledged expiry must still leave
+the selected ADB timeout plus two seconds for timestamp precision and dispatch.
+A tap needs at least 7 seconds; a 5000 ms
 swipe needs 9 seconds. If insufficient, heartbeat separately, wait for the
 renewed matching acknowledgement, and invoke the helper again. The helper does
 not request, heartbeat, extend, revive, release, or retry a lease or uncertain

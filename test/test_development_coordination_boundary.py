@@ -23,7 +23,10 @@ from core.action_authority import (
 )
 from core.app import App
 from core.automation_supervisor import AutomationSupervisor
-from core.control_directives import ControlDirectiveStore
+from core.control_directives import (
+    ControlDirectiveStore,
+    INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
+)
 from core.control_surface import (
     ControlSurfaceRequestError,
     ControlSurfaceService,
@@ -648,6 +651,7 @@ def test_heartbeat_expiry_rejects_input_then_restores_after_fresh_observation(
     coordination_harness: CoordinationHarness,
 ) -> None:
     harness = coordination_harness
+    expired_offset = 10 + INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS + 1
     lease_id = _activate_lease(harness)
     harness.service.apply_interactive_development_lease(
         {"operation": "heartbeat", "lease_id": lease_id},
@@ -669,7 +673,7 @@ def test_heartbeat_expiry_rejects_input_then_restores_after_fresh_observation(
     rejected, _reader, runner = _execute_input(
         harness,
         lease_id,
-        offsets=(41,),
+        offsets=(expired_offset,),
     )
     assert rejected.exit_code == EXIT_REJECTED
     assert "expired" in rejected.message
@@ -677,7 +681,7 @@ def test_heartbeat_expiry_rejects_input_then_restores_after_fresh_observation(
 
     with patch("core.app.stop_blind_gem_tapper", return_value=False):
         harness.app._sync_interactive_development_control_boundary(
-            now=harness.base_time + 41,
+            now=harness.base_time + expired_offset,
         )
     assert harness.app._interactive_development_ack["state"] == "expiry_pending"
     assert harness.app._external_development_hold_active
@@ -687,7 +691,7 @@ def test_heartbeat_expiry_rejects_input_then_restores_after_fresh_observation(
     ):
         harness.app._sync_interactive_development_observation(
             {"state": "RUNNING"},
-            now=harness.base_time + 42,
+            now=harness.base_time + expired_offset + 1,
         )
     terminal = harness.store.status()["interactive_development_lease"]
     assert terminal["terminal_disposition"] == "expired"
@@ -779,25 +783,35 @@ def test_stale_runtime_acknowledgement_rejects_before_any_fake_adb_call(
 
 
 def test_near_expiry_is_rejected_after_geometry_without_mutating_adb(
-    coordination_harness: CoordinationHarness,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    harness = coordination_harness
-    lease_id = _activate_lease(harness)
-    with patch("core.app.stop_blind_gem_tapper", return_value=False):
-        harness.app._sync_interactive_development_control_boundary(
-            now=harness.base_time + 24,
-        )
-    status = harness.service.status(now=harness.base_time + 24)
-    assert status["interactive_development_lease"]["active"] is True
-
-    rejected, reader, runner = _execute_input(
-        harness,
-        lease_id,
-        offsets=(24, 24),
+    # The synthetic harness does not publish periodic wall-clock observations.
+    # Keep its authority snapshot fresh across the longer lease so this test
+    # isolates the helper's dispatch reserve rather than status staleness.
+    harness = _build_coordination_harness(
+        tmp_path,
+        monkeypatch,
+        stale_after_seconds=INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
     )
-    assert rejected.exit_code == EXIT_REJECTED
-    assert "Heartbeat the lease" in rejected.message
-    assert reader.calls == 2
-    assert [command for command, _timeout in runner.commands] == [
-        ["adb", "-s", TARGET, "exec-out", "screencap", "-p"]
-    ]
+    near_expiry_offset = INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS - 6
+    try:
+        lease_id = _activate_lease(harness)
+        status = harness.service.status(
+            now=harness.base_time + near_expiry_offset
+        )
+        assert status["interactive_development_lease"]["active"] is True
+
+        rejected, reader, runner = _execute_input(
+            harness,
+            lease_id,
+            offsets=(near_expiry_offset, near_expiry_offset),
+        )
+        assert rejected.exit_code == EXIT_REJECTED
+        assert "Heartbeat the lease" in rejected.message
+        assert reader.calls == 2
+        assert [command for command, _timeout in runner.commands] == [
+            ["adb", "-s", TARGET, "exec-out", "screencap", "-p"]
+        ]
+    finally:
+        harness.close()
