@@ -4256,6 +4256,41 @@ def test_repeated_return_enable_is_pending_and_keeps_request_identity(
     assert second["control_model"]["manual_control"]["updated_at"] == updated_at
 
 
+def test_runtime_awaiting_enable_while_paused_starts_enable_request(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(service, evidence, paused=True)
+    manual = service.control_store.request_manual_control(
+        evidence=evidence,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    service.control_store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "awaiting_enable",
+        refresh_status="save_validation_pending",
+    )
+    paused = service.control_store.set_state("PAUSED", source="runtime")
+
+    response = service.apply_control({"action": "enable"})
+
+    assert response["request"]["disposition"] == "requested"
+    assert response["control"]["state"] == "RUNNING"
+    assert response["control"]["state_request_id"] != paused["state_request_id"]
+    resumed = response["control_model"]["manual_control"]
+    assert resumed["status"] == "awaiting_enable"
+    assert resumed["refresh_status"] == "save_refresh_pending_after_enable"
+
+
 def test_same_value_state_ack_requires_the_exact_request_identity(tmp_path):
     service = ControlSurfaceService(repository_root=tmp_path)
     first = service.control_store.set_state("PAUSED", source="first")
