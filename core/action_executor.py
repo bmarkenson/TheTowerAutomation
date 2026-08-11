@@ -54,6 +54,10 @@ from core.gc_preflight import (
     summarize_gc_preflight_variations,
 )
 from core.gate_decisions import merge_profile_skip_waivers
+from core.runtime_failure_policy import (
+    RuntimeFailureKind,
+    decide_runtime_failure,
+)
 from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
 )
@@ -68,35 +72,8 @@ from handlers.ad_gem_handler import (
 Action = Dict[str, Any]
 
 
-def _repair_mismatch_attempt_limit(action: Mapping[str, Any]) -> int:
-    """Return a safe, backwards-compatible retry threshold for one action."""
-
-    try:
-        attempts = int(action.get("repair_mismatch_attempts", 1))
-    except (TypeError, ValueError):
-        return 1
-    return max(1, attempts)
-
-
-def _repair_mismatch_failure_key(
-    failed_checks: Iterable[Any],
-    *,
-    reason: str,
-) -> str:
-    """Identify consecutive authoritative mismatches without volatile detail."""
-
-    normalized = sorted(
-        {
-            str(check).strip()
-            for check in failed_checks
-            if str(check).strip()
-        }
-    )
-    return json.dumps(normalized or [str(reason).strip()], sort_keys=True)
-
-
 def _reset_repair_mismatch_attempts(mv: Dict[str, Any]) -> None:
-    """Clear only the automatic retry evidence owned by session preflight."""
+    """Clear legacy automatic-repair counters after a completed check."""
 
     mv["gc_session_preflight_repair_attempts"] = 0
     mv["gc_session_preflight_repair_failure_key"] = ""
@@ -804,6 +781,8 @@ def execute_actions(
                 if result.status is GcPreflightNavigationStatus.COMPLETE:
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = True
+                        mv["gc_session_preflight_degraded"] = False
+                        mv["gc_session_preflight_disposition"] = "verified"
                         mv["gc_session_preflight_failed_checks"] = []
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
@@ -831,23 +810,8 @@ def execute_actions(
                         "DEBUG",
                     )
                 elif result.status is GcPreflightNavigationStatus.MISMATCH:
-                    mismatch_policy = str(
-                        act.get("mismatch_policy") or "block"
-                    ).strip().lower()
-                    observation_only = mismatch_policy == "notify"
-                    home_repair_available = bool(
-                        not attached_route
-                        and result.evidence is not None
-                        and getattr(
-                            result.evidence,
-                            "requires_no_battle_repair",
-                            False,
-                        )
-                    )
-                    repairable = bool(
-                        not observation_only
-                        and act.get("allow_repair", True)
-                        and home_repair_available
+                    decision = decide_runtime_failure(
+                        RuntimeFailureKind.CONFIGURATION_MISMATCH
                     )
                     failed_checks = list(
                         getattr(result.evidence, "failed_checks", ())
@@ -855,113 +819,63 @@ def execute_actions(
                     mismatch_summary = summarize_gc_preflight_mismatch(
                         evidence_payload
                     )
-                    repair_requested = repairable
-                    retry_attempt = 0
-                    retry_limit = _repair_mismatch_attempt_limit(act)
-                    if repairable and mv is not None:
-                        failure_key = _repair_mismatch_failure_key(
-                            failed_checks,
-                            reason=result.reason,
-                        )
-                        prior_key = str(
-                            mv.get("gc_session_preflight_repair_failure_key")
-                            or ""
-                        )
-                        try:
-                            prior_attempts = (
-                                int(
-                                    mv.get(
-                                        "gc_session_preflight_repair_attempts"
-                                    )
-                                    or 0
-                                )
-                                if prior_key == failure_key
-                                else 0
-                            )
-                        except (TypeError, ValueError):
-                            prior_attempts = 0
-                        retry_attempt = prior_attempts + 1
-                        repair_requested = retry_attempt >= retry_limit
-                        mv["gc_session_preflight_repair_attempts"] = (
-                            retry_attempt
-                        )
-                        mv["gc_session_preflight_repair_failure_key"] = (
-                            failure_key
-                        )
-                    elif mv is not None:
-                        _reset_repair_mismatch_attempts(mv)
                     if mv is not None:
-                        mv["gc_session_preflight_completed"] = False
-                        mv["gc_session_preflight_blocked"] = bool(
-                            not observation_only
-                            and (not repairable or repair_requested)
+                        # A conclusive mismatch is still a completed check.  It
+                        # cannot globally halt strategy or lifecycle input.
+                        mv["gc_session_preflight_completed"] = True
+                        mv["gc_session_preflight_degraded"] = True
+                        mv["gc_session_preflight_disposition"] = (
+                            decision.disposition.value
                         )
+                        mv["gc_session_preflight_blocked"] = False
                         mv["gc_session_preflight_failed_checks"] = failed_checks
-                        mv["gc_session_preflight_repair_required"] = (
-                            repair_requested
-                        )
+                        mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
-                        mv["gc_session_preflight_restart_available"] = (
-                            home_repair_available
-                        )
-                        if repairable and not repair_requested:
-                            mv["gc_session_preflight_attempted"] = False
-                        if repair_requested:
-                            mv["gc_no_battle_setup_completed"] = False
-                    if repairable and not repair_requested:
-                        log_mission(
-                            "[SESSION_PREFLIGHT] Transient no-battle "
-                            "configuration mismatch "
-                            f"(attempt {retry_attempt} of {retry_limit}) — "
-                            f"{mismatch_summary}. Read-only validation will "
-                            "retry after cooldown.",
-                            "INFO",
-                        )
-                    elif repair_requested:
-                        log_mission(
-                            "[SESSION_PREFLIGHT] No-battle configuration mismatch; "
-                            f"{retry_attempt} matching attempts exhausted — "
-                            f"{mismatch_summary}. Guarded stop/repair/restart "
-                            "requested.",
-                            "WARN",
-                        )
-                    elif observation_only:
-                        log_mission(
-                            "[SESSION_PREFLIGHT] Read-only observer mismatch "
-                            f"recorded — {mismatch_summary}. Observation and "
-                            "terminal capture continue without operator action.",
-                            "WARN",
-                        )
-                    else:
-                        log_mission(
-                            "[SESSION_PREFLIGHT] Configuration mismatch is not "
-                            f"repairable at Home — {mismatch_summary}. Automation "
-                            "remains blocked.",
-                            "WARN",
-                        )
+                        mv["gc_session_preflight_restart_available"] = False
+                        _reset_repair_mismatch_attempts(mv)
+                    log_mission(
+                        "[SESSION_PREFLIGHT] Configuration mismatch flagged — "
+                        f"{mismatch_summary}. Automation continues in degraded "
+                        "mode; only a safe Home boundary may repair it.",
+                        "WARN",
+                    )
                     log_mission(
                         "[SESSION_PREFLIGHT] mismatch_evidence="
                         + json.dumps(evidence_payload, sort_keys=True),
                         "DEBUG",
                     )
                 else:
+                    battle_ended = (
+                        result.status
+                        is GcPreflightNavigationStatus.BATTLE_ENDED
+                    )
+                    decision = decide_runtime_failure(
+                        RuntimeFailureKind.VALIDATION_UNAVAILABLE
+                    )
                     if mv is not None:
-                        mv["gc_session_preflight_completed"] = False
-                        mv["gc_session_preflight_attempted"] = False
+                        mv["gc_session_preflight_completed"] = not battle_ended
+                        mv["gc_session_preflight_attempted"] = not battle_ended
+                        mv["gc_session_preflight_degraded"] = not battle_ended
+                        mv["gc_session_preflight_disposition"] = (
+                            "battle_ended"
+                            if battle_ended
+                            else decision.disposition.value
+                        )
+                        mv["gc_session_preflight_blocked"] = False
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
                         mv["gc_session_preflight_failed_checks"] = []
                         _reset_repair_mismatch_attempts(mv)
-                    interrupted_level = (
-                        "INFO"
-                        if result.status
-                        is GcPreflightNavigationStatus.BATTLE_ENDED
-                        else "WARN"
-                    )
+                    interrupted_level = "INFO" if battle_ended else "WARN"
                     log_mission(
                         f"[SESSION_PREFLIGHT] Validation interrupted "
-                        f"status={result.status.value} reason={result.reason}",
+                        f"status={result.status.value} reason={result.reason}; "
+                        + (
+                            "the battle ended before another action"
+                            if battle_ended
+                            else "automation continues in degraded mode"
+                        ),
                         interrupted_level,
                     )
             elif t in {"ultimate_set_all_on", "ultimate_ensure_state"}:

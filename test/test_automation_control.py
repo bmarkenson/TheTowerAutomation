@@ -20,6 +20,7 @@ from core.gate_decisions import (
 )
 from core.control_surface import ControlSurfaceService
 from core.run_state import AUTOMATION, AutomationControl, ExecMode
+from core.runtime_failure_policy import RuntimeFailureKind
 from tools.automation_ctl import main as automation_ctl_main
 
 
@@ -668,7 +669,7 @@ def test_gate_decision_has_guarded_lifecycle(tmp_path):
     assert consumed["completion_reason"] == "waiver applied"
 
 
-def test_advisory_gate_decision_persists_nonblocking_pause_choice(tmp_path):
+def test_advisory_gate_decision_has_no_failure_owned_pause_choice(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
     options = build_gate_decision_options(
@@ -687,46 +688,53 @@ def test_advisory_gate_decision_persists_nonblocking_pause_choice(tmp_path):
     )
     resolved = store.resolve_gate_decision(
         requested["request_id"],
-        "pause_for_changes",
+        "continue_observing",
         source="test",
     )
 
     assert requested["blocking"] is False
     assert [option["id"] for option in requested["options"]] == [
-        "pause_for_changes",
         "retry",
         "continue_observing",
     ]
     assert resolved is not None
     assert resolved["blocking"] is False
-    assert resolved["selected_option"]["action"] == "pause"
+    assert resolved["selected_option"]["action"] == "waive"
 
 
-def test_attached_mismatch_can_offer_guarded_restart():
-    options = build_gate_decision_options(
-        "modules",
-        allow_repair_restart=True,
-    )
+def test_failed_check_options_never_offer_pause_or_battle_restart():
+    options = build_gate_decision_options("modules")
+    advisory = build_gate_decision_options("modules", advisory=True)
 
-    restart = next(
-        option for option in options
-        if option["id"] == "restart_and_repair"
-    )
-    assert restart["action"] == "repair_restart"
-    assert restart["label"] == "Surrender this battle and repair setup"
-    assert "separate authority" in restart["description"]
+    assert {option["action"] for option in options} <= {"retry", "waive"}
+    assert {option["action"] for option in advisory} <= {"retry", "waive"}
 
 
-def test_runtime_can_persist_advisory_pause(tmp_path):
+def test_runtime_can_persist_operator_authority_pause(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     supervisor = _supervisor(control_file)
 
-    assert supervisor.persist_state("PAUSED")
+    assert supervisor.pause_for_operator_authority("operator selected Pause")
 
     saved = json.loads(control_file.read_text(encoding="utf-8"))
     assert saved["state"] == "PAUSED"
-    assert saved["updated_by"] == "runtime"
+    assert saved["updated_by"] == "runtime-operator-authority"
     assert supervisor.is_paused
+
+
+def test_recoverable_failure_cannot_use_catastrophic_pause_api(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    supervisor = _supervisor(control_file)
+
+    with pytest.raises(ValueError, match="recoverable"):
+        supervisor.pause_for_catastrophic_failure(
+            RuntimeFailureKind.CONFIGURATION_MISMATCH,
+            reason="configuration differs",
+        )
+
+    assert store.status()["state"] == "RUNNING"
 
 
 def test_terminal_gate_prompt_displays_issue_and_returns_shared_option_id():

@@ -1220,7 +1220,7 @@ class DeferredStartupGateTests(unittest.TestCase):
         self.assertTrue(manager.attached_validation_requested())
         self.assertTrue(manager.session_preflight_pending())
 
-    def test_app_applies_same_battle_continuity_before_recapture(self):
+    def test_same_battle_continuity_releases_legacy_orphaned_validation_hold(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()
         app._exclusive_validation_ownership_hold = True
@@ -1235,7 +1235,7 @@ class DeferredStartupGateTests(unittest.TestCase):
             app._mission_mgr.reuse_session_preflight_for_confirmed_attachment
         )
         reuse.assert_called_once_with("current-run")
-        self.assertTrue(app._exclusive_validation_ownership_hold)
+        self.assertFalse(app._exclusive_validation_ownership_hold)
 
     def test_later_battle_continuity_clears_orphaned_validation_hold(self):
         app = App.__new__(App)
@@ -1347,7 +1347,7 @@ class DeferredStartupGateTests(unittest.TestCase):
         self.assertFalse(manager.ctx.data["skip_attached_checks"])
         self.assertTrue(manager.no_battle_setup_requirements())
 
-    def test_operator_can_authorize_guarded_restart_after_attached_mismatch(self):
+    def test_legacy_attached_repair_request_migrates_to_degraded(self):
         manager = MissionManager(
             None,
             self._strategy(),
@@ -1359,15 +1359,21 @@ class DeferredStartupGateTests(unittest.TestCase):
         mv = manager.ctx.data["mission_vars"]
         mv["gc_session_preflight_blocked"] = True
         mv["gc_session_preflight_restart_available"] = True
+        mv["gc_session_preflight_repair_required"] = True
 
-        self.assertTrue(manager.session_preflight_restart_available())
-        authority = _repair_authority()
-        self.assertTrue(
-            manager.authorize_session_preflight_restart(authority)
-        )
+        self.assertFalse(manager.session_preflight_terminally_blocked())
         self.assertFalse(mv["gc_session_preflight_blocked"])
-        self.assertTrue(mv["gc_session_preflight_repair_required"])
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertTrue(mv["gc_session_preflight_degraded"])
+        self.assertEqual(
+            mv["gc_session_preflight_disposition"],
+            "continue_degraded",
+        )
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
         self.assertFalse(mv["gc_session_preflight_restart_available"])
+        self.assertFalse(
+            hasattr(manager, "authorize_session_preflight_restart")
+        )
 
     def test_terminal_boundary_rearms_gates_for_next_battle(self):
         strategy = self._strategy()
@@ -1424,7 +1430,7 @@ class DeferredStartupGateTests(unittest.TestCase):
         self.assertEqual(deferred["status"], "unavailable_deferred")
         self.assertIsNone(deferred["valid"])
         self.assertTrue(deferred["blocking_valid"])
-        self.assertFalse(manager.session_preflight_repair_required())
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
 
         manager.maybe_run_start(
             {"state": "HOME_SCREEN", "home_battle_control": "RESUME_BATTLE"}
@@ -2423,7 +2429,7 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["gc_session_preflight_completed"])
         self.assertFalse(manager.session_preflight_pending())
 
-    def test_terminal_preflight_block_excludes_owned_home_repair(self):
+    def test_legacy_terminal_preflight_block_migrates_to_degraded_completion(self):
         strategy = get_strategy("gc_farm_t19_experiment")
         manager = MissionManager(None, strategy)
         manager.start()
@@ -2434,14 +2440,17 @@ class GcFarmProfileTests(unittest.TestCase):
             gc_session_preflight_repair_required=False,
             gc_session_preflight_repair_in_progress=False,
         )
-        self.assertTrue(manager.session_preflight_terminally_blocked())
-
-        mv["gc_session_preflight_repair_required"] = True
-        self.assertTrue(manager.session_preflight_terminally_blocked())
-
-        mv["gc_session_preflight_repair_required"] = False
-        mv["gc_session_preflight_repair_in_progress"] = True
         self.assertFalse(manager.session_preflight_terminally_blocked())
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertTrue(mv["gc_session_preflight_attempted"])
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertTrue(mv["gc_session_preflight_degraded"])
+        self.assertEqual(
+            mv["gc_session_preflight_disposition"],
+            "continue_degraded",
+        )
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
+        self.assertFalse(mv["gc_session_preflight_repair_in_progress"])
 
     def test_session_preflight_action_records_one_continuous_session_completion(self):
         strategy = get_strategy("farm_t19")
@@ -2807,7 +2816,7 @@ class GcFarmProfileTests(unittest.TestCase):
         )
         self.assertIsNone(app._observed_active_battle_scope_id)
 
-    def test_session_preflight_mismatch_blocks_without_correction(self):
+    def test_session_preflight_mismatch_completes_degraded_without_blocking(self):
         strategy = get_strategy("gc_farm_t19_experiment")
         ctx = MissionContext()
         strategy.on_start(ctx)
@@ -2836,11 +2845,16 @@ class GcFarmProfileTests(unittest.TestCase):
             )
 
         self.assertTrue(mv["gc_session_preflight_attempted"])
-        self.assertFalse(mv["gc_session_preflight_completed"])
-        self.assertTrue(mv["gc_session_preflight_blocked"])
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertTrue(mv["gc_session_preflight_degraded"])
+        self.assertEqual(
+            mv["gc_session_preflight_disposition"],
+            "continue_degraded",
+        )
+        self.assertFalse(mv["gc_session_preflight_blocked"])
         self.assertFalse(mv["gc_session_preflight_repair_required"])
 
-    def test_read_only_attached_mismatch_exposes_restart_without_requesting_it(self):
+    def test_read_only_attached_mismatch_does_not_request_restart(self):
         strategy = get_strategy("farm_t18")
         ctx = MissionContext()
         strategy.on_start(ctx)
@@ -2875,11 +2889,13 @@ class GcFarmProfileTests(unittest.TestCase):
                 ctx,
             )
 
-        self.assertTrue(mv["gc_session_preflight_blocked"])
-        self.assertTrue(mv["gc_session_preflight_restart_available"])
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertTrue(mv["gc_session_preflight_degraded"])
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertFalse(mv["gc_session_preflight_restart_available"])
         self.assertFalse(mv["gc_session_preflight_repair_required"])
 
-    def test_session_preflight_no_battle_mismatch_requests_guarded_repair(self):
+    def test_session_preflight_no_battle_mismatch_continues_without_surrender(self):
         strategy = get_strategy("gc_farm_t19_experiment")
         ctx = MissionContext()
         strategy.on_start(ctx)
@@ -2910,41 +2926,22 @@ class GcFarmProfileTests(unittest.TestCase):
             "core.action_executor.run_read_only_gc_preflight",
             return_value=result,
         ):
-            for attempt in range(1, 4):
-                execute_actions(
-                    object(),
-                    [{**action, "_strategy": True}],
-                    ctx,
-                )
-                self.assertEqual(
-                    mv["gc_session_preflight_repair_attempts"],
-                    attempt,
-                )
-                self.assertEqual(
-                    mv["gc_session_preflight_repair_required"],
-                    attempt == 3,
-                )
-                self.assertEqual(
-                    mv["gc_session_preflight_attempted"],
-                    attempt == 3,
-                )
-                self.assertEqual(
-                    mv["gc_session_preflight_blocked"],
-                    attempt == 3,
-                )
-                self.assertEqual(
-                    mv["gc_no_battle_setup_completed"],
-                    attempt < 3,
-                )
+            execute_actions(
+                object(),
+                [{**action, "_strategy": True}],
+                ctx,
+            )
 
         self.assertTrue(mv["gc_session_preflight_attempted"])
-        self.assertFalse(mv["gc_session_preflight_completed"])
-        self.assertTrue(mv["gc_session_preflight_blocked"])
-        self.assertTrue(mv["gc_session_preflight_repair_required"])
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertTrue(mv["gc_session_preflight_degraded"])
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
         self.assertFalse(mv["gc_session_preflight_repair_in_progress"])
-        self.assertFalse(mv["gc_no_battle_setup_completed"])
+        self.assertTrue(mv["gc_no_battle_setup_completed"])
+        self.assertEqual(mv["gc_session_preflight_repair_attempts"], 0)
 
-    def test_transient_repairable_mismatch_recovers_without_home_repair(self):
+    def test_later_successful_validation_clears_degraded_evidence(self):
         strategy = get_strategy("farm_t19")
         ctx = MissionContext()
         strategy.on_start(ctx)
@@ -2985,19 +2982,23 @@ class GcFarmProfileTests(unittest.TestCase):
             side_effect=results,
         ):
             execute_actions(object(), [{**action, "_strategy": True}], ctx)
-            self.assertFalse(mv["gc_session_preflight_attempted"])
+            self.assertTrue(mv["gc_session_preflight_attempted"])
+            self.assertTrue(mv["gc_session_preflight_completed"])
+            self.assertTrue(mv["gc_session_preflight_degraded"])
             self.assertFalse(mv["gc_session_preflight_repair_required"])
             self.assertTrue(mv["gc_no_battle_setup_completed"])
             execute_actions(object(), [{**action, "_strategy": True}], ctx)
 
         self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertFalse(mv["gc_session_preflight_degraded"])
+        self.assertEqual(mv["gc_session_preflight_disposition"], "verified")
         self.assertFalse(mv["gc_session_preflight_blocked"])
         self.assertFalse(mv["gc_session_preflight_repair_required"])
         self.assertEqual(mv["gc_session_preflight_repair_attempts"], 0)
         self.assertEqual(mv["gc_session_preflight_repair_failure_key"], "")
         self.assertTrue(mv["gc_no_battle_setup_completed"])
 
-    def test_different_repairable_mismatch_restarts_consecutive_count(self):
+    def test_mismatches_do_not_accumulate_automatic_repair_attempts(self):
         strategy = get_strategy("farm_t19")
         ctx = MissionContext()
         strategy.on_start(ctx)
@@ -3040,8 +3041,11 @@ class GcFarmProfileTests(unittest.TestCase):
                     ctx,
                 )
 
-        self.assertEqual(mv["gc_session_preflight_repair_attempts"], 1)
-        self.assertFalse(mv["gc_session_preflight_attempted"])
+        self.assertEqual(mv["gc_session_preflight_repair_attempts"], 0)
+        self.assertEqual(mv["gc_session_preflight_repair_failure_key"], "")
+        self.assertTrue(mv["gc_session_preflight_attempted"])
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertTrue(mv["gc_session_preflight_degraded"])
         self.assertFalse(mv["gc_session_preflight_blocked"])
         self.assertFalse(mv["gc_session_preflight_repair_required"])
         self.assertTrue(mv["gc_no_battle_setup_completed"])
@@ -3069,63 +3073,6 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertFalse(mv["gc_session_preflight_repair_in_progress"])
         self.assertEqual(mv["gc_session_preflight_repair_attempts"], 0)
         self.assertEqual(mv["gc_session_preflight_repair_failure_key"], "")
-
-    def test_app_surrenders_once_for_claimed_gc_home_repair(self):
-        manager = MagicMock()
-        manager.begin_session_preflight_repair.return_value = True
-        app = App.__new__(App)
-        app._auto_start_enabled = True
-        app._session_preflight_repair_denial_logged = False
-        app._mission_mgr = manager
-        app._supervisor = MagicMock()
-        authority = _repair_authority()
-        app._current_control_workflow_evidence = lambda: authority
-
-        with patch("core.app.surrender_run", return_value=True) as surrender:
-            app._attempt_session_preflight_repair({"state": "RUNNING"})
-
-        manager.begin_session_preflight_repair.assert_called_once_with(authority)
-        surrender.assert_called_once_with(
-            action_guard=app._session_preflight_repair_action_guard
-        )
-        manager.fail_session_preflight_repair.assert_not_called()
-
-    def test_app_fails_closed_when_guarded_surrender_does_not_complete(self):
-        manager = MagicMock()
-        manager.begin_session_preflight_repair.return_value = True
-        app = App.__new__(App)
-        app._auto_start_enabled = True
-        app._session_preflight_repair_denial_logged = False
-        app._mission_mgr = manager
-        app._supervisor = MagicMock()
-        authority = _repair_authority()
-        app._current_control_workflow_evidence = lambda: authority
-
-        with patch("core.app.surrender_run", return_value=False):
-            app._attempt_session_preflight_repair({"state": "RUNNING"})
-
-        manager.fail_session_preflight_repair.assert_called_once_with(
-            "guarded Surrender did not reach Game Over"
-        )
-        app._supervisor.persist_state.assert_not_called()
-
-    def test_unbound_repair_yields_to_strategy_gate_without_global_pause(self):
-        manager = MagicMock()
-        manager.begin_session_preflight_repair.return_value = False
-        app = App.__new__(App)
-        app._mission_mgr = manager
-        app._supervisor = MagicMock()
-        authority = _repair_authority()
-        app._current_control_workflow_evidence = lambda: authority
-
-        with patch("core.app.surrender_run") as surrender:
-            app._attempt_session_preflight_repair({"state": "RUNNING"})
-
-        manager.fail_session_preflight_repair.assert_called_once_with(
-            "guarded repair ownership could not be bound to the current battle"
-        )
-        app._supervisor.persist_state.assert_not_called()
-        surrender.assert_not_called()
 
     def test_natural_game_over_during_preflight_remains_pending_for_next_run(self):
         strategy = get_strategy("gc_farm_t19_experiment")
@@ -3310,7 +3257,7 @@ class PausedStartupObservationTests(unittest.TestCase):
             allow_actions=False,
         )
 
-    def test_terminally_blocked_preflight_allows_only_safe_ad_gem_handler(self):
+    def test_legacy_terminal_block_is_released_for_normal_automation(self):
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
         strategy = _IncompleteSessionPreflightStrategy()
         manager = MagicMock()
@@ -3351,6 +3298,10 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._capture_frame = MagicMock(side_effect=[frame, KeyboardInterrupt])
         app._resolve_upgrade_detail_overlay = MagicMock()
         app._handle_primary_states = MagicMock()
+        app._handler_enabled = MagicMock(return_value=False)
+        app._perk_timeline_enabled = MagicMock(return_value=False)
+        app._observe_player_save_audit_visual_events = MagicMock()
+        app._sync_floating_gem_tapper = MagicMock()
         app._game_speed_guard = MagicMock()
         app._game_speed_guard.handle.return_value = False
         app._battle_activation_tracker = MagicMock()
@@ -3380,10 +3331,7 @@ class PausedStartupObservationTests(unittest.TestCase):
         ):
             app.run()
 
-        handle_ad_gem.assert_called_once()
-        ad_gem_call = handle_ad_gem.call_args.kwargs
-        self.assertTrue(callable(ad_gem_call["action_guard_fn"]))
-        self.assertTrue(callable(ad_gem_call["floating_action_guard_fn"]))
+        handle_ad_gem.assert_not_called()
         manager.observe_detection.assert_called_once()
         observed_detection = manager.observe_detection.call_args.args[0]
         self.assertEqual(observed_detection["state"], "RUNNING")
@@ -3391,18 +3339,22 @@ class PausedStartupObservationTests(unittest.TestCase):
             observed_detection["overlays"],
             ["AD_GEMS_AVAILABLE"],
         )
-        manager.tick.assert_not_called()
-        manager.handle_overlays.assert_not_called()
-        manager.on_state.assert_not_called()
+        manager.tick.assert_called_once_with(frame, observed_detection)
+        manager.handle_overlays.assert_called_once_with(observed_detection)
+        manager.on_state.assert_called_once_with(observed_detection)
         app._resolve_upgrade_detail_overlay.assert_not_called()
-        app._handle_primary_states.assert_not_called()
+        app._handle_primary_states.assert_called_once_with(
+            "RUNNING",
+            {"AD_GEMS_AVAILABLE"},
+            frame,
+        )
         handle_daily_gem.assert_not_called()
         handle_mission_rewards.assert_not_called()
         recover.assert_not_called()
         surrender.assert_not_called()
         home.assert_not_called()
         game_over.assert_not_called()
-        supervisor.persist_state.assert_not_called()
+        supervisor.pause_for_catastrophic_failure.assert_not_called()
         supervisor.auto_return_check.assert_not_called()
         start_tapper.assert_not_called()
         self.assertEqual(manager.ctx.data["mission_vars"]["last_wave"], 1)

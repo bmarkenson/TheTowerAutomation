@@ -109,6 +109,7 @@ class PlayerSaveHistoryReadResult:
     )
     background_dispatched: bool = False
     operator_workflow_interrupted: bool = False
+    source_restored: bool = True
 
     @property
     def complete(self) -> bool:
@@ -567,7 +568,9 @@ class PlayerSaveHistoryReader:
                 background_dispatched=serialized.background_dispatched,
                 operator_workflow_interrupted=(
                     serialized.background_dispatched
+                    or serialized.lifecycle_input_attempted
                 ),
+                source_restored=serialized.source_restored,
             )
         acquisition = serialized.acquisition
         snapshot = serialized.snapshot
@@ -882,6 +885,7 @@ def _blocked(
     *,
     background_dispatched: bool = False,
     operator_workflow_interrupted: bool = False,
+    source_restored: bool = True,
 ) -> PlayerSaveHistoryReadResult:
     return PlayerSaveHistoryReadResult(
         PlayerSaveHistoryReadStatus.BLOCKED,
@@ -889,6 +893,7 @@ def _blocked(
         safe_ui_fallback=False,
         background_dispatched=background_dispatched,
         operator_workflow_interrupted=operator_workflow_interrupted,
+        source_restored=source_restored,
     )
 
 

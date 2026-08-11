@@ -49,6 +49,11 @@ from core.control_model import (
 from core.strategy_profiles import is_configurable_strategy
 from utils.logger import log, log_action_intent, log_result
 from core.run_state import AUTOMATION
+from core.runtime_failure_policy import (
+    RuntimeFailureDisposition,
+    RuntimeFailureKind,
+    decide_runtime_failure,
+)
 from core.input import tap_if_visible
 from core.label_tapper import is_visible
 from core.matcher import get_match as _get_match
@@ -1006,8 +1011,8 @@ class AutomationSupervisor:
             return
         self._exclusive_validation = dict(ledger or {})
 
-    def persist_state(self, state: str) -> bool:
-        """Persist and immediately apply a runtime-owned state transition."""
+    def _persist_runtime_state(self, state: str, *, source: str) -> bool:
+        """Persist one already-authorized runtime state transition."""
 
         normalized = str(state).strip().upper()
         if normalized not in _ALLOWED_STATES:
@@ -1018,7 +1023,7 @@ class AutomationSupervisor:
         try:
             saved = self._control_store.set_state(
                 normalized,
-                source="runtime",
+                source=source,
             )
         except ControlDirectiveError as exc:
             log(f"[CTRL] Failed writing control file: {exc}", "WARN")
@@ -1028,6 +1033,42 @@ class AutomationSupervisor:
         self._last_state_directive_revision = request_id
         self._apply_state(normalized, request_id=request_id)
         return True
+
+    def pause_for_operator_authority(self, reason: str) -> bool:
+        """Persist a Pause explicitly selected by, or yielded to, the operator."""
+
+        log(
+            "[RUNTIME_POLICY] Operator authority requested Pause: "
+            f"{str(reason or 'operator request').strip()}",
+            "INFO",
+        )
+        return self._persist_runtime_state(
+            "PAUSED",
+            source="runtime-operator-authority",
+        )
+
+    def pause_for_catastrophic_failure(
+        self,
+        kind: RuntimeFailureKind,
+        *,
+        reason: str,
+    ) -> bool:
+        """Persist the only automatic Pause permitted by global policy."""
+
+        decision = decide_runtime_failure(kind)
+        if decision.disposition is not RuntimeFailureDisposition.PAUSE_FOR_SAFETY:
+            raise ValueError(
+                f"{kind.value} is recoverable and cannot globally Pause automation"
+            )
+        log(
+            "[RUNTIME_POLICY] Catastrophic failure Paused automation: "
+            f"kind={kind.value} reason={str(reason or 'unavailable').strip()}",
+            "ERROR",
+        )
+        return self._persist_runtime_state(
+            "PAUSED",
+            source="runtime-catastrophic-failure",
+        )
 
     def transition_battle_workflow(
         self,

@@ -73,6 +73,7 @@ class ActivityContinuityOutcome:
     ] = None
     running_attachment_context: Optional[PlayerSaveAttachmentContext] = None
     operator_workflow_interruption_reason: Optional[str] = None
+    operator_workflow_source_restored: Optional[bool] = None
     ui_monitoring_fallback: bool = False
     ui_fallback_complete: bool = False
     ui_fallback_reason: str = ""
@@ -560,6 +561,11 @@ class ActivityContinuityCoordinator:
                     recapture=True,
                     operator_workflow_interruption_reason=(
                         save_result.reason
+                        if save_result.operator_workflow_interrupted
+                        else None
+                    ),
+                    operator_workflow_source_restored=(
+                        save_result.source_restored
                         if save_result.operator_workflow_interrupted
                         else None
                     ),

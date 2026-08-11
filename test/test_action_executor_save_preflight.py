@@ -85,7 +85,7 @@ def test_running_attachment_always_uses_in_battle_preflight_route():
     )
 
 
-def test_running_attachment_cannot_request_home_repair():
+def test_running_attachment_mismatch_completes_degraded_without_home_repair():
     ctx = MissionContext(
         data={
             "startup_gates_deferred": True,
@@ -124,7 +124,11 @@ def test_running_attachment_cannot_request_home_repair():
         )
 
     variables = ctx.data["mission_vars"]
-    assert variables["gc_session_preflight_blocked"] is True
+    assert variables["gc_session_preflight_attempted"] is True
+    assert variables["gc_session_preflight_completed"] is True
+    assert variables["gc_session_preflight_degraded"] is True
+    assert variables["gc_session_preflight_disposition"] == "continue_degraded"
+    assert variables["gc_session_preflight_blocked"] is False
     assert variables["gc_session_preflight_repair_required"] is False
     assert variables["gc_session_preflight_restart_available"] is False
 

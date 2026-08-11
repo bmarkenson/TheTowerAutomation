@@ -114,6 +114,8 @@ vars:
   orb_distance_observation: {}
   gc_session_preflight_completed: false
   gc_session_preflight_attempted: false
+  gc_session_preflight_degraded: false
+  gc_session_preflight_disposition: ''
   gc_session_preflight_blocked: false
   gc_session_preflight_repair_required: false
   gc_session_preflight_repair_in_progress: false

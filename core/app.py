@@ -177,6 +177,11 @@ from core.mission_reward_scheduler import (
     daily_mission_claims_allowed,
 )
 from core.run_state import AUTOMATION, ExecMode, RunState
+from core.runtime_failure_policy import (
+    RuntimeFailureDisposition,
+    RuntimeFailureKind,
+    decide_runtime_failure,
+)
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
 from core.recovery import handle_unknown_state, update_unknown_state
@@ -237,6 +242,26 @@ _GENERIC_SESSION_PREFLIGHT_REASONS = frozenset(
 
 class App:
     """Main automation orchestrator wrapping capture → detect → dispatch."""
+
+    @staticmethod
+    def _flag_recoverable_runtime_failure(
+        kind: RuntimeFailureKind,
+        reason: str,
+    ):
+        """Record a recoverable failure without changing global authority."""
+
+        decision = decide_runtime_failure(kind)
+        if decision.disposition is not (
+            RuntimeFailureDisposition.CONTINUE_DEGRADED
+        ):
+            raise ValueError(f"{kind.value} requires catastrophic handling")
+        log(
+            "[RUNTIME_POLICY] Automation continues degraded: "
+            f"kind={kind.value} reason={str(reason or 'unavailable').strip()}",
+            "WARN",
+            console=True,
+        )
+        return decision
 
     def __init__(
         self,
@@ -2156,6 +2181,37 @@ class App:
         """Acknowledge and revalidate Better Control Model directives."""
 
         del detection  # the exact normalized observation is already recorded
+        malformed_authority = next(
+            (
+                label
+                for label, present in (
+                    (
+                        "manual-control",
+                        self._supervisor.manual_control_error is True,
+                    ),
+                    (
+                        "battle-workflow",
+                        self._supervisor.battle_workflow_error is True,
+                    ),
+                    (
+                        "setup-capture",
+                        self._supervisor.setup_capture_error is True,
+                    ),
+                )
+                if present
+            ),
+            None,
+        )
+        if malformed_authority is not None:
+            if not self._supervisor.is_paused:
+                self._supervisor.pause_for_catastrophic_failure(
+                    RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                    reason=(
+                        f"malformed {malformed_authority} directive made "
+                        "device-input ownership unknowable"
+                    ),
+                )
+            return
         if self._sync_setup_capture(frame):
             return
         current = self._current_control_workflow_evidence()
@@ -2216,9 +2272,20 @@ class App:
                 ):
                     owner_change = "ADB target generation changed"
                 if owner_change is not None:
+                    failure_kind = (
+                        RuntimeFailureKind.TARGET_OWNERSHIP_LOST
+                        if owner_change in {
+                            "runtime evidence changed at adb_target",
+                            "ADB target generation changed",
+                        }
+                        else RuntimeFailureKind.CONTROL_AUTHORITY_LOST
+                    )
                     if (
                         not self._supervisor.is_paused
-                        and not self._supervisor.persist_state("PAUSED")
+                        and not self._supervisor.pause_for_catastrophic_failure(
+                            failure_kind,
+                            reason=owner_change,
+                        )
                     ):
                         return
                     self._supervisor.transition_manual_control(
@@ -2928,7 +2995,13 @@ class App:
             # ``capturing`` is a process-owned critical section.  Reaching it
             # without the in-process ready claim means that owner was lost;
             # repeating Android lifecycle input would be ambiguous.
-            self._supervisor.persist_state("PAUSED")
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.INPUT_RESULT_UNCERTAIN,
+                reason=(
+                    "setup capture lost its process-local owner after entering "
+                    "the serialization critical section"
+                ),
+            )
             finish(
                 "interrupted",
                 "runtime capture ownership ended before its ready receipt; no second serialization was attempted and Automation remains Paused",
@@ -3031,7 +3104,10 @@ class App:
                 self._setup_capture_source_refreshed = True
             if serialized.status is GuardedSerializationStatus.BLOCKED:
                 if lifecycle_input_attempted and not source_restored:
-                    self._supervisor.persist_state("PAUSED")
+                    self._supervisor.pause_for_catastrophic_failure(
+                        RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                        reason=serialized.reason,
+                    )
                     finish(
                         "failed",
                         "source restoration or exact workflow authority was lost after backgrounding; Automation remains Paused",
@@ -3080,31 +3156,36 @@ class App:
                 )
                 authority = self._get_action_authority()
                 prior_gate = authority.strategy_gate
-                if prior_gate is None or prior_gate.source == "setup_capture":
-                    authority.activate_strategy_gate(
-                        strategy=self._current_strategy_name(),
-                        battle_scope=str(
-                            requested.get("activity_scope_run_id") or ""
-                        )
-                        or None,
-                        source="setup_capture",
-                        phase="running_battle",
-                        failed_check_ids=("setup_capture_battle_identity",),
-                        reason=reason,
+                if prior_gate is not None and prior_gate.source == "setup_capture":
+                    authority.clear_strategy_gate(
+                        event=StrategyGateExitEvent.SUCCESSFUL_VALIDATION,
+                        reason=(
+                            "recoverable setup-capture evidence cannot halt "
+                            "ordinary automation"
+                        ),
                     )
-                authority_outcome = "continuity_gated"
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                    reason,
+                )
+                authority_outcome = "preserved"
                 binding_reason = (
-                    f"{reason}; Automation remains Enabled with strategy and "
-                    "lifecycle input gated while safe gem collection and "
-                    "observation may continue"
+                    f"{reason}; the capture failed and Automation continues "
+                    "without granting authority from that evidence"
                 )
             elif binding_status == "failed" and not retained_return_source:
-                self._supervisor.persist_state("PAUSED")
-                authority_outcome = "paused_for_safety"
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                    str(
+                        binding_reason
+                        or "setup-capture Home boundary contradiction"
+                    ),
+                )
+                authority_outcome = "preserved"
                 binding_reason = (
                     str(binding_reason or "setup-capture boundary contradiction")
-                    + "; Automation Paused because the fresh save contradicts "
-                    "the observed new-run Home boundary"
+                    + "; capture failed, but Automation remains Enabled because "
+                    "no unsafe source transition remains"
                 )
             finish(
                 binding_status or "unavailable",
@@ -3339,7 +3420,10 @@ class App:
                     retained.pop("pending_terminal_evidence", None)
                     self._manual_terminal_claims()[manual_id] = retained
                 else:
-                    self._supervisor.persist_state("PAUSED")
+                    self._flag_recoverable_runtime_failure(
+                        RuntimeFailureKind.REPORTING_FAILURE,
+                        "manual terminal evidence receipt did not persist",
+                    )
                 return recorded
             self._manual_terminal_claims().pop(manual_id, None)
         context, acquisition, _mapping_observer = self._terminal_battle_bundle(
@@ -3495,10 +3579,14 @@ class App:
         elif receipt is None:
             self._manual_terminal_claims().pop(manual_id, None)
         if status == "unavailable":
-            self._supervisor.persist_state("PAUSED")
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                reason,
+            )
             log(
                 "[MANUAL_CONTROL] Manual terminal evidence is ambiguous; "
-                "Automation remains Paused and no terminal UI input is authorized",
+                "the operator-owned manual Pause remains in effect and no "
+                "terminal UI input is authorized",
                 "WARN",
                 console=True,
             )
@@ -3621,7 +3709,20 @@ class App:
             is PlayerSaveAcquisitionType.NATURAL_BOUNDARY
         )
         if not same_runtime_binding or not (valid_ui_claim or valid_save_claim):
-            self._supervisor.persist_state("PAUSED")
+            self._manual_terminal_claims().pop(manual_id, None)
+            self._supervisor.transition_manual_control(
+                manual_id,
+                "interrupted",
+                detail=(
+                    "terminal completion evidence expired; automation continued "
+                    "from the fresh observed boundary"
+                ),
+                refresh_status="terminal_completion_evidence_expired",
+            )
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.WORKFLOW_EVIDENCE_EXPIRED,
+                "manual terminal completion claim no longer matches the runtime",
+            )
             return None
         completed = self._supervisor.transition_manual_control(
             manual_id,
@@ -3644,7 +3745,10 @@ class App:
         )
         if completed is None or completed.get("status") != "completed":
             if not ui_fallback:
-                self._supervisor.persist_state("PAUSED")
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.REPORTING_FAILURE,
+                    "manual terminal completion receipt could not be persisted; retry retained",
+                )
             return None
         self._manual_terminal_claims().pop(manual_id, None)
         return dict(completed)
@@ -3709,23 +3813,10 @@ class App:
                 claim,
             )
 
-        authorized_id = str(
-            getattr(
-                self,
-                "_manual_return_configuration_authorized_id",
-                "",
-            )
-            or ""
-        )
-        mismatch_validation_authorized = authorized_id == workflow_id
         configuration = self._return_configuration_report(
             receipt,
             check_sets,
-            stage=(
-                "configuration_validation_pending"
-                if not mismatched or mismatch_validation_authorized
-                else "trusted_mismatch_paused"
-            ),
+            stage="configuration_validation_pending",
         )
         transitioned = self._supervisor.transition_manual_control(
             workflow_id,
@@ -3739,8 +3830,6 @@ class App:
             ),
             refresh_status=(
                 "configuration_validation_pending"
-                if not mismatched or mismatch_validation_authorized
-                else "trusted_mismatch_paused"
             ),
             save_receipt=dict(receipt),
             configuration=configuration,
@@ -3750,12 +3839,20 @@ class App:
         ):
             return False
 
-        if mismatched and not mismatch_validation_authorized:
-            # A confirmed difference is not an invitation to open UI or fix
-            # the game.  Yield input until the operator explicitly Enables a
-            # fresh validation attempt (or changes the selected Strategy).
-            self._supervisor.persist_state("PAUSED")
-            return True
+        if mismatched:
+            # Save-authoritative differences cannot be repaired inside the
+            # active battle.  Report them, release Return Control, and let the
+            # selected Strategy continue in degraded mode.
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.CONFIGURATION_MISMATCH,
+                "Return Control found: " + ", ".join(mismatched),
+            )
+            return self._complete_running_return_claim(
+                transitioned,
+                current,
+                claim,
+                degraded=True,
+            )
 
         started = self._mission_mgr.begin_manual_return_reconciliation()
         mutable_claim = self._pending_return_reconciliation_claims().get(
@@ -3764,17 +3861,16 @@ class App:
         if isinstance(mutable_claim, dict):
             mutable_claim["validation_started"] = bool(started)
         if not started:
-            # A Strategy with no running checks can finish from the forced save
-            # alone; otherwise fail closed rather than restoring ordinary input.
-            requirements = claim.get("requirements")
-            if not isinstance(requirements, Mapping) or not requirements:
-                return self._complete_running_return_claim(
-                    transitioned,
-                    current,
-                    claim,
-                )
-            self._supervisor.persist_state("PAUSED")
-            return False
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                "the active Strategy did not expose a running Return check",
+            )
+            return self._complete_running_return_claim(
+                transitioned,
+                current,
+                claim,
+                degraded=bool(unresolved),
+            )
         return True
 
     def _matching_pending_running_return_claim(
@@ -3807,7 +3903,19 @@ class App:
                 None,
             )
             self._mission_mgr.finish_manual_return_reconciliation()
-            self._supervisor.persist_state("PAUSED")
+            self._supervisor.transition_manual_control(
+                workflow_id,
+                "interrupted",
+                detail=(
+                    "Return Control UI evidence expired; automation continued "
+                    "from the fresh active-battle observation"
+                ),
+                refresh_status="workflow_evidence_expired",
+            )
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.WORKFLOW_EVIDENCE_EXPIRED,
+                "running Return UI claim no longer matches the live battle",
+            )
             return None
         try:
             live_context = self._current_player_save_attachment_context()
@@ -3832,7 +3940,19 @@ class App:
                 None,
             )
             self._mission_mgr.finish_manual_return_reconciliation()
-            self._supervisor.persist_state("PAUSED")
+            self._supervisor.transition_manual_control(
+                workflow_id,
+                "interrupted",
+                detail=(
+                    "Return Control save evidence expired; automation continued "
+                    "from the fresh active-battle observation"
+                ),
+                refresh_status="workflow_evidence_expired",
+            )
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.WORKFLOW_EVIDENCE_EXPIRED,
+                "running Return save claim no longer matches the live battle",
+            )
             return None
         return dict(claim)
 
@@ -3843,6 +3963,7 @@ class App:
         claim: Mapping[str, object],
         *,
         after_configuration: bool = False,
+        degraded: bool = False,
     ) -> bool:
         """Persist the final Return acknowledgement, retaining write retries."""
 
@@ -3873,6 +3994,43 @@ class App:
                     }
                 )
             )
+            failure_checks_fn = getattr(
+                self._mission_mgr,
+                "session_preflight_failure_checks",
+                None,
+            )
+            raw_failed_checks = (
+                failure_checks_fn() if callable(failure_checks_fn) else []
+            )
+            failed_checks = {
+                str(check).strip()
+                for check in (
+                    raw_failed_checks
+                    if isinstance(raw_failed_checks, (list, tuple, set))
+                    else []
+                )
+                if str(check).strip()
+            }
+            degraded_fn = getattr(
+                self._mission_mgr,
+                "session_preflight_degraded",
+                None,
+            )
+            validation_degraded = bool(
+                callable(degraded_fn) and degraded_fn() is True
+            )
+            unresolved_after_validation = set(failed_checks)
+            if validation_degraded and not unresolved_after_validation:
+                unresolved_after_validation.update(
+                    {
+                        *check_sets.get("mismatched", ()),
+                        *check_sets.get("ui_required", ()),
+                    }
+                )
+            resolved_after_validation = set(all_checks).difference(
+                unresolved_after_validation
+            )
+            degraded = bool(degraded or validation_degraded)
             try:
                 disposition = str(
                     receipt.get("continuity", {}).get("disposition")
@@ -3898,7 +4056,8 @@ class App:
                             isinstance(fallback, Mapping)
                             and fallback.get("status") == "complete"
                         ),
-                        resolved_check_ids=all_checks,
+                        resolved_check_ids=resolved_after_validation,
+                        unresolved_check_ids=unresolved_after_validation,
                     )
                 else:
                     final_receipt = build_running_save_reconciliation_receipt(
@@ -3910,23 +4069,33 @@ class App:
                         acquisition=acquisition,
                         temporal_binding=temporal,
                         disposition=disposition,
-                        resolved_check_ids=all_checks,
+                        resolved_check_ids=resolved_after_validation,
+                        unresolved_check_ids=unresolved_after_validation,
                     )
-            except (TypeError, ValueError):
-                self._supervisor.persist_state("PAUSED")
-                return False
+            except (TypeError, ValueError) as exc:
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.REPORTING_FAILURE,
+                    f"Return Control final receipt could not be rebuilt: {exc}",
+                )
+                degraded = True
+                final_receipt = dict(receipt)
         completed = self._supervisor.transition_manual_control(
             workflow_id,
             "completed",
             detail=(
-                "supported UI discovery reconciled battle continuity and active "
-                "Strategy configuration after manual control"
+                "Return Control released automation with configuration problems "
+                "flagged for the next safe Home repair"
+                if degraded
+                else "supported UI discovery reconciled battle continuity and "
+                "active Strategy configuration after manual control"
                 if ui_fallback
                 else "fresh forced save confirmed battle identity and active "
                 "Strategy configuration after manual control"
             ),
             refresh_status=(
-                "ui_fallback_reconciliation_complete"
+                "reconciliation_complete_degraded"
+                if degraded
+                else "ui_fallback_reconciliation_complete"
                 if ui_fallback
                 else "save_reconciliation_complete"
             ),
@@ -3934,7 +4103,7 @@ class App:
             configuration=self._return_configuration_report(
                 final_receipt,
                 check_sets,
-                stage="complete",
+                stage="complete_degraded" if degraded else "complete",
             ),
         )
         if completed is None or completed.get("status") != "completed":
@@ -3988,8 +4157,17 @@ class App:
                 mutable_claim["validation_started"] = True
 
         if self._mission_mgr.session_preflight_terminally_blocked():
-            self._supervisor.persist_state("PAUSED")
-            return True
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                "legacy Return validation reported a terminal block",
+            )
+            return self._complete_running_return_claim(
+                manual,
+                current,
+                claim,
+                after_configuration=True,
+                degraded=True,
+            )
         if self._mission_mgr.session_preflight_pending():
             self._run_owned_strategy_tick(
                 AuthorityHold.MANUAL_CONTROL_RETURN,
@@ -3998,8 +4176,17 @@ class App:
                 strategy_only=True,
             )
             if self._mission_mgr.session_preflight_terminally_blocked():
-                self._supervisor.persist_state("PAUSED")
-                return True
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                    "Return validation could not complete after its bounded check",
+                )
+                return self._complete_running_return_claim(
+                    manual,
+                    current,
+                    claim,
+                    after_configuration=True,
+                    degraded=True,
+                )
             if self._mission_mgr.session_preflight_pending():
                 return True
 
@@ -4018,10 +4205,17 @@ class App:
                 after_configuration=True,
             )
 
-        # An interrupted route or incomplete Strategy result cannot silently
-        # release ordinary actions.  Keep the claim for an explicit retry.
-        self._supervisor.persist_state("PAUSED")
-        return True
+        self._flag_recoverable_runtime_failure(
+            RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+            "Return validation ended without a complete Strategy result",
+        )
+        return self._complete_running_return_claim(
+            manual,
+            current,
+            claim,
+            after_configuration=True,
+            degraded=True,
+        )
 
     def _retain_running_reconciliation_claim(
         self,
@@ -4147,9 +4341,8 @@ class App:
         workflow: Mapping[str, object],
         current: Mapping[str, object],
     ) -> None:
-        """Fail closed when only a persisted/reporting receipt survives."""
+        """End Attach when only a persisted/reporting receipt survives."""
 
-        self._supervisor.persist_state("PAUSED")
         self._mission_mgr.revoke_initial_battle_intent(
             "attach_battle",
             request_id=str(workflow.get("request_id") or ""),
@@ -4162,6 +4355,10 @@ class App:
                 "redacted receipt cannot grant attachment authority"
             ),
             acknowledgement=current,
+        )
+        self._flag_recoverable_runtime_failure(
+            RuntimeFailureKind.WORKFLOW_EVIDENCE_EXPIRED,
+            "Attach lost its process-local reconciliation claim",
         )
 
     def _complete_ready_attachment_after_adoption(self) -> bool:
@@ -4183,8 +4380,6 @@ class App:
             self._interrupt_unbacked_ready_attachment(workflow, current)
             return False
         ui_fallback = claim.get("ui_fallback") is True
-        if not ui_fallback and not self._supervisor.persist_state("PAUSED"):
-            return False
         completed = self._supervisor.transition_battle_workflow(
             str(workflow.get("request_id") or ""),
             "completed",
@@ -4192,8 +4387,8 @@ class App:
                 "the supported UI fallback adopted the active battle and "
                 "released normal UI monitoring"
                 if ui_fallback
-                else "validated battle was adopted after the same active-battle "
-                "boundary was observed"
+                else "validated battle was adopted for observation after the same "
+                "active-battle boundary was observed"
             ),
             acknowledgement=current,
         )
@@ -4221,15 +4416,15 @@ class App:
             reason=(
                 "continue with supported UI monitoring after unusable save evidence"
                 if ui_fallback
-                else "return to zero automated input after save-backed identity adoption"
+                else "continue observation and safe collectors after save-backed identity adoption"
             ),
             result=(
                 "Battle attached through the UI fallback — Automation remains "
                 "Enabled for supported monitoring and safe collectors; no Strategy "
                 "was adopted"
                 if ui_fallback
-                else "Battle attached for observation — Automation Paused; choose a "
-                "Strategy and Enable explicitly to manage it"
+                else "Battle attached for observation — Automation remains Enabled; "
+                "choose a Strategy explicitly to manage it"
             ),
         )
         return True
@@ -5645,7 +5840,7 @@ class App:
         return True
 
     def _terminate_home_return_reconciliation(self, result: object) -> bool:
-        """Pause and report a Home Return refresh that cannot be trusted."""
+        """End a Home Return refresh, pausing only if its source is unsafe."""
 
         manual = self._supervisor.manual_control
         if not (
@@ -5668,16 +5863,35 @@ class App:
         )
         result_status = getattr(result, "status", None)
         status_value = str(getattr(result_status, "value", result_status) or "")
-        interrupted = bool(
-            background_dispatched and status_value == "blocked"
+        lifecycle_input_attempted = bool(
+            provenance.get("lifecycle_input_attempted") is True
+            or background_dispatched
         )
-        final_status = "interrupted" if interrupted else "failed"
+        source_restored = bool(
+            provenance.get("source_restored") is True
+            or serialization == "verified_android_home_boundary"
+        )
+        catastrophic = bool(
+            lifecycle_input_attempted
+            and not source_restored
+            and status_value == "blocked"
+        )
+        final_status = "interrupted" if catastrophic else "failed"
         refresh_status = (
             "home_save_restoration_interrupted"
-            if interrupted
-            else "home_save_refresh_failed"
+            if catastrophic
+            else "home_save_refresh_failed_continued"
         )
-        self._supervisor.persist_state("PAUSED")
+        if catastrophic:
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                reason=result_reason,
+            )
+        else:
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                result_reason,
+            )
         self._pending_return_reconciliation_claims().pop(manual_id, None)
         mission_manager = getattr(self, "_mission_mgr", None)
         if mission_manager is not None:
@@ -5686,9 +5900,12 @@ class App:
             manual_id,
             final_status,
             detail=(
-                "Home save-backed Return Control stopped safely: "
-                f"{result_reason}; Automation remains Paused and no "
-                "configuration UI is authorized"
+                "Home save-backed Return Control stopped after an unsafe source "
+                f"transition: {result_reason}; Automation remains Paused"
+                if catastrophic
+                else "Home save refresh was unavailable: "
+                f"{result_reason}; Return Control ended and Automation continues "
+                "in degraded mode"
             ),
             refresh_status=refresh_status,
         )
@@ -5758,6 +5975,9 @@ class App:
                 }
             )
         )
+        degraded = False
+        degraded_reason = ""
+        repair_failure: Dict[str, object] = {}
         try:
             if ui_backed:
                 receipt = build_home_ui_reconciliation_receipt(
@@ -5784,155 +6004,166 @@ class App:
                     unresolved_check_ids=unresolved,
                 )
         except (TypeError, ValueError) as exc:
-            self._supervisor.persist_state("PAUSED")
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.REPORTING_FAILURE,
+                f"Home Return receipt could not be built: {exc}",
+            )
             self._supervisor.transition_manual_control(
                 workflow_id,
                 "failed",
-                detail=f"Home save reconciliation failed: {exc}",
-                refresh_status="save_reconciliation_failed",
+                detail=(
+                    f"Home Return reporting failed: {exc}; Automation continues "
+                    "from the verified Home boundary"
+                ),
+                refresh_status="save_reconciliation_failed_continued",
             )
-            return False
+            return True
         if unresolved:
             awaiting = self._supervisor.transition_manual_control(
                 workflow_id,
                 "awaiting_configuration",
                 detail=(
                     "save evidence was unusable, so supported Home UI checks "
-                    "must be resolved before guarded automation resumes"
+                    "will be repaired at the current safe Home boundary"
                     if ui_backed
-                    else "fresh Home save found configuration checks that must be "
-                    "resolved before guarded automation resumes"
+                    else "fresh Home save found configuration checks that will be "
+                    "repaired at the current safe Home boundary"
                 ),
-                refresh_status=(
-                    "trusted_mismatch_paused"
-                    if check_sets["mismatched"]
-                    else "configuration_ui_pending"
-                ),
+                refresh_status="configuration_repair_in_progress",
                 save_receipt=receipt,
                 configuration=self._return_configuration_report(
                     receipt,
                     check_sets,
-                    stage=(
-                        "trusted_mismatch_paused"
-                        if check_sets["mismatched"]
-                        else "configuration_ui_pending"
-                    ),
+                    stage="configuration_repair_in_progress",
                 ),
             )
             if awaiting is None:
                 return False
-            if check_sets["mismatched"]:
-                # Save-authoritative differences are reported, not repaired or
-                # rechecked through UI.  Changing Strategy/manual setup and a
-                # subsequent explicit Enable will request another forced save.
-                self._supervisor.persist_state("PAUSED")
-                return True
             requirements = self._active_strategy_session_requirements()
             if screenshot is None or not requirements:
-                self._supervisor.persist_state("PAUSED")
-                return False
-            waivers = merge_profile_skip_waivers(
-                requirements,
-                getattr(self, "_startup_gate_waivers", {}),
-            )
-            setup = self._run_home_setup_attempts(
-                requirements,
-                screenshot=screenshot,
-                waivers=waivers,
-                save_preflight=result,
-            )
-            if not setup.complete:
-                self._supervisor.persist_state("PAUSED")
-                if setup.interrupted:
-                    return True
-                failed_check = str(
-                    setup.failed_check or "startup_setup"
+                degraded = True
+                degraded_reason = (
+                    "Home configuration evidence is unavailable for repair"
                 )
-                configuration = self._return_configuration_report(
-                    receipt,
-                    check_sets,
-                    stage="manual_correction_required",
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                    degraded_reason,
                 )
-                configuration.update(
-                    {
+            else:
+                repair_decision = decide_runtime_failure(
+                    RuntimeFailureKind.CONFIGURATION_MISMATCH,
+                    repair_available=True,
+                )
+                if repair_decision.disposition is not (
+                    RuntimeFailureDisposition.REPAIR_NOW
+                ):
+                    raise AssertionError("safe Home mismatch must select repair")
+                waivers = merge_profile_skip_waivers(
+                    requirements,
+                    getattr(self, "_startup_gate_waivers", {}),
+                )
+                setup = self._run_home_setup_attempts(
+                    requirements,
+                    screenshot=screenshot,
+                    waivers=waivers,
+                    save_preflight=result,
+                )
+                setup_evidence = dict(getattr(setup, "evidence", {}) or {})
+                setup_evidence["player_save_preflight"] = result.as_dict()
+                if not setup.complete:
+                    if setup.interrupted:
+                        return True
+                    degraded = True
+                    failed_check = str(setup.failed_check or "startup_setup")
+                    degraded_reason = (
+                        f"Home repair stopped at {failed_check}: {setup.reason}"
+                    )
+                    repair_failure = {
                         "failed_check": failed_check,
                         "failure_reason": str(setup.reason),
                         "retryable_from_home": bool(
-                            getattr(setup, "retryable_from_home", True)
+                            setup.retryable_from_home
                         ),
                     }
-                )
-                self._supervisor.transition_manual_control(
-                    workflow_id,
-                    "awaiting_manual_correction",
-                    detail=(
-                        f"Home configuration stopped at {failed_check}: "
-                        f"{setup.reason}; make the reported manual correction "
-                        "before explicitly enabling another fresh save check"
-                    ),
-                    refresh_status="manual_correction_required",
-                    save_receipt=receipt,
-                    configuration=configuration,
-                )
-                return True
-            setup_evidence = dict(setup.evidence)
-            setup_evidence["player_save_preflight"] = result.as_dict()
-            self._mission_mgr.mark_no_battle_setup_complete(
-                setup_evidence,
-                waivers=waivers,
-            )
-            all_checks = tuple(
-                sorted(
-                    {
-                        *check_sets["accepted"],
-                        *check_sets["ui_required"],
-                    }
-                )
-            )
-            if ui_backed:
-                receipt = build_home_ui_reconciliation_receipt(
-                    workflow_id=workflow_id,
-                    observation_id=str(current.get("observation_id") or ""),
-                    evidence=current,
-                    reason=str(
-                        getattr(result, "reason", "")
-                        or "save_evidence_unavailable"
-                    ),
-                    resolved_check_ids=all_checks,
-                )
-            else:
-                receipt = build_home_return_reconciliation_receipt(
-                    workflow_id=workflow_id,
-                    observation_id=str(current.get("observation_id") or ""),
-                    activity_scope_id=str(
-                        current.get("activity_scope_run_id") or ""
-                    ),
-                    acquisition=acquisition,
-                    expected_binding=expected_binding,
-                    resolved_check_ids=all_checks,
-                )
+                    self._flag_recoverable_runtime_failure(
+                        RuntimeFailureKind.REPAIR_EXHAUSTED,
+                        degraded_reason,
+                    )
+                    self._mission_mgr.mark_no_battle_setup_degraded(
+                        setup_evidence,
+                        failed_check=failed_check,
+                        reason=str(setup.reason),
+                        waivers=waivers,
+                    )
+                else:
+                    self._mission_mgr.mark_no_battle_setup_complete(
+                        setup_evidence,
+                        waivers=waivers,
+                    )
+                    all_checks = tuple(
+                        sorted(
+                            {
+                                *check_sets["accepted"],
+                                *check_sets["mismatched"],
+                                *check_sets["ui_required"],
+                            }
+                        )
+                    )
+                    if ui_backed:
+                        receipt = build_home_ui_reconciliation_receipt(
+                            workflow_id=workflow_id,
+                            observation_id=str(
+                                current.get("observation_id") or ""
+                            ),
+                            evidence=current,
+                            reason=str(
+                                getattr(result, "reason", "")
+                                or "save_evidence_unavailable"
+                            ),
+                            resolved_check_ids=all_checks,
+                        )
+                    else:
+                        receipt = build_home_return_reconciliation_receipt(
+                            workflow_id=workflow_id,
+                            observation_id=str(
+                                current.get("observation_id") or ""
+                            ),
+                            activity_scope_id=str(
+                                current.get("activity_scope_run_id") or ""
+                            ),
+                            acquisition=acquisition,
+                            expected_binding=expected_binding,
+                            resolved_check_ids=all_checks,
+                        )
 
         completed = self._supervisor.transition_manual_control(
             workflow_id,
             "completed",
             detail=(
-                "verified Home UI discovery replaced unusable save evidence and "
-                "reconciled current configuration"
+                f"Home Return released automation with a flagged problem: {degraded_reason}"
+                if degraded
+                else "verified Home UI discovery replaced unusable save evidence "
+                "and reconciled current configuration"
                 if ui_backed
                 else "fresh Home save confirmed there is no active battle and "
                 "reconciled current configuration evidence"
             ),
             refresh_status=(
-                "home_ui_fallback_reconciliation_complete"
+                "home_reconciliation_complete_degraded"
+                if degraded
+                else "home_ui_fallback_reconciliation_complete"
                 if ui_backed
                 else "home_save_reconciliation_complete"
             ),
             save_receipt=receipt,
-            configuration=self._return_configuration_report(
-                receipt,
-                check_sets,
-                stage="complete",
-            ),
+            configuration={
+                **self._return_configuration_report(
+                    receipt,
+                    check_sets,
+                    stage="complete_degraded" if degraded else "complete",
+                ),
+                **repair_failure,
+            },
         )
         complete = bool(
             completed is not None and completed.get("status") == "completed"
@@ -5962,7 +6193,26 @@ class App:
         if not callable(requirement_fn):
             return {}
         requirements = requirement_fn()
-        return dict(requirements) if isinstance(requirements, Mapping) else {}
+        if not isinstance(requirements, Mapping):
+            return {}
+        effective = dict(requirements)
+        runtime_waivers_fn = getattr(
+            self._mission_mgr,
+            "session_preflight_waivers",
+            None,
+        )
+        runtime_waivers = (
+            runtime_waivers_fn() if callable(runtime_waivers_fn) else None
+        )
+        waivers = merge_profile_skip_waivers(
+            effective,
+            runtime_waivers if isinstance(runtime_waivers, Mapping) else None,
+        )
+        if waivers:
+            for check_id in waivers:
+                effective.pop(str(check_id), None)
+            effective["_gate_waivers"] = waivers
+        return effective
 
     @staticmethod
     def _save_reconciliation_check_sets(
@@ -6124,7 +6374,11 @@ class App:
                     ),
                 )
                 if failed:
-                    self._exclusive_validation_ownership_hold = True
+                    self._exclusive_validation_ownership_hold = False
+                    self._flag_recoverable_runtime_failure(
+                        RuntimeFailureKind.WORKFLOW_EVIDENCE_EXPIRED,
+                        "orphaned Tournament validation ownership was retired",
+                    )
                     self._announce_exclusive_validation_result(failed)
 
         receipt = self._exclusive_validation_receipt()
@@ -6538,6 +6792,10 @@ class App:
             outcome = "failed"
             reason += "; the owned battle ended, but verified NEW_BATTLE Home was not reached"
             self._exclusive_validation_terminal_hold = request_id
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                reason=reason,
+            )
         else:
             self._exclusive_validation_terminal_hold = None
         result = self._supervisor.finish_exclusive_validation(
@@ -7030,20 +7288,8 @@ class App:
         reason: str,
         expected: object,
         blocking: bool = True,
-        allow_repair_restart: bool = False,
         allow_waive: bool = True,
     ) -> Optional[Dict[str, Any]]:
-        repair_authority = None
-        if allow_repair_restart:
-            current = self._current_control_workflow_evidence()
-            if (
-                isinstance(current, Mapping)
-                and current.get("game_state") == "active_battle"
-                and self._mission_mgr.active_battle_observed()
-            ):
-                repair_authority = current
-            else:
-                allow_repair_restart = False
         options = build_gate_decision_options(
             check_id,
             (
@@ -7052,7 +7298,6 @@ class App:
                 else ()
             ),
             advisory=not blocking,
-            allow_repair_restart=allow_repair_restart,
             allow_waive=allow_waive,
         )
         directive = self._supervisor.publish_gate_decision(
@@ -7063,13 +7308,18 @@ class App:
             expected=expected,
             options=options,
             blocking=blocking,
-            repair_authority=repair_authority,
+            repair_authority=None,
         )
         if not isinstance(directive, Mapping):
             return None
         if directive and directive.get("status") == "pending":
             log(
-                f"[GATE_DECISION] Waiting for {check_id}: {reason}",
+                (
+                    f"[GATE_DECISION] Waiting for {check_id}: {reason}"
+                    if blocking
+                    else f"[RUNTIME_ADVISORY] {check_id}: {reason}; "
+                    "Automation continues"
+                ),
                 "WARN",
                 console=True,
             )
@@ -7158,51 +7408,31 @@ class App:
             if phase == "session_preflight":
                 self._mission_mgr.retry_session_preflight()
             completion_reason = f"retrying {check_id} without a waiver"
-        elif action == "pause":
-            if not self._supervisor.persist_state("PAUSED"):
-                return False
-            completion_reason = f"paused for manual {check_id} changes"
-        elif action == "repair_restart":
-            current = self._current_control_workflow_evidence()
-            repair_authority = directive.get("repair_authority")
-            if (
-                not self._repair_authority_matches_runtime(
-                    repair_authority,
-                    current,
-                )
-                or not self._mission_mgr.authorize_session_preflight_restart(
-                    repair_authority,
-                    request_id=request_id,
-                    check_id=check_id,
-                    reason=str(directive.get("reason") or ""),
-                )
-            ):
-                log(
-                    "[SESSION_PREFLIGHT] Repair authorization no longer "
-                    "matches the live battle; the Strategy Gate remains in "
-                    "place while safe collectors continue",
-                    "WARN",
-                    console=True,
-                )
-                return False
+        elif action in {"pause", "repair_restart"}:
+            self._flag_recoverable_runtime_failure(
+                RuntimeFailureKind.WORKFLOW_EVIDENCE_EXPIRED,
+                f"retired legacy {action} decision for {check_id}",
+            )
             completion_reason = (
-                f"authorized guarded battle restart to repair {check_id}"
+                f"retired legacy {action} decision for {check_id}; "
+                "automation continues degraded"
             )
         else:
             return False
-        if phase == "session_preflight" and action in {
-            "waive",
-            "retry",
-            "repair_restart",
-        }:
+        if phase == "session_preflight" and action in {"waive", "retry"}:
             self._get_action_authority().clear_strategy_gate(
                 event={
                     "waive": StrategyGateExitEvent.RUN_SCOPED_WAIVER,
                     "retry": StrategyGateExitEvent.ACCEPTED_RETRY,
-                    "repair_restart": (
-                        StrategyGateExitEvent.AUTHORIZED_REPAIR_TRANSITION
-                    ),
                 }[action],
+                reason=completion_reason,
+            )
+        elif phase == "session_preflight" and action in {
+            "pause",
+            "repair_restart",
+        }:
+            self._get_action_authority().clear_strategy_gate(
+                event=StrategyGateExitEvent.SUCCESSFUL_VALIDATION,
                 reason=completion_reason,
             )
         self._supervisor.consume_gate_decision(
@@ -7211,7 +7441,7 @@ class App:
         )
         log(
             f"[GATE_DECISION] {completion_reason}",
-            "WARN" if action in {"waive", "repair_restart"} else "INFO",
+            "WARN" if action in {"waive", "pause", "repair_restart"} else "INFO",
             console=True,
         )
         return True
@@ -7348,10 +7578,7 @@ class App:
                 check_id=check_id,
                 reason=reason,
                 expected=(requirements.get(check_id) if checks else None),
-                allow_repair_restart=(
-                    bool(checks)
-                    and self._mission_mgr.session_preflight_restart_available()
-                ),
+                blocking=False,
                 allow_waive=bool(checks),
             )
         if directive and directive.get("status") == "pending":
@@ -7536,42 +7763,21 @@ class App:
         terminally_blocked: bool,
         detection: Optional[Mapping[str, Any]] = None,
     ) -> None:
-        """Translate terminal preflight evidence into the typed gate state."""
+        """Retire legacy preflight gates; mismatches are advisory only."""
 
         authority = self._get_action_authority()
         if terminally_blocked:
-            state = str((detection or {}).get("state") or "").upper()
-            home_control = HomeBattleControl.parse(
-                (detection or {}).get("home_battle_control", "UNKNOWN")
-            )
-            if state in {"GAME_OVER", "TOURNAMENT_RESULTS", "WORKSHOP"} or (
-                state in {"HOME", "HOME_SCREEN"}
-                and home_control is HomeBattleControl.NEW_BATTLE
-            ):
-                # The mismatch belongs to the battle that just ended. Do not
-                # recreate its running-battle gate after authoritative natural
-                # boundary evidence has cleared it; terminal routing and the
-                # next run's normal gates remain available.
-                return
             existing_gate = authority.strategy_gate
-            if (
-                existing_gate is not None
-                and existing_gate.source != "session_preflight"
+            if existing_gate is not None and existing_gate.source == (
+                "session_preflight"
             ):
-                # Every running-battle gate has the same input envelope. Keep
-                # the older independent safety fact instead of silently
-                # replacing it; the new preflight evidence remains available
-                # through its own gate-decision ledger.
-                return
-            checks, reason = self._session_preflight_gate_context()
-            authority.activate_strategy_gate(
-                strategy=self._current_strategy_name(),
-                battle_scope=self._current_run_scope_id(),
-                source="session_preflight",
-                phase="running_battle",
-                failed_check_ids=checks,
-                reason=reason,
-            )
+                authority.clear_strategy_gate(
+                    event=StrategyGateExitEvent.SUCCESSFUL_VALIDATION,
+                    reason=(
+                        "configuration mismatches are advisory under the global "
+                        "runtime failure policy"
+                    ),
+                )
             return
 
         strategy = self._mission_mgr.strategy
@@ -7780,7 +7986,22 @@ class App:
             or ""
         ).strip()
         if interruption_reason:
-            self._supervisor.persist_state("PAUSED")
+            source_restored = getattr(
+                outcome,
+                "operator_workflow_source_restored",
+                None,
+            )
+            catastrophic = source_restored is False
+            if catastrophic:
+                self._supervisor.pause_for_catastrophic_failure(
+                    RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                    reason=interruption_reason,
+                )
+            else:
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                    interruption_reason,
+                )
             current = self._current_control_workflow_evidence() or {}
             final_status = (
                 "failed"
@@ -7799,8 +8020,12 @@ class App:
                     str(workflow.get("request_id") or ""),
                     final_status,
                     reason=(
-                        "save-backed attachment stopped safely: "
-                        f"{interruption_reason}; Automation remains Paused"
+                        "save-backed attachment stopped after source restoration "
+                        f"failed: {interruption_reason}; Automation remains Paused"
+                        if catastrophic
+                        else "save-backed attachment evidence was rejected: "
+                        f"{interruption_reason}; Automation continues without "
+                        "granting attachment authority"
                     ),
                     acknowledgement=current,
                 )
@@ -7818,14 +8043,22 @@ class App:
                     manual_id,
                     final_status,
                     detail=(
-                        "save-backed Return Control stopped safely: "
-                        f"{interruption_reason}; Automation remains Paused"
+                        "save-backed Return Control stopped after source restoration "
+                        f"failed: {interruption_reason}; Automation remains Paused"
+                        if catastrophic
+                        else "save-backed Return Control evidence was rejected: "
+                        f"{interruption_reason}; Automation continues in degraded mode"
                     ),
-                    refresh_status="save_restoration_interrupted",
+                    refresh_status=(
+                        "save_restoration_interrupted"
+                        if catastrophic
+                        else "save_evidence_rejected_continued"
+                    ),
                 )
             log(
-                "[PLAYER_SAVE] Operator workflow stopped safely after guarded "
-                f"serialization failure: {interruption_reason}",
+                "[PLAYER_SAVE] Operator workflow ended after guarded "
+                f"serialization issue: {interruption_reason}; disposition="
+                + ("pause_for_safety" if catastrophic else "continue_degraded"),
                 "WARN",
             )
             return
@@ -8068,6 +8301,14 @@ class App:
             self._mission_mgr.reuse_session_preflight_for_confirmed_attachment(
                 str(confirmed_scope_id)
             )
+            if getattr(self, "_exclusive_validation_ownership_hold", False):
+                self._exclusive_validation_ownership_hold = False
+                log(
+                    "[TOURNAMENT_VALIDATION] Released legacy orphaned "
+                    "validation hold after current-battle continuity was "
+                    "confirmed",
+                    "INFO",
+                )
 
         confirmed_later_scope_id = getattr(
             outcome,
@@ -8160,7 +8401,10 @@ class App:
                     resolved_check_ids=(),
                 )
             except (TypeError, ValueError) as exc:
-                self._supervisor.persist_state("PAUSED")
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.REPORTING_FAILURE,
+                    f"Attach reconciliation receipt failed: {exc}",
+                )
                 self._supervisor.transition_battle_workflow(
                     workflow_id,
                     "failed",
@@ -8238,7 +8482,10 @@ class App:
                     unresolved_check_ids=unresolved,
                 )
             except (TypeError, ValueError) as exc:
-                self._supervisor.persist_state("PAUSED")
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.REPORTING_FAILURE,
+                    f"Return reconciliation receipt failed: {exc}",
+                )
                 self._supervisor.transition_manual_control(
                     workflow_id,
                     "failed",
@@ -8804,22 +9051,36 @@ class App:
                     and self._advance_exclusive_validation(detection)
                 ):
                     continue
-                session_preflight_terminally_blocked = bool(
+                legacy_session_preflight_block = bool(
                     session_preflight_pending
                     and self._mission_mgr.session_preflight_terminally_blocked()
                 )
-                if session_preflight_terminally_blocked:
+                degraded_fn = getattr(
+                    self._mission_mgr,
+                    "session_preflight_degraded",
+                    None,
+                )
+                session_preflight_degraded = bool(
+                    callable(degraded_fn) and degraded_fn() is True
+                )
+                if (
+                    legacy_session_preflight_block
+                    or session_preflight_degraded
+                ):
                     self._handle_terminal_session_gate_decision()
                     session_preflight_pending = (
                         not initialization_pending
                         and self._mission_mgr.session_preflight_pending()
                     )
-                    session_preflight_terminally_blocked = bool(
-                        session_preflight_pending
-                        and self._mission_mgr.session_preflight_terminally_blocked()
-                    )
+                    if legacy_session_preflight_block and session_preflight_pending:
+                        self._flag_recoverable_runtime_failure(
+                            RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                            "legacy session validation remained blocked after "
+                            "migration; releasing its action hold",
+                        )
+                        session_preflight_pending = False
                 self._sync_strategy_action_gate(
-                    terminally_blocked=session_preflight_terminally_blocked,
+                    terminally_blocked=legacy_session_preflight_block,
                     detection=detection,
                 )
                 operator_workflow_hold = (
@@ -8857,7 +9118,6 @@ class App:
                     )
                 elif (
                     session_preflight_pending
-                    and not session_preflight_terminally_blocked
                 ):
                     authority_holds = (
                         AuthorityHoldState(
@@ -8982,49 +9242,29 @@ class App:
                     self._run_initialization_gate_logged = False
 
                 if session_preflight_pending:
-                    if session_preflight_terminally_blocked:
-                        if not self._session_preflight_terminal_blocked_logged:
-                            log(
-                                "[SESSION_PREFLIGHT] Validation is blocked; "
-                                "strategy actions remain blocked while safe runtime "
-                                "handlers stay available",
-                                "WARN",
-                                console=True,
-                            )
-                            self._session_preflight_terminal_blocked_logged = True
-                    else:
-                        if not self._session_preflight_gate_logged:
-                            log(
-                                "[SESSION_PREFLIGHT] Exclusive validation gate active; "
-                                "normal handlers are blocked",
-                                "INFO",
-                                console=True,
-                            )
-                            self._session_preflight_gate_logged = True
-                        if stop_blind_gem_tapper():
-                            self._blind_tapper_suspended = True
-                        if (
-                            not continuity_pending
-                            and self._action_decision(
-                                RuntimeActionClass.STRATEGY_ACTION,
-                                owner=AuthorityHold.SESSION_PREFLIGHT,
-                            ).allowed
-                        ):
-                            if self._mission_mgr.session_preflight_repair_required():
-                                if self._action_decision(
-                                    RuntimeActionClass.LIFECYCLE_ACTION,
-                                    owner=AuthorityHold.SESSION_PREFLIGHT,
-                                ).allowed:
-                                    self._attempt_session_preflight_repair(
-                                        detection
-                                    )
-                            else:
-                                self._run_owned_strategy_tick(
-                                    AuthorityHold.SESSION_PREFLIGHT,
-                                    img,
-                                    detection,
-                                    strategy_only=True,
-                                )
+                    if not self._session_preflight_gate_logged:
+                        log(
+                            "[SESSION_PREFLIGHT] Exclusive validation gate active; "
+                            "normal handlers are blocked",
+                            "INFO",
+                            console=True,
+                        )
+                        self._session_preflight_gate_logged = True
+                    if stop_blind_gem_tapper():
+                        self._blind_tapper_suspended = True
+                    if (
+                        not continuity_pending
+                        and self._action_decision(
+                            RuntimeActionClass.STRATEGY_ACTION,
+                            owner=AuthorityHold.SESSION_PREFLIGHT,
+                        ).allowed
+                    ):
+                        self._run_owned_strategy_tick(
+                            AuthorityHold.SESSION_PREFLIGHT,
+                            img,
+                            detection,
+                            strategy_only=True,
+                        )
                 elif self._session_preflight_gate_logged or getattr(
                     self,
                     "_session_preflight_terminal_blocked_logged",
@@ -9646,10 +9886,13 @@ class App:
             self._pending_home_setup_recovery = None
         elif recovery_failed:
             self._pending_home_setup_recovery = None
-            self._supervisor.persist_state("PAUSED")
             failure_reason = (
                 "verified Home recovery failed after the same workflow was "
                 "explicitly Enabled; no further cleanup input is authorized"
+            )
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                reason=failure_reason,
             )
             workflow_id = str(pending.get("workflow_id") or "")
             if owner is AuthorityHold.OPERATOR_WORKFLOW and workflow_id:
@@ -9864,90 +10107,6 @@ class App:
                     AuxiliaryCollector.FLOATING_GEM_SCAN
                 ),
             )
-
-    def _attempt_session_preflight_repair(
-        self,
-        detection: Dict[str, Any],
-    ) -> None:
-        """End one GC run so Home-only settings can be corrected safely."""
-
-        if detection.get("state") != "RUNNING":
-            return
-        current_authority = self._current_control_workflow_evidence()
-        if (
-            not isinstance(current_authority, Mapping)
-            or not self._mission_mgr.begin_session_preflight_repair(
-                current_authority
-            )
-        ):
-            reason = (
-                "guarded repair ownership could not be bound to the current "
-                "battle"
-            )
-            self._mission_mgr.fail_session_preflight_repair(reason)
-            log(
-                "[SESSION_PREFLIGHT] Repair input was not authorized; "
-                "Automation remains Enabled with strategy input gated and "
-                "safe gem collection available",
-                "WARN",
-                console=True,
-            )
-            return
-
-        attached_authorization = (
-            self._mission_mgr.attached_validation_requested()
-        )
-        log_action_intent(
-            "Surrendering this battle for Home-only strategy repair",
-            reason=(
-                "the operator authorized the attached-battle restart after "
-                "read-only validation"
-                if attached_authorization
-                else "repeated session validation established the configured "
-                "guarded recovery threshold"
-            ),
-            detail="[SESSION_PREFLIGHT] repair_transition=surrender_to_game_over",
-            console=True,
-        )
-        if not surrender_run(
-            action_guard=self._session_preflight_repair_action_guard
-        ):
-            reason = "guarded Surrender did not reach Game Over"
-            self._mission_mgr.fail_session_preflight_repair(reason)
-            log(
-                f"[SESSION_PREFLIGHT] {reason}; automation remains blocked",
-                "ERROR",
-                console=True,
-            )
-            log_result(
-                f"Battle Surrender for strategy repair failed — {reason}",
-                detail="[SESSION_PREFLIGHT] repair_transition=failed",
-                console=True,
-            )
-            return
-        log_result(
-            "Battle surrendered for strategy repair — Game Over reached",
-            detail=(
-                "[SESSION_PREFLIGHT] repair_transition=game_over; "
-                "next_step=return_home_then_pause"
-            ),
-            console=True,
-        )
-
-    def _session_preflight_repair_action_guard(self) -> bool:
-        """Revalidate the separately authorized repair owner's lifecycle lease."""
-
-        current = self._current_control_workflow_evidence()
-        return bool(
-            isinstance(current, Mapping)
-            and self._mission_mgr.session_preflight_repair_authorized_for(
-                current
-            )
-            and self._runtime_action_guard(
-                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
-                owner=AuthorityHold.SESSION_PREFLIGHT,
-            )
-        )
 
     def _observe_no_strategy_frame(
         self,
@@ -11976,7 +12135,7 @@ class App:
                     "_player_save_history_baseline_outcome",
                     None,
                 )
-                if (
+                prior_history_baseline_blocked = bool(
                     bool(getattr(prior_history_baseline, "blocked", False))
                     and getattr(
                         self,
@@ -11984,35 +12143,63 @@ class App:
                         None,
                     )
                     == scope_id
-                ):
-                    log(
-                        "[BATTLE_CONTINUITY] Save-first Home baseline remains "
-                        "blocked for this activity scope; no repeated save, "
-                        "History UI, or battle input is authorized",
-                        "INFO",
-                    )
-                    return
-                save_preflight = self._acquire_player_save_home_preflight(
-                    {},
-                    screenshot=img,
                 )
-                if save_preflight is not None and not save_preflight.ready:
-                    return
-                if not home_preflight_owner_still_current():
-                    return
-                history_baseline = getattr(
-                    self,
-                    "_player_save_history_baseline_outcome",
-                    None,
-                )
-                if bool(getattr(history_baseline, "blocked", False)):
-                    log(
-                        "[BATTLE_CONTINUITY] Baseline-only Home serialization "
-                        "lost its activity/source binding; no History UI or "
-                        "battle input is authorized",
-                        "INFO",
+                if prior_history_baseline_blocked:
+                    self._flag_recoverable_runtime_failure(
+                        RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                        str(
+                            getattr(prior_history_baseline, "reason", "")
+                            or "Home History baseline remains unavailable"
+                        ),
                     )
-                    return
+                    history_baseline = prior_history_baseline
+                else:
+                    save_preflight = self._acquire_player_save_home_preflight(
+                        {},
+                        screenshot=img,
+                    )
+                    if save_preflight is not None and not save_preflight.ready:
+                        provenance = getattr(save_preflight, "provenance", {})
+                        provenance = (
+                            provenance if isinstance(provenance, Mapping) else {}
+                        )
+                        lifecycle_input_attempted = bool(
+                            provenance.get("lifecycle_input_attempted") is True
+                            or provenance.get("background_dispatched") is True
+                        )
+                        if lifecycle_input_attempted and not bool(
+                            provenance.get("source_restored") is True
+                        ):
+                            self._supervisor.pause_for_catastrophic_failure(
+                                RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                                reason=str(
+                                    getattr(save_preflight, "reason", "")
+                                    or "Home baseline refresh did not restore its source"
+                                ),
+                            )
+                            return
+                        self._flag_recoverable_runtime_failure(
+                            RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                            str(
+                                getattr(save_preflight, "reason", "")
+                                or "Home History baseline was unavailable"
+                            ),
+                        )
+                    if not home_preflight_owner_still_current():
+                        return
+                    history_baseline = getattr(
+                        self,
+                        "_player_save_history_baseline_outcome",
+                        None,
+                    )
+                    if bool(getattr(history_baseline, "blocked", False)):
+                        self._flag_recoverable_runtime_failure(
+                            RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                            str(
+                                getattr(history_baseline, "reason", "")
+                                or "Home History baseline binding was unavailable"
+                            ),
+                        )
                 if bool(getattr(history_baseline, "ui_required", False)):
                     log(
                         "[BATTLE_CONTINUITY] Baseline-only Home serialization "
@@ -12035,7 +12222,7 @@ class App:
                     "_player_save_history_baseline_outcome",
                     None,
                 )
-                if (
+                prior_history_baseline_blocked = bool(
                     bool(getattr(prior_history_baseline, "blocked", False))
                     and getattr(
                         self,
@@ -12043,35 +12230,77 @@ class App:
                         None,
                     )
                     == scope_id
-                ):
-                    log(
-                        "[BATTLE_CONTINUITY] Save-first Home baseline remains "
-                        "blocked for this activity scope; no repeated save, "
-                        "History UI, or battle input is authorized",
-                        "INFO",
+                )
+                if prior_history_baseline_blocked:
+                    self._flag_recoverable_runtime_failure(
+                        RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                        str(
+                            getattr(prior_history_baseline, "reason", "")
+                            or "Home History baseline remains unavailable"
+                        ),
                     )
-                    return
                 self._claim_proactive_gate_waivers(
                     for_home_setup=True,
                     requirements=requirements,
                 )
                 if exclusive_validation is None:
                     directive = self._matching_gate_decision("home_setup")
-                    if directive and not self._apply_gate_decision(
-                        directive,
-                        phase="home_setup",
+                    if directive and directive.get("blocking", True):
+                        self._supervisor.consume_gate_decision(
+                            str(directive.get("request_id") or ""),
+                            completion_reason=(
+                                "superseded by the global continue-degraded policy"
+                            ),
+                        )
+                        directive = None
+                    if (
+                        directive
+                        and directive.get("status") == "resolved"
+                        and not self._apply_gate_decision(
+                            directive,
+                            phase="home_setup",
+                        )
                     ):
                         return
                 waivers = merge_profile_skip_waivers(
                     requirements,
                     getattr(self, "_startup_gate_waivers", {}),
                 )
-                save_preflight = self._acquire_player_save_home_preflight(
-                    requirements,
-                    screenshot=img,
-                )
+                save_preflight = None
+                if not prior_history_baseline_blocked:
+                    save_preflight = self._acquire_player_save_home_preflight(
+                        requirements,
+                        screenshot=img,
+                    )
                 if save_preflight is not None and not save_preflight.ready:
-                    return
+                    provenance = getattr(save_preflight, "provenance", {})
+                    provenance = (
+                        provenance if isinstance(provenance, Mapping) else {}
+                    )
+                    lifecycle_input_attempted = bool(
+                        provenance.get("lifecycle_input_attempted") is True
+                        or provenance.get("background_dispatched") is True
+                    )
+                    source_restored = bool(
+                        provenance.get("source_restored") is True
+                    )
+                    if lifecycle_input_attempted and not source_restored:
+                        self._supervisor.pause_for_catastrophic_failure(
+                            RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                            reason=str(
+                                getattr(save_preflight, "reason", "")
+                                or "Home save refresh did not restore its source"
+                            ),
+                        )
+                        return
+                    self._flag_recoverable_runtime_failure(
+                        RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                        str(
+                            getattr(save_preflight, "reason", "")
+                            or "Home save preflight was unavailable"
+                        ),
+                    )
+                    save_preflight = None
                 if not home_preflight_owner_still_current():
                     return
                 history_baseline = getattr(
@@ -12080,13 +12309,13 @@ class App:
                     None,
                 )
                 if bool(getattr(history_baseline, "blocked", False)):
-                    log(
-                        "[BATTLE_CONTINUITY] Save-first Home baseline lost its "
-                        "activity/source binding; no History UI or battle input "
-                        "is authorized",
-                        "INFO",
+                    self._flag_recoverable_runtime_failure(
+                        RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                        str(
+                            getattr(history_baseline, "reason", "")
+                            or "Home History baseline was unavailable"
+                        ),
                     )
-                    return
                 setup = self._run_home_setup_attempts(
                     requirements,
                     screenshot=img,
@@ -12124,58 +12353,57 @@ class App:
                         check_id=check_id,
                         reason=setup.reason,
                         expected=requirements.get(check_id),
+                        blocking=False,
                     )
                     if directive and directive.get("status") == "pending":
                         directive = (
-                            self._prompt_for_gate_decision(directive) or directive
+                            self._prompt_for_gate_decision(directive)
+                            or directive
                         )
-                    if not directive or not self._apply_gate_decision(
-                        directive,
-                        phase="home_setup",
-                    ):
-                        log(
-                            f"[GC_NO_BATTLE] Blocking Battle start at "
-                            f"{check_id}: {setup.reason}",
-                            "ERROR",
-                        )
-                        return
-                    fresh = self._capture_frame()
-                    if fresh is None:
-                        return
-                    waivers = merge_profile_skip_waivers(
-                        requirements,
-                        getattr(self, "_startup_gate_waivers", {}),
-                    )
-                    setup = self._run_home_setup_attempts(
-                        requirements,
-                        screenshot=fresh,
-                        waivers=waivers,
-                        save_preflight=save_preflight,
-                    )
-                    if setup.interrupted:
-                        return
-                    if not home_preflight_owner_still_current():
-                        return
-                    if not setup.complete:
-                        next_check = setup.failed_check or "startup_setup"
-                        self._publish_gate_decision(
+                    if (
+                        directive
+                        and directive.get("status") == "resolved"
+                        and self._apply_gate_decision(
+                            directive,
                             phase="home_setup",
-                            check_id=next_check,
-                            reason=setup.reason,
-                            expected=requirements.get(next_check),
                         )
-                        log(
-                            f"[GC_NO_BATTLE] Blocking Battle start at "
-                            f"{next_check}: {setup.reason}",
-                            "ERROR",
+                    ):
+                        waivers = merge_profile_skip_waivers(
+                            requirements,
+                            getattr(self, "_startup_gate_waivers", {}),
                         )
-                        return
+                        retry_frame = self._capture_frame()
+                        if retry_frame is not None:
+                            setup = self._run_home_setup_attempts(
+                                requirements,
+                                screenshot=retry_frame,
+                                waivers=waivers,
+                                save_preflight=save_preflight,
+                            )
+                            if setup.interrupted:
+                                return
+                            if not home_preflight_owner_still_current():
+                                return
+                    if not setup.complete:
+                        self._flag_recoverable_runtime_failure(
+                            RuntimeFailureKind.REPAIR_EXHAUSTED,
+                            f"Home setup stopped at {check_id}: {setup.reason}",
+                        )
                 setup_evidence = dict(setup.evidence)
                 if save_preflight is not None:
                     setup_evidence["player_save_preflight"] = (
                         save_preflight.as_dict()
                     )
-                if waivers:
+                if not setup.complete:
+                    self._mission_mgr.mark_no_battle_setup_degraded(
+                        setup_evidence,
+                        failed_check=str(
+                            setup.failed_check or "startup_setup"
+                        ),
+                        reason=str(setup.reason),
+                        waivers=waivers,
+                    )
+                elif waivers:
                     self._mission_mgr.mark_no_battle_setup_complete(
                         setup_evidence,
                         waivers=waivers,

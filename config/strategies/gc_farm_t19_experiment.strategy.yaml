@@ -106,9 +106,13 @@ vars:
   level_skip_taps_sent: 0
   level_skip_last_reason: ''
   gc_no_battle_setup_completed: false
+  gc_no_battle_setup_degraded: false
+  gc_no_battle_setup_failure: {}
   gc_no_battle_setup_evidence: {}
   gc_session_preflight_completed: false
   gc_session_preflight_attempted: false
+  gc_session_preflight_degraded: false
+  gc_session_preflight_disposition: ''
   gc_session_preflight_blocked: false
   gc_session_preflight_repair_required: false
   gc_session_preflight_repair_in_progress: false

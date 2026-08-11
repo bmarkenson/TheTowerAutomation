@@ -1883,25 +1883,33 @@ def test_return_control_stays_input_blocked_during_reconciliation(
 
 
 @pytest.mark.parametrize(
-    ("status", "reason", "background_dispatched", "expected_status"),
     (
-        ("blocked", "action_not_authorized", False, "failed"),
+        "status",
+        "reason",
+        "background_dispatched",
+        "expected_status",
+        "paused",
+    ),
+    (
+        ("blocked", "action_not_authorized", False, "failed", False),
         (
             "blocked",
             "restored_target_or_new_battle_boundary_unverified",
             True,
             "interrupted",
+            True,
         ),
-        ("ready", "stable_save_unavailable", True, "failed"),
+        ("ready", "stable_save_unavailable", True, "failed", False),
     ),
 )
-def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
+def test_home_return_refresh_failure_uses_global_failure_policy(
     tmp_path,
     monkeypatch,
     status,
     reason,
     background_dispatched,
     expected_status,
+    paused,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
     path = tmp_path / "automation_ctl.json"
@@ -1957,6 +1965,8 @@ def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
                 else "not_attempted"
             ),
             "background_dispatched": background_dispatched,
+            "lifecycle_input_attempted": background_dispatched,
+            "source_restored": status == "ready",
         },
         acquisition=None,
         context=None,
@@ -1974,8 +1984,17 @@ def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
 
     terminal = supervisor.manual_control
     assert terminal["status"] == expected_status
-    assert "Automation remains Paused" in terminal["detail"]
-    assert supervisor.is_paused is True
+    assert (
+        "Automation remains Paused"
+        if paused
+        else "Automation continues in degraded mode"
+    ) in terminal["detail"]
+    assert supervisor.is_paused is paused
+    assert terminal["refresh_status"] == (
+        "home_save_restoration_interrupted"
+        if paused
+        else "home_save_refresh_failed_continued"
+    )
     assert acquisitions == [result]
 
 
@@ -2097,6 +2116,10 @@ def test_home_return_reports_nonretryable_setup_for_manual_correction(
         evidence=evidence,
         source="test",
     )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
     store.transition_manual_control(
         manual["manual_control_id"],
         "reconciling",
@@ -2140,6 +2163,7 @@ def test_home_return_reports_nonretryable_setup_for_manual_correction(
                 "reason": "current order needs UI validation",
             }
         },
+        as_dict=lambda: {"ready": True},
     )
     setup = GcNoBattleSetupResult(
         GcNoBattleSetupStatus.FAILED,
@@ -2154,18 +2178,20 @@ def test_home_return_reports_nonretryable_setup_for_manual_correction(
         screenshot=object(),
     ) is True
 
-    blocked = supervisor.manual_control
-    assert blocked["status"] == "awaiting_manual_correction"
-    assert blocked["refresh_status"] == "manual_correction_required"
-    assert blocked["configuration"]["failed_check"] == (
+    completed = supervisor.manual_control
+    assert completed["status"] == "completed"
+    assert completed["refresh_status"] == (
+        "home_reconciliation_complete_degraded"
+    )
+    assert completed["configuration"]["failed_check"] == (
         "perk_auto_pick_order"
     )
-    assert blocked["configuration"]["retryable_from_home"] is False
-    assert "made no stable progress" in blocked["detail"]
-    assert blocked["save_receipt"]["acquisition"]["type"] == (
+    assert completed["configuration"]["retryable_from_home"] is False
+    assert "made no stable progress" in completed["detail"]
+    assert completed["save_receipt"]["acquisition"]["type"] == (
         "forced_serialization"
     )
-    assert supervisor.is_paused is True
+    assert supervisor.is_paused is False
     app._run_home_setup_attempts.assert_called_once()
     assert app._complete_home_return_reconciliation(
         result,
@@ -2222,7 +2248,8 @@ def test_post_serialization_interruption_terminates_attach_and_pauses(
         SimpleNamespace(
             operator_workflow_interruption_reason=(
                 "active_attachment_restored_source_convergence_timeout"
-            )
+            ),
+            operator_workflow_source_restored=False,
         )
     )
 
@@ -2262,6 +2289,10 @@ def test_identity_projection_failure_terminates_return_and_discards_claim(
         evidence=evidence,
         source="test",
     )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
     store.transition_manual_control(
         manual["manual_control_id"],
         "reconciling",
@@ -2282,19 +2313,20 @@ def test_identity_projection_failure_terminates_return_and_discards_claim(
         SimpleNamespace(
             operator_workflow_interruption_reason=(
                 "active_attachment_temporal_projection_unavailable"
-            )
+            ),
+            operator_workflow_source_restored=True,
         )
     )
 
-    assert supervisor.is_paused is True
+    assert supervisor.is_paused is False
     assert supervisor.manual_control["status"] == "failed"
     assert supervisor.manual_control["refresh_status"] == (
-        "save_restoration_interrupted"
+        "save_evidence_rejected_continued"
     )
     assert app._manual_return_reconciliation_claims == {}
 
 
-def test_running_return_trusted_save_mismatch_pauses_without_ui_fallback(
+def test_running_return_trusted_save_mismatch_completes_degraded(
     tmp_path,
     monkeypatch,
 ):
@@ -2327,13 +2359,13 @@ def test_running_return_trusted_save_mismatch_pauses_without_ui_fallback(
 
     assert completed is True
     manual = supervisor.manual_control
-    assert manual["status"] == "awaiting_configuration"
-    assert manual["refresh_status"] == "trusted_mismatch_paused"
+    assert manual["status"] == "completed"
+    assert manual["refresh_status"] == "reconciliation_complete_degraded"
     assert manual["configuration"]["trusted_mismatch_check_ids"] == [
         "workshop_preset"
     ]
     assert manual["configuration"]["ui_required_check_ids"] == []
-    assert supervisor.is_paused is True
+    assert supervisor.is_paused is False
     manager.begin_manual_return_reconciliation.assert_not_called()
 
 
@@ -2379,15 +2411,11 @@ def test_unusable_running_return_save_starts_supported_ui_reconciliation(
     manager.begin_manual_return_reconciliation.assert_called_once_with()
 
 
-def test_capture_reviews_manual_changes_from_exact_retained_return_save(
+def test_completed_return_mismatch_does_not_retain_capture_authority(
     tmp_path,
     monkeypatch,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
-    runtime_save = SimpleNamespace(
-        round_active=True,
-        active_round_identity=SimpleNamespace(fingerprint="a" * 64),
-    )
     (
         app,
         supervisor,
@@ -2402,7 +2430,6 @@ def test_capture_reviews_manual_changes_from_exact_retained_return_save(
         snapshot=_player_save_snapshot(
             "workshop_preset",
             "Tourney",
-            runtime_save=runtime_save,
         ),
         observed_value="Tourney",
     )
@@ -2417,69 +2444,35 @@ def test_capture_reviews_manual_changes_from_exact_retained_return_save(
         context=context,
     ) is True
     manual = supervisor.manual_control
-    assert manual["status"] == "awaiting_configuration"
-    assert supervisor.is_paused is True
+    assert manual["status"] == "completed"
+    assert supervisor.is_paused is False
+    assert app._pending_return_reconciliation_claims() == {}
 
     service = ControlSurfaceService(
         repository_root=tmp_path,
         control_file=supervisor.control_file,
     )
+    control = service.control_store.status()
     _publish_runtime_observation(
         service,
         evidence,
-        paused=True,
+        paused=False,
         active_battle_adopted=True,
         active_strategy="active-farm",
+        acknowledgements=_runtime_acknowledgements(
+            state=("RUNNING", control["state_request_id"]),
+        ),
     )
     availability = service.status()["control_model"]["actions"][
         "capture_current_setup"
     ]
-    assert availability["available"] is True
-    assert availability["code"] == "available_from_return_control"
+    assert availability["available"] is True, availability
+    assert availability["code"] == "available"
 
     requested = service.apply_setup_capture({"operation": "request"})
     capture = requested["capture"]
-    assert capture["acquisition_source"] == (
-        "retained_return_control_refresh"
-    )
-    assert capture["source_manual_control_id"] == manual[
-        "manual_control_id"
-    ]
-    supervisor.apply_control()
-
-    monkeypatch.setattr(
-        "core.app.GuardedPlayerSaveSerializer",
-        lambda **_kwargs: pytest.fail(
-            "retained Return Control evidence must not request another refresh"
-        ),
-    )
-    monkeypatch.setattr(
-        "core.app.project_forced_save_setup",
-        lambda bundle: (
-            _capture_preview(evidence=evidence, acquisition=bundle)
-            if bundle is acquisition
-            else pytest.fail("capture used a different acquisition")
-        ),
-    )
-    app._setup_capture_source_refreshed = False
-    app._log_operator_workflow_result = lambda *_args, **_kwargs: None
-
-    app._sync_operator_control_workflows({"state": "RUNNING"})
-
-    ready = supervisor.setup_capture
-    assert ready["status"] == "ready"
-    assert "without new device input" in ready["reason"]
-    assert ready["preview"]["capture_origin"]["acquisition_source"] == (
-        "retained_return_control_refresh"
-    )
-    assert len(
-        ready["preview"]["capture_origin"][
-            "source_manual_control_fingerprint"
-        ]
-    ) == 64
-    assert app._setup_capture_source_refreshed is False
-    assert supervisor.manual_control["status"] == "awaiting_configuration"
-    assert supervisor.is_paused is True
+    assert capture["acquisition_source"] == "new_setup_capture_refresh"
+    assert "source_manual_control_id" not in capture
 
 
 @pytest.mark.parametrize(
@@ -2706,6 +2699,29 @@ def test_running_return_save_match_completes_without_using_queued_strategy(
     assert supervisor.manual_control["configuration"]["status"] == "complete"
     assert supervisor.is_paused is False
     manager.begin_manual_return_reconciliation.assert_not_called()
+
+
+def test_return_control_excludes_profile_skipped_requirements():
+    strategy = SimpleNamespace(
+        session_preflight_requirements=lambda: {
+            "workshop_preset": "Farm",
+            "perk_bans": ["interest"],
+            "profile_skips": ["perk_bans"],
+        }
+    )
+    app = App.__new__(App)
+    app._mission_mgr = SimpleNamespace(
+        strategy=strategy,
+        session_preflight_waivers=lambda: {},
+    )
+
+    requirements = app._active_strategy_session_requirements()
+
+    assert requirements["workshop_preset"] == "Farm"
+    assert "perk_bans" not in requirements
+    assert requirements["_gate_waivers"]["perk_bans"]["source"] == (
+        "strategy_profile"
+    )
 
 
 def test_running_return_persists_forced_save_before_ui_fallback_is_armed(
@@ -4984,7 +5000,7 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime",
             "failed",
             "round identity contradicts",
-            "continuity_gated",
+            "preserved",
             False,
         ),
         (
@@ -4995,8 +5011,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime",
             "failed",
             "round identity contradicts",
-            "paused_for_safety",
-            True,
+            "preserved",
+            False,
         ),
         (
             "active_battle",
@@ -5181,8 +5197,6 @@ def test_runtime_setup_capture_evidence_failure_preserves_enabled_after_restorat
     assert supervisor.is_paused is paused
     if expected_authority == "preserved":
         assert "did not change automation authority" in result["reason"]
-    elif expected_authority == "continuity_gated":
-        assert app._get_action_authority().strategy_gate is not None
     assert serializer_calls == ["serialize"]
     project.assert_not_called()
 

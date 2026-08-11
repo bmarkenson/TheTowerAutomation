@@ -633,6 +633,8 @@ class MissionManager:
             mv["gc_no_battle_setup_evidence"] = {}
             mv["gc_session_preflight_attempted"] = False
             mv["gc_session_preflight_completed"] = False
+            mv["gc_session_preflight_degraded"] = False
+            mv["gc_session_preflight_disposition"] = ""
             mv["gc_session_preflight_blocked"] = False
             mv["gc_session_preflight_repair_required"] = False
             mv["gc_session_preflight_repair_in_progress"] = False
@@ -726,6 +728,8 @@ class MissionManager:
             mv["damage_slider_observation"] = {}
             mv["gc_session_preflight_attempted"] = False
             mv["gc_session_preflight_completed"] = False
+            mv["gc_session_preflight_degraded"] = False
+            mv["gc_session_preflight_disposition"] = ""
             mv["gc_session_preflight_blocked"] = False
             mv["gc_session_preflight_repair_required"] = False
             mv["gc_session_preflight_repair_in_progress"] = False
@@ -748,6 +752,8 @@ class MissionManager:
         self._exclusive_validation_prepared_request_id = normalized
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["gc_no_battle_setup_completed"] = False
+        mv["gc_no_battle_setup_degraded"] = False
+        mv["gc_no_battle_setup_failure"] = {}
         mv["gc_no_battle_setup_evidence"] = {}
         mv["gc_session_preflight_waivers"] = {}
         self._reset_session_preflight_repair_attempts()
@@ -786,54 +792,19 @@ class MissionManager:
             return False
         return not self.strategy.is_session_preflight_complete(self.ctx)
 
-    def session_preflight_repair_required(self) -> bool:
-        """Return whether preflight requested a guarded no-battle repair."""
+    def session_preflight_degraded(self) -> bool:
+        """Return whether validation completed with a reported problem."""
 
         mv = self.ctx.data.setdefault("mission_vars", {})
-        return bool(mv.get("gc_session_preflight_repair_required"))
+        return bool(
+            mv.get("gc_session_preflight_completed")
+            and mv.get("gc_session_preflight_degraded")
+        )
 
     def attached_validation_requested(self) -> bool:
         """Return whether this process adopted and is validating a live battle."""
 
         return bool(self.ctx.data.get("attached_validation_requested"))
-
-    def session_preflight_restart_available(self) -> bool:
-        """Return whether attached validation found a Home-repairable mismatch."""
-
-        mv = self.ctx.data.setdefault("mission_vars", {})
-        return bool(
-            self.attached_validation_requested()
-            and mv.get("gc_session_preflight_restart_available")
-        )
-
-    def authorize_session_preflight_restart(
-        self,
-        repair_authority: Mapping[str, object],
-        *,
-        request_id: str = "",
-        check_id: str = "",
-        reason: str = "",
-    ) -> bool:
-        """Convert a confirmed attached mismatch into the guarded repair path."""
-
-        normalized_authority = _normalized_repair_authority(repair_authority)
-        if (
-            not self.session_preflight_restart_available()
-            or normalized_authority is None
-        ):
-            return False
-        mv = self.ctx.data.setdefault("mission_vars", {})
-        mv["gc_session_preflight_blocked"] = False
-        mv["gc_session_preflight_repair_required"] = True
-        mv["gc_session_preflight_repair_in_progress"] = False
-        mv["gc_session_preflight_restart_available"] = False
-        mv["gc_session_preflight_repair_authority"] = {
-            **normalized_authority,
-            "request_id": str(request_id or "").strip(),
-            "check_id": str(check_id or "").strip(),
-            "reason": str(reason or "").strip(),
-        }
-        return True
 
     def session_preflight_repair_grant(self) -> Optional[dict[str, object]]:
         """Return the current one-shot grant as evidence, never as new authority."""
@@ -864,13 +835,21 @@ class MissionManager:
         return bool(mv.get("gc_session_preflight_repair_in_progress"))
 
     def session_preflight_terminally_blocked(self) -> bool:
-        """Return whether validation failed without an owned repair transition."""
+        """Migrate legacy blocks into completed degraded validation."""
 
         mv = self.ctx.data.setdefault("mission_vars", {})
-        return bool(
-            mv.get("gc_session_preflight_blocked")
-            and not mv.get("gc_session_preflight_repair_in_progress")
-        )
+        if not mv.get("gc_session_preflight_blocked"):
+            return False
+        mv["gc_session_preflight_blocked"] = False
+        mv["gc_session_preflight_attempted"] = True
+        mv["gc_session_preflight_completed"] = True
+        mv["gc_session_preflight_degraded"] = True
+        mv["gc_session_preflight_disposition"] = "continue_degraded"
+        mv["gc_session_preflight_repair_required"] = False
+        mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_restart_available"] = False
+        mv.pop("gc_session_preflight_repair_authority", None)
+        return False
 
     def session_preflight_failure_checks(self) -> list[str]:
         """Return requirement ids from the last authoritative mismatch."""
@@ -899,6 +878,8 @@ class MissionManager:
         mv["gc_session_preflight_waivers"] = waivers
         mv["gc_session_preflight_attempted"] = False
         mv["gc_session_preflight_completed"] = False
+        mv["gc_session_preflight_degraded"] = False
+        mv["gc_session_preflight_disposition"] = ""
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
@@ -913,6 +894,8 @@ class MissionManager:
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["gc_session_preflight_attempted"] = False
         mv["gc_session_preflight_completed"] = False
+        mv["gc_session_preflight_degraded"] = False
+        mv["gc_session_preflight_disposition"] = ""
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
@@ -959,32 +942,18 @@ class MissionManager:
         mv["gc_session_preflight_repair_attempts"] = 0
         mv["gc_session_preflight_repair_failure_key"] = ""
 
-    def begin_session_preflight_repair(
-        self,
-        current_authority: Mapping[str, object],
-    ) -> bool:
-        """Claim the one guarded surrender transition for a repair request."""
-
-        mv = self.ctx.data.setdefault("mission_vars", {})
-        if (
-            not mv.get("gc_session_preflight_repair_required")
-            or mv.get("gc_session_preflight_repair_in_progress")
-            or not self.session_preflight_repair_authorized_for(
-                current_authority
-            )
-        ):
-            return False
-        mv["gc_session_preflight_repair_in_progress"] = True
-        return True
-
     def fail_session_preflight_repair(self, reason: str) -> None:
-        """Fail closed after a surrender transition cannot be completed."""
+        """Release a failed repair while retaining its degraded evidence."""
 
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
         mv["gc_session_preflight_restart_available"] = False
-        mv["gc_session_preflight_blocked"] = True
+        mv["gc_session_preflight_attempted"] = True
+        mv["gc_session_preflight_completed"] = True
+        mv["gc_session_preflight_degraded"] = True
+        mv["gc_session_preflight_disposition"] = "continue_degraded"
+        mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_last_reason"] = str(reason)
         mv.pop("gc_session_preflight_repair_authority", None)
 
@@ -1025,6 +994,8 @@ class MissionManager:
             or mv.get("gc_session_preflight_repair_in_progress")
         )
         mv["gc_no_battle_setup_completed"] = True
+        mv["gc_no_battle_setup_degraded"] = False
+        mv["gc_no_battle_setup_failure"] = {}
         mv["gc_no_battle_setup_evidence"] = copy.deepcopy(dict(evidence))
         lock_evidence = evidence.get("free_upgrade_locks")
         if isinstance(lock_evidence, Mapping):
@@ -1063,8 +1034,28 @@ class MissionManager:
             # corrected no-battle settings.
             mv["gc_session_preflight_attempted"] = False
             mv["gc_session_preflight_completed"] = False
+            mv["gc_session_preflight_degraded"] = False
+            mv["gc_session_preflight_disposition"] = ""
             mv["gc_session_preflight_blocked"] = False
             self._reset_session_preflight_repair_attempts()
+
+    def mark_no_battle_setup_degraded(
+        self,
+        evidence: Mapping[str, Any],
+        *,
+        failed_check: str,
+        reason: str,
+        waivers: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        """Release Home setup after bounded repair while retaining its failure."""
+
+        self.mark_no_battle_setup_complete(evidence, waivers=waivers)
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_no_battle_setup_degraded"] = True
+        mv["gc_no_battle_setup_failure"] = {
+            "failed_check": str(failed_check or "startup_setup"),
+            "reason": str(reason or "Home setup did not complete"),
+        }
 
     def observe_detection(self, detection: Detection) -> None:
         """Update passive runtime context without materializing any action.

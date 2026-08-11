@@ -580,6 +580,10 @@ class PlayerSavePreflightCoordinator:
         provenance["background_dispatched"] = bool(
             serialized.background_dispatched
         )
+        provenance["lifecycle_input_attempted"] = bool(
+            serialized.lifecycle_input_attempted
+        )
+        provenance["source_restored"] = bool(serialized.source_restored)
         if serialized.background_dispatched:
             provenance["serialization"] = "background_dispatched"
         if serialized.status is GuardedSerializationStatus.BLOCKED:

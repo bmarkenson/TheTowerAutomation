@@ -17,6 +17,7 @@ from core.app import App
 from core.action_executor import execute_actions
 from core.input import safe_tap
 from core.run_state import AUTOMATION
+from core.runtime_failure_policy import RuntimeFailureKind
 
 
 def _set_running_context(
@@ -70,7 +71,7 @@ def _terminal_gate_app() -> App:
     app = App.__new__(App)
     app._mission_mgr = manager
     app._supervisor = Mock()
-    app._supervisor.persist_state.return_value = True
+    app._supervisor.pause_for_operator_authority.return_value = True
     app._supervisor.consume_gate_decision.return_value = True
     app._action_authority = RuntimeActionAuthority()
     app._current_run_scope_id = Mock(return_value="run-1")
@@ -573,7 +574,7 @@ def test_app_auxiliary_guard_has_no_capture_or_status_work_in_tap_hot_path():
     assert app._supervisor.apply_control.call_count == 2
 
 
-def test_gate_activation_never_mutates_pause_or_dispatches_lifecycle_input():
+def test_legacy_gate_is_retired_without_pause_or_lifecycle_input():
     app = _terminal_gate_app()
     original_state = AUTOMATION.state
     with (
@@ -585,16 +586,36 @@ def test_gate_activation_never_mutates_pause_or_dispatches_lifecycle_input():
         app._sync_strategy_action_gate(terminally_blocked=True)
 
     gate = app._get_action_authority().strategy_gate
-    assert gate is not None
-    assert gate.strategy == "farm_t18"
-    assert gate.battle_scope == "run-1"
-    assert gate.failed_check_ids == ("modules",)
+    assert gate is None
     assert AUTOMATION.state == original_state
-    app._supervisor.persist_state.assert_not_called()
+    app._supervisor.pause_for_operator_authority.assert_not_called()
+    app._supervisor.pause_for_catastrophic_failure.assert_not_called()
     surrender.assert_not_called()
     home.assert_not_called()
     game_over.assert_not_called()
     exit_battle.assert_not_called()
+
+
+def test_malformed_workflow_authority_uses_catastrophic_pause_policy():
+    app = App.__new__(App)
+    supervisor = Mock()
+    supervisor.manual_control_error = False
+    supervisor.battle_workflow_error = True
+    supervisor.setup_capture_error = False
+    supervisor.is_paused = False
+    app._supervisor = supervisor
+    app._sync_setup_capture = Mock()
+
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+
+    supervisor.pause_for_catastrophic_failure.assert_called_once_with(
+        RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+        reason=(
+            "malformed battle-workflow directive made device-input "
+            "ownership unknowable"
+        ),
+    )
+    app._sync_setup_capture.assert_not_called()
 
 
 def test_terminal_boundary_does_not_recreate_a_failed_battle_gate():
@@ -606,10 +627,11 @@ def test_terminal_boundary_does_not_recreate_a_failed_battle_gate():
     )
 
     assert app._get_action_authority().strategy_gate is None
-    app._supervisor.persist_state.assert_not_called()
+    app._supervisor.pause_for_operator_authority.assert_not_called()
+    app._supervisor.pause_for_catastrophic_failure.assert_not_called()
 
 
-def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
+def test_gate_decisions_clear_only_retry_and_scoped_waiver_transitions():
     app = _terminal_gate_app()
     manager = app._mission_mgr
     supervisor = app._supervisor
@@ -617,13 +639,10 @@ def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
     for action, expected_event in (
         ("retry", "retry_session_preflight"),
         ("waive", "waive_session_preflight_check"),
-        ("repair_restart", "authorize_session_preflight_restart"),
     ):
         _activate_gate(app._get_action_authority())
         manager.reset_mock()
         supervisor.reset_mock()
-        supervisor.persist_state.return_value = True
-        manager.authorize_session_preflight_restart.return_value = True
         directive = {
             "request_id": f"request-{action}",
             "status": "resolved",
@@ -637,10 +656,6 @@ def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
                 "value": "",
             },
         }
-        if action == "repair_restart":
-            directive["repair_authority"] = (
-                app._current_control_workflow_evidence()
-            )
 
         assert app._apply_gate_decision(
             directive,
@@ -650,23 +665,39 @@ def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
         assert getattr(manager, expected_event).call_count == 1
         supervisor.consume_gate_decision.assert_called_once()
 
+
+@pytest.mark.parametrize("action", ["pause", "repair_restart"])
+def test_legacy_failure_choices_are_retired_without_input(action):
+    app = _terminal_gate_app()
+    manager = app._mission_mgr
+    supervisor = app._supervisor
     _activate_gate(app._get_action_authority())
-    pause = {
-        "request_id": "request-pause",
+    directive = {
+        "request_id": f"legacy-{action}",
         "status": "resolved",
         "check_id": "modules",
-        "decision_id": "pause_for_changes",
+        "decision_id": action,
         "reason": "Modules do not match",
         "selected_option": {
-            "action": "pause",
-            "label": "Pause",
+            "action": action,
+            "label": action,
             "kind": "standard",
             "value": "",
         },
     }
-    assert app._apply_gate_decision(pause, phase="session_preflight")
-    assert app._get_action_authority().strategy_gate is not None
-    supervisor.persist_state.assert_called_once_with("PAUSED")
+
+    assert app._apply_gate_decision(directive, phase="session_preflight")
+
+    assert app._get_action_authority().strategy_gate is None
+    supervisor.pause_for_operator_authority.assert_not_called()
+    manager.authorize_session_preflight_restart.assert_not_called()
+    supervisor.consume_gate_decision.assert_called_once_with(
+        f"legacy-{action}",
+        completion_reason=(
+            f"retired legacy {action} decision for modules; "
+            "automation continues degraded"
+        ),
+    )
 
 
 def test_success_strategy_change_and_natural_boundary_end_the_scoped_gate():

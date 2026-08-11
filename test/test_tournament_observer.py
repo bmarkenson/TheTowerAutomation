@@ -472,15 +472,17 @@ def test_tournament_invariant_mismatch_is_nonblocking_but_warned():
 
     variables = ctx.data["mission_vars"]
     assert variables["gc_session_preflight_attempted"]
-    assert not variables["gc_session_preflight_completed"]
+    assert variables["gc_session_preflight_completed"]
+    assert variables["gc_session_preflight_degraded"]
+    assert variables["gc_session_preflight_disposition"] == "continue_degraded"
     assert not variables["gc_session_preflight_blocked"]
     assert variables["gc_session_preflight_failed_checks"] == [
         "ultimate_weapons"
     ]
     mission_log.assert_any_call(
-        "[SESSION_PREFLIGHT] Read-only observer mismatch recorded — Ultimate "
-        "Weapons Spotlight: missiles=on (actual=off). Observation and terminal "
-        "capture continue without operator action.",
+        "[SESSION_PREFLIGHT] Configuration mismatch flagged — Ultimate Weapons "
+        "Spotlight: missiles=on (actual=off). Automation continues in degraded "
+        "mode; only a safe Home boundary may repair it.",
         "WARN",
     )
     app = App.__new__(App)
