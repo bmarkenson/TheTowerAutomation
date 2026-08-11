@@ -111,12 +111,13 @@ canonical document linked by an entry for current behavior.
   `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`
   and 35,172,109-byte Tunnel Host
   `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
-- By 19:07 PDT, a connected revision-36-compatible native publisher was
-  supplying fresh optional `process_attribution` arrays through the promoted
-  API into the production SQLite store. The empty arrays and absent attribution
-  cost under sub-threshold load confirmed the intended dormant path. This
-  compatibility smoke does not replace the bounded Windows lifecycle and
-  target-host cost validation still routed through `ISSUE-2026-003`.
+- By 19:07 PDT, the pre-existing native client continued publishing fresh
+  aggregates through revision 36 without error. Server normalization added an
+  empty optional `process_attribution` array to those stored records; that
+  proves backward compatibility, not that the newly published executable is
+  running or that its dormant attribution path has been measured. A Windows
+  close/relaunch plus bounded lifecycle and target-host cost validation remain
+  pending, with the cost work still routed through `ISSUE-2026-003`.
 
 ### 2026-08-10 bounded interactive-development lease extension
 
