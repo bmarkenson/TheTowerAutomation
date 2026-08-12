@@ -3212,7 +3212,7 @@ public partial class MainWindow : Window
                 ? "match"
                 : "MISMATCH"
             : "not comparable";
-        RuntimeDetailText.Text = string.Join(
+        RuntimeServiceDetailText.Text = string.Join(
             Environment.NewLine,
             new[]
             {
@@ -3227,17 +3227,22 @@ public partial class MainWindow : Window
                 $"ADB target file: {service?.AdbEnvironmentFile ?? "-"}",
                 $"Installed unit reads target file: {YesNo(service?.AutomationEnvironmentFileLoaded)}",
                 $"Systemd EnvironmentFiles: {service?.ServiceEnvironmentFiles ?? "-"}",
+                $"Configured next-start strategy: {configuredStrategy ?? "-"}",
+                $"Strategy source: {service?.StrategySource ?? "-"}",
+                $"Strategy file: {service?.StrategyEnvironmentFile ?? "-"}",
+                $"Next-start gate policy: {service?.StartupGatePolicy ?? "-"}",
+                $"Gate policy source: {service?.StartupGatePolicySource ?? "-"}",
+            });
+        RuntimeDetailText.Text = string.Join(
+            Environment.NewLine,
+            new[]
+            {
                 $"Current runtime strategy: {currentStrategy ?? "-"}",
                 $"Strategy Action Gate: {FormatStrategyActionGate(strategyGate)}",
                 $"Strategy Gate failed checks: {Join(strategyGate?.FailedCheckIds)}",
                 $"Strategy Gate allowed collectors: {Join(strategyGate?.AllowedAuxiliaryCollectors)}",
                 $"{pendingStrategyLabel}: {pendingStrategy ?? "-"}",
                 $"Strategy request mode: {status.Control.StrategyApplyMode}",
-                $"Configured next-start strategy: {configuredStrategy ?? "-"}",
-                $"Strategy source: {service?.StrategySource ?? "-"}",
-                $"Strategy file: {service?.StrategyEnvironmentFile ?? "-"}",
-                $"Next-start gate policy: {service?.StartupGatePolicy ?? "-"}",
-                $"Gate policy source: {service?.StartupGatePolicySource ?? "-"}",
                 $"Runtime lock: {runtime?.File ?? "-"}",
                 $"Runtime lock PID: {runtime?.Pid?.ToString() ?? "-"}",
                 $"Lock held / PID alive: {YesNo(runtime?.LockHeld)} / {YesNo(runtime?.PidAlive)}",

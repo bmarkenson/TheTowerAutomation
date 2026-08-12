@@ -243,6 +243,52 @@ def test_native_combo_theme_keeps_closed_and_dropdown_text_high_contrast():
     assert '<Trigger Property="IsSelected" Value="True">' in item_style
 
 
+def test_native_expander_theme_owns_complete_high_contrast_chrome():
+    app_xaml = _text("App.xaml")
+    expander_style = app_xaml.split('<Style TargetType="Expander">', 1)[1].split(
+        "</Style>", 1
+    )[0]
+
+    assert '<Setter Property="Background" Value="#182338" />' in expander_style
+    assert '<Setter Property="Foreground" Value="#EDF2F7" />' in expander_style
+    assert '<Setter Property="OverridesDefaultStyle" Value="True" />' in expander_style
+    assert '<ControlTemplate TargetType="{x:Type Expander}">' in expander_style
+    assert 'x:Name="HeaderChrome"' in expander_style
+    assert 'TextElement.Foreground="{TemplateBinding Foreground}"' in expander_style
+    assert 'Stroke="{TemplateBinding Foreground}"' in expander_style
+    assert 'x:Name="ExpandSite"' in expander_style
+    assert '<Trigger Property="IsExpanded" Value="True">' in expander_style
+    assert '<Trigger Property="IsEnabled" Value="False">' in expander_style
+    assert '<Setter Property="Foreground" Value="#7890AC" />' in expander_style
+
+
+def test_native_dashboard_uses_header_width_and_prioritizes_host_health():
+    xaml = _text("MainWindow.xaml")
+    code = _text("MainWindow.xaml.cs")
+    header = xaml.split('x:Name="HeaderHealthButton"', 1)[1].split(
+        "</Button>", 1
+    )[0]
+    diagnostics = xaml.split('<TabItem Header="Diagnostics"', 1)[1].split(
+        "</TabItem>", 1
+    )[0]
+
+    assert 'HorizontalAlignment="Stretch"' in header
+    assert 'HorizontalContentAlignment="Stretch"' in header
+    assert header.count('<ColumnDefinition Width="*" />') == 4
+    assert 'Grid.Row="1"' not in header
+    assert diagnostics.index('x:Name="HostPerformancePanel"') < diagnostics.index(
+        'x:Name="RuntimeServiceDetailText"'
+    )
+    assert 'Text="SERVICE &amp; CONFIGURATION"' in diagnostics
+    assert 'Text="RUNTIME &amp; OBSERVATION"' in diagnostics
+    assert "RuntimeServiceDetailText.Text = string.Join(" in code
+    service_detail = code.split(
+        "RuntimeServiceDetailText.Text = string.Join(", 1
+    )[1].split("RuntimeDetailText.Text = string.Join(", 1)[0]
+    assert "Configured next-start strategy:" in service_detail
+    assert "Current runtime strategy:" not in service_detail
+
+
 def test_native_choice_labels_remain_readable_when_editor_is_disabled():
     app_xaml = _text("App.xaml")
 

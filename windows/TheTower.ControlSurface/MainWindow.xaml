@@ -31,31 +31,33 @@
           <TextBlock Text="Native control surface" Foreground="{StaticResource MutedBrush}" FontSize="10" />
         </StackPanel>
         <Button Grid.Column="1"
+                x:Name="HeaderHealthButton"
                 Click="ShowSystem_Click"
-                HorizontalAlignment="Left"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
                 VerticalAlignment="Center"
                 Padding="9,5"
                 Margin="0"
                 ToolTip="Open System for service, tunnel, process, and diagnostic details.">
           <Grid>
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="100" />
+              <ColumnDefinition Width="*" />
               <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="100" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="LINUX SERVICE" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" x:Name="LinuxApiServiceStatusText" Text="Unknown" Margin="6,0,14,0" Foreground="#F1BF5B" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="1" x:Name="LinuxApiServiceStatusText" Text="Unknown" Margin="6,0,18,0" Foreground="#F1BF5B" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
             <TextBlock Grid.Column="2" Text="HTTP" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="3" x:Name="ConnectionText" Text="Not connected" Margin="6,0,0,0" Foreground="#F1BF5B" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Row="1" Text="API SSH" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="ApiTunnelTopStatusText" Text="Stopped" Margin="6,0,14,0" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Row="1" Grid.Column="2" Text="ADB SSH" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="1" Grid.Column="3" x:Name="AdbTunnelTopStatusText" Text="Stopped" Margin="6,0,0,0" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="3" x:Name="ConnectionText" Text="Not connected" Margin="6,0,18,0" Foreground="#F1BF5B" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="4" Text="API SSH" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="5" x:Name="ApiTunnelTopStatusText" Text="Stopped" Margin="6,0,18,0" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="6" Text="ADB SSH" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="7" x:Name="AdbTunnelTopStatusText" Text="Stopped" Margin="6,0,0,0" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
           </Grid>
         </Button>
         <Menu Grid.Column="2" VerticalAlignment="Center">
@@ -1229,7 +1231,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                       </Grid.ColumnDefinitions>
-                      <TextBlock Text="RUNTIME AND HOST DIAGNOSTICS"
+                      <TextBlock Text="SYSTEM DIAGNOSTICS"
                                  Foreground="#62D5FF"
                                  FontSize="10"
                                  FontWeight="Bold"
@@ -1275,16 +1277,6 @@
                                    TextWrapping="Wrap" />
                       </Grid>
                     </Border>
-                    <TextBlock x:Name="RuntimeDetailText"
-                               Text="No runtime evidence."
-                               TextWrapping="Wrap"
-                               Foreground="{StaticResource MutedBrush}"
-                               Margin="4,7" />
-                    <TextBlock x:Name="LastErrorText"
-                               Text=""
-                               TextWrapping="Wrap"
-                               Foreground="#FFACB9"
-                               Margin="4" />
                   </StackPanel>
                 </Border>
 
@@ -1393,6 +1385,60 @@
                         <TextBlock x:Name="ProcessAttributionStateText" Text="Idle" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
                       </StackPanel>
                     </Grid>
+                  </Grid>
+                </Border>
+
+                <Border Style="{StaticResource DashboardCard}"
+                        Margin="0,8,0,0">
+                  <Grid>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="SERVICE &amp; CONFIGURATION"
+                               Foreground="#62D5FF"
+                               FontSize="10"
+                               FontWeight="Bold"
+                               Margin="4,0,14,2" />
+                    <TextBlock Grid.Column="1"
+                               Text="RUNTIME &amp; OBSERVATION"
+                               Foreground="#62D5FF"
+                               FontSize="10"
+                               FontWeight="Bold"
+                               Margin="14,0,4,2" />
+                    <TextBlock Grid.Row="1"
+                               x:Name="RuntimeServiceDetailText"
+                               Text="No service evidence."
+                               TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedBrush}"
+                               FontSize="10"
+                               LineHeight="15"
+                               Margin="4,6,14,4" />
+                    <Border Grid.Row="1"
+                            Grid.Column="1"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1,0,0,0"
+                            Padding="14,0,0,0">
+                      <TextBlock x:Name="RuntimeDetailText"
+                                 Text="No runtime evidence."
+                                 TextWrapping="Wrap"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="10"
+                                 LineHeight="15"
+                                 Margin="0,6,4,4" />
+                    </Border>
+                    <TextBlock Grid.Row="2"
+                               Grid.ColumnSpan="2"
+                               x:Name="LastErrorText"
+                               Text=""
+                               TextWrapping="Wrap"
+                               Foreground="#FFACB9"
+                               Margin="4,5,4,0" />
                   </Grid>
                 </Border>
               </StackPanel>

@@ -231,8 +231,11 @@ receive the full data width and retain their independent refresh and scroll
 behavior. System divides infrastructure into
 **Services**, **Connections**, and **Diagnostics**: process lifecycle and ADB
 runtime target; API/SSH transport and tunnel host; then optional prior-screen,
-runtime, and host-performance evidence. These pages may use their own fallback
-scrollbar when the supported minimum window cannot contain the bounded form.
+runtime, and host-performance evidence. When Host Health is expanded,
+Diagnostics places its complete local telemetry card ahead of the verbose
+evidence and presents the remainder in two columns: service/configuration and
+runtime/observation. These pages may use their own fallback scrollbar when the
+supported minimum window cannot contain the bounded form.
 **Preferences** opens a bounded modal for the API URL, optional bearer token,
 SSH destination, API/ADB forwarding defaults, startup sampling choice, and
 dashboard-layout reset. Save validates and records defaults without starting,
@@ -252,11 +255,17 @@ directive own it.
 
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
-tunnel, and the ADB reverse-forward SSH tunnel. Selecting the group opens
-System detail. Service and tunnel Start/Stop/Restart actions live under System
-instead of competing with routine controls in the header. API actions affect
-only `thetower-control-surface.service`, and API/ADB SSH tunnel recovery remains
+tunnel, and the ADB reverse-forward SSH tunnel. The four indicators consume the
+available header width in one row. Selecting the group opens System detail.
+Service and tunnel Start/Stop/Restart actions live under System instead of
+competing with routine controls in the header. API actions affect only
+`thetower-control-surface.service`, and API/ADB SSH tunnel recovery remains
 independent so an ADB bind conflict cannot disturb API control.
+
+Templated choice and disclosure controls own their complete dark-theme chrome
+instead of relying on Windows defaults that can reintroduce near-black text.
+That contract includes closed and open ComboBoxes, ComboBox items, and the
+Timed Pause Expander in normal, focused, expanded, and disabled states.
 
 The main operational pages no longer have draggable sidebar or latest-battle
 splitters. Previous Game Screen and Host Health are independently expandable
@@ -999,11 +1008,18 @@ already configured:
    same-ID publication; polling must preserve those existing behaviors. Confirm
    Attach is disabled while the visible selection is dirty or its request is in
    flight, then enabled after exact acknowledgement.
+11. At minimum, default, and maximized window sizes, confirm the four header
+    health indicators remain on one row. Expand Host Health and verify all
+    three telemetry rows precede the two-column runtime evidence without being
+    clipped. Exercise Timed Pause collapsed and expanded, then inspect a
+    disabled state; its label and chevron must remain light on dark chrome with
+    no platform-default white disc or near-black text.
 
-Revision-38 items 9 and 10 remain pending until they are actually exercised in
-a Windows WPF session. Linux cross-builds and portable compatibility tests do
-not count as that runtime validation, and no live control or device request is
-needed merely to refresh these displays.
+Revision-38 items 9 and 10 and the visual layout/theme checks in item 11 remain
+pending until they are actually exercised in a Windows WPF session. Linux
+cross-builds and portable compatibility tests do not count as that runtime
+validation, and no live control or device request is needed merely to refresh
+these displays.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).
