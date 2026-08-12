@@ -80,19 +80,26 @@ There is no need to fingerprint or attest a worker's complete source tree for
 emulator access. Branch, HEAD, and an ordinary dirty summary are sufficient
 diagnostic context in a handoff or lease log.
 
-The save-mapping control-surface workflow is one narrow preparation route into
-this same topology. The production server may enumerate Git-linked
-`feature/*` worktrees inside the configured development root and prepare one
-exact, operator-reviewed canonical mapping proposal in a selected clean
-feature. Clients receive and return only an opaque snapshot ID; the server
-binds the current `main`, `develop`, and feature tips and the target file
-hashes and modes. A private durable journal makes an interrupted multi-target
-replacement explicitly recoverable from that same reviewed selection; it does
-not authorize the server to clean or overwrite unrelated work. It cannot
-target `main` or `develop`, create a worktree, stage, commit, merge, promote,
-restart a service, or use the emulator. The resulting dirty feature remains
-ordinary owned development work and follows the normal checkpoint and
-promotion path.
+The save-mapping control-surface workflow is one narrow operator-maintenance
+exception to the feature-branch route, not general permission for agents or
+application features to write `develop`. It accepts only a durable server-
+generated mapping candidate while the standing `main` and `develop` worktrees
+are clean, at their branch tips, and exactly synchronized. After an exact read-
+only review and a separate operator confirmation, the production server may
+construct one standardized child commit containing only the fixed, tracked
+canonical mapping JSON targets and fast-forward the clean linked `develop`
+checkout to it. The client supplies no path, branch, target, patch, message,
+identity, or arbitrary value.
+
+A private durable transaction binds the reviewed base, target hashes and modes,
+generated commit, and candidate provenance through production promotion and a
+fresh canonical decode. It permits only exact idempotent recovery; it never
+authorizes cleanup, reset, backward ref movement, production promotion, service
+restart, runtime-control change, or emulator input. Any conflict, unsupported
+proposal owner, unequal branch tips, unrelated work, or uncertain state leaves
+the routine lane and returns to an ordinary owned feature outcome. The direct
+commit still receives the complete `develop` checkpoint and normal production
+procedure before deployment.
 
 ### Staging, promotion, and rollback
 

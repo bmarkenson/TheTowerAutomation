@@ -71,8 +71,9 @@ from core.player_save_setup_capture import (
 from core.player_save import confirmed_local_mapping_status
 from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
 from core.player_save_mapping_candidates import AppendOnlyMappingCandidateStore
-from core.player_save_mapping_integration import (
+from core.player_save_mapping_develop_integration import (
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
+    SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
     SaveMappingIntegrationError,
     SaveMappingIntegrationManager,
 )
@@ -91,14 +92,14 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 39
+CONTROL_SURFACE_REVISION = 40
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "better_control_model_v1",
     "better_control_model_v2",
     "completed_battle_discard",
-    "confirmed_local_mapping_status_v1",
+    "confirmed_local_mapping_status_v2",
     "current_battle_perks_v1",
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
@@ -115,7 +116,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "runtime_control_acknowledgements_v1",
     "save_backed_setup_capture_v1",
     "save_backed_setup_capture_v2",
-    "save_mapping_review_status_v1",
+    SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
@@ -293,7 +294,7 @@ class ControlSurfaceService:
         return self.profile_store.catalog()
 
     def save_mapping_integration(self) -> dict[str, Any]:
-        """Return review candidates and server-discovered feature worktrees."""
+        """Return review candidates and fixed develop eligibility."""
 
         return self.save_mapping_integration_manager.catalog()
 
@@ -301,62 +302,48 @@ class ControlSurfaceService:
         self,
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Review or prepare one exact mapping proposal in a feature worktree."""
+        """Review or commit one exact mapping proposal directly to develop."""
 
         if not isinstance(request, Mapping):
             raise ControlSurfaceRequestError("Request body must be a JSON object")
         operation = str(request.get("operation") or "").strip().lower()
         required = {
-            "review": {"operation", "candidate_record_id", "workspace_id"},
-            "prepare": {
+            "review": {"operation", "candidate_record_id"},
+            "integrate": {
                 "operation",
                 "candidate_record_id",
-                "workspace_id",
                 "reviewed_proposal_fingerprint",
             },
         }
         if operation not in required:
-            raise ControlSurfaceRequestError("operation must be review or prepare")
+            raise ControlSurfaceRequestError("operation must be review or integrate")
         if set(request) != required[operation]:
             raise ControlSurfaceRequestError(
                 f"{operation} accepts exactly: "
                 + ", ".join(sorted(required[operation]))
             )
         candidate_record_id = request.get("candidate_record_id")
-        workspace_id = request.get("workspace_id")
+        if not isinstance(candidate_record_id, str) or re.fullmatch(
+            r"[0-9a-f]{64}", candidate_record_id
+        ) is None:
+            raise ControlSurfaceRequestError(
+                "candidate_record_id must be exactly 64 lowercase hexadecimal characters"
+            )
         try:
             if operation == "review":
                 return self.save_mapping_integration_manager.review(
                     candidate_record_id=candidate_record_id,
-                    workspace_id=workspace_id,
                 )
 
             reviewed_fingerprint = request.get(
                 "reviewed_proposal_fingerprint"
             )
-            preview = self.save_mapping_integration_manager.review(
-                candidate_record_id=candidate_record_id,
-                workspace_id=workspace_id,
-            )
-            if reviewed_fingerprint != preview.get(
-                "reviewed_proposal_fingerprint"
-            ):
-                raise SaveMappingIntegrationError(
-                    "reviewed_proposal_stale",
-                    "The proposal or repository snapshot changed; nothing was "
-                    "written. Refresh and review again.",
-                )
-            prepared_result = preview.get("prepared_result")
-            if isinstance(prepared_result, Mapping):
-                return dict(prepared_result)
-            availability = preview.get("prepare") or {}
-            if availability.get("available") is not True:
-                raise SaveMappingIntegrationError(
-                    str(availability.get("code") or "prepare_unavailable"),
-                    str(
-                        availability.get("reason")
-                        or "Canonical preparation is unavailable."
-                    ),
+            if not isinstance(reviewed_fingerprint, str) or re.fullmatch(
+                r"[0-9a-f]{64}", reviewed_fingerprint
+            ) is None:
+                raise ControlSurfaceRequestError(
+                    "reviewed_proposal_fingerprint must be exactly 64 lowercase "
+                    "hexadecimal characters"
                 )
             record_prefix = str(candidate_record_id or "")[:12]
             fingerprint_prefix = str(reviewed_fingerprint or "")[:12]
@@ -364,30 +351,28 @@ class ControlSurfaceService:
                 f"save-mapping-{record_prefix}-{fingerprint_prefix}-"
                 f"{secrets.token_hex(6)}"
             )
-            workspace = preview.get("workspace") or {}
             action_warning = self._append_audit(
-                "Preparing reviewed canonical save mapping "
-                f"candidate={record_prefix} branch={workspace.get('branch')} "
-                f"targets={len(_mapping_proposal_targets(preview.get('proposal')))} "
+                "Integrating reviewed canonical save mapping into develop "
+                f"candidate={record_prefix} "
+                f"review={fingerprint_prefix} "
                 f"[OPERATION] id={operation_id}",
                 level="ACTION",
             )
             if action_warning:
                 raise ControlSurfaceRequestError(
-                    "Canonical preparation audit could not be written; nothing was changed.",
+                    "Canonical integration audit could not be written; nothing was changed.",
                     status=503,
-                    code="mapping_prepare_audit_unavailable",
+                    code="mapping_integration_audit_unavailable",
                 )
             try:
-                result = self.save_mapping_integration_manager.prepare(
+                result = self.save_mapping_integration_manager.integrate(
                     candidate_record_id=candidate_record_id,
-                    workspace_id=workspace_id,
                     reviewed_proposal_fingerprint=reviewed_fingerprint,
                 )
             except SaveMappingIntegrationError as exc:
-                disposition = _save_mapping_prepare_disposition(exc.code)
+                disposition = _save_mapping_integration_disposition(exc.code)
                 self._append_audit(
-                    "Canonical save mapping preparation "
+                    "Canonical save mapping develop integration "
                     f"disposition={disposition} code={exc.code} "
                     f"[OPERATION] id={operation_id}",
                     level="RESULT",
@@ -395,21 +380,23 @@ class ControlSurfaceService:
                 raise
             except Exception as exc:
                 self._append_audit(
-                    "Canonical save mapping preparation "
+                    "Canonical save mapping develop integration "
                     "disposition=unconfirmed code=unexpected_failure "
                     f"[OPERATION] id={operation_id}",
                     level="RESULT",
                 )
                 raise ControlSurfaceRequestError(
-                    "Canonical preparation failed unexpectedly; inspect the "
-                    "selected feature worktree before continuing.",
+                    "Canonical develop integration failed unexpectedly; inspect "
+                    "main, develop, and the durable transaction before continuing.",
                     status=500,
-                    code="mapping_prepare_unexpected_failure",
+                    code="mapping_integration_unexpected_failure",
                 ) from exc
             result_warning = self._append_audit(
-                "Canonical save mapping preparation disposition=prepared "
-                f"candidate={record_prefix} branch={workspace.get('branch')} "
-                "committed=false promoted=false validation=pending "
+                "Canonical save mapping develop integration "
+                "disposition=committed_to_develop "
+                f"candidate={record_prefix} commit={result.get('integration_commit')} "
+                f"committed=true promoted={str(bool(result.get('promoted'))).lower()} "
+                "mapping_invariants=passed "
                 f"[OPERATION] id={operation_id}",
                 level="RESULT",
             )
@@ -1341,6 +1328,9 @@ class ControlSurfaceService:
             store=self.confirmed_local_mapping_store,
             candidate_store=self.mapping_candidate_store,
             repository_root=self.repository_root,
+            candidate_status=(
+                self.save_mapping_integration_manager.status()
+            ),
         )
         control_model = self._better_control_model_status(
             control=control,
@@ -5444,42 +5434,33 @@ class ControlSurfaceService:
         return None
 
 
-def _mapping_proposal_targets(proposal: object) -> list[Mapping[str, Any]]:
-    if not isinstance(proposal, Mapping):
-        return []
-    if proposal.get("schema_version") == 2:
-        targets = proposal.get("targets")
-        return [item for item in targets or [] if isinstance(item, Mapping)]
-    target = proposal.get("target")
-    return [target] if isinstance(target, Mapping) else []
-
-
 def _save_mapping_integration_error_status(code: str) -> int:
     if code in {
         "mapping_candidate_record_not_found",
-        "workspace_snapshot_stale",
     }:
         return 404
     if code in {
         "git_inspection_failed",
-        "worktree_catalog_unavailable",
-        "development_root_unavailable",
         "integration_lock_unavailable",
         "commit_state_uncertain",
-        "mapping_prepare_rollback_failed",
-        "prepared_state_unconfirmed",
         "transaction_write_failed",
+        "legacy_transaction_recovery_required",
+        "decode_receipt_store_invalid",
+        "decode_receipt_conflict",
+        "canonical_status_unavailable",
     }:
         return 503
     return 409
 
 
-def _save_mapping_prepare_disposition(code: str) -> str:
+def _save_mapping_integration_disposition(code: str) -> str:
     if code in {
         "commit_state_uncertain",
-        "mapping_prepare_rollback_failed",
-        "prepared_state_unconfirmed",
+        "transaction_write_failed",
         "transaction_recovery_required",
+        "legacy_transaction_recovery_required",
+        "decode_receipt_conflict",
+        "canonical_status_unavailable",
     }:
         return "unconfirmed"
     return "failed"

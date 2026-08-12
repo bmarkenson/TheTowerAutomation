@@ -514,8 +514,8 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/setup-capture` | Current runtime-issued capture status, availability, inactive captured-draft catalog, Module presets, and comparison Bases |
 | `POST` | `/api/v1/setup-capture` | Request a new forced-save capture, review a fingerprinted captured-versus-Base difference, save through the existing Module/Strategy owner, or cancel; never activate or publish |
 | `GET` | `/api/v1/setup-capture/drafts/{id}` | Reopen one immutable captured Strategy source in the ordinary authoring editor without selecting or activating it |
-| `GET` | `/api/v1/save-mapping-integration` | Durable review candidates, current repository bases, and server-discovered linked feature-worktree snapshots; never mutates a repository |
-| `POST` | `/api/v1/save-mapping-integration` | Review one server-generated canonical proposal or prepare its exact fingerprint in one selected clean `feature/*` worktree; never writes `main`/`develop`, stages, commits, validates, merges, promotes, restarts, or sends input |
+| `GET` | `/api/v1/save-mapping-integration` | Durable review candidates and the fixed, read-only `main`/`develop` eligibility snapshot; never mutates a repository |
+| `POST` | `/api/v1/save-mapping-integration` | Review one server-generated canonical proposal or commit its exact reviewed fingerprint directly to an eligible `develop`; never promotes, restarts, changes runtime authority, or sends input |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -544,50 +544,87 @@ authority decision.
 
 ### Save-mapping review status
 
-Server revision 34 advertises `save_mapping_review_status_v1` while retaining
-the additive `confirmed_local_mapping_status_v1` contract. The
+Server revision 40 advertises `save_mapping_review_status_v2` and
+`confirmed_local_mapping_status_v2`. The
 `confirmed_local_mappings` status object combines durable unmapped-value
 candidate receipts with exact-version local Module confirmations. Browser and
 native clients show a persistent nonmodal banner for review, more-evidence,
 local-active, authority/mirror-pending, reconfirmation, ambiguity, or conflict
-states. Integrated and explicitly revoked records disappear from the banner.
+states. It also preserves direct-integration recovery, production-promotion,
+and fresh-decode checkpoints even when the same candidate already has a local
+confirmation. Integrated and explicitly revoked records disappear from the
+banner.
 
 The banner is diagnostic. It never blocks startup, changes Automation state,
 suppresses a UI check, or grants integration/revoke authority. A missing or
 unreadable status contract is shown as a compatibility/error state; canonical
 save mappings and their existing UI fallbacks remain runtime authority.
 
-Server revision 35 advertises `save_mapping_integration_v1`. The banner's
-**Review mappings…** action and the native **Tools > Save mapping
-integration…** item open the same explicit review workflow. The catalog
-contains opaque server-issued workspace IDs for linked `feature/*` worktrees;
-requests cannot carry a filesystem path, branch, patch operation, or mapping
-value. Review is read-only and binds the candidate receipt, current `main` and
-`develop` tips, feature tip, proposal, and rendered before/after hashes into
-one fingerprint. Any selection or repository change invalidates that review.
+Server revision 40 advertises `save_mapping_develop_integration_v1`. The
+banner's **Review mappings…** action and the native **Tools > Save mapping
+integration…** item open the same explicit review workflow. Candidate is the
+only selection. A read-only **Develop eligibility** panel identifies the fixed
+linked `develop` checkout and shows both branch tips, cleanliness, exact
+synchronization, and any blocker. Requests cannot carry a filesystem path,
+branch, target, patch operation, mapping value, commit message, or Git identity.
+Review is read-only and binds the candidate receipt, equal `main`/`develop`
+base, proposal, exact before/after hashes and modes, prospective canonical
+mapping fingerprint, and standardized commit contract. The response exposes
+that immutable `reviewed_base_commit` separately from the current branch tips,
+so an exact recovery remains verifiable after production promotion. Any
+candidate or repository change invalidates an ordinary review.
 
-Prepare requires a second operator confirmation and recomputes every guard
-under a process-shared lock. Production and `develop` must be clean and at
-their branch tips, production must be an ancestor of `develop`, and the clean
-selected feature must descend from both. A successful result changes only the
-allowlisted canonical JSON targets in that feature worktree and explicitly
-reports `committed=false`, `promoted=false`, and pending validation. The
-server reconstructs the same typed `prepared_result` on a later review, so
-refreshing or reopening either GUI cannot turn prepared state back into an
-actionable proposal. Both clients validate that result against the exact
-candidate, workspace, review fingerprint, lifecycle flags, and target hashes
-before showing success.
+**Integrate reviewed mapping into develop…** requires a second operator
+confirmation and recomputes every guard under a process-shared lock. Production
+and `develop` must be clean, at their branch tips, and at the same exact commit;
+exactly one unlocked linked `develop` checkout must exist. The server renders
+the fixed allowlisted canonical JSON targets against both checkouts and requires
+identical bases. It then builds one child commit from a private temporary Git
+index, verifies its parent, exact path set, blobs, modes, message, and full
+candidate/fingerprint trailers, locks one final candidate-queue snapshot, and
+detaches the clean develop checkout at the reviewed base. One atomic Git ref
+transaction verifies `main` is still that base while compare-and-swapping the
+explicit `refs/heads/develop` name. Git then switches that same checkout to the
+advanced develop branch, serializing its index/worktree update with any other
+checkout command; a race can neither redirect the ref update nor stage the
+mapping onto another branch. `main` and its files remain unchanged. Both
+clients accept success
+only when the response proves the exact reviewed base and target set, candidate,
+review fingerprint, commit, before/after hashes and modes, passed mapping
+invariants, `committed=true`, and pending production validation. Initial
+integration must report `promoted=false`; an exact idempotent recovery after an
+external promotion reports the current promoted state instead of claiming that
+production is still unchanged.
 
-Preparation publishes a private durable transaction journal before replacing
-the first target and uses compare-before-replace checks for every file and
-mode. A process exit may therefore leave an explicit recovery-required state,
-never an inferred success. The matching reviewed selection offers one manual
-recovery action; other selections remain blocked. The clients disable
-selection, refresh, and dismissal while that request is active, never retry it
-automatically, distinguish a proven pre-write rejection from an unconfirmed
-outcome, and surface audit warnings. The persistent mapping warning remains
-until ordinary review, validation, commit, integration, production promotion,
-and a later fresh canonical decode retire the receipt.
+A private durable transaction records the exact generated commit before the
+`develop` ref update and remains through promotion. Response loss is idempotent
+only when the exact commit and repository state can be proved. A safely rejected
+review is refreshed and repeated; a proven unchanged fast-forward failure may
+be explicitly recovered once. That exact durable transaction reappears as a
+reviewable recovery item after a GUI refresh or restart; the second confirmation
+can retry only its stored candidate and fingerprint and cannot create a second
+commit. Automatic recovery accepts only a clean checkout at an exact detached
+transaction endpoint. A plain Git switch refuses and preserves any edit that
+arrives after that proof; every partial index or worktree state remains
+unconfirmed for ordinary inspection. Git `index.lock`, `HEAD.lock`, branch-ref
+lock, or `packed-refs.lock` crash artifacts also disable recovery and are never
+removed automatically.
+A moved ref, unrelated dirty state, malformed
+journal, or unprovable outcome remains visible for inspection and is never
+retried automatically or reset. Only one unresolved direct integration exists
+at a time.
+
+The persistent banner reports **Save mapping awaiting production promotion**
+while the standardized commit exists only on `develop`, then **Deployed save
+mapping awaiting fresh validation** after `main` contains it. A complete stable
+post-deployment acquisition appends one privacy-safe receipt only when the
+runtime-loaded authority/structural mappings and canonical fingerprint match
+the committed targets. Its durable receipt binds the acquisition's start time
+and the production commit loaded by that runtime. Receipt work runs after the
+outer ADB/mutation lifecycle has released. Observer failure never degrades a
+valid save or changes automation; it keeps the checkpoint visible. Only the
+matching production commit plus that fresh decode receipt retires the
+transaction and banner.
 
 ### Structured Strategy Action Gate status
 
@@ -1172,7 +1209,7 @@ Process request examples:
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  39 plus `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
+  40 plus `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
   `strategy_aware_attach_v1`, and `bluestacks_maintenance_v1`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
 - A read-only full-width **Perks** page showing the current run's

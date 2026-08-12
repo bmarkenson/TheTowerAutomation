@@ -267,11 +267,35 @@ public sealed class SaveMappingIntegrationCatalog
     [JsonPropertyName("repository")]
     public SaveMappingRepositoryStatus? Repository { get; set; }
 
-    [JsonPropertyName("workspaces")]
-    public List<SaveMappingWorkspaceStatus> Workspaces { get; set; } = [];
-
     [JsonPropertyName("items")]
     public List<SaveMappingIntegrationItem> Items { get; set; } = [];
+
+    [JsonPropertyName("transaction")]
+    public SaveMappingIntegrationTransaction? Transaction { get; set; }
+}
+
+public sealed class SaveMappingIntegrationTransaction
+{
+    [JsonPropertyName("candidate_record_id")]
+    public string CandidateRecordId { get; set; } = "";
+
+    [JsonPropertyName("reviewed_proposal_fingerprint")]
+    public string ReviewedProposalFingerprint { get; set; } = "";
+
+    [JsonPropertyName("phase")]
+    public string Phase { get; set; } = "";
+
+    [JsonPropertyName("integration_commit")]
+    public string IntegrationCommit { get; set; } = "";
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("recovery_required")]
+    public bool RecoveryRequired { get; set; }
 }
 
 public sealed class SaveMappingRepositoryStatus
@@ -282,8 +306,8 @@ public sealed class SaveMappingRepositoryStatus
     [JsonPropertyName("develop_commit")]
     public string DevelopCommit { get; set; } = "";
 
-    [JsonPropertyName("main_is_ancestor")]
-    public bool MainIsAncestor { get; set; }
+    [JsonPropertyName("synchronized")]
+    public bool Synchronized { get; set; }
 
     [JsonPropertyName("production_clean")]
     public bool ProductionClean { get; set; }
@@ -294,38 +318,8 @@ public sealed class SaveMappingRepositoryStatus
     [JsonPropertyName("develop_path")]
     public string DevelopPath { get; set; } = "";
 
-    [JsonPropertyName("available")]
-    public bool Available { get; set; }
-
-    [JsonPropertyName("code")]
-    public string Code { get; set; } = "";
-
-    [JsonPropertyName("reason")]
-    public string Reason { get; set; } = "";
-}
-
-public sealed class SaveMappingWorkspaceStatus
-{
-    [JsonPropertyName("workspace_id")]
-    public string WorkspaceId { get; set; } = "";
-
-    [JsonPropertyName("path_display")]
-    public string PathDisplay { get; set; } = "";
-
-    [JsonPropertyName("branch")]
-    public string Branch { get; set; } = "";
-
-    [JsonPropertyName("head_commit")]
-    public string HeadCommit { get; set; } = "";
-
-    [JsonPropertyName("role")]
-    public string Role { get; set; } = "";
-
-    [JsonPropertyName("clean")]
-    public bool Clean { get; set; }
-
-    [JsonPropertyName("available")]
-    public bool Available { get; set; }
+    [JsonPropertyName("integration_available")]
+    public bool IntegrationAvailable { get; set; }
 
     [JsonPropertyName("code")]
     public string Code { get; set; } = "";
@@ -399,26 +393,27 @@ public sealed class SaveMappingIntegrationReview
     [JsonPropertyName("reviewed_proposal_fingerprint")]
     public string ReviewedProposalFingerprint { get; set; } = "";
 
+    [JsonPropertyName("reviewed_base_commit")]
+    public string ReviewedBaseCommit { get; set; } = "";
+
     [JsonPropertyName("repository")]
     public SaveMappingRepositoryStatus Repository { get; set; } = new();
-
-    [JsonPropertyName("workspace")]
-    public SaveMappingWorkspaceStatus Workspace { get; set; } = new();
 
     [JsonPropertyName("proposal")]
     public SaveMappingProposal Proposal { get; set; } = new();
 
-    [JsonPropertyName("prepare")]
-    public BetterControlActionAvailability Prepare { get; set; } = new();
+    [JsonPropertyName("canonical_mapping_fingerprint")]
+    public string CanonicalMappingFingerprint { get; set; } = "";
 
-    [JsonPropertyName("prepared")]
-    public bool Prepared { get; set; }
+    [JsonPropertyName("rendered_targets")]
+    public List<SaveMappingIntegratedTarget> RenderedTargets { get; set; } = [];
+
+    [JsonPropertyName("integrate")]
+    public BetterControlActionAvailability Integrate { get; set; } = new();
 
     [JsonPropertyName("recovery_required")]
     public bool RecoveryRequired { get; set; }
 
-    [JsonPropertyName("prepared_result")]
-    public SaveMappingPreparedResult? PreparedResult { get; set; }
 }
 
 public sealed class SaveMappingProposal
@@ -478,7 +473,7 @@ public sealed class SaveMappingProposalOperation
     public JsonElement Value { get; set; }
 }
 
-public sealed class SaveMappingPreparedResult
+public sealed class SaveMappingIntegratedResult
 {
     [JsonPropertyName("schema_version")]
     public int SchemaVersion { get; set; }
@@ -501,11 +496,14 @@ public sealed class SaveMappingPreparedResult
     [JsonPropertyName("reviewed_proposal_fingerprint")]
     public string ReviewedProposalFingerprint { get; set; } = "";
 
-    [JsonPropertyName("repository")]
-    public SaveMappingRepositoryStatus Repository { get; set; } = new();
+    [JsonPropertyName("base_commit")]
+    public string BaseCommit { get; set; } = "";
 
-    [JsonPropertyName("workspace")]
-    public SaveMappingWorkspaceStatus Workspace { get; set; } = new();
+    [JsonPropertyName("develop_commit")]
+    public string DevelopCommit { get; set; } = "";
+
+    [JsonPropertyName("integration_commit")]
+    public string IntegrationCommit { get; set; } = "";
 
     [JsonPropertyName("committed")]
     public bool? Committed { get; set; }
@@ -513,20 +511,20 @@ public sealed class SaveMappingPreparedResult
     [JsonPropertyName("promoted")]
     public bool? Promoted { get; set; }
 
-    [JsonPropertyName("validation_status")]
-    public string ValidationStatus { get; set; } = "";
+    [JsonPropertyName("mapping_invariants")]
+    public string MappingInvariants { get; set; } = "";
 
     [JsonPropertyName("targets")]
-    public List<SaveMappingPreparedTarget>? Targets { get; set; }
+    public List<SaveMappingIntegratedTarget>? Targets { get; set; }
 
-    [JsonPropertyName("validation")]
-    public List<string>? Validation { get; set; }
+    [JsonPropertyName("promotion_validation")]
+    public string PromotionValidation { get; set; } = "";
 
     [JsonPropertyName("warning")]
     public string Warning { get; set; } = "";
 }
 
-public sealed class SaveMappingPreparedTarget
+public sealed class SaveMappingIntegratedTarget
 {
     [JsonPropertyName("path")]
     public string Path { get; set; } = "";
@@ -542,6 +540,9 @@ public sealed class SaveMappingPreparedTarget
 
     [JsonPropertyName("changed")]
     public bool? Changed { get; set; }
+
+    [JsonPropertyName("mode")]
+    public int? Mode { get; set; }
 }
 
 public sealed class StrategyActionGateStatus

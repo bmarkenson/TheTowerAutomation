@@ -39,6 +39,77 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-12 direct-develop save-mapping integration rollout
+
+- Commit `4bff966` replaces the persistent feature-worktree selector with a
+  narrow, reviewed integration lane that creates one standardized child commit
+  directly on synchronized `develop`. Both GUIs now show read-only Develop
+  eligibility, the exact candidate and target hashes/modes, and a second
+  confirmation that explicitly does not promote, restart, send input, or
+  change a battle. Server/native revision 40 advertises
+  `save_mapping_develop_integration_v1`,
+  `save_mapping_review_status_v2`, and
+  `confirmed_local_mapping_status_v2`; incompatible older clients fail the
+  compatibility gate instead of presenting the retired selector.
+- The implementation uses a private Git index, exact reviewed base/target
+  fingerprints, a durable phase journal, an atomic main-verify/develop-update
+  ref transaction, and passive post-promotion decode receipts. A lost response
+  is idempotent. Promotion and fresh production validation remain persistent
+  GUI states. Dirty or moved refs, candidate conflicts, target drift, stale Git
+  locks, foreign or partial index/worktree state, and any result that cannot be
+  proved exact are non-actionable and fail closed without deleting locks,
+  overwriting concurrent work, or retrying automatically.
+- Three independent adversarial reviews covered backend transaction safety,
+  crash/recovery behavior, and browser/native contract parity. The exact
+  integrated `develop` commit passed compilation, state-definition validation,
+  clickmap integrity with zero errors, `git diff --check`, and all 2,478 Python
+  tests in 391.85 seconds. The merged production-overlap slice passed 284
+  Python tests, JavaScript syntax/import checks passed, and all 158 portable
+  native tests passed. Reconciliation with revision-39 BlueStacks recovery
+  changed its compatibility fixture and user-facing minimum-revision message
+  to derive revision 40 from the shared constant rather than retaining a stale
+  literal.
+- Production and `develop` advanced from `698fd1a` to exact `4bff966` behind
+  annotated rollback tag
+  `production-before-20260812T225711Z-698fd1a`. The supported process endpoint
+  stopped automation PID `1945953` cleanly and released its exact
+  `localhost:5555` lock before the control surface stopped. Revision-40
+  control-surface PID `2174850` then served the new capability/catalog
+  contract with clean synchronized main/develop, no pending transaction, and
+  no review candidate. The existing Astral Deliverance module observation
+  remained canonically `integrated`.
+- Replacement automation PID `2175232` / runtime
+  `bfee4d2f636440748b52560965ae0428` acquired the exact target lock, started
+  Paused, and attached to the preserved Tier-19 battle through request
+  `bd4a53ed7fdd456a874427947f59cc8a`. It bound fresh save continuity, adopted
+  `farm_t19_ad_assist` without repairing the active battle, reached steady
+  `RUNNING` at wave 4599, and retained current state/mode/speed/target/Strategy
+  acknowledgements. The attachment log sourced Modules, Auto Pick, Perk order,
+  and Ultimate Weapons from `bound_player_save_preflight`; it did not navigate
+  to Modules. Immutable Free Upgrade locks lacked authoritative no-battle
+  evidence, so they were logged as deferred to Home and automation continued,
+  as designed.
+- The complete Windows package was published from exact `4bff966` at 15:58
+  PDT. Current Control Surface is 72,460,718 bytes with SHA-256
+  `70b7026560fd84252cd8d652be4014f427fb98836c221967a325d0c31d2d7c5c`;
+  current Tunnel Host is 35,172,116 bytes with SHA-256
+  `988724eedb669dba10187333e2639a55568ef4ba342ed98c429b0aa766effc32`.
+  Retained slot 1 is the prior `c568111` package: 72,459,365-byte Control
+  Surface `89abf22573f2785f30e9b9673fde42558220277b0ed323c63b75f3c63c88ef82`
+  and 35,172,106-byte Tunnel Host
+  `098798d54ee44062a2c990c53b5483141295473208ca65afb4290463338fd5d8`.
+  Slot 2 is the prior `5c1ac19` package: 72,432,042-byte Control Surface
+  `258f136e025d73913c6d7952d8fea31d73fddb0d95ed848c961d716134243c39`
+  and 35,172,100-byte Tunnel Host
+  `2474ffc85f7cc40bb2a8aab0b61761ef9e9b0d740e3cc8ef6cb86098f0bc17`.
+  Publication is not Windows execution; the revision-40 native dialog remains
+  covered by portable contract tests rather than a Windows runtime smoke.
+- The service journal's recurring host-performance upload 400/413 responses
+  were present before this rollout and continued afterward. They are not a
+  save-mapping regression and did not affect the API, ADB owner, attachment,
+  or steady-run smoke; this record does not characterize unrelated telemetry
+  upload health as clean.
+
 ### 2026-08-12 BlueStacks recovery forward port
 
 - Forward-ported the default-off automatic restart candidate onto production

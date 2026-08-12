@@ -31,23 +31,23 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(38);
+        var status = Status(40);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
         Assert.Contains("better_control_model_v2", result.MissingCapabilities);
         Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
-            "confirmed_local_mapping_status_v1",
+            "confirmed_local_mapping_status_v2",
             result.MissingCapabilities);
         Assert.Contains(
             "save_backed_setup_capture_v2",
             result.MissingCapabilities);
         Assert.Contains(
-            "save_mapping_integration_v1",
+            "save_mapping_develop_integration_v1",
             result.MissingCapabilities);
         Assert.Contains(
-            "save_mapping_review_status_v1",
+            "save_mapping_review_status_v2",
             result.MissingCapabilities);
         Assert.Contains(
             "strategy_authoring_preset_local_copy_v1",
@@ -345,13 +345,13 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                39,
+                40,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
                 "bluestacks_maintenance_v1",
                 "completed_battle_discard",
-                "confirmed_local_mapping_status_v1",
+                "confirmed_local_mapping_status_v2",
                 "current_battle_perks_v1",
                 "current_run_activity_scope",
                 "exclusive_strategy_validation_status",
@@ -365,8 +365,8 @@ public sealed class ControlSurfaceCompatibilityTests
                 "runtime_control_acknowledgements_v1",
                 "selected_strategy_process_start",
                 "save_backed_setup_capture_v2",
-                "save_mapping_integration_v1",
-                "save_mapping_review_status_v1",
+                "save_mapping_develop_integration_v1",
+                "save_mapping_review_status_v2",
                 "strategy_aware_attach_v1",
                 "strategy_action_gate_v1",
                 "strategy_authoring_local_loadout_editors_v1",
@@ -402,6 +402,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var active = new ConfirmedLocalMappingStatus
         {
+            SchemaVersion = 2,
             Available = true,
             BlocksStartup = false,
             Items =
@@ -456,9 +457,27 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Equal("danger", presentation.Severity);
         Assert.Contains("conflicting canonical value", presentation.Detail);
 
+        active.Items =
+        [
+            new ConfirmedLocalMappingItem
+            {
+                State = "active_local",
+                Reason = "ordinary local queue",
+            },
+            new ConfirmedLocalMappingItem
+            {
+                State = "promotion_pending",
+                Reason = "awaiting exact production promotion",
+            },
+        ];
+        presentation = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+        Assert.Contains("production promotion", presentation.Title);
+        Assert.Contains("awaiting exact production promotion", presentation.Detail);
+
         active.Items = null!;
-        Assert.False(
-            ControlSurfaceCompatibility.ConfirmedLocalMapping(active).Visible);
+        var malformed = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+        Assert.True(malformed.Visible);
+        Assert.Equal("danger", malformed.Severity);
     }
 
     [Fact]
