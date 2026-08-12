@@ -26,6 +26,16 @@ TOURNAMENT_BATTLE_REGION = (285, 1455, 510, 190)
 _CONTROL_CONFIDENCE_FLOOR = 55.0
 
 
+def _input_guard_kwargs(
+    action_guard: Optional[ActionGuard],
+) -> dict[str, object]:
+    return (
+        {"action_guard_fn": action_guard}
+        if action_guard is not None
+        else {}
+    )
+
+
 @dataclass(frozen=True)
 class TournamentLaunchDispatch:
     dispatched: bool
@@ -75,7 +85,11 @@ def tournament_battle_control_visible(screenshot: Optional[Frame]) -> bool:
     )
 
 
-def tap_verified_tournament_open(screenshot: Frame) -> bool:
+def tap_verified_tournament_open(
+    screenshot: Frame,
+    *,
+    action_guard: Optional[ActionGuard] = None,
+) -> bool:
     """Enter Tournament only from fresh verified ordinary Home evidence."""
 
     return safe_tap(
@@ -87,10 +101,15 @@ def tap_verified_tournament_open(screenshot: Frame) -> bool:
             description="tournament_open:home_new_battle",
             verifier=tournament_open_control_visible,
         ),
+        **_input_guard_kwargs(action_guard),
     )
 
 
-def tap_verified_tournament_battle(screenshot: Frame) -> bool:
+def tap_verified_tournament_battle(
+    screenshot: Frame,
+    *,
+    action_guard: Optional[ActionGuard] = None,
+) -> bool:
     """Tap only the freshly verified Tournament BATTLE control."""
 
     return safe_tap(
@@ -102,6 +121,7 @@ def tap_verified_tournament_battle(screenshot: Frame) -> bool:
             description="tournament_battle:tournament_screen",
             verifier=tournament_battle_control_visible,
         ),
+        **_input_guard_kwargs(action_guard),
     )
 
 
@@ -131,7 +151,10 @@ def dispatch_tournament_launch(
                 False,
                 "launch authority was withdrawn before Tournament navigation",
             )
-        if not tap_verified_tournament_open(screenshot):
+        if not tap_verified_tournament_open(
+            screenshot,
+            action_guard=action_guard,
+        ):
             return TournamentLaunchDispatch(
                 False,
                 "verified Tournament OPEN could not be tapped",
@@ -173,7 +196,10 @@ def dispatch_tournament_launch(
             False,
             "launch authority was withdrawn before Tournament BATTLE",
         )
-    if not tap_verified_tournament_battle(tournament_screen):
+    if not tap_verified_tournament_battle(
+        tournament_screen,
+        action_guard=action_guard,
+    ):
         return TournamentLaunchDispatch(
             False,
             "verified Tournament BATTLE could not be tapped",

@@ -32,8 +32,34 @@ claimed atomically by a profile-declared exclusive-validation receipt before
 the verified Home tap. Only the same live owner may use its verified menu,
 Exit, Surrender, Game Over, and return-to-Home sequence, and only while fresh
 evidence excludes Tournament identity. A later unrelated `RUNNING` battle,
-terminal-persistence failure, or ownership ambiguity closes the receipt and
-performs no Retry or Surrender.
+terminal-persistence failure, or ownership ambiguity grants no further device
+input. Failed result persistence retains the exact receipt and typed owner so a
+later heartbeat can retry only the write. If a later unrelated `RUNNING` frame
+follows proven Game Over before verified Home cleanup, the runtime persists a
+failed old result and releases it before that successor can be adopted; it
+performs no Retry, Home, or Surrender input.
+
+Fresh owned-start and natural-terminal evidence is retained before activity
+continuity or a fallible receipt write can consume its only observation frame.
+Pause denies every write and input while preserving that exact proof for
+Resume. A transient claimed-start or confirmed-launch result-write failure is
+retried as receipt-only work; it never grants continuity, a second launch, or
+Surrender against a later screen. Confirmed-launch prompts and manual-start
+observation remain bound to the ADB target on which validation completed.
+If Surrender never proves Game Over, durable failure releases the receipt but
+leaves a separate suppressive battle hold. No strategy, handler, workflow,
+continuity, background, target-handoff, or Strategy-replacement input is
+allowed until fresh Game Over, Tournament Results, Workshop, or verified Home
+`NEW_BATTLE` proves the real boundary; resumable Home, continued Running,
+unknown state, and incomplete Home-control evidence do not release it. A
+dispatched confirmed Tournament launch follows the same rule if its receipt
+times out or is superseded before fresh start proof.
+
+A failed fresh receipt-ownership reread is uncertainty, not release. The
+runtime retains its cached exact validation or confirmed-launch identity as a
+suppressive hold, blocks ordinary input and ADB target handoff, and waits for a
+fresh exact-owner read or a durable orphan transition. Setup Capture and new
+interactive-development lease admission cannot displace that boundary.
 
 ## Configuration repair
 

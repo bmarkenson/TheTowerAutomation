@@ -62,6 +62,7 @@ from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
 )
 from automation.missions.base import MissionContext
+from core.run_state import AUTOMATION
 from handlers.ad_gem_handler import (
     is_blind_gem_tapper_active,
     start_blind_gem_tapper,
@@ -423,6 +424,8 @@ def execute_actions(
         t = None
         attachment_validation = False
         attachment_rule_id = ""
+        guard_scope = AUTOMATION.action_guard_scope(action_guard_fn)
+        guard_scope.__enter__()
         try:
             t = (act or {}).get("type")
             is_strategy_action = bool((act or {}).get("_strategy"))
@@ -512,7 +515,11 @@ def execute_actions(
                     continue
                 key = act.get("key")
                 if key:
-                    _maybe_suspend_blind_tapper_for_cards(key, mv)
+                    _maybe_suspend_blind_tapper_for_cards(
+                        key,
+                        mv,
+                        action_guard_fn=action_guard_fn,
+                    )
                     tap_if_visible(key)
             elif t == "restart_run":
                 if is_strategy_action and last_state not in allowed_states:
@@ -1439,6 +1446,8 @@ def execute_actions(
                     )
                 continue
             log(f"[EXEC] Exception during action {act}: {e}", "ERROR")
+        finally:
+            guard_scope.__exit__(None, None, None)
 
 
 def _sleep_ms(milliseconds: int) -> None:
@@ -1470,7 +1479,12 @@ _CARD_EXIT_KEYS = {
 }
 
 
-def _maybe_suspend_blind_tapper_for_cards(key: str, mv: Optional[Dict[str, Any]]) -> None:
+def _maybe_suspend_blind_tapper_for_cards(
+    key: str,
+    mv: Optional[Dict[str, Any]],
+    *,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+) -> None:
     if mv is None:
         return
     paused_flag = "blind_tapper_paused_for_cards"
@@ -1486,4 +1500,9 @@ def _maybe_suspend_blind_tapper_for_cards(key: str, mv: Optional[Dict[str, Any]]
     if key in _CARD_EXIT_KEYS:
         if mv.pop(paused_flag, False):
             log("[EXEC] Resuming blind gem tapper after card interaction", "INFO")
-            start_blind_gem_tapper(duration=10, interval=1, blocking=False)
+            start_blind_gem_tapper(
+                duration=10,
+                interval=1,
+                blocking=False,
+                action_guard_fn=action_guard_fn,
+            )

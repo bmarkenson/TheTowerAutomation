@@ -342,8 +342,11 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
 - [ ] Diagnose the transient Home Poison Swamp Stun verification timeout
   recorded in
   [open issue dossier](../issues/open-2026.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).
-  Retain the failing frame and individual detail/off/on match confidences on
-  recurrence, then distinguish a missed detail-open tap from unsettled
+  A second first-attempt timeout followed by a successful complete retry was
+  recorded on 2026-08-12, again with a dynamically relocated source, but it
+  still retained no failing frame or per-poll confidences. Instrument the next
+  attempt to retain the final frame and individual detail/off/on match
+  confidences, then distinguish a missed detail-open tap from unsettled
   Workshop scroll geometry or a detail-template miss before changing retry or
   stabilization behavior.
 - [ ] Confirm normal gate re-arming after guarded **Reload automation for
@@ -583,12 +586,53 @@ stages:
   replacement attachment and terminal-lease replay were confirmed during
   promotion of `ab84a3c`; track only
   [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle).
-- [ ] Close an owned exclusive-validation `cleanup` receipt when the same
-  runtime has already proved that its validation battle reached Game Over and
-  later observes `RUNNING` before verified Home cleanup. Fail closed, release
-  action authority, and perform no Retry, Surrender, or other recovery input,
-  as recorded in
-  [open issue dossier](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
+- [ ] Deploy and live-confirm the exclusive-validation typed-authority repair
+  recorded in
+  [ISSUE-2026-041](../issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
+  and the same-family later-battle release in
+  [ISSUE-2026-001](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
+  - [x] Select one heartbeat owner for the durable validation or confirmed-
+    launch receipt; use it for every battle-only strategy tick, timeout
+    Surrender, Game Over cleanup, proof-backed result persistence, and
+    Tournament OPEN/BATTLE input.
+  - [x] Finalize exact cleanup before any queued successor Start/launch; retry
+    failed persistence without repeating Home or Surrender, and keep
+    inconclusive-Surrender completion separate from Game Over semantics.
+  - [x] Quarantine successor lifecycle adoption while Pause retains terminal
+    proof, and defer ADB target handoff until validation/launch ownership has
+    released the target.
+  - [x] Retain conclusive Surrender's exact Game Over proof. If Home cleanup
+    fails and a later `RUNNING` frame appears, persist a failed result without
+    further input, consume the old lifecycle/activity boundary, and adopt the
+    successor only on a subsequent heartbeat.
+  - [x] Preserve that owner through passive capture, refresh newly accepted
+    operator workflows at every runtime guard, and carry the composed guard to
+    every nested final mutation. Reject new interactive-development leases
+    while a non-external typed owner is published; reject Setup Capture while
+    validation owns the runtime, and keep queued successor workflows behind
+    exact terminal finalization.
+  - [x] Treat an inconclusive fresh ownership reread as suppressive, retaining
+    cached validation/launch identity across ordinary dispatch and ADB handoff
+    until a fresh exact-owner read or durable orphan transition resolves it.
+  - [x] Retain single-frame validation/launch start and natural-terminal proof
+    ahead of continuity, Pause, receipt-write failure, and queued Strategy
+    replacement; bind launch prompt/claim/manual observation to the validated
+    ADB target.
+  - [x] After inconclusive Surrender, keep the physical battle under a
+    suppressive no-input hold until authoritative terminal or verified
+    no-battle evidence; continued Running, resumable or incompletely classified
+    Home, and unknown screens do not release it. Apply the same fail-closed
+    boundary after a dispatched confirmed launch times out or is superseded.
+  - [x] Cover all three validation phases, cleanup, timeout, ordinary attached
+    preflight, launch conflict, owner priority, and mid-route takeover in
+    repository regressions.
+  - [ ] After integration, use only a newly and explicitly authorized ordinary
+    validation battle at a natural safe boundary. Confirm each declared phase,
+    exactly owned Surrender when required, verified Home cleanup and authority
+    release, plus Pause or operator-workflow interruption before the next input.
+    Do not manufacture the historical later-`RUNNING` transition; if it recurs
+    naturally, confirm the old receipt fails and releases without any recovery
+    input before the successor is adopted.
 - [x] Make `STOPPED` interrupt an in-progress Home setup without another device
   input, as recorded in
   [open issue dossier](../issues/open-2026.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).

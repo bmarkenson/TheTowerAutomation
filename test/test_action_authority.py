@@ -91,6 +91,161 @@ def _terminal_gate_app() -> App:
     return app
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({}, None),
+        ({"session_preflight_pending": True}, AuthorityHold.SESSION_PREFLIGHT),
+        (
+            {
+                "initialization_pending": True,
+                "session_preflight_pending": True,
+            },
+            AuthorityHold.RUN_INITIALIZATION,
+        ),
+        (
+            {
+                "exclusive_validation_in_progress": True,
+                "initialization_pending": True,
+            },
+            AuthorityHold.EXCLUSIVE_VALIDATION,
+        ),
+        (
+            {"exclusive_validation_launch_in_progress": True},
+            AuthorityHold.EXCLUSIVE_VALIDATION,
+        ),
+        (
+            {
+                "exclusive_validation_ownership_hold": True,
+                "exclusive_validation_in_progress": True,
+            },
+            AuthorityHold.EXCLUSIVE_OWNERSHIP,
+        ),
+        (
+            {
+                "continuity_pending": True,
+                "exclusive_validation_in_progress": True,
+            },
+            AuthorityHold.ACTIVITY_CONTINUITY,
+        ),
+        (
+            {
+                "operator_workflow_hold": AuthorityHoldState(
+                    AuthorityHold.SETUP_CAPTURE,
+                    "setup capture owns the screen",
+                ),
+                "continuity_pending": True,
+                "exclusive_validation_in_progress": True,
+            },
+            AuthorityHold.SETUP_CAPTURE,
+        ),
+        (
+            {
+                "exclusive_validation_terminal_finalization_pending": True,
+                "operator_workflow_hold": AuthorityHoldState(
+                    AuthorityHold.OPERATOR_WORKFLOW,
+                    "a successor Start Battle is queued",
+                ),
+            },
+            AuthorityHold.EXCLUSIVE_VALIDATION,
+        ),
+        (
+            {
+                "exclusive_validation_passive_battle_hold": True,
+                "operator_workflow_hold": AuthorityHoldState(
+                    AuthorityHold.OPERATOR_WORKFLOW,
+                    "a successor workflow is queued",
+                ),
+            },
+            AuthorityHold.EXCLUSIVE_OWNERSHIP,
+        ),
+    ],
+)
+def test_heartbeat_owner_selection_has_one_explicit_priority(
+    overrides,
+    expected,
+):
+    inputs = {
+        "operator_workflow_hold": None,
+        "continuity_pending": False,
+        "exclusive_validation_terminal_finalization_pending": False,
+        "exclusive_validation_passive_battle_hold": False,
+        "exclusive_validation_ownership_hold": False,
+        "exclusive_validation_in_progress": False,
+        "exclusive_validation_launch_in_progress": False,
+        "initialization_pending": False,
+        "session_preflight_pending": False,
+    }
+    inputs.update(overrides)
+
+    holds = App._heartbeat_action_authority_holds(**inputs)
+
+    assert len(holds) == (0 if expected is None else 1)
+    if expected is not None:
+        assert holds[0].hold is expected
+
+
+def test_validation_lifecycle_waits_for_higher_priority_operator_owner():
+    app = App.__new__(App)
+    app._advance_exclusive_validation = Mock(return_value=True)
+    app._update_action_authority(
+        detection={"state": "RUNNING", "secondary_states": []},
+        holds=(
+            AuthorityHoldState(
+                AuthorityHold.SETUP_CAPTURE,
+                "setup capture owns the screen",
+            ),
+        ),
+    )
+
+    assert not app._advance_owned_exclusive_validation(
+        {"state": "RUNNING", "secondary_states": []}
+    )
+    app._advance_exclusive_validation.assert_not_called()
+
+
+def test_validation_terminal_claim_defers_new_operator_hold_until_release():
+    app = App.__new__(App)
+    exclusive = AuthorityHoldState(
+        AuthorityHold.EXCLUSIVE_VALIDATION,
+        "exact validation cleanup is finalizing",
+    )
+    app._authority_holds = (exclusive,)
+    app._exclusive_validation_terminal_hold = "validation-cleanup"
+    app._operator_workflow_authority_hold = Mock(
+        return_value=AuthorityHoldState(
+            AuthorityHold.OPERATOR_WORKFLOW,
+            "a successor Start Battle is queued",
+        )
+    )
+
+    assert app._refreshed_operator_authority_holds(
+        release_stale=False
+    ) == (exclusive,)
+    app._operator_workflow_authority_hold.assert_not_called()
+
+
+def test_validation_launch_waits_for_higher_priority_operator_owner():
+    app = App.__new__(App)
+    app._advance_exclusive_validation_launch = Mock(return_value=True)
+    app._update_action_authority(
+        detection={"state": "HOME_SCREEN", "secondary_states": []},
+        holds=(
+            AuthorityHoldState(
+                AuthorityHold.SETUP_CAPTURE,
+                "setup capture owns the screen",
+            ),
+        ),
+    )
+
+    assert not app._advance_owned_exclusive_validation_launch(
+        object(),
+        {"state": "HOME_SCREEN", "secondary_states": []},
+        battle_started=False,
+    )
+    app._advance_exclusive_validation_launch.assert_not_called()
+
+
 def test_complete_normal_pause_and_strategy_gate_authority_matrix():
     authority = RuntimeActionAuthority()
     _set_running_context(authority)
@@ -574,6 +729,43 @@ def test_app_auxiliary_guard_has_no_capture_or_status_work_in_tap_hot_path():
     assert app._supervisor.apply_control.call_count == 2
 
 
+def test_runtime_guard_merges_new_operator_owner_into_active_route_hold():
+    app = App.__new__(App)
+    app._supervisor = Mock(is_paused=False)
+    app._supervisor.apply_control.return_value = False
+    app._status_reporter = Mock()
+    app._authority_battle_active = True
+    app._authority_primary_state = "RUNNING"
+    app._authority_holds = (
+        AuthorityHoldState(
+            AuthorityHold.EXCLUSIVE_VALIDATION,
+            "validation owns the screen",
+        ),
+    )
+    app._action_authority = RuntimeActionAuthority()
+    app._action_authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope="run-1",
+        primary_state="RUNNING",
+        holds=app._authority_holds,
+    )
+    app._operator_workflow_authority_hold = Mock(
+        return_value=AuthorityHoldState(
+            AuthorityHold.SETUP_CAPTURE,
+            "setup capture was accepted during the route",
+        )
+    )
+
+    assert not app._runtime_action_guard(
+        owner=AuthorityHold.EXCLUSIVE_VALIDATION
+    )
+    assert [hold.hold for hold in app._authority_holds] == [
+        AuthorityHold.EXCLUSIVE_VALIDATION,
+        AuthorityHold.SETUP_CAPTURE,
+    ]
+
+
 def test_legacy_gate_is_retired_without_pause_or_lifecycle_input():
     app = _terminal_gate_app()
     original_state = AUTOMATION.state
@@ -903,6 +1095,84 @@ def test_action_executor_rechecks_central_authority_before_material_input():
 
     guard.assert_called_once_with()
     tap.assert_not_called()
+
+
+def test_action_executor_scopes_guard_through_final_nested_mutation():
+    guard = Mock(side_effect=(True, False))
+    final_decisions = []
+    context = SimpleNamespace(
+        data={"mission_vars": {"last_detection_state": "RUNNING"}}
+    )
+
+    def nested_tap(_key):
+        with AUTOMATION.authorize_mutation() as allowed:
+            final_decisions.append(allowed)
+        return bool(final_decisions[-1])
+
+    with patch("core.action_executor.tap_if_visible", side_effect=nested_tap):
+        execute_actions(
+            object(),
+            [
+                {
+                    "type": "tap_label",
+                    "key": "buttons.example",
+                    "_strategy": True,
+                }
+            ],
+            context,
+            action_guard_fn=guard,
+        )
+
+    assert final_decisions == [False]
+    assert guard.call_count == 2
+
+
+def test_card_exit_resume_transports_guard_to_async_blind_tapper():
+    guard = Mock(return_value=True)
+    context = SimpleNamespace(
+        data={
+            "mission_vars": {
+                "last_detection_state": "RUNNING",
+                "blind_tapper_paused_for_cards": True,
+            }
+        }
+    )
+
+    with (
+        patch("core.action_executor.tap_if_visible", return_value=True),
+        patch("core.action_executor.start_blind_gem_tapper") as start,
+    ):
+        execute_actions(
+            object(),
+            [
+                {
+                    "type": "tap_label",
+                    "key": "buttons.return_to_game",
+                    "_strategy": True,
+                }
+            ],
+            context,
+            action_guard_fn=guard,
+        )
+
+    start.assert_called_once_with(
+        duration=10,
+        interval=1,
+        blocking=False,
+        action_guard_fn=guard,
+    )
+
+
+def test_scoped_action_guard_does_not_hold_or_leak_mutation_authority():
+    guard = Mock(return_value=False)
+
+    with AUTOMATION.action_guard_scope(guard):
+        with AUTOMATION.authorize_mutation() as allowed:
+            assert not allowed
+
+    with AUTOMATION.authorize_mutation() as allowed:
+        assert allowed
+    guard.assert_called_once_with()
 
 
 def test_verified_tap_rechecks_authority_after_match_before_dispatch():

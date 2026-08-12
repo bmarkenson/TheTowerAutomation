@@ -4,6 +4,13 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-12 exclusive-validation authority mismatch
+
+[`exclusive-validation-authority-mismatch-2026-08-12.md`](exclusive-validation-authority-mismatch-2026-08-12.md)
+preserves the bounded production action sequence and repository cause that
+established `ISSUE-2026-041`. It distinguishes the validation-dispatch defect
+from the still-unexplained later-battle transition in `ISSUE-2026-001`.
+
 ## 2026-08-07 Utility Dissonance production confirmation
 
 [`utility-dissonance-confirmation-2026-08-07.md`](utility-dissonance-confirmation-2026-08-07.md)

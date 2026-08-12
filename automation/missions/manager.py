@@ -666,6 +666,24 @@ class MissionManager:
         mv.pop("gc_session_preflight_repair_authority", None)
         self.set_exclusive_validation_battle(False)
 
+    def finalize_exclusive_validation_game_over_boundary(self) -> None:
+        """Apply a proven validation terminal to hooks and lifecycle once.
+
+        Validation cleanup can prove Game Over and verified Home while Pause
+        delays process-local finalization. Consume that retained proof before a
+        manually started successor is observed so the next RUNNING frame emits
+        a genuine new-battle boundary.
+        """
+
+        self._battle_lifecycle.observe("GAME_OVER")
+        self._last_state = "GAME_OVER"
+        self.on_game_over()
+        start_activity_scope(
+            reason="exclusive_validation_game_over_boundary",
+            carry_terminal_history_handoff=True,
+        )
+        self._new_battle_home_observed = True
+
     def replace_strategy_at_boundary(
         self,
         strategy: Optional[BaseStrategy],
@@ -674,7 +692,9 @@ class MissionManager:
 
         self._replace_strategy(strategy)
         self._startup_gates_deferred = False
-        self._new_battle_home_observed = False
+        # Strategy replacement does not create another physical Home
+        # boundary. Preserve an already-consumed validation Home/Game Over
+        # marker so its activity scope is not rotated twice on the next frame.
         self.ctx.data["startup_gates_deferred"] = False
         self._clear_attached_check_state()
 
@@ -769,6 +789,25 @@ class MissionManager:
             mv["gc_session_preflight_failed_checks"] = []
             mv["gc_session_preflight_waivers"] = {}
             self._reset_session_preflight_repair_attempts()
+
+    def release_exclusive_validation_battle_without_boundary(self) -> None:
+        """Keep a failed-cleanup battle passive until its real boundary.
+
+        An inconclusive Surrender does not establish Game Over. Releasing the
+        durable validation owner must therefore not arm Tournament
+        initialization or session-preflight actions in the still-running
+        ordinary battle. Treat its remainder like an attached observation and
+        re-arm the normal gates only when the lifecycle later proves a genuine
+        terminal or fresh-Home boundary.
+        """
+
+        self.set_exclusive_validation_battle(False)
+        self._startup_gates_deferred = True
+        self.ctx.data["startup_gates_deferred"] = True
+        self.ctx.data["attached_validation_requested"] = False
+        self.ctx.data["skip_attached_checks"] = True
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["attached_validation_requested"] = False
 
     def prepare_exclusive_validation_request(self, request_id: str) -> bool:
         """Re-arm Home evidence exactly once for one durable request."""
