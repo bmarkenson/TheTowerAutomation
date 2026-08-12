@@ -39,6 +39,31 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-12 owned blocking-modal and cross-heartbeat recovery
+
+- Commit `af3d1b0` adds a nonterminal `blocking_primary` state for the retained
+  Free Ticket incident, a fresh-evidence Claim recipe owned only by an exact
+  in-flight battle launch, and a retained launch postcondition through verified
+  ordinary `RUNNING`. Modal clearance permits at most one Battle retry after
+  two stable exact-Home observations; Tournament, changed ownership, Pause,
+  Stop, and uncertain input all fail closed without replay.
+- A generic process-local circuit breaker now retains exhausted Home ad-gem
+  transactions across equivalent heartbeats. Typed dispatch and verification
+  outcomes prevent missing, incomplete, navigated, or uncertain evidence from
+  being misreported as collection or silently rearming input.
+- The isolated feature checkpoint and the exact integrated `develop`
+  checkpoint each passed compilation, state-definition validation, clickmap
+  integrity, and all 2,391 tests. Independent adversarial review found no
+  remaining concrete correctness or safety defect in the final candidate.
+- Production advanced from `5c94827` to `af3d1b0` behind annotated rollback
+  tag `production-before-20260812T192004Z-5c94827`. The explicit managed
+  Stop/Start/Attach handoff replaced PID `884966` with `1565008`, preserved
+  activity scope `232e6953e86b492bb0c6a22845bd596f`, proved an ordinary Tier
+  19 save, adopted `farm_t19_ad_assist` without degradation, and reached steady
+  `RUNNING` at wave 5762. A natural post-deployment Free Ticket recurrence is
+  still required before closing `ISSUE-2026-041`; no battle or modal was
+  manufactured for validation.
+
 ### 2026-08-11 native diagnostics layout and disclosure-theme repair
 
 - Operator screenshots showed the expanded Host Health telemetry clipped below

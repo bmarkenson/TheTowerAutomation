@@ -25,8 +25,9 @@ current runtime state.
 - Load the [dossier](issues/open-2026.md#free-ticket-modal-stranded-a-completed-battle-launch-and-exposed-background-controls)
   before changing blocking-screen precedence, Home launch completion, or
   cross-heartbeat retry behavior, and for live confirmation or recurrence.
-  Next: after explicit operator release, deploy and observe one natural
-  no-battle launch boundary without manufacturing a battle; [state/recovery
+  Commit `af3d1b0` is deployed and its managed active-battle handoff passed.
+  Next: observe one natural no-battle launch boundary without manufacturing a
+  battle or modal; [state/recovery
   backlog](backlog/state-and-detection.md#state-coverage-and-recovery).
 
 ### Owned validation cleanup survived a later running-battle transition
