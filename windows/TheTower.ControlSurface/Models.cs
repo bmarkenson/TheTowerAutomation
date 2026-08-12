@@ -168,6 +168,12 @@ public sealed class BlueStacksHostProcessIdentity
     [JsonPropertyName("process_started_at")]
     public string ProcessStartedAt { get; set; } = "";
 
+    [JsonPropertyName("executable_path")]
+    public string ExecutablePath { get; set; } = "";
+
+    [JsonPropertyName("instance_name")]
+    public string InstanceName { get; set; } = "";
+
     [JsonPropertyName("previous_process_id")]
     public int? PreviousProcessId { get; set; }
 
@@ -198,8 +204,23 @@ public sealed class ConfirmedLocalMappingStatus
 
 public sealed class ConfirmedLocalMappingItem
 {
+    [JsonPropertyName("record_id")]
+    public string RecordId { get; set; } = "";
+
+    [JsonPropertyName("candidate_record_id")]
+    public string CandidateRecordId { get; set; } = "";
+
+    [JsonPropertyName("event_id")]
+    public string EventId { get; set; } = "";
+
     [JsonPropertyName("mapping_id")]
     public string MappingId { get; set; } = "";
+
+    [JsonPropertyName("data_version")]
+    public int? DataVersion { get; set; }
+
+    [JsonPropertyName("game_version")]
+    public int? GameVersion { get; set; }
 
     [JsonPropertyName("check_id")]
     public string CheckId { get; set; } = "";
@@ -221,6 +242,306 @@ public sealed class ConfirmedLocalMappingItem
 
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
+
+    [JsonPropertyName("recorded_at")]
+    public string RecordedAt { get; set; } = "";
+}
+
+public sealed class SaveMappingIntegrationCatalog
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    [JsonPropertyName("available")]
+    public bool Available { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    [JsonPropertyName("repository")]
+    public SaveMappingRepositoryStatus? Repository { get; set; }
+
+    [JsonPropertyName("workspaces")]
+    public List<SaveMappingWorkspaceStatus> Workspaces { get; set; } = [];
+
+    [JsonPropertyName("items")]
+    public List<SaveMappingIntegrationItem> Items { get; set; } = [];
+}
+
+public sealed class SaveMappingRepositoryStatus
+{
+    [JsonPropertyName("main_commit")]
+    public string MainCommit { get; set; } = "";
+
+    [JsonPropertyName("develop_commit")]
+    public string DevelopCommit { get; set; } = "";
+
+    [JsonPropertyName("main_is_ancestor")]
+    public bool MainIsAncestor { get; set; }
+
+    [JsonPropertyName("production_clean")]
+    public bool ProductionClean { get; set; }
+
+    [JsonPropertyName("develop_clean")]
+    public bool DevelopClean { get; set; }
+
+    [JsonPropertyName("develop_path")]
+    public string DevelopPath { get; set; } = "";
+
+    [JsonPropertyName("available")]
+    public bool Available { get; set; }
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+}
+
+public sealed class SaveMappingWorkspaceStatus
+{
+    [JsonPropertyName("workspace_id")]
+    public string WorkspaceId { get; set; } = "";
+
+    [JsonPropertyName("path_display")]
+    public string PathDisplay { get; set; } = "";
+
+    [JsonPropertyName("branch")]
+    public string Branch { get; set; } = "";
+
+    [JsonPropertyName("head_commit")]
+    public string HeadCommit { get; set; } = "";
+
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = "";
+
+    [JsonPropertyName("clean")]
+    public bool Clean { get; set; }
+
+    [JsonPropertyName("available")]
+    public bool Available { get; set; }
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+}
+
+public sealed class SaveMappingIntegrationItem
+{
+    [JsonPropertyName("record_id")]
+    public string RecordId { get; set; } = "";
+
+    [JsonPropertyName("mapping_id")]
+    public string MappingId { get; set; } = "";
+
+    [JsonPropertyName("data_version")]
+    public int DataVersion { get; set; }
+
+    [JsonPropertyName("game_version")]
+    public int GameVersion { get; set; }
+
+    [JsonPropertyName("check_id")]
+    public string CheckId { get; set; } = "";
+
+    [JsonPropertyName("value_kind")]
+    public string ValueKind { get; set; } = "";
+
+    [JsonPropertyName("raw_value")]
+    public decimal? RawValue { get; set; }
+
+    [JsonPropertyName("semantic_value")]
+    public string SemanticValue { get; set; } = "";
+
+    [JsonPropertyName("scope")]
+    public Dictionary<string, string> Scope { get; set; } = [];
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("recorded_at")]
+    public string RecordedAt { get; set; } = "";
+
+    [JsonPropertyName("review_available")]
+    public bool ReviewAvailable { get; set; }
+
+    [JsonPropertyName("review_code")]
+    public string ReviewCode { get; set; } = "";
+
+    [JsonPropertyName("review_reason")]
+    public string ReviewReason { get; set; } = "";
+}
+
+public sealed class SaveMappingIntegrationReview
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    [JsonPropertyName("operation")]
+    public string Operation { get; set; } = "";
+
+    [JsonPropertyName("candidate_record_id")]
+    public string CandidateRecordId { get; set; } = "";
+
+    [JsonPropertyName("reviewed_proposal_fingerprint")]
+    public string ReviewedProposalFingerprint { get; set; } = "";
+
+    [JsonPropertyName("repository")]
+    public SaveMappingRepositoryStatus Repository { get; set; } = new();
+
+    [JsonPropertyName("workspace")]
+    public SaveMappingWorkspaceStatus Workspace { get; set; } = new();
+
+    [JsonPropertyName("proposal")]
+    public SaveMappingProposal Proposal { get; set; } = new();
+
+    [JsonPropertyName("prepare")]
+    public BetterControlActionAvailability Prepare { get; set; } = new();
+
+    [JsonPropertyName("prepared")]
+    public bool Prepared { get; set; }
+
+    [JsonPropertyName("recovery_required")]
+    public bool RecoveryRequired { get; set; }
+
+    [JsonPropertyName("prepared_result")]
+    public SaveMappingPreparedResult? PreparedResult { get; set; }
+}
+
+public sealed class SaveMappingProposal
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    [JsonPropertyName("record_id")]
+    public string RecordId { get; set; } = "";
+
+    [JsonPropertyName("atomic_group")]
+    public bool AtomicGroup { get; set; }
+
+    [JsonPropertyName("target")]
+    public SaveMappingProposalTarget? Target { get; set; }
+
+    [JsonPropertyName("targets")]
+    public List<SaveMappingProposalTarget> Targets { get; set; } = [];
+
+    [JsonPropertyName("operations")]
+    public List<SaveMappingProposalOperation> Operations { get; set; } = [];
+
+    [JsonPropertyName("validation")]
+    public List<string> Validation { get; set; } = [];
+}
+
+public sealed class SaveMappingProposalTarget
+{
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = "";
+
+    [JsonPropertyName("expected_sha256")]
+    public string ExpectedSha256 { get; set; } = "";
+
+    [JsonPropertyName("mapping_id")]
+    public string MappingId { get; set; } = "";
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    [JsonPropertyName("operations")]
+    public List<SaveMappingProposalOperation> Operations { get; set; } = [];
+}
+
+public sealed class SaveMappingProposalOperation
+{
+    [JsonPropertyName("op")]
+    public string Operation { get; set; } = "";
+
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = "";
+
+    [JsonPropertyName("value")]
+    public JsonElement Value { get; set; }
+}
+
+public sealed class SaveMappingPreparedResult
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    [JsonPropertyName("operation")]
+    public string Operation { get; set; } = "";
+
+    [JsonPropertyName("disposition")]
+    public string Disposition { get; set; } = "";
+
+    [JsonPropertyName("idempotent")]
+    public bool? Idempotent { get; set; }
+
+    [JsonPropertyName("candidate_record_id")]
+    public string CandidateRecordId { get; set; } = "";
+
+    [JsonPropertyName("reviewed_proposal_fingerprint")]
+    public string ReviewedProposalFingerprint { get; set; } = "";
+
+    [JsonPropertyName("repository")]
+    public SaveMappingRepositoryStatus Repository { get; set; } = new();
+
+    [JsonPropertyName("workspace")]
+    public SaveMappingWorkspaceStatus Workspace { get; set; } = new();
+
+    [JsonPropertyName("committed")]
+    public bool? Committed { get; set; }
+
+    [JsonPropertyName("promoted")]
+    public bool? Promoted { get; set; }
+
+    [JsonPropertyName("validation_status")]
+    public string ValidationStatus { get; set; } = "";
+
+    [JsonPropertyName("targets")]
+    public List<SaveMappingPreparedTarget>? Targets { get; set; }
+
+    [JsonPropertyName("validation")]
+    public List<string>? Validation { get; set; }
+
+    [JsonPropertyName("warning")]
+    public string Warning { get; set; } = "";
+}
+
+public sealed class SaveMappingPreparedTarget
+{
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = "";
+
+    [JsonPropertyName("mapping_id")]
+    public string MappingId { get; set; } = "";
+
+    [JsonPropertyName("before_sha256")]
+    public string BeforeSha256 { get; set; } = "";
+
+    [JsonPropertyName("after_sha256")]
+    public string AfterSha256 { get; set; } = "";
+
+    [JsonPropertyName("changed")]
+    public bool? Changed { get; set; }
 }
 
 public sealed class StrategyActionGateStatus
@@ -362,6 +683,12 @@ public sealed class BetterControlStrategyScopeStatus
 
     [JsonPropertyName("pending_next_boundary")]
     public string? PendingNextBoundary { get; set; }
+
+    [JsonPropertyName("pending_active_battle")]
+    public string? PendingActiveBattle { get; set; }
+
+    [JsonPropertyName("degradation")]
+    public Dictionary<string, object?>? Degradation { get; set; }
 }
 
 public sealed class BetterControlTerminalPolicyStatus
@@ -768,6 +1095,9 @@ public sealed class ControlStatus
     [JsonPropertyName("game_speed_target")]
     public double GameSpeedTarget { get; set; } = 6.3;
 
+    [JsonPropertyName("game_speed_target_request_id")]
+    public string? GameSpeedTargetRequestId { get; set; }
+
     [JsonPropertyName("remaining_seconds")]
     public int? RemainingSeconds { get; set; }
 
@@ -776,6 +1106,9 @@ public sealed class ControlStatus
 
     [JsonPropertyName("adb_port_updated_at")]
     public string? AdbPortUpdatedAt { get; set; }
+
+    [JsonPropertyName("adb_port_request_id")]
+    public string? AdbPortRequestId { get; set; }
 
     [JsonPropertyName("strategy")]
     public string? Strategy { get; set; }
@@ -1013,6 +1346,12 @@ public sealed class RuntimeInstance
 
     [JsonPropertyName("target")]
     public string? Target { get; set; }
+
+    [JsonPropertyName("runtime_id")]
+    public string? RuntimeId { get; set; }
+
+    [JsonPropertyName("target_generation")]
+    public int? TargetGeneration { get; set; }
 
     [JsonPropertyName("started_at")]
     public string? StartedAt { get; set; }

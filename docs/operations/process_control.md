@@ -26,6 +26,18 @@ strategy, handler, recovery, and terminal action. An agent-owned work Pause
 must be reconciled under
 [`live_action_authority.md`](../live_action_authority.md#cleanup-and-reporting).
 
+Pause, Stop, Take Manual Control, input-owner acquisition, and terminal-policy
+writes share the runtime's final cross-process input-dispatch boundary. The
+native client cancels an older status read and transmits a control write
+immediately. If a request races an input that has already crossed its final
+guard, that one atomic ADB command may finish; a lifecycle transaction that has
+already changed the source may also perform only the restoration needed to
+leave the game in a proved state. The control write cannot be delayed by
+passive prechecks, and after it is durably accepted no later compound step or
+new automated input may begin. A missing control file, or legacy `RUNNING`
+state without a valid request identity, initializes as `PAUSED` rather than
+granting implicit input authority.
+
 State and terminal-policy acknowledgement is request-ID exact. A repeated
 same-value request remains pending without changing its ID until that exact
 request is applied; an already acknowledged or stopped-policy repeat is a
@@ -43,10 +55,15 @@ other route. Attach remains input-blocked at `validating_save` until one
 guarded exact-target serialization proves source restoration and either binds
 usable save evidence or selects the established Battle History UI fallback.
 An absent, unsupported, incompatible, or unprojectable save after safe
-restoration therefore still adopts the battle for observation only and keeps
-supported UI monitoring available. Owner, target, scope, authority, or
-restoration loss blocks input. Applying a Strategy remains a separate explicit
-action.
+restoration therefore still adopts the battle and keeps supported UI
+monitoring available. Attach freezes the accepted selected Strategy definition
+with the request. No Strategy becomes an intentional observer; a proven
+kind/tier-compatible Strategy becomes active; and an incompatible or
+unprovable selection becomes a degraded observer while the selection remains
+pending for the next safe boundary. Attached checks never repair the current
+battle. Recoverable check, data, and reporting failures complete degraded and
+release automation. Only owner, target, scope, authority, restoration, or
+uncertain-input loss is catastrophic and leaves input Paused.
 
 Take Manual Control first requests an indefinite Pause and becomes active only
 after runtime acknowledgement. Return Control remains Paused; explicit Enable
@@ -54,36 +71,56 @@ starts an exclusive reconciliation hold. A newly forced save, or the exact
 bound natural Game Over save, is preferred. When that save is unusable after a
 safe source restoration, the same hold automatically uses the supported
 active/Home/terminal UI discovery route and a target/scope-bound UI receipt.
-A trusted mapped mismatch remains Paused for explicit operator review; cached
-evidence cannot satisfy Return, and an unsafe source or authority boundary
-cannot authorize UI input.
+A trusted mapped mismatch completes Return with exact degraded evidence; at
+Home it is repaired immediately when possible, and exhausted repair still
+releases automation. Cached evidence cannot satisfy Return, and an unsafe
+source or authority boundary cannot authorize UI input.
 
 `NEXT_BATTLE`, `WAIT`, and `HOME` are terminal dispositions. `NEXT_BATTLE`
-uses the next authorized Retry/Battle/Resume path after terminal capture;
-`WAIT` holds Game Over or Home; `HOME` goes Home and suppresses automatic
-Battle/Resume input. Pause blocks terminal navigation and Stop exits without a
-terminal tap. Game Over statistics and record enrichment are best effort; the
-selected terminal route is still attempted. A failed route tap stays pending
-for a fresh-evidence retry without changing action authority or the selected
-policy. Tournament Results satisfies `WAIT` by retaining the screen;
-`NEXT_BATTLE` and `HOME` persist the result and retry the verified dismissal
-route under the same authority-preserving rule. Legacy `RETRY` normalizes to
-`NEXT_BATTLE`.
+normally uses the next authorized Retry/Battle/Resume path after terminal
+capture. When a strategy battle ends with repairable configuration degradation,
+`NEXT_BATTLE` first goes Home, rearms the next profile's normal setup, and runs
+that bounded repair before its exact one-shot launch. Failed Home navigation
+stays pending; exhausted repair records the new failure and still launches
+degraded. `WAIT` holds Game Over or Home; `HOME` goes Home and suppresses
+automatic Battle/Resume input. Pause blocks terminal navigation and Stop exits
+without a terminal tap. Game Over statistics and record enrichment are best
+effort; the selected terminal route is still attempted. A failed route tap
+stays pending for a fresh-evidence retry without changing action authority or
+the selected policy. Tournament Results satisfies `WAIT` by retaining the
+screen; `NEXT_BATTLE` and `HOME` persist the result and retry the verified
+dismissal route under the same authority-preserving rule. Legacy `RETRY`
+normalizes to `NEXT_BATTLE`.
 
 A persistent game-speed target is independent of Pause. Acknowledged values
 `x0.0`–`x6.0` are exact; `max`/`x6.3` means maximum available. It persists
 across battles and process starts until changed.
 
-## Strategy Action Gate
+## Runtime failure policy
 
-An active-battle validation mismatch may raise a Strategy Action Gate while
-control remains `RUNNING`. This is not a failed Pause acknowledgement. Capture,
-detection, OCR, status, and explicitly allowlisted independent collectors may
-continue; strategy and lifecycle actions remain blocked. Resolve it only with
-the published retry, run-scoped waiver, explicit Pause/manual change, or
-offered guarded repair decision. The gate itself never authorizes Surrender,
-Home, restart, or a new battle. See
-[`architecture/runtime.md`](../architecture/runtime.md#typed-runtime-action-authority).
+Configuration mismatch, unavailable validation/evidence, exhausted repair,
+reporting failure, and expired workflow evidence are recoverable. Repair them
+only at an already-safe boundary; otherwise flag the exact problem and continue
+degraded. They cannot create a global Pause, Stop, Strategy Action Gate, or
+indefinite authority hold. For running configuration degradation, a Game Over
+handled under already-selected Continue is the next repair boundary: go Home,
+run ordinary profile setup, and continue whether that setup succeeds or
+exhausts. Legacy session-preflight gates are cleared when the runtime encounters
+them.
+
+Automatic Pause is reserved for catastrophic safety failures: lost/corrupt
+control authority, lost exact-target ownership, failure to prove source
+restoration after lifecycle input, or a dispatched input whose result is
+uncertain. Explicit operator Pause, Stop, and Take Manual Control are separate
+intent. See
+[`architecture/runtime.md`](../architecture/runtime.md#global-runtime-failure-policy).
+
+Low-level ADB mutations and screenshots have bounded subprocess timeouts.
+Lifecycle owners such as forced save and watchdog recovery retain typed
+attempt/uncertainty evidence across their complete transaction: a timed-out
+intermediate command is catastrophic only if the required final source cannot
+be freshly proved restored. Recoverable status/report persistence remains
+diagnostic and cannot convert a degraded continuation into a shutdown.
 
 ## Process replacement and terminal recovery
 

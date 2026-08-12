@@ -6,6 +6,9 @@ import json
 from typing import Any, Callable, Mapping, Sequence
 
 
+# ``pause`` and ``repair_restart`` remain parseable only so an older durable
+# decision can be retired without making the control ledger malformed. Current
+# option builders never publish either action.
 VALID_GATE_DECISION_ACTIONS = frozenset(
     {"pause", "repair_restart", "retry", "waive"}
 )
@@ -165,7 +168,6 @@ def build_gate_decision_options(
     configured_fallbacks: Sequence[Mapping[str, Any]] = (),
     *,
     advisory: bool = False,
-    allow_repair_restart: bool = False,
     allow_waive: bool = True,
 ) -> list[dict[str, str]]:
     """Return safe operator choices for one failed requirement."""
@@ -202,26 +204,18 @@ def build_gate_decision_options(
             seen.add(option_id)
 
     if advisory:
-        advisory_options = [
-            {
-                "id": "pause_for_changes",
-                "label": "Pause for manual changes",
-                "description": (
-                    "Pause automation without ending the Tournament; resume "
-                    "after changing the setting to review the warning again."
-                ),
-                "action": "pause",
-                "kind": "standard",
-            },
-            {
-                "id": "retry",
-                "label": "Retry the read-only check",
-                "description": "Re-run the observer check with fresh evidence.",
-                "action": "retry",
-                "kind": "standard",
-            },
-        ]
-        if allow_waive:
+        advisory_options = list(options)
+        if "retry" not in seen:
+            advisory_options.append(
+                {
+                    "id": "retry",
+                    "label": "Retry the read-only check",
+                    "description": "Re-run the observer check with fresh evidence.",
+                    "action": "retry",
+                    "kind": "standard",
+                }
+            )
+        if allow_waive and "continue_observing" not in seen:
             advisory_options.append(
                 {
                     "id": "continue_observing",
@@ -235,22 +229,6 @@ def build_gate_decision_options(
                 }
             )
         return advisory_options
-
-    if allow_repair_restart:
-        options.append(
-            {
-                "id": "restart_and_repair",
-                "label": "Surrender this battle and repair setup",
-                "description": (
-                    "Explicitly authorize one guarded Surrender for this exact "
-                    "battle and reason, return Home, and Pause. Correcting the "
-                    "setup and starting another battle require separate authority."
-                ),
-                "action": "repair_restart",
-                "kind": "standard",
-            }
-        )
-        seen.add("restart_and_repair")
 
     defaults = [
         {

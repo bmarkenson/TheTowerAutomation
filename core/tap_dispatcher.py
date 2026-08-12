@@ -21,6 +21,7 @@ import threading
 import queue
 import time
 import random
+from typing import Callable, Optional
 from utils.logger import log, log_input
 from core.adb_utils import input_tap
 
@@ -29,7 +30,7 @@ TAP_QUEUE = queue.Queue()
 spec:
   name: TAP_QUEUE
   kind: queue.Queue
-  r: In-process FIFO for (x:int, y:int, label:Optional[str], log_it:bool)
+  r: In-process FIFO for (x:int, y:int, label:Optional[str], log_it:bool, action_guard_fn:Callable|None)
   notes:
     - Back-compat: the worker also accepts 3-tuples (x, y, label) and sets log_it=True.
 """
@@ -51,12 +52,26 @@ def log_tap(x, y, label):
     )
 
 
-def _execute_tap(x, y, label, *, log_it: bool) -> bool:
+def _execute_tap(
+    x,
+    y,
+    label,
+    *,
+    log_it: bool,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+) -> bool:
     """Dispatch one queued tap and report success only when ADB accepted it."""
 
     error = None
     try:
-        dispatched = input_tap(x, y) is not None
+        if action_guard_fn is None:
+            dispatched = input_tap(x, y) is not None
+        else:
+            dispatched = input_tap(
+                x,
+                y,
+                action_guard_fn=action_guard_fn,
+            ) is not None
     except Exception as exc:
         dispatched = False
         error = exc
@@ -76,13 +91,33 @@ def _execute_tap(x, y, label, *, log_it: bool) -> bool:
     return False
 
 
-def tap_now(x, y, label=None, *, log_it: bool = True) -> bool:
+def tap_now(
+    x,
+    y,
+    label=None,
+    *,
+    log_it: bool = True,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+) -> bool:
     """Dispatch one tap synchronously through the existing logging boundary."""
 
-    return _execute_tap(x, y, label, log_it=log_it)
+    return _execute_tap(
+        x,
+        y,
+        label,
+        log_it=log_it,
+        action_guard_fn=action_guard_fn,
+    )
 
 
-def tap(x, y, label=None, *, log_it: bool = True):
+def tap(
+    x,
+    y,
+    label=None,
+    *,
+    log_it: bool = True,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+):
     """
     Public function for scripts to submit tap requests.
 
@@ -95,10 +130,10 @@ def tap(x, y, label=None, *, log_it: bool = True):
       s: [thread]
       e: none (puts into an unbounded Queue; may block briefly only under extreme memory pressure)
       notes:
-        - Enqueues a 4-tuple (x, y, label, log_it) for the worker.
+        - Enqueues a 5-tuple (x, y, label, log_it, action_guard_fn) for the worker.
         - Callers should not assume immediate execution; it is asynchronous.
     """
-    TAP_QUEUE.put((x, y, label, log_it))
+    TAP_QUEUE.put((x, y, label, log_it, action_guard_fn))
 
 
 def _tap_worker():
@@ -112,20 +147,30 @@ def _tap_worker():
         - queue.Empty is handled internally with a short idle wait.
         - Other exceptions from input_tap are not re-raised here (same-process resilience).
       notes:
-        - Accepts both 4-tuple and legacy 3-tuple items from TAP_QUEUE.
+        - Accepts 5-tuples plus legacy 3- and 4-tuple items from TAP_QUEUE.
     """
     last_keepalive = time.time()
     while True:
         now = time.time()
         try:
             item = TAP_QUEUE.get(timeout=1)
-            # Backward compatibility: accept old 3-tuples
+            # Backward compatibility: accept old 3- and 4-tuples.
             if isinstance(item, tuple) and len(item) == 3:
                 x, y, label = item
                 log_it = True
-            else:
+                action_guard_fn = None
+            elif isinstance(item, tuple) and len(item) == 4:
                 x, y, label, log_it = item
-            _execute_tap(x, y, label, log_it=log_it)
+                action_guard_fn = None
+            else:
+                x, y, label, log_it, action_guard_fn = item
+            _execute_tap(
+                x,
+                y,
+                label,
+                log_it=log_it,
+                action_guard_fn=action_guard_fn,
+            )
         except queue.Empty:
             pass  # nothing to do
 

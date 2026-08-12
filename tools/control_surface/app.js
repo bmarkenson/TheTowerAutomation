@@ -11,6 +11,11 @@ const state = {
   captureCatalogLoading: false,
   captureReview: null,
   captureReviewInput: null,
+  saveMappingCatalog: null,
+  saveMappingReview: null,
+  saveMappingResult: null,
+  saveMappingBusy: false,
+  saveMappingSelectionGeneration: 0,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -44,7 +49,11 @@ async function api(path, options = {}) {
     throw new Error("Access token required");
   }
   if (!response.ok) {
-    throw new Error(payload.error || `Request failed (${response.status})`);
+    const error = new Error(payload.error || `Request failed (${response.status})`);
+    error.code = payload.code || "";
+    error.details = payload.details || null;
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -233,6 +242,458 @@ function renderConfirmedLocalMapping(status) {
     alert.dataset.presentationSignature = signature;
     setText("confirmedLocalMappingTitle", presentation.title);
     setText("confirmedLocalMappingDetail", presentation.detail);
+  }
+  const reviewButton = byId("reviewSaveMappingsButton");
+  const compatible = clientModel.saveMappingIntegrationCompatible(
+    state.lastStatus,
+  );
+  reviewButton.hidden = !presentation.visible;
+  reviewButton.disabled = !compatible;
+  reviewButton.title = compatible
+    ? "Review exact canonical proposals and prepare one in a selected feature worktree."
+    : "Linux API revision 35 with save_mapping_integration_v1 is required.";
+}
+
+function saveMappingCandidate() {
+  const recordId = byId("saveMappingCandidateSelect").value;
+  return (state.saveMappingCatalog?.items || []).find(
+    (item) => item.record_id === recordId,
+  ) || null;
+}
+
+function saveMappingWorkspace() {
+  const workspaceId = byId("saveMappingWorkspaceSelect").value;
+  return (state.saveMappingCatalog?.workspaces || []).find(
+    (item) => item.workspace_id === workspaceId,
+  ) || null;
+}
+
+function saveMappingSelection() {
+  return {
+    candidateRecordId: byId("saveMappingCandidateSelect").value,
+    workspaceId: byId("saveMappingWorkspaceSelect").value,
+    generation: state.saveMappingSelectionGeneration,
+  };
+}
+
+function saveMappingSelectionStillCurrent(selection) {
+  const current = saveMappingSelection();
+  return current.generation === selection.generation
+    && current.candidateRecordId === selection.candidateRecordId
+    && current.workspaceId === selection.workspaceId;
+}
+
+function updateSaveMappingControls() {
+  const item = saveMappingCandidate();
+  const workspace = saveMappingWorkspace();
+  const reviewButton = byId("reviewSaveMappingProposalButton");
+  const prepareButton = byId("prepareSaveMappingButton");
+  reviewButton.disabled = state.saveMappingBusy
+    || !item
+    || !workspace
+    || item.review_available !== true;
+  const availability = clientModel.saveMappingPrepareAvailability(
+    state.saveMappingReview,
+    byId("saveMappingCandidateSelect").value,
+    byId("saveMappingWorkspaceSelect").value,
+  );
+  prepareButton.disabled = state.saveMappingBusy
+    || state.saveMappingResult != null
+    || !availability.available;
+}
+
+function setSaveMappingBusy(busy) {
+  state.saveMappingBusy = busy;
+  byId("saveMappingCandidateSelect").disabled = busy;
+  byId("saveMappingWorkspaceSelect").disabled = busy;
+  byId("refreshSaveMappingCatalogButton").disabled = busy;
+  document.querySelectorAll(
+    '[data-close-dialog="saveMappingIntegrationDialog"]',
+  ).forEach((button) => {
+    button.disabled = busy;
+  });
+  updateSaveMappingControls();
+}
+
+function clearSaveMappingReview(message = "Review an exact proposal before preparation.") {
+  state.saveMappingReview = null;
+  state.saveMappingResult = null;
+  byId("saveMappingProposal").replaceChildren();
+  byId("saveMappingProposal").className = "mapping-proposal muted";
+  byId("saveMappingProposal").textContent = message;
+  byId("saveMappingResult").hidden = true;
+  byId("saveMappingResult").replaceChildren();
+  byId("prepareSaveMappingButton").disabled = true;
+}
+
+function saveMappingCandidateLabel(item) {
+  const scope = item?.scope?.slot_key ? ` · ${item.scope.slot_key}` : "";
+  const value = item?.raw_value == null
+    ? ""
+    : ` · ${item.raw_value} → ${item.semantic_value || "unknown"}`;
+  return `${humanize(item?.check_id || "save mapping")}${scope}${value}`;
+}
+
+function renderSaveMappingCatalog(catalog) {
+  state.saveMappingSelectionGeneration += 1;
+  state.saveMappingCatalog = catalog;
+  const candidateSelect = byId("saveMappingCandidateSelect");
+  const workspaceSelect = byId("saveMappingWorkspaceSelect");
+  candidateSelect.replaceChildren(new Option("Select a mapping observation…", ""));
+  workspaceSelect.replaceChildren(new Option("Select an owned feature worktree…", ""));
+  for (const item of catalog.items || []) {
+    const option = new Option(saveMappingCandidateLabel(item), item.record_id);
+    option.title = item.reason || "";
+    candidateSelect.append(option);
+  }
+  for (const workspace of catalog.workspaces || []) {
+    const suffix = workspace.available
+      ? "ready"
+      : humanize(workspace.code || "unavailable");
+    const option = new Option(
+      `${workspace.branch} · ${workspace.head_commit?.slice(0, 12) || "unknown"} · ${suffix}`,
+      workspace.workspace_id,
+    );
+    option.title = `${workspace.path_display}\n${workspace.reason || "Clean linked feature worktree"}`;
+    workspaceSelect.append(option);
+  }
+  const availableWorkspaces = (catalog.workspaces || []).filter(
+    (workspace) => workspace.available,
+  );
+  if (availableWorkspaces.length === 1) {
+    workspaceSelect.value = availableWorkspaces[0].workspace_id;
+  }
+  setText(
+    "saveMappingCatalogStatus",
+    catalog.available === false
+      ? catalog.reason || "Save-mapping integration catalog is unavailable."
+      : `${(catalog.items || []).length} observation(s) · ${(catalog.workspaces || []).length} linked feature worktree(s)`,
+  );
+  renderSaveMappingSelection();
+}
+
+function renderSaveMappingSelection() {
+  const item = saveMappingCandidate();
+  const workspace = saveMappingWorkspace();
+  clearSaveMappingReview();
+  setText(
+    "saveMappingCandidateDetail",
+    item
+      ? `${item.mapping_id} · ${item.state} · ${item.reason || "Review pending"}`
+      : "Choose one durable observation.",
+  );
+  setText(
+    "saveMappingWorkspaceDetail",
+    workspace
+      ? `${workspace.path_display}\n${workspace.available ? "Eligible for review and preparation." : workspace.reason || "Unavailable."}`
+      : "Choose the feature worktree owned by this outcome.",
+  );
+  const reviewButton = byId("reviewSaveMappingProposalButton");
+  reviewButton.title = item?.review_available === false
+    ? item.review_reason || "This observation is not reviewable."
+    : "Review the exact server-generated proposal.";
+  updateSaveMappingControls();
+}
+
+function mappingProposalTargets(proposal) {
+  if (proposal?.schema_version === 2) return proposal.targets || [];
+  return proposal?.target
+    ? [{ ...proposal.target, operations: proposal.operations || [] }]
+    : [];
+}
+
+function mappingProposalRow(title, detail) {
+  const row = document.createElement("div");
+  row.className = "mapping-proposal-row";
+  const heading = document.createElement("strong");
+  const body = document.createElement("pre");
+  heading.textContent = title;
+  body.textContent = detail;
+  row.append(heading, body);
+  return row;
+}
+
+function renderSaveMappingReview(review) {
+  const container = byId("saveMappingProposal");
+  container.replaceChildren();
+  container.className = "mapping-proposal";
+  container.append(mappingProposalRow(
+    "Reviewed proposal fingerprint",
+    review.reviewed_proposal_fingerprint,
+  ));
+  container.append(mappingProposalRow(
+    "Repository snapshot",
+    `main ${review.repository?.main_commit}\ndevelop ${review.repository?.develop_commit}\nfeature ${review.workspace?.head_commit}`,
+  ));
+  for (const target of mappingProposalTargets(review.proposal)) {
+    const operations = (target.operations || []).map(
+      (operation) => `${operation.op} ${operation.path}\n${JSON.stringify(operation.value, null, 2)}`,
+    ).join("\n\n") || "Already present; no operation for this target.";
+    container.append(mappingProposalRow(
+      `${target.mapping_id} · ${target.path}`,
+      `base ${target.expected_sha256}\nstate ${target.state || "pending"}\n${operations}`,
+    ));
+  }
+  const availability = clientModel.saveMappingPrepareAvailability(
+    review,
+    byId("saveMappingCandidateSelect").value,
+    byId("saveMappingWorkspaceSelect").value,
+  );
+  setText(
+    "saveMappingPrepareStatus",
+    availability.available
+      ? "Ready to prepare tracked JSON in the selected feature worktree."
+      : availability.reason || "Preparation is unavailable.",
+  );
+  if (review.recovery_required === true) {
+    const result = byId("saveMappingResult");
+    result.replaceChildren();
+    result.hidden = false;
+    result.className = "callout warning";
+    const title = document.createElement("strong");
+    const detail = document.createElement("p");
+    title.textContent = "Interrupted preparation requires recovery";
+    detail.textContent = availability.reason
+      || "Inspect the selected feature worktree before another action.";
+    result.append(title, detail);
+  } else if (review.prepared === true && review.prepared_result == null) {
+    renderSaveMappingFailure(
+      {
+        code: "prepared_result_invalid",
+        message: "The server reported prepared state without its exact result.",
+      },
+      true,
+    );
+  } else if (review.prepared_result != null) {
+    state.saveMappingResult = review.prepared_result;
+    const presentation = renderSaveMappingResult(
+      review.prepared_result,
+      review.candidate_record_id,
+      review.workspace?.workspace_id,
+      review.reviewed_proposal_fingerprint,
+    );
+    setText(
+      "saveMappingPrepareStatus",
+      presentation.success
+        ? "Already prepared — validation, commit, and promotion remain required."
+        : presentation.detail,
+    );
+  }
+  updateSaveMappingControls();
+}
+
+function renderSaveMappingResult(
+  result,
+  candidateRecordId,
+  workspaceId,
+  reviewedProposalFingerprint,
+) {
+  const presentation = clientModel.saveMappingPreparedPresentation(
+    result,
+    candidateRecordId,
+    workspaceId,
+    reviewedProposalFingerprint,
+  );
+  const container = byId("saveMappingResult");
+  container.replaceChildren();
+  container.hidden = false;
+  container.className = `callout ${presentation.success ? "success" : "warning"}`;
+  const title = document.createElement("strong");
+  const detail = document.createElement("p");
+  title.textContent = presentation.title;
+  detail.textContent = presentation.detail;
+  container.append(title, detail);
+  if (presentation.success) {
+    container.append(mappingProposalRow(
+      "Lifecycle state",
+      `committed: ${String(result.committed)}\npromoted: ${String(result.promoted)}\nvalidation: ${result.validation_status}`,
+    ));
+    for (const target of result.targets) {
+      container.append(mappingProposalRow(
+        `${target.mapping_id} · ${target.path}`,
+        `${target.before_sha256}\n→ ${target.after_sha256}`,
+      ));
+    }
+    if (result.validation.length) {
+      container.append(mappingProposalRow(
+        "Validation still required",
+        result.validation.join("\n"),
+      ));
+    }
+    if (result.warning) {
+      container.append(mappingProposalRow("Audit warning", result.warning));
+    }
+  }
+  return presentation;
+}
+
+function renderSaveMappingFailure(error, prepareRequest) {
+  const presentation = clientModel.saveMappingFailurePresentation(
+    error,
+    prepareRequest,
+  );
+  const container = byId("saveMappingResult");
+  container.replaceChildren();
+  container.hidden = false;
+  container.className = `callout ${presentation.uncertain ? "warning" : "info"}`;
+  const title = document.createElement("strong");
+  const detail = document.createElement("p");
+  title.textContent = presentation.title;
+  detail.textContent = presentation.detail;
+  container.append(title, detail);
+  return presentation;
+}
+
+async function loadSaveMappingIntegrationCatalog() {
+  if (state.saveMappingBusy) return;
+  setSaveMappingBusy(true);
+  clearSaveMappingReview("Loading save-mapping integration catalog…");
+  try {
+    const catalog = await api("/api/v1/save-mapping-integration");
+    if (
+      catalog?.schema_version !== 1
+      || catalog?.capability !== "save_mapping_integration_v1"
+    ) {
+      const error = new Error(
+        "The server returned an incompatible save-mapping catalog.",
+      );
+      error.code = "catalog_contract_invalid";
+      throw error;
+    }
+    renderSaveMappingCatalog(catalog);
+  } catch (error) {
+    setText("saveMappingCatalogStatus", error.message);
+    clearSaveMappingReview("The catalog could not be loaded.");
+    renderSaveMappingFailure(error, false);
+    toast(error.message, true);
+  } finally {
+    setSaveMappingBusy(false);
+  }
+}
+
+async function openSaveMappingIntegration() {
+  const dialog = byId("saveMappingIntegrationDialog");
+  if (!dialog.open) dialog.showModal();
+  await loadSaveMappingIntegrationCatalog();
+}
+
+async function reviewSaveMappingProposal() {
+  if (state.saveMappingBusy) return;
+  const selection = saveMappingSelection();
+  const { candidateRecordId, workspaceId } = selection;
+  if (!candidateRecordId || !workspaceId) return;
+  setSaveMappingBusy(true);
+  clearSaveMappingReview("Reviewing exact proposal…");
+  try {
+    const review = await api("/api/v1/save-mapping-integration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "review",
+        candidate_record_id: candidateRecordId,
+        workspace_id: workspaceId,
+      }),
+    });
+    if (
+      !saveMappingSelectionStillCurrent(selection)
+      || !clientModel.saveMappingReviewIsCurrent(
+        review,
+        candidateRecordId,
+        workspaceId,
+      )
+    ) {
+      const error = new Error(
+        "The returned review does not match the current exact selection.",
+      );
+      error.code = "review_contract_invalid";
+      throw error;
+    }
+    state.saveMappingReview = review;
+    renderSaveMappingReview(review);
+  } catch (error) {
+    clearSaveMappingReview("Review unavailable. Refresh and review again.");
+    const presentation = renderSaveMappingFailure(error, false);
+    setText("saveMappingPrepareStatus", presentation.detail);
+    toast(error.message, true);
+  } finally {
+    setSaveMappingBusy(false);
+  }
+}
+
+async function prepareSaveMappingProposal() {
+  if (state.saveMappingBusy) return;
+  const review = state.saveMappingReview;
+  const selection = saveMappingSelection();
+  const { candidateRecordId, workspaceId } = selection;
+  const availability = clientModel.saveMappingPrepareAvailability(
+    review,
+    candidateRecordId,
+    workspaceId,
+  );
+  if (!availability.available) return;
+  const targets = mappingProposalTargets(review.proposal);
+  const confirmation = [
+    `Prepare this exact proposal in ${review.workspace.branch}?`,
+    review.workspace.path_display,
+    `Fingerprint: ${review.reviewed_proposal_fingerprint}`,
+    `Targets: ${targets.length}`,
+    "",
+    "This makes tracked JSON dirty in the feature worktree. It does not test, commit, merge, promote, restart anything, send device input, or change the current battle.",
+  ].join("\n");
+  if (!window.confirm(confirmation)) return;
+  setSaveMappingBusy(true);
+  try {
+    const result = await api("/api/v1/save-mapping-integration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "prepare",
+        candidate_record_id: candidateRecordId,
+        workspace_id: workspaceId,
+        reviewed_proposal_fingerprint: review.reviewed_proposal_fingerprint,
+      }),
+    });
+    if (!saveMappingSelectionStillCurrent(selection)) {
+      const error = new Error(
+        "The GUI selection changed while preparation was in flight.",
+      );
+      error.code = "selection_changed_during_prepare";
+      throw error;
+    }
+    const validation = clientModel.saveMappingPreparedResultValidation(
+      result,
+      candidateRecordId,
+      workspaceId,
+      review.reviewed_proposal_fingerprint,
+    );
+    if (!validation.valid) {
+      const error = new Error(validation.reason);
+      error.code = validation.code;
+      throw error;
+    }
+    state.saveMappingResult = result;
+    const presentation = renderSaveMappingResult(
+      result,
+      candidateRecordId,
+      workspaceId,
+      review.reviewed_proposal_fingerprint,
+    );
+    setText(
+      "saveMappingPrepareStatus",
+      presentation.detail,
+    );
+    toast("Canonical mapping prepared in the feature worktree; it is not promoted");
+    if (result.warning) toast(result.warning, true);
+    await refresh();
+  } catch (error) {
+    clearSaveMappingReview(
+      "The reviewed proposal was invalidated. Refresh and review again.",
+    );
+    const presentation = renderSaveMappingFailure(error, true);
+    setText("saveMappingPrepareStatus", presentation.detail);
+    toast(error.message, true);
+  } finally {
+    setSaveMappingBusy(false);
   }
 }
 
@@ -1249,7 +1710,13 @@ document.addEventListener("click", (event) => {
     return;
   }
   const close = event.target.closest("[data-close-dialog]");
-  if (close) byId(close.dataset.closeDialog).close();
+  if (close) {
+    if (
+      close.dataset.closeDialog === "saveMappingIntegrationDialog"
+      && state.saveMappingBusy
+    ) return;
+    byId(close.dataset.closeDialog).close();
+  }
 });
 
 byId("customPauseForm").addEventListener("submit", (event) => {
@@ -1304,6 +1771,41 @@ byId("battleRows").addEventListener("keydown", (event) => {
 });
 
 byId("authButton").addEventListener("click", showAuthDialog);
+byId("reviewSaveMappingsButton").addEventListener(
+  "click",
+  openSaveMappingIntegration,
+);
+byId("refreshSaveMappingCatalogButton").addEventListener(
+  "click",
+  loadSaveMappingIntegrationCatalog,
+);
+byId("saveMappingCandidateSelect").addEventListener(
+  "change",
+  () => {
+    if (state.saveMappingBusy) return;
+    state.saveMappingSelectionGeneration += 1;
+    renderSaveMappingSelection();
+  },
+);
+byId("saveMappingWorkspaceSelect").addEventListener(
+  "change",
+  () => {
+    if (state.saveMappingBusy) return;
+    state.saveMappingSelectionGeneration += 1;
+    renderSaveMappingSelection();
+  },
+);
+byId("saveMappingIntegrationDialog").addEventListener("cancel", (event) => {
+  if (state.saveMappingBusy) event.preventDefault();
+});
+byId("reviewSaveMappingProposalButton").addEventListener(
+  "click",
+  reviewSaveMappingProposal,
+);
+byId("prepareSaveMappingButton").addEventListener(
+  "click",
+  prepareSaveMappingProposal,
+);
 byId("configureRunButton").addEventListener("click", openRunConfiguration);
 byId("captureSetupButton").addEventListener("click", openSetupCapture);
 byId("retryCaptureButton").addEventListener("click", retrySetupCapture);

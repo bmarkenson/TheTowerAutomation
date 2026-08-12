@@ -6,12 +6,6 @@ completion evidence remains in the
 
 ## Mission rewards
 
-- [ ] Live-confirm commit `3046c93`'s outcome-specific scheduling now that it
-  is deployed: a productive reward sweep becomes eligible again after two
-  minutes, an empty sweep backs a persistent alert off for 30 minutes, and the
-  residual-badge diagnostic agrees with the restored reward hub. The guarded
-  production smoke had no remaining Mission reward badge with which to exercise
-  these natural-trigger outcomes.
 - [ ] Deploy commit `e14999c` at a safe process boundary and confirm that a
   scheduler-owned Event Mission pass uses overlapping downward viewports. The
   repaired traversal and paused one-off validation are preserved in the

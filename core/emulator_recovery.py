@@ -15,6 +15,7 @@ from typing import Any, Mapping, Optional
 EMULATOR_MAINTENANCE_SCHEMA_VERSION = 1
 EMULATOR_MAINTENANCE_ACTION = "restart_bluestacks"
 EMULATOR_HOST_ACK_TIMEOUT_SECONDS = 180
+EMULATOR_HOME_POSTCONDITION_TIMEOUT_SECONDS = 15
 EMULATOR_MAINTENANCE_STATES = frozenset(
     {"requested", "host_acknowledged", "host_restarted", "terminal"}
 )
@@ -43,6 +44,37 @@ class RecoveryUiAction(str, Enum):
     RESUME = "resume"
     END_RUN = "end_run"
     START_NEW_BATTLE = "start_new_battle"
+
+
+class RecoveryUiDispatchStatus(str, Enum):
+    """Typed disposition for one verified Welcome Back transaction."""
+
+    RESOLVED = "resolved"
+    ALREADY_RESOLVED = "already_resolved"
+    DEFERRED = "deferred"
+    INTERRUPTED = "interrupted"
+    FAILED = "failed"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True)
+class RecoveryUiDispatchOutcome:
+    status: RecoveryUiDispatchStatus
+    input_dispatched: bool = False
+    attempts: int = 0
+    final_state: str = "UNKNOWN"
+    reason: str = ""
+
+    @property
+    def dispatched(self) -> bool:
+        return self.input_dispatched
+
+    @property
+    def uncertain(self) -> bool:
+        return self.status is RecoveryUiDispatchStatus.UNCERTAIN
+
+    def __bool__(self) -> bool:
+        return self.status is RecoveryUiDispatchStatus.RESOLVED
 
 
 @dataclass(frozen=True)
@@ -261,11 +293,26 @@ def _runtime_binding(value: object) -> Optional[dict[str, Any]]:
     target = str(value.get("adb_target") or "").strip()
     try:
         pid = int(value.get("pid"))
+        target_generation = int(value.get("target_generation"))
     except (TypeError, ValueError):
         return None
-    if not runtime_id or pid <= 0 or not target or target == "unknown":
+    state_request_id = _bounded_text(value.get("state_request_id"), 96)
+    if (
+        not runtime_id
+        or pid <= 0
+        or not target
+        or target == "unknown"
+        or target_generation < 1
+        or not state_request_id
+    ):
         return None
-    return {"runtime_id": runtime_id[:96], "pid": pid, "adb_target": target[:128]}
+    return {
+        "runtime_id": runtime_id[:96],
+        "pid": pid,
+        "adb_target": target[:128],
+        "target_generation": target_generation,
+        "state_request_id": state_request_id,
+    }
 
 
 def _host_identity(value: object, *, include_new: bool) -> Optional[dict[str, Any]]:
@@ -279,12 +326,16 @@ def _host_identity(value: object, *, include_new: bool) -> Optional[dict[str, An
     except (TypeError, ValueError):
         return None
     process_started_at = _bounded_text(value.get("process_started_at"), 64)
+    executable_path = _bounded_text(value.get("executable_path"), 512)
+    instance_name = _bounded_text(value.get("instance_name"), 64)
     if (
         not host_id
         or not observed_at
         or not 1 <= adb_port <= 65535
         or process_id <= 0
         or not process_started_at
+        or not executable_path
+        or not instance_name
     ):
         return None
     result: dict[str, Any] = {
@@ -292,6 +343,8 @@ def _host_identity(value: object, *, include_new: bool) -> Optional[dict[str, An
         "adb_port": adb_port,
         "process_id": process_id,
         "process_started_at": process_started_at,
+        "executable_path": executable_path,
+        "instance_name": instance_name,
         "observed_at": observed_at,
     }
     if include_new:
@@ -349,6 +402,8 @@ __all__ = [
     "EMULATOR_MAINTENANCE_STATES",
     "EMULATOR_RECOVERY_ACK_STATES",
     "RecoveryUiAction",
+    "RecoveryUiDispatchOutcome",
+    "RecoveryUiDispatchStatus",
     "ReplayObservation",
     "RestartReplayWindow",
     "normalize_emulator_maintenance",

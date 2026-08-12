@@ -9,7 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -23,6 +23,7 @@ from core.action_authority import (
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
+    INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
     VALID_GAME_SPEED_TARGETS,
 )
 from core.development_adb_input import validate_active_lease_status
@@ -36,6 +37,7 @@ from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
 from core.gate_decisions import build_gate_decision_options
+from core.player_save_mapping_integration import SaveMappingIntegrationError
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
 
 
@@ -143,6 +145,129 @@ def _fresh_runtime_lock(root: Path, *, state: str):
     lock_handle = lock_path.open("r", encoding="utf-8")
     fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     return lock_handle
+
+
+def _fresh_exact_runtime_lock(
+    root: Path,
+    *,
+    runtime_id: str,
+    target_generation: int,
+    target: str = "localhost:5555",
+):
+    lock_path = root / "logs" / "automation-localhost_5555.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "runtime_id": runtime_id,
+                "target": target,
+                "target_generation": target_generation,
+                "state": "held",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    lock_handle = lock_path.open("r", encoding="utf-8")
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return lock_handle
+
+
+def _directive_acknowledgements(
+    control: dict[str, object],
+    *,
+    acknowledged_at: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "state": {
+            "value": control["state"],
+            "request_id": control["state_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "mode": {
+            "value": control["mode"],
+            "request_id": control["mode_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "game_speed_target": {
+            "value": f"x{control['game_speed_target']:.1f}",
+            "request_id": control["game_speed_target_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "adb_target": {
+            "value": f"localhost:{control['adb_port']}",
+            "request_id": control["adb_port_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "strategy": {
+            "value": control["strategy"],
+            "request_id": control["strategy_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+    }
+
+
+def _publish_runtime_acknowledgements(
+    root: Path,
+    *,
+    now: datetime,
+    owner: dict[str, object],
+    acknowledgements: dict[str, object],
+    runtime_active: bool = True,
+    strategy_scope: dict[str, object] | None = None,
+) -> None:
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope="ack-scope",
+        primary_state="RUNNING",
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        root / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    assert publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        runtime_active=runtime_active,
+        now=now.timestamp(),
+        acknowledgements=acknowledgements,
+        control_model={
+            "schema_version": 1,
+            "observation": {
+                "schema_version": 1,
+                "observation_id": f"{owner['runtime_id']}:1",
+                "observed_at": now.isoformat(timespec="seconds"),
+                "primary_state": "RUNNING",
+                "home_battle_control": "UNKNOWN",
+                "game_state": "active_battle",
+                "active_battle": True,
+                "activity_scope_run_id": "ack-scope",
+                "target_generation": owner.get("target_generation"),
+            },
+            "battle_lifecycle": {"active_battle_adopted": True},
+            "strategy_scope": strategy_scope
+            or {
+                "startup_default": "farm_t18",
+                "active_battle": "farm_t18",
+                "pending_next_boundary": None,
+                "pending_active_battle": None,
+            },
+        },
+    )
+
+
+def _control_with_all_request_identities(root: Path) -> dict[str, object]:
+    store = ControlDirectiveStore(root / "logs" / "automation_ctl.json")
+    store.set_state("RUNNING", source="test")
+    store.set_mode("WAIT", source="test")
+    store.set_game_speed_target(4.5, source="test")
+    store.set_adb_port(5555, source="test")
+    store.set_strategy("farm_t18", source="test")
+    return store.status()
 
 
 def _write_current_run_scope(root: Path, *, run_id: str) -> None:
@@ -302,6 +427,49 @@ def test_control_store_persists_active_battle_strategy_adoption(tmp_path):
     )
 
 
+def test_control_store_defers_only_exact_active_battle_strategy_request(tmp_path):
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    accepted = store.set_strategy(
+        "farm_t18",
+        apply_mode="active_battle",
+        source="test",
+    )
+    request_id = accepted["strategy_request_id"]
+
+    assert store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        "stale-request",
+        source="test-deferral",
+    ) is None
+    assert store.status()["strategy_apply_mode"] == "active_battle"
+
+    deferred = store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        request_id,
+        source="test-deferral",
+    )
+
+    assert deferred is not None
+    assert deferred["strategy_apply_mode"] == "next_boundary"
+    assert deferred["strategy_request_id"] == request_id
+    assert deferred["updated_by"] == "test-deferral"
+
+    replacement = store.set_strategy(
+        "farm_t19",
+        apply_mode="active_battle",
+        source="newer-request",
+    )
+    assert store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        request_id,
+    ) is None
+    assert store.status()["strategy_request_id"] == replacement[
+        "strategy_request_id"
+    ]
+    assert store.status()["strategy_apply_mode"] == "active_battle"
+
+
 def test_control_store_rejects_unknown_strategy_apply_mode(tmp_path):
     with pytest.raises(ValueError, match="Strategy apply mode"):
         ControlDirectiveStore(tmp_path / "automation_ctl.json").set_strategy(
@@ -392,12 +560,327 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
         "stale": False,
     }
     assert status["runtime"]["instances"][0]["active"]
-    assert status["acknowledgements"]["state"]["acknowledges_current"]
-    assert status["acknowledgements"]["mode"]["acknowledges_current"]
-    assert status["acknowledgements"]["game_speed_target"]["acknowledges_current"]
-    assert status["acknowledgements"]["adb_target"]["acknowledges_current"]
-    assert status["acknowledgements"]["strategy"]["value"] == "farm_t18"
-    assert status["acknowledgements"]["strategy"]["acknowledges_current"]
+    assert status["acknowledgements"] == {
+        "state": None,
+        "mode": None,
+        "game_speed_target": None,
+        "adb_target": None,
+        "strategy": None,
+    }
+
+
+def test_runtime_acknowledgements_survive_more_than_tail_window_of_log_output(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-long-log",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+    }
+    action_log = tmp_path / "logs" / "actions.log"
+    audit_prefix = "".join(
+        f"[INFO {now:%Y-%m-%d %H:%M:%S}] [CTRL] {field} acknowledged\n"
+        for field in acknowledgements
+        if field != "schema_version"
+    )
+    noisy_line = (
+        f"[DEBUG {now:%Y-%m-%d %H:%M:%S}] " + ("x" * 1024) + "\n"
+    )
+    action_log.write_text(
+        audit_prefix
+        + (noisy_line * 300)
+        + f"[STATUS {now:%Y-%m-%d %H:%M:%S}] "
+        "State=RUNNING | Wave=500 | Coins/min=1.0T\n",
+        encoding="utf-8",
+    )
+    assert action_log.stat().st_size > 262_144
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-long-log",
+        target_generation=7,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    for field in (
+        "state",
+        "mode",
+        "game_speed_target",
+        "adb_target",
+        "strategy",
+    ):
+        assert status["acknowledgements"][field]["acknowledges_current"]
+        assert status["acknowledgements"][field]["request_id"] == (
+            acknowledgements[field]["request_id"]
+        )
+    assert status["control_model"]["action_authority"]["effective"] == (
+        "enabled"
+    )
+    assert status["control_model"]["when_battle_ends"]["acknowledged"]
+    assert status["control_model"]["strategy_scope"] == {
+        "startup_default": "farm_t18",
+        "active_battle": "farm_t18",
+        "pending_next_boundary": None,
+        "pending_active_battle": None,
+        "request_id": control["strategy_request_id"],
+        "observation_only": False,
+        "degradation": None,
+    }
+
+
+def test_runtime_acknowledgements_survive_action_log_rotation(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-rotated-log",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+    }
+    action_log = tmp_path / "logs" / "actions.log"
+    action_log.write_text(
+        f"[INFO {now:%Y-%m-%d %H:%M:%S}] old acknowledgement audit\n",
+        encoding="utf-8",
+    )
+    action_log.replace(action_log.with_suffix(".log.1"))
+    action_log.write_text(
+        f"[STATUS {now:%Y-%m-%d %H:%M:%S}] "
+        "State=RUNNING | Wave=501 | Coins/min=1.1T\n",
+        encoding="utf-8",
+    )
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-rotated-log",
+        target_generation=4,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert all(
+        receipt is not None and receipt["acknowledges_current"]
+        for receipt in status["acknowledgements"].values()
+    )
+    assert status["control_model"]["actions"]["capture_current_setup"][
+        "code"
+    ] == "available"
+
+
+@pytest.mark.parametrize("legacy_strategy_receipt", (None, "farm_t19"))
+def test_authoritative_strategy_scope_wins_over_legacy_acknowledgements(
+    tmp_path,
+    legacy_strategy_receipt,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    if legacy_strategy_receipt is None:
+        acknowledgements["strategy"] = None
+    else:
+        acknowledgements["strategy"] = {
+            "value": legacy_strategy_receipt,
+            "request_id": control["strategy_request_id"],
+            "acknowledged_at": now.isoformat(timespec="seconds"),
+        }
+    owner = {
+        "runtime_id": "runtime-strategy-scope",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 6,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-strategy-scope",
+        target_generation=6,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+        strategy_scope={
+            "startup_default": "farm_t19_ad_assist",
+            "active_battle": "farm_t19_ad_assist",
+            "pending_next_boundary": None,
+            "pending_active_battle": None,
+        },
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert status["acknowledgements"]["strategy"] is None or not status[
+        "acknowledgements"
+    ]["strategy"]["acknowledges_current"]
+    assert status["control_model"]["strategy_scope"] == {
+        "startup_default": "farm_t19_ad_assist",
+        "active_battle": "farm_t19_ad_assist",
+        "pending_next_boundary": None,
+        "pending_active_battle": None,
+        "request_id": control["strategy_request_id"],
+        "observation_only": False,
+        "degradation": None,
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "runtime_id",
+        "pid",
+        "adb_target",
+        "target_generation",
+        "age_seconds",
+    ),
+    (
+        ("prior-runtime", os.getpid(), "localhost:5555", 9, 0),
+        ("current-runtime", os.getpid() + 1000, "localhost:5555", 9, 0),
+        ("current-runtime", os.getpid(), "localhost:5565", 9, 0),
+        ("current-runtime", os.getpid(), "localhost:5555", 8, 0),
+        ("current-runtime", os.getpid(), "localhost:5555", 9, 31),
+    ),
+)
+def test_runtime_acknowledgements_reject_stale_or_wrong_runtime_owner(
+    tmp_path,
+    runtime_id,
+    pid,
+    adb_target,
+    target_generation,
+    age_seconds,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="current-runtime",
+        target_generation=9,
+    )
+    published_at = now - timedelta(seconds=age_seconds)
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=published_at,
+        owner={
+            "runtime_id": runtime_id,
+            "pid": pid,
+            "adb_target": adb_target,
+            "target_generation": target_generation,
+        },
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert all(
+        receipt is None for receipt in status["acknowledgements"].values()
+    )
+    assert status["control_model"]["action_authority"]["effective"] in {
+        "pending",
+        "unknown",
+    }
+
+
+def test_same_value_request_stays_pending_until_exact_request_id_replaces_ack(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    store = ControlDirectiveStore(tmp_path / "logs" / "automation_ctl.json")
+    first = store.set_state("RUNNING", source="first")
+    store.set_mode("WAIT", source="test")
+    store.set_game_speed_target(4.5, source="test")
+    store.set_adb_port(5555, source="test")
+    store.set_strategy("farm_t18", source="test")
+    first_control = store.status()
+    acknowledgements = _directive_acknowledgements(
+        first_control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-request-replacement",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 12,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-request-replacement",
+        target_generation=12,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    second = store.set_state("RUNNING", source="replacement")
+    try:
+        pending = _service(tmp_path).status(now=now.timestamp())
+        assert pending["acknowledgements"]["state"]["request_id"] == (
+            first["state_request_id"]
+        )
+        assert not pending["acknowledgements"]["state"][
+            "acknowledges_current"
+        ]
+        assert pending["control_model"]["action_authority"]["effective"] == (
+            "pending"
+        )
+
+        acknowledgements["state"] = {
+            "value": "RUNNING",
+            "request_id": second["state_request_id"],
+            "acknowledged_at": now.isoformat(timespec="seconds"),
+        }
+        _publish_runtime_acknowledgements(
+            tmp_path,
+            now=now,
+            owner=owner,
+            acknowledgements=acknowledgements,
+        )
+        current = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert current["acknowledgements"]["state"]["request_id"] == (
+        second["state_request_id"]
+    )
+    assert current["acknowledgements"]["state"]["acknowledges_current"]
+    assert current["control_model"]["action_authority"]["effective"] == (
+        "enabled"
+    )
 
 
 def test_status_exposes_scope_bound_current_save_perks(tmp_path):
@@ -468,6 +951,219 @@ def test_status_exposes_local_mapping_lifecycle_without_blocking_health(tmp_path
     assert status["confirmed_local_mappings"] == mapping_status
     assert status["healthy"]
     assert not status["confirmed_local_mappings"]["blocks_startup"]
+
+
+def test_save_mapping_integration_catalog_and_review_are_non_mutating(tmp_path):
+    service = _service(tmp_path)
+    catalog = {
+        "schema_version": 1,
+        "capability": "save_mapping_integration_v1",
+        "available": True,
+        "reason": "",
+        "repository": {},
+        "workspaces": [],
+        "items": [],
+    }
+    review = {
+        "operation": "review",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "workspace": {"workspace_id": "c" * 64},
+        "proposal": {"schema_version": 2, "targets": []},
+        "prepare": {"available": False, "code": "workspace_dirty", "reason": "dirty"},
+        "prepared": False,
+    }
+    service.save_mapping_integration_manager.catalog = Mock(return_value=catalog)
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+
+    assert service.save_mapping_integration() == catalog
+    assert service.apply_save_mapping_integration(
+        {
+            "operation": "review",
+            "candidate_record_id": "a" * 64,
+            "workspace_id": "c" * 64,
+        }
+    ) == review
+    service.save_mapping_integration_manager.review.assert_called_once_with(
+        candidate_record_id="a" * 64,
+        workspace_id="c" * 64,
+    )
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_prepare_requires_exact_review_and_logs_one_pair(tmp_path):
+    service = _service(tmp_path)
+    review = {
+        "operation": "review",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "workspace": {
+            "workspace_id": "c" * 64,
+            "branch": "feature/mapping-test",
+        },
+        "proposal": {
+            "schema_version": 2,
+            "targets": [{"path": "one.json"}, {"path": "two.json"}],
+        },
+        "prepare": {"available": True, "code": "", "reason": ""},
+        "prepared": False,
+    }
+    prepared = {
+        "operation": "prepare",
+        "disposition": "prepared",
+        "committed": False,
+        "promoted": False,
+        "validation_status": "pending",
+    }
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+    service.save_mapping_integration_manager.prepare = Mock(return_value=prepared)
+
+    result = service.apply_save_mapping_integration(
+        {
+            "operation": "prepare",
+            "candidate_record_id": "a" * 64,
+            "workspace_id": "c" * 64,
+            "reviewed_proposal_fingerprint": "b" * 64,
+        }
+    )
+
+    assert result == prepared
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    assert activity.count("[ACTION ") == 1
+    assert activity.count("[RESULT ") == 1
+    operation_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if "[OPERATION] id=" in line
+    ]
+    assert len(set(operation_ids)) == 1
+    assert operation_ids[0].startswith(
+        "save-mapping-aaaaaaaaaaaa-bbbbbbbbbbbb-"
+    )
+    assert len(operation_ids[0].rsplit("-", 1)[1]) == 12
+    assert "committed=false promoted=false validation=pending" in activity
+
+
+def test_save_mapping_prepare_attempts_have_unique_audit_identities(tmp_path):
+    service = _service(tmp_path)
+    review = {
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "workspace": {"branch": "feature/mapping-test"},
+        "proposal": {"schema_version": 2, "targets": [{"path": "one.json"}]},
+        "prepare": {"available": True, "code": "", "reason": ""},
+        "prepared": False,
+        "prepared_result": None,
+    }
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+    service.save_mapping_integration_manager.prepare = Mock(
+        side_effect=SaveMappingIntegrationError(
+            "commit_state_uncertain",
+            "Inspect the selected feature worktree.",
+        )
+    )
+    request = {
+        "operation": "prepare",
+        "candidate_record_id": "a" * 64,
+        "workspace_id": "c" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+    }
+
+    for _ in range(2):
+        with pytest.raises(ControlSurfaceRequestError) as failure:
+            service.apply_save_mapping_integration(request)
+        assert failure.value.status == 503
+        assert failure.value.code == "commit_state_uncertain"
+
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    action_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if line.startswith("[ACTION ")
+    ]
+    result_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if line.startswith("[RESULT ")
+    ]
+    assert len(action_ids) == 2
+    assert len(set(action_ids)) == 2
+    assert sorted(action_ids) == sorted(result_ids)
+    assert activity.count("disposition=unconfirmed code=commit_state_uncertain") == 2
+
+
+def test_save_mapping_exact_prepared_review_reopens_without_new_audit(tmp_path):
+    service = _service(tmp_path)
+    prepared = {
+        "operation": "prepare",
+        "disposition": "prepared",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+    }
+    service.save_mapping_integration_manager.review = Mock(
+        return_value={
+            "reviewed_proposal_fingerprint": "b" * 64,
+            "prepared": True,
+            "prepared_result": prepared,
+            "prepare": {
+                "available": False,
+                "code": "already_prepared",
+                "reason": "Already prepared.",
+            },
+        }
+    )
+    service.save_mapping_integration_manager.prepare = Mock()
+
+    result = service.apply_save_mapping_integration(
+        {
+            "operation": "prepare",
+            "candidate_record_id": "a" * 64,
+            "workspace_id": "c" * 64,
+            "reviewed_proposal_fingerprint": "b" * 64,
+        }
+    )
+
+    assert result == prepared
+    service.save_mapping_integration_manager.prepare.assert_not_called()
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_prepare_rejects_stale_fingerprint_without_audit(tmp_path):
+    service = _service(tmp_path)
+    service.save_mapping_integration_manager.review = Mock(
+        return_value={
+            "reviewed_proposal_fingerprint": "b" * 64,
+            "prepared": False,
+            "prepare": {"available": True, "code": "", "reason": ""},
+        }
+    )
+
+    with pytest.raises(ControlSurfaceRequestError) as failure:
+        service.apply_save_mapping_integration(
+            {
+                "operation": "prepare",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "c" * 64,
+                "reviewed_proposal_fingerprint": "d" * 64,
+            }
+        )
+
+    assert failure.value.status == 409
+    assert failure.value.code == "reviewed_proposal_stale"
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_integration_requests_are_exact_shape(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ControlSurfaceRequestError, match="accepts exactly"):
+        service.apply_save_mapping_integration(
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+                "path": "/client/supplied/path",
+            }
+        )
 
 
 def test_status_never_exposes_perks_from_another_run(tmp_path):
@@ -554,8 +1250,10 @@ def test_status_serializes_fresh_runtime_owned_strategy_gate(tmp_path):
         authority.snapshot(now=now.timestamp()),
         now=now.timestamp(),
     )
+    service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
-        status = _service(tmp_path).status(now=now.timestamp())
+        status = service.status(now=now.timestamp())
     finally:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
         lock_handle.close()
@@ -735,11 +1433,21 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
         "runtime_id": "runtime-emulator-recovery",
         "pid": os.getpid(),
         "adb_target": "localhost:5555",
+        "target_generation": 11,
     }
-    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id=owner["runtime_id"],
+        target_generation=owner["target_generation"],
+    )
     _write_current_run_scope(tmp_path, run_id=run_id)
     service = _service(tmp_path)
     service.control_store.set_strategy("farm_t18", source="test")
+    control = service.control_store.set_state("RUNNING", source="test")
+    bound_runtime = {
+        **owner,
+        "state_request_id": control["state_request_id"],
+    }
     authority = RuntimeActionAuthority()
     authority.update_context(
         global_pause=False,
@@ -793,7 +1501,7 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
         assert detector.call_args.kwargs["current_strategy"] == "farm_t18"
         maintenance = requested["host_maintenance"]["request"]
         assert maintenance["state"] == "requested"
-        assert maintenance["runtime"] == owner
+        assert maintenance["runtime"] == bound_runtime
         assert maintenance["battle_scope"] == run_id
         request_id = maintenance["request_id"]
 
@@ -813,7 +1521,7 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
             "schema_version": 1,
             "request_id": request_id,
             "state": "host_restart_authorized",
-            "runtime": owner,
+            "runtime": bound_runtime,
             "battle_scope": run_id,
             "high_water_wave": 2_000,
             "intro_sprint_active": False,
@@ -876,6 +1584,8 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
             "adb_port": 5555,
             "process_id": 90,
             "process_started_at": "2026-08-10T10:00:00+00:00",
+            "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            "instance_name": "Nougat32",
         }
         acknowledged = service.apply_host_maintenance(
             ack_payload,
@@ -901,6 +1611,8 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
             "process_started_at": "2026-08-10T10:04:00+00:00",
             "previous_process_id": 90,
             "previous_process_started_at": "2026-08-10T10:00:00+00:00",
+            "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            "instance_name": "Nougat32",
         }
         completed = service.apply_host_maintenance(
             completion_payload,
@@ -930,6 +1642,52 @@ def test_host_maintenance_request_rejects_an_unready_detector(tmp_path):
     assert rejected.value.code == "emulator_degradation_not_ready"
 
 
+def test_host_failure_cannot_release_an_acknowledged_restart(tmp_path):
+    service = _service(tmp_path)
+    enabled = service.control_store.set_state("RUNNING", source="test")
+    request = service.control_store.request_emulator_maintenance(
+        reason="confirmed degradation",
+        source="test",
+        runtime={
+            "runtime_id": "runtime-1",
+            "pid": os.getpid(),
+            "adb_target": "localhost:5555",
+            "target_generation": 3,
+            "state_request_id": enabled["state_request_id"],
+        },
+        battle_scope="run-1",
+    )
+    service.control_store.acknowledge_emulator_maintenance_host(
+        request["request_id"],
+        host_ack={
+            "host_id": "WINDOWS-HOST",
+            "adb_port": 5555,
+            "process_id": 90,
+            "process_started_at": "2026-08-10T10:00:00+00:00",
+            "executable_path": (
+                r"C:\Program Files\BlueStacks_nxt\HD-Player.exe"
+            ),
+            "instance_name": "Nougat32",
+            "observed_at": "2026-08-10T10:01:00+00:00",
+        },
+    )
+
+    with pytest.raises(ControlSurfaceRequestError) as rejected:
+        service.apply_host_maintenance(
+            {
+                "operation": "fail",
+                "request_id": request["request_id"],
+                "reason": "Windows result uncertain",
+            }
+        )
+
+    assert rejected.value.status == 409
+    assert rejected.value.code == "maintenance_reconciliation_required"
+    assert service.control_store.status()["emulator_maintenance"]["state"] == (
+        "host_acknowledged"
+    )
+
+
 def test_interactive_development_status_separates_request_and_fresh_ack(
     tmp_path,
 ):
@@ -957,6 +1715,7 @@ def test_interactive_development_status_separates_request_and_fresh_ack(
         now=now.timestamp(),
     )
     service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
         requested = service.apply_interactive_development_lease(
             {
@@ -967,6 +1726,9 @@ def test_interactive_development_status_separates_request_and_fresh_ack(
         )
         lease = requested["interactive_development_lease"]["request"]
         assert lease["runtime"] == owner
+        assert lease["expires_at"] == (
+            now + timedelta(seconds=INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS)
+        ).isoformat(timespec="seconds")
         assert lease["starting_evidence"] == {
             "screen_state": "RUNNING",
             "battle_active": True,
@@ -1097,6 +1859,7 @@ def test_interactive_development_heartbeat_rejects_stale_or_wrong_lease(
     )
     publisher.publish(authority.snapshot(), now=now.timestamp())
     service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
         response = service.apply_interactive_development_lease(
             {"operation": "request", "owner_label": "heartbeat test"},
@@ -1149,9 +1912,11 @@ def test_http_interactive_development_endpoint_returns_busy_and_id_errors(
         },
     )
     publisher.publish(authority.snapshot(), now=now.timestamp())
+    service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     server = ControlSurfaceHTTPServer(
         ("127.0.0.1", 0),
-        service=_service(tmp_path),
+        service=service,
         static_dir=STATIC_DIR,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1330,8 +2095,10 @@ def test_runtime_evidence_exposes_clean_release_metadata(tmp_path):
             "pid": None,
             "pid_alive": None,
             "released_at": released_at,
+            "runtime_id": None,
             "started_at": None,
             "target": "localhost:5555",
+            "target_generation": None,
         }
     ]
 
@@ -1714,17 +2481,27 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 35" in native_compatibility
+    assert "MinimumServerRevision = 39" in native_compatibility
     assert '"bluestacks_maintenance_v1"' in native_compatibility
+    assert '"strategy_aware_attach_v1"' in native_compatibility
     assert '"confirmed_local_mapping_status_v1"' in native_compatibility
     assert "confirmed_local_mapping_status_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_review_status_v1"' in native_compatibility
     assert "save_mapping_review_status_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_integration_v1"' in native_compatibility
+    assert "save_mapping_integration_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'id="confirmedLocalMappingAlert"' in html
     assert 'x:Name="ConfirmedLocalMappingBanner"' in native_xaml
     assert 'JsonPropertyName("confirmed_local_mappings")' in native_models
+    assert 'x:Name="ReviewSaveMappingsButton"' in native_xaml
+    assert 'Header="Save mapping integration…"' in native_xaml
     assert "RenderConfirmedLocalMappings(status.ConfirmedLocalMappings)" in native_code
     assert '"better_control_model_v2"' in native_compatibility
+    assert '"runtime_control_acknowledgements_v1"' in native_compatibility
+    assert "ResolveStrategyScope(" in native_compatibility
+    assert (
+        "ControlSurfaceCompatibility.ResolveStrategyScope(" in native_code
+    )
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"current_battle_perks_v1"' in native_compatibility
@@ -1765,6 +2542,11 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
+    assert '"host_performance_process_attribution_v1"' in native_compatibility
+    assert (
+        "host_performance_process_attribution_v1"
+        in CONTROL_SURFACE_CAPABILITIES
+    )
     assert '"automatic_battle_attachment"' not in native_compatibility
 
 
@@ -1959,6 +2741,9 @@ def test_native_strategy_selection_auto_queues_and_retains_failed_intent():
     assert 'Content="Save startup default"' in native_xaml
     assert 'Content="Switch this battle"' in native_xaml
     assert '"Retry next battle"' in native_code
+    assert "private bool _strategyDegradedObserver;" in native_code
+    assert "&& !_strategyDegradedObserver" in native_code
+    assert "This attached battle must remain a degraded observer" in native_code
     assert "QueueStrategyButton.Visibility = !_strategyProcessActive" in native_code
     assert "private async void StrategySelectionBox_SelectionChanged" in native_code
     assert "if (_updatingStrategySelection)" in native_code
@@ -2231,6 +3016,110 @@ assert.strictEqual(
   model.confirmedLocalMappingPresentation(undefined).visible,
   true,
 );
+const mappingReview = {{
+  schema_version: 1,
+  capability: 'save_mapping_integration_v1',
+  operation: 'review',
+  candidate_record_id: 'a'.repeat(64),
+  reviewed_proposal_fingerprint: 'c'.repeat(64),
+  workspace: {{workspace_id: 'b'.repeat(64)}},
+  prepare: {{available: true, code: '', reason: ''}},
+}};
+assert.strictEqual(
+  model.saveMappingReviewIsCurrent(
+    mappingReview,
+    'a'.repeat(64),
+    'b'.repeat(64),
+  ),
+  true,
+);
+assert.strictEqual(
+  model.saveMappingPrepareAvailability(
+    mappingReview,
+    'a'.repeat(64),
+    'b'.repeat(64),
+  ).available,
+  true,
+);
+assert.strictEqual(
+  model.saveMappingPrepareAvailability(
+    mappingReview,
+    'changed',
+    'b'.repeat(64),
+  ).code,
+  'review_stale',
+);
+assert.strictEqual(model.saveMappingIntegrationCompatible({{
+  api_version: 1,
+  server_revision: 35,
+  capabilities: ['save_mapping_integration_v1'],
+}}), true);
+assert.strictEqual(model.saveMappingIntegrationCompatible({{
+  api_version: 1,
+  server_revision: 34,
+  capabilities: ['save_mapping_integration_v1'],
+}}), false);
+const preparedResult = {{
+  schema_version: 1,
+  capability: 'save_mapping_integration_v1',
+  operation: 'prepare',
+  disposition: 'prepared',
+  idempotent: false,
+  candidate_record_id: 'a'.repeat(64),
+  reviewed_proposal_fingerprint: 'c'.repeat(64),
+  workspace: {{workspace_id: 'b'.repeat(64)}},
+  committed: false,
+  promoted: false,
+  validation_status: 'pending',
+  targets: [{{
+    path: 'config/player_save_versions/data.json',
+    mapping_id: 'data-9-game-1101',
+    before_sha256: 'd'.repeat(64),
+    after_sha256: 'e'.repeat(64),
+    changed: true,
+  }}],
+  validation: ['checkpoint'],
+}};
+assert.strictEqual(model.saveMappingPreparedResultValidation(
+  preparedResult,
+  'a'.repeat(64),
+  'b'.repeat(64),
+  'c'.repeat(64),
+).valid, true);
+assert.match(
+  model.saveMappingPreparedPresentation(
+    preparedResult,
+    'a'.repeat(64),
+    'b'.repeat(64),
+    'c'.repeat(64),
+  ).detail,
+  /Validation, commit, and promotion remain required/,
+);
+for (const invalid of [
+  {{...preparedResult, candidate_record_id: 'f'.repeat(64)}},
+  {{...preparedResult, committed: true}},
+  {{...preparedResult, validation_status: 'passed'}},
+  {{...preparedResult, targets: [{{...preparedResult.targets[0], after_sha256: 'bad'}}]}},
+]) {{
+  assert.strictEqual(model.saveMappingPreparedResultValidation(
+    invalid,
+    'a'.repeat(64),
+    'b'.repeat(64),
+    'c'.repeat(64),
+  ).valid, false);
+}}
+assert.strictEqual(model.saveMappingFailurePresentation({{
+  code: 'workspace_dirty', message: 'dirty',
+}}).uncertain, false);
+assert.strictEqual(model.saveMappingFailurePresentation({{
+  code: 'commit_state_uncertain', message: 'inspect',
+}}).uncertain, true);
+const rolledBack = model.saveMappingFailurePresentation({{
+  code: 'mapping_prepare_write_failed', message: 'Targets were restored.',
+}});
+assert.strictEqual(rolledBack.uncertain, false);
+assert.match(rolledBack.detail, /No prepared changes/);
+assert.doesNotMatch(rolledBack.detail, /Nothing was written/);
 """
     completed = subprocess.run(
         ["node", "-e", script],
@@ -2245,6 +3134,19 @@ assert.strictEqual(
     assert 'openAction !== "request"' in browser
     assert "async function retrySetupCapture()" in browser
     assert 'id="retryCaptureButton"' in html
+    assert 'id="reviewSaveMappingsButton"' in html
+    assert 'id="saveMappingIntegrationDialog"' in html
+    assert 'id="saveMappingWorkspaceSelect"' in html
+    assert "reviewed_proposal_fingerprint" in browser
+    assert "Prepare reviewed change in feature worktree" in html
+    assert "does not test, commit, merge, promote" in browser
+    assert "saveMappingPreparedResultValidation" in browser
+    assert "saveMappingSelectionStillCurrent" in browser
+    assert "Interrupted preparation requires recovery" in browser
+    assert 'byId("saveMappingCandidateSelect").disabled = busy' in browser
+    assert 'byId("saveMappingWorkspaceSelect").disabled = busy' in browser
+    assert "state.saveMappingResult != null" in browser
+    assert 'addEventListener("cancel"' in browser
 
 
 def test_native_incompatible_api_has_prominent_start_mitigation():
@@ -2549,6 +3451,7 @@ def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):
     )
     assert defaults["control"]["startup_gate_waivers"] == {}
 
+    service.control_store.set_state("RUNNING", source="test")
     with patch.object(
         service,
         "_runtime_evidence",
@@ -2961,6 +3864,95 @@ def test_http_setup_capture_routes_include_durable_draft_reopen(
             "accepted": True,
             "operation": "request",
         }
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def test_http_save_mapping_integration_routes_catalog_review_and_prepare(
+    tmp_path,
+    monkeypatch,
+):
+    service = _service(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        service,
+        "save_mapping_integration",
+        lambda: {
+            "schema_version": 1,
+            "capability": "save_mapping_integration_v1",
+            "available": True,
+            "workspaces": [],
+            "items": [],
+        },
+    )
+
+    def apply(payload):
+        calls.append(payload)
+        return {"operation": payload["operation"], "accepted": True}
+
+    monkeypatch.setattr(service, "apply_save_mapping_integration", apply)
+    server = ControlSurfaceHTTPServer(
+        ("127.0.0.1", 0),
+        service=service,
+        static_dir=STATIC_DIR,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_port,
+        timeout=3,
+    )
+    try:
+        connection.request("GET", "/api/v1/save-mapping-integration")
+        response = connection.getresponse()
+        catalog = json.loads(response.read())
+        assert response.status == 200
+        assert catalog["capability"] == "save_mapping_integration_v1"
+
+        for payload in (
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+            },
+            {
+                "operation": "prepare",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+                "reviewed_proposal_fingerprint": "c" * 64,
+            },
+        ):
+            body = json.dumps(payload)
+            connection.request(
+                "POST",
+                "/api/v1/save-mapping-integration",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = connection.getresponse()
+            result = json.loads(response.read())
+            assert response.status == 200
+            assert result == {"operation": payload["operation"], "accepted": True}
+        assert calls == [
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+            },
+            {
+                "operation": "prepare",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+                "reviewed_proposal_fingerprint": "c" * 64,
+            },
+        ]
     finally:
         connection.close()
         server.shutdown()

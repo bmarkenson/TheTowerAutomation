@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pytest
 
 from core.control_directives import ControlDirectiveStore
 from core.app import App
@@ -18,10 +19,14 @@ from core.emulator_degradation import (
     load_comparable_battles,
 )
 from core.emulator_recovery import (
+    EMULATOR_HOME_POSTCONDITION_TIMEOUT_SECONDS,
+    RecoveryUiDispatchOutcome,
+    RecoveryUiDispatchStatus,
     RestartReplayWindow,
     normalize_emulator_maintenance,
     normalize_runtime_recovery_ack,
 )
+from core.runtime_failure_policy import RuntimeFailureKind
 from handlers.game_restarted_handler import (
     GameRestartedAction,
     handle_game_restarted,
@@ -33,6 +38,8 @@ RUNTIME = {
     "runtime_id": "runtime-recovery",
     "pid": 1234,
     "adb_target": "localhost:5555",
+    "target_generation": 7,
+    "state_request_id": "state-enable-1",
 }
 
 
@@ -100,10 +107,15 @@ def test_replay_without_trusted_wave_finishes_on_first_fresh_running_wave():
 
 def test_emulator_maintenance_directive_lifecycle_is_idempotent(tmp_path):
     store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    control = store.set_state("RUNNING", source="test")
+    runtime = {
+        **RUNTIME,
+        "state_request_id": control["state_request_id"],
+    }
     request = store.request_emulator_maintenance(
         reason="confirmed degradation",
         source="test",
-        runtime=RUNTIME,
+        runtime=runtime,
         battle_scope="run-1",
         trigger={"candidate_cph_ratio": 0.88},
         now=1_000.0,
@@ -116,6 +128,8 @@ def test_emulator_maintenance_directive_lifecycle_is_idempotent(tmp_path):
         "adb_port": 5555,
         "process_id": 90,
         "process_started_at": "2026-08-10T10:00:00+00:00",
+        "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+        "instance_name": "Nougat32",
         "observed_at": "2026-08-10T10:01:00+00:00",
     }
     acknowledged = store.acknowledge_emulator_maintenance_host(
@@ -133,6 +147,17 @@ def test_emulator_maintenance_directive_lifecycle_is_idempotent(tmp_path):
     )
     assert repeated_ack == acknowledged
 
+    with pytest.raises(ValueError, match="must prove a new process"):
+        store.complete_emulator_maintenance_host(
+            request["request_id"],
+            host_completion={
+                **host_ack,
+                "previous_process_id": host_ack["process_id"],
+                "previous_process_started_at": host_ack["process_started_at"],
+            },
+            now=1_002.5,
+        )
+
     completion = {
         "host_id": "WINDOWS-HOST",
         "adb_port": 5555,
@@ -140,6 +165,8 @@ def test_emulator_maintenance_directive_lifecycle_is_idempotent(tmp_path):
         "process_started_at": "2026-08-10T10:03:00+00:00",
         "previous_process_id": 90,
         "previous_process_started_at": "2026-08-10T10:00:00+00:00",
+        "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+        "instance_name": "Nougat32",
         "observed_at": "2026-08-10T10:03:05+00:00",
     }
     restarted = store.complete_emulator_maintenance_host(
@@ -173,6 +200,65 @@ def test_emulator_maintenance_directive_lifecycle_is_idempotent(tmp_path):
         source="test-runtime",
         now=1_006.0,
     ) == terminal
+
+
+def test_pause_wins_before_host_ack_but_ack_before_pause_is_durable(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    enabled = store.set_state("RUNNING", source="test")
+    runtime = {
+        **RUNTIME,
+        "state_request_id": enabled["state_request_id"],
+    }
+    request = store.request_emulator_maintenance(
+        reason="confirmed degradation",
+        source="test",
+        runtime=runtime,
+        battle_scope="run-1",
+    )
+    host_ack = {
+        "host_id": "WINDOWS-HOST",
+        "adb_port": 5555,
+        "process_id": 90,
+        "process_started_at": "2026-08-10T10:00:00+00:00",
+        "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+        "instance_name": "Nougat32",
+        "observed_at": "2026-08-10T10:01:00+00:00",
+    }
+
+    store.set_state("PAUSED", source="test")
+    with pytest.raises(ValueError, match="Enabled control boundary"):
+        store.acknowledge_emulator_maintenance_host(
+            request["request_id"],
+            host_ack=host_ack,
+        )
+
+    enabled = store.set_state("RUNNING", source="test")
+    replacement_request = store.finish_emulator_maintenance(
+        request["request_id"],
+        disposition="cancelled",
+        reason="test boundary",
+        source="test",
+    )
+    assert replacement_request["state"] == "terminal"
+    request = store.request_emulator_maintenance(
+        reason="confirmed degradation",
+        source="test",
+        runtime={
+            **RUNTIME,
+            "state_request_id": enabled["state_request_id"],
+        },
+        battle_scope="run-2",
+    )
+    acknowledged = store.acknowledge_emulator_maintenance_host(
+        request["request_id"],
+        host_ack=host_ack,
+    )
+    store.set_state("PAUSED", source="test")
+
+    assert acknowledged["state"] == "host_acknowledged"
+    assert store.status()["emulator_maintenance"]["state"] == (
+        "host_acknowledged"
+    )
 
 
 def test_maintenance_and_runtime_ack_require_exact_runtime_and_scope():
@@ -216,11 +302,15 @@ def test_maintenance_and_runtime_ack_require_exact_runtime_and_scope():
 
 
 def test_game_restarted_handler_dispatches_only_from_fresh_modal_evidence():
-    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    frame = np.full((1920, 1080, 3), 255, dtype=np.uint8)
     with (
         patch(
             "handlers.game_restarted_handler.detect_state_and_overlays",
-            return_value={"state": "GAME_RESTARTED"},
+            side_effect=(
+                {"state": "GAME_RESTARTED"},
+                {"state": "GAME_RESTARTED"},
+                {"state": "HOME_SCREEN"},
+            ),
         ),
         patch(
             "handlers.game_restarted_handler.safe_tap",
@@ -231,6 +321,8 @@ def test_game_restarted_handler_dispatches_only_from_fresh_modal_evidence():
             frame,
             action=GameRestartedAction.RESUME,
             action_guard_fn=lambda: True,
+            capture_fn=lambda: frame,
+            poll_interval_s=0,
         )
     assert tap.call_args.args == ("buttons.resume_game:game_restarted",)
     assert tap.call_args.kwargs["dispatch"] == "now"
@@ -426,6 +518,7 @@ def test_runtime_installs_recovery_hold_and_captures_pre_restart_wave():
     app._supervisor = SimpleNamespace(
         emulator_maintenance=maintenance,
         current_exclusive_validation_owner=lambda: dict(RUNTIME),
+        control_request_identity={"state_request_id": "state-enable-1"},
         finish_emulator_maintenance=Mock(),
     )
     app._last_wave_value = 1_234
@@ -462,6 +555,7 @@ def test_unacknowledged_host_request_expires_before_any_host_mutation():
     app._supervisor = SimpleNamespace(
         emulator_maintenance=maintenance,
         current_exclusive_validation_owner=lambda: dict(RUNTIME),
+        control_request_identity={"state_request_id": "state-enable-1"},
     )
     app._current_run_scope_id = lambda: "run-1"
     app._finish_emulator_recovery = Mock(return_value=True)
@@ -488,6 +582,7 @@ def test_request_is_cancelled_if_battle_changes_before_host_acknowledgement():
     app._supervisor = SimpleNamespace(
         emulator_maintenance=maintenance,
         current_exclusive_validation_owner=lambda: dict(RUNTIME),
+        control_request_identity={"state_request_id": "state-enable-1"},
     )
     app._current_run_scope_id = lambda: "replacement-run"
     app._finish_emulator_recovery = Mock(return_value=True)
@@ -512,6 +607,7 @@ def _recovery_app() -> App:
         emulator_maintenance=maintenance,
         control_state="RUNNING",
         current_exclusive_validation_owner=lambda: dict(RUNTIME),
+        control_request_identity={"state_request_id": "state-enable-1"},
     )
     app._emulator_maintenance_hold_active = True
     app._emulator_replay_window = RestartReplayWindow(
@@ -520,12 +616,15 @@ def _recovery_app() -> App:
         battle_scope="run-1",
     )
     app._emulator_recovery_resume_attempts = 0
+    app._emulator_recovery_home_attempts = 0
+    app._emulator_recovery_home_dispatch = None
     app._emulator_recovery_next_action_at = 0.0
     app._emulator_recovery_force_new_battle = False
     app._sync_emulator_maintenance_control_boundary = Mock()
     app._update_action_authority = Mock()
     app._publish_action_authority = Mock()
     app._runtime_action_guard = Mock(return_value=True)
+    app._capture_frame = Mock()
     app._set_emulator_recovery_ack = Mock()
     app._last_wave_value = 100
     app._last_wave_conf = 90.0
@@ -536,9 +635,19 @@ def _recovery_app() -> App:
 def test_runtime_resumes_welcome_back_then_falls_back_to_end_run():
     app = _recovery_app()
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    resolved = RecoveryUiDispatchOutcome(
+        RecoveryUiDispatchStatus.RESOLVED,
+        input_dispatched=True,
+        attempts=1,
+        final_state="RUNNING",
+        reason="cleared",
+    )
     with (
         patch("core.app.time.monotonic", return_value=100.0),
-        patch("core.app.handle_game_restarted", return_value=True) as handler,
+        patch(
+            "core.app.handle_game_restarted",
+            return_value=resolved,
+        ) as handler,
     ):
         assert app._advance_emulator_recovery(
             {"state": "GAME_RESTARTED"},
@@ -548,12 +657,25 @@ def test_runtime_resumes_welcome_back_then_falls_back_to_end_run():
     assert app._emulator_replay_window.resume_dispatched is True
     assert app._emulator_recovery_resume_attempts == 1
 
-    app._emulator_recovery_resume_attempts = 3
-    app._emulator_recovery_next_action_at = 0.0
+    app = _recovery_app()
+    failed = RecoveryUiDispatchOutcome(
+        RecoveryUiDispatchStatus.FAILED,
+        input_dispatched=True,
+        attempts=2,
+        final_state="GAME_RESTARTED",
+        reason="persisted",
+    )
     with (
         patch("core.app.time.monotonic", return_value=200.0),
-        patch("core.app.handle_game_restarted", return_value=True) as handler,
+        patch(
+            "core.app.handle_game_restarted",
+            side_effect=(failed, resolved),
+        ) as handler,
     ):
+        assert app._advance_emulator_recovery(
+            {"state": "GAME_RESTARTED"},
+            frame,
+        )
         assert app._advance_emulator_recovery(
             {"state": "GAME_RESTARTED"},
             frame,
@@ -588,6 +710,11 @@ def test_runtime_suppresses_replay_frames_until_high_water_is_reached():
 def test_fallback_recovery_releases_only_after_new_battle_is_running():
     app = _recovery_app()
     app._emulator_recovery_force_new_battle = True
+    app._emulator_recovery_home_dispatch = {
+        "request_id": REQUEST_ID,
+        "control": HomeBattleControl.NEW_BATTLE.value,
+        "dispatched_monotonic": 10.0,
+    }
     app._finish_emulator_recovery = Mock(return_value=True)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
@@ -602,6 +729,102 @@ def test_fallback_recovery_releases_only_after_new_battle_is_running():
         ),
         now=None,
     )
+    assert app._emulator_recovery_home_dispatch is None
+
+
+def test_accepted_home_recovery_input_is_not_replayed_without_postcondition():
+    app = _recovery_app()
+    app._emulator_recovery_home_attempts = 1
+    app._emulator_recovery_home_dispatch = {
+        "request_id": REQUEST_ID,
+        "control": HomeBattleControl.RESUME_BATTLE.value,
+        "dispatched_monotonic": 100.0,
+        "modal_recovery_completed": False,
+    }
+    app._runtime_uncertain_mutation_result = Mock()
+    app._uncertain_lifecycle_actions = set()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch(
+        "core.app.time.monotonic",
+        return_value=100.0 + EMULATOR_HOME_POSTCONDITION_TIMEOUT_SECONDS,
+    ):
+        assert app._advance_emulator_recovery(
+            {
+                "state": "HOME_SCREEN",
+                "home_battle_control": HomeBattleControl.RESUME_BATTLE.value,
+            },
+            frame,
+        )
+
+    app._runtime_uncertain_mutation_result.assert_called_once()
+    assert REQUEST_ID in app._uncertain_lifecycle_actions
+    assert app._emulator_recovery_home_dispatch is not None
+
+
+def test_free_ticket_clear_requires_two_stable_home_frames_before_retry():
+    app = _recovery_app()
+    app._emulator_recovery_force_new_battle = True
+    app._emulator_recovery_home_attempts = 1
+    app._emulator_recovery_home_dispatch = {
+        "request_id": REQUEST_ID,
+        "control": HomeBattleControl.NEW_BATTLE.value,
+        "dispatched_monotonic": 100.0,
+        "modal_recovery_completed": True,
+    }
+    app._control_observation = {"observation_id": "runtime-recovery:1"}
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    detection = {
+        "state": "HOME_SCREEN",
+        "home_battle_control": HomeBattleControl.NEW_BATTLE.value,
+    }
+
+    with patch("core.app.time.monotonic", return_value=101.0):
+        assert app._advance_emulator_recovery(detection, frame)
+    assert (
+        app._emulator_recovery_home_dispatch[
+            "retry_home_candidate_observation_id"
+        ]
+        == "runtime-recovery:1"
+    )
+
+    app._control_observation = {"observation_id": "runtime-recovery:2"}
+    with patch("core.app.time.monotonic", return_value=102.0):
+        assert not app._advance_emulator_recovery(detection, frame)
+    assert app._emulator_recovery_home_dispatch is None
+
+
+def test_restored_source_releases_hold_when_terminal_receipt_is_pending():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        finish_emulator_maintenance=Mock(return_value=None),
+    )
+    app._emulator_maintenance_hold_active = True
+    app._emulator_recovery_force_new_battle = True
+    app._emulator_recovery_action_logged = False
+    app._set_emulator_recovery_ack = Mock()
+    app._update_action_authority = Mock()
+    app._publish_action_authority = Mock()
+    app._flag_recoverable_runtime_failure = Mock()
+    maintenance = _maintenance("host_restarted")
+
+    assert app._finish_emulator_recovery(
+        maintenance,
+        disposition="fallback_new_battle",
+        reason="fresh RUNNING replacement battle",
+    )
+
+    assert app._emulator_maintenance_hold_active is False
+    assert app._emulator_recovery_terminal_pending == {
+        "request_id": REQUEST_ID,
+        "disposition": "fallback_new_battle",
+        "reason": "fresh RUNNING replacement battle",
+    }
+    app._flag_recoverable_runtime_failure.assert_called_once_with(
+        RuntimeFailureKind.REPORTING_FAILURE,
+        "the BlueStacks recovery source was restored, but its terminal "
+        "receipt could not yet be persisted",
+    )
 
 
 def test_recovery_home_authority_accepts_resume_or_forced_new_battle_only():
@@ -614,6 +837,8 @@ def test_recovery_home_authority_accepts_resume_or_forced_new_battle_only():
     app._runtime_action_guard = Mock(return_value=True)
     app._emulator_maintenance_hold_active = True
     app._emulator_recovery_force_new_battle = False
+    app._emulator_recovery_home_attempts = 0
+    app._emulator_recovery_home_dispatch = None
 
     assert app._home_launch_authority_matches(
         source="emulator_recovery",
@@ -630,4 +855,45 @@ def test_recovery_home_authority_accepts_resume_or_forced_new_battle_only():
         source="emulator_recovery",
         request_id=REQUEST_ID,
         home_control=HomeBattleControl.NEW_BATTLE,
+    )
+
+    app._emulator_recovery_home_dispatch = {
+        "request_id": REQUEST_ID,
+        "control": HomeBattleControl.NEW_BATTLE.value,
+    }
+    assert not app._home_launch_authority_matches(
+        source="emulator_recovery",
+        request_id=REQUEST_ID,
+        home_control=HomeBattleControl.NEW_BATTLE,
+    )
+
+    app._emulator_recovery_home_dispatch = None
+    app._emulator_recovery_home_attempts = 2
+    assert not app._home_launch_authority_matches(
+        source="emulator_recovery",
+        request_id=REQUEST_ID,
+        home_control=HomeBattleControl.NEW_BATTLE,
+    )
+
+
+def test_free_ticket_recovery_requires_exact_new_battle_dispatch_receipt():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        emulator_maintenance=_maintenance(),
+        battle_workflow=None,
+        manual_control=None,
+    )
+    app._emulator_maintenance_hold_active = True
+    app._emulator_recovery_force_new_battle = True
+    app._emulator_recovery_home_dispatch = None
+
+    assert app._free_ticket_recovery_owner() is None
+
+    app._emulator_recovery_home_dispatch = {
+        "request_id": REQUEST_ID,
+        "control": HomeBattleControl.NEW_BATTLE.value,
+    }
+    assert app._free_ticket_recovery_owner() == (
+        "emulator_maintenance",
+        f"emulator:{REQUEST_ID}",
     )

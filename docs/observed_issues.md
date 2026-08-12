@@ -12,6 +12,24 @@ current runtime state.
 
 ## Global live-preflight hazards
 
+### Free Ticket modal stranded a completed-battle launch and exposed background controls
+
+**Stable ID:** `ISSUE-2026-041` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A known Free Ticket modal appeared after a verified Home Battle dispatch;
+  launch authority was consumed before `RUNNING`, while Home and its ad-gem
+  remained detectable behind the modal and restarted a bounded collector on
+  every heartbeat. Treat blocking primaries as non-actionable background,
+  retain the exact launch until its postcondition, allow one typed modal
+  recovery and one fresh-Home retry, and circuit-break exhausted transactions.
+- Load the [dossier](issues/open-2026.md#free-ticket-modal-stranded-a-completed-battle-launch-and-exposed-background-controls)
+  before changing blocking-screen precedence, Home launch completion, or
+  cross-heartbeat retry behavior, and for live confirmation or recurrence.
+  Commit `af3d1b0` is deployed and its managed active-battle handoff passed.
+  Next: observe one natural no-battle launch boundary without manufacturing a
+  battle or modal; [state/recovery
+  backlog](backlog/state-and-detection.md#state-coverage-and-recovery).
+
 ### Owned validation cleanup survived a later running-battle transition
 
 **Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `confirmed_unresolved`
@@ -60,10 +78,11 @@ current runtime state.
   BlueStacks restart, supporting but not proving emulator aging.
 - Load the [dossier](issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed)
   for a throughput recurrence, T19 causal analysis, or host-correlation work.
-  Revision 35 adds a conservative default-off exact-instance mitigation. Next:
-  verify its configured Windows identity and one authorized end-to-end recovery,
-  while pairing any recurrence with exact loadout/locks and host counters; see
-  the [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+  Revision 39 adds a conservative default-off exact-instance mitigation with
+  same-session cross-run aging evidence. Next: verify its configured Windows
+  identity/mapping and one authorized end-to-end recovery, while pairing any
+  recurrence with exact loadout/locks and host counters; see the
+  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Windows performance telemetry exceeded its client CPU budget
 
@@ -81,8 +100,9 @@ current runtime state.
 **Stable ID:** `ISSUE-2026-005` · **Lifecycle:** `unresolved_pending_recurrence_evidence`
 
 - One authorized source tap yielded only `unknown`
-  post-tap evidence although Retry verified Stun off; the gate must still block
-  Battle start without a waiver.
+  post-tap evidence although Retry verified Stun off. Preserve the diagnostic
+  evidence, but a bounded verifier failure must release Battle launch in
+  degraded mode under the global runtime failure policy.
 - Load the [dossier](issues/open-2026.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap)
   on recurrence or before changing this verifier. Next: retain the final frame
   and detail/off/on confidences; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
@@ -193,6 +213,23 @@ current runtime state.
   publication/reload, automatic dropdown queueing, conditional retry,
   explicit active adoption, feedback, and Pause preservation on Windows;
   [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
+
+### Long action-log retention made current controls appear pending
+
+**Stable ID:** `ISSUE-2026-038` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A healthy exact-owner runtime reported correct Strategy Scope and authority,
+  but current acknowledgements disappeared after their audit lines aged beyond
+  the adapter's 262 KiB tail. The repair publishes exact state, mode, speed,
+  ADB, and Strategy receipts in the atomic runtime channel and makes WPF render
+  authoritative Strategy Scope; revision 37 is deployed on Linux and its
+  Windows package is published, while Windows runtime confirmation remains
+  pending. Action logs remain audit-only.
+- Load the [dossier](issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending)
+  for a recurrence, acknowledgement-channel change, or Windows confirmation.
+  Next: verify long-run and rotated-log presentation, Strategy current/pending,
+  paused ADB handoff, and setup-capture availability in WPF without issuing a
+  refresh request; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Windows client could not identify or reload a stale Linux control service
 

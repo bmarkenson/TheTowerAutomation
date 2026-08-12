@@ -286,6 +286,7 @@ def test_tournament_module_variation_completes_and_is_logged_as_information():
     run_preflight.assert_called_once_with(
         action["requirements"],
         validate_fn=validate_tournament_session_preflight_screens,
+        allow_repair=False,
     )
     variables = ctx.data["mission_vars"]
     assert variables["gc_session_preflight_attempted"]
@@ -339,6 +340,7 @@ def test_attached_tournament_executor_requests_an_in_battle_only_route():
         action["requirements"],
         validate_fn=validate_tournament_session_preflight_screens,
         stay_in_battle=True,
+        allow_repair=False,
     )
 
 
@@ -472,15 +474,17 @@ def test_tournament_invariant_mismatch_is_nonblocking_but_warned():
 
     variables = ctx.data["mission_vars"]
     assert variables["gc_session_preflight_attempted"]
-    assert not variables["gc_session_preflight_completed"]
+    assert variables["gc_session_preflight_completed"]
+    assert variables["gc_session_preflight_degraded"]
+    assert variables["gc_session_preflight_disposition"] == "continue_degraded"
     assert not variables["gc_session_preflight_blocked"]
     assert variables["gc_session_preflight_failed_checks"] == [
         "ultimate_weapons"
     ]
     mission_log.assert_any_call(
-        "[SESSION_PREFLIGHT] Read-only observer mismatch recorded — Ultimate "
-        "Weapons Spotlight: missiles=on (actual=off). Observation and terminal "
-        "capture continue without operator action.",
+        "[SESSION_PREFLIGHT] Configuration mismatch flagged — Ultimate Weapons "
+        "Spotlight: missiles=on (actual=off). Automation continues in degraded "
+        "mode; only a safe Home boundary may repair it.",
         "WARN",
     )
     app = App.__new__(App)
@@ -494,13 +498,14 @@ def test_tournament_invariant_mismatch_is_nonblocking_but_warned():
     assert app._get_action_authority().strategy_gate is None
 
 
-def test_tournament_attachment_enforces_battle_loadout_before_preflight():
+def test_tournament_attachment_never_enforces_battle_loadout():
     strategy = get_strategy("tournament")
     assert strategy is not None
     manager = MissionManager(
         None,
         strategy,
         defer_startup_gates_until_next_run=True,
+        validate_attached_battle=True,
     )
     manager.start()
 
@@ -509,40 +514,18 @@ def test_tournament_attachment_enforces_battle_loadout_before_preflight():
 
     assert manager.session_preflight_pending()
     assert len(actions) == 1
+    assert actions[0]["type"] == "session_preflight"
+    assert actions[0]["allow_repair"] is False
+
+    manager.ctx.data["mission_vars"]["gc_session_preflight_attempted"] = True
+    manager.ctx.data["mission_vars"]["gc_session_preflight_completed"] = True
+    actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+    assert len(actions) == 1
     assert actions[0]["type"] == "damage_slider_configure"
     assert actions[0]["mode"] == "enforce"
-    assert actions[0]["value"] == "1E2%"
-
-    manager.ctx.data["mission_vars"]["damage_slider_checked"] = True
-    actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
-
-    assert len(actions) == 1
-    assert actions[0] == {
-        "type": "orb_distance_configure",
-        "mode": "enforce",
-        "range_basis": "98.38m",
-        "extra": "87.16m",
-        "workshop": "80.37m",
-        "range_presets": [
-            {
-                "range_basis": "30.00m",
-                "extra": "30.00m",
-                "workshop": "39.00m",
-            },
-            {
-                "range_basis": "98.38m",
-                "extra": "87.16m",
-                "workshop": "80.37m",
-            },
-        ],
-    }
-
-    manager.ctx.data["mission_vars"]["orb_distance_checked"] = True
-    actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
-
-    assert len(actions) == 1
-    assert actions[0]["type"] == "session_preflight"
-    assert actions[0]["validator"] == "tournament"
+    assert not manager.session_preflight_pending()
+    assert not strategy.is_session_preflight_complete(manager.ctx)
 
 
 def test_tournament_policy_allows_guarded_reward_collectors_only():
@@ -893,6 +876,10 @@ def test_tournament_results_are_recorded_once_without_changing_policy(
     operation_id = action_log.call_args.kwargs["operation_id"]
     assert action_log.call_args.args == ("Capturing the finished Tournament",)
     if terminal_policy is ExecMode.WAIT:
+        # Terminal records always include any current degradation, even when
+        # WAIT deliberately retains the results screen without Home repair.
+        manager.running_configuration_degradation.assert_called_once_with()
+        manager.prepare_degraded_home_repair.assert_not_called()
         dismiss_results.assert_not_called()
         app._commit_terminal_home_continuation.assert_not_called()
         result_log.assert_called_once_with(
@@ -922,6 +909,117 @@ def test_tournament_results_are_recorded_once_without_changing_policy(
             ),
             operation_id=operation_id,
         )
+
+
+def test_observation_only_tournament_record_keeps_observed_config_and_degradation():
+    degradation = {
+        "schema_version": 1,
+        "sources": ["attachment_applicability"],
+        "reason": "selected farming Strategy does not match Tournament",
+        "failed_checks": ["battle_kind"],
+    }
+    observed = {
+        "schema_version": 1,
+        "fields": {"cards_deck": {"status": "observed", "value": "Farm"}},
+    }
+    manager = MagicMock()
+    manager.strategy = None
+    manager.ctx = MissionContext(data={"mission_vars": {}})
+    manager.running_configuration_degradation.return_value = degradation
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = MagicMock()
+    app._status_reporter = MagicMock()
+    app._status_reporter.coin_rate_samples = []
+    app._last_wave_value = 2028
+    app._last_wave_conf = 99.0
+    app._tournament_results_captured = False
+    app._build_terminal_home_continuation_claim = MagicMock(return_value=None)
+    app._no_strategy_observer = MagicMock()
+    app._no_strategy_observer.snapshot.return_value = observed
+    app._no_strategy_observation_active = True
+    app._no_strategy_attachment_boundary_id = "attach-observer"
+    app._no_strategy_inventory_complete = False
+    app._no_strategy_inventory_retry_at = 0.0
+    app._pending_no_strategy_record = None
+    _bind_terminal_context(app)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    previous_mode = AUTOMATION.mode
+
+    try:
+        AUTOMATION.mode = ExecMode.WAIT
+        with patch(
+            "core.app.handle_tournament_results",
+            return_value={"tournament_id": "TournamentObserved"},
+        ) as tournament_results:
+            app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+    finally:
+        AUTOMATION.mode = previous_mode
+
+    context = tournament_results.call_args.kwargs["battle_context"]
+    assert context["strategy"] is None
+    assert context["observed_run_configuration"] == observed
+    assert context["running_configuration_degradation"] == degradation
+    app._no_strategy_observer.snapshot.assert_called_once_with(finalized=True)
+    app._no_strategy_observer.reset.assert_called_once_with()
+
+
+def test_degraded_tournament_continue_prepares_home_repair_before_dismissal():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    degradation = {
+        "schema_version": 1,
+        "sources": ["attachment_observation"],
+        "reason": "damage_slider attached observation: observed_mismatch",
+        "failed_checks": ["damage_slider"],
+    }
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx = MissionContext(data={"mission_vars": {}})
+    manager.running_configuration_degradation.return_value = degradation
+    manager.prepare_degraded_home_repair.return_value = True
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = MagicMock()
+    app._status_reporter = MagicMock()
+    app._status_reporter.coin_rate_samples = []
+    app._last_wave_value = 2028
+    app._last_wave_conf = 99.0
+    app._tournament_results_captured = False
+    app._apply_pending_strategy = MagicMock(return_value=False)
+    continuation = {
+        "schema_version": 1,
+        "source": "tournament_results",
+    }
+    app._build_terminal_home_continuation_claim = MagicMock(
+        return_value=continuation
+    )
+    app._commit_terminal_home_continuation = MagicMock(return_value=True)
+    _bind_terminal_context(app)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    previous_mode = AUTOMATION.mode
+
+    try:
+        AUTOMATION.mode = ExecMode.NEXT_BATTLE
+        with (
+            patch(
+                "core.app.handle_tournament_results",
+                return_value={"tournament_id": "Tournament20260718"},
+            ),
+            patch(
+                "core.app.dismiss_tournament_results_to_home",
+                return_value=True,
+            ),
+        ):
+            app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+    finally:
+        AUTOMATION.mode = previous_mode
+
+    assert manager.running_configuration_degradation.call_count == 2
+    manager.on_game_over.assert_called_once_with()
+    app._apply_pending_strategy.assert_called_once_with()
+    manager.prepare_degraded_home_repair.assert_called_once_with(degradation)
+    app._commit_terminal_home_continuation.assert_called_once_with(continuation)
 
 
 @pytest.mark.parametrize("terminal_policy", [ExecMode.NEXT_BATTLE, ExecMode.HOME])

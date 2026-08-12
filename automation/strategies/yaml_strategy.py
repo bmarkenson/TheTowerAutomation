@@ -243,6 +243,11 @@ class YamlStrategy(BaseStrategy):
             },
         }
 
+    def _definition_fingerprint_payload(self) -> Dict[str, Any]:
+        """Bind attachment semantics to the complete generated YAML plan."""
+
+        return copy.deepcopy(self.config)
+
     def run_configuration(self) -> Dict[str, Any]:
         return copy.deepcopy(self._run_configuration)
 
@@ -326,11 +331,21 @@ class YamlStrategy(BaseStrategy):
         mv = ctx.data.setdefault("mission_vars", {})
 
         for idx, rule in enumerate(self.rules):
+            rid = str(rule.get("name") or idx)
             gate_phase = str(rule.get("gate_phase") or "").strip()
-            if (
+            attachment_validation_rule = bool(
                 ctx.data.get("startup_gates_deferred")
                 and gate_phase in {"run_initialization", "session_preflight"}
-            ):
+                and bool(rule.get("run_when_attached"))
+            )
+            if attachment_validation_rule:
+                dispositions = mv.get("attached_validation_rule_dispositions")
+                if isinstance(dispositions, dict) and rid in dispositions:
+                    continue
+            if ctx.data.get("startup_gates_deferred") and gate_phase in {
+                "run_initialization",
+                "session_preflight",
+            }:
                 if (
                     ctx.data.get("skip_attached_checks")
                     or ctx.data.get("attached_session_preflight_reused")
@@ -357,7 +372,6 @@ class YamlStrategy(BaseStrategy):
 
             # cooldown gate
             cd = float(rule.get("cooldown_sec") or 0.0)
-            rid = str(rule.get("name") or idx)
             now = time.time()
             last_ts = float(last_fire.get(rid) or 0.0)
             if cd > 0 and (now - last_ts) < cd:
@@ -370,7 +384,14 @@ class YamlStrategy(BaseStrategy):
                     if var:
                         mv[var] = act.get("value")
                 else:
-                    actions.append(act)
+                    materialized = copy.deepcopy(act)
+                    if attachment_validation_rule and isinstance(
+                        materialized,
+                        dict,
+                    ):
+                        materialized["_attachment_validation"] = True
+                        materialized["_attachment_rule_id"] = rid
+                    actions.append(materialized)
 
             if actions:
                 log_mission(f"[YAML] Rule fired: {rid}", "DEBUG")

@@ -24,6 +24,8 @@
     <Compile Include="..\TheTower.ControlSurface\HostPerformanceModels.cs"
              Link="HostPerformanceModels.cs" />
     <Compile Include="..\TheTower.ControlSurface\Models.cs" Link="Models.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostProcessAttribution.cs"
+             Link="HostProcessAttribution.cs" />
     <Compile Include="..\TheTower.ControlSurface\GateDecisionPresentation.cs"
              Link="GateDecisionPresentation.cs" />
     <Compile Include="..\TheTower.ControlSurface\ControlSurfaceCompatibility.cs"
@@ -34,5 +36,7 @@
              Link="StrategyStructuredEditorViewModels.cs" />
     <Compile Include="..\TheTower.ControlSurface\StrategySelectionCoordinator.cs"
              Link="StrategySelectionCoordinator.cs" />
+    <Compile Include="..\TheTower.ControlSurface\SaveMappingIntegrationViewModels.cs"
+             Link="SaveMappingIntegrationViewModels.cs" />
   </ItemGroup>
 </Project>

@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import fcntl
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import subprocess
 import stat
+import threading
 import time
 
 import pytest
 
+from core.action_authority import (
+    RuntimeActionAuthority,
+    RuntimeActionAuthorityPublisher,
+)
 from core.automation_process import (
     AutomationProcessError,
     SystemdAutomationManager,
@@ -188,8 +193,17 @@ def _service(tmp_path, manager=None, adb_connection_manager=None):
     )
 
 
-def _write_running_runtime_evidence(tmp_path, *, pid: int) -> Path:
+def _write_running_runtime_evidence(
+    tmp_path,
+    *,
+    pid: int,
+    control: dict[str, object],
+    primary_state: str = "RUNNING",
+    startup_gate_policy: str = "next_run",
+) -> Path:
     timestamp = datetime.now().astimezone().replace(microsecond=0)
+    runtime_id = f"runtime-{pid}"
+    target_generation = 1
     log_path = tmp_path / "logs" / "actions.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text(
@@ -202,11 +216,75 @@ def _write_running_runtime_evidence(tmp_path, *, pid: int) -> Path:
         json.dumps(
             {
                 "pid": pid,
+                "runtime_id": runtime_id,
                 "target": "localhost:5555",
+                "target_generation": target_generation,
+                "state": "held",
                 "started_at": timestamp.isoformat(),
             }
         ),
         encoding="utf-8",
+    )
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=control.get("state") == "PAUSED",
+        active_battle=primary_state == "RUNNING",
+        battle_scope="attached-restart",
+        primary_state=primary_state,
+    )
+    acknowledgements: dict[str, object] = {
+        "schema_version": 1,
+        "runtime_id": runtime_id,
+    }
+    request_id = str(control.get("state_request_id") or "")
+    if request_id:
+        acknowledgements["state"] = {
+            "value": str(control.get("state") or ""),
+            "request_id": request_id,
+            "acknowledged_at": timestamp.astimezone(timezone.utc).isoformat(),
+        }
+    publisher = RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner={
+            "runtime_id": runtime_id,
+            "pid": pid,
+            "adb_target": "localhost:5555",
+            "target_generation": target_generation,
+        },
+    )
+    assert publisher.publish(
+        authority.snapshot(now=timestamp.timestamp()),
+        runtime_active=True,
+        now=timestamp.timestamp(),
+        acknowledgements=acknowledgements,
+        control_model={
+            "schema_version": 1,
+            "startup_gate_policy": startup_gate_policy,
+            "observation": {
+                "schema_version": 1,
+                "observation_id": f"{runtime_id}:1",
+                "observed_at": timestamp.isoformat(),
+                "primary_state": primary_state,
+                "home_battle_control": "UNKNOWN",
+                "game_state": (
+                    "active_battle" if primary_state == "RUNNING" else "unknown"
+                ),
+                "active_battle": primary_state == "RUNNING",
+                "activity_scope_run_id": "attached-restart",
+                "target_generation": target_generation,
+            },
+            "battle_lifecycle": {
+                "active_battle_adopted": primary_state == "RUNNING",
+            },
+            "strategy_scope": {
+                "startup_default": "farm_t18",
+                "active_battle": (
+                    "farm_t18" if primary_state == "RUNNING" else None
+                ),
+                "pending_next_boundary": None,
+                "pending_active_battle": None,
+            },
+        },
     )
     return lock_path
 
@@ -862,6 +940,113 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     assert response["process_service"]["active"] is False
 
 
+def test_process_stop_linearizes_after_an_inflight_enable(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.control_store.set_state("PAUSED", source="test")
+    enable_snapshot_ready = threading.Event()
+    release_enable = threading.Event()
+    original_status = service.status
+    enable_status_calls = 0
+    failures = []
+
+    def blocking_status(*args, **kwargs):
+        nonlocal enable_status_calls
+        result = original_status(*args, **kwargs)
+        if threading.current_thread().name == "enable-request":
+            enable_status_calls += 1
+            if enable_status_calls == 1:
+                enable_snapshot_ready.set()
+                assert release_enable.wait(timeout=2)
+        return result
+
+    service.status = blocking_status
+
+    def enable():
+        try:
+            service.apply_control({"action": "enable"})
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    def stop():
+        try:
+            service.apply_process_action({"action": "stop"})
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    enable_thread = threading.Thread(target=enable, name="enable-request")
+    stop_thread = threading.Thread(target=stop, name="stop-request")
+    enable_thread.start()
+    assert enable_snapshot_ready.wait(timeout=2)
+    stop_thread.start()
+    release_enable.set()
+    enable_thread.join(timeout=2)
+    stop_thread.join(timeout=2)
+
+    assert not enable_thread.is_alive()
+    assert not stop_thread.is_alive()
+    assert failures == []
+    assert service.control_store.status()["state"] == "STOPPED"
+    assert manager.active is False
+
+
+def test_take_manual_cannot_weaken_stop_while_process_exit_is_pending(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    running = service.control_store.set_state("RUNNING", source="test")
+    _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=running,
+    )
+    stop_entered = threading.Event()
+    release_stop = threading.Event()
+    manual_completed = threading.Event()
+    stop_failures = []
+    manual_failures = []
+
+    def block_stop():
+        stop_entered.set()
+        assert release_stop.wait(timeout=2)
+
+    manager.on_stop = block_stop
+
+    def stop():
+        try:
+            service.apply_process_action({"action": "stop"})
+        except Exception as exc:  # pragma: no cover - surfaced below
+            stop_failures.append(exc)
+
+    def take_manual():
+        try:
+            service.apply_control({"action": "take_manual_control"})
+        except Exception as exc:
+            manual_failures.append(exc)
+        finally:
+            manual_completed.set()
+
+    stop_thread = threading.Thread(target=stop)
+    manual_thread = threading.Thread(target=take_manual)
+    stop_thread.start()
+    assert stop_entered.wait(timeout=2)
+    assert service.control_store.status()["state"] == "STOPPED"
+    manual_thread.start()
+    assert not manual_completed.wait(timeout=0.05)
+
+    release_stop.set()
+    stop_thread.join(timeout=2)
+    manual_thread.join(timeout=2)
+
+    assert not stop_thread.is_alive()
+    assert not manual_thread.is_alive()
+    assert stop_failures == []
+    assert len(manual_failures) == 1
+    assert isinstance(manual_failures[0], ControlSurfaceRequestError)
+    assert manual_failures[0].code == "process_stopping"
+    assert service.control_store.status()["state"] == "STOPPED"
+    assert manager.active is False
+
+
 def test_attached_restart_requires_explicit_stop_start_and_attach(tmp_path):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
@@ -885,23 +1070,16 @@ def test_attached_restart_readiness_verifies_fresh_owner_control_and_status(
         "PAUSED",
         source="attached-restart",
     )
-    state_request_id = control["state_request_id"]
-    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
-    timestamp = datetime.now().astimezone().replace(microsecond=0)
-    timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    service.action_log.write_text(
-        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file "
-        f"request_id={state_request_id}\n"
-        f"[STATUS {timestamp_text}] State=RUNNING/PAUSED | "
-        "Wave=123 | Coins/min=1.0T\n",
-        encoding="utf-8",
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
     )
 
     with lock_path.open("r", encoding="utf-8") as lock_handle:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         status = service._wait_for_attached_restart_pause(
             previous_pid=manager.pid,
-            log_offset=0,
         )
 
     assert status["observation"]["state"] == "RUNNING"
@@ -915,24 +1093,16 @@ def test_replacement_readiness_verifies_attached_policy_and_first_status(tmp_pat
         "PAUSED",
         source="attached-restart",
     )
-    state_request_id = control["state_request_id"]
-    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
-    timestamp = datetime.now().astimezone().replace(microsecond=0)
-    timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    service.action_log.write_text(
-        f"[INFO {timestamp_text}] [RUN_INIT] Startup gate policy=next_run\n"
-        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file "
-        f"request_id={state_request_id}\n"
-        f"[STATUS {timestamp_text}] State=RUNNING/PAUSED | "
-        "Wave=123 | Coins/min=1.0T\n",
-        encoding="utf-8",
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
     )
 
     with lock_path.open("r", encoding="utf-8") as lock_handle:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         status = service._wait_for_replacement_runtime(
             replacement_pid=manager.pid,
-            log_offset=0,
         )
 
     assert status["process_service"]["main_pid"] == manager.pid
@@ -946,16 +1116,11 @@ def test_attached_restart_pause_rejects_fresh_nonrunning_observation(tmp_path):
         "PAUSED",
         source="attached-restart",
     )
-    state_request_id = control["state_request_id"]
-    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
-    timestamp = datetime.now().astimezone().replace(microsecond=0)
-    timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    service.action_log.write_text(
-        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file "
-        f"request_id={state_request_id}\n"
-        f"[STATUS {timestamp_text}] State=HOME_SCREEN/PAUSED | "
-        "Wave=— | Coins/min=—\n",
-        encoding="utf-8",
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
+        primary_state="HOME_SCREEN",
     )
 
     with lock_path.open("r", encoding="utf-8") as lock_handle:
@@ -963,7 +1128,6 @@ def test_attached_restart_pause_rejects_fresh_nonrunning_observation(tmp_path):
         with pytest.raises(AutomationProcessError, match="HOME_SCREEN"):
             service._wait_for_attached_restart_pause(
                 previous_pid=manager.pid,
-                log_offset=0,
             )
 
 
@@ -1010,19 +1174,16 @@ def test_control_surface_requests_live_adb_handoff_only_after_pause_ack(tmp_path
     service = _service(tmp_path, manager, connection_manager)
     service.apply_control({"action": "pause"})
     control = service.control_store.read()
-    requested_at = control["state_updated_at"]
-    state_request_id = control["state_request_id"]
-    timestamp = datetime.fromisoformat(requested_at).strftime("%Y-%m-%d %H:%M:%S")
-    service.action_log.parent.mkdir(parents=True, exist_ok=True)
-    with service.action_log.open("a", encoding="utf-8") as handle:
-        handle.write(
-            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file "
-            f"request_id={state_request_id}\n"
-        )
-
-    response = service.apply_process_action(
-        {"action": "set_adb_port", "adb_port": 5575}
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
     )
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        response = service.apply_process_action(
+            {"action": "set_adb_port", "adb_port": 5575}
+        )
 
     assert manager.calls == ["persist_adb_port:5575"]
     assert connection_manager.calls == [("localhost:5575", True)]
@@ -1034,16 +1195,6 @@ def test_control_surface_rejects_live_handoff_under_timed_pause(tmp_path):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
     service.apply_control({"action": "pause", "minutes": 15})
-    control = service.control_store.read()
-    requested_at = control["state_updated_at"]
-    state_request_id = control["state_request_id"]
-    timestamp = datetime.fromisoformat(requested_at).strftime("%Y-%m-%d %H:%M:%S")
-    service.action_log.parent.mkdir(parents=True, exist_ok=True)
-    with service.action_log.open("a", encoding="utf-8") as handle:
-        handle.write(
-            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file "
-            f"request_id={state_request_id}\n"
-        )
 
     with pytest.raises(ControlSurfaceRequestError, match="Indefinitely pause"):
         service.apply_process_action(

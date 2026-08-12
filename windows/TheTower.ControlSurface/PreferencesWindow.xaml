@@ -67,9 +67,16 @@
                        Foreground="{StaticResource MutedBrush}"
                        FontSize="10" Margin="4,8,4,2" />
             <TextBox x:Name="BlueStacksInstanceNameBox" />
-            <TextBlock Text="Recovery is attempted only after Linux has installed a runtime hold. Windows resolves the configured ADB listener to one exact executable PID/start time before stop, launches only this instance, and requires a new exact listener before Linux relaunches The Tower. Verify the instance name against a BlueStacks-created desktop shortcut before enabling."
+            <TextBlock Text="Recovery is attempted only after Linux has installed a runtime hold. Windows maps this instance to its configured ADB listener, acknowledges one exact executable PID/start time before stop, launches only the immutable target, and requires a new exact listener before Linux relaunches The Tower. Verify the instance name against a BlueStacks-created desktop shortcut before enabling; multiple active instances disable automatic recovery."
                        Foreground="{StaticResource MutedBrush}"
                        FontSize="10" TextWrapping="Wrap" Margin="6,5,6,0" />
+            <TextBlock x:Name="BlueStacksRecoveryLockText"
+                       Text=""
+                       Visibility="Collapsed"
+                       Foreground="#F1BF5B"
+                       FontSize="10"
+                       TextWrapping="Wrap"
+                       Margin="6,7,6,0" />
           </StackPanel>
         </Border>
 

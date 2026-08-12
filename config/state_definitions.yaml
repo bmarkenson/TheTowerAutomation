@@ -26,6 +26,11 @@ states:
   match_keys:
   - indicators.home_screen
 
+- name: FREE_TICKET
+  type: blocking_primary
+  match_keys:
+  - indicators.free_ticket_dialog
+
 - name: MILESTONES
   type: primary
   match_keys:
@@ -53,7 +58,7 @@ states:
   - buttons.more_stats:game_over
 
 - name: GAME_RESTARTED
-  type: terminal_primary
+  type: blocking_primary
   match_keys:
   - indicators.game_restarted
 

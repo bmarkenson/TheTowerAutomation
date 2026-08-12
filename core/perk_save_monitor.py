@@ -893,10 +893,10 @@ def merge_terminal_perk_tail(
 ) -> tuple[Optional[dict[str, Any]], dict[str, Any]]:
     """Merge only the newest terminal rows with an exact saved prefix.
 
-    The top viewport is not a complete inventory.  It may prove new or moved
-    families before an unchanged saved-recency marker; every other visible or
-    scheduled change remains explicit uncertainty rather than being invented
-    as an exact pick.
+    The newest-first prefix may stop before the complete inventory. It proves
+    new or moved families only before an unchanged saved-recency marker; every
+    other visible or scheduled change remains explicit uncertainty rather than
+    being invented as an exact pick.
     """
 
     base = {
@@ -930,7 +930,11 @@ def merge_terminal_perk_tail(
         else None
     )
     if (
-        terminal_top.get("capture_scope") != "newest_visible_prefix"
+        terminal_top.get("capture_scope")
+        not in {
+            "newest_visible_prefix",
+            "newest_prefix_until_saved_recency",
+        }
         or terminal_top.get("order_semantics") != "latest_selected_first"
         or not isinstance(quality, Mapping)
         or quality.get("valid") is not True
@@ -1035,7 +1039,7 @@ def merge_terminal_perk_tail(
     warnings: list[str] = []
     if overlap_split is None and saved_recency:
         warnings.append(
-            "The newest terminal viewport did not reach an unchanged saved "
+            "The newest terminal prefix did not reach an unchanged saved "
             "recency marker; only families absent from the saved prefix were "
             "proved as tail additions"
         )
@@ -1223,7 +1227,7 @@ def merge_terminal_perk_tail(
         "final_inventory": list(final_by_key.values()),
         "terminal_tail": {
             "status": "top_prefix_reconciled",
-            "capture_scope": "newest_visible_prefix",
+            "capture_scope": terminal_top.get("capture_scope"),
             "aggregate_semantics": (
                 "collapsed_recency_rows_preserve_unresolved_repeat_counts"
             ),

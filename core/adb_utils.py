@@ -27,12 +27,55 @@ import os
 import re
 import shlex
 import subprocess
-from typing import List, Optional, Union
+from dataclasses import dataclass
+from typing import Any, Callable, List, Optional, Union
 
+from core.run_state import AUTOMATION
 from core.screen_geometry import canonical_to_device_point
 
 #ADB_DEVICE_ID = "07171JEC203290"  # Or ""
 ADB_DEVICE_ID = "localhost:5555"
+ADB_SHELL_TIMEOUT_SECONDS = 10.0
+ADB_SCREENSHOT_TIMEOUT_SECONDS = 10.0
+
+
+@dataclass(frozen=True)
+class AdbShellDispatchOutcome:
+    """Typed host/device boundary result for lifecycle-safe callers."""
+
+    result: Any = None
+    attempted: bool = False
+    uncertain: bool = False
+
+    @property
+    def accepted(self) -> bool:
+        return self.result is not None
+
+    def __bool__(self) -> bool:
+        return self.accepted
+
+
+_READ_ONLY_SHELL_COMMANDS = frozenset(
+    {
+        ("dumpsys", "window", "windows"),
+        ("dumpsys", "activity", "activities"),
+        ("ps", "-A"),
+        ("service", "call", "clipboard", "3", "s16", "com.android.shell"),
+    }
+)
+
+
+def _shell_command_is_read_only(cmd: List[str]) -> bool:
+    """Return whether a known shell command is passive runtime observation."""
+
+    normalized = tuple(str(value).strip() for value in cmd)
+    if normalized in _READ_ONLY_SHELL_COMMANDS:
+        return True
+    return bool(
+        len(normalized) == 2
+        and normalized[0] == "pidof"
+        and re.fullmatch(r"[A-Za-z0-9._]+", normalized[1]) is not None
+    )
 
 
 def resolve_adb_device(device_id: Optional[str] = None) -> str:
@@ -47,6 +90,10 @@ def adb_shell(
     check: bool = True,
     device_id: Optional[str] = None,
     report_errors: bool = True,
+    timeout_s: float = ADB_SHELL_TIMEOUT_SECONDS,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+    return_dispatch_outcome: bool = False,
+    defer_uncertain_reporting: bool = False,
 ):
     """
     ---
@@ -73,13 +120,20 @@ def adb_shell(
         check: When True, raises CalledProcessError internally (caught below) on non-zero exit.
         device_id: Overrides target device. Falls back to env ADB_DEVICE, then ADB_DEVICE_ID.
         report_errors: Print subprocess failures when True.
+        timeout_s: Bound the host-side ADB shell dispatch.
+        action_guard_fn: Optional narrower authority checked atomically with a
+            mutating dispatch.
+        return_dispatch_outcome: Return typed attempted/uncertain metadata for
+            lifecycle callers instead of the legacy process result.
+        defer_uncertain_reporting: Let a lifecycle transaction owner report
+            only if its required final restoration cannot be proven.
 
     Returns:
         subprocess.CompletedProcess on success.
         None on failure (errors printed when ``report_errors`` is true).
     """
     # Normalize command
-    cmd_list = shlex.split(cmd) if isinstance(cmd, str) else cmd
+    cmd_list = shlex.split(cmd) if isinstance(cmd, str) else list(cmd)
 
     # Resolve device selection (explicit > env > module default)
     target = resolve_adb_device(device_id)
@@ -88,34 +142,143 @@ def adb_shell(
     if target:
         base_cmd += ["-s", target]
     full_cmd = base_cmd + ["shell"] + cmd_list
+    read_only = _shell_command_is_read_only(cmd_list)
+    timeout = max(0.1, float(timeout_s))
 
-    try:
-        if capture_output:
-            result = subprocess.run(
-                full_cmd,
-                check=check,
-                text=True,
-                capture_output=True
+    def dispatch() -> AdbShellDispatchOutcome:
+        try:
+            if capture_output:
+                return AdbShellDispatchOutcome(
+                    result=subprocess.run(
+                        full_cmd,
+                        check=check,
+                        text=True,
+                        capture_output=True,
+                        timeout=timeout,
+                    ),
+                    attempted=True,
+                )
+            return AdbShellDispatchOutcome(
+                result=subprocess.run(
+                    full_cmd,
+                    check=check,
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=timeout,
+                ),
+                attempted=True,
             )
-        else:
-            result = subprocess.run(
-                full_cmd,
-                check=check,
-                text=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+        except subprocess.TimeoutExpired:
+            if not read_only and not defer_uncertain_reporting:
+                AUTOMATION.report_uncertain_mutation(
+                    "ADB mutation timed out after dispatch: "
+                    f"command={str(cmd_list[0] if cmd_list else 'unknown')} "
+                    f"target={target} timeout_s={timeout:.1f}"
+                )
+            if report_errors:
+                print(
+                    "[ERROR] ADB command timed out: "
+                    f"{cmd_list[0] if cmd_list else 'unknown'}"
+                )
+            return AdbShellDispatchOutcome(
+                attempted=True,
+                uncertain=not read_only,
             )
-        return result
-    except subprocess.CalledProcessError as e:
-        if report_errors:
-            print(f"[ERROR] ADB command failed: {e}")
-            if hasattr(e, 'stderr') and e.stderr:
-                print(f"[STDERR] {e.stderr.strip()}")
-        return None
-    except Exception as e:
-        if report_errors:
-            print(f"[ERROR] Unexpected ADB exception: {e}")
-        return None
+        except subprocess.CalledProcessError as e:
+            if not read_only and not defer_uncertain_reporting:
+                AUTOMATION.report_uncertain_mutation(
+                    "ADB mutation returned a nonzero result after dispatch: "
+                    f"command={str(cmd_list[0] if cmd_list else 'unknown')} "
+                    f"target={target} returncode={e.returncode}"
+                )
+            if report_errors:
+                print(f"[ERROR] ADB command failed: {e}")
+                if hasattr(e, 'stderr') and e.stderr:
+                    print(f"[STDERR] {e.stderr.strip()}")
+            return AdbShellDispatchOutcome(
+                attempted=True,
+                uncertain=not read_only,
+            )
+        except (FileNotFoundError, PermissionError, TypeError, ValueError) as e:
+            # These narrow failures prove that the host could not construct or
+            # start the requested ADB client.  Broader OSError values are not
+            # treated this way because they can also arise while waiting for
+            # an already-started child.
+            if report_errors:
+                print(f"[ERROR] ADB command could not start: {e}")
+            return AdbShellDispatchOutcome()
+        except OSError as e:
+            if not read_only and not defer_uncertain_reporting:
+                AUTOMATION.report_uncertain_mutation(
+                    "ADB mutation raised an OS error after dispatch may have "
+                    "started: "
+                    f"command={str(cmd_list[0] if cmd_list else 'unknown')} "
+                    f"target={target} error={type(e).__name__}"
+                )
+            if report_errors:
+                print(f"[ERROR] ADB command OS failure: {e}")
+            return AdbShellDispatchOutcome(
+                attempted=True,
+                uncertain=not read_only,
+            )
+        except Exception as e:
+            if not read_only and not defer_uncertain_reporting:
+                AUTOMATION.report_uncertain_mutation(
+                    "ADB mutation raised after dispatch was attempted: "
+                    f"command={str(cmd_list[0] if cmd_list else 'unknown')} "
+                    f"target={target} error={type(e).__name__}"
+                )
+            if report_errors:
+                print(f"[ERROR] Unexpected ADB exception: {e}")
+            return AdbShellDispatchOutcome(
+                attempted=True,
+                uncertain=not read_only,
+            )
+        except BaseException as exc:
+            # KeyboardInterrupt/SystemExit can land after the ADB client has
+            # delivered input.  Preserve graceful shutdown, but first retain a
+            # catastrophic local hold for an outcome that cannot be proven.
+            if not read_only and not defer_uncertain_reporting:
+                AUTOMATION.report_uncertain_mutation(
+                    "ADB mutation was interrupted after dispatch may have "
+                    "started: "
+                    f"command={str(cmd_list[0] if cmd_list else 'unknown')} "
+                    f"target={target} interruption={type(exc).__name__}"
+                )
+            raise
+
+    def return_value(outcome: AdbShellDispatchOutcome):
+        return outcome if return_dispatch_outcome else outcome.result
+
+    if read_only:
+        return return_value(dispatch())
+
+    # Unknown shell commands fail on the safe side: when a production runtime
+    # guard is installed, only the explicit read-only allowlist bypasses the
+    # global device-mutation boundary.  The boundary refreshes durable control
+    # intent and remains held through the complete subprocess dispatch.
+    with AUTOMATION.authorize_mutation(action_guard_fn) as allowed:
+        if not allowed:
+            return return_value(AdbShellDispatchOutcome())
+        outcome = dispatch()
+        if (
+            outcome.result is not None
+            and int(getattr(outcome.result, "returncode", 0)) != 0
+        ):
+            if not defer_uncertain_reporting:
+                AUTOMATION.report_uncertain_mutation(
+                    "ADB mutation returned a nonzero result after dispatch: "
+                    f"command={str(cmd_list[0] if cmd_list else 'unknown')} "
+                    "target="
+                    f"{target} returncode="
+                    f"{getattr(outcome.result, 'returncode', 'unknown')}"
+                )
+            outcome = AdbShellDispatchOutcome(
+                attempted=True,
+                uncertain=True,
+            )
+        return return_value(outcome)
 
 
 def read_device_file(
@@ -165,6 +328,7 @@ def screencap_png(
     device_id: Optional[str] = None,
     check: bool = True,
     report_errors: bool = True,
+    timeout_s: float = ADB_SCREENSHOT_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
     """
     ---
@@ -185,6 +349,7 @@ def screencap_png(
     Args:
         device_id: Overrides target device. Falls back to env ADB_DEVICE, then ADB_DEVICE_ID.
         check: When True, raises CalledProcessError internally (caught) on non-zero exit.
+        timeout_s: Bound the host-side ADB screenshot subprocess.
 
     Returns:
         PNG bytes on success, or None on failure.
@@ -202,8 +367,13 @@ def screencap_png(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=check,
+            timeout=max(0.1, float(timeout_s)),
         )
         return result.stdout
+    except subprocess.TimeoutExpired as e:
+        if report_errors:
+            print(f"[ERROR] ADB screencap timed out: {e}")
+        return None
     except subprocess.CalledProcessError as e:
         # Mirror adb_shell's lightweight reporting without pulling in logger here.
         if report_errors:
@@ -223,6 +393,7 @@ def screencap_png(
 def screencap_raw(
     device_id: Optional[str] = None,
     check: bool = True,
+    timeout_s: float = ADB_SCREENSHOT_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
     """Capture the Android raw framebuffer without device-side PNG encoding."""
 
@@ -239,8 +410,12 @@ def screencap_raw(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=check,
+            timeout=max(0.1, float(timeout_s)),
         )
         return result.stdout
+    except subprocess.TimeoutExpired as exc:
+        print(f"[ERROR] ADB raw screencap timed out: {exc}")
+        return None
     except subprocess.CalledProcessError as exc:
         print(f"[ERROR] ADB raw screencap failed: {exc}")
         if exc.stderr:
@@ -260,15 +435,29 @@ def input_tap(
     *,
     check: bool = True,
     device_id: Optional[str] = None,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+    return_dispatch_outcome: bool = False,
 ):
-    """Tap a canonical UI point after mapping it to device framebuffer pixels."""
+    """Tap a canonical point, optionally preserving dispatch uncertainty."""
 
     target = resolve_adb_device(device_id)
     device_x, device_y = canonical_to_device_point(x, y, device_id=target)
+    guard_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
+    outcome_kwargs = (
+        {"return_dispatch_outcome": True}
+        if return_dispatch_outcome
+        else {}
+    )
     return adb_shell(
         ["input", "tap", str(device_x), str(device_y)],
         check=check,
         device_id=target,
+        **guard_kwargs,
+        **outcome_kwargs,
     )
 
 
@@ -281,6 +470,7 @@ def input_swipe(
     *,
     check: bool = True,
     device_id: Optional[str] = None,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
 ):
     """Swipe between canonical UI points in device framebuffer pixels."""
 
@@ -295,6 +485,11 @@ def input_swipe(
         y2,
         device_id=target,
     )
+    guard_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
     return adb_shell(
         [
             "input",
@@ -307,11 +502,15 @@ def input_swipe(
         ],
         check=check,
         device_id=target,
+        **guard_kwargs,
     )
 
 
 __all__ = [
     "ADB_DEVICE_ID",
+    "ADB_SCREENSHOT_TIMEOUT_SECONDS",
+    "ADB_SHELL_TIMEOUT_SECONDS",
+    "AdbShellDispatchOutcome",
     "adb_shell",
     "input_swipe",
     "input_tap",

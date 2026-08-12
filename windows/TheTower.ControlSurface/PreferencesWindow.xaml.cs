@@ -10,7 +10,10 @@ public partial class PreferencesWindow : Window
     public PreferencesResult? Result { get; private set; }
     public bool ResetLayoutRequested { get; private set; }
 
-    public PreferencesWindow(ClientSettings settings, string inMemoryToken)
+    public PreferencesWindow(
+        ClientSettings settings,
+        string inMemoryToken,
+        bool blueStacksRecoveryTargetLocked = false)
     {
         InitializeComponent();
         BaseUrlBox.Text = settings.BaseUrl;
@@ -32,6 +35,18 @@ public partial class PreferencesWindow : Window
             settings.BlueStacksAutomaticRecoveryEnabled;
         BlueStacksPlayerPathBox.Text = settings.BlueStacksPlayerExecutablePath;
         BlueStacksInstanceNameBox.Text = settings.BlueStacksInstanceName;
+        if (blueStacksRecoveryTargetLocked)
+        {
+            BlueStacksAutomaticRecoveryBox.IsEnabled = false;
+            BlueStacksPlayerPathBox.IsEnabled = false;
+            BlueStacksInstanceNameBox.IsEnabled = false;
+            WindowsBlueStacksAdbPortBox.IsEnabled = false;
+            BlueStacksRecoveryLockText.Text =
+                "A durable recovery request is active. Its enabled setting, "
+                + "executable, instance, and Windows ADB port remain locked "
+                + "until Linux records a terminal outcome.";
+            BlueStacksRecoveryLockText.Visibility = Visibility.Visible;
+        }
     }
 
     private void ResetLayout_Click(object sender, RoutedEventArgs e)

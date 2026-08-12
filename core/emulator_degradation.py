@@ -91,7 +91,7 @@ def assess_emulator_degradation(
     current_run_id: Optional[str],
     assessed_at: Optional[datetime] = None,
 ) -> dict[str, Any]:
-    """Assess two comparable runs plus current sustained handle growth."""
+    """Assess two comparable runs plus same-session sustained handle growth."""
 
     when = (assessed_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
     base = {
@@ -205,7 +205,7 @@ def assess_emulator_degradation(
             **evidence,
             "status": "recommend",
             "reason": (
-                "two comparable Farm runs are degraded, but sustained exact-run "
+                "two comparable Farm runs are degraded, but sustained same-session "
                 "host corroboration is incomplete"
             ),
         }

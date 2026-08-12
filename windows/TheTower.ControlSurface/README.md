@@ -177,6 +177,21 @@ Only one control-surface process is allowed per Windows session. Launching the
 application again restores and foregrounds the existing main window, or flashes
 it on the taskbar if Windows declines the foreground request.
 
+**Tools > Save mapping integration…** and the persistent save-mapping banner's
+**Review mappings…** action open the revision-35 canonical preparation UI.
+Choose one durable observation and one server-discovered owned `feature/*`
+worktree, review the exact proposal fingerprint, then accept the separate
+warning before preparation. The client never submits a filesystem path,
+branch, patch operation, or value. Success remains visibly uncommitted,
+unpromoted, and pending validation; the window stays open with target hashes
+and required validation. Reopening the same exact review shows an **Already
+prepared** result instead of offering the write again. While review or Prepare
+is in flight, the selection, refresh, and Close controls are disabled and the
+window cannot be dismissed. Failed or lost requests are never retried
+automatically; the UI distinguishes a proven rejection from an unconfirmed
+outcome and surfaces any audit warning. Preparation does not control
+automation, restart a service, send device input, or change the current battle.
+
 Overview keeps a compact, normally collapsed summary of the most recent
 completed battle without devoting the normal workspace to the full history.
 Select **Tools > Battle history...** to open the separate completed-battles
@@ -216,8 +231,11 @@ receive the full data width and retain their independent refresh and scroll
 behavior. System divides infrastructure into
 **Services**, **Connections**, and **Diagnostics**: process lifecycle and ADB
 runtime target; API/SSH transport and tunnel host; then optional prior-screen,
-runtime, and host-performance evidence. These pages may use their own fallback
-scrollbar when the supported minimum window cannot contain the bounded form.
+runtime, and host-performance evidence. When Host Health is expanded,
+Diagnostics places its complete local telemetry card ahead of the verbose
+evidence and presents the remainder in two columns: service/configuration and
+runtime/observation. These pages may use their own fallback scrollbar when the
+supported minimum window cannot contain the bounded form.
 **Preferences** opens a bounded modal for the API URL, optional bearer token,
 SSH destination, API/ADB forwarding defaults, startup sampling choice, and
 dashboard-layout reset. Save validates and records defaults without starting,
@@ -237,11 +255,17 @@ directive own it.
 
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
-tunnel, and the ADB reverse-forward SSH tunnel. Selecting the group opens
-System detail. Service and tunnel Start/Stop/Restart actions live under System
-instead of competing with routine controls in the header. API actions affect
-only `thetower-control-surface.service`, and API/ADB SSH tunnel recovery remains
+tunnel, and the ADB reverse-forward SSH tunnel. The four indicators consume the
+available header width in one row. Selecting the group opens System detail.
+Service and tunnel Start/Stop/Restart actions live under System instead of
+competing with routine controls in the header. API actions affect only
+`thetower-control-surface.service`, and API/ADB SSH tunnel recovery remains
 independent so an ADB bind conflict cannot disturb API control.
+
+Templated choice and disclosure controls own their complete dark-theme chrome
+instead of relying on Windows defaults that can reintroduce near-black text.
+That contract includes closed and open ComboBoxes, ComboBox items, and the
+Timed Pause Expander in normal, focused, expanded, and disabled states.
 
 The main operational pages no longer have draggable sidebar or latest-battle
 splitters. Previous Game Screen and Host Health are independently expandable
@@ -276,11 +300,28 @@ it does not claim the game is Running. **When this battle ends** separately
 selects Continue automatically, Wait, or Return/stay Home; those choices never
 act as an immediate Start/Resume command. The buttons apply immediately, which
 prevents a periodic status refresh from replacing an unsaved selection.
+Automation-authority, manual-control, and terminal-policy writes have their own
+serialization gate: a click cancels an older status request and sends its POST
+immediately, then waits to render until the old response has drained. Linux
+orders the accepted write with the final input-dispatch boundary. An ADB
+command already past that boundary, or mandatory restoration after lifecycle
+input, may finish; no later compound step or new automated input may begin
+after Pause is accepted.
 State and terminal-policy acknowledgements match an exact Linux request ID;
 same-value requests remain visibly pending without being rewritten.
+Revision 35 extends that exact receipt contract to state, terminal policy,
+game-speed target, ADB target, and Strategy. Linux publishes the receipts in
+its atomically replaced runtime-owned status file and binds the whole snapshot
+to runtime ID, PID, target, and target generation. The client never derives a
+current acknowledgement from Activity text, a log timestamp, observation,
+handler activity, or an allowed authority flag, so a noisy or rotated action
+log cannot turn a healthy long-running runtime into false `pending` state.
 
 **Start Battle** is enabled only for fresh verified Home New Battle evidence;
-**Attach to Battle** is enabled only for fresh active or resumable evidence.
+**Attach to Battle** is enabled only for fresh active or resumable evidence and
+only after the visible Strategy selection has been accepted by Linux. A dirty
+selection or an in-flight Strategy request disables Attach so the operator can
+never request one profile while the server snapshots another.
 Linux revalidates the exact runtime, target, activity scope, and boundary and
 reports unavailable, requested, awaiting-enable, acknowledged, rejected, or
 interrupted state. A verified Home tap appears as `action_dispatched` and keeps
@@ -295,12 +336,22 @@ at Tournament Results, unknown state, or without exact target/scope binding
 rather than advertising an incomplete workflow. A failed Home New refresh is
 recorded once as failed/interrupted and does not repeat background/foreground
 input on later status frames.
-A Home UI repair that exhausts after a successful save appears as
-`awaiting_manual_correction` with the failed check and reason. Automation stays
-Paused; after making that manual correction, Enable requests a new save rather
-than replaying the retained receipt. Pause, Stop, or Take Manual Control during
-Home setup yields before cleanup input, and only the same original workflow
-may restore Home on a later Enabled observation.
+A Home UI repair that exhausts after a successful save appears as degraded
+with the failed check and reason, then releases automation. A later safe Home
+boundary can retry normal profile setup. Pause, Stop, or Take Manual Control
+during Home setup yields before cleanup input, and only the same original
+workflow may restore Home on a later Enabled observation.
+
+Attach snapshots the accepted Strategy definition. No Strategy intentionally
+observes; a proved compatible selection becomes active; and an incompatible or
+unprovable selection observes degraded while remaining pending for the next
+safe boundary. **Switch this battle** is disabled for that degraded observer;
+Linux also downshifts any raced request to the next safe boundary. Intentional
+No Strategy observation remains eligible for a later explicit switch. The
+attached validation pass never repairs configuration. A
+recoverable validation or reporting failure keeps automation enabled and marks
+the battle degraded; only a catastrophic authority, target, restoration, or
+uncertain-input failure Pauses.
 
 The manual Surrender selector belongs to Take Manual Control. The default
 excludes manual Surrender stats and writes only a save-backed nonrepresentative
@@ -329,6 +380,16 @@ without starting. Active adoption changes normal strategy behavior and Battle
 End identity without a restart, while new-run initialization, session preflight,
 and Home-only gates wait for the next genuine boundary. Selected, current, and
 pending values remain separate.
+
+Current, pending-next-boundary, pending-active-adoption, and next-start Strategy
+labels, plus the current battle's degradation marker, come from Linux
+`control_model.strategy_scope`. Missing or contradictory
+legacy Strategy acknowledgements do not reconstruct or override that scope.
+Acknowledgement-based reconstruction is retained only for a server that does
+not advertise `better_control_model_v2`. A stopped process still shows the
+authoritative next-start default without inventing an active Strategy, and a
+dirty or failed selection remains locally retained across polling exactly as
+before.
 
 The same panel selects a persistent numeric game-speed target. The dropdown
 offers `x0.0` through `x6.0` in `x0.5` increments and `x6.3 — Maximum
@@ -702,25 +763,24 @@ still requires the complete visible smoke below.
    current battle. The real
    operator profile catalog and control state remain byte-for-byte untouched.
 
-When a startup requirement fails, the runtime publishes the failed check,
-expected value, and allowed responses. The app opens **Startup check needs a
-decision** automatically; **Review preflight decision** reopens the current
-request. **Apply choice** resolves only that request, while **Decide later**
-leaves automation blocked without changing anything. **Retry check** captures
-fresh evidence. A configured fallback or **Bypass only this check for this
-run** waives only the displayed requirement for the current run; all unrelated
-preflight checks still execute. The same pending decision is visible to the
-browser and CLI because the Linux control file remains authoritative.
+When a recoverable startup requirement fails, the runtime publishes the failed
+check, expected value, and any scoped responses as a nonblocking advisory. It
+does not open automatically and does not halt automation. **Review preflight
+advisory** opens the current evidence; closing or deciding later leaves it
+visible while automation continues degraded and sends no input. **Retry check**
+captures fresh evidence. A configured fallback or **Bypass only this check for
+this run** waives only the displayed requirement for the current run; all
+unrelated preflight checks still execute. The same pending advisory is visible
+to the browser and CLI because the Linux control file remains authoritative.
 
-An attached Tournament mismatch uses the same dialog as a non-blocking
-preflight warning. **Pause for manual changes** persists Pause without ending
-the Tournament, **Retry the read-only check** captures fresh evidence, and
-**Continue despite...** waives only the displayed mismatch for the current
-run. **Decide later** leaves the warning pending while Tournament result
-observation continues. The attached Tournament check remains strictly inside
-the battle; it never uses Exit Battle → Go Home → Resume Battle. Its Home-only
-Workshop preset is reported as deferred unless exact bound save evidence is
-already available.
+An attached-battle mismatch is a nonblocking preflight advisory, not a decision
+gate. It does not open a popup automatically and requires no action;
+observation and automation continue while the battle is marked degraded.
+**Review preflight advisory** opens the retained evidence and any optional
+fresh read-only retry or scoped continuation Linux supplied. Pause remains an
+ordinary explicit Automation control. The attached check stays strictly inside
+the battle and never uses Exit Battle → Go Home → Resume Battle; Home-only work
+is reported as deferred unless exact bound save evidence is already available.
 
 Recent Activity refreshes independently once per second, follows the newest
 entry, and defaults to the concise `ACTION`, `RESULT`, `WARN`, `ERROR`, and
@@ -784,6 +844,19 @@ interfaces are vendor-specific. Continuous frame telemetry is not a planned
 control-surface provider; use a bounded, issue-specific diagnostic trace only
 when the retained counters cannot answer a concrete performance anomaly.
 
+The strip's third line separates residual **Other Windows CPU** from measured
+BlueStacks and Control Surface CPU. If host CPU remains at least `70%`, memory
+use remains at least `95%`, or free physical memory remains at most `1 GiB`,
+for 30 seconds, the existing
+ten-second process-discovery pass begins bounded attribution. It retains the
+four highest non-BlueStacks CPU consumers plus the four largest working-set
+consumers, at most eight distinct PID/name pairs, and continues through two
+minutes of healthy recovery. The first pass may show memory while CPU says
+**Warming up** because it establishes the rate baseline. Hover over the strip
+for average/maximum CPU, working set, private bytes, inspected-process count,
+and scan cost. The collector records no command lines or window titles and
+never changes automation or game state.
+
 The compact **Pause sampling** control remains visible in the health strip at
 the window's minimum supported size. Pausing flushes the current partial
 aggregate and stops new samples, while the independent uploader continues
@@ -800,9 +873,11 @@ aggregates are queued in
 API or tunnel outage does not discard recent telemetry. The bounded queue keeps
 the newest nominal 24 hours and reconnects automatically. Linux stores
 idempotent aggregates in `logs/host_performance.sqlite3` with sample-time host,
-ADB-port, UTC, and fresh current-run correlation. This requires server revision
-13 and capabilities `host_performance_telemetry_v1` and
-`host_performance_gpu_v1`.
+ADB-port, UTC, and fresh current-run correlation. Base and GPU publication
+require server revision 13 and capabilities `host_performance_telemetry_v1`
+and `host_performance_gpu_v1`. Process attribution requires revision 36 and
+`host_performance_process_attribution_v1`; older queued aggregates remain
+valid because the added field is optional.
 
 **Preferences > BlueStacks Recovery** is a default-off opt-in for automatic
 restart after Linux confirms a sustained emulator-degradation signature. Before
@@ -814,7 +889,10 @@ enabling it:
    but does not promise a stable raw command-line interface.
 2. Set the absolute path to that installation's `HD-Player.exe`, the exact
    instance name, and the Windows ADB listener port. The Windows listener and
-   Linux forwarded/runtime ports remain separate settings.
+   Linux forwarded/runtime ports remain separate settings. Recovery also
+   verifies that `bst.instance.INSTANCE.status.adb_port` in
+   `C:\ProgramData\BlueStacks_nxt\bluestacks.conf` maps that instance to the
+   configured port.
 3. Leave recovery disabled until those values have been checked on this host.
    The implementation starts `HD-Player.exe --instance INSTANCE`; a different
    shortcut argument form requires a code/configuration update before enabling.
@@ -822,17 +900,28 @@ enabling it:
 An eligible request first makes the Linux runtime install a no-input maintenance
 hold on fresh `RUNNING` evidence. Windows then resolves the configured listener
 to exactly one `HD-Player.exe` PID/start time, durably acknowledges that exact
-identity, revalidates it before close or force-kill, starts only the configured
-instance, and requires a different exact listener owner on two consecutive
-polls. A lost response is reconciled instead of replaying the mutation.
+identity together with the immutable executable/instance/port target,
+revalidates it before close or force-kill through the same process handle,
+starts only the configured instance, and requires a different exact listener
+owner on two consecutive polls. A lost response is reconciled instead of
+replaying the mutation. Target fields are locked while a request remains
+active, and closing the client waits for an in-flight coordinator step before
+disposing its API connection. More than one configured instance with an active
+ADB listener disables automatic recovery because the host-wide aging signal is
+ambiguous.
 
 Linux reconnects ADB, launches The Tower, and handles the distinct **Welcome
 Back** popup. It tries **Resume**, suppresses the non-earning rollback until the
 old wave high-water, and—if Resume cannot clear the popup—uses **End run** and
 starts a verified configured new battle. Recovery remains held until the old
-battle catches up or the replacement battle is freshly `RUNNING`. An accepted
-request is reconciled even if the Preference is disabled afterward. The
-thresholds, cooldown, and exact authority handshake are specified in the
+battle catches up or the replacement battle is freshly `RUNNING`. Accepted
+launcher and Home inputs retain bounded postcondition receipts and are never
+blindly repeated on the next refresh; the known Free Ticket blocker has one
+exact-owner Claim and one stable-Home retry boundary. An accepted request is
+reconciled even if the Preference is disabled afterward. **System > Host
+Health** shows detector ratios, request phase, acknowledged instance/port/PID,
+and outcome independently of ordinary error text. The thresholds, cooldown,
+and exact authority handshake are specified in the
 [control-surface architecture](../../docs/architecture/control_surface.md#automatic-bluestacks-degradation-recovery).
 
 **System > Services** shows the managed localhost ADB target as four distinct
@@ -844,7 +933,10 @@ new target without recreating its startup/session gates. Polling does not
 replace a dirty draft; invalid or currently ineligible input remains visible
 until **Revert** or a successful apply. Wait for target acknowledgement before
 resuming; the existing validated API rollback leaves the runtime paused on its
-former target after a failed connection or capture.
+former target after a failed connection or capture. Paused handoff eligibility
+uses the durable exact state receipt, and target completion uses the durable
+exact ADB receipt; neither depends on retaining the corresponding Activity
+lines.
 
 Attachment is never automatic. **Start Automation** changes only the managed
 process lifecycle and leaves action authority Paused. After a fresh
@@ -875,8 +967,11 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 35, `current_battle_perks_v1`,
-`better_control_model_v2`, `save_backed_setup_capture_v2`,
+current Windows build requires revision 39, `current_battle_perks_v1`,
+`better_control_model_v2`, `runtime_control_acknowledgements_v1`,
+`strategy_aware_attach_v1`,
+`save_backed_setup_capture_v2`, `save_mapping_integration_v1`,
+`host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,
 `bluestacks_maintenance_v1`,
 `managed_custom_module_presets_v1`,
@@ -938,14 +1033,52 @@ already configured:
 7. With no desired tunnel, close the GUI and confirm the companion exits after
    about 15 seconds. Then start a desired tunnel, sign out of Windows, sign back
    in, and confirm neither the host nor a tunnel starts automatically.
-8. Keep BlueStacks recovery disabled while confirming the executable path,
-   instance shortcut, and listener port. In a disposable or operator-approved
-   active battle, enable it and exercise one detector-authorized request:
-   verify the acknowledged old PID/path/start time, replacement listener, ADB
-   reconnection, The Tower launch, distinct Welcome Back Resume, held rollback,
-   and release at the old wave high-water. Separately validate the bounded
-   **End run** -> full interrupted report -> configured **New Battle** fallback
-   only on a battle the operator has explicitly authorized for that boundary.
+8. With one durable mapping observation and a disposable clean owned feature
+   worktree available, open save-mapping integration from both **Tools** and
+   the persistent banner. Review the exact proposal, change either selection
+   and confirm preparation disables, then review again. Cancel the warning once
+   and prove all repositories remain clean. Confirm preparation once and verify
+   only the displayed feature targets become unstaged changes; keep the
+   uncommitted/unpromoted/pending-validation result visible and confirm no
+   automatic retry, service restart, runtime-control change, or device input.
+9. For revision 38, connect to a fresh exact-owner runtime snapshot after the
+   relevant acknowledgement lines have moved more than 262 KiB behind the log
+   tail, then after log rotation. Confirm Action Authority, terminal policy,
+   speed, ADB, setup-capture availability, and an acknowledged indefinite Pause
+   remain stable without issuing a control request to refresh the display.
+10. Confirm Strategy Scope shows the Linux-authored startup default, current
+   battle, current degradation, pending next boundary, and explicit pending
+   active adoption even when
+   compatibility acknowledgements are absent or contradictory. Repeat with a
+   stopped process, a dirty local selection, a failed/retried request, and a
+   same-ID publication; polling must preserve those existing behaviors. Confirm
+   Attach is disabled while the visible selection is dirty or its request is in
+   flight, then enabled after exact acknowledgement.
+11. At minimum, default, and maximized window sizes, confirm the four header
+    health indicators remain on one row. Expand Host Health and verify all
+    three telemetry rows precede the two-column runtime evidence without being
+    clipped. Exercise Timed Pause collapsed and expanded, then inspect a
+    disabled state; its label and chevron must remain light on dark chrome with
+    no platform-default white disc or near-black text.
+12. For revision 39, keep BlueStacks recovery disabled while confirming the
+    executable path, instance shortcut, listener port, and exact
+    `bluestacks.conf` instance mapping. Confirm target fields become read-only
+    during a durable request and that a close requested after host
+    acknowledgement waits for replacement reconciliation. In a disposable or
+    operator-approved active battle, enable it and exercise one
+    detector-authorized request: verify the acknowledged old
+    PID/path/instance/port/start time, replacement listener, sampler-baseline
+    reset, ADB reconnection, The Tower launch, distinct Welcome Back Resume,
+    held rollback, and release at the old wave high-water. Separately validate
+    the bounded **End run** -> full interrupted report -> configured **New
+    Battle** fallback only on a battle the operator has explicitly authorized
+    for that boundary.
+
+Revision-38 items 9 and 10 and the visual layout/theme checks in item 11 remain
+pending until they are actually exercised in a Windows WPF session. Linux
+cross-builds and portable compatibility tests do not count as that runtime
+validation. Revision-39 item 12 also remains pending; no live control or device
+request is needed merely to refresh these displays.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).

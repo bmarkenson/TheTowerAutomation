@@ -580,6 +580,10 @@ class PlayerSavePreflightCoordinator:
         provenance["background_dispatched"] = bool(
             serialized.background_dispatched
         )
+        provenance["lifecycle_input_attempted"] = bool(
+            serialized.lifecycle_input_attempted
+        )
+        provenance["source_restored"] = bool(serialized.source_restored)
         if serialized.background_dispatched:
             provenance["serialization"] = "background_dispatched"
         if serialized.status is GuardedSerializationStatus.BLOCKED:
@@ -589,6 +593,15 @@ class PlayerSavePreflightCoordinator:
                 ),
                 "restored_source_boundary_unverified": (
                     "restored_target_or_new_battle_boundary_unverified"
+                ),
+                "restored_target_binding_unverified": (
+                    "restored_target_or_new_battle_boundary_unverified"
+                ),
+                "restored_context_boundary_unverified": (
+                    "restored_target_or_new_battle_boundary_unverified"
+                ),
+                "restored_source_convergence_timeout": (
+                    "restored_new_battle_boundary_convergence_timeout"
                 ),
             }.get(serialized.reason, serialized.reason)
             return self._blocked_result(
@@ -1576,11 +1589,11 @@ def _capture_default():
     return capture_adb_screenshot()
 
 
-def _background_default(target: str) -> bool:
+def _background_default(target: str) -> Any:
     return background_to_android_home(target)
 
 
-def _foreground_default(target: str) -> bool:
+def _foreground_default(target: str) -> Any:
     return restore_tower_launcher(target)
 
 

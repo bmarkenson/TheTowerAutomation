@@ -17,6 +17,7 @@ from core.app import App
 from core.action_executor import execute_actions
 from core.input import safe_tap
 from core.run_state import AUTOMATION
+from core.runtime_failure_policy import RuntimeFailureKind
 
 
 def _set_running_context(
@@ -70,7 +71,7 @@ def _terminal_gate_app() -> App:
     app = App.__new__(App)
     app._mission_mgr = manager
     app._supervisor = Mock()
-    app._supervisor.persist_state.return_value = True
+    app._supervisor.pause_for_operator_authority.return_value = True
     app._supervisor.consume_gate_decision.return_value = True
     app._action_authority = RuntimeActionAuthority()
     app._current_run_scope_id = Mock(return_value="run-1")
@@ -162,6 +163,51 @@ def test_complete_normal_pause_and_strategy_gate_authority_matrix():
     )
     assert not snapshot.strategy_action_authority.allowed
     assert not snapshot.lifecycle_action_authority.allowed
+
+
+def test_emulator_recovery_supersedes_ordinary_internal_holds_only():
+    app = App.__new__(App)
+    app._action_authority = RuntimeActionAuthority()
+    app._authority_battle_active = False
+    app._authority_primary_state = "HOME_SCREEN"
+    app._external_development_hold_active = False
+    app._emulator_maintenance_hold_active = True
+    app._supervisor = SimpleNamespace(is_paused=False)
+    app._current_run_scope_id = Mock(return_value="run-1")
+    superseded = tuple(
+        AuthorityHoldState(hold, "ordinary recovery boundary")
+        for hold in (
+            AuthorityHold.ACTIVITY_CONTINUITY,
+            AuthorityHold.RUN_INITIALIZATION,
+            AuthorityHold.SESSION_PREFLIGHT,
+            AuthorityHold.OPERATOR_WORKFLOW,
+            AuthorityHold.BLOCKING_MODAL_RECOVERY,
+        )
+    )
+
+    app._update_action_authority(holds=superseded)
+
+    snapshot = app._action_authority.snapshot()
+    assert tuple(item.hold for item in snapshot.holds) == (
+        AuthorityHold.EMULATOR_MAINTENANCE,
+    )
+    assert app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=AuthorityHold.EMULATOR_MAINTENANCE,
+    ).allowed
+
+    app._update_action_authority(
+        holds=(
+            AuthorityHoldState(
+                AuthorityHold.EXCLUSIVE_OWNERSHIP,
+                "genuine competing owner",
+            ),
+        )
+    )
+    assert not app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=AuthorityHold.EMULATOR_MAINTENANCE,
+    ).allowed
 
 
 def test_initial_battle_intent_hold_allows_only_fresh_home_ad_gem():
@@ -573,7 +619,7 @@ def test_app_auxiliary_guard_has_no_capture_or_status_work_in_tap_hot_path():
     assert app._supervisor.apply_control.call_count == 2
 
 
-def test_gate_activation_never_mutates_pause_or_dispatches_lifecycle_input():
+def test_legacy_gate_is_retired_without_pause_or_lifecycle_input():
     app = _terminal_gate_app()
     original_state = AUTOMATION.state
     with (
@@ -585,16 +631,36 @@ def test_gate_activation_never_mutates_pause_or_dispatches_lifecycle_input():
         app._sync_strategy_action_gate(terminally_blocked=True)
 
     gate = app._get_action_authority().strategy_gate
-    assert gate is not None
-    assert gate.strategy == "farm_t18"
-    assert gate.battle_scope == "run-1"
-    assert gate.failed_check_ids == ("modules",)
+    assert gate is None
     assert AUTOMATION.state == original_state
-    app._supervisor.persist_state.assert_not_called()
+    app._supervisor.pause_for_operator_authority.assert_not_called()
+    app._supervisor.pause_for_catastrophic_failure.assert_not_called()
     surrender.assert_not_called()
     home.assert_not_called()
     game_over.assert_not_called()
     exit_battle.assert_not_called()
+
+
+def test_malformed_workflow_authority_uses_catastrophic_pause_policy():
+    app = App.__new__(App)
+    supervisor = Mock()
+    supervisor.manual_control_error = False
+    supervisor.battle_workflow_error = True
+    supervisor.setup_capture_error = False
+    supervisor.is_paused = False
+    app._supervisor = supervisor
+    app._sync_setup_capture = Mock()
+
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+
+    supervisor.pause_for_catastrophic_failure.assert_called_once_with(
+        RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+        reason=(
+            "malformed battle-workflow directive made device-input "
+            "ownership unknowable"
+        ),
+    )
+    app._sync_setup_capture.assert_not_called()
 
 
 def test_terminal_boundary_does_not_recreate_a_failed_battle_gate():
@@ -606,10 +672,11 @@ def test_terminal_boundary_does_not_recreate_a_failed_battle_gate():
     )
 
     assert app._get_action_authority().strategy_gate is None
-    app._supervisor.persist_state.assert_not_called()
+    app._supervisor.pause_for_operator_authority.assert_not_called()
+    app._supervisor.pause_for_catastrophic_failure.assert_not_called()
 
 
-def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
+def test_gate_decisions_clear_only_retry_and_scoped_waiver_transitions():
     app = _terminal_gate_app()
     manager = app._mission_mgr
     supervisor = app._supervisor
@@ -617,13 +684,10 @@ def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
     for action, expected_event in (
         ("retry", "retry_session_preflight"),
         ("waive", "waive_session_preflight_check"),
-        ("repair_restart", "authorize_session_preflight_restart"),
     ):
         _activate_gate(app._get_action_authority())
         manager.reset_mock()
         supervisor.reset_mock()
-        supervisor.persist_state.return_value = True
-        manager.authorize_session_preflight_restart.return_value = True
         directive = {
             "request_id": f"request-{action}",
             "status": "resolved",
@@ -637,10 +701,6 @@ def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
                 "value": "",
             },
         }
-        if action == "repair_restart":
-            directive["repair_authority"] = (
-                app._current_control_workflow_evidence()
-            )
 
         assert app._apply_gate_decision(
             directive,
@@ -650,23 +710,39 @@ def test_gate_decisions_clear_only_the_authorized_non_pause_transitions():
         assert getattr(manager, expected_event).call_count == 1
         supervisor.consume_gate_decision.assert_called_once()
 
+
+@pytest.mark.parametrize("action", ["pause", "repair_restart"])
+def test_legacy_failure_choices_are_retired_without_input(action):
+    app = _terminal_gate_app()
+    manager = app._mission_mgr
+    supervisor = app._supervisor
     _activate_gate(app._get_action_authority())
-    pause = {
-        "request_id": "request-pause",
+    directive = {
+        "request_id": f"legacy-{action}",
         "status": "resolved",
         "check_id": "modules",
-        "decision_id": "pause_for_changes",
+        "decision_id": action,
         "reason": "Modules do not match",
         "selected_option": {
-            "action": "pause",
-            "label": "Pause",
+            "action": action,
+            "label": action,
             "kind": "standard",
             "value": "",
         },
     }
-    assert app._apply_gate_decision(pause, phase="session_preflight")
-    assert app._get_action_authority().strategy_gate is not None
-    supervisor.persist_state.assert_called_once_with("PAUSED")
+
+    assert app._apply_gate_decision(directive, phase="session_preflight")
+
+    assert app._get_action_authority().strategy_gate is None
+    supervisor.pause_for_operator_authority.assert_not_called()
+    manager.authorize_session_preflight_restart.assert_not_called()
+    supervisor.consume_gate_decision.assert_called_once_with(
+        f"legacy-{action}",
+        completion_reason=(
+            f"retired legacy {action} decision for modules; "
+            "automation continues degraded"
+        ),
+    )
 
 
 def test_success_strategy_change_and_natural_boundary_end_the_scoped_gate():
@@ -727,6 +803,64 @@ def test_success_retires_same_strategy_session_preflight_decision(status):
         completion_reason=(
             "session preflight subsequently completed successfully"
         ),
+    )
+
+
+def test_degraded_completion_preserves_session_preflight_advisory():
+    app = _terminal_gate_app()
+    app._mission_mgr.strategy.is_session_preflight_complete.return_value = True
+    app._mission_mgr.session_preflight_degraded.return_value = True
+    app._mission_mgr.ctx.data["mission_vars"].update(
+        gc_session_preflight_completed=True,
+        gc_session_preflight_last_status="complete",
+        gc_session_preflight_degraded=True,
+    )
+    app._supervisor.gate_decision = {
+        "request_id": "degraded-session",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "free_upgrade_locks",
+        "blocking": False,
+    }
+
+    app._sync_strategy_action_gate(terminally_blocked=False)
+
+    app._supervisor.consume_gate_decision.assert_not_called()
+
+
+def test_recovered_completion_retires_advisory_and_records_recovery():
+    app = _terminal_gate_app()
+    app._mission_mgr.strategy.is_session_preflight_complete.return_value = True
+    app._mission_mgr.session_preflight_degraded.return_value = False
+    app._mission_mgr.ctx.data["mission_vars"].update(
+        gc_session_preflight_completed=True,
+        gc_session_preflight_last_status="complete",
+        gc_session_preflight_degraded=False,
+    )
+    app._supervisor.gate_decision = {
+        "request_id": "recovered-session",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "free_upgrade_locks",
+        "blocking": False,
+    }
+
+    with patch("core.app.log") as runtime_log:
+        app._sync_strategy_action_gate(terminally_blocked=False)
+
+    app._supervisor.consume_gate_decision.assert_called_once_with(
+        "recovered-session",
+        completion_reason=(
+            "session preflight subsequently completed successfully"
+        ),
+    )
+    runtime_log.assert_called_once_with(
+        "[RUNTIME_ADVISORY] Session configuration recovered; "
+        "the persistent advisory is cleared",
+        "INFO",
+        console=True,
     )
 
 

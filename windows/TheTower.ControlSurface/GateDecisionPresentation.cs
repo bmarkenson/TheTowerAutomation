@@ -15,10 +15,11 @@ public sealed record GateDecisionPresentation(
         if (!decision.Blocking)
         {
             return new(
-                "Preflight warning needs direction",
-                "A read-only preflight found a mismatch",
+                "Preflight advisory",
+                "A nonblocking preflight advisory is available",
                 checkText,
-                "Closing leaves the warning pending; Tournament observation continues.");
+                "No decision is required; closing leaves the advisory visible " +
+                "while automation continues.");
         }
 
         if (string.Equals(

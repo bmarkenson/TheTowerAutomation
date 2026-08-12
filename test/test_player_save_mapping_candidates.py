@@ -22,6 +22,7 @@ from core.player_save_mapping_candidates import (
     resolve_mapping_candidates,
     validate_mapping_candidate_context,
     validate_mapping_candidate_record,
+    validate_mapping_candidate_result,
 )
 
 
@@ -853,12 +854,13 @@ def test_module_assist_pairing_persists_family_scope_and_proposes_replace():
 
 
 def test_module_proposal_allows_an_identical_global_pair_in_a_new_scope():
+    record = _module_info_record(
+        raw_value=39,
+        semantic="Harmony Conductor",
+        known_raw_semantic_value="Harmony Conductor",
+    )
     proposal = proposed_mapping_patch(
-        _module_info_record(
-            raw_value=39,
-            semantic="Harmony Conductor",
-            known_raw_semantic_value="Harmony Conductor",
-        ),
+        record,
         repository_root=ROOT,
     )
 
@@ -872,6 +874,25 @@ def test_module_proposal_allows_an_identical_global_pair_in_a_new_scope():
             },
         }
     ]
+
+    mapping = json.loads(
+        (ROOT / "config/player_save_versions/data_9_game_1073.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    mapping["module_loadout"]["primary"][3]["values"].append(
+        {"info_index": 39, "name": "Harmony Conductor"}
+    )
+    validate_mapping_candidate_result(record, mapping)
+
+    mapping["module_loadout"]["assist"][0]["values"].append(
+        {"info_index": 39, "name": "Conflicting Module"}
+    )
+    with pytest.raises(
+        PlayerSaveMappingCandidateError,
+        match="proposal_result_conflict",
+    ):
+        validate_mapping_candidate_result(record, mapping)
 
 
 @pytest.mark.parametrize(

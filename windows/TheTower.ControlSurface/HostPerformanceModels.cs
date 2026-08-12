@@ -60,6 +60,10 @@ public sealed class HostPerformanceAggregate
 
     [JsonPropertyName("gpu_competitors")]
     public List<HostPerformanceGpuCompetitor> GpuCompetitors { get; set; } = [];
+
+    [JsonPropertyName("process_attribution")]
+    public List<HostPerformanceProcessAttribution> ProcessAttribution
+        { get; set; } = [];
 }
 
 public sealed class HostPerformanceGpuCompetitor
@@ -84,6 +88,30 @@ public sealed class HostPerformanceGpuCompetitor
 
     [JsonPropertyName("shared_memory_bytes_max")]
     public long SharedMemoryBytesMaximum { get; set; }
+}
+
+public sealed class HostPerformanceProcessAttribution
+{
+    [JsonPropertyName("process_id")]
+    public int ProcessId { get; set; }
+
+    [JsonPropertyName("process_name")]
+    public string ProcessName { get; set; } = "";
+
+    [JsonPropertyName("sample_count")]
+    public int SampleCount { get; set; }
+
+    [JsonPropertyName("cpu_percent_avg")]
+    public double? CpuPercentAverage { get; set; }
+
+    [JsonPropertyName("cpu_percent_max")]
+    public double? CpuPercentMaximum { get; set; }
+
+    [JsonPropertyName("working_set_bytes_max")]
+    public long WorkingSetBytesMaximum { get; set; }
+
+    [JsonPropertyName("private_bytes_max")]
+    public long PrivateBytesMaximum { get; set; }
 }
 
 public sealed class HostPerformancePublishResponse
@@ -141,6 +169,11 @@ internal sealed record HostPerformanceSample
     public IReadOnlyList<HostGpuProcessSample> GpuCompetitors { get; init; } = [];
     public double? GpuSampleDurationMilliseconds { get; init; }
     public string? GpuError { get; init; }
+    public HostProcessAttributionState ProcessAttributionState { get; init; }
+    public int ProcessAttributionProcessCount { get; init; }
+    public IReadOnlyList<HostProcessObservation> ProcessAttribution
+        { get; init; } = [];
+    public double? ProcessAttributionSampleDurationMilliseconds { get; init; }
     public double? ControlSurfaceCpuPercent { get; init; }
     public double SampleDurationMilliseconds { get; init; }
 }
@@ -151,6 +184,21 @@ internal sealed record HostGpuProcessSample(
     double GpuPercent,
     long DedicatedMemoryBytes,
     long SharedMemoryBytes);
+
+internal sealed record HostProcessObservation(
+    int ProcessId,
+    string ProcessName,
+    double? CpuPercent,
+    long WorkingSetBytes,
+    long PrivateBytes);
+
+public enum HostProcessAttributionState
+{
+    Inactive,
+    Arming,
+    Active,
+    Recovering,
+}
 
 public enum HostPerformanceHealthState
 {
@@ -192,6 +240,13 @@ public sealed record HostPerformanceSnapshot
         { get; init; } = [];
     public double? GpuSampleDurationMilliseconds { get; init; }
     public string? GpuError { get; init; }
+    public double? ControlSurfaceCpuPercent { get; init; }
+    public double? OtherWindowsCpuPercent { get; init; }
+    public HostProcessAttributionState ProcessAttributionState { get; init; }
+    public int ProcessAttributionProcessCount { get; init; }
+    public IReadOnlyList<HostPerformanceProcessAttribution> ProcessAttribution
+        { get; init; } = [];
+    public double? ProcessAttributionSampleDurationMilliseconds { get; init; }
     public double? SampleDurationMilliseconds { get; init; }
     public int PendingAggregateCount { get; init; }
     public long DroppedAggregateCount { get; init; }

@@ -75,6 +75,20 @@ def _gpu_competitor(**overrides):
     return payload
 
 
+def _process_attribution(**overrides):
+    payload = {
+        "process_id": 8080,
+        "process_name": "Code",
+        "sample_count": 1,
+        "cpu_percent_avg": 17.5,
+        "cpu_percent_max": 21.0,
+        "working_set_bytes_max": 805_306_368,
+        "private_bytes_max": 1_073_741_824,
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _write_activity_scope(root: Path, run_id: str) -> None:
     path = root / "logs" / "activity_scope.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +139,7 @@ def test_host_performance_publish_is_idempotent_and_keeps_sample_run(tmp_path):
     assert stored["host_name"] == "MAIN-PC"
     assert stored["metrics"]["bluestacks_cpu_percent_avg"] == 18.75
     assert stored["gpu_competitors"] == []
+    assert stored["process_attribution"] == []
 
 
 def test_recent_host_aggregates_are_bounded_by_run_and_cutoff(tmp_path):
@@ -162,6 +177,58 @@ def test_recent_host_aggregates_are_bounded_by_run_and_cutoff(tmp_path):
     ]
 
 
+def test_current_sampler_session_history_crosses_runs_but_not_target(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    same_session_prior_run = _aggregate(
+        aggregate_id="11111111-1111-4111-8111-111111111111",
+        sequence=1,
+        run_id="prior-run",
+        window_start_utc="2026-07-30T14:59:00+00:00",
+        window_end_utc="2026-07-30T14:59:09+00:00",
+    )
+    other_session = _aggregate(
+        aggregate_id="22222222-2222-4222-8222-222222222222",
+        session_id="99999999-9999-4999-8999-999999999999",
+        sequence=1,
+        run_id="other-run",
+        window_start_utc="2026-07-30T14:59:10+00:00",
+        window_end_utc="2026-07-30T14:59:19+00:00",
+    )
+    other_port = _aggregate(
+        aggregate_id="33333333-3333-4333-8333-333333333333",
+        sequence=2,
+        adb_port=5565,
+        run_id="other-target",
+        window_start_utc="2026-07-30T14:59:20+00:00",
+        window_end_utc="2026-07-30T14:59:29+00:00",
+    )
+    current_run = _aggregate(
+        aggregate_id="44444444-4444-4444-8444-444444444444",
+        sequence=3,
+        run_id="current-run",
+        window_start_utc="2026-07-30T15:00:00+00:00",
+        window_end_utc="2026-07-30T15:00:09+00:00",
+    )
+    service.publish_host_performance(
+        _request(
+            same_session_prior_run,
+            other_session,
+            other_port,
+            current_run,
+        )
+    )
+
+    history = service.host_performance_store.recent_session_aggregates(
+        current_run_id="current-run",
+        since=datetime(2026, 7, 30, 14, 58, tzinfo=timezone.utc),
+    )
+
+    assert [item["aggregate_id"] for item in history] == [
+        "11111111-1111-4111-8111-111111111111",
+        "44444444-4444-4444-8444-444444444444",
+    ]
+
+
 def test_host_performance_stores_gpu_metrics_and_bounded_competitors(tmp_path):
     service = ControlSurfaceService(repository_root=tmp_path)
     aggregate = _aggregate(
@@ -190,6 +257,34 @@ def test_host_performance_stores_gpu_metrics_and_bounded_competitors(tmp_path):
         )
     assert payload["metrics"]["host_gpu_percent_avg"] == 42.5
     assert payload["gpu_competitors"] == [_gpu_competitor()]
+
+
+def test_host_performance_stores_bounded_process_attribution(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    aggregate = _aggregate(
+        metrics={
+            "host_cpu_percent_avg": 78.0,
+            "process_attribution_process_count_min": 142,
+            "process_attribution_process_count_max": 145,
+            "process_attribution_sample_duration_ms_avg": 8.5,
+            "process_attribution_sample_duration_ms_max": 9.25,
+        },
+        process_attribution=[_process_attribution()],
+    )
+
+    response = service.publish_host_performance(_request(aggregate))
+
+    assert response["accepted"] == 1
+    with sqlite3.connect(
+        tmp_path / "logs" / "host_performance.sqlite3"
+    ) as database:
+        payload = json.loads(
+            database.execute(
+                "SELECT payload_json FROM host_performance_aggregates"
+            ).fetchone()[0]
+        )
+    assert payload["process_attribution"] == [_process_attribution()]
+    assert payload["metrics"]["process_attribution_process_count_max"] == 145
 
 
 def test_host_performance_retention_prunes_old_aggregates(tmp_path):
@@ -267,6 +362,34 @@ def test_host_performance_retention_prunes_old_aggregates(tmp_path):
                 ]
             ),
             "at most 5",
+        ),
+        (
+            lambda aggregate: aggregate.update(
+                process_attribution=[
+                    _process_attribution(
+                        cpu_percent_avg=30.0,
+                        cpu_percent_max=20.0,
+                    )
+                ]
+            ),
+            "must not exceed",
+        ),
+        (
+            lambda aggregate: aggregate.update(
+                process_attribution=[
+                    _process_attribution(cpu_percent_avg=None)
+                ]
+            ),
+            "must both be null or numeric",
+        ),
+        (
+            lambda aggregate: aggregate.update(
+                process_attribution=[
+                    _process_attribution(process_id=index + 1)
+                    for index in range(9)
+                ]
+            ),
+            "at most 8",
         ),
         (
             lambda aggregate: aggregate.update(
@@ -353,6 +476,9 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     gpu_sampler = (native_root / "WindowsGpuPerformanceSampler.cs").read_text(
         encoding="utf-8"
     )
+    process_attribution = (
+        native_root / "HostProcessAttribution.cs"
+    ).read_text(encoding="utf-8")
 
     assert "ThreadPriority.BelowNormal" in tracker
     assert "SampleIntervalMilliseconds = 1000" in tracker
@@ -371,6 +497,11 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     assert r"\GPU Process Memory(*)\Dedicated Usage" in gpu_sampler
     assert "MaximumSampleCompetitors = 8" in gpu_sampler
     assert "MaximumGpuCompetitors = 5" in tracker
+    assert "MaximumSelectedProcesses = 8" in process_attribution
+    assert "HostMemoryThresholdPercent = 95.0" in process_attribution
+    assert "ActivationDelay = TimeSpan.FromSeconds(30)" in process_attribution
+    assert "RecoveryDelay = TimeSpan.FromMinutes(2)" in process_attribution
+    assert "process_attribution_sample_duration_ms" in tracker
     assert "Process.Start(" not in sampler
     assert "Process.Start(" not in gpu_sampler
     assert "Process.GetProcesses(" not in gpu_sampler
@@ -403,6 +534,12 @@ def test_native_host_sampling_control_is_persistent_and_collapsible():
     assert 'x:Name="HostGpuText"' in window
     assert 'x:Name="BlueStacksGpuText"' in window
     assert 'x:Name="GpuCompetitorText"' in window
+    assert 'x:Name="OtherWindowsCpuText"' in window
+    assert 'x:Name="TopCpuProcessText"' in window
+    assert 'x:Name="TopMemoryProcessText"' in window
+    assert 'x:Name="ProcessAttributionStateText"' in window
+    assert "snapshot.ProcessAttribution" in window_code
+    assert "snapshot.OtherWindowsCpuPercent" in window_code
     assert 'Click="HostSamplingToggle_Click"' in window
     assert "TextTrimming=\"CharacterEllipsis\"" in window
     assert 'x:Name="HostHealthToggleButton"' in window

@@ -7,7 +7,35 @@ using System.Text.Json;
 
 namespace TheTower.ControlSurface;
 
-public sealed class ControlSurfaceApi : IDisposable
+internal interface IHostMaintenanceApi
+{
+    Task<StatusResponse> PostHostMaintenanceAsync(
+        object payload,
+        CancellationToken cancellationToken);
+}
+
+public sealed class ControlSurfaceApiException : InvalidOperationException
+{
+    public ControlSurfaceApiException(
+        string message,
+        int statusCode,
+        string code,
+        JsonElement? details)
+        : base(message)
+    {
+        StatusCode = statusCode;
+        Code = code;
+        Details = details;
+    }
+
+    public int StatusCode { get; }
+
+    public string Code { get; }
+
+    public JsonElement? Details { get; }
+}
+
+public sealed class ControlSurfaceApi : IDisposable, IHostMaintenanceApi
 {
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(120) };
     private readonly object _configurationGate = new();
@@ -39,6 +67,12 @@ public sealed class ControlSurfaceApi : IDisposable
         CancellationToken cancellationToken) =>
         GetAsync<SetupCaptureResponse>(
             "/api/v1/setup-capture",
+            cancellationToken);
+
+    public Task<SaveMappingIntegrationCatalog> GetSaveMappingIntegrationAsync(
+        CancellationToken cancellationToken) =>
+        GetAsync<SaveMappingIntegrationCatalog>(
+            "/api/v1/save-mapping-integration",
             cancellationToken);
 
     public Task<CapturedStrategyDraftResponse> GetCapturedStrategyDraftAsync(
@@ -155,6 +189,22 @@ public sealed class ControlSurfaceApi : IDisposable
             payload,
             cancellationToken);
 
+    public Task<SaveMappingIntegrationReview> ReviewSaveMappingIntegrationAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<SaveMappingIntegrationReview>(
+            "/api/v1/save-mapping-integration",
+            payload,
+            cancellationToken);
+
+    public Task<SaveMappingPreparedResult> PrepareSaveMappingIntegrationAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<SaveMappingPreparedResult>(
+            "/api/v1/save-mapping-integration",
+            payload,
+            cancellationToken);
+
     public Task<StrategyProfileMutationResponse> PostStrategyProfileAsync(
         object payload,
         CancellationToken cancellationToken) =>
@@ -241,6 +291,8 @@ public sealed class ControlSurfaceApi : IDisposable
             return;
         }
         var message = $"Linux service returned {(int)response.StatusCode} {response.ReasonPhrase}.";
+        var code = "";
+        JsonElement? details = null;
         try
         {
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -251,12 +303,24 @@ public sealed class ControlSurfaceApi : IDisposable
             {
                 message = error.GetString() ?? message;
             }
+            if (document.RootElement.TryGetProperty("code", out var errorCode))
+            {
+                code = errorCode.GetString() ?? "";
+            }
+            if (document.RootElement.TryGetProperty("details", out var errorDetails))
+            {
+                details = errorDetails.Clone();
+            }
         }
         catch (JsonException)
         {
             // Keep the HTTP status when the error body is not JSON.
         }
-        throw new InvalidOperationException(AddControlServerRestartHint(message));
+        throw new ControlSurfaceApiException(
+            AddControlServerRestartHint(message),
+            (int)response.StatusCode,
+            code,
+            details);
     }
 
     internal static string AddControlServerRestartHint(string message)

@@ -80,6 +80,20 @@ There is no need to fingerprint or attest a worker's complete source tree for
 emulator access. Branch, HEAD, and an ordinary dirty summary are sufficient
 diagnostic context in a handoff or lease log.
 
+The save-mapping control-surface workflow is one narrow preparation route into
+this same topology. The production server may enumerate Git-linked
+`feature/*` worktrees inside the configured development root and prepare one
+exact, operator-reviewed canonical mapping proposal in a selected clean
+feature. Clients receive and return only an opaque snapshot ID; the server
+binds the current `main`, `develop`, and feature tips and the target file
+hashes and modes. A private durable journal makes an interrupted multi-target
+replacement explicitly recoverable from that same reviewed selection; it does
+not authorize the server to clean or overwrite unrelated work. It cannot
+target `main` or `develop`, create a worktree, stage, commit, merge, promote,
+restart a service, or use the emulator. The resulting dirty feature remains
+ordinary owned development work and follows the normal checkpoint and
+promotion path.
+
 ### Staging, promotion, and rollback
 
 `develop` is the project's only standing staging layer. It provides a clean
@@ -309,7 +323,10 @@ minimal record contains:
 control surface binds a request to the fresh runtime-owned session ID, PID, ADB
 target, screen, and battle evidence it has already verified against the held
 runtime lock. A conflicting live request returns `busy`/HTTP 409. The fixed
-30-second heartbeat expiry is server policy rather than client negotiation.
+120-second heartbeat expiry is server policy rather than client negotiation.
+This window includes production quiescence and acknowledgement time, leaving a
+bounded interval for guarded multi-screen development work without relying on
+client timing or an indefinite hold.
 
 There is no source registration, complete worktree fingerprint, secret bearer
 token, client authentication handshake, service epoch, capability negotiation,

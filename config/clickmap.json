@@ -1408,6 +1408,20 @@
       "roles": [
         "indicator"
       ]
+    },
+    "free_ticket_dialog": {
+      "match_template": "indicators/free_ticket_dialog.png",
+      "match_region": {
+        "x": 330,
+        "y": 545,
+        "w": 420,
+        "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator",
+        "blocking_modal"
+      ]
     }
   },
   "overlays": {
@@ -3178,6 +3192,20 @@
       "match_threshold": 0.9,
       "roles": [
         "button"
+      ]
+    },
+    "claim:free_ticket": {
+      "match_template": "buttons/claim:free_ticket.png",
+      "match_region": {
+        "x": 310,
+        "y": 1115,
+        "w": 460,
+        "h": 235
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button",
+        "blocking_modal_action"
       ]
     }
   },

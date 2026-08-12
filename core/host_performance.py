@@ -16,6 +16,7 @@ from uuid import UUID
 HOST_PERFORMANCE_SCHEMA_VERSION = 1
 MAX_HOST_PERFORMANCE_BATCH = 120
 MAX_GPU_COMPETITORS = 5
+MAX_PROCESS_ATTRIBUTION = 8
 DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS = 30
 
 _RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
@@ -69,6 +70,10 @@ _METRIC_LIMITS: dict[str, tuple[float, float]] = {
     "gpu_process_count_max": (0.0, 100_000.0),
     "gpu_sample_duration_ms_avg": (0.0, 60_000.0),
     "gpu_sample_duration_ms_max": (0.0, 60_000.0),
+    "process_attribution_process_count_min": (0.0, 100_000.0),
+    "process_attribution_process_count_max": (0.0, 100_000.0),
+    "process_attribution_sample_duration_ms_avg": (0.0, 60_000.0),
+    "process_attribution_sample_duration_ms_max": (0.0, 60_000.0),
     "control_surface_cpu_percent_avg": (0.0, 100.0),
     "control_surface_cpu_percent_max": (0.0, 100.0),
     "sample_duration_ms_avg": (0.0, 60_000.0),
@@ -226,6 +231,76 @@ class HostPerformanceStore:
                 result.append(payload)
         return result
 
+    def recent_session_aggregates(
+        self,
+        *,
+        current_run_id: str,
+        since: datetime,
+        limit: int = 8192,
+    ) -> list[dict[str, Any]]:
+        """Return cross-run history for the current host sampling session.
+
+        The newest aggregate attached to ``current_run_id`` selects one exact
+        Windows sampler session, host, and ADB port.  Earlier runs from only
+        that tuple are then eligible as the aging baseline; another PC,
+        restarted control-surface session, or ADB target cannot leak in.
+        """
+
+        normalized_run_id = _optional_run_id(
+            current_run_id,
+            field="current_run_id",
+        )
+        if normalized_run_id is None or not self.path.exists():
+            return []
+        bounded_limit = max(1, min(int(limit), 8192))
+        cutoff = _utc_datetime(since).isoformat(timespec="milliseconds")
+        try:
+            with self._write_lock:
+                with sqlite3.connect(self.path, timeout=5.0) as connection:
+                    selected = connection.execute(
+                        """
+                        SELECT session_id, host_id, adb_port
+                        FROM host_performance_aggregates
+                        WHERE run_id = ?
+                        ORDER BY window_end_utc DESC
+                        LIMIT 1
+                        """,
+                        (normalized_run_id,),
+                    ).fetchone()
+                    if selected is None:
+                        return []
+                    session_id, host_id, adb_port = selected
+                    rows = connection.execute(
+                        """
+                        SELECT payload_json
+                        FROM host_performance_aggregates
+                        WHERE window_end_utc >= ?
+                          AND session_id = ?
+                          AND host_id = ?
+                          AND adb_port IS ?
+                        ORDER BY window_end_utc ASC
+                        LIMIT ?
+                        """,
+                        (
+                            cutoff,
+                            session_id,
+                            host_id,
+                            adb_port,
+                            bounded_limit,
+                        ),
+                    ).fetchall()
+        except sqlite3.Error as exc:
+            raise HostPerformanceStorageError(str(exc)) from exc
+        result: list[dict[str, Any]] = []
+        for (raw,) in rows:
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(payload, dict):
+                result.append(payload)
+        return result
+
     @staticmethod
     def _prepare(connection: sqlite3.Connection) -> None:
         connection.execute(
@@ -256,6 +331,17 @@ class HostPerformanceStore:
             """
             CREATE INDEX IF NOT EXISTS host_performance_by_host_time
             ON host_performance_aggregates (host_id, window_start_utc)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS host_performance_by_session_target_time
+            ON host_performance_aggregates (
+                session_id,
+                host_id,
+                adb_port,
+                window_start_utc
+            )
             """
         )
         connection.execute(
@@ -321,7 +407,7 @@ def _validate_aggregate(
         "context_observed_at_utc",
         "metrics",
     }
-    optional = {"gpu_competitors"}
+    optional = {"gpu_competitors", "process_attribution"}
     provided = set(aggregate)
     if not required.issubset(provided) or provided - required - optional:
         missing = sorted(required - provided)
@@ -454,6 +540,11 @@ def _validate_aggregate(
         field=f"aggregates[{index}].gpu_competitors",
         maximum_samples=normalized["sample_count"],
     )
+    normalized["process_attribution"] = _validate_process_attribution(
+        aggregate.get("process_attribution", []),
+        field=f"aggregates[{index}].process_attribution",
+        maximum_samples=normalized["sample_count"],
+    )
     return normalized
 
 
@@ -547,6 +638,124 @@ def _validate_gpu_competitors(
                 "shared_memory_bytes_max": _bounded_integer(
                     item.get("shared_memory_bytes_max"),
                     field=f"{item_field}.shared_memory_bytes_max",
+                    minimum=0,
+                    maximum=2**63 - 1,
+                ),
+            }
+        )
+    return normalized
+
+
+def _validate_process_attribution(
+    value: object,
+    *,
+    field: str,
+    maximum_samples: int,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, Sequence) or isinstance(
+        value,
+        (str, bytes, bytearray),
+    ):
+        raise HostPerformancePayloadError(f"{field} must be a JSON array")
+    if len(value) > MAX_PROCESS_ATTRIBUTION:
+        raise HostPerformancePayloadError(
+            f"{field} must contain at most {MAX_PROCESS_ATTRIBUTION} items"
+        )
+
+    required = {
+        "process_id",
+        "process_name",
+        "sample_count",
+        "cpu_percent_avg",
+        "cpu_percent_max",
+        "working_set_bytes_max",
+        "private_bytes_max",
+    }
+    normalized: list[dict[str, Any]] = []
+    identities: set[tuple[int, str]] = set()
+    for index, item in enumerate(value):
+        item_field = f"{field}[{index}]"
+        if not isinstance(item, Mapping) or set(item) != required:
+            raise HostPerformancePayloadError(
+                f"{item_field} must define exactly "
+                + ", ".join(sorted(required))
+            )
+        process_id = _bounded_integer(
+            item.get("process_id"),
+            field=f"{item_field}.process_id",
+            minimum=1,
+            maximum=2**31 - 1,
+        )
+        process_name = _bounded_text(
+            item.get("process_name"),
+            field=f"{item_field}.process_name",
+            maximum=128,
+        )
+        identity = (process_id, process_name.casefold())
+        if identity in identities:
+            raise HostPerformancePayloadError(
+                f"{field} contains duplicate process identity "
+                + f"{process_name} ({process_id})"
+            )
+        identities.add(identity)
+
+        cpu_average_value = item.get("cpu_percent_avg")
+        cpu_maximum_value = item.get("cpu_percent_max")
+        if (cpu_average_value is None) != (cpu_maximum_value is None):
+            raise HostPerformancePayloadError(
+                f"{item_field} CPU average and maximum must both be null "
+                "or numeric"
+            )
+        cpu_average = (
+            None
+            if cpu_average_value is None
+            else _bounded_number(
+                cpu_average_value,
+                field=f"{item_field}.cpu_percent_avg",
+                minimum=0.0,
+                maximum=100.0,
+            )
+        )
+        cpu_maximum = (
+            None
+            if cpu_maximum_value is None
+            else _bounded_number(
+                cpu_maximum_value,
+                field=f"{item_field}.cpu_percent_max",
+                minimum=0.0,
+                maximum=100.0,
+            )
+        )
+        if (
+            cpu_average is not None
+            and cpu_maximum is not None
+            and cpu_average > cpu_maximum
+        ):
+            raise HostPerformancePayloadError(
+                f"{item_field}.cpu_percent_avg must not exceed "
+                "cpu_percent_max"
+            )
+        normalized.append(
+            {
+                "process_id": process_id,
+                "process_name": process_name,
+                "sample_count": _bounded_integer(
+                    item.get("sample_count"),
+                    field=f"{item_field}.sample_count",
+                    minimum=1,
+                    maximum=maximum_samples,
+                ),
+                "cpu_percent_avg": cpu_average,
+                "cpu_percent_max": cpu_maximum,
+                "working_set_bytes_max": _bounded_integer(
+                    item.get("working_set_bytes_max"),
+                    field=f"{item_field}.working_set_bytes_max",
+                    minimum=0,
+                    maximum=2**63 - 1,
+                ),
+                "private_bytes_max": _bounded_integer(
+                    item.get("private_bytes_max"),
+                    field=f"{item_field}.private_bytes_max",
                     minimum=0,
                     maximum=2**63 - 1,
                 ),

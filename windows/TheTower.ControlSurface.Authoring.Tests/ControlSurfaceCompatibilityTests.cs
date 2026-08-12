@@ -31,7 +31,7 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(34);
+        var status = Status(38);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
@@ -44,11 +44,207 @@ public sealed class ControlSurfaceCompatibilityTests
             "save_backed_setup_capture_v2",
             result.MissingCapabilities);
         Assert.Contains(
+            "save_mapping_integration_v1",
+            result.MissingCapabilities);
+        Assert.Contains(
             "save_mapping_review_status_v1",
             result.MissingCapabilities);
         Assert.Contains(
             "strategy_authoring_preset_local_copy_v1",
             result.MissingCapabilities);
+        Assert.Contains(
+            "host_performance_process_attribution_v1",
+            result.MissingCapabilities);
+        Assert.Contains(
+            "strategy_aware_attach_v1",
+            result.MissingCapabilities);
+    }
+
+    [Fact]
+    public void StrategyAwareAttachRequiresRevisionThirtyEight()
+    {
+        var result = ControlSurfaceCompatibility.Evaluate(
+            Status(
+                37,
+                "strategy_aware_attach_v1"));
+
+        Assert.False(result.IsCompatible);
+        Assert.False(result.ServerRevisionSupported);
+    }
+
+    [Theory]
+    [InlineData(true, false, "strategy_selection_unaccepted")]
+    [InlineData(false, true, "strategy_selection_pending")]
+    public void AttachWaitsForTheVisibleStrategySelectionToBeAccepted(
+        bool dirty,
+        bool requestInFlight,
+        string expectedCode)
+    {
+        var availability = ControlSurfaceCompatibility.ResolveAttachAvailability(
+            new BetterControlActionAvailability
+            {
+                Available = true,
+                Code = "available",
+                Reason = "Attach is available.",
+            },
+            dirty,
+            requestInFlight);
+
+        Assert.False(availability.Available);
+        Assert.Equal(expectedCode, availability.Code);
+        Assert.Contains("Strategy", availability.Reason);
+    }
+
+    [Fact]
+    public void AuthoritativeStrategyScopeWinsOverMissingLegacyAcknowledgement()
+    {
+        var status = Status(35, "better_control_model_v2");
+        status.Control = new ControlStatus
+        {
+            Strategy = "legacy_pending",
+            StrategyApplyMode = "next_boundary",
+        };
+        status.Acknowledgements = new AcknowledgementStatus
+        {
+            Strategy = null,
+        };
+        status.ControlModel = new BetterControlModelStatus
+        {
+            StrategyScope = new BetterControlStrategyScopeStatus
+            {
+                StartupDefault = "farm_t19_ad_assist",
+                ActiveBattle = "farm_t19_ad_assist",
+                PendingNextBoundary = null,
+            },
+        };
+
+        var presentation = ControlSurfaceCompatibility.ResolveStrategyScope(
+            status,
+            processActive: true,
+            configuredStrategy: "legacy_configured");
+
+        Assert.True(presentation.Authoritative);
+        Assert.Equal("farm_t19_ad_assist", presentation.StartupDefault);
+        Assert.Equal("farm_t19_ad_assist", presentation.CurrentStrategy);
+        Assert.Null(presentation.PendingStrategy);
+    }
+
+    [Fact]
+    public void AuthoritativeStrategyScopeRendersCurrentAndPendingBoundary()
+    {
+        var status = Status(35, "better_control_model_v2");
+        status.ControlModel = new BetterControlModelStatus
+        {
+            StrategyScope = new BetterControlStrategyScopeStatus
+            {
+                StartupDefault = "farm_t19",
+                ActiveBattle = "farm_t18",
+                PendingNextBoundary = "farm_t19",
+            },
+        };
+
+        var presentation = ControlSurfaceCompatibility.ResolveStrategyScope(
+            status,
+            processActive: true,
+            configuredStrategy: "contradictory_legacy");
+
+        Assert.Equal("farm_t18", presentation.CurrentStrategy);
+        Assert.Equal("farm_t19", presentation.PendingStrategy);
+        Assert.Equal("Pending boundary", presentation.PendingLabel);
+    }
+
+    [Fact]
+    public void AuthoritativeStrategyScopeFlagsRunningDegradation()
+    {
+        var status = Status(38, "better_control_model_v2");
+        status.ControlModel = new BetterControlModelStatus
+        {
+            StrategyScope = new BetterControlStrategyScopeStatus
+            {
+                StartupDefault = "farm_t19",
+                ActiveBattle = null,
+                Degradation = new Dictionary<string, object?>
+                {
+                    ["reason"] = "attached Tier mismatch",
+                },
+            },
+        };
+
+        var presentation = ControlSurfaceCompatibility.ResolveStrategyScope(
+            status,
+            processActive: true,
+            configuredStrategy: "farm_t19");
+
+        Assert.True(presentation.Degraded);
+    }
+
+    [Fact]
+    public void ActiveAdoptionAndStoppedScopeRemainExplicit()
+    {
+        var status = Status(35, "better_control_model_v2");
+        status.ControlModel = new BetterControlModelStatus
+        {
+            StrategyScope = new BetterControlStrategyScopeStatus
+            {
+                StartupDefault = "farm_t19",
+                ActiveBattle = "farm_t18",
+                PendingNextBoundary = null,
+                PendingActiveBattle = "farm_t19",
+            },
+        };
+
+        var active = ControlSurfaceCompatibility.ResolveStrategyScope(
+            status,
+            processActive: true,
+            configuredStrategy: "legacy");
+        var stopped = ControlSurfaceCompatibility.ResolveStrategyScope(
+            status,
+            processActive: false,
+            configuredStrategy: "legacy");
+
+        Assert.Equal("farm_t19", active.PendingStrategy);
+        Assert.Equal("Pending active adoption", active.PendingLabel);
+        Assert.Equal("farm_t19", stopped.StartupDefault);
+        Assert.Null(stopped.CurrentStrategy);
+        Assert.Null(stopped.PendingStrategy);
+    }
+
+    [Fact]
+    public void LegacyStrategyReconstructionRunsOnlyWithoutCapability()
+    {
+        var legacy = Status(34);
+        legacy.Control = new ControlStatus
+        {
+            Strategy = "farm_t19",
+            StrategyApplyMode = "next_boundary",
+        };
+        legacy.Acknowledgements = new AcknowledgementStatus
+        {
+            Strategy = new DirectiveAcknowledgement
+            {
+                Value = "farm_t18",
+                AcknowledgesCurrent = false,
+            },
+        };
+        var reconstructed = ControlSurfaceCompatibility.ResolveStrategyScope(
+            legacy,
+            processActive: true,
+            configuredStrategy: "farm_t18");
+
+        var authoritativeButMissing = Status(35, "better_control_model_v2");
+        authoritativeButMissing.Control = legacy.Control;
+        authoritativeButMissing.Acknowledgements = legacy.Acknowledgements;
+        var unavailable = ControlSurfaceCompatibility.ResolveStrategyScope(
+            authoritativeButMissing,
+            processActive: true,
+            configuredStrategy: "farm_t18");
+
+        Assert.False(reconstructed.Authoritative);
+        Assert.Equal("farm_t18", reconstructed.CurrentStrategy);
+        Assert.Equal("farm_t19", reconstructed.PendingStrategy);
+        Assert.True(unavailable.Authoritative);
+        Assert.Null(unavailable.CurrentStrategy);
+        Assert.Null(unavailable.PendingStrategy);
     }
 
     [Fact]
@@ -149,7 +345,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                35,
+                39,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
@@ -162,12 +358,16 @@ public sealed class ControlSurfaceCompatibilityTests
                 "explicit_strategy_disposition",
                 "game_speed_target",
                 "host_performance_gpu_v1",
+                "host_performance_process_attribution_v1",
                 "host_performance_telemetry_v1",
                 "managed_custom_module_presets_v1",
                 "observed_game_speed",
+                "runtime_control_acknowledgements_v1",
                 "selected_strategy_process_start",
                 "save_backed_setup_capture_v2",
+                "save_mapping_integration_v1",
                 "save_mapping_review_status_v1",
+                "strategy_aware_attach_v1",
                 "strategy_action_gate_v1",
                 "strategy_authoring_local_loadout_editors_v1",
                 "strategy_authoring_preset_local_copy_v1",
@@ -190,6 +390,8 @@ public sealed class ControlSurfaceCompatibilityTests
 
         Assert.True(
             ControlSurfaceCompatibility.CanOpenSetupCapture(compatible, model));
+        Assert.True(
+            ControlSurfaceCompatibility.CanOpenSaveMappingIntegration(compatible));
         model.SetupCapture.Status = "ready";
         Assert.True(
             ControlSurfaceCompatibility.CanOpenSetupCapture(compatible, model));
@@ -391,5 +593,49 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Throws<ArgumentException>(() =>
             BlueStacksInstanceController.ValidateInstanceName(
                 instanceName + " --instance Other"));
+    }
+
+    [Fact]
+    public void BlueStacksConfigurationBindsInstanceNameToStatusAdbPort()
+    {
+        var mappings = BlueStacksInstanceController.ParseInstanceAdbPortMappings(
+            [
+                "bst.instance.Nougat32.status.adb_port=\"5555\"",
+                "bst.instance.Pie64_1.status.adb_port=\"5565\"",
+                "bst.instance.Nougat32.adb_port=\"9999\"",
+                "unrelated=value",
+            ]);
+
+        Assert.Equal(2, mappings.Count);
+        Assert.Equal(5555, mappings["Nougat32"]);
+        Assert.Equal(5565, mappings["Pie64_1"]);
+    }
+
+    [Fact]
+    public void BlueStacksStoppedPortCannotBecomeAnotherLiveInstancePort()
+    {
+        var target = new BlueStacksRecoveryTarget(
+            @"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            "Nougat32",
+            5555);
+
+        BlueStacksInstanceController.ValidateConfiguredPortBinding(
+            target,
+            5555,
+            allowStoppedPort: false);
+        BlueStacksInstanceController.ValidateConfiguredPortBinding(
+            target,
+            0,
+            allowStoppedPort: true);
+        Assert.Throws<BlueStacksTargetBindingException>(() =>
+            BlueStacksInstanceController.ValidateConfiguredPortBinding(
+                target,
+                5565,
+                allowStoppedPort: true));
+        Assert.Throws<BlueStacksTargetBindingException>(() =>
+            BlueStacksInstanceController.ValidateConfiguredPortBinding(
+                target,
+                0,
+                allowStoppedPort: false));
     }
 }

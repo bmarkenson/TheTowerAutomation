@@ -30,13 +30,22 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       `infoIndex 10` as `Astral Deliverance`; the exact-version local event is
       active for later fresh decodes and the runtime reached steady state with
       no gate, repair, Surrender, or new battle.
-    - [ ] Review candidate
+    - [x] Candidate
       `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`
-      and apply its atomic proposal to both `data-9-game-1073` authority and
-      the `data-9-game-1101` structural mirror, then confirm at a later natural
-      fresh decode that Modules no longer needs UI. Exercise the remaining
-      Home and terminal candidate paths only when those boundaries occur
-      naturally.
+      was reviewed and atomically integrated into both `data-9-game-1073`
+      authority and the `data-9-game-1101` structural mirror by `dbe3d34`.
+      The first production attachment afterward reported Modules, including
+      cannon-assist `infoIndex 10` as `Astral Deliverance`, from
+      `bound_player_save_preflight` without opening Modules; the durable local
+      event now reports `integrated` because canonical owner and mirror agree.
+    - [ ] Exercise the remaining Home and terminal candidate paths only when
+      those boundaries occur naturally.
+    - [ ] Diagnose why that production attachment's continuity projector
+      rejected battle-history entry 29 at `chainlightningdamage` as a malformed
+      value. Determine whether the game emitted a valid negative/sentinel stat
+      before relaxing any invariant. The guarded Battle History fallback
+      completed safely, and independent configuration projections—including
+      Modules, Auto Pick, perk order, and Ultimate Weapons—remained save-backed.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module value. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
@@ -219,9 +228,11 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         acquisition/timeline progress with no in-battle
         `navigation.open_perks` input. At natural Game Over, confirm a proved
         exhausted final prefix performs zero Perks navigation, or a nonfinal
-        bound prefix visits only the newest viewport and never dispatches
-        `gesture_targets.goto_next:perks`. Retain the record to confirm exact
-        saved picks and any terminal uncertainty are rendered separately.
+        bound prefix proves the newest/top edge and dispatches
+        `gesture_targets.goto_next:perks` only until the first unchanged
+        saved-recency marker (or the actual list edge). Retain the record to
+        confirm exact saved picks and any terminal uncertainty are rendered
+        separately.
   - [ ] Confirm the deployed direct-Retry repair on the next ordinary
     `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
     retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh
@@ -297,6 +308,25 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       versus active behavior, and restoration. Only if natural transitions are
       insufficient may a later coordinator authorize one owned bounded
       calibration.
+      - [x] Increase the server-owned interactive-development request and
+        heartbeat window from 30 to 120 seconds. The first authorized live
+        calibration showed that background-input quiescence, runtime
+        acknowledgement, fresh visual guards, and the input helper's required
+        dispatch reserve could consume the former window before one guarded
+        multi-screen operation. The 120-second server policy keeps the lease
+        bounded and preserves every existing Pause/Stop, runtime-owner, target,
+        battle-boundary, release, acknowledgement, and per-input rejection
+        rule. Commit `d77bca3` was promoted behind rollback tag
+        `production-before-20260810T232148Z-785d786`; its input-free smoke
+        request proved an exact 120-second expiry, matching active runtime
+        acknowledgement, suppressive hold, and normal fresh-observation
+        release.
+      - [ ] Resume the authorized changed/restored calibration only after a
+        fresh preflight confirms a steady running battle. The 2026-08-10
+        pre-deployment attempt ended at a natural Game
+        Over before the first Orb value mutation; the panel had already been
+        closed, the lease was terminal with no external hold, and the last
+        authoritative pair remained Extra `30.00m` / Workshop `39.00m`.
     - [ ] Continue routing incompatible versions and shapes, unknown IDs or
       values, unsupported Module requests, and Damage Slider through UI. A
       unique exact-evidence mapping attempt may use the existing fail-closed
@@ -786,6 +816,47 @@ stages:
       09:33:44, observed the overlay removed at 09:33:53, and completed its
       bounded floating-gem scan at 09:33:57. No Surrender or test battle
       boundary was used.
+  - Global runtime failure-policy checkpoint (2026-08-11, feature branch):
+    - [x] Commit `1b16db9` makes configuration mismatch, unavailable
+      validation/evidence, exhausted bounded repair, reporting failure, and
+      expired workflow evidence globally recoverable. An already-safe boundary
+      repairs immediately; otherwise the exact problem is flagged and
+      automation continues degraded.
+    - [x] Only lost/corrupt control authority, lost exact-target ownership,
+      failure to restore the source after lifecycle input, or an uncertain
+      dispatched-input result may automatically persist Pause. Explicit
+      operator Pause, Stop, and Take Manual Control remain independent intent.
+      Static regression prevents App from using generic state persistence or
+      creating a session-preflight Strategy Gate.
+    - [x] Return Control now applies profile skips before comparison. Active or
+      resumable mismatches complete degraded and release Return; Home New
+      repairs at the current safe boundary and releases degraded if evidence or
+      repair exhausts. Recoverable setup-capture, terminal reporting, legacy
+      gate, and orphan-validation outcomes likewise release their owners.
+    - [x] Follow-up commit `4ac5237` makes the next safe boundary actionable:
+      when Continue is already selected for a configuration-degraded strategy
+      battle, Game Over returns Home rather than Retry, retains that route
+      across a failed terminal tap, applies the next Strategy, and runs ordinary
+      bounded profile setup before an exact one-shot continuation. Exhausted
+      repair still launches degraded, and `WAIT` is not overridden.
+    - [x] The affected combined suite passed 470 tests. The supported
+      checkpoint passed compilation, state-definition validation, clickmap
+      validation with zero errors and the established 44 orphan notices, and
+      all 2,225 tests in 360.86 seconds.
+    - [x] The Home-first affected suite passed 535 tests. A second supported
+      checkpoint passed compilation, state-definition validation, clickmap
+      integrity with zero errors and the established 44 orphan notices, and all
+      2,232 tests in 362.15 seconds.
+    - [x] Exact candidate `12ad795` passed a fresh 2,232-test promotion
+      checkpoint and was deployed on 2026-08-11 behind rollback tag
+      `production-before-20260811T162652Z-d9305fc`. Replacement runtime
+      `c7408508ab0a421a98f724e4474d9ba0` completed save-backed Attach, active
+      `farm_t19_ad_assist` adoption, session validation, and a steady-state
+      smoke without Pause or an authority hold.
+    - [ ] Observe the original Return Control mismatch or degraded Game
+      Over/Home-first repair at a natural post-deployment boundary. The
+      deployment smoke preserved an already-running battle and did not
+      manufacture either boundary.
   - Home launch-authority correction checkpoint (2026-08-08, feature branch):
     - [x] Commit `b36f878` requires fresh `RUNNING`, an active No Strategy
       observation, and lifecycle-owned active-battle evidence before granting
@@ -878,6 +949,62 @@ stages:
       collected the already-visible five-gem Home reward and stayed Home; no
       Start Battle intent, battle transition, Surrender, or manufactured test
       boundary was used. Native Windows usability remains pending.
+  - Durable acknowledgement and Strategy Scope correction checkpoint
+    (2026-08-10, feature branch):
+    - [x] Server revision 37 and capability
+      `runtime_control_acknowledgements_v1` publish exact applied state, mode,
+      speed, ADB, and Strategy receipts in the existing atomic runtime-owned
+      authority channel. The envelope must match runtime ID, PID, target, and
+      target generation in the active lock; each field must match the current
+      request ID and value. Legacy/implicit defaults gain IDs at startup without
+      an operator refresh, while action-log messages remain audit-only.
+    - [x] Action Authority, terminal policy, setup-capture availability, paused
+      ADB handoff, and speed/ADB indicators now consume those durable receipts.
+      Attached-restart readiness also uses the exact receipt, fresh runtime
+      observation, and replacement startup-policy snapshot rather than appended
+      log position. No runtime authority semantics or input routes changed.
+    - [x] WPF renders Linux `control_model.strategy_scope` for startup, current,
+      pending-next, and pending-active presentation. Compatibility reconstruction
+      runs only without `better_control_model_v2`; dirty selection, failed retry,
+      same-ID publication, stopped-process, and explicit active adoption remain
+      under the existing selection coordinator.
+    - [x] Repository regressions cover a valid receipt beyond 262 KiB of later
+      log output, rotation, stale/wrong runtime/PID/target/generation rejection,
+      exact request replacement, all five receipt types, authoritative Strategy
+      Scope versus missing/contradictory legacy evidence, and portable WPF
+      current/pending presentation. The expanded affected Python aggregate
+      passes 465 tests, the concurrent-promotion boundary slice passes 203
+      tests, and all 139 portable native tests pass. The Release WPF project
+      cross-builds with zero errors. The supported checkpoint passes
+      compilation, state-definition
+      validation, clickmap integrity with zero errors and the established 44
+      orphan candidates, and all 2,211 Python tests in 353.14 seconds after
+      rebasing onto current `develop` at `adf2176`.
+    - [x] Production and `develop` advanced from `adf2176` to exact `3460d5c`
+      behind rollback tag `production-before-20260811T025615Z-adf2176`.
+      Control-surface PID `2864662` served revision 37. Replacement automation
+      PID `2866425` acquired the exact runtime/target/generation-1 lock while
+      preserving the operator-owned Pause; all five current receipts matched
+      their values and request IDs, Action Authority remained `paused`, the
+      terminal policy was acknowledged, and Strategy Scope contained no false
+      pending state. The promotion smoke used no device input or control
+      refresh request. A separately issued Start Battle request then completed
+      at 20:02 PDT; a read-only follow-up found the same runtime healthy and
+      `RUNNING`, with exact replacement state and Strategy receipts and all
+      five current acknowledgements true.
+    - [x] The complete revision-37 Windows package was published from exact
+      `3460d5c`. Current Control Surface is 72,429,586 bytes with SHA-256
+      `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`;
+      current Tunnel Host is 35,172,117 bytes with SHA-256
+      `cabad7e7fadb26f29c494a54eea8ed0fa717e6035376b6805b25d19457aec828`.
+      Retained slots contain exact prior packages `d836532` and `dbe3d34`.
+    - [ ] Run the revision-37 Windows checks in
+      [`../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation`](../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation):
+      preserve every indicator across long noisy output and rotation without a
+      refresh request, and verify authoritative Strategy current/pending/startup
+      rendering plus dirty/retry/same-ID/stopped/active-adoption behavior. No
+      Windows runtime or device validation is claimed here; see
+      [ISSUE-2026-038](../issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending).
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,
@@ -956,17 +1083,23 @@ stages:
     approximately `0.83%` process CPU clean and `1.9%` under contention,
     exceeding the `<0.5%` non-frame telemetry target. Profile sampler work
     separately from UI and other process activity, retain complete evidence
-    cadence, and validate both clean and contended cases. Track evidence in
+    cadence, and validate both clean and contended cases. Include the dedicated
+    threshold-triggered process-attribution scan-duration metric, confirm the
+    dormant path adds no second process enumeration, and distinguish scan cost
+    from the already measured total client CPU. Track evidence in
     [`ISSUE-2026-003`](../issues/open-2026.md#windows-performance-telemetry-exceeded-its-client-cpu-budget).
   - [ ] Validate and calibrate the default-off BlueStacks degradation recovery
     on Windows. Verify the installed `HD-Player.exe`, instance name from a
-    BlueStacks-created shortcut, and exact ADB listener before enabling it;
-    retain one detector decision and authorized end-to-end restart through
-    Welcome Back catch-up. Exercise the End run/New Battle branch only at an
-    explicitly authorized boundary. Compare false-positive/false-negative
-    behavior with exact run/configuration and host telemetry before changing
-    the trigger thresholds. This completes mitigation validation but does not
-    by itself resolve the cause tracked in
+    BlueStacks-created shortcut, exact `bluestacks.conf` instance/port mapping,
+    and listener owner before enabling it. Confirm target edits lock during a
+    durable request, client close waits across an acknowledged host mutation,
+    and sampler baselines reset at replacement. Retain one detector decision
+    and authorized end-to-end restart through Welcome Back catch-up. Exercise
+    the End run/New Battle branch only at an explicitly authorized boundary.
+    Compare false-positive/false-negative behavior with exact run/configuration
+    and same-session cross-run host telemetry before changing the trigger
+    thresholds. This completes mitigation validation but does not by itself
+    resolve the cause tracked in
     [`ISSUE-2026-002`](../issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
