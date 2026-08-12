@@ -39,6 +39,45 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-12 bounded host telemetry uploads and diagnostics layout
+
+- Commit `e46aee8` fixes the enriched host-performance spool deadlock observed
+  after process attribution was enabled. The client no longer always posts 120
+  aggregates: it measures the serialized ordered candidates, chooses the
+  largest prefix below a conservative `480 KiB` body boundary for the server's
+  `512 KiB` endpoint limit, and sends those exact bytes. Oversized records remain
+  durable and visible as an upload error rather than being discarded.
+- System Diagnostics now keeps health, telemetry state, and sampling control in
+  a stable header, then maps the unchanged values into **Windows Host**,
+  **BlueStacks**, and **Other Windows Load** groups. This replaces the unrelated
+  wide flowing rows that truncated telemetry and split competing-process
+  evidence from its context at the operator's window size.
+- The exact candidate passed the complete repository checkpoint: compilation,
+  state-definition validation, clickmap integrity with zero errors, and all
+  2,478 Python tests in 390.40 seconds. All 160 portable Control Surface tests
+  and 18 Tunnel Host tests passed. The Release WPF cross-build and guarded
+  complete-package publisher passed; only the known read-only NuGet
+  vulnerability-cache warnings remained.
+- Production and `develop` advanced from `54aeb97` to `e46aee8` behind annotated
+  rollback tag `production-before-20260812T235339Z-54aeb97`. This was a native
+  Windows-only boundary, so no Linux service, automation process, ADB owner, or
+  battle was restarted.
+- The complete Windows package was published from exact `e46aee8` at 16:54 PDT.
+  Current Control Surface is 72,462,225 bytes with SHA-256
+  `77c9fdb448fda65e1fdc334cdc9720a08b685a3dc42e64d93b52370dadd98e64`;
+  current Tunnel Host is 35,172,106 bytes with SHA-256
+  `d0203bf09c47561c95d32e076dce0aa8b357f8a09ae0f3637076046798e8b27e`.
+  Retained slot 1 is the prior `4bff966` package: 72,460,718-byte Control
+  Surface `70b7026560fd84252cd8d652be4014f427fb98836c221967a325d0c31d2d7c5c`
+  and 35,172,116-byte Tunnel Host
+  `988724eedb669dba10187333e2639a55568ef4ba342ed98c429b0aa766effc32`.
+  Slot 2 is the prior `c568111` package: 72,459,365-byte Control Surface
+  `89abf22573f2785f30e9b9673fde42558220277b0ed323c63b75f3c63c88ef82`
+  and 35,172,106-byte Tunnel Host
+  `098798d54ee44062a2c990c53b5483141295473208ca65afb4290463338fd5d8`.
+  Publication is not Windows execution; queue drainage, cleared upload status,
+  and the grouped layout remain the bounded native relaunch smoke.
+
 ### 2026-08-12 direct-develop save-mapping integration rollout
 
 - Commit `4bff966` replaces the persistent feature-worktree selector with a
