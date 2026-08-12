@@ -5,7 +5,6 @@ public sealed class HostPerformanceTracker : IDisposable
     private const int SampleIntervalMilliseconds = 1000;
     private const int AggregateSampleCount = 10;
     private const int RawRingCapacity = 120;
-    private const int UploadBatchSize = 120;
     private const int MaximumGpuCompetitors = 5;
     private const int MaximumProcessAttributionPerResource = 4;
     private static readonly TimeSpan RunContextFreshness =
@@ -544,25 +543,25 @@ public sealed class HostPerformanceTracker : IDisposable
                 continue;
             }
 
-            var batch = _spool.Peek(UploadBatchSize);
+            var candidates = _spool.Peek(
+                HostPerformanceUploadBatch.MaximumAggregateCount);
             try
             {
+                var upload = HostPerformanceUploadBatch.Prepare(candidates);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(12));
                 var response = await _api.PostHostPerformanceAsync(
-                    new HostPerformanceBatch
-                    {
-                        Aggregates = batch.ToList(),
-                    },
+                    upload,
                     timeout.Token);
-                if (response.Received != batch.Count)
+                if (response.Received != upload.Aggregates.Count)
                 {
                     throw new InvalidOperationException(
                         "The Linux service acknowledged an unexpected "
                         + "host-performance batch size.");
                 }
-                _spool.Acknowledge(batch.Select(item => item.AggregateId));
+                _spool.Acknowledge(
+                    upload.Aggregates.Select(item => item.AggregateId));
                 lock (_stateGate)
                 {
                     _lastUploadedAtUtc = DateTimeOffset.UtcNow;

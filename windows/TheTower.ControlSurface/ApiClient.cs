@@ -221,12 +221,12 @@ public sealed class ControlSurfaceApi : IDisposable, IHostMaintenanceApi
             payload,
             cancellationToken);
 
-    public Task<HostPerformancePublishResponse> PostHostPerformanceAsync(
-        HostPerformanceBatch payload,
+    internal Task<HostPerformancePublishResponse> PostHostPerformanceAsync(
+        HostPerformanceUploadPayload payload,
         CancellationToken cancellationToken) =>
-        PostAsync<HostPerformancePublishResponse>(
+        PostSerializedJsonAsync<HostPerformancePublishResponse>(
             "/api/v1/host-performance",
-            payload,
+            payload.Json,
             cancellationToken);
 
     public Task<StatusResponse> PostHostMaintenanceAsync(
@@ -256,6 +256,24 @@ public sealed class ControlSurfaceApi : IDisposable, IHostMaintenanceApi
             JsonSerializer.Serialize(payload, _json),
             Encoding.UTF8,
             "application/json");
+        using var response = await _http.SendAsync(request, cancellationToken);
+        await EnsureSuccess(response, cancellationToken);
+        return await response.Content.ReadFromJsonAsync<T>(_json, cancellationToken)
+            ?? throw new InvalidOperationException("The Linux service returned an empty response.");
+    }
+
+    private async Task<T> PostSerializedJsonAsync<T>(
+        string path,
+        byte[] payload,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(HttpMethod.Post, path);
+        request.Content = new ByteArrayContent(payload);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(
+            "application/json")
+        {
+            CharSet = "utf-8",
+        };
         using var response = await _http.SendAsync(request, cancellationToken);
         await EnsureSuccess(response, cancellationToken);
         return await response.Content.ReadFromJsonAsync<T>(_json, cancellationToken)

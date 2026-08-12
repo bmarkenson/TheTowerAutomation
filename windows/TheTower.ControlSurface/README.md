@@ -834,15 +834,17 @@ systemd MainPID, lock PID, lock/PID liveness, and whether the two identities
 agree. Stale lock metadata is retained for diagnosis but is not promoted as a
 live process PID.
 
-The **HOST HEALTH** strip is measured locally on Windows once per second, even
-when the SSH tunnel is down. It shows host CPU/memory/clock, combined BlueStacks
-CPU and RAM, detected process count, and aggregate publication state. Hover over
-the strip for BlueStacks I/O, sampler cost, last Linux acknowledgement, and
-errors. Sampling uses native counters on a below-normal-priority worker; it does
-not capture the screen or start PowerShell, WMI, `nvidia-smi`, or another
-per-sample process.
+The **HOST HEALTH** panel is measured locally on Windows once per second, even
+when the SSH tunnel is down. Its stable header keeps overall health, telemetry
+queue state, and the sampling control together. The metrics below are grouped
+as **Windows Host**, **BlueStacks**, and **Other Windows Load** so host capacity,
+emulator consumption, and competing-process evidence remain visually distinct
+at every supported window width. Hover over the panel for BlueStacks I/O,
+sampler cost, last Linux acknowledgement, and errors. Sampling uses native
+counters on a below-normal-priority worker; it does not capture the screen or
+start PowerShell, WMI, `nvidia-smi`, or another per-sample process.
 
-The strip's second line reports busiest-engine host GPU utilization,
+The grouped panel reports busiest-engine host GPU utilization,
 dedicated/shared adapter memory, BlueStacks GPU utilization/memory, and the top
 competing GPU process. Its tooltip lists up to five non-BlueStacks competitors
 with PID, average/maximum utilization, and memory. Collection uses one
@@ -853,7 +855,7 @@ interfaces are vendor-specific. Continuous frame telemetry is not a planned
 control-surface provider; use a bounded, issue-specific diagnostic trace only
 when the retained counters cannot answer a concrete performance anomaly.
 
-The strip's third line separates residual **Other Windows CPU** from measured
+The **Other Windows Load** group separates residual CPU from measured
 BlueStacks and Control Surface CPU. If host CPU remains at least `70%`, memory
 use remains at least `95%`, or free physical memory remains at most `1 GiB`,
 for 30 seconds, the existing
@@ -866,7 +868,7 @@ for average/maximum CPU, working set, private bytes, inspected-process count,
 and scan cost. The collector records no command lines or window titles and
 never changes automation or game state.
 
-The compact **Pause sampling** control remains visible in the health strip at
+The compact **Pause sampling** control remains visible in the health panel at
 the window's minimum supported size. Pausing flushes the current partial
 aggregate and stops new samples, while the independent uploader continues
 draining queued telemetry. The health state changes to **Sampling paused** and
@@ -880,7 +882,11 @@ Raw samples remain in a two-minute memory ring. Approximately ten-second
 aggregates are queued in
 `%LOCALAPPDATA%\TheTower\host-performance-pending.jsonl` before upload, so an
 API or tunnel outage does not discard recent telemetry. The bounded queue keeps
-the newest nominal 24 hours and reconnects automatically. Linux stores
+the newest nominal 24 hours and reconnects automatically. Uploads select the
+largest ordered aggregate prefix whose serialized UTF-8 request fits below the
+Linux endpoint's `512 KiB` limit; enriched process-attribution records therefore
+split into smaller batches instead of repeatedly receiving HTTP `413` while the
+queue fills. Linux stores
 idempotent aggregates in `logs/host_performance.sqlite3` with sample-time host,
 ADB-port, UTC, and fresh current-run correlation. Base and GPU publication
 require server revision 13 and capabilities `host_performance_telemetry_v1`

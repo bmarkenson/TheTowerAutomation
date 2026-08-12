@@ -2980,7 +2980,10 @@ def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     assert 'operation = "retire_strategy"' in profile_code
     assert 'reviewed_rebase_fingerprint' in profile_code
     assert 'Text="HOST HEALTH"' in native_xaml
-    assert 'Text="BLUESTACKS CPU"' in native_xaml
+    assert 'Text="WINDOWS HOST"' in native_xaml
+    assert 'Text="BLUESTACKS"' in native_xaml
+    assert 'x:Name="BlueStacksCpuText"' in native_xaml
+    assert 'Text="OTHER WINDOWS LOAD"' in native_xaml
     assert 'Text="OBSERVED SPEED"' in native_xaml
 
 
