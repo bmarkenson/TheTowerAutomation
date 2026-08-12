@@ -46,6 +46,7 @@ from core.player_save_confirmed_local_mapping import (
 from core.player_save_mapping_candidates import (
     AppendOnlyMappingCandidateStore,
     PlayerSaveMappingCandidateError,
+    canonical_mapping_set_fingerprint,
     fingerprint_json,
     mapping_candidate_review_status,
     pending_mapping_candidate,
@@ -60,7 +61,7 @@ PLAYER_SAVE_DEVICE_PATH = (
 )
 MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
-SNAPSHOT_SCHEMA_VERSION = 5
+SNAPSHOT_SCHEMA_VERSION = 6
 RAW_FIELD_MANIFEST_SCHEMA_VERSION = 1
 REVISION_COMPATIBILITY_SCHEMA_VERSION = 1
 RAW_FIELD_DISPOSITION_NAMES = frozenset(
@@ -143,6 +144,7 @@ class PlayerSaveSnapshot:
     mapping_authority_id: Optional[str] = None
     mapping_structural_id: Optional[str] = None
     mapping_semantic_fingerprint: Optional[str] = None
+    canonical_mapping_fingerprint: Optional[str] = None
     effective_mapping_fingerprint: Optional[str] = None
     confirmed_local_mappings: Mapping[str, Any] = field(default_factory=dict)
 
@@ -178,6 +180,7 @@ class PlayerSaveSnapshot:
                 "authority_id": self.mapping_authority_id,
                 "structural_id": self.mapping_structural_id,
                 "semantic_fingerprint": self.mapping_semantic_fingerprint,
+                "canonical_fingerprint": self.canonical_mapping_fingerprint,
                 "effective_fingerprint": self.effective_mapping_fingerprint,
                 "confirmed_local": dict(self.confirmed_local_mappings),
             },
@@ -331,6 +334,14 @@ def decode_player_save_bytes(
         authority_mapping_id=mapping_resolution.authority_mapping_id,
         structural_mapping_id=mapping_resolution.structural_mapping_id,
     )
+    canonical_mapping_fingerprint = canonical_mapping_set_fingerprint(
+        {
+            str(candidate["mapping_id"]): candidate
+            for candidate in _load_mappings()
+        },
+        authority_mapping_id=mapping_resolution.authority_mapping_id,
+        structural_mapping_id=mapping_resolution.structural_mapping_id,
+    )
     confirmed_local = _empty_confirmed_local_projection()
     if shape_valid:
         mapping, confirmed_local, local_warnings = (
@@ -450,6 +461,7 @@ def decode_player_save_bytes(
         mapping_authority_id=mapping_resolution.authority_mapping_id,
         mapping_structural_id=mapping_resolution.structural_mapping_id,
         mapping_semantic_fingerprint=mapping_semantic_fingerprint,
+        canonical_mapping_fingerprint=canonical_mapping_fingerprint,
         effective_mapping_fingerprint=effective_mapping_fingerprint,
         confirmed_local_mappings=confirmed_local,
     )
@@ -1458,14 +1470,16 @@ def confirmed_local_mapping_status(
     store: Optional[ConfirmedLocalMappingStore] = None,
     candidate_store: Optional[AppendOnlyMappingCandidateStore] = None,
     repository_root: Path | str = ROOT,
+    candidate_status: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Project durable local authority and review receipts for status UIs."""
 
     owner = store or ConfirmedLocalMappingStore()
-    candidate_status = mapping_candidate_review_status(
-        store=candidate_store,
-        repository_root=repository_root,
-    )
+    if candidate_status is None:
+        candidate_status = mapping_candidate_review_status(
+            store=candidate_store,
+            repository_root=repository_root,
+        )
     try:
         documents = owner.list_documents()
     except (ConfirmedLocalMappingError, OSError) as exc:
@@ -1507,6 +1521,22 @@ def confirmed_local_mapping_status(
                 item["state"] = "revoked"
                 item["reason"] = "local confirmation was explicitly revoked"
             items.append(item)
+    integration_lifecycle_states = {
+        "integration_recovery_required",
+        "integration_unconfirmed",
+        "production_validation_pending",
+        "promotion_pending",
+    }
+    integration_candidate_ids = {
+        str(item.get("candidate_record_id") or "")
+        for item in candidate_status.get("items") or ()
+        if item.get("state") in integration_lifecycle_states
+    }
+    items = [
+        item
+        for item in items
+        if item["candidate_record_id"] not in integration_candidate_ids
+    ]
     confirmed_candidate_ids = {
         item["candidate_record_id"]
         for item in items

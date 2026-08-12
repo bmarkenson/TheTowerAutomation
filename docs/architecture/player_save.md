@@ -669,36 +669,57 @@ Local authority applies only during a later fresh decode whose exact identity,
 root class, mapping resolution, authority/structural IDs, validation policy,
 revision-compatibility declaration, and canonical Module dependency still
 match. It never changes the snapshot whose UI produced the receipt. Each
-snapshot publishes an effective-mapping fingerprint after the local overlay;
+snapshot publishes the exact canonical authority/structural mapping-set
+fingerprint used by its decoder and an effective-mapping fingerprint after the
+local overlay;
 all carry, setup-capture, attachment, History, and terminal provenance binds to
 that fingerprint. Dependency drift, conflict, malformed local state, or a
 read/write failure leaves canonical values authoritative and the unknown value
 on its existing UI fallback.
 
 The control surface publishes the combined local-confirmation and candidate
-review queue as a persistent nonmodal warning. Exact canonical integration
-retires the warning. A `compatible_exact_revision` proposal is an atomic
-review artifact for both the authority owner and the exact structural mirror,
-with a base hash and scoped operation for each. The runtime decoder never
-applies that proposal. Server revision 35 instead offers an explicit operator
-workflow in both control-surface GUIs: the server discovers current linked
-`feature/*` worktrees, the operator reviews one exact proposal against a
-selected clean feature snapshot, and a second confirmation may prepare only
-that fingerprinted result there. The client cannot supply a path, branch,
-operation, or value.
+review queue as a persistent nonmodal warning. A `compatible_exact_revision`
+proposal is an atomic review artifact for both the authority owner and the
+exact structural mirror, with a base hash and scoped operation for each. The
+runtime decoder never applies that proposal. Server revision 40 instead offers
+the same narrow operator workflow in both control-surface GUIs. It has no
+feature-worktree selection: the operator reviews one exact candidate and
+proposal while clean `main` and `develop` are at the same tip, then separately
+confirms creation of one verified child commit directly on `develop`. The
+client cannot supply a path, branch, target, operation, value, commit message,
+or Git identity.
 
-Preparation binds the current `main`, `develop`, and feature tips plus every
-canonical base/result hash and file mode. It refuses dirty or stale repository
-state and records a durable transaction before the first atomic replacement.
-If the process ends between grouped replacements, only the same reviewed
-candidate/worktree selection can request recovery; unrelated changes are never
-cleaned or overwritten. A completed review later includes the exact typed
-prepared result, allowing either GUI to reopen it without offering the write
-again. Preparation never writes `main` or `develop`, stages, commits, tests,
-merges, promotes, restarts a service, changes runtime authority, or sends
-device input. The result remains visibly unvalidated, uncommitted, and
-unpromoted until the ordinary repository and production procedures complete.
-Candidate/local-store failures are diagnostic and do not become startup gates.
+Review binds and exposes the immutable equal base commit, every canonical
+base/result hash and file mode, the prospective canonical mapping-set
+fingerprint, and the standardized commit contract. Integration rechecks those
+facts under a process-shared lock, holds one final candidate-receipt snapshot,
+constructs the commit with a private Git index, durably records its exact
+identity, detaches the bound clean checkout at the base, and uses one Git ref
+transaction to verify `main` while compare-and-swapping only the named
+`develop` ref. An explicit Git switch then serializes the checkout refresh.
+Crash recovery accepts only a clean checkout at an exact detached transaction
+endpoint. A plain switch refuses and preserves a newly arriving edit; every
+partial index or worktree state remains unconfirmed. Relevant Git crash lock
+files likewise make recovery unconfirmed and are never removed automatically.
+It never
+writes or moves production `main`, promotes, restarts a service, changes
+runtime authority, or sends device input. Ref, target, mode, journal, or
+unrelated-state ambiguity is preserved for inspection; no automatic reset or
+retry occurs.
+
+The warning remains `promotion_pending` after the commit reaches `develop` and
+`production_validation_pending` after production contains it. A later complete
+stable save acquisition records a privacy-safe receipt only when the running
+decoder's mapping identity and canonical mapping-set fingerprint match the
+deployed commit. The receipt also binds the acquisition start time and the
+production commit captured when that runtime loaded; an acquisition that began
+before the integration became available cannot clear the checkpoint. Receipt
+work is deferred until the outer save-operation and mutation boundaries have
+released, so it cannot delay Android foreground restoration. The observer is
+advisory: its failure cannot invalidate the save or block automation, but it
+leaves the warning visible. Only that matching post-deployment decode durably
+records the receipt and then retires the integration transaction. Candidate
+and local-store failures remain diagnostic and do not become startup gates.
 
 ## Acquisition provenance and temporal authority
 

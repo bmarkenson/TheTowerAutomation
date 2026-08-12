@@ -149,6 +149,28 @@ class GuardedPlayerSaveSerializer:
     ) -> GuardedSerializationResult:
         """Return a snapshot or a reason whose restoration class is explicit."""
 
+        with self._acquirer.deferred_completion_observers():
+            return self._acquire_with_deferred_observer(
+                expected_target=expected_target,
+                expected_generation=expected_generation,
+                target_generation_detail=target_generation_detail,
+                source_label=source_label,
+                initial_frame=initial_frame,
+                stable_initial_source=stable_initial_source,
+            )
+
+    def _acquire_with_deferred_observer(
+        self,
+        *,
+        expected_target: str,
+        expected_generation: int,
+        target_generation_detail: str,
+        source_label: str,
+        initial_frame: Any = None,
+        stable_initial_source: bool = False,
+    ) -> GuardedSerializationResult:
+        """Run the guarded lifecycle before advisory completion observers."""
+
         background_dispatched = False
         background_attempted = False
         background_uncertain = False

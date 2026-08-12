@@ -197,10 +197,10 @@ public sealed class ControlSurfaceApi : IDisposable, IHostMaintenanceApi
             payload,
             cancellationToken);
 
-    public Task<SaveMappingPreparedResult> PrepareSaveMappingIntegrationAsync(
+    public Task<SaveMappingIntegratedResult> IntegrateSaveMappingAsync(
         object payload,
         CancellationToken cancellationToken) =>
-        PostAsync<SaveMappingPreparedResult>(
+        PostAsync<SaveMappingIntegratedResult>(
             "/api/v1/save-mapping-integration",
             payload,
             cancellationToken);

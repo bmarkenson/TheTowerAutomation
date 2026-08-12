@@ -11,18 +11,13 @@ public partial class SaveMappingIntegrationWindow : Window
         string Label,
         SaveMappingIntegrationItem Item);
 
-    private sealed record WorkspaceChoice(
-        string Label,
-        SaveMappingWorkspaceStatus Workspace);
-
     private sealed record SelectionSnapshot(
         string CandidateRecordId,
-        string WorkspaceId,
         long Generation);
 
     private readonly ControlSurfaceApi _api;
     private SaveMappingIntegrationReview? _review;
-    private SaveMappingPreparedResult? _preparedResult;
+    private SaveMappingIntegratedResult? _integratedResult;
     private bool _busy;
     private bool _applying;
     private long _selectionGeneration;
@@ -38,18 +33,15 @@ public partial class SaveMappingIntegrationWindow : Window
     private CandidateChoice? SelectedCandidate =>
         CandidateBox.SelectedItem as CandidateChoice;
 
-    private WorkspaceChoice? SelectedWorkspace =>
-        WorkspaceBox.SelectedItem as WorkspaceChoice;
-
     private async Task RefreshCatalogAsync()
     {
         await RunAsync(async cancellationToken =>
         {
-            ClearReview("Review an exact proposal before preparation.");
+            ClearReview("Review an exact proposal before integration.");
             var catalog = await _api.GetSaveMappingIntegrationAsync(
                 cancellationToken);
-            if (catalog.SchemaVersion != 1
-                || catalog.Capability != "save_mapping_integration_v1")
+            if (catalog.SchemaVersion != 2
+                || catalog.Capability != "save_mapping_develop_integration_v1")
             {
                 throw new InvalidOperationException(
                     "The Linux service returned an incompatible save-mapping catalog.");
@@ -57,32 +49,31 @@ public partial class SaveMappingIntegrationWindow : Window
             _applying = true;
             try
             {
-                CandidateBox.ItemsSource = catalog.Items
+                var choices = catalog.Items
                     .Select(item => new CandidateChoice(
                         SaveMappingIntegrationViewModels.CandidateLabel(item),
                         item))
                     .ToArray();
-                WorkspaceBox.ItemsSource = catalog.Workspaces
-                    .Select(workspace => new WorkspaceChoice(
-                        SaveMappingIntegrationViewModels.WorkspaceLabel(workspace),
-                        workspace))
-                    .ToArray();
-                CandidateBox.SelectedItem = null;
-                var available = ((IEnumerable<WorkspaceChoice>)WorkspaceBox.ItemsSource)
-                    .Where(choice => choice.Workspace.Available)
-                    .ToArray();
-                WorkspaceBox.SelectedItem = available.Length == 1
-                    ? available[0]
-                    : null;
+                CandidateBox.ItemsSource = choices;
+                CandidateBox.SelectedItem = choices.FirstOrDefault(choice =>
+                    choice.Item.RecordId
+                    == catalog.Transaction?.CandidateRecordId);
             }
             finally
             {
                 _applying = false;
             }
             _selectionGeneration += 1;
+            RepositoryDetailText.Text =
+                SaveMappingIntegrationViewModels.RepositoryText(
+                    catalog.Repository);
+            var readiness = catalog.Repository?.IntegrationAvailable is true
+                ? "main/develop eligible"
+                : "develop integration unavailable";
             CatalogStatusText.Text = catalog.Available
-                ? $"{catalog.Items.Count} observation(s) · "
-                    + $"{catalog.Workspaces.Count} linked feature worktree(s)"
+                ? !string.IsNullOrWhiteSpace(catalog.Transaction?.Reason)
+                    ? catalog.Transaction.Reason
+                    : $"{catalog.Items.Count} observation(s) · {readiness}"
                 : string.IsNullOrWhiteSpace(catalog.Reason)
                     ? "Save-mapping integration catalog is unavailable."
                     : catalog.Reason;
@@ -104,24 +95,14 @@ public partial class SaveMappingIntegrationWindow : Window
     {
         ClearReview("Selection changed. Review the exact proposal again.");
         var candidate = SelectedCandidate?.Item;
-        var workspace = SelectedWorkspace?.Workspace;
         CandidateDetailText.Text = candidate is null
             ? "Choose one durable observation."
             : $"{candidate.MappingId} · {candidate.State} · "
                 + (string.IsNullOrWhiteSpace(candidate.Reason)
                     ? "Review pending"
                     : candidate.Reason);
-        WorkspaceDetailText.Text = workspace is null
-            ? "Choose the feature worktree owned by this outcome."
-            : $"{workspace.PathDisplay}{Environment.NewLine}"
-                + (workspace.Available
-                    ? "Eligible for review and preparation."
-                    : string.IsNullOrWhiteSpace(workspace.Reason)
-                        ? "Unavailable."
-                        : workspace.Reason);
         ReviewButton.IsEnabled = !_busy
-            && candidate?.ReviewAvailable == true
-            && workspace is not null;
+            && candidate?.ReviewAvailable == true;
         ReviewButton.ToolTip = candidate?.ReviewAvailable == false
             ? candidate.ReviewReason
             : "Review the exact server-generated proposal.";
@@ -130,14 +111,12 @@ public partial class SaveMappingIntegrationWindow : Window
     private async void Review_Click(object sender, RoutedEventArgs e)
     {
         var candidate = SelectedCandidate?.Item;
-        var workspace = SelectedWorkspace?.Workspace;
-        if (candidate is null || workspace is null)
+        if (candidate is null)
         {
             return;
         }
         var selection = new SelectionSnapshot(
             candidate.RecordId,
-            workspace.WorkspaceId,
             _selectionGeneration);
         await RunAsync(async cancellationToken =>
         {
@@ -146,14 +125,12 @@ public partial class SaveMappingIntegrationWindow : Window
                 {
                     operation = "review",
                     candidate_record_id = candidate.RecordId,
-                    workspace_id = workspace.WorkspaceId,
                 },
                 cancellationToken);
             if (!SelectionStillCurrent(selection)
                 || !SaveMappingIntegrationViewModels.ReviewMatches(
                     review,
-                    candidate.RecordId,
-                    workspace.WorkspaceId))
+                    candidate.RecordId))
             {
                 throw new InvalidOperationException(
                     "The Linux service returned a review for a different selection.");
@@ -162,72 +139,59 @@ public partial class SaveMappingIntegrationWindow : Window
             ProposalText.Text = SaveMappingIntegrationViewModels.ProposalText(
                 review);
             var availability =
-                SaveMappingIntegrationViewModels.PrepareAvailability(
+                SaveMappingIntegrationViewModels.IntegrateAvailability(
                     review,
-                    candidate.RecordId,
-                    workspace.WorkspaceId);
-            PrepareButton.IsEnabled = availability.Available;
-            PrepareStatusText.Text = availability.Available
-                ? "Ready to prepare tracked JSON in the selected feature worktree."
+                    candidate.RecordId);
+            IntegrateButton.IsEnabled = availability.Available;
+            IntegrateStatusText.Text = availability.Available
+                ? "Ready to create one verified develop commit."
                 : string.IsNullOrWhiteSpace(availability.Reason)
-                    ? "Preparation is unavailable."
+                    ? "Develop integration is unavailable."
                     : availability.Reason;
             if (review.RecoveryRequired)
             {
                 ResultPanel.Visibility = Visibility.Visible;
                 ResultPanel.BorderBrush = new SolidColorBrush(
                     Color.FromRgb(241, 191, 91));
-                ResultText.Text = "Interrupted preparation requires recovery"
+                ResultText.Text = "Interrupted integration requires recovery"
                     + Environment.NewLine
                     + (string.IsNullOrWhiteSpace(availability.Reason)
-                        ? "Inspect the selected feature worktree before another action."
+                        ? "Inspect main, develop, and the durable transaction before another action."
                         : availability.Reason);
-            }
-            else if (review.Prepared && review.PreparedResult is null)
-            {
-                throw new InvalidOperationException(
-                    "The Linux service reported prepared state without its exact result.");
-            }
-            if (review.PreparedResult is not null)
-            {
-                RenderPreparedResult(
-                    review.PreparedResult,
-                    candidate.RecordId,
-                    workspace.WorkspaceId,
-                    review.ReviewedProposalFingerprint,
-                    alreadyPrepared: true);
             }
         });
     }
 
-    private async void Prepare_Click(object sender, RoutedEventArgs e)
+    private async void Integrate_Click(object sender, RoutedEventArgs e)
     {
         var candidate = SelectedCandidate?.Item;
-        var workspace = SelectedWorkspace?.Workspace;
-        var availability = SaveMappingIntegrationViewModels.PrepareAvailability(
+        var availability = SaveMappingIntegrationViewModels.IntegrateAvailability(
             _review,
-            candidate?.RecordId,
-            workspace?.WorkspaceId);
-        if (!availability.Available
-            || candidate is null
-            || workspace is null
-            || _review is null)
+            candidate?.RecordId);
+        if (!availability.Available || candidate is null || _review is null)
         {
             return;
         }
         var targets = SaveMappingIntegrationViewModels.Targets(_review.Proposal);
         var confirmation =
-            $"Prepare this exact proposal in {workspace.Branch}?\n\n"
-            + $"{workspace.PathDisplay}\n\n"
+            (_review.RecoveryRequired
+                ? "Recover and verify this exact durable integration?\n\n"
+                : "Commit this exact proposal directly to develop?\n\n")
+            + $"{_review.Repository.DevelopPath}\n\n"
             + $"Fingerprint: {_review.ReviewedProposalFingerprint}\n"
             + $"Targets: {targets.Count}\n\n"
-            + "This makes tracked JSON dirty in the feature worktree. It does "
-            + "not test, commit, merge, promote, restart anything, send device "
-            + "input, or change the current battle.";
+            + (_review.RecoveryRequired
+                ? "This retries only the durable reviewed identity and verifies "
+                    + "exact Git refs and mappings. It does not create a second "
+                    + "commit, promote, restart services, send device input, change "
+                    + "runtime authority, or alter the current battle."
+                : "This creates one verified child commit and fast-forwards clean "
+                    + "develop. It does not promote, restart services, send device "
+                    + "input, change runtime authority, or alter the current battle.");
         if (MessageBox.Show(
             this,
             confirmation,
-            "Prepare canonical save mapping",
+            "Integrate canonical save mapping",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
             MessageBoxResult.Cancel) != MessageBoxResult.OK)
@@ -235,50 +199,46 @@ public partial class SaveMappingIntegrationWindow : Window
             return;
         }
         var reviewedFingerprint = _review.ReviewedProposalFingerprint;
+        var reviewed = _review;
         var selection = new SelectionSnapshot(
             candidate.RecordId,
-            workspace.WorkspaceId,
             _selectionGeneration);
         await RunAsync(async cancellationToken =>
         {
-            var result = await _api.PrepareSaveMappingIntegrationAsync(
+            var result = await _api.IntegrateSaveMappingAsync(
                 new
                 {
-                    operation = "prepare",
+                    operation = "integrate",
                     candidate_record_id = candidate.RecordId,
-                    workspace_id = workspace.WorkspaceId,
                     reviewed_proposal_fingerprint = reviewedFingerprint,
                 },
                 cancellationToken);
             if (!SelectionStillCurrent(selection))
             {
                 throw new InvalidOperationException(
-                    "The GUI selection changed while preparation was in flight.");
+                    "The GUI selection changed while integration was in flight.");
             }
-            RenderPreparedResult(
+            RenderIntegratedResult(
                 result,
-                candidate.RecordId,
-                workspace.WorkspaceId,
-                reviewedFingerprint,
-                alreadyPrepared: false);
-        }, prepareRequest: true);
+                reviewed);
+        }, integrateRequest: true);
     }
 
     private void ClearReview(string message)
     {
         _review = null;
-        _preparedResult = null;
+        _integratedResult = null;
         ProposalText.Text = message;
         ResultPanel.Visibility = Visibility.Collapsed;
         ResultText.Text = "";
-        PrepareButton.IsEnabled = false;
-        PrepareStatusText.Text =
-            "Preparation remains disabled until this exact selection is reviewed.";
+        IntegrateButton.IsEnabled = false;
+        IntegrateStatusText.Text =
+            "Integration remains disabled until this exact candidate is reviewed.";
     }
 
     private async Task RunAsync(
         Func<CancellationToken, Task> action,
-        bool prepareRequest = false)
+        bool integrateRequest = false)
     {
         if (_busy)
         {
@@ -294,7 +254,7 @@ public partial class SaveMappingIntegrationWindow : Window
         catch (Exception exc)
         {
             _review = null;
-            _preparedResult = null;
+            _integratedResult = null;
             ResultPanel.Visibility = Visibility.Visible;
             ResultPanel.BorderBrush = new SolidColorBrush(
                 Color.FromRgb(241, 191, 91));
@@ -304,11 +264,11 @@ public partial class SaveMappingIntegrationWindow : Window
             var presentation = SaveMappingIntegrationViewModels.Failure(
                 code,
                 exc.Message,
-                prepareRequest);
+                integrateRequest);
             ResultText.Text = presentation.Title
                 + Environment.NewLine
                 + presentation.Detail;
-            PrepareStatusText.Text = presentation.Detail;
+            IntegrateStatusText.Text = presentation.Detail;
         }
         finally
         {
@@ -318,14 +278,12 @@ public partial class SaveMappingIntegrationWindow : Window
 
     private void RenderSelectionButtonsOnly()
     {
-        ReviewButton.IsEnabled = SelectedCandidate?.Item.ReviewAvailable == true
-            && SelectedWorkspace is not null;
-        var availability = SaveMappingIntegrationViewModels.PrepareAvailability(
+        ReviewButton.IsEnabled = SelectedCandidate?.Item.ReviewAvailable == true;
+        var availability = SaveMappingIntegrationViewModels.IntegrateAvailability(
             _review,
-            SelectedCandidate?.Item.RecordId,
-            SelectedWorkspace?.Workspace.WorkspaceId);
-        PrepareButton.IsEnabled = availability.Available
-            && _preparedResult is null;
+            SelectedCandidate?.Item.RecordId);
+        IntegrateButton.IsEnabled = availability.Available
+            && _integratedResult is null;
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) =>
@@ -341,51 +299,43 @@ public partial class SaveMappingIntegrationWindow : Window
 
     private bool SelectionStillCurrent(SelectionSnapshot selection) =>
         selection.Generation == _selectionGeneration
-        && SelectedCandidate?.Item.RecordId == selection.CandidateRecordId
-        && SelectedWorkspace?.Workspace.WorkspaceId == selection.WorkspaceId;
+        && SelectedCandidate?.Item.RecordId == selection.CandidateRecordId;
 
-    private void RenderPreparedResult(
-        SaveMappingPreparedResult result,
-        string candidateRecordId,
-        string workspaceId,
-        string reviewedFingerprint,
-        bool alreadyPrepared)
+    private void RenderIntegratedResult(
+        SaveMappingIntegratedResult result,
+        SaveMappingIntegrationReview review)
     {
-        var validation = SaveMappingIntegrationViewModels.ValidatePreparedResult(
+        var validation = SaveMappingIntegrationViewModels.ValidateIntegratedResult(
             result,
-            candidateRecordId,
-            workspaceId,
-            reviewedFingerprint);
+            review);
         if (!validation.Valid)
         {
             throw new InvalidOperationException(validation.Reason);
         }
-        _preparedResult = result;
+        _integratedResult = result;
         ResultPanel.Visibility = Visibility.Visible;
         ResultPanel.BorderBrush = new SolidColorBrush(
             Color.FromRgb(73, 214, 157));
-        ResultText.Text = SaveMappingIntegrationViewModels.PreparedResultText(
+        ResultText.Text = SaveMappingIntegrationViewModels.IntegratedResultText(
             result,
-            candidateRecordId,
-            workspaceId,
-            reviewedFingerprint);
-        PrepareStatusText.Text = alreadyPrepared
-            ? "Already prepared — validation, commit, and promotion remain required."
-            : "Prepared — validation, commit, and promotion remain required.";
-        PrepareButton.IsEnabled = false;
+            review);
+        IntegrateStatusText.Text =
+            result.Promoted is true
+                ? "Deployed — a fresh stable decode remains pending."
+                : "Committed to develop — production promotion and a fresh stable decode remain pending.";
+        IntegrateButton.IsEnabled = false;
     }
 
     private void SetBusy(bool busy)
     {
         _busy = busy;
         CandidateBox.IsEnabled = !busy;
-        WorkspaceBox.IsEnabled = !busy;
         CloseButton.IsEnabled = !busy;
         RefreshButton.IsEnabled = !busy;
         if (busy)
         {
             ReviewButton.IsEnabled = false;
-            PrepareButton.IsEnabled = false;
+            IntegrateButton.IsEnabled = false;
         }
         else
         {

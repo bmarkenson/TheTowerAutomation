@@ -722,6 +722,7 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
         "authority_id": "data-9-game-1073",
         "structural_id": "data-9-game-1101",
         "semantic_fingerprint": snapshot.mapping_semantic_fingerprint,
+        "canonical_fingerprint": snapshot.canonical_mapping_fingerprint,
         "effective_fingerprint": snapshot.effective_mapping_fingerprint,
         "confirmed_local": dict(snapshot.confirmed_local_mappings),
     }
@@ -785,7 +786,7 @@ def test_unknown_incompatible_version_falls_back_to_ui(monkeypatch, mutation):
 def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     snapshot = _snapshot(monkeypatch)
 
-    assert snapshot.as_dict()["schema_version"] == 5
+    assert snapshot.as_dict()["schema_version"] == 6
     assert snapshot.mapping_id == "data-9-game-1073"
     assert snapshot.mapping_maturity == "candidate"
     assert snapshot.validated_checks == (

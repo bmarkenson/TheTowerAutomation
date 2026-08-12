@@ -338,7 +338,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
         bool degradationReady = false) =>
         new()
         {
-            ServerRevision = 39,
+            ServerRevision = ControlSurfaceCompatibility.MinimumServerRevision,
             Capabilities = ["bluestacks_maintenance_v1"],
             HostMaintenance = new HostMaintenanceStatus
             {

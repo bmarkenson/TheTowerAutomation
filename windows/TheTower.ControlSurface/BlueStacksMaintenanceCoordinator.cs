@@ -63,7 +63,8 @@ internal sealed class BlueStacksMaintenanceCoordinator
         {
             StateChanged?.Invoke(
                 this,
-                "BlueStacks recovery unavailable · Linux revision 39 with "
+                "BlueStacks recovery unavailable · Linux revision "
+                    + $"{ControlSurfaceCompatibility.MinimumServerRevision} with "
                     + "bluestacks_maintenance_v1 is required");
             return;
         }

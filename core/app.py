@@ -117,6 +117,14 @@ from core.player_save_history import (
 from core.player_save_mapping_observer import (
     BoundPlayerSaveMappingObserver,
 )
+from core.player_save_mapping_candidates import (
+    DEFAULT_MAPPING_CANDIDATE_RECEIPT_PATH,
+)
+from core.player_save_mapping_develop_integration import (
+    canonical_mapping_decode_start,
+    canonical_mapping_runtime_commit,
+    observe_canonical_mapping_decode,
+)
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
@@ -373,9 +381,31 @@ class App:
         self._player_save_preflight_result = None
         self._player_save_preflight_activity_scope_id = None
         self._player_save_history_baseline_outcome = None
+        runtime_repository_root = Path(__file__).resolve().parents[1]
+        runtime_mapping_main_commit = canonical_mapping_runtime_commit(
+            repository_root=runtime_repository_root,
+        )
         self._player_save_acquirer = (
             StablePlayerSaveAcquirer(
                 target_snapshot_fn=adb_target_session.snapshot,
+                acquisition_start_observer=lambda started_at: (
+                    canonical_mapping_decode_start(
+                        runtime_main_commit=runtime_mapping_main_commit,
+                        acquired_at=started_at,
+                    )
+                ),
+                completion_observer=lambda bundle, start_evidence: (
+                    observe_canonical_mapping_decode(
+                        bundle.snapshot,
+                        repository_root=runtime_repository_root,
+                        candidate_store_path=(
+                            DEFAULT_MAPPING_CANDIDATE_RECEIPT_PATH
+                        ),
+                        start_evidence=start_evidence,
+                    )
+                    if bundle.complete and bundle.snapshot is not None
+                    else None
+                ),
             )
             if adb_target_session is not None
             else None

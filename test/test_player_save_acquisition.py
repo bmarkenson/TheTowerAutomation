@@ -305,3 +305,60 @@ def test_global_lock_serializes_acquisitions_across_owner_instances():
     assert second_entered.is_set()
     assert len(outcomes) == 2
     assert all(outcome.complete for outcome in outcomes)
+
+
+def test_complete_stable_acquisition_notifies_advisory_observer_once():
+    observed = []
+    snapshot = _snapshot()
+    acquirer = StablePlayerSaveAcquirer(
+        fixed_target="private-target",
+        pull_fn=lambda **_kwargs: b"payload",
+        decode_fn=lambda *_args, **_kwargs: snapshot,
+        now_fn=_times(),
+        completion_observer=lambda bundle, _start_evidence: observed.append(bundle),
+    )
+
+    bundle = acquirer.acquire(PlayerSaveAcquisitionType.PASSIVE_STABLE_READ)
+
+    assert bundle.complete
+    assert observed == [bundle]
+    assert observed[0].snapshot is snapshot
+
+
+def test_advisory_observer_failure_cannot_degrade_stable_acquisition():
+    def fail(_bundle, _start_evidence):
+        raise OSError("receipt unavailable")
+
+    acquirer = StablePlayerSaveAcquirer(
+        fixed_target="private-target",
+        pull_fn=lambda **_kwargs: b"payload",
+        decode_fn=lambda *_args, **_kwargs: _snapshot(),
+        now_fn=_times(),
+        completion_observer=fail,
+    )
+
+    bundle = acquirer.acquire(PlayerSaveAcquisitionType.PASSIVE_STABLE_READ)
+
+    assert bundle.complete
+    assert bundle.reason == "save_acquired"
+
+
+def test_completion_observer_waits_for_outer_mutation_and_target_boundaries():
+    observed = []
+    acquirer = StablePlayerSaveAcquirer(
+        fixed_target="private-target",
+        pull_fn=lambda **_kwargs: b"payload",
+        decode_fn=lambda *_args, **_kwargs: _snapshot(),
+        now_fn=_times(),
+        completion_observer=lambda bundle, _start: observed.append(bundle),
+    )
+
+    with acquirer.deferred_completion_observers():
+        with acquirer.locked_operation():
+            bundle = acquirer.acquire(
+                PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+            )
+            assert observed == []
+        assert observed == []
+
+    assert observed == [bundle]

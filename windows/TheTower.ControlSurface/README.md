@@ -178,19 +178,28 @@ application again restores and foregrounds the existing main window, or flashes
 it on the taskbar if Windows declines the foreground request.
 
 **Tools > Save mapping integration…** and the persistent save-mapping banner's
-**Review mappings…** action open the revision-35 canonical preparation UI.
-Choose one durable observation and one server-discovered owned `feature/*`
-worktree, review the exact proposal fingerprint, then accept the separate
-warning before preparation. The client never submits a filesystem path,
-branch, patch operation, or value. Success remains visibly uncommitted,
-unpromoted, and pending validation; the window stays open with target hashes
-and required validation. Reopening the same exact review shows an **Already
-prepared** result instead of offering the write again. While review or Prepare
-is in flight, the selection, refresh, and Close controls are disabled and the
-window cannot be dismissed. Failed or lost requests are never retried
-automatically; the UI distinguishes a proven rejection from an unconfirmed
-outcome and surfaces any audit warning. Preparation does not control
-automation, restart a service, send device input, or change the current battle.
+**Review mappings…** action open the revision-40 direct-integration UI. Choose
+one durable observation, verify the read-only Develop eligibility panel, review
+the exact proposal fingerprint, then accept the separate warning before
+integration. The client never submits a filesystem path, branch, target,
+patch operation, mapping value, commit message, or Git identity. Success shows
+the exact `develop` commit, target hashes, passed mapping invariants, and the
+still-pending production promotion and fresh-decode checkpoint. An exact lost
+response before transaction finalization reopens as a reviewable exact recovery
+and returns **Already committed to develop** when the ref had already moved. A
+fully recorded commit reappears as **Save mapping awaiting production
+promotion** instead of offering another write. An unprovable outcome remains an
+inspection warning.
+
+While review or Integrate is in flight, the selection, refresh, and Close
+controls are disabled and the window cannot be dismissed. Failed or lost
+requests are never retried automatically; the UI distinguishes a proven
+rejection from an unconfirmed outcome and surfaces any audit warning.
+Integration does not promote, control automation, restart a service, send
+device input, alter runtime authority, or change the current battle. The
+persistent banner says **Save mapping awaiting production promotion** until the
+commit reaches `main`, then **Deployed save mapping awaiting fresh validation**
+until a complete stable save proves the deployed mapping is loaded.
 
 Overview keeps a compact, normally collapsed summary of the most recent
 completed battle without devoting the normal workspace to the full history.
@@ -967,10 +976,11 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 39, `current_battle_perks_v1`,
+current Windows build requires revision 40, `current_battle_perks_v1`,
 `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,
-`save_backed_setup_capture_v2`, `save_mapping_integration_v1`,
+`save_backed_setup_capture_v2`, `save_mapping_develop_integration_v1`,
+`save_mapping_review_status_v2`, `confirmed_local_mapping_status_v2`,
 `host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,
 `bluestacks_maintenance_v1`,
@@ -1033,15 +1043,17 @@ already configured:
 7. With no desired tunnel, close the GUI and confirm the companion exits after
    about 15 seconds. Then start a desired tunnel, sign out of Windows, sign back
    in, and confirm neither the host nor a tunnel starts automatically.
-8. With one durable mapping observation and a disposable clean owned feature
-   worktree available, open save-mapping integration from both **Tools** and
-   the persistent banner. Review the exact proposal, change either selection
-   and confirm preparation disables, then review again. Cancel the warning once
-   and prove all repositories remain clean. Confirm preparation once and verify
-   only the displayed feature targets become unstaged changes; keep the
-   uncommitted/unpromoted/pending-validation result visible and confirm no
-   automatic retry, service restart, runtime-control change, or device input.
-9. For revision 38, connect to a fresh exact-owner runtime snapshot after the
+8. With one durable mapping observation and clean, exactly synchronized
+   `main`/`develop`, open save-mapping integration from both **Tools** and the
+   persistent banner. Verify the fixed Develop eligibility panel, review the
+   exact proposal, change the candidate and confirm integration disables, then
+   review again. Cancel the warning once and prove both refs and worktrees stay
+   unchanged. Confirm integration once and verify one exact child commit reaches
+   only `develop`, both worktrees remain clean, and the result keeps promotion
+   and fresh validation pending. Simulate or inspect the documented recovery
+   states and confirm there is no automatic retry, service restart, runtime-
+   control change, or device input.
+9. For revision 40, connect to a fresh exact-owner runtime snapshot after the
    relevant acknowledgement lines have moved more than 262 KiB behind the log
    tail, then after log rotation. Confirm Action Authority, terminal policy,
    speed, ADB, setup-capture availability, and an acknowledged indefinite Pause
@@ -1074,7 +1086,7 @@ already configured:
     Battle** fallback only on a battle the operator has explicitly authorized
     for that boundary.
 
-Revision-38 items 9 and 10 and the visual layout/theme checks in item 11 remain
+Revision-40 items 9 and 10 and the visual layout/theme checks in item 11 remain
 pending until they are actually exercised in a Windows WPF session. Linux
 cross-builds and portable compatibility tests do not count as that runtime
 validation. Revision-39 item 12 also remains pending; no live control or device

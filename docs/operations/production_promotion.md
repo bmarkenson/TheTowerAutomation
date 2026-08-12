@@ -35,28 +35,43 @@ owner work. Complete the repository-change checklist before this procedure and
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
 
-### Prepared save-mapping changes
+### Direct save-mapping integration
 
-The control-surface save-mapping action is preparation, not promotion. Start
-with a clean linked `feature/*` worktree that is owned by the outcome and
-descends from the current `develop`. In the browser or native GUI, select the
-durable observation and that server-discovered worktree, review the exact
-proposal and repository fingerprint, then confirm preparation. Inspect the
-resulting unstaged canonical JSON diff and run every validation named by the
-proposal plus the complete supported checkpoint before committing it.
+The control-surface save-mapping action commits to `develop`; it does not
+promote. Its routine lane is available only when the standing production and
+integration worktrees are clean, at their branch tips, and exactly
+synchronized. In either GUI, select the durable observation, inspect the fixed
+Develop eligibility panel, review the exact proposal and repository
+fingerprint, then confirm **Integrate reviewed mapping into develop…**. Success
+must identify one standardized commit, exact canonical target hashes, passed
+mapping invariants, `committed=true`, and `promoted=false`; production `main`
+must remain at the reviewed base.
 
-Continue with the ordinary feature-to-`develop` integration and this exact
-production procedure. Do not clear the persistent observation warning merely
-because preparation or commit succeeded: retire it only after the canonical
-change is promoted and a later fresh decode/status proves the production
-mapping owns the value. A stale review, dirty worktree, changed Git tip/base
-hash or mode, write ambiguity, or unconfirmed client response requires
-inspection and a fresh review; never retry preparation automatically. If the
-catalog reports an interrupted transaction, select the candidate and worktree
-named by that transaction, review the recovery notice, and invoke Prepare once
-to recover under the original fingerprint. Do not move refs or edit its target
-files first. A mismatch, changed ref, or unrelated dirty state leaves recovery
-closed and requires manual inspection rather than an automatic retry.
+Treat that commit as the next `develop` candidate. Review its exact diff and
+provenance trailers, run the complete supported checkpoint, then continue at
+step 2 of this production procedure. This narrow lane does not replace the
+combined checkpoint, annotated rollback tag, service boundary, native-package
+publication when applicable, or production smoke test.
+
+Do not clear the persistent warning when the `develop` commit succeeds. It
+becomes **Save mapping awaiting production promotion**, then **Deployed save
+mapping awaiting fresh validation** after `main` contains the commit, and
+retires only when a later complete stable save proves the running decoder
+loaded the matching canonical mapping set. That observation is passive and
+cannot change runtime authority or send input.
+
+A stale review, dirty worktree, unequal or changed Git tip, target/hash/mode
+drift, busy lock, or other proven pre-write rejection requires a fresh catalog
+and review. Never retry automatically. If the catalog reports exact integration
+recovery, the GUI makes only that same candidate reviewable; inspect its stored
+target hashes and fingerprint, then invoke Integrate once to continue its
+durable transaction. A response lost after the commit was fully recorded
+reappears as the promotion-pending commit rather than another write. If the
+catalog reports an unconfirmed result, malformed or legacy
+journal, moved ref, unrelated index/worktree state, or any outcome that cannot
+be proved exact, do not retry, edit targets, or move refs; inspect the recorded
+transaction and repository state and route the repair through ordinary
+development.
 
 ### Required Windows package publication
 
