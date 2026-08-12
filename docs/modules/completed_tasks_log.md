@@ -59,8 +59,33 @@ canonical document linked by an entry for current behavior.
   supported checkpoint with all 2,341 Python tests passed. The complete Windows
   package cross-published successfully, and the exact final XAML completed a
   zero-error Release WPF build; only the known sandbox read-only NuGet
-  vulnerability-cache warnings remained. No live process, device, control, or
-  battle state was inspected or changed. Minimum/default/maximized Windows
+  vulnerability-cache warnings remained. Implementation validation changed no
+  live process, device, control, or battle state. The exact integrated
+  candidate repeated the complete checkpoint with all 2,341 tests in 371.73
+  seconds.
+- Production and `develop` advanced from `d5af787` through exact package source
+  `5c1ac19` behind annotated rollback tag
+  `production-before-20260812T004432Z-d5af787`. The WPF-only boundary required
+  no Linux service restart or automation Pause. At 17:46 PDT, fresh host-backed
+  evidence retained PID `148448`, runtime
+  `36e6f4290f6c4eba8b4fe0458b02f1db`, its held `localhost:5555` lock, all five
+  current acknowledgements, and a fresh Running wave-4318 observation; the
+  promotion issued no control or device input.
+- The complete Windows package was published from exact `5c1ac19` at 17:45
+  PDT. Current Control Surface is 72,432,042 bytes with SHA-256
+  `258f136e025d73913c6d7952d8fea31d73fddb0d95ed848c961d716134243c39`;
+  current Tunnel Host is 35,172,100 bytes with SHA-256
+  `2474ffc85f7cc40bb2a8a8aab0b61761ef9e9b0d740e3cc8ef6cb86098f0bc17`.
+  Retained slot 1 contains the prior `054d171` package: 72,430,797-byte Control
+  Surface `ccf582a8db116225ae0354660d8c29daa4fd1a6b5de06b9ab50371e4e0abee93`
+  and 35,172,121-byte Tunnel Host
+  `9592be0ce6563ba4d4c4f3ec19ae59df579e3f293f38f66f92400881e5255e90`.
+  Slot 2 contains the prior `bde889e` package: 72,430,549-byte Control Surface
+  `3c6be626e29600ef24719db127e0c9e04fa6d3249741d0a730a176847a368774`
+  and 35,172,075-byte Tunnel Host
+  `3c331280ea93ec34ceb6a95b7a655e32366e22ac477c2a2e798e39ab8bfafa58`.
+  Publication is not Windows execution; the older GUI must be closed and
+  relaunched before it uses this package. Minimum/default/maximized Windows
   visual confirmation remains explicitly pending in the native README.
 
 ### 2026-08-11 immediate Pause and global input authority hardening
