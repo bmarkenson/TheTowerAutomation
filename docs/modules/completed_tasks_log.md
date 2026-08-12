@@ -42,7 +42,7 @@ canonical document linked by an entry for current behavior.
 ### 2026-08-12 BlueStacks recovery forward port
 
 - Forward-ported the default-off automatic restart candidate onto production
-  anchor `091d09a` and the current revision-39 control, dispatch, blocking-modal,
+  anchor `5b28ce9` and the current revision-39 control, dispatch, blocking-modal,
   player-save, runtime-failure, and native diagnostics contracts. The durable
   request now binds runtime/PID/ADB target/target generation/state-request ID
   and battle scope. Windows durably binds executable/instance/port plus the
@@ -62,13 +62,41 @@ canonical document linked by an entry for current behavior.
   every run. The official v28.0.6 patch note confirms the diagnostic rollback
   expectation of five waves, or fifty with Intro Sprint; the actual completion
   boundary remains the captured pre-restart wave high-water.
-- The final checkpoint passed Python compilation, state-definition validation,
-  clickmap integrity with zero errors, `git diff --check`, and all 2,421 Python
-  tests in 387.06 seconds. All 158 portable native contract/state-machine tests
-  also passed. This Linux SDK still lacks WindowsDesktop targets, so the WPF
-  build and the exact-shortcut/authorized end-to-end Windows recovery smoke
-  remain in the runtime backlog. No live process, BlueStacks, ADB, game, or
-  production service interaction was used.
+- The exact forward-port candidate passed Python compilation, state-definition
+  validation, clickmap integrity with zero errors, `git diff --check`, and all
+  2,421 Python tests. The production WPF cross-build then exposed a missing
+  explicit `System.IO` import that the portable project supplied implicitly;
+  fix commit `c568111` repeated the complete checkpoint with all 2,421 tests in
+  367.56 seconds and all 158 portable native contract/state-machine tests. Its
+  Release self-contained WPF cross-build and complete two-executable publisher
+  passed with zero errors; only the sandbox read-only NuGet vulnerability-cache
+  warnings remained.
+- Production and `develop` advanced from `5b28ce9` through exact package source
+  `c568111` behind annotated rollback tag
+  `production-before-20260812T221144Z-5b28ce9`. The guarded managed handoff
+  stopped PID `1565008`, restarted control-surface PID `1944706`, and attached
+  replacement automation PID `1945953` / runtime
+  `260a9b7fcd2a48d294220e2b9ad90da3` to the preserved ordinary Tier-19 battle.
+  Exact Attach request `7ec2589cac044e5c8fe4f456423dd74c` proved source
+  restoration and same-battle save continuity, adopted `farm_t19_ad_assist`,
+  and reached steady `RUNNING` at wave 4023 with all five receipts current and
+  no authority hold. The default-off recovery remained disabled; this rollout
+  did not restart BlueStacks or manufacture a battle boundary.
+- The complete Windows package was published from exact `c568111` at 15:21 PDT.
+  Current Control Surface is 72,459,365 bytes with SHA-256
+  `89abf22573f2785f30e9b9673fde42558220277b0ed323c63b75f3c63c88ef82`;
+  current Tunnel Host is 35,172,106 bytes with SHA-256
+  `098798d54ee44062a2c990c53b5483141295473208ca65afb4290463338fd5d8`.
+  Retained slot 1 is the prior `5c1ac19` package: 72,432,042-byte Control
+  Surface `258f136e025d73913c6d7952d8fea31d73fddb0d95ed848c961d716134243c39`
+  and 35,172,100-byte Tunnel Host
+  `2474ffc85f7cc40bb2a8a8aab0b61761ef9e9b0d740e3cc8ef6cb86098f0bc17`.
+  Slot 2 is the prior `054d171` package: 72,430,797-byte Control Surface
+  `ccf582a8db116225ae0354660d8c29daa4fd1a6b5de06b9ab50371e4e0abee93`
+  and 35,172,121-byte Tunnel Host
+  `9592be0ce6563ba4d4c4f3ec19ae59df579e3f293f38f66f92400881e5255e90`.
+  Publication is not Windows execution; the revision-39 identity/mapping and
+  authorized end-to-end recovery smoke remain in the runtime backlog.
 
 ### 2026-08-10 initial automatic BlueStacks recovery candidate
 
