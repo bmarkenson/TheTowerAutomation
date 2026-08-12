@@ -39,6 +39,30 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-11 native diagnostics layout and disclosure-theme repair
+
+- Operator screenshots showed the expanded Host Health telemetry clipped below
+  a single long runtime dump, the four header health indicators unnecessarily
+  consuming two rows, and the Timed Pause disclosure inheriting near-black text
+  plus platform-default Expander chrome.
+- Commit `8211d0e` makes the clickable header-health group consume the available
+  width in one row, places the complete Host Health card before verbose runtime
+  evidence, and divides that evidence into Service & Configuration and Runtime
+  & Observation columns. Host Health and Previous Game Screen retain their
+  independent persisted visibility controls.
+- The shared dark theme now owns a complete Expander template, including its
+  header, chevron, expanded content, hover/focus states, and disabled colors.
+  This extends the existing full-template contrast contract instead of relying
+  on foreground setters that Windows platform chrome can override. Focused
+  regressions enforce both the theme and layout hierarchy.
+- All 19 focused WPF/static tests, all 143 portable native tests, and the
+  supported checkpoint with all 2,341 Python tests passed. The complete Windows
+  package cross-published successfully, and the exact final XAML completed a
+  zero-error Release WPF build; only the known sandbox read-only NuGet
+  vulnerability-cache warnings remained. No live process, device, control, or
+  battle state was inspected or changed. Minimum/default/maximized Windows
+  visual confirmation remains explicitly pending in the native README.
+
 ### 2026-08-11 immediate Pause and global input authority hardening
 
 - Commit `9add674` gives every durable Pause, Stop, Take Manual Control,
