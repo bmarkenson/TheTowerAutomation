@@ -240,6 +240,392 @@ def test_terminal_home_continuation_never_authorizes_resume_battle():
     app._current_control_workflow_evidence.assert_not_called()
 
 
+def test_terminal_home_continuation_retains_dispatch_until_running_and_retries_once():
+    binding = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-terminal",
+    }
+    current = {
+        **binding,
+        "activity_scope_run_id": "scope-launch",
+        "observation_id": "runtime-1:home",
+        "game_state": "home_new_battle",
+    }
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_state="RUNNING",
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+        battle_workflow=None,
+        manual_control=None,
+        manual_control_error=False,
+        interactive_development_lease_error=False,
+        battle_workflow_error=False,
+        setup_capture_error=False,
+        setup_capture=None,
+    )
+    app._mission_mgr = MagicMock()
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    app._current_run_scope_id = MagicMock(return_value="scope-launch")
+    app._terminal_home_continuation = {
+        "schema_version": 2,
+        "source": "no_strategy_post_run",
+        "phase": "armed",
+        "operation_id": "terminal-1",
+        "terminal_observation_id": "runtime-1:terminal",
+        "state_request_id": "state-1",
+        "mode_request_id": "mode-1",
+        "binding": binding,
+        "dispatch_count": 0,
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    try:
+        assert app._mark_terminal_home_continuation_dispatched() is True
+        assert app._terminal_home_continuation["phase"] == "action_dispatched"
+        assert app._terminal_home_continuation["dispatch_count"] == 1
+        assert app._terminal_home_continuation_ready(
+            home_control=HomeBattleControl.NEW_BATTLE
+        ) is False
+        hold = app._operator_workflow_authority_hold()
+        assert hold is not None
+        assert hold.hold is AuthorityHold.OPERATOR_WORKFLOW
+        assert hold.allowed_auxiliary_collectors == ()
+
+        assert app._mark_terminal_home_continuation_modal_cleared() is True
+        app._reconcile_terminal_home_continuation({"state": "HOME_SCREEN"})
+        assert app._terminal_home_continuation["phase"] == "action_dispatched"
+        current["observation_id"] = "runtime-1:home-confirmed"
+        app._reconcile_terminal_home_continuation({"state": "HOME_SCREEN"})
+        assert app._terminal_home_continuation["phase"] == "retry_ready"
+        assert app._terminal_home_continuation_ready(
+            home_control=HomeBattleControl.NEW_BATTLE
+        ) is True
+
+        assert app._mark_terminal_home_continuation_dispatched() is True
+        assert app._terminal_home_continuation["dispatch_count"] == 2
+        assert app._complete_terminal_home_continuation(True) is True
+        assert app._terminal_home_continuation is None
+    finally:
+        AUTOMATION.mode = original_mode
+
+
+def test_terminal_dispatched_continuation_clears_after_control_request_change():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_state="RUNNING",
+        control_request_identity={
+            "state_request_id": "state-new",
+            "mode_request_id": "mode-1",
+        },
+        battle_workflow=None,
+        manual_control=None,
+    )
+    app._current_control_workflow_evidence = MagicMock(
+        return_value={
+            "runtime_id": "runtime-1",
+            "pid": 123,
+            "adb_target": "localhost:5555",
+            "target_generation": 7,
+            "activity_scope_run_id": "scope-launch",
+            "game_state": "unknown",
+        }
+    )
+    app._current_run_scope_id = MagicMock(return_value="scope-launch")
+    app._terminal_home_continuation = {
+        "schema_version": 2,
+        "phase": "action_dispatched",
+        "operation_id": "terminal-1",
+        "terminal_observation_id": "runtime-1:terminal",
+        "state_request_id": "state-old",
+        "mode_request_id": "mode-1",
+        "dispatch_count": 1,
+        "launch_binding": {
+            "runtime_id": "runtime-1",
+            "pid": 123,
+            "adb_target": "localhost:5555",
+            "target_generation": 7,
+            "activity_scope_run_id": "scope-launch",
+        },
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        app._reconcile_terminal_home_continuation({"state": "UNKNOWN"})
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert app._terminal_home_continuation is None
+
+
+def test_terminal_ordinary_launch_yields_instead_of_adopting_tournament():
+    current = _evidence(
+        game_state="active_battle",
+        observation_id="runtime-1:tournament",
+        scope="scope-launch",
+    )
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_state="RUNNING",
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+        battle_workflow=None,
+        manual_control=None,
+        yield_to_unexpected_manual_activity=MagicMock(
+            return_value={"manual_control_id": "manual-1"}
+        ),
+        unexpected_manual_yield_emergency=False,
+    )
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    app._current_run_scope_id = MagicMock(return_value="scope-launch")
+    app._update_action_authority = MagicMock()
+    app._publish_action_authority = MagicMock()
+    app._terminal_home_continuation = {
+        "schema_version": 2,
+        "phase": "action_dispatched",
+        "operation_id": "terminal-1",
+        "terminal_observation_id": "runtime-1:terminal",
+        "state_request_id": "state-1",
+        "mode_request_id": "mode-1",
+        "dispatch_count": 1,
+        "launch_binding": {
+            key: current[key]
+            for key in (
+                "runtime_id",
+                "pid",
+                "adb_target",
+                "target_generation",
+                "activity_scope_run_id",
+            )
+        },
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        interrupted = app._reconcile_terminal_home_continuation(
+            {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]}
+        )
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert interrupted is True
+    assert app._terminal_home_continuation is None
+    app._supervisor.yield_to_unexpected_manual_activity.assert_called_once_with(
+        current
+    )
+    assert app._complete_terminal_home_continuation(
+        True,
+        {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]},
+    ) is False
+
+
+def test_dispatch_receipt_requires_complete_exact_owner_scope_and_requests():
+    requested = _evidence(scope="scope-request")
+    current = _evidence(
+        observation_id="runtime-1:dispatch",
+        scope="scope-launch",
+    )
+    receipt = {
+        **current,
+        "state_request_id": "state-1",
+        "mode_request_id": "mode-1",
+    }
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "action_dispatched",
+        "evidence": requested,
+        "acknowledgement": receipt,
+    }
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        }
+    )
+
+    assert app._workflow_dispatch_receipt_mismatch(workflow, current) is None
+
+    empty = {**workflow, "acknowledgement": {}}
+    assert "missing or malformed" in str(
+        app._workflow_dispatch_receipt_mismatch(empty, current)
+    )
+    missing_generation = {
+        **workflow,
+        "acknowledgement": {**receipt, "target_generation": None},
+    }
+    assert app._workflow_dispatch_receipt_mismatch(
+        missing_generation,
+        current,
+    ) is not None
+    changed_scope = {**current, "activity_scope_run_id": "scope-other"}
+    assert app._workflow_dispatch_receipt_mismatch(
+        workflow,
+        changed_scope,
+    ) == "battle activity scope changed"
+    app._supervisor.control_request_identity = {
+        "state_request_id": "state-2",
+        "mode_request_id": "mode-1",
+    }
+    assert "state_request_id" in str(
+        app._workflow_dispatch_receipt_mismatch(workflow, current)
+    )
+
+
+def test_modal_retry_preserves_same_owner_dispatched_player_save_carry():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(battle_workflow=None)
+    app._terminal_home_continuation = {
+        "phase": "action_dispatched",
+        "modal_recovery_completed": True,
+    }
+    app._terminal_home_continuation_owner_current = MagicMock(
+        return_value=True
+    )
+
+    assert app._same_owner_free_ticket_retry_ready(
+        source=None,
+        request_id="",
+    ) is True
+
+    app._terminal_home_continuation = None
+    current = _evidence(scope="scope-launch")
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "action_dispatched",
+        "evidence": _evidence(scope="scope-request"),
+        "acknowledgement": {
+            **current,
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+    }
+    app._supervisor = SimpleNamespace(
+        battle_workflow=workflow,
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+    )
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    app._free_ticket_recovery_cleared = {"battle:start-1"}
+
+    assert app._same_owner_free_ticket_retry_ready(
+        source=None,
+        request_id="",
+    ) is True
+
+    app._current_control_workflow_evidence.return_value = {
+        **current,
+        "activity_scope_run_id": "scope-other",
+    }
+    assert app._same_owner_free_ticket_retry_ready(
+        source=None,
+        request_id="",
+    ) is False
+
+
+def test_uncertain_home_action_tombstone_denies_replay_if_reporting_fails():
+    current = _evidence(scope="scope-launch")
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "acknowledged",
+        "evidence": _evidence(scope="scope-request"),
+    }
+    supervisor = SimpleNamespace(
+        battle_workflow=workflow,
+        manual_control=None,
+        transition_battle_workflow=MagicMock(return_value=None),
+    )
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._runtime_uncertain_mutation_result = MagicMock()
+    app._runtime_action_guard = MagicMock(return_value=True)
+
+    app._terminalize_uncertain_battle_workflow(
+        workflow,
+        current,
+        reason="device dispatch result was uncertain",
+    )
+
+    assert "start-1" in app._uncertain_lifecycle_actions
+    supervisor.transition_battle_workflow.assert_called_once()
+    assert app._home_launch_authority_matches(
+        source="start_battle",
+        request_id="start-1",
+        home_control=HomeBattleControl.NEW_BATTLE,
+    ) is False
+
+
+def test_explicit_start_interrupts_and_yields_on_tournament_running():
+    requested = _evidence(scope="scope-request")
+    current = _evidence(
+        game_state="active_battle",
+        observation_id="runtime-1:tournament",
+        scope="scope-launch",
+    )
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "action_dispatched",
+        "evidence": requested,
+        "acknowledgement": {
+            **_evidence(
+                observation_id="runtime-1:dispatch",
+                scope="scope-launch",
+            ),
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+    }
+    supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+        transition_battle_workflow=MagicMock(return_value={"status": "interrupted"}),
+        yield_to_unexpected_manual_activity=MagicMock(
+            return_value={"manual_control_id": "manual-1"}
+        ),
+        unexpected_manual_yield_emergency=False,
+    )
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._update_action_authority = MagicMock()
+    app._publish_action_authority = MagicMock()
+
+    app._reconcile_dispatched_battle_workflow(
+        workflow,
+        current,
+        detection={"state": "RUNNING", "secondary_states": ["TOURNAMENT"]},
+    )
+
+    app._mission_mgr.revoke_initial_battle_intent.assert_called_once_with(
+        "start_battle",
+        request_id="start-1",
+    )
+    assert supervisor.transition_battle_workflow.call_args.args == (
+        "start-1",
+        "interrupted",
+    )
+    supervisor.yield_to_unexpected_manual_activity.assert_called_once_with(
+        current
+    )
+
+
 @pytest.mark.parametrize(
     "workflow",
     [
@@ -1565,13 +1951,16 @@ def test_start_dispatch_survives_preflight_scope_change_and_completes(
     ) is False
     assert app._mark_operator_battle_action_dispatched(True) is True
     assert supervisor.battle_workflow["status"] == "action_dispatched"
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
     assert app._operator_workflow_authority_hold() is not None
 
     running = _evidence(
         game_state="active_battle",
         observation_id="runtime-1:3",
         runtime_id=str(owner["runtime_id"]),
-        scope="scope-preflight",
+        scope=str(launch_scope),
     )
     running["pid"] = owner["pid"]
     app._control_observation = {
@@ -1767,6 +2156,9 @@ def test_dispatched_start_interrupts_on_a_definitive_wrong_boundary(
     }
     app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
     assert app._mark_operator_battle_action_dispatched(True) is True
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
 
     changed = _evidence(
         game_state=changed_state,
@@ -1814,11 +2206,15 @@ def test_dispatched_start_fails_closed_after_bounded_home_timeout(
     }
     app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
     assert app._mark_operator_battle_action_dispatched(True) is True
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
     dispatched_at = datetime.fromisoformat(
         str(supervisor.battle_workflow["updated_at"])
     )
     app._control_observation = {
         **app._control_observation,
+        "activity_scope_run_id": launch_scope,
         "observation_id": "runtime-1:timeout",
         "observed_at": (
             dispatched_at + timedelta(seconds=21)
@@ -1829,6 +2225,72 @@ def test_dispatched_start_fails_closed_after_bounded_home_timeout(
 
     assert supervisor.battle_workflow["status"] == "failed"
     assert "within 20 seconds" in supervisor.battle_workflow["reason"]
+    assert supervisor.control_state == "PAUSED"
+    assert str(supervisor.battle_workflow["request_id"]) in (
+        app._uncertain_lifecycle_actions
+    )
+
+
+def test_dispatched_start_suspends_timeout_for_known_modal_then_retries_once(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(runtime_id=str(owner["runtime_id"]))
+    evidence["pid"] = owner["pid"]
+    store.request_battle_workflow("start_battle", evidence=evidence)
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+    assert app._mark_operator_battle_action_dispatched(True) is True
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
+    dispatched_at = datetime.fromisoformat(
+        str(supervisor.battle_workflow["updated_at"])
+    )
+    app._control_observation = {
+        **app._control_observation,
+        "activity_scope_run_id": launch_scope,
+        "observation_id": "runtime-1:modal-timeout",
+        "observed_at": (
+            dispatched_at + timedelta(seconds=60)
+        ).isoformat(timespec="seconds"),
+    }
+
+    app._sync_operator_control_workflows({"state": "FREE_TICKET"})
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
+
+    recovery_key = app._battle_workflow_recovery_key(
+        supervisor.battle_workflow
+    )
+    app._free_ticket_recovery_cleared_set().add(recovery_key)
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
+    app._control_observation = {
+        **app._control_observation,
+        "observation_id": "runtime-1:modal-home-confirmed",
+    }
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+
+    assert supervisor.battle_workflow["status"] == "ready"
+    assert app._mark_operator_battle_action_dispatched(True) is True
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
 
 
 def test_dispatched_resumable_attach_completes_after_same_battle_adoption(

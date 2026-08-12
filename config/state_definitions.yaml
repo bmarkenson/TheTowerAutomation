@@ -26,6 +26,11 @@ states:
   match_keys:
   - indicators.home_screen
 
+- name: FREE_TICKET
+  type: blocking_primary
+  match_keys:
+  - indicators.free_ticket_dialog
+
 - name: MILESTONES
   type: primary
   match_keys:

@@ -12,6 +12,23 @@ current runtime state.
 
 ## Global live-preflight hazards
 
+### Free Ticket modal stranded a completed-battle launch and exposed background controls
+
+**Stable ID:** `ISSUE-2026-041` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A known Free Ticket modal appeared after a verified Home Battle dispatch;
+  launch authority was consumed before `RUNNING`, while Home and its ad-gem
+  remained detectable behind the modal and restarted a bounded collector on
+  every heartbeat. Treat blocking primaries as non-actionable background,
+  retain the exact launch until its postcondition, allow one typed modal
+  recovery and one fresh-Home retry, and circuit-break exhausted transactions.
+- Load the [dossier](issues/open-2026.md#free-ticket-modal-stranded-a-completed-battle-launch-and-exposed-background-controls)
+  before changing blocking-screen precedence, Home launch completion, or
+  cross-heartbeat retry behavior, and for live confirmation or recurrence.
+  Next: after explicit operator release, deploy and observe one natural
+  no-battle launch boundary without manufacturing a battle; [state/recovery
+  backlog](backlog/state-and-detection.md#state-coverage-and-recovery).
+
 ### Owned validation cleanup survived a later running-battle transition
 
 **Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `confirmed_unresolved`

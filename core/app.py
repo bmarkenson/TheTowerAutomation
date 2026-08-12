@@ -41,6 +41,8 @@ from core.action_authority import (
     RuntimeActionClass,
     StrategyGateExitEvent,
 )
+from core.action_circuit_breaker import ActionCircuitBreaker
+from core.input import TapDispatchOutcome, TapDispatchStatus
 from core.ss_capture import (
     ScreenshotFailure,
     capture_and_save_screenshot,
@@ -207,8 +209,13 @@ from handlers.tournament_result_handler import (
     handle_tournament_results,
 )
 from handlers.home_screen_handler import handle_home_screen, tap_verified_new_battle
+from handlers.free_ticket_handler import (
+    FreeTicketRecoveryStatus,
+    handle_free_ticket_modal,
+)
 from handlers.tournament_launch_handler import dispatch_tournament_launch
 from handlers.ad_gem_handler import (
+    AdGemCollectionStatus,
     handle_ad_gem,
     handle_home_ad_gem,
     is_blind_gem_tapper_active,
@@ -525,6 +532,22 @@ class App:
         self._control_observation_sequence = 0
         self._control_observation: Optional[Dict[str, Any]] = None
         self._terminal_home_continuation: Optional[Dict[str, Any]] = None
+        self._action_circuit_breaker = ActionCircuitBreaker(failure_limit=1)
+        self._home_ad_gem_absence_candidate: Optional[
+            tuple[tuple[object, ...], str]
+        ] = None
+        self._home_ad_gem_nonreplayable_epochs: Set[
+            tuple[object, ...]
+        ] = set()
+        self._free_ticket_recovery_attempts: Dict[str, int] = {}
+        self._free_ticket_recovery_cleared: Set[str] = set()
+        self._free_ticket_recovery_warnings: Set[str] = set()
+        self._free_ticket_retry_home_candidates: Dict[str, str] = {}
+        self._uncertain_lifecycle_actions: Set[str] = set()
+        self._uncertain_legacy_home_launch_epochs: Set[
+            tuple[object, ...]
+        ] = set()
+        self._blocking_primary_hold_active = False
         self._watchdog_mutation_guard = CooperativeMutationGuard(
             lambda: self._runtime_action_guard(
                 action_class=RuntimeActionClass.LIFECYCLE_ACTION
@@ -1337,6 +1360,192 @@ class App:
             self._action_authority = authority
         return authority
 
+    def _get_action_circuit_breaker(self) -> ActionCircuitBreaker:
+        breaker = getattr(self, "_action_circuit_breaker", None)
+        if breaker is None:
+            breaker = ActionCircuitBreaker(failure_limit=1)
+            self._action_circuit_breaker = breaker
+        return breaker
+
+    def _home_ad_gem_circuit_epoch(self) -> tuple[object, ...]:
+        try:
+            evidence = self._current_control_workflow_evidence()
+        except Exception:
+            evidence = None
+        if not isinstance(evidence, Mapping):
+            evidence = getattr(self, "_control_observation", None)
+        if not isinstance(evidence, Mapping):
+            evidence = {}
+        return (
+            evidence.get("runtime_id"),
+            evidence.get("pid"),
+            evidence.get("adb_target"),
+            evidence.get("target_generation"),
+            evidence.get("activity_scope_run_id"),
+        )
+
+    def _observe_action_circuits(self, detection: Mapping[str, Any]) -> None:
+        """Reset process-local breakers only on material passive evidence."""
+
+        action = "home_ad_gem"
+        active = bool(
+            str(detection.get("state") or "").upper() == "HOME_SCREEN"
+            and "HOME_AD_GEMS_AVAILABLE"
+            in set(detection.get("overlays") or ())
+        )
+        breaker = self._get_action_circuit_breaker()
+        state = str(detection.get("state") or "").upper()
+        if not active:
+            if state in {"UNKNOWN", "FREE_TICKET"}:
+                # UNKNOWN/incomplete pixels and a blocking modal that hides
+                # Home are not material evidence that the failed source
+                # disappeared.
+                self._home_ad_gem_absence_candidate = None
+                return
+            previous = breaker.snapshot(action)
+            if previous is None:
+                self._home_ad_gem_absence_candidate = None
+                return
+            epoch = self._home_ad_gem_circuit_epoch()
+            if previous.epoch != epoch:
+                recovered = breaker.reset(action)
+                self._home_ad_gem_nonreplayable_epoch_set().discard(
+                    previous.epoch
+                )
+                self._home_ad_gem_absence_candidate = None
+            elif not previous.tripped:
+                recovered = breaker.reset(action)
+                self._home_ad_gem_absence_candidate = None
+            elif epoch in self._home_ad_gem_nonreplayable_epoch_set():
+                # Accepted input without an authoritative result cannot be
+                # rearmed by navigating away or by time alone.
+                self._home_ad_gem_absence_candidate = None
+                return
+            else:
+                observation = getattr(self, "_control_observation", None)
+                observation_id = str(
+                    (observation or {}).get("observation_id")
+                    if isinstance(observation, Mapping)
+                    else ""
+                ) or f"sequence:{getattr(self, '_control_observation_sequence', 0)}"
+                candidate = getattr(
+                    self,
+                    "_home_ad_gem_absence_candidate",
+                    None,
+                )
+                if candidate is None or candidate[0] != epoch:
+                    self._home_ad_gem_absence_candidate = (
+                        epoch,
+                        observation_id,
+                    )
+                    return
+                if candidate[1] == observation_id:
+                    return
+                recovered = breaker.reset(action)
+                self._home_ad_gem_absence_candidate = None
+            if recovered:
+                log(
+                    "[ACTION_CIRCUIT] Home ad-gem circuit recovered after two "
+                    "stable source-absent observations or a binding change",
+                    "INFO",
+                )
+            return
+        self._home_ad_gem_absence_candidate = None
+        epoch = self._home_ad_gem_circuit_epoch()
+        previous = breaker.snapshot(action)
+        breaker.allows(action, epoch=epoch)
+        if (
+            previous is not None
+            and previous.tripped
+            and previous.epoch != epoch
+        ):
+            self._home_ad_gem_nonreplayable_epoch_set().discard(
+                previous.epoch
+            )
+            log(
+                "[ACTION_CIRCUIT] Home ad-gem circuit rearmed for a new "
+                "runtime, process, target, generation, or battle-scope epoch",
+                "INFO",
+            )
+
+    def _home_ad_gem_circuit_allows(
+        self,
+        *,
+        epoch: Optional[tuple[object, ...]] = None,
+    ) -> bool:
+        resolved_epoch = epoch or self._home_ad_gem_circuit_epoch()
+        if resolved_epoch in self._home_ad_gem_nonreplayable_epoch_set():
+            return False
+        return self._get_action_circuit_breaker().allows(
+            "home_ad_gem",
+            epoch=resolved_epoch,
+        )
+
+    def _home_ad_gem_nonreplayable_epoch_set(
+        self,
+    ) -> Set[tuple[object, ...]]:
+        epochs = getattr(self, "_home_ad_gem_nonreplayable_epochs", None)
+        if epochs is None:
+            epochs = set()
+            self._home_ad_gem_nonreplayable_epochs = epochs
+        return epochs
+
+    def _record_home_ad_gem_outcome(
+        self,
+        outcome: AdGemCollectionStatus | bool,
+        *,
+        epoch: Optional[tuple[object, ...]] = None,
+    ) -> None:
+        scheduled_epoch = epoch or self._home_ad_gem_circuit_epoch()
+        if scheduled_epoch != self._home_ad_gem_circuit_epoch():
+            # A final control/target guard changed the owner while the handler
+            # was running. Never attribute that result to the new epoch.
+            return
+        normalized = (
+            outcome
+            if isinstance(outcome, AdGemCollectionStatus)
+            else AdGemCollectionStatus.COLLECTED
+            if outcome
+            else AdGemCollectionStatus.EXHAUSTED
+        )
+        breaker = self._get_action_circuit_breaker()
+        if normalized is AdGemCollectionStatus.COLLECTED:
+            self._home_ad_gem_nonreplayable_epoch_set().discard(
+                scheduled_epoch
+            )
+            if breaker.record_success("home_ad_gem", epoch=scheduled_epoch):
+                log(
+                    "[ACTION_CIRCUIT] Home ad-gem circuit recovered after a "
+                    "verified collection",
+                    "INFO",
+                )
+            return
+        if normalized not in {
+            AdGemCollectionStatus.EXHAUSTED,
+            AdGemCollectionStatus.UNCERTAIN,
+        }:
+            return
+        if normalized is AdGemCollectionStatus.UNCERTAIN:
+            self._home_ad_gem_nonreplayable_epoch_set().add(
+                scheduled_epoch
+            )
+        if breaker.record_failure(
+            "home_ad_gem",
+            epoch=scheduled_epoch,
+            reason=(
+                "the Home ad-gem input result was uncertain and cannot be replayed"
+                if normalized is AdGemCollectionStatus.UNCERTAIN
+                else "the bounded Home ad-gem transaction did not clear its target"
+            ),
+        ):
+            log(
+                "[ACTION_CIRCUIT] Home ad-gem retries are disabled for this "
+                "exact observation epoch after one exhausted or uncertain "
+                "bounded transaction; lifecycle handling remains available",
+                "WARN",
+                console=True,
+            )
+
     def _get_watchdog_mutation_guard(self) -> CooperativeMutationGuard:
         """Return the guard shared by watchdog recovery and lease holds."""
 
@@ -1867,8 +2076,12 @@ class App:
         if any(current.get(field) in {None, ""} for field in binding_fields):
             return None
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "source": str(source),
+            "phase": "armed",
+            "operation_id": new_operation_id(),
+            "dispatch_count": 0,
+            "modal_recovery_completed": False,
             "created_at": datetime.now(timezone.utc).astimezone().isoformat(
                 timespec="seconds"
             ),
@@ -1890,7 +2103,10 @@ class App:
         if not isinstance(claim, Mapping):
             self._terminal_home_continuation = None
             return False
+        recovery_key = self._terminal_home_continuation_recovery_key(claim)
         self._terminal_home_continuation = None
+        self._free_ticket_recovery_cleared_set().discard(recovery_key)
+        self._free_ticket_recovery_attempt_map().pop(recovery_key, None)
         log(
             "[HOME] Cleared terminal-bound continuation authority — " + reason,
             "INFO",
@@ -1919,7 +2135,13 @@ class App:
             != str(claim.get("mode_request_id") or "")
         ):
             return False
-        self._terminal_home_continuation = copy.deepcopy(dict(claim))
+        committed = copy.deepcopy(dict(claim))
+        committed.setdefault("schema_version", 2)
+        committed.setdefault("phase", "armed")
+        committed.setdefault("operation_id", new_operation_id())
+        committed.setdefault("dispatch_count", 0)
+        committed.setdefault("modal_recovery_completed", False)
+        self._terminal_home_continuation = committed
         log(
             "[HOME] Armed one terminal-bound Continue automatically launch "
             f"from {claim.get('source')}",
@@ -1936,6 +2158,14 @@ class App:
 
         claim = getattr(self, "_terminal_home_continuation", None)
         if not isinstance(claim, Mapping):
+            return False
+        phase = str(claim.get("phase") or "armed")
+        if phase not in {"armed", "retry_ready"}:
+            return False
+        if int(claim.get("dispatch_count") or 0) >= 2:
+            self._clear_terminal_home_continuation(
+                "the bounded Home launch budget was exhausted"
+            )
             return False
         if AUTOMATION.mode is not ExecMode.NEXT_BATTLE:
             self._clear_terminal_home_continuation(
@@ -1971,7 +2201,11 @@ class App:
             return False
         if current.get("game_state") != "home_new_battle":
             return False
-        binding = claim.get("binding")
+        binding = (
+            claim.get("launch_binding")
+            if phase == "retry_ready"
+            else claim.get("binding")
+        )
         binding_fields = (
             "runtime_id",
             "pid",
@@ -1992,19 +2226,297 @@ class App:
             return False
         return True
 
-    def _consume_terminal_home_continuation(self) -> bool:
-        """Consume a successfully dispatched terminal-bound Home launch."""
+    @staticmethod
+    def _terminal_home_continuation_recovery_key(
+        claim: Mapping[str, Any],
+    ) -> str:
+        return "terminal:" + str(
+            claim.get("terminal_observation_id")
+            or claim.get("operation_id")
+            or "unknown"
+        )
+
+    def _mark_terminal_home_continuation_dispatched(self) -> bool:
+        """Retain a Home launch until a fresh battle boundary proves success."""
+
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if not isinstance(claim, dict):
+            return False
+        phase = str(claim.get("phase") or "armed")
+        if phase not in {"armed", "retry_ready"}:
+            return False
+        current = self._current_control_workflow_evidence()
+        if not isinstance(current, Mapping):
+            return False
+        binding_fields = (
+            "runtime_id",
+            "pid",
+            "adb_target",
+            "target_generation",
+        )
+        if any(current.get(field) in {None, ""} for field in binding_fields):
+            return False
+        launch_scope_id = self._current_run_scope_id()
+        if not launch_scope_id:
+            return False
+        claim["phase"] = "action_dispatched"
+        claim["dispatch_count"] = int(claim.get("dispatch_count") or 0) + 1
+        claim["dispatched_at"] = datetime.now(
+            timezone.utc
+        ).astimezone().isoformat(timespec="seconds")
+        claim["dispatched_monotonic"] = time.monotonic()
+        claim["dispatch_observation_id"] = current.get("observation_id")
+        claim["modal_recovery_completed"] = False
+        claim["launch_binding"] = {
+            **{field: copy.deepcopy(current.get(field)) for field in binding_fields},
+            "activity_scope_run_id": launch_scope_id,
+        }
+        log(
+            "[HOME] Retained terminal-bound continuation after verified New "
+            f"Battle dispatch {claim['dispatch_count']}/2; fresh RUNNING "
+            "evidence is still required",
+            "INFO",
+        )
+        return True
+
+    def _terminalize_uncertain_terminal_home_action(self, reason: str) -> None:
+        """Clear one local continuation after a possibly delivered input."""
+
+        claim = getattr(self, "_terminal_home_continuation", None)
+        recovery_key = (
+            self._terminal_home_continuation_recovery_key(claim)
+            if isinstance(claim, Mapping)
+            else "terminal:unknown"
+        )
+        self._clear_terminal_home_continuation(reason)
+        uncertain = getattr(self, "_uncertain_lifecycle_actions", None)
+        if uncertain is None:
+            uncertain = set()
+            self._uncertain_lifecycle_actions = uncertain
+        uncertain.add(recovery_key)
+        self._runtime_uncertain_mutation_result(
+            reason + "; automation is Paused and the action will not be replayed"
+        )
+
+    def _terminal_home_continuation_owner_current(self) -> bool:
+        """Revalidate an in-flight process-local launch without sending input."""
 
         claim = getattr(self, "_terminal_home_continuation", None)
         if not isinstance(claim, Mapping):
             return False
-        self._terminal_home_continuation = None
+        if AUTOMATION.mode is not ExecMode.NEXT_BATTLE:
+            return False
+        if str(
+            getattr(getattr(self, "_supervisor", None), "control_state", "")
+        ).upper() != "RUNNING":
+            return False
+        identity = self._current_control_request_identity()
+        if (
+            str(identity.get("state_request_id") or "")
+            != str(claim.get("state_request_id") or "")
+            or str(identity.get("mode_request_id") or "")
+            != str(claim.get("mode_request_id") or "")
+        ):
+            return False
+        workflow = getattr(self._supervisor, "battle_workflow", None)
+        manual = getattr(self._supervisor, "manual_control", None)
+        if (
+            isinstance(workflow, Mapping)
+            and workflow.get("status") not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+        ) or (
+            isinstance(manual, Mapping)
+            and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+        ):
+            return False
+        current = self._current_control_workflow_evidence()
+        binding = claim.get("launch_binding")
+        if not isinstance(current, Mapping) or not isinstance(binding, Mapping):
+            return False
+        for field in ("runtime_id", "pid", "adb_target", "target_generation"):
+            if binding.get(field) != current.get(field):
+                return False
+        return str(binding.get("activity_scope_run_id") or "") == str(
+            self._current_run_scope_id() or ""
+        )
+
+    def _mark_terminal_home_continuation_modal_cleared(self) -> bool:
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if not (
+            isinstance(claim, dict)
+            and str(claim.get("phase") or "") == "action_dispatched"
+        ):
+            return False
+        claim["modal_recovery_completed"] = True
+        claim.pop("retry_home_candidate_observation_id", None)
+        claim["modal_recovered_at"] = datetime.now(
+            timezone.utc
+        ).astimezone().isoformat(timespec="seconds")
+        return True
+
+    def _yield_tournament_from_ordinary_launch(self, reason: str) -> bool:
+        """Pause rather than adopting manual Tournament activity as ordinary."""
+
+        self._clear_terminal_home_continuation(reason)
+        evidence = self._current_control_workflow_evidence()
+        yielded = None
+        if isinstance(evidence, Mapping):
+            yielded = self._supervisor.yield_to_unexpected_manual_activity(
+                evidence
+            )
+        if yielded is None and not getattr(
+            self._supervisor,
+            "unexpected_manual_yield_emergency",
+            False,
+        ):
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                reason=(
+                    reason
+                    + "; exact manual-control ownership could not be persisted"
+                ),
+            )
+        self._update_action_authority()
+        self._publish_action_authority()
         log(
-            "[HOME] Consumed terminal-bound continuation authority after "
-            "verified New Battle dispatch",
-            "INFO",
+            f"[HOME] {reason}; automation yielded without adopting the battle",
+            "WARN",
+            console=True,
         )
         return True
+
+    def _reconcile_terminal_home_continuation(
+        self,
+        detection: Mapping[str, Any],
+    ) -> bool:
+        """Advance or revoke the retained launch from one fresh observation."""
+
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if not isinstance(claim, dict):
+            return False
+        phase = str(claim.get("phase") or "armed")
+        if phase == "armed":
+            if AUTOMATION.mode is not ExecMode.NEXT_BATTLE or str(
+                getattr(self._supervisor, "control_state", "")
+            ).upper() != "RUNNING":
+                return self._clear_terminal_home_continuation(
+                    "control changed before Home launch"
+                )
+            return False
+        if phase == "retry_ready":
+            if not self._terminal_home_continuation_owner_current():
+                return self._clear_terminal_home_continuation(
+                    "the retained retry owner changed"
+                )
+            state = str(detection.get("state") or "UNKNOWN").upper()
+            current = self._current_control_workflow_evidence()
+            game_state = str((current or {}).get("game_state") or "unknown")
+            if self._tournament_battle_guard(detection):
+                return self._yield_tournament_from_ordinary_launch(
+                    "a Tournament battle appeared before the retained ordinary "
+                    "Battle retry"
+                )
+            if game_state in {"active_battle", "home_new_battle"}:
+                return False
+            if state == "UNKNOWN":
+                return False
+            return self._clear_terminal_home_continuation(
+                f"the retained retry reached unexpected {state}"
+            )
+        if phase != "action_dispatched":
+            return self._clear_terminal_home_continuation(
+                f"unsupported retained launch phase {phase}"
+            )
+        if not self._terminal_home_continuation_owner_current():
+            return self._clear_terminal_home_continuation(
+                "runtime, target, scope, or control request changed after dispatch"
+            )
+
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        if state == "FREE_TICKET":
+            claim.pop("retry_home_candidate_observation_id", None)
+            return False
+        current = self._current_control_workflow_evidence()
+        game_state = str((current or {}).get("game_state") or "unknown")
+        if self._tournament_battle_guard(detection):
+            return self._yield_tournament_from_ordinary_launch(
+                "a Tournament battle appeared while an ordinary Battle launch "
+                "receipt was pending"
+            )
+        if game_state == "active_battle":
+            return False
+        if (
+            claim.get("modal_recovery_completed") is True
+            and game_state == "home_new_battle"
+        ):
+            observation_id = str((current or {}).get("observation_id") or "")
+            candidate = str(
+                claim.get("retry_home_candidate_observation_id") or ""
+            )
+            if not candidate:
+                claim["retry_home_candidate_observation_id"] = observation_id
+                return False
+            if candidate == observation_id:
+                return False
+            if int(claim.get("dispatch_count") or 0) < 2:
+                claim["phase"] = "retry_ready"
+                claim["modal_recovery_completed"] = False
+                claim.pop("retry_home_candidate_observation_id", None)
+                log(
+                    "[HOME] Free Ticket cleared; two stable Home observations "
+                    "authorize one verified New Battle retry",
+                    "INFO",
+                )
+            else:
+                return self._clear_terminal_home_continuation(
+                    "the modal cleared after the final launch attempt"
+                )
+            return False
+        claim.pop("retry_home_candidate_observation_id", None)
+        if game_state in {
+            "home_resume_battle",
+            "game_over",
+            "tournament_results",
+        } or state not in {"UNKNOWN", "HOME_SCREEN", "RUNNING"}:
+            return self._clear_terminal_home_continuation(
+                f"the dispatched launch reached unexpected {state}"
+            )
+        elapsed = time.monotonic() - float(
+            claim.get("dispatched_monotonic") or time.monotonic()
+        )
+        if elapsed >= BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS:
+            recovery_key = self._terminal_home_continuation_recovery_key(claim)
+            reason = (
+                "the accepted Home action had no authoritative battle or known "
+                "blocker outcome within "
+                f"{int(BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS)} seconds"
+            )
+            self._clear_terminal_home_continuation(reason)
+            uncertain = getattr(self, "_uncertain_lifecycle_actions", None)
+            if uncertain is None:
+                uncertain = set()
+                self._uncertain_lifecycle_actions = uncertain
+            uncertain.add(recovery_key)
+            self._runtime_uncertain_mutation_result(reason)
+            return True
+        return False
+
+    def _complete_terminal_home_continuation(
+        self,
+        battle_started: bool,
+        detection: Optional[Mapping[str, Any]] = None,
+    ) -> bool:
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if not (
+            battle_started is True
+            and not self._tournament_battle_guard(detection or {})
+            and isinstance(claim, Mapping)
+            and str(claim.get("phase") or "")
+            in {"action_dispatched", "retry_ready"}
+        ):
+            return False
+        return self._clear_terminal_home_continuation(
+            "fresh RUNNING evidence completed the retained launch postcondition"
+        )
 
     def _terminal_home_continuation_status(self) -> Dict[str, object]:
         """Publish non-authoritative operator visibility for a pending claim."""
@@ -2015,11 +2527,359 @@ class App:
         return {
             "pending": True,
             "source": claim.get("source"),
+            "phase": claim.get("phase", "armed"),
+            "dispatch_count": int(claim.get("dispatch_count") or 0),
             "created_at": claim.get("created_at"),
             "terminal_observation_id": claim.get(
                 "terminal_observation_id"
             ),
         }
+
+    def _free_ticket_recovery_attempt_map(self) -> Dict[str, int]:
+        attempts = getattr(self, "_free_ticket_recovery_attempts", None)
+        if attempts is None:
+            attempts = {}
+            self._free_ticket_recovery_attempts = attempts
+        return attempts
+
+    def _free_ticket_recovery_cleared_set(self) -> Set[str]:
+        cleared = getattr(self, "_free_ticket_recovery_cleared", None)
+        if cleared is None:
+            cleared = set()
+            self._free_ticket_recovery_cleared = cleared
+        return cleared
+
+    def _free_ticket_recovery_warning_set(self) -> Set[str]:
+        warned = getattr(self, "_free_ticket_recovery_warnings", None)
+        if warned is None:
+            warned = set()
+            self._free_ticket_recovery_warnings = warned
+        return warned
+
+    @staticmethod
+    def _blocking_primary_authority_hold() -> AuthorityHoldState:
+        return AuthorityHoldState(
+            AuthorityHold.BLOCKING_MODAL_RECOVERY,
+            "a recognized blocking modal suppresses every background action",
+        )
+
+    def _observe_blocking_primary_boundary(
+        self,
+        detection: Mapping[str, Any],
+    ) -> None:
+        """Retain a blocker across captures until fresh known absence."""
+
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        if state == "FREE_TICKET":
+            self._blocking_primary_hold_active = True
+        elif state != "UNKNOWN":
+            self._blocking_primary_hold_active = False
+
+    def _pre_capture_authority_holds(self) -> tuple[AuthorityHoldState, ...]:
+        """Keep the last blocking boundary and current control owner passive."""
+
+        holds: list[AuthorityHoldState] = []
+        operator = self._operator_workflow_authority_hold()
+        if operator is not None:
+            holds.append(operator)
+        if bool(getattr(self, "_blocking_primary_hold_active", False)):
+            holds.append(self._blocking_primary_authority_hold())
+        return tuple(holds)
+
+    def _blocking_recovery_handoff(
+        self,
+        owner: Optional[Tuple[str, str]],
+    ) -> tuple[tuple[AuthorityHoldState, ...], bool]:
+        """Replace a healthy launch hold, but preserve every stronger owner."""
+
+        blocker = self._blocking_primary_authority_hold()
+        competing = self._operator_workflow_authority_hold()
+        capture = getattr(self._supervisor, "setup_capture", None)
+        setup_active = bool(
+            isinstance(capture, Mapping)
+            and capture.get("status") not in SETUP_CAPTURE_TERMINAL_STATUSES
+        )
+        healthy = bool(
+            owner is not None
+            and competing is not None
+            and competing.hold is AuthorityHold.OPERATOR_WORKFLOW
+            and getattr(self._supervisor, "battle_workflow_error", False)
+            is not True
+            and getattr(self._supervisor, "setup_capture_error", False)
+            is not True
+            and not setup_active
+            and self._free_ticket_recovery_owner_current(*owner)
+        )
+        if healthy:
+            return (blocker,), True
+        holds = tuple(
+            item
+            for item in (competing, blocker)
+            if item is not None
+        )
+        return holds, False
+
+    @staticmethod
+    def _battle_workflow_recovery_key(workflow: Mapping[str, Any]) -> str:
+        return "battle:" + str(workflow.get("request_id") or "unknown")
+
+    def _workflow_dispatch_receipt_mismatch(
+        self,
+        workflow: Mapping[str, Any],
+        current: Mapping[str, Any],
+    ) -> Optional[str]:
+        """Validate one accepted lifecycle input against its exact owner."""
+
+        raw_receipt = workflow.get("acknowledgement")
+        receipt = validate_workflow_evidence(raw_receipt)
+        requested = validate_workflow_evidence(workflow.get("evidence"))
+        current_evidence = validate_workflow_evidence(current)
+        if receipt is None:
+            return "dispatch receipt is missing or malformed"
+        if requested is None or current_evidence is None:
+            return "workflow owner or current runtime evidence is unavailable"
+        required = (
+            "runtime_id",
+            "pid",
+            "adb_target",
+            "target_generation",
+            "activity_scope_run_id",
+            "observation_id",
+        )
+        if any(receipt.get(field) in {None, ""} for field in required):
+            return "dispatch receipt is incomplete"
+        for field in ("runtime_id", "pid", "adb_target", "target_generation"):
+            if receipt.get(field) != requested.get(field):
+                return f"dispatch owner changed at {field}"
+            if receipt.get(field) != current_evidence.get(field):
+                return f"runtime evidence changed at {field}"
+        if receipt.get("activity_scope_run_id") != current_evidence.get(
+            "activity_scope_run_id"
+        ):
+            return "battle activity scope changed"
+        identity = self._current_control_request_identity()
+        if not isinstance(raw_receipt, Mapping):
+            return "dispatch control identity is unavailable"
+        for field in ("state_request_id", "mode_request_id"):
+            retained = str(raw_receipt.get(field) or "")
+            current_id = str(identity.get(field) or "")
+            if not retained or retained != current_id:
+                return f"control request identity changed at {field}"
+        return None
+
+    def _free_ticket_recovery_owner(self) -> Optional[Tuple[str, str]]:
+        """Return the exact launch transition allowed to claim the modal."""
+
+        workflow = getattr(self._supervisor, "battle_workflow", None)
+        manual = getattr(self._supervisor, "manual_control", None)
+        if (
+            isinstance(manual, Mapping)
+            and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+        ):
+            return None
+        if (
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "start_battle"
+            and workflow.get("status") == "action_dispatched"
+            and str(workflow.get("request_id") or "")
+            not in getattr(self, "_uncertain_lifecycle_actions", set())
+        ):
+            return "battle_workflow", self._battle_workflow_recovery_key(workflow)
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if (
+            isinstance(claim, Mapping)
+            and str(claim.get("phase") or "") == "action_dispatched"
+            and self._terminal_home_continuation_owner_current()
+        ):
+            return (
+                "terminal_continuation",
+                self._terminal_home_continuation_recovery_key(claim),
+            )
+        return None
+
+    def _free_ticket_recovery_owner_current(
+        self,
+        owner_kind: str,
+        recovery_key: str,
+    ) -> bool:
+        if owner_kind == "terminal_continuation":
+            claim = getattr(self, "_terminal_home_continuation", None)
+            return bool(
+                isinstance(claim, Mapping)
+                and str(claim.get("phase") or "") == "action_dispatched"
+                and self._terminal_home_continuation_recovery_key(claim)
+                == recovery_key
+                and self._terminal_home_continuation_owner_current()
+            )
+        if owner_kind != "battle_workflow":
+            return False
+        workflow = getattr(self._supervisor, "battle_workflow", None)
+        manual = getattr(self._supervisor, "manual_control", None)
+        if not (
+            isinstance(workflow, Mapping)
+            and self._battle_workflow_recovery_key(workflow) == recovery_key
+            and workflow.get("intent") == "start_battle"
+            and workflow.get("status") == "action_dispatched"
+            and not (
+                isinstance(manual, Mapping)
+                and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+            )
+        ):
+            return False
+        current = self._current_control_workflow_evidence()
+        if not isinstance(current, Mapping):
+            return False
+        return (
+            self._workflow_dispatch_receipt_mismatch(workflow, current)
+            is None
+        )
+
+    def _fail_free_ticket_recovery(
+        self,
+        owner_kind: str,
+        recovery_key: str,
+        reason: str,
+    ) -> None:
+        if owner_kind == "terminal_continuation":
+            self._clear_terminal_home_continuation(reason)
+            return
+        workflow = getattr(self._supervisor, "battle_workflow", None)
+        if not (
+            isinstance(workflow, Mapping)
+            and self._battle_workflow_recovery_key(workflow) == recovery_key
+            and workflow.get("status") == "action_dispatched"
+        ):
+            return
+        request_id = str(workflow.get("request_id") or "")
+        self._mission_mgr.revoke_initial_battle_intent(
+            str(workflow.get("intent") or ""),
+            request_id=request_id,
+        )
+        self._supervisor.transition_battle_workflow(
+            request_id,
+            "failed",
+            reason=reason,
+            acknowledgement=(self._current_control_workflow_evidence() or {}),
+        )
+
+    def _advance_blocking_primary_recovery(
+        self,
+        screenshot: Frame,
+        detection: Mapping[str, Any],
+    ) -> bool:
+        """Suppress a known blocker and recover only its exact launch owner."""
+
+        if str(detection.get("state") or "").upper() != "FREE_TICKET":
+            return False
+        self._blocking_primary_hold_active = True
+        owner = self._free_ticket_recovery_owner()
+        holds, handoff_ready = self._blocking_recovery_handoff(owner)
+        self._update_action_authority(detection=detection, holds=holds)
+        self._publish_action_authority()
+        if stop_blind_gem_tapper():
+            self._blind_tapper_suspended = True
+
+        if owner is None or not handoff_ready:
+            warning_key = "unowned_free_ticket"
+            if warning_key not in self._free_ticket_recovery_warning_set():
+                self._free_ticket_recovery_warning_set().add(warning_key)
+                log(
+                    "[FREE_TICKET_RECOVERY] Blocking modal recognized, but no "
+                    "exact dispatched battle transition owns recovery; all "
+                    "background input remains suppressed",
+                    "WARN",
+                    console=True,
+                )
+            return True
+        owner_kind, recovery_key = owner
+        attempts = self._free_ticket_recovery_attempt_map()
+        if int(attempts.get(recovery_key, 0)) >= 1:
+            reason = (
+                "the Free Ticket modal recurred after its single bounded "
+                "recovery transaction"
+            )
+            self._fail_free_ticket_recovery(owner_kind, recovery_key, reason)
+            if recovery_key not in self._free_ticket_recovery_warning_set():
+                self._free_ticket_recovery_warning_set().add(recovery_key)
+                log(f"[FREE_TICKET_RECOVERY] {reason}", "WARN", console=True)
+            return True
+        if getattr(self._supervisor, "is_paused", False):
+            return True
+
+        def action_allowed() -> bool:
+            if not self._runtime_action_guard(
+                    action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                    owner=AuthorityHold.BLOCKING_MODAL_RECOVERY,
+                ):
+                return False
+            refreshed_owner = self._free_ticket_recovery_owner()
+            refreshed_holds, refreshed_ready = (
+                self._blocking_recovery_handoff(refreshed_owner)
+            )
+            self._update_action_authority(holds=refreshed_holds)
+            self._publish_action_authority()
+            return bool(
+                refreshed_ready
+                and refreshed_owner == (owner_kind, recovery_key)
+            )
+
+        result = handle_free_ticket_modal(
+            screenshot,
+            action_guard_fn=action_allowed,
+            capture_fn=self._capture_frame,
+            operation_id=f"{recovery_key}:free-ticket-recovery",
+        )
+        if result.input_dispatched:
+            attempts[recovery_key] = int(attempts.get(recovery_key, 0)) + 1
+        if result.status is FreeTicketRecoveryStatus.DISMISSED:
+            self._free_ticket_recovery_cleared_set().add(recovery_key)
+            if owner_kind == "terminal_continuation":
+                self._mark_terminal_home_continuation_modal_cleared()
+        elif result.status is FreeTicketRecoveryStatus.ALREADY_RESOLVED:
+            if result.final_state != "RUNNING":
+                self._fail_free_ticket_recovery(
+                    owner_kind,
+                    recovery_key,
+                    "the Free Ticket modal changed without an owned recovery "
+                    "input; no launch retry was inferred",
+                )
+        elif result.status is FreeTicketRecoveryStatus.DEFERRED:
+            # No input was attempted. Preserve the exact launch owner and let
+            # a later complete frame retry the same bounded transaction.
+            pass
+        elif result.status is FreeTicketRecoveryStatus.UNCERTAIN:
+            self._fail_free_ticket_recovery(
+                owner_kind,
+                recovery_key,
+                "the Free Ticket Claim input had no authoritative outcome; "
+                "the same action is non-replayable",
+            )
+            uncertain = getattr(self, "_uncertain_lifecycle_actions", None)
+            if uncertain is None:
+                uncertain = set()
+                self._uncertain_lifecycle_actions = uncertain
+            uncertain.add(recovery_key)
+            if owner_kind == "battle_workflow":
+                workflow = getattr(self._supervisor, "battle_workflow", None)
+                if isinstance(workflow, Mapping):
+                    uncertain.add(str(workflow.get("request_id") or ""))
+            self._runtime_uncertain_mutation_result(
+                "the Free Ticket Claim input may have reached the device, but "
+                "no authoritative result was observed; automation is Paused "
+                "and the action will not be replayed"
+            )
+        elif result.status is FreeTicketRecoveryStatus.FAILED or (
+            result.status is FreeTicketRecoveryStatus.INTERRUPTED
+            and result.input_dispatched
+        ):
+            self._fail_free_ticket_recovery(
+                owner_kind,
+                recovery_key,
+                "Free Ticket recovery did not prove that the blocking modal cleared",
+            )
+        # The supplied frame predates every recovery observation and possible
+        # input. Always recapture through the main loop before any other work.
+        return True
 
     def _workflow_evidence_matches_runtime(
         self,
@@ -2158,48 +3018,127 @@ class App:
         )
         logged.add(operation_id)
 
+    def _terminalize_uncertain_battle_workflow(
+        self,
+        workflow: Mapping[str, Any],
+        current: Mapping[str, Any],
+        *,
+        reason: str,
+    ) -> None:
+        """Make an accepted unresolved lifecycle input non-replayable."""
+
+        request_id = str(workflow.get("request_id") or "")
+        intent = str(workflow.get("intent") or "")
+        if request_id:
+            uncertain = getattr(self, "_uncertain_lifecycle_actions", None)
+            if uncertain is None:
+                uncertain = set()
+                self._uncertain_lifecycle_actions = uncertain
+            uncertain.add(request_id)
+        self._mission_mgr.revoke_initial_battle_intent(
+            intent,
+            request_id=request_id,
+        )
+        self._supervisor.transition_battle_workflow(
+            request_id,
+            "failed",
+            reason=reason,
+            acknowledgement=current,
+        )
+        self._runtime_uncertain_mutation_result(
+            reason + "; automation is Paused and the action will not be replayed"
+        )
+        log(
+            f"[BATTLE_WORKFLOW] {reason}; accepted input is non-replayable",
+            "ERROR",
+            console=True,
+        )
+
     def _reconcile_dispatched_battle_workflow(
         self,
         workflow: Mapping[str, Any],
         current: Mapping[str, Any],
+        *,
+        detection: Optional[Mapping[str, Any]] = None,
     ) -> None:
         """Resolve a dispatched Home action without competing for input."""
 
         request_id = str(workflow.get("request_id") or "")
         intent = str(workflow.get("intent") or "")
-        dispatched = workflow.get("acknowledgement")
-        if not isinstance(dispatched, Mapping):
-            dispatched = workflow.get("evidence")
-        mismatch = None
-        if not isinstance(dispatched, Mapping):
-            mismatch = "dispatch evidence is unavailable"
-        else:
-            for field in ("runtime_id", "pid", "adb_target"):
-                if dispatched.get(field) != current.get(field):
-                    mismatch = f"runtime evidence changed at {field}"
-                    break
-            if (
-                mismatch is None
-                and dispatched.get("target_generation") is not None
-                and dispatched.get("target_generation")
-                != current.get("target_generation")
-            ):
-                mismatch = "ADB target generation changed"
-            if (
-                mismatch is None
-                and intent == "attach_battle"
-                and dispatched.get("activity_scope_run_id")
-                != current.get("activity_scope_run_id")
-            ):
-                mismatch = "battle activity scope changed"
+        mismatch = self._workflow_dispatch_receipt_mismatch(
+            workflow,
+            current,
+        )
         game_state = str(current.get("game_state") or "unknown")
+        unexpected_tournament = bool(
+            game_state == "active_battle"
+            and self._tournament_battle_guard(detection or {})
+        )
+        if (
+            mismatch is None
+            and unexpected_tournament
+        ):
+            mismatch = (
+                "the ordinary battle launch reached a Tournament battle; "
+                "manual Tournament activity cannot satisfy this workflow"
+            )
         if mismatch is None and game_state == "active_battle":
+            return
+        if (
+            mismatch is None
+            and intent == "start_battle"
+            and str((detection or {}).get("state") or "").upper()
+            == "FREE_TICKET"
+        ):
+            # A known blocker has its own exact-owner recovery path. Its time
+            # on screen cannot consume the ordinary launch postcondition
+            # timeout before that path gets the current frame.
             return
         expected_home = (
             "home_new_battle"
             if intent == "start_battle"
             else "home_resume_battle"
         )
+        recovery_key = self._battle_workflow_recovery_key(workflow)
+        if (
+            mismatch is None
+            and intent == "start_battle"
+            and game_state == expected_home
+            and recovery_key in self._free_ticket_recovery_cleared_set()
+        ):
+            observation_id = str(current.get("observation_id") or "")
+            candidates = getattr(
+                self,
+                "_free_ticket_retry_home_candidates",
+                None,
+            )
+            if candidates is None:
+                candidates = {}
+                self._free_ticket_retry_home_candidates = candidates
+            prior_observation_id = candidates.get(recovery_key)
+            if not prior_observation_id:
+                candidates[recovery_key] = observation_id
+                return
+            if prior_observation_id == observation_id:
+                return
+            transitioned = self._supervisor.transition_battle_workflow(
+                request_id,
+                "ready",
+                reason=(
+                    "the recognized Free Ticket modal cleared; one verified "
+                    "New Battle retry is ready on fresh Home evidence"
+                ),
+                acknowledgement=current,
+            )
+            if transitioned is None:
+                candidates.pop(recovery_key, None)
+            return
+        if game_state != expected_home:
+            getattr(
+                self,
+                "_free_ticket_retry_home_candidates",
+                {},
+            ).pop(recovery_key, None)
         if (
             mismatch is None
             and game_state not in {expected_home, "unknown"}
@@ -2227,11 +3166,17 @@ class App:
                 elapsed = 0.0
             if elapsed < BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS:
                 return
-            terminal_status = "failed"
             reason = (
-                f"dispatched {intent} did not reach an active battle within "
+                f"dispatched {intent} had no authoritative outcome within "
                 f"{int(BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS)} seconds"
             )
+
+            self._terminalize_uncertain_battle_workflow(
+                workflow,
+                current,
+                reason=reason,
+            )
+            return
 
         self._mission_mgr.revoke_initial_battle_intent(
             intent,
@@ -2247,6 +3192,45 @@ class App:
             f"[BATTLE_WORKFLOW] {reason}; automated input remains yielded",
             "WARN",
             console=True,
+        )
+        if unexpected_tournament:
+            yielded = self._supervisor.yield_to_unexpected_manual_activity(
+                current
+            )
+            if yielded is None and not getattr(
+                self._supervisor,
+                "unexpected_manual_yield_emergency",
+                False,
+            ):
+                self._supervisor.pause_for_catastrophic_failure(
+                    RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                    reason=(
+                        "Tournament activity superseded an ordinary Battle "
+                        "workflow, but manual ownership could not be persisted"
+                    ),
+                )
+            self._update_action_authority()
+            self._publish_action_authority()
+
+    def _reconcile_dispatched_workflow_behind_blocker(
+        self,
+        detection: Mapping[str, Any],
+    ) -> None:
+        """Revoke a stale receipt before a blocker can retain its hold."""
+
+        workflow = getattr(self._supervisor, "battle_workflow", None)
+        if not (
+            isinstance(workflow, Mapping)
+            and workflow.get("status") == "action_dispatched"
+        ):
+            return
+        current = self._current_control_workflow_evidence()
+        if not isinstance(current, Mapping):
+            return
+        self._reconcile_dispatched_battle_workflow(
+            workflow,
+            current,
+            detection=detection,
         )
 
     def _sync_operator_control_workflows(
@@ -2573,7 +3557,11 @@ class App:
         status = str(workflow.get("status") or "")
         if status == "action_dispatched":
             if current is not None:
-                self._reconcile_dispatched_battle_workflow(workflow, current)
+                self._reconcile_dispatched_battle_workflow(
+                    workflow,
+                    current,
+                    detection=detection,
+                )
             return
         if status == "ready" and intent == "attach_battle":
             retained_claim = self._running_reconciliation_claims().get(
@@ -4987,7 +5975,7 @@ class App:
             and (
                 (
                     workflow.get("intent") == "start_battle"
-                    and workflow.get("status") == "acknowledged"
+                    and workflow.get("status") in {"acknowledged", "ready"}
                 )
                 or (
                     workflow.get("intent") == "attach_battle"
@@ -4996,19 +5984,78 @@ class App:
             )
         ):
             return False
+        request_id = str(workflow.get("request_id") or "")
+        if request_id in getattr(self, "_uncertain_lifecycle_actions", set()):
+            return False
+        current = self._current_control_workflow_evidence()
+        launch_scope_id = self._current_run_scope_id()
+        identity = self._current_control_request_identity()
+        requested = validate_workflow_evidence(workflow.get("evidence"))
+        if not (
+            isinstance(current, Mapping)
+            and launch_scope_id
+            and isinstance(requested, Mapping)
+            and all(
+                current.get(field) not in {None, ""}
+                for field in (
+                    "runtime_id",
+                    "pid",
+                    "adb_target",
+                    "target_generation",
+                    "observation_id",
+                )
+            )
+            and all(
+                str(identity.get(field) or "")
+                for field in ("state_request_id", "mode_request_id")
+            )
+            and all(
+                current.get(field) == requested.get(field)
+                for field in (
+                    "runtime_id",
+                    "pid",
+                    "adb_target",
+                    "target_generation",
+                )
+            )
+        ):
+            return False
+        acknowledgement = {
+            **dict(current),
+            "activity_scope_run_id": str(launch_scope_id),
+            "state_request_id": str(identity["state_request_id"]),
+            "mode_request_id": str(identity["mode_request_id"]),
+        }
+        if validate_workflow_evidence(acknowledgement) is None:
+            return False
+        was_modal_retry = bool(
+            workflow.get("intent") == "start_battle"
+            and workflow.get("status") == "ready"
+            and self._battle_workflow_recovery_key(workflow)
+            in self._free_ticket_recovery_cleared_set()
+        )
         transitioned = self._supervisor.transition_battle_workflow(
-            str(workflow.get("request_id") or ""),
+            request_id,
             "action_dispatched",
             reason=(
                 "the exact verified Home battle control was dispatched; "
                 "battle lifecycle adoption is pending"
             ),
-            acknowledgement=(self._current_control_workflow_evidence() or {}),
+            acknowledgement=acknowledgement,
         )
-        return bool(
+        marked = bool(
             transitioned is not None
             and transitioned.get("status") == "action_dispatched"
         )
+        if marked and was_modal_retry:
+            recovery_key = self._battle_workflow_recovery_key(workflow)
+            self._free_ticket_recovery_cleared_set().discard(recovery_key)
+            getattr(
+                self,
+                "_free_ticket_retry_home_candidates",
+                {},
+            ).pop(recovery_key, None)
+        return marked
 
     def _home_launch_authority_matches(
         self,
@@ -5034,6 +6081,12 @@ class App:
             and manual.get("status")
             not in MANUAL_CONTROL_TERMINAL_STATUSES
         )
+        if request_id and request_id in getattr(
+            self,
+            "_uncertain_lifecycle_actions",
+            set(),
+        ):
+            return False
 
         if source == "terminal_continuation":
             if workflow_active or manual_active:
@@ -5089,15 +6142,88 @@ class App:
                 and not self._awaiting_initial_battle_intent()
                 and self._auto_start_enabled
                 and AUTOMATION.mode is ExecMode.NEXT_BATTLE
+                and self._legacy_home_launch_epoch(home_control)
+                not in getattr(
+                    self,
+                    "_uncertain_legacy_home_launch_epochs",
+                    set(),
+                )
             )
         return False
 
-    def _complete_started_battle_workflow(self, battle_started: bool) -> bool:
+    def _legacy_home_launch_epoch(
+        self,
+        home_control: HomeBattleControl,
+    ) -> tuple[object, ...]:
+        """Bind an unmanaged Home launch to material runtime UI identity."""
+
+        try:
+            current = self._current_control_workflow_evidence()
+        except Exception:
+            current = getattr(self, "_control_observation", None)
+        if not isinstance(current, Mapping):
+            current = {}
+        return (
+            current.get("runtime_id"),
+            current.get("pid"),
+            current.get("adb_target"),
+            current.get("target_generation"),
+            current.get("activity_scope_run_id"),
+        )
+
+    def _same_owner_free_ticket_retry_ready(
+        self,
+        *,
+        source: Optional[str],
+        request_id: str,
+    ) -> bool:
+        """Retain carried save evidence only across the exact modal retry."""
+
+        claim = getattr(self, "_terminal_home_continuation", None)
+        if isinstance(claim, Mapping):
+            phase = str(claim.get("phase") or "")
+            if (
+                phase in {"action_dispatched", "retry_ready"}
+                and (
+                    phase == "retry_ready"
+                    or claim.get("modal_recovery_completed") is True
+                )
+                and self._terminal_home_continuation_owner_current()
+            ):
+                return True
+        workflow = getattr(self._supervisor, "battle_workflow", None)
+        if not (
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "start_battle"
+            and workflow.get("status") in {"action_dispatched", "ready"}
+            and (
+                not request_id
+                or str(workflow.get("request_id") or "") == request_id
+            )
+            and self._battle_workflow_recovery_key(workflow)
+            in self._free_ticket_recovery_cleared_set()
+        ):
+            return False
+        if workflow.get("status") == "ready":
+            return True
+        current = self._current_control_workflow_evidence()
+        return bool(
+            isinstance(current, Mapping)
+            and self._workflow_dispatch_receipt_mismatch(workflow, current)
+            is None
+        )
+
+    def _complete_started_battle_workflow(
+        self,
+        battle_started: bool,
+        detection: Optional[Mapping[str, Any]] = None,
+    ) -> bool:
         """Complete Start only after its dispatched launch becomes a run."""
 
         workflow = self._supervisor.battle_workflow
         if not (
             battle_started is True
+            and not self._tournament_battle_guard(detection or {})
             and isinstance(workflow, Mapping)
             and workflow.get("intent") == "start_battle"
             and workflow.get("status") == "action_dispatched"
@@ -5294,6 +6420,16 @@ class App:
                     else "manual-control handoff blocks automated device input "
                     f"while status is {manual_status}"
                 ),
+            )
+        continuation = getattr(self, "_terminal_home_continuation", None)
+        if (
+            isinstance(continuation, Mapping)
+            and str(continuation.get("phase") or "armed")
+            in {"action_dispatched", "retry_ready"}
+        ):
+            return AuthorityHoldState(
+                AuthorityHold.OPERATOR_WORKFLOW,
+                "a retained terminal launch is awaiting fresh battle evidence",
             )
         if self._awaiting_initial_battle_intent():
             workflow = self._supervisor.battle_workflow
@@ -7672,15 +8808,69 @@ class App:
             ),
             detail=f"[TOURNAMENT_VALIDATION] request_id={request_id}",
         )
-        if tap_verified_new_battle():
-            self._mark_operator_battle_action_dispatched(True)
+        raw_launch = tap_verified_new_battle(return_dispatch_outcome=True)
+        launch_outcome = (
+            raw_launch
+            if isinstance(raw_launch, TapDispatchOutcome)
+            else TapDispatchOutcome(
+                TapDispatchStatus.DISPATCHED
+                if raw_launch
+                else TapDispatchStatus.NOT_DISPATCHED
+            )
+        )
+        workflow = self._supervisor.battle_workflow
+        if launch_outcome.dispatched:
+            operator_launch = bool(
+                isinstance(workflow, Mapping)
+                and workflow.get("intent") == "start_battle"
+                and workflow.get("status") in {"acknowledged", "ready"}
+            )
+            marked = bool(
+                not operator_launch
+                or self._mark_operator_battle_action_dispatched(True)
+            )
+            if not marked:
+                reason = (
+                    "the owned validation Battle input was accepted, but its "
+                    "durable action receipt could not be retained"
+                )
+                if isinstance(workflow, Mapping):
+                    self._terminalize_uncertain_battle_workflow(
+                        workflow,
+                        self._current_control_workflow_evidence() or {},
+                        reason=reason,
+                    )
+                else:
+                    self._runtime_uncertain_mutation_result(reason)
+                self._finish_exclusive_validation_without_cleanup(
+                    claimed,
+                    reason + "; no Surrender or replay was attempted",
+                )
+                return True
             log(
                 "[TOURNAMENT_VALIDATION] Ordinary NEW_BATTLE dispatched after "
                 f"durable ownership claim {request_id}",
                 "DEBUG",
             )
             return True
-        workflow = self._supervisor.battle_workflow
+        if launch_outcome.uncertain:
+            reason = (
+                "the owned validation Battle input may have reached the device, "
+                "but its dispatch result was uncertain"
+            )
+            if isinstance(workflow, Mapping):
+                self._terminalize_uncertain_battle_workflow(
+                    workflow,
+                    self._current_control_workflow_evidence() or {},
+                    reason=reason,
+                )
+            else:
+                self._runtime_uncertain_mutation_result(reason)
+            self._finish_exclusive_validation_without_cleanup(
+                claimed,
+                reason + "; no Surrender or replay was attempted",
+            )
+            return True
         if (
             isinstance(workflow, Mapping)
             and workflow.get("intent") == "start_battle"
@@ -10047,13 +11237,8 @@ class App:
                 is_paused = self._supervisor.is_paused
                 if is_paused and stop_blind_gem_tapper():
                     self._blind_tapper_suspended = True
-                pre_capture_workflow_hold = (
-                    self._operator_workflow_authority_hold()
-                )
                 self._update_action_authority(
-                    holds=(pre_capture_workflow_hold,)
-                    if pre_capture_workflow_hold
-                    else (),
+                    holds=self._pre_capture_authority_holds(),
                 )
                 self._publish_action_authority()
 
@@ -10070,9 +11255,25 @@ class App:
                     )
                 self._annotate_home_battle_control(img, detection)
                 self._record_control_observation(detection)
+                self._observe_blocking_primary_boundary(detection)
                 self._yield_on_unexpected_manual_activity()
                 self._setup_capture_source_refreshed = False
+                if str(detection.get("state") or "").upper() == "FREE_TICKET":
+                    terminal_interrupted = (
+                        self._reconcile_terminal_home_continuation(detection)
+                    )
+                    self._reconcile_dispatched_workflow_behind_blocker(
+                        detection
+                    )
+                    self._observe_action_circuits(detection)
+                    if terminal_interrupted:
+                        continue
+                    if self._advance_blocking_primary_recovery(img, detection):
+                        continue
                 self._sync_operator_control_workflows(detection, frame=img)
+                if self._reconcile_terminal_home_continuation(detection):
+                    continue
+                self._observe_action_circuits(detection)
                 if self._setup_capture_source_refreshed:
                     # The frame predates the Android-Home serialization route.
                     # Re-enter capture/detection before any ordinary handler.
@@ -10080,12 +11281,13 @@ class App:
                 operator_workflow_hold = (
                     self._operator_workflow_authority_hold()
                 )
-                if operator_workflow_hold is not None:
-                    self._update_action_authority(
-                        detection=detection,
-                        holds=(operator_workflow_hold,),
-                    )
-                    self._publish_action_authority()
+                self._update_action_authority(
+                    detection=detection,
+                    holds=(operator_workflow_hold,)
+                    if operator_workflow_hold is not None
+                    else (),
+                )
+                self._publish_action_authority()
                 if self._advance_pending_home_setup_recovery(img):
                     # Recovery may have navigated from a setup sub-screen. A
                     # fresh frame must establish verified Home before setup or
@@ -10110,15 +11312,19 @@ class App:
                 # or blind tapper may run before this gate clears.
                 battle_started = self._mission_mgr.maybe_run_start(detection)
                 if battle_started is True:
-                    self._clear_terminal_home_continuation(
-                        "a new active battle boundary was observed"
+                    self._complete_terminal_home_continuation(
+                        battle_started,
+                        detection,
                     )
                 self._accept_pending_terminal_history_handoff()
                 self._cancel_pending_tournament_validation_after_boundary(
                     detection
                 )
                 if battle_started is True:
-                    self._complete_started_battle_workflow(battle_started)
+                    self._complete_started_battle_workflow(
+                        battle_started,
+                        detection,
+                    )
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)
                     self._reset_player_save_audit_perk_mapping_evidence()
@@ -12425,16 +13631,22 @@ class App:
                 collector=AuxiliaryCollector.HOME_AD_GEM,
             ).allowed
         ):
-            # Collect before Home handling can start or resume a battle.  The
-            # handler revalidates both the visible control and typed authority
-            # at the final dispatch boundary, so this overlay is scheduling
-            # evidence rather than tap authority.
-            handle_home_ad_gem(
-                action_guard_fn=self._auxiliary_action_guard(
-                    AuxiliaryCollector.HOME_AD_GEM
+            scheduled_epoch = self._home_ad_gem_circuit_epoch()
+            if self._home_ad_gem_circuit_allows(epoch=scheduled_epoch):
+                # Collect before Home handling can start or resume a battle. The
+                # handler revalidates both the visible control and typed
+                # authority at the final dispatch boundary, so this overlay is
+                # scheduling evidence rather than tap authority.
+                outcome = handle_home_ad_gem(
+                    action_guard_fn=self._auxiliary_action_guard(
+                        AuxiliaryCollector.HOME_AD_GEM
+                    )
                 )
-            )
-            return
+                self._record_home_ad_gem_outcome(
+                    outcome,
+                    epoch=scheduled_epoch,
+                )
+                return
 
         if (
             new_state == "TOURNAMENT_RESULTS"
@@ -14036,6 +15248,14 @@ class App:
                     or terminal_continuation_authorized
                     or legacy_home_launch_authorized
                 )
+                preserve_dispatched_carry = bool(
+                    carry is not None
+                    and carry.state is CarriedEvidenceState.LAUNCH_DISPATCHED
+                    and self._same_owner_free_ticket_retry_ready(
+                        source=home_launch_source,
+                        request_id=home_launch_request_id,
+                    )
+                )
                 if (
                     carry is not None
                     and carry.state
@@ -14043,6 +15263,7 @@ class App:
                         CarriedEvidenceState.LAUNCH_DISPATCHED,
                         CarriedEvidenceState.BOUND_RUNNING,
                     }
+                    and not preserve_dispatched_carry
                 ):
                     save_coordinator.discard_carry(
                         "unrelated_later_home_launch_boundary"
@@ -14111,58 +15332,167 @@ class App:
                         if isinstance(continuation, Mapping)
                         else "terminal_route"
                     )
-                    workflow_operation_id = new_operation_id()
+                    continuation_operation_id = str(
+                        continuation.get("operation_id")
+                        if isinstance(continuation, Mapping)
+                        else ""
+                    ) or new_operation_id()
+                    dispatch_number = int(
+                        continuation.get("dispatch_count", 0)
+                        if isinstance(continuation, Mapping)
+                        else 0
+                    ) + 1
+                    workflow_operation_id = (
+                        f"{continuation_operation_id}:home-dispatch-"
+                        f"{dispatch_number}"
+                    )
                     workflow_action_purpose = (
                         "Continuing after the completed battle"
                     )
                     workflow_action_reason = (
-                        "consume the exact one-shot Home continuation from "
-                        f"{continuation_source}; the future policy alone does "
-                        "not authorize this launch"
+                        "exercise the exact bounded Home continuation from "
+                        f"{continuation_source}; retain it until fresh battle "
+                        "evidence proves the launch postcondition"
                     )
+                typed_dispatch_kwargs = {
+                    "return_dispatch_outcome": True
+                }
                 if explicit_attach or manual_return_resume:
-                    launched = handle_home_screen(
+                    launch_result = handle_home_screen(
                         restart_enabled=restart_enabled,
                         require_resume_battle=True,
                         operation_id=workflow_operation_id,
                         action_purpose=workflow_action_purpose,
                         action_reason=workflow_action_reason,
                         action_guard_fn=launch_action_guard,
+                        **typed_dispatch_kwargs,
                     )
                 elif explicit_start or terminal_continuation_authorized:
-                    launched = handle_home_screen(
+                    launch_result = handle_home_screen(
                         restart_enabled=restart_enabled,
                         require_new_battle=True,
                         operation_id=workflow_operation_id,
                         action_purpose=workflow_action_purpose,
                         action_reason=workflow_action_reason,
                         action_guard_fn=launch_action_guard,
+                        **typed_dispatch_kwargs,
                     )
                 elif carry_pending:
-                    launched = handle_home_screen(
+                    launch_result = handle_home_screen(
                         restart_enabled=restart_enabled,
                         require_new_battle=True,
                         action_guard_fn=launch_action_guard,
+                        **typed_dispatch_kwargs,
+                    )
+                elif legacy_home_launch_authorized:
+                    launch_result = handle_home_screen(
+                        restart_enabled=restart_enabled,
+                        action_guard_fn=launch_action_guard,
+                        **typed_dispatch_kwargs,
                     )
                 else:
                     if launch_action_guard is None:
-                        launched = handle_home_screen(
+                        launch_result = handle_home_screen(
                             restart_enabled=restart_enabled
                         )
                     else:
-                        launched = handle_home_screen(
+                        launch_result = handle_home_screen(
                             restart_enabled=restart_enabled,
                             action_guard_fn=launch_action_guard,
                         )
-                launch_authorized = bool(launch_guard_state["allowed"])
-                if explicit_start or explicit_attach:
-                    self._mark_operator_battle_action_dispatched(
-                        bool(launched)
+                launch_outcome = (
+                    launch_result
+                    if isinstance(launch_result, TapDispatchOutcome)
+                    else TapDispatchOutcome(
+                        TapDispatchStatus.DISPATCHED
+                        if launch_result
+                        else TapDispatchStatus.NOT_DISPATCHED
                     )
+                )
+                launched = launch_outcome.dispatched
+                launch_authorized = bool(launch_guard_state["allowed"])
+                if launch_outcome.uncertain:
+                    reason = (
+                        "the verified Home battle-control input may have reached "
+                        "the device, but its dispatch result was uncertain"
+                    )
+                    if explicit_start or explicit_attach:
+                        workflow = self._supervisor.battle_workflow
+                        current = self._current_control_workflow_evidence() or {}
+                        if isinstance(workflow, Mapping):
+                            self._terminalize_uncertain_battle_workflow(
+                                workflow,
+                                current,
+                                reason=reason,
+                            )
+                    elif terminal_continuation_authorized:
+                        self._terminalize_uncertain_terminal_home_action(reason)
+                    else:
+                        if legacy_home_launch_authorized:
+                            epochs = getattr(
+                                self,
+                                "_uncertain_legacy_home_launch_epochs",
+                                None,
+                            )
+                            if epochs is None:
+                                epochs = set()
+                                self._uncertain_legacy_home_launch_epochs = epochs
+                            epochs.add(
+                                self._legacy_home_launch_epoch(home_control)
+                            )
+                        if home_launch_request_id:
+                            uncertain = getattr(
+                                self,
+                                "_uncertain_lifecycle_actions",
+                                None,
+                            )
+                            if uncertain is None:
+                                uncertain = set()
+                                self._uncertain_lifecycle_actions = uncertain
+                            uncertain.add(home_launch_request_id)
+                        self._runtime_uncertain_mutation_result(
+                            reason + "; no replay is safe"
+                        )
+                if explicit_start or explicit_attach:
+                    marked = (
+                        self._mark_operator_battle_action_dispatched(True)
+                        if launched
+                        else False
+                    )
+                    if launched and not marked:
+                        workflow = self._supervisor.battle_workflow
+                        current = self._current_control_workflow_evidence() or {}
+                        if isinstance(workflow, Mapping):
+                            self._terminalize_uncertain_battle_workflow(
+                                workflow,
+                                current,
+                                reason=(
+                                    "a verified explicit Home launch was accepted, "
+                                    "but its durable action_dispatched receipt could "
+                                    "not be retained"
+                                ),
+                            )
+                        else:
+                            self._runtime_uncertain_mutation_result(
+                                "a verified explicit Home launch was accepted, but "
+                                "its durable owner disappeared; no replay is safe"
+                            )
+                    elif launch_outcome.uncertain:
+                        marked = False
                 if terminal_continuation_authorized and launched:
-                    self._consume_terminal_home_continuation()
+                    marked = self._mark_terminal_home_continuation_dispatched()
+                    if not marked:
+                        self._terminalize_uncertain_terminal_home_action(
+                            "a verified terminal-bound Home launch was accepted, "
+                            "but its process-local postcondition receipt could not "
+                            "be retained"
+                        )
                 if carry_pending:
-                    if restart_enabled:
+                    if launch_outcome.uncertain:
+                        save_coordinator.suspend_carry(
+                            "input_result_uncertain"
+                        )
+                    elif restart_enabled:
                         save_coordinator.mark_runtime_launch(
                             control=home_control,
                             action_authorized=launch_authorized,

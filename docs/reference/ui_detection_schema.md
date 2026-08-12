@@ -54,13 +54,16 @@ also declares one supported `type`:
 | Type | Result behavior |
 | --- | --- |
 | `terminal_primary` | Authoritative terminal modal; at most one may match. |
-| `primary` | Ordinary exclusive screen; multiple matches are an error when no terminal primary is present. |
+| `blocking_primary` | Known nonterminal modal that blocks controls on an otherwise recognizable screen; at most one may match when no terminal primary is present. |
+| `primary` | Ordinary exclusive screen; multiple matches are an error when no terminal or blocking primary is present. |
 | `fallback_primary` | Modal fallback used only when neither terminal nor ordinary primary matched; YAML order breaks ties with a warning. |
 | `background_primary` | Underlying screen used only after the stronger primary classes fail; YAML order breaks ties. |
 | `secondary` | Non-primary state appended to `secondary_states`. |
 | `menu` | Mutually exclusive menu result; the first matching YAML entry wins. |
 
-Primary selection priority is terminal, ordinary, fallback, then background.
+Primary selection priority is terminal, blocking, ordinary, fallback, then
+background. A blocking primary is action-suppression evidence, not generic tap
+authority; only its owning typed workflow may dismiss it from fresh evidence.
 Overlays are evaluated separately after state classification and any number may
 coexist. Detection returns `state`, `secondary_states`, `overlays`, and `menu`;
 it returns `UNKNOWN` for an incomplete frame without matching.

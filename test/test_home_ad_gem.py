@@ -1,5 +1,6 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -14,6 +15,7 @@ from core.action_authority import (
 )
 from core.app import App
 from core.label_tapper import get_label_match
+from core.input import TapDispatchOutcome, TapDispatchStatus
 from core.matcher import get_match
 from core.state_detector import detect_state_and_overlays
 import handlers.ad_gem_handler as ad_gems
@@ -68,8 +70,17 @@ def test_home_ad_gem_template_and_overlay_have_positive_and_negative_evidence():
 
 def test_home_ad_gem_claim_revalidates_and_never_starts_blind_tapper():
     guard = Mock(return_value=True)
+    frame = object()
     with (
-        patch.object(ad_gems, "is_visible", side_effect=[True, False]),
+        patch.object(
+            ad_gems,
+            "_fresh_target_observation",
+            side_effect=[
+                (frame, True, ("HOME_SCREEN", "NEW_BATTLE")),
+                (frame, False, ("HOME_SCREEN", "NEW_BATTLE")),
+                (frame, False, ("HOME_SCREEN", "NEW_BATTLE")),
+            ],
+        ),
         patch.object(ad_gems, "safe_tap", return_value=True) as tap,
         patch.object(ad_gems, "start_blind_gem_tapper") as start,
         patch.object(ad_gems, "stop_blind_gem_tapper") as stop,
@@ -83,10 +94,12 @@ def test_home_ad_gem_claim_revalidates_and_never_starts_blind_tapper():
     start.assert_not_called()
     tap.assert_called_once_with(
         "buttons.claim_ad_gem:home",
-        retries=1,
+        retries=0,
         retry_delay=0.4,
         dispatch="now",
+        screenshot=frame,
         action_guard_fn=guard,
+        return_dispatch_outcome=True,
     )
     guard.assert_called_once_with()
     action_log.assert_called_once_with(
@@ -173,7 +186,15 @@ def test_initial_battle_intent_hold_dispatches_only_guarded_home_ad_gem():
 def test_home_ad_gem_final_guard_blocks_input_after_authority_loss():
     guard = Mock(return_value=False)
     with (
-        patch.object(ad_gems, "is_visible", return_value=True),
+        patch.object(
+            ad_gems,
+            "_fresh_target_observation",
+            return_value=(
+                object(),
+                True,
+                ("HOME_SCREEN", "NEW_BATTLE"),
+            ),
+        ),
         patch.object(ad_gems, "safe_tap") as tap,
         patch.object(ad_gems, "start_blind_gem_tapper") as start,
         patch.object(ad_gems, "stop_blind_gem_tapper"),
@@ -184,7 +205,7 @@ def test_home_ad_gem_final_guard_blocks_input_after_authority_loss():
     guard.assert_called_once_with()
     tap.assert_not_called()
     start.assert_not_called()
-    assert "result=no_op" in result_log.call_args.kwargs["detail"]
+    assert "result=interrupted" in result_log.call_args.kwargs["detail"]
 
 
 def test_home_ad_gem_guard_rejects_new_battle_workflow_before_input():
@@ -241,7 +262,15 @@ def test_home_ad_gem_guard_rejects_new_battle_workflow_before_input():
 
 def test_home_ad_gem_disappearance_before_action_fails_closed():
     with (
-        patch.object(ad_gems, "is_visible", return_value=False),
+        patch.object(
+            ad_gems,
+            "_fresh_target_observation",
+            return_value=(
+                object(),
+                False,
+                ("HOME_SCREEN", "NEW_BATTLE"),
+            ),
+        ),
         patch.object(ad_gems, "safe_tap") as tap,
         patch.object(ad_gems, "start_blind_gem_tapper") as start,
         patch.object(ad_gems, "stop_blind_gem_tapper"),
@@ -254,10 +283,293 @@ def test_home_ad_gem_disappearance_before_action_fails_closed():
     result_log.assert_called_once_with(
         "Home ad-gem collection complete — no reward was collected",
         detail=(
-            "[AD_GEM] result=no_op source=home "
+            "[AD_GEM] result=no_target source=home "
             "label=buttons.claim_ad_gem:home"
         ),
     )
+
+
+def test_home_ad_gem_failure_trips_across_heartbeats_until_owner_epoch_changes():
+    app = App.__new__(App)
+    app._control_observation = {
+        "runtime_id": "runtime-1",
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "home_battle_control": "NEW_BATTLE",
+    }
+    app._supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        }
+    )
+
+    with patch("core.app.log") as emit:
+        assert app._home_ad_gem_circuit_allows() is True
+        app._record_home_ad_gem_outcome(False)
+        assert app._home_ad_gem_circuit_allows() is False
+        for _ in range(100):
+            assert app._home_ad_gem_circuit_allows() is False
+        assert sum(
+            "Home ad-gem retries are disabled" in call.args[0]
+            for call in emit.call_args_list
+        ) == 1
+
+    app._control_observation["target_generation"] = 8
+    assert app._home_ad_gem_circuit_allows() is True
+
+
+@pytest.mark.parametrize("state", ["UNKNOWN", "FREE_TICKET"])
+def test_hidden_or_unknown_observation_does_not_rearm_home_ad_gem_circuit(
+    state,
+):
+    app = App.__new__(App)
+    app._control_observation = {
+        "runtime_id": "runtime-1",
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "home_battle_control": "NEW_BATTLE",
+    }
+    app._supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        }
+    )
+    app._record_home_ad_gem_outcome(False)
+
+    app._observe_action_circuits({"state": state, "overlays": []})
+
+    assert app._home_ad_gem_circuit_allows() is False
+
+
+def test_one_known_detector_miss_does_not_rearm_tripped_home_gem():
+    app = App.__new__(App)
+    app._control_observation_sequence = 1
+    app._control_observation = {
+        "observation_id": "runtime-1:1",
+        "runtime_id": "runtime-1",
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "home_battle_control": "NEW_BATTLE",
+    }
+    app._supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        }
+    )
+    app._record_home_ad_gem_outcome(ad_gems.AdGemCollectionStatus.EXHAUSTED)
+
+    app._observe_action_circuits({"state": "HOME_SCREEN", "overlays": []})
+    assert app._home_ad_gem_circuit_allows() is False
+
+    app._control_observation_sequence = 2
+    app._control_observation["observation_id"] = "runtime-1:2"
+    app._observe_action_circuits({"state": "HOME_SCREEN", "overlays": []})
+    assert app._home_ad_gem_circuit_allows() is True
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        ad_gems.AdGemCollectionStatus.NO_TARGET,
+        ad_gems.AdGemCollectionStatus.INTERRUPTED,
+    ],
+)
+def test_home_gem_noop_or_interruption_does_not_trip_circuit(outcome):
+    app = App.__new__(App)
+    app._control_observation = {
+        "runtime_id": "runtime-1",
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "home_battle_control": "NEW_BATTLE",
+    }
+    app._supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        }
+    )
+    epoch = app._home_ad_gem_circuit_epoch()
+
+    app._record_home_ad_gem_outcome(outcome, epoch=epoch)
+
+    assert app._home_ad_gem_circuit_allows(epoch=epoch) is True
+
+
+def test_home_gem_result_cannot_poison_a_new_guard_epoch():
+    app = App.__new__(App)
+    app._control_observation = {
+        "runtime_id": "runtime-1",
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "home_battle_control": "NEW_BATTLE",
+    }
+    app._supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        }
+    )
+    scheduled_epoch = app._home_ad_gem_circuit_epoch()
+    app._control_observation["target_generation"] = 8
+
+    app._record_home_ad_gem_outcome(
+        ad_gems.AdGemCollectionStatus.EXHAUSTED,
+        epoch=scheduled_epoch,
+    )
+
+    assert app._home_ad_gem_circuit_allows() is True
+
+
+def test_uncertain_home_gem_dispatch_trips_nonreplayable_epoch():
+    guard = Mock(return_value=True)
+    with (
+        patch.object(
+            ad_gems,
+            "_fresh_target_observation",
+            return_value=(
+                object(),
+                True,
+                ("HOME_SCREEN", "NEW_BATTLE"),
+            ),
+        ),
+        patch.object(
+            ad_gems,
+            "safe_tap",
+            return_value=TapDispatchOutcome(TapDispatchStatus.UNCERTAIN),
+        ),
+    ):
+        outcome = ad_gems._collect_visible_ad_gem(
+            "buttons.claim_ad_gem:home",
+            action_guard_fn=guard,
+        )
+
+    assert outcome is ad_gems.AdGemCollectionStatus.UNCERTAIN
+
+    app = App.__new__(App)
+    app._control_observation = {
+        "runtime_id": "runtime-1",
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "home_battle_control": "NEW_BATTLE",
+    }
+    app._supervisor = SimpleNamespace(control_request_identity={})
+    epoch = app._home_ad_gem_circuit_epoch()
+    app._record_home_ad_gem_outcome(outcome, epoch=epoch)
+
+    assert app._home_ad_gem_circuit_allows(epoch=epoch) is False
+
+
+def test_home_gem_one_post_input_miss_without_confirmation_is_uncertain():
+    frame = object()
+    with (
+        patch.object(
+            ad_gems,
+            "_fresh_target_observation",
+            side_effect=[
+                (frame, True, ("HOME_SCREEN", "NEW_BATTLE")),
+                (frame, False, ("HOME_SCREEN", "NEW_BATTLE")),
+                (None, None, None),
+                (None, None, None),
+            ],
+        ),
+        patch.object(ad_gems, "safe_tap", return_value=True) as tap,
+        patch.object(ad_gems.time, "sleep"),
+    ):
+        outcome = ad_gems._collect_visible_ad_gem(
+            "buttons.claim_ad_gem:home",
+            action_guard_fn=Mock(return_value=True),
+        )
+
+    assert outcome is ad_gems.AdGemCollectionStatus.UNCERTAIN
+    tap.assert_called_once()
+
+
+def test_home_gem_navigation_cannot_prove_post_input_collection():
+    frame = object()
+    with (
+        patch.object(
+            ad_gems,
+            "_fresh_target_observation",
+            side_effect=[
+                (frame, True, ("HOME_SCREEN", "NEW_BATTLE")),
+                (frame, False, ("FREE_TICKET", None)),
+            ],
+        ),
+        patch.object(ad_gems, "safe_tap", return_value=True),
+        patch.object(ad_gems.time, "sleep"),
+    ):
+        outcome = ad_gems._collect_visible_ad_gem(
+            "buttons.claim_ad_gem:home",
+            action_guard_fn=Mock(return_value=True),
+            required_state="HOME_SCREEN",
+        )
+
+    assert outcome is ad_gems.AdGemCollectionStatus.UNCERTAIN
+
+
+def test_uncertain_home_gem_cannot_rearm_from_source_absence():
+    app = App.__new__(App)
+    app._control_observation_sequence = 1
+    app._control_observation = {
+        "observation_id": "runtime-1:1",
+        "runtime_id": "runtime-1",
+        "pid": 100,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "home_battle_control": "NEW_BATTLE",
+    }
+    epoch = app._home_ad_gem_circuit_epoch()
+    app._record_home_ad_gem_outcome(
+        ad_gems.AdGemCollectionStatus.UNCERTAIN,
+        epoch=epoch,
+    )
+
+    for observation_id in ("runtime-1:2", "runtime-1:3"):
+        app._control_observation["observation_id"] = observation_id
+        app._observe_action_circuits({"state": "RUNNING", "overlays": []})
+
+    assert app._home_ad_gem_circuit_allows(epoch=epoch) is False
+    snapshot = app._get_action_circuit_breaker().snapshot("home_ad_gem")
+    assert snapshot is not None and snapshot.tripped is True
+
+
+def test_unknown_to_known_home_control_does_not_rearm_tripped_gem_epoch():
+    app = App.__new__(App)
+    app._control_observation = {
+        "runtime_id": "runtime-1",
+        "pid": 100,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-1",
+        "home_battle_control": "UNKNOWN",
+    }
+    app._record_home_ad_gem_outcome(ad_gems.AdGemCollectionStatus.EXHAUSTED)
+    tripped_epoch = app._get_action_circuit_breaker().snapshot(
+        "home_ad_gem"
+    ).epoch
+
+    app._control_observation["home_battle_control"] = "NEW_BATTLE"
+    app._observe_action_circuits(
+        {
+            "state": "HOME_SCREEN",
+            "overlays": ["HOME_AD_GEMS_AVAILABLE"],
+        }
+    )
+
+    snapshot = app._get_action_circuit_breaker().snapshot("home_ad_gem")
+    assert snapshot.epoch == tripped_epoch
+    assert snapshot.tripped is True
+    assert app._home_ad_gem_circuit_allows() is False
 
 
 def test_blind_floating_gem_taps_retain_input_logging():
@@ -451,8 +763,17 @@ def test_floating_gem_guard_latency_does_not_accumulate_in_tap_cadence():
 
 def test_visible_ad_gem_rechecks_authority_before_each_retry_input():
     guard = Mock(side_effect=[True, False])
+    frame = object()
     with (
-        patch.object(ad_gems, "is_visible", side_effect=[True, True, True]),
+        patch.object(
+            ad_gems,
+            "_fresh_target_observation",
+            side_effect=[
+                (frame, True, ("RUNNING", None)),
+                (frame, True, ("RUNNING", None)),
+                (frame, True, ("RUNNING", None)),
+            ],
+        ),
         patch.object(ad_gems, "safe_tap", return_value=True) as tap,
         patch.object(ad_gems.time, "sleep"),
     ):

@@ -8,6 +8,7 @@ import pytest
 from automation.missions.base import MissionContext
 from core.app import App
 from core.battle_lifecycle import HomeBattleControl
+from core.input import TapDispatchOutcome, TapDispatchStatus
 from core.no_strategy_inventory import (
     NoStrategyInventoryResult,
     NoStrategyInventoryStatus,
@@ -635,7 +636,58 @@ def test_next_battle_mode_auto_starts_from_home():
     home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
+
+
+def test_legacy_home_launch_uncertainty_is_tombstoned_across_enable():
+    app = _app_without_strategy()
+    app._auto_start_enabled = True
+    app._handler_enabled = MagicMock(side_effect=lambda name: name == "home")
+    app._runtime_policy = MagicMock(return_value={})
+    app._mission_mgr.no_battle_setup_requirements.return_value = {}
+    app._current_control_workflow_evidence = MagicMock(
+        return_value={
+            "runtime_id": "runtime-1",
+            "pid": 100,
+            "adb_target": "localhost:5555",
+            "target_generation": 7,
+            "activity_scope_run_id": "scope-1",
+        }
+    )
+    app._runtime_uncertain_mutation_result = MagicMock()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    uncertain = TapDispatchOutcome(TapDispatchStatus.UNCERTAIN)
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    try:
+        with (
+            patch(
+                "core.app.detect_home_battle_control",
+                side_effect=[
+                    SimpleNamespace(control=HomeBattleControl.UNKNOWN),
+                    SimpleNamespace(control=HomeBattleControl.NEW_BATTLE),
+                ],
+            ),
+            patch(
+                "core.app.handle_home_screen",
+                side_effect=[uncertain, False],
+            ) as home,
+        ):
+            app._handle_primary_states("HOME_SCREEN", set(), frame)
+            app._handle_primary_states("HOME_SCREEN", set(), frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert home.call_args_list[0].kwargs["return_dispatch_outcome"] is True
+    assert home.call_args_list[1] == call(restart_enabled=False)
+    epoch = app._legacy_home_launch_epoch(HomeBattleControl.UNKNOWN)
+    assert epoch in app._uncertain_legacy_home_launch_epochs
+    assert (
+        app._legacy_home_launch_epoch(HomeBattleControl.NEW_BATTLE) == epoch
+    )
+    app._runtime_uncertain_mutation_result.assert_called_once()
 
 
 def test_managed_terminal_policy_does_not_start_from_idle_home():
@@ -684,7 +736,9 @@ def test_terminal_bound_continuation_dispatches_exact_new_battle_once():
     }
     app._terminal_home_continuation_ready = MagicMock(return_value=True)
     app._runtime_action_guard = MagicMock(return_value=True)
-    app._consume_terminal_home_continuation = MagicMock(return_value=True)
+    app._mark_terminal_home_continuation_dispatched = MagicMock(
+        return_value=True
+    )
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     original_mode = AUTOMATION.mode
     AUTOMATION.mode = ExecMode.NEXT_BATTLE
@@ -711,8 +765,8 @@ def test_terminal_bound_continuation_dispatches_exact_new_battle_once():
     assert home_call.kwargs["action_purpose"] == (
         "Continuing after the completed battle"
     )
-    assert "one-shot Home continuation" in home_call.kwargs["action_reason"]
-    app._consume_terminal_home_continuation.assert_called_once_with()
+    assert "bounded Home continuation" in home_call.kwargs["action_reason"]
+    app._mark_terminal_home_continuation_dispatched.assert_called_once_with()
 
 
 def test_automatic_in_battle_inventory_is_exclusive_and_runs_once():

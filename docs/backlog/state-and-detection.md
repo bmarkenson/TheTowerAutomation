@@ -28,6 +28,13 @@ Completed and superseded detail remains in the
   - Allow pause, cancellation, and extension through CLI/GUI controls.
   - Do not interrupt an automation action making expected progress.
   - Attempt the least destructive route back to the game first.
+  - Confirm the `ISSUE-2026-041` blocking-primary repair at one natural
+    completed-battle Home launch after explicit operator release: Free Ticket
+    may be claimed only by the exact retained launch, at most one verified
+    Battle retry may follow two stable fresh Home `NEW_BATTLE` observations,
+    and an
+    exhausted Home ad-gem transaction must remain circuit-broken across
+    equivalent heartbeats without blocking lifecycle progress.
 
 ## Detection architecture
 

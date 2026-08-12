@@ -1950,6 +1950,7 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
             "new-run gates"
         ),
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
     manager.on_home.assert_called_once_with()
 
@@ -1971,7 +1972,7 @@ def test_degraded_terminal_continuation_repairs_before_next_battle_launch():
         "source": "degraded_battle_repair"
     }
     app._terminal_home_continuation_ready = Mock(return_value=True)
-    app._consume_terminal_home_continuation = Mock(return_value=True)
+    app._mark_terminal_home_continuation_dispatched = Mock(return_value=True)
     app._runtime_action_guard = Mock(return_value=True)
     app._report_home_policy = Mock()
     app._handle_daily_gem_if_due = Mock(return_value=False)
@@ -2009,7 +2010,7 @@ def test_degraded_terminal_continuation_repairs_before_next_battle_launch():
     manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
     assert handle_home.call_args.kwargs["restart_enabled"] is True
     assert handle_home.call_args.kwargs["require_new_battle"] is True
-    app._consume_terminal_home_continuation.assert_called_once_with()
+    app._mark_terminal_home_continuation_dispatched.assert_called_once_with()
 
 
 def test_home_setup_does_not_transfer_launch_to_a_replacement_start_request():
@@ -2471,6 +2472,7 @@ def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
         restart_enabled=True,
         require_new_battle=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
     coordinator.mark_runtime_launch.assert_called_once_with(
         control=HomeBattleControl.NEW_BATTLE,
@@ -2604,6 +2606,7 @@ def test_app_skips_repeated_save_and_continues_when_history_scope_is_blocked():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
     manager.on_home.assert_called_once_with()
 
@@ -2870,6 +2873,7 @@ def test_app_flags_failed_no_battle_setup_and_continues():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
     manager.on_home.assert_called_once_with()
 
@@ -2972,6 +2976,7 @@ def test_app_retries_transient_home_setup_failure_before_starting_battle():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
 
 
@@ -3308,6 +3313,7 @@ def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
     manager.on_home.assert_called_once_with()
 
@@ -3384,6 +3390,7 @@ def test_app_claims_optional_configured_skip_before_home_setup():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
 
 

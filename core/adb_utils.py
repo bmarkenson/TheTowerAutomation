@@ -436,8 +436,9 @@ def input_tap(
     check: bool = True,
     device_id: Optional[str] = None,
     action_guard_fn: Optional[Callable[[], bool]] = None,
+    return_dispatch_outcome: bool = False,
 ):
-    """Tap a canonical UI point after mapping it to device framebuffer pixels."""
+    """Tap a canonical point, optionally preserving dispatch uncertainty."""
 
     target = resolve_adb_device(device_id)
     device_x, device_y = canonical_to_device_point(x, y, device_id=target)
@@ -446,11 +447,17 @@ def input_tap(
         if action_guard_fn is not None
         else {}
     )
+    outcome_kwargs = (
+        {"return_dispatch_outcome": True}
+        if return_dispatch_outcome
+        else {}
+    )
     return adb_shell(
         ["input", "tap", str(device_x), str(device_y)],
         check=check,
         device_id=target,
         **guard_kwargs,
+        **outcome_kwargs,
     )
 
 

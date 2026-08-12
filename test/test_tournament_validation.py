@@ -14,6 +14,7 @@ from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
 from core.app import App
+from core.input import TapDispatchOutcome, TapDispatchStatus
 from core.run_state import AUTOMATION
 from core.runtime_failure_policy import RuntimeFailureKind
 from handlers.tournament_launch_handler import TournamentLaunchDispatch
@@ -612,8 +613,12 @@ def test_explicit_start_owns_tournament_validation_launch_through_adoption(
         ) is True
 
     assert supervisor.battle_workflow["status"] == "action_dispatched"
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
     app._control_observation = {
         **app._control_observation,
+        "activity_scope_run_id": launch_scope,
         "observation_id": "tournament-workflow:running",
         "primary_state": "RUNNING",
         "home_battle_control": "UNKNOWN",
@@ -646,7 +651,7 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
         assert not app._maybe_start_exclusive_validation(
             home_control=HomeBattleControl.NEW_BATTLE
         )
-    start.assert_called_once_with()
+    start.assert_called_once_with(return_dispatch_outcome=True)
     claimed = _current_receipt(store)
     assert claimed["status"] == "claimed"
 
@@ -699,6 +704,34 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
     assert result_log.call_args.args[0].startswith(
         "Tournament validation complete — "
     )
+
+
+def test_uncertain_validation_battle_dispatch_pauses_and_never_replays(
+    tmp_path,
+):
+    app, store, _manager = _app_for_pending_validation(tmp_path)
+    uncertain = TapDispatchOutcome(TapDispatchStatus.UNCERTAIN)
+
+    with (
+        patch(
+            "core.app.tap_verified_new_battle",
+            return_value=uncertain,
+        ) as start,
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+        assert not app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+
+    start.assert_called_once_with(return_dispatch_outcome=True)
+    result = _current_receipt(store)
+    assert result["status"] == "result"
+    assert result["outcome"] == "failed"
+    assert app._supervisor.control_state == "PAUSED"
 
 
 def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
