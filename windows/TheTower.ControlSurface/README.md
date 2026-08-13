@@ -974,6 +974,13 @@ End run/New Battle fallback. The thresholds, cooldown,
 and exact authority handshake are specified in the
 [control-surface architecture](../../docs/architecture/control_surface.md#automatic-bluestacks-degradation-recovery).
 
+BlueStacks Home can report the screen as landscape before The Tower launches.
+Linux accepts only the exact transpose of a supported portrait resolution, on
+the durable request's ADB target and only during `host_restarted`, as permission
+for the package launch. It never maps coordinates or classifies game controls
+from that landscape frame; all popup and battle input still waits for fresh
+portrait evidence.
+
 **System > Services** shows the managed localhost ADB target as four distinct
 values: configured next start, requested/acknowledged directive, active
 runtime, and local draft. While automation is stopped, **Save for next start**

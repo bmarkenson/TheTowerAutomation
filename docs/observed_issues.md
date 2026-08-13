@@ -80,9 +80,12 @@ current runtime state.
   for a throughput recurrence, T19 causal analysis, or host-correlation work.
   Revision 41 adds a confirmed operator path, visible handle evidence, and a
   conservative default-off exact-instance mitigation with exact-listener
-  aging continuity across GUI sessions. Next: verify its configured Windows
-  identity/mapping and one authorized end-to-end recovery, while pairing any
-  recurrence with exact loadout/locks and host counters; see the
+  aging continuity across GUI sessions. The first operator transaction proved
+  exact `Pie64` replacement and downstream Welcome Back/catch-up; its landscape
+  launcher gap is repaired in `7ce123c` and awaits one hands-free repeat. Next:
+  verify that launch plus sampler/client reconciliation and one detector
+  decision, while pairing any recurrence with exact loadout/locks and host
+  counters; see the
   [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Windows performance telemetry exceeded its client CPU budget

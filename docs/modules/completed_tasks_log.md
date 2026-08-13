@@ -39,6 +39,35 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 first coordinated BlueStacks restart and launcher repair
+
+- The revision-41 Windows client completed the exact host mutation for operator
+  request `7a2beace3b944e8782ff4080a0b361ba`: installed instance `Pie64` moved from
+  listener PID 17712 to PID 137952 and ADB returned on `localhost:5555`.
+  BlueStacks Home then presented `1920x1080`, which the canonical portrait
+  capture boundary correctly refused to treat as mapped UI but, unintentionally,
+  also prevented the existing package launcher from running.
+- The operator opened only The Tower. The still-owned Linux transaction then
+  launched/foregrounded the package, tapped the distinct Welcome Back Resume
+  once, observed a lowest rollback wave of 3759, caught up to high-water 3765,
+  and persisted terminal disposition `resumed` at 01:51:19 PDT. No fallback,
+  Surrender, or replacement battle was used, and the completed recovery is
+  excluded from degradation calibration.
+- Commit `7ce123c` makes unsupported native geometry a typed capture result and
+  allows only a fresh exact-target `1920x1080`/`1280x720` transpose, under the
+  durable `host_restarted` maintenance hold, to reach the existing bounded
+  package launcher. The frame is never normalized, published as canonical UI,
+  or used for coordinates. Missing hold, request phase, target identity, or
+  transpose shape still fails closed.
+- Compilation, state-definition validation, clickmap integrity with zero
+  errors, and all 2,517 tests passed in 395.93 seconds. Runtime code reached
+  production behind rollback tag
+  `production-before-20260813T090251Z-b087989`. Replacement PID 2973042
+  freshly observed the active Tier-19 battle, completed explicit Attach request
+  `07d3da5c0f48463980e966e4ce5a6a5c`, adopted `farm_t19_ad_assist`, and returned
+  to acknowledged `RUNNING`. No native Windows package input changed, so the
+  published WPF/Tunnel Host package remains the `b087989` build.
+
 ### 2026-08-12 coordinated BlueStacks restart controls
 
 - Commit `40f414e` adds a confirmed **System > Diagnostics > Restart

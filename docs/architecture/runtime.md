@@ -1470,6 +1470,16 @@ through natural Game Over/Home handling; it does not stop at a notification
 while leaving a known non-resumable run in place. Missing post-input evidence
 is an uncertain result that Pauses without replaying the input.
 
+BlueStacks Home may expose the configured framebuffer as the exact landscape
+transpose of a supported game resolution (`1920x1080` or `1280x720`). That
+frame is retained as typed native-geometry evidence but is never normalized,
+published as a canonical screenshot, classified as game UI, or used for mapped
+coordinates. Only while an exact-target maintenance hold is active in durable
+`host_restarted` may a fresh transpose from that request's ADB target enter the
+existing bounded package-launch transaction. It authorizes no tap or Home
+control; every later Welcome Back, Resume, fallback, and completion decision
+still requires fresh supported portrait UI evidence.
+
 The official [v28.0.6 patch note](https://www.techtreegames.com/post/v28-0-6-patch-notes)
 documents that process-restart resume returns five waves, or fifty waves while
 Intro Sprint is active. Those counts are retained as diagnostic expected

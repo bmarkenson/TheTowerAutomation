@@ -1107,10 +1107,18 @@ stages:
     [`ISSUE-2026-002`](../issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
     The first revision-41 operator attempt identified the installed `Pie64`
     mapping but could not bind its listener because module-level process
-    inspection returned Access Denied even from an elevated client. The
-    fix-forward replaces module enumeration with limited-information native
-    path/start-time reads and keeps any future preflight error visible; repeat
-    the same operator test with that package before advancing this item.
+    inspection returned Access Denied even from an elevated client. Commit
+    `b087989` replaced module enumeration with limited-information native
+    path/start-time reads. The repeated operator test then bound and replaced
+    the exact listener, reconnected ADB, handled Welcome Back/Resume, held the
+    five-wave replay through the old high-water, and released normally. It also
+    exposed one Linux gap: BlueStacks Home was `1920x1080`, so the portrait
+    capture guard prevented the package launcher until the operator opened only
+    The Tower. Commit `7ce123c` now routes that typed exact-target landscape
+    boundary solely to the bounded package launch. Repeat one operator restart
+    to confirm the now hands-free launch; GUI-close reconciliation,
+    sampler-baseline/session continuity, one detector decision, and the
+    explicitly authorized fallback branch remain outstanding.
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
     second client, as tracked in
