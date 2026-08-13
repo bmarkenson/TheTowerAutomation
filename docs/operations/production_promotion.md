@@ -64,12 +64,16 @@ suite once per feature and again merely because they were combined.
 | Interpreter, lock files, persistent-state formats, installed units, migrations, or an otherwise uncertain cross-cutting change | One complete checkpoint at frozen `D` plus the specific rebuild, migration, or recovery proof for that boundary. |
 
 If several rows apply, use their combined requirements. Record the exact `D`,
-selected gate, result, and development-environment input fingerprint. A result
-may be reused only while `D`, the relevant tracked validation inputs, and that
-environment fingerprint remain exact. Fast-forwarding `main` to the already
-validated object does not change `D` and does not trigger another checkpoint.
-If validation or review causes a new commit, validate the new object; repetition
-is justified by a changed candidate, not by promotion itself.
+selected gate, result, and any relevant development-environment input
+fingerprint. A result may be reused only while `D` and every tracked,
+environment, or external input on which that check depends remain exact.
+Fast-forwarding `main` to the already validated object changes none of those
+inputs and does not trigger another checkpoint.
+For documentation-only candidates, the unchanged exact-`D` content/link/static
+result remains the post-promotion evidence too. If validation or review causes
+a new commit, or another validation dependency changes, run the affected check
+against the new boundary; repetition is justified by a changed validation
+boundary, not by promotion itself.
 
 ## Promote one exact candidate
 
@@ -98,11 +102,14 @@ is justified by a changed candidate, not by promotion itself.
    select the boundary below, fast-forward the production checkout to exact
    object `D`, and verify `HEAD == main == D`. Abort on a non-fast-forward,
    changed ref, or newly dirty checkout.
-6. For documentation-only candidates, rerun the applicable content/link/static
-   smoke checks at promoted `D`; perform no service or runtime action. For every
-   other candidate, apply only separately reviewed non-Git changes, restart
-   affected services, and perform a bounded production smoke test. Record the
-   promoted or deployed commit and result.
+6. For documentation-only candidates, treat step 5's exact-commit and clean-
+   worktree verification plus the unchanged exact-`D` candidate gate as the
+   complete post-promotion verification. Rerun only an affected check whose
+   validation dependency changed; perform no separate content/link/static
+   smoke and no service or runtime action. For every other candidate, apply
+   only separately reviewed non-Git changes, restart affected services, and
+   perform a bounded production smoke test. Record the promoted or deployed
+   commit and result.
 7. Complete the [successful-promotion closure](#close-a-successful-promotion).
    Promotion ownership includes default publication of exact `D` to
    `origin/main`, but never publication of tags or temporary refs.
@@ -112,7 +119,7 @@ is justified by a changed candidate, not by promotion itself.
 
 | Candidate contents | Production boundary |
 | --- | --- |
-| Documentation only | Fast-forward without a rollback tag or stopping automation; rerun applicable content/link/static checks at promoted `D`, then automatically retire the exact clean integrated feature worktree/branch. |
+| Documentation only | Fast-forward without a rollback tag or stopping automation; verify exact commit and worktree cleanliness, reuse unchanged exact-`D` candidate evidence, then automatically retire the exact clean integrated feature worktree/branch. |
 | Runtime Python, YAML, templates, or runtime-read assets | Stop automation before update; restart and smoke-test afterward. |
 | Control surface or shared modules | Stop/restart the control-surface service; also stop automation when shared runtime code changes. |
 | Native Windows package input | Complete the [required Windows package publication](#required-windows-package-publication) after the production checkout reaches `D`. |
@@ -229,7 +236,7 @@ failure also stops that step; none authorizes a force-push, rewritten history,
 or a different destination. Deployment and temporary-branch retirement remain
 separate decisions except that a documentation-only coordinator owns
 retirement of its exact clean integrated pair by default. After the applicable
-smoke check succeeds:
+post-promotion verification or smoke check succeeds:
 
 1. Recheck that production `HEAD` and `main` still equal exact candidate `D`,
    that `D` remains reachable from the retained candidate branch, and that the

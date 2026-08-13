@@ -72,11 +72,12 @@ its affected validation; running a test does not change the candidate class.
 Unless the operator requests a draft, review-only result, retained branch, or
 no promotion, the documentation coordinator owns the complete closure:
 freeze the exact validated feature tip, promote it to local production `main`
-without a rollback tag or service/runtime action, verify the promoted content,
-publish that exact `main` tip to `origin/main`, and automatically retire that
-coordinator's exact clean integrated worktree and branch with non-force
-operations. An explicit no-publication instruction withholds only the remote
-step. Follow the
+without a rollback tag or service/runtime action, use the guarded fast-forward's
+exact-commit and clean-worktree verification while reusing unchanged candidate
+validation, publish that exact `main` tip to `origin/main`, and automatically
+retire that coordinator's exact clean integrated worktree and branch with non-
+force operations. Rerun only validation whose dependency boundary changed. An
+explicit no-publication instruction withholds only the remote step. Follow the
 [documentation-only production boundary](operations/production_promotion.md#promote-one-exact-candidate)
 and [integrated retirement](operations/production_promotion.md#integrated-feature-or-integration-branch)
 checks rather than duplicating them here.

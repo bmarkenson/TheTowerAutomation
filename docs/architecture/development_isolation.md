@@ -145,25 +145,29 @@ The normal release path is deliberately direct:
 4. recheck that neither ref moved, stop each affected long-lived service when
    the candidate boundary requires it, then fast-forward the production
    checkout—while it remains on `main`—to exact commit `D`;
-5. for documentation-only, rerun the applicable content/link/static checks at
-   promoted `D`; otherwise update production dependencies only when their
-   tracked inputs changed, restart each affected service, and perform a bounded
-   production smoke test;
-6. after the applicable smoke succeeds, unless the operator explicitly withheld
-   publication, require the live `origin/main` tip to be absent or an ancestor
-   of `D`, push only the explicit `refs/heads/main:refs/heads/main`
-   fast-forward, and verify the live remote at exact `D` without publishing
-   tags or temporary refs; and
-7. if the applicable smoke fails instead, create and validate a normal
-   rollback or fix-forward on a temporary recovery feature branch from current
-   `main`, stopping affected services and restoring separately changed
-   environments or installed units only when those boundaries exist.
+5. for documentation-only, treat the guarded fast-forward's exact-commit and
+   clean-worktree verification plus the unchanged exact-`D` candidate gate as
+   complete post-promotion verification, rerunning only a check whose
+   validation dependency changed; otherwise update production dependencies
+   only when their tracked inputs changed, restart each affected service, and
+   perform a bounded production smoke test;
+6. after the applicable verification or smoke succeeds, unless the operator
+   explicitly withheld publication, require the live `origin/main` tip to be
+   absent or an ancestor of `D`, push only the explicit
+   `refs/heads/main:refs/heads/main` fast-forward, and verify the live remote at
+   exact `D` without publishing tags or temporary refs; and
+7. if the applicable verification or smoke fails instead, create and validate
+   a normal rollback or fix-forward on a temporary recovery feature branch
+   from current `main`, stopping affected services and restoring separately
+   changed environments or installed units only when those boundaries exist.
 
 Documentation-only closure is automatic unless the operator withholds it: the
 coordinator runs the proportionate documentation gate, fast-forwards `main`
-without a rollback tag or runtime action, verifies promoted content, publishes
-exact `D` to `origin/main`, and uses non-force operations to remove only its
-exact clean integrated worktree and branch. An explicit no-publication request,
+without a rollback tag or runtime action, uses the guarded fast-forward's exact-
+commit and clean-worktree verification while reusing unchanged candidate
+evidence, publishes exact `D` to `origin/main`, and uses non-force operations to
+remove only its exact clean integrated worktree and branch. An explicit no-
+publication request,
 unexpected remote non-fast-forward, known nonpublishable content, or
 network/authentication failure is reported without force-pushing or rewriting
 history and does not alone retain a clean integrated pair. Any candidate or
