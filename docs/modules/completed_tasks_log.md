@@ -58,6 +58,34 @@ canonical document linked by an entry for current behavior.
   accepted; a post-stage advance requires exact retirement and restaging.
 - Pre-freeze validation passed 168 affected Python/JavaScript contract tests,
   189 portable .NET tests, and the Release `win-x64` cross-publish build.
+- Exact candidate `823ab8a` passed compilation, state-definition validation,
+  clickmap integrity with zero errors, and all 2,484 Python tests in 376.68
+  seconds. Moving the unchanged object through the final legacy `develop` ref
+  and into `main` reused that result rather than running another checkpoint.
+- Production advanced from `c737897` to `823ab8a` behind rollback tag
+  `production-before-20260813T040204-c737897`. Revision-42 control surface PID
+  3160958 served `save_mapping_staged_candidate_v1`; replacement automation
+  PID 3161329 acquired `localhost:5555`, and Attach request
+  `04a078eabde34ef38e542264d921ca68` confirmed the same battle, adopted
+  `farm_t19_ad_assist` without repair, and returned to enabled `RUNNING`.
+  The Home-only free-upgrade-lock check remained normally deferred to the next
+  natural boundary; no runtime hold remained.
+- The complete native package was published at 04:04 PDT. Current Control
+  Surface is 72,477,605 bytes with SHA-256
+  `af821cc6cb2c6706012d5d93fad1f269446b98aeff6e723f8159e8328eb5cb61`;
+  current Tunnel Host is 35,172,132 bytes with SHA-256
+  `96e27dc3a73c77a9be6777533b2273720d041a581847a757d521103580bcbae5`.
+  Retained slot 1 is the prior `c737897` package: 72,477,518-byte Control
+  Surface `a51381325dd9fdf3a029dc04d6fd4871a1a7e60ff51381f075fa344f6917c871`
+  and 35,172,113-byte Tunnel Host
+  `1c1de580b47e3fb04ab7dd31a2c4aa3d762e06e5e825715f1457c4064e245c2e`.
+  Retained slot 2 is the prior `b087989` package: 72,477,552-byte Control
+  Surface `4b57f0abc55b75188c3e3bae162559cb04ba7f90d7b808d7c878d336d0b185f1`
+  and 35,172,104-byte Tunnel Host
+  `4f6d8e7dfff6607ba0c07a2bdfa9923c932196b8f82a72825b0c04ecde12db2b`.
+  Linux publication and smoke evidence do not establish the revision-42
+  Windows-only staging and restaging lifecycle checks; those remain pending a
+  real WPF session.
 
 ### 2026-08-13 replay-safe collectors during BlueStacks recovery
 
