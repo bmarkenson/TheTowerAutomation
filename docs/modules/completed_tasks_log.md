@@ -39,6 +39,59 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-12 host telemetry schema-rejection recovery
+
+- Commit `95aa11d` closes the remaining FIFO poison-record failure exposed by
+  the bounded uploader. Production evidence separated the two failures: the old
+  client repeatedly received HTTP `413`; the byte-bounded client then received
+  HTTP `400` through 17:07:11 PDT, followed by uninterrupted `200` responses
+  beginning at 17:07:41. The backlog flushed in about 14 seconds and normal
+  ten-second publication remained successful afterward.
+- The retained database proves collateral loss without proving that every
+  missing aggregate was invalid: accepted sequence jumps from `22098` to
+  `22226`, so 127 records were not ingested. The last accepted window ended at
+  16:05:07 PDT and the first surviving window began at 17:06:48, while the
+  missing sequence count represents only about 21 minutes at nominal cadence.
+  This strongly supports, but does not prove, one roughly 40-minute
+  sleep/scheduler gap inside the first missing aggregate, with valid neighbors
+  later evicted while its batch remained rejected.
+- The sampler now closes a partial aggregate across a greater-than-five-second
+  scheduler, sleep, or wall-clock discontinuity. Linux schema errors identify
+  the exact aggregate index with a typed response. The client durably preserves
+  only that record and reason in the bounded
+  `host-performance-rejected.jsonl` spool, atomically removes only its UUID
+  from pending, and retries valid neighbors. Request-level errors, untrusted
+  indexes, and local preservation/checkpoint failures remove nothing. The GUI
+  distinguishes rejected records from capacity drops.
+- The exact candidate passed compilation, state-definition validation,
+  clickmap integrity with zero errors, and all 2,479 Python tests in 390.99
+  seconds. All 21 focused host-performance tests and 169 portable native tests
+  passed. The Release WPF cross-build completed with zero warnings and zero
+  errors; only the known read-only NuGet vulnerability-cache warning appeared
+  during portable testing/publication.
+- Production and `develop` advanced from `8bed089` to `95aa11d` behind annotated
+  rollback tag `production-before-20260813T003834Z-8bed089`. Restarting only
+  `thetower-control-surface.service` replaced PID `2174850` with `2339142`.
+  Automation remained active under PID `2175232`, exact target
+  `localhost:5555` remained connected, and a fresh post-restart observation and
+  successful host-performance `200` upload completed the Linux smoke.
+- The complete Windows package was published from exact `95aa11d` at 17:40
+  PDT. Current Control Surface is 72,464,645 bytes with SHA-256
+  `4568363f37b4fe2ac33b76fa20334de5084d169ab0db6906322fffbb57a2c4c9`;
+  current Tunnel Host is 35,172,119 bytes with SHA-256
+  `0bf8a68ab735993c193c68da51befcaadc72266f8819c9a2b18137d762cb3821`.
+  Retained slot 1 is the prior `e46aee8` package: 72,462,225-byte Control
+  Surface `77c9fdb448fda65e1fdc334cdc9720a08b685a3dc42e64d93b52370dadd98e64`
+  and 35,172,106-byte Tunnel Host
+  `d0203bf09c47561c95d32e076dce0aa8b357f8a09ae0f3637076046798e8b27e`.
+  Slot 2 is the prior `4bff966` package: 72,460,718-byte Control Surface
+  `70b7026560fd84252cd8d652be4014f427fb98836c221967a325d0c31d2d7c5c`
+  and 35,172,116-byte Tunnel Host
+  `988724eedb669dba10187333e2639a55568ef4ba342ed98c429b0aa766effc32`.
+  Native lifecycle validation remains the bounded Windows relaunch smoke;
+  publication and Linux-side success do not prove the new WPF process is
+  running.
+
 ### 2026-08-12 bounded host telemetry uploads and diagnostics layout
 
 - Commit `e46aee8` fixes the enriched host-performance spool deadlock observed
