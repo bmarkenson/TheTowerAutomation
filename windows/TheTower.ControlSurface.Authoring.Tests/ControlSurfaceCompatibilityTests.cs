@@ -762,4 +762,26 @@ public sealed class ControlSurfaceCompatibilityTests
             },
             0);
     }
+
+    [Fact]
+    public void BlueStacksNativeCreationTimePreservesWindowsTicks()
+    {
+        var expected = new DateTimeOffset(
+                2026,
+                8,
+                13,
+                4,
+                0,
+                0,
+                TimeSpan.Zero)
+            .AddTicks(1_234_567);
+        var fileTime = expected.ToFileTime();
+        var native = new BlueStacksInstanceController.NativeFileTime(
+            unchecked((uint)fileTime),
+            unchecked((uint)(fileTime >> 32)));
+
+        Assert.Equal(
+            expected,
+            BlueStacksInstanceController.FileTimeToUtc(native));
+    }
 }

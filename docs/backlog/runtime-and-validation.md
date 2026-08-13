@@ -1105,6 +1105,12 @@ stages:
     thresholds. This completes mitigation validation but does not by itself
     resolve the cause tracked in
     [`ISSUE-2026-002`](../issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
+    The first revision-41 operator attempt identified the installed `Pie64`
+    mapping but could not bind its listener because module-level process
+    inspection returned Access Denied even from an elevated client. The
+    fix-forward replaces module enumeration with limited-information native
+    path/start-time reads and keeps any future preflight error visible; repeat
+    the same operator test with that package before advancing this item.
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
     second client, as tracked in

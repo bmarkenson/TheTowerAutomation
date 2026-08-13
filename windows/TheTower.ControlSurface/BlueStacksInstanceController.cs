@@ -3,7 +3,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Win32.SafeHandles;
 
 namespace TheTower.ControlSurface;
 
@@ -96,7 +98,10 @@ internal sealed class BlueStacksTargetBindingException : InvalidOperationExcepti
 internal sealed class BlueStacksInstanceController : IBlueStacksInstanceController
 {
     private const int AddressFamilyInterNetwork = 2;
+    private const int ErrorInvalidParameter = 87;
     private const int ErrorInsufficientBuffer = 122;
+    private const uint StillActive = 259;
+    private const int MaximumWindowsPathCharacters = 32768;
     private static readonly Regex InstanceNamePattern = new(
         @"\A[A-Za-z0-9_.-]{1,64}\z",
         RegexOptions.CultureInvariant);
@@ -317,27 +322,36 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
             throw new InvalidOperationException(
                 $"TCP listener {target.AdbPort} has ambiguous process ownership.");
         }
-        using var process = Process.GetProcessById(owners[0]);
-        return IdentityFromVerifiedHandle(process, target, requireListener: true);
+        return IdentityFromVerifiedProcess(
+            owners[0],
+            target,
+            requireListener: true);
     }
 
-    private BlueStacksProcessIdentity IdentityFromVerifiedHandle(
-        Process process,
+    private BlueStacksProcessIdentity IdentityFromVerifiedProcess(
+        int processId,
         BlueStacksRecoveryTarget target,
         bool requireListener)
     {
-        process.Refresh();
-        if (process.HasExited)
-        {
-            throw new InvalidOperationException(
-                "The acknowledged BlueStacks process already exited.");
-        }
-        var actualPath = process.MainModule?.FileName;
-        if (string.IsNullOrWhiteSpace(actualPath)
-            || !string.Equals(
-                Path.GetFullPath(actualPath),
-                target.ExecutablePath,
-                StringComparison.OrdinalIgnoreCase))
+        using var processHandle = OpenProcessHandle(
+            processId,
+            ProcessAccessRights.QueryLimitedInformation,
+            "BlueStacks listener owner inspection failed");
+        return IdentityFromVerifiedHandle(
+            processHandle,
+            processId,
+            target,
+            requireListener);
+    }
+
+    private BlueStacksProcessIdentity IdentityFromVerifiedHandle(
+        SafeProcessHandle processHandle,
+        int processId,
+        BlueStacksRecoveryTarget target,
+        bool requireListener)
+    {
+        var snapshot = ReadProcessSnapshot(processHandle, processId);
+        if (!PathsEqual(snapshot.ExecutablePath, target.ExecutablePath))
         {
             throw new InvalidOperationException(
                 $"TCP listener {target.AdbPort} is not owned by the configured "
@@ -351,7 +365,7 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
                 .Where(processId => processId > 0)
                 .Distinct()
                 .ToArray();
-            if (owners.Length != 1 || owners[0] != process.Id)
+            if (owners.Length != 1 || owners[0] != processId)
             {
                 throw new InvalidOperationException(
                     "The exact BlueStacks process no longer owns the configured "
@@ -361,8 +375,8 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
         return new BlueStacksProcessIdentity(
             Environment.MachineName,
             target.AdbPort,
-            process.Id,
-            new DateTimeOffset(process.StartTime.ToUniversalTime(), TimeSpan.Zero),
+            processId,
+            snapshot.ProcessStartedAtUtc,
             target.ExecutablePath);
     }
 
@@ -394,9 +408,13 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
             expected.ExecutablePath,
             "acknowledged-instance",
             expected.AdbPort);
-        using var process = Process.GetProcessById(expected.ProcessId);
+        using var processHandle = OpenProcessHandle(
+            expected.ProcessId,
+            ProcessAccessRights.QueryLimitedInformation,
+            "The acknowledged BlueStacks process could not be inspected before stop");
         var current = IdentityFromVerifiedHandle(
-            process,
+            processHandle,
+            expected.ProcessId,
             target,
             requireListener: true);
         if (current.ProcessStartedAtUtc != expected.ProcessStartedAtUtc)
@@ -405,21 +423,32 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
                 "The BlueStacks listener owner changed before the stop boundary.");
         }
 
-        var closeRequested = process.CloseMainWindow();
+        var closeRequested = TryCloseMainWindow(expected.ProcessId);
         if (closeRequested
             && await WaitForExitAsync(
-                process,
+                processHandle,
                 TimeSpan.FromSeconds(30),
                 cancellationToken))
         {
             return;
         }
 
-        // Keep the original process HANDLE from verification through force.
-        // If that process exited and Windows reused its PID, this handle cannot
-        // mutate the replacement process.
+        if (HasExited(processHandle))
+        {
+            return;
+        }
+
+        using var forceHandle = OpenProcessHandle(
+            expected.ProcessId,
+            ProcessAccessRights.QueryLimitedInformation
+                | ProcessAccessRights.Terminate,
+            "The acknowledged BlueStacks process could not be opened for forced stop");
+        // Revalidate through the exact handle used for force. If Windows
+        // reused the PID after the graceful-close boundary, the start-time
+        // comparison fails before TerminateProcess can mutate it.
         current = IdentityFromVerifiedHandle(
-            process,
+            forceHandle,
+            expected.ProcessId,
             target,
             requireListener: false);
         if (current.ProcessStartedAtUtc != expected.ProcessStartedAtUtc)
@@ -427,9 +456,18 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
             throw new InvalidOperationException(
                 "The BlueStacks listener owner changed before forced stop.");
         }
-        process.Kill(entireProcessTree: true);
+        if (!TerminateProcess(forceHandle, 1))
+        {
+            var error = Marshal.GetLastWin32Error();
+            if (!HasExited(forceHandle))
+            {
+                throw Win32Failure(
+                    error,
+                    "The exact BlueStacks process could not be terminated");
+            }
+        }
         if (!await WaitForExitAsync(
-            process,
+            forceHandle,
             TimeSpan.FromSeconds(30),
             cancellationToken))
         {
@@ -443,53 +481,53 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
         BlueStacksRecoveryTarget target,
         CancellationToken cancellationToken)
     {
-        Process process;
+        SafeProcessHandle processHandle;
         try
         {
-            process = Process.GetProcessById(expected.ProcessId);
+            processHandle = OpenProcessHandle(
+                expected.ProcessId,
+                ProcessAccessRights.QueryLimitedInformation
+                    | ProcessAccessRights.Terminate,
+                "The acknowledged BlueStacks process could not be reopened for reconciliation");
         }
-        catch (ArgumentException)
+        catch (Win32Exception exception)
+            when (exception.NativeErrorCode == ErrorInvalidParameter)
         {
             return;
         }
-        using (process)
+        using (processHandle)
         {
-            process.Refresh();
-            if (process.HasExited)
+            if (HasExited(processHandle))
             {
                 return;
             }
-            DateTimeOffset startedAt;
-            try
-            {
-                startedAt = new DateTimeOffset(
-                    process.StartTime.ToUniversalTime(),
-                    TimeSpan.Zero);
-            }
-            catch (InvalidOperationException)
-            {
-                return;
-            }
-            if (startedAt != expected.ProcessStartedAtUtc)
+            var snapshot = ReadProcessSnapshot(
+                processHandle,
+                expected.ProcessId);
+            if (snapshot.ProcessStartedAtUtc != expected.ProcessStartedAtUtc)
             {
                 // The acknowledged process is gone and Windows reused its PID.
                 return;
             }
-            var actualPath = process.MainModule?.FileName;
-            if (string.IsNullOrWhiteSpace(actualPath)
-                || !string.Equals(
-                    Path.GetFullPath(actualPath),
-                    target.ExecutablePath,
-                    StringComparison.OrdinalIgnoreCase))
+            if (!PathsEqual(snapshot.ExecutablePath, target.ExecutablePath))
             {
                 throw new InvalidOperationException(
                     "The acknowledged BlueStacks PID still exists with an "
                         + "unexpected executable path; replacement start is "
                         + "deferred.");
             }
-            process.Kill(entireProcessTree: true);
+            if (!TerminateProcess(processHandle, 1))
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (!HasExited(processHandle))
+                {
+                    throw Win32Failure(
+                        error,
+                        "The exact acknowledged BlueStacks process could not be terminated");
+                }
+            }
             if (!await WaitForExitAsync(
-                process,
+                processHandle,
                 TimeSpan.FromSeconds(30),
                 cancellationToken))
             {
@@ -622,28 +660,118 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
                 StringComparer.OrdinalIgnoreCase);
 
     private static async Task<bool> WaitForExitAsync(
-        Process process,
+        SafeProcessHandle processHandle,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        if (process.HasExited)
+        if (HasExited(processHandle))
         {
             return true;
         }
-        using var timeoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken);
-        timeoutCancellation.CancelAfter(timeout);
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+            if (HasExited(processHandle))
+            {
+                return true;
+            }
+        }
+        return HasExited(processHandle);
+    }
+
+    private static bool TryCloseMainWindow(int processId)
+    {
         try
         {
-            await process.WaitForExitAsync(timeoutCancellation.Token);
-            return true;
+            using var process = Process.GetProcessById(processId);
+            return process.CloseMainWindow();
         }
-        catch (OperationCanceledException)
-            when (!cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or InvalidOperationException
+                or Win32Exception)
         {
-            return process.HasExited;
+            return false;
         }
     }
+
+    private static SafeProcessHandle OpenProcessHandle(
+        int processId,
+        ProcessAccessRights access,
+        string operation)
+    {
+        var processHandle = OpenProcess(access, false, processId);
+        if (!processHandle.IsInvalid)
+        {
+            return processHandle;
+        }
+        var error = Marshal.GetLastWin32Error();
+        processHandle.Dispose();
+        throw Win32Failure(error, operation);
+    }
+
+    private static NativeProcessSnapshot ReadProcessSnapshot(
+        SafeProcessHandle processHandle,
+        int processId)
+    {
+        var path = new StringBuilder(MaximumWindowsPathCharacters);
+        var pathLength = path.Capacity;
+        if (!QueryFullProcessImageName(
+                processHandle,
+                0,
+                path,
+                ref pathLength))
+        {
+            throw Win32Failure(
+                Marshal.GetLastWin32Error(),
+                $"The executable path for BlueStacks PID {processId} could not be read");
+        }
+        if (!GetProcessTimes(
+                processHandle,
+                out var createdAt,
+                out _,
+                out _,
+                out _))
+        {
+            throw Win32Failure(
+                Marshal.GetLastWin32Error(),
+                $"The start time for BlueStacks PID {processId} could not be read");
+        }
+        return new NativeProcessSnapshot(
+            path.ToString(),
+            FileTimeToUtc(createdAt));
+    }
+
+    internal static DateTimeOffset FileTimeToUtc(NativeFileTime value)
+    {
+        var fileTime = unchecked(
+            (long)(((ulong)value.HighDateTime << 32) | value.LowDateTime));
+        return new DateTimeOffset(
+            DateTime.FromFileTimeUtc(fileTime),
+            TimeSpan.Zero);
+    }
+
+    internal static bool PathsEqual(string left, string right) =>
+        string.Equals(
+            Path.GetFullPath(left),
+            Path.GetFullPath(right),
+            StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasExited(SafeProcessHandle processHandle)
+    {
+        if (!GetExitCodeProcess(processHandle, out var exitCode))
+        {
+            throw Win32Failure(
+                Marshal.GetLastWin32Error(),
+                "The exact BlueStacks process state could not be read");
+        }
+        return exitCode != StillActive;
+    }
+
+    private static Win32Exception Win32Failure(int error, string operation) =>
+        new(error, $"{operation}: {new Win32Exception(error).Message}");
 
     internal static string ValidateExecutablePath(string value)
     {
@@ -744,6 +872,30 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
         OwnerPidListener = 3,
     }
 
+    [Flags]
+    private enum ProcessAccessRights : uint
+    {
+        Terminate = 0x0001,
+        QueryLimitedInformation = 0x1000,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NativeFileTime
+    {
+        public uint LowDateTime;
+        public uint HighDateTime;
+
+        public NativeFileTime(uint lowDateTime, uint highDateTime)
+        {
+            LowDateTime = lowDateTime;
+            HighDateTime = highDateTime;
+        }
+    }
+
+    private sealed record NativeProcessSnapshot(
+        string ExecutablePath,
+        DateTimeOffset ProcessStartedAtUtc);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct MibTcpRowOwnerPid
     {
@@ -763,4 +915,43 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
         int addressFamily,
         TcpTableClass tableClass,
         uint reserved);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern SafeProcessHandle OpenProcess(
+        ProcessAccessRights desiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+        int processId);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "QueryFullProcessImageNameW",
+        CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(
+        SafeProcessHandle processHandle,
+        uint flags,
+        StringBuilder executablePath,
+        ref int size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessTimes(
+        SafeProcessHandle processHandle,
+        out NativeFileTime creationTime,
+        out NativeFileTime exitTime,
+        out NativeFileTime kernelTime,
+        out NativeFileTime userTime);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TerminateProcess(
+        SafeProcessHandle processHandle,
+        uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetExitCodeProcess(
+        SafeProcessHandle processHandle,
+        out uint exitCode);
 }

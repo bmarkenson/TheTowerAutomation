@@ -1160,14 +1160,19 @@ The durable request separates the two mutation owners:
    `bst.instance.INSTANCE.status.adb_port` from `bluestacks.conf`, resolves
    that loopback/any-address listener through the native TCP owner table, and
    requires exactly one process whose executable path is the configured
-   `HD-Player.exe`. It posts the target plus host name, PID, and start time
-   before mutation. If more than one configured instance has an active ADB
-   listener, automatic recovery is disabled because the host-wide aging
-   evidence is ambiguous.
+   `HD-Player.exe`. Path and creation-time inspection uses the exact PID with
+   Windows `PROCESS_QUERY_LIMITED_INFORMATION`, `QueryFullProcessImageName`,
+   and `GetProcessTimes`; it does not request module-enumeration access, which
+   BlueStacks may deny even to an elevated interactive client. It posts the
+   target plus host name, PID, and start time before mutation. If more than one
+   configured instance has an active ADB listener, automatic recovery is
+   disabled because the host-wide aging evidence is ambiguous.
 3. Immediately before graceful close—and again before the force-kill fallback—
-   Windows revalidates listener PID, executable path, and start time. It starts
-   only the configured instance and accepts completion only after a different
-   exact process owns the listener for two consecutive polls.
+   Windows revalidates listener PID, executable path, and start time. A force
+   fallback retains and terminates the already verified native process handle,
+   so later PID reuse cannot retarget it. Windows starts only the configured
+   instance and accepts completion only after a different exact process owns
+   the listener for two consecutive polls.
 4. Linux then owns ADB reconnection, The Tower launch, Welcome Back handling,
    replay suppression, and the configured new-battle fallback described in the
    [runtime architecture](runtime.md#emulator-maintenance-and-restart-replay).

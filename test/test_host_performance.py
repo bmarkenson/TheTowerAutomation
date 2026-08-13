@@ -898,6 +898,8 @@ def test_native_host_sampling_control_is_persistent_and_collapsible():
     assert "snapshot.BlueStacksHandleCount" in window_code
     assert "degradation.HostEvidence" in window_code
     assert "RequestOperatorRestartAsync" in window_code
+    assert "_blueStacksOperatorMessage" in window_code
+    assert "SetBlueStacksOperatorMessage" in window_code
     assert "ResolveTelemetryTarget" in window_code
     assert "ReconcileTunnelHostBlueStacksPort" in window_code
     refresh_status = window_code.split(
@@ -908,6 +910,14 @@ def test_native_host_sampling_control_is_persistent_and_collapsible():
     ) < refresh_status.index("QueueBlueStacksMaintenance(status)")
     assert "RequestOutcomeUnknown" in window_code
     assert "allowRequestCreation: false" in window_code
+
+    controller = (native_root / "BlueStacksInstanceController.cs").read_text(
+        encoding="utf-8"
+    )
+    assert "QueryFullProcessImageName" in controller
+    assert "ProcessAccessRights.QueryLimitedInformation" in controller
+    assert "GetProcessTimes" in controller
+    assert ".MainModule" not in controller
     assert "_shutdownStarted = false;" in window_code
     assert "terminal_disposition" in models
     assert "terminal_reason" in models

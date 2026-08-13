@@ -108,6 +108,7 @@ public partial class MainWindow : Window
         Reason = "BlueStacks restart status is unavailable.",
     };
     private bool _blueStacksMaintenanceCompatible;
+    private string? _blueStacksOperatorMessage;
     private bool _shutdownStarted;
     private bool _coordinatedClosePending;
     public MainWindow()
@@ -229,19 +230,19 @@ public partial class MainWindow : Window
         bool resetLayout)
     {
         var recoveryTargetLocked = _blueStacksMaintenance.TargetEditsLocked;
+        var recoveryTargetChanged =
+            _settings.WindowsBlueStacksAdbPort
+                != preferences.TunnelConfiguration.WindowsBlueStacksAdbPort
+            || !string.Equals(
+                _settings.BlueStacksPlayerExecutablePath,
+                preferences.BlueStacksPlayerExecutablePath,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                _settings.BlueStacksInstanceName,
+                preferences.BlueStacksInstanceName,
+                StringComparison.Ordinal);
         var attemptedRecoveryTargetChange = recoveryTargetLocked
-            && (
-                _settings.WindowsBlueStacksAdbPort
-                    != preferences.TunnelConfiguration.WindowsBlueStacksAdbPort
-                || !string.Equals(
-                    _settings.BlueStacksPlayerExecutablePath,
-                    preferences.BlueStacksPlayerExecutablePath,
-                    StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(
-                    _settings.BlueStacksInstanceName,
-                    preferences.BlueStacksInstanceName,
-                    StringComparison.Ordinal)
-            );
+            && recoveryTargetChanged;
         var apiChanged = !string.Equals(
                 _settings.BaseUrl,
                 preferences.BaseUrl,
@@ -280,6 +281,10 @@ public partial class MainWindow : Window
                 preferences.BlueStacksPlayerExecutablePath;
             _settings.BlueStacksInstanceName =
                 preferences.BlueStacksInstanceName;
+            if (recoveryTargetChanged)
+            {
+                _blueStacksOperatorMessage = null;
+            }
         }
         _api.Configure(_settings.BaseUrl, _apiToken);
         _hostPerformance.SetSamplingEnabled(
@@ -3580,10 +3585,16 @@ public partial class MainWindow : Window
         UpdateBlueStacksRestartAvailability();
         if (_blueStacksMaintenanceTask.IsCompleted)
         {
+            if (maintenance.Active)
+            {
+                _blueStacksOperatorMessage = null;
+            }
             BlueStacksRecoveryProgressText.Text = maintenance.Active
                 ? $"Maintenance progress: {FormatStatusToken(request?.State)} · "
                     + maintenance.Reason
-                : request?.State == "terminal"
+                : _blueStacksOperatorMessage is not null
+                    ? _blueStacksOperatorMessage
+                    : request?.State == "terminal"
                     ? "Last maintenance: "
                         + (string.IsNullOrWhiteSpace(
                             request.TerminalDisposition)
@@ -3621,6 +3632,8 @@ public partial class MainWindow : Window
         {
             return;
         }
+        SetBlueStacksOperatorMessage(
+            "Validating the exact BlueStacks listener before requesting maintenance…");
         _blueStacksMaintenanceTask = RequestOperatorBlueStacksRestartAsync();
         UpdateBlueStacksRestartAvailability();
         await _blueStacksMaintenanceTask;
@@ -3637,8 +3650,8 @@ public partial class MainWindow : Window
             var status = await _api.GetStatusAsync(freshness.Token);
             if (_shutdownStarted)
             {
-                BlueStacksRecoveryProgressText.Text =
-                    "Operator BlueStacks restart canceled during close.";
+                SetBlueStacksOperatorMessage(
+                    "Operator BlueStacks restart canceled during close.");
                 return;
             }
             RenderStatus(status);
@@ -3680,35 +3693,42 @@ public partial class MainWindow : Window
                 MessageBoxResult.Cancel);
             if (confirmation != MessageBoxResult.OK)
             {
-                BlueStacksRecoveryProgressText.Text =
-                    "Operator BlueStacks restart canceled.";
+                SetBlueStacksOperatorMessage(
+                    "Operator BlueStacks restart canceled.");
                 return;
             }
             if (_shutdownStarted)
             {
-                BlueStacksRecoveryProgressText.Text =
-                    "Operator BlueStacks restart canceled during close.";
+                SetBlueStacksOperatorMessage(
+                    "Operator BlueStacks restart canceled during close.");
                 return;
             }
+            _blueStacksOperatorMessage = null;
             await _blueStacksMaintenance.RequestOperatorRestartAsync(
                 preview,
                 CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
-            BlueStacksRecoveryProgressText.Text =
-                "Operator BlueStacks restart status check timed out.";
+            SetBlueStacksOperatorMessage(
+                "Operator BlueStacks restart status check timed out.");
         }
         catch (Exception exception)
         {
-            BlueStacksRecoveryProgressText.Text =
+            SetBlueStacksOperatorMessage(
                 _blueStacksMaintenance.RequestOutcomeUnknown
                     ? "Operator BlueStacks restart result is unknown; target "
                         + "edits remain locked until Linux status reconciles · "
                         + exception.Message
                     : "Operator BlueStacks restart was not requested · "
-                        + exception.Message;
+                        + exception.Message);
         }
+    }
+
+    private void SetBlueStacksOperatorMessage(string message)
+    {
+        _blueStacksOperatorMessage = message;
+        BlueStacksRecoveryProgressText.Text = message;
     }
 
     private void RenderConfirmedLocalMappings(
