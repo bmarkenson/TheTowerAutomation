@@ -1,41 +1,5 @@
 # Player-Save Architecture and Versioned Evidence
-The runtime decoder never applies that proposal. Server revision 42 instead
-offers the same narrow operator workflow in both control-surface GUIs. It has no
-feature-worktree selection: the operator reviews one exact candidate and its
-mapping target hashes, then separately confirms creation of one verified child
-of current `main` under `refs/thetower/save-mapping-candidate`. The client
-cannot supply a path, ref, target, operation, value, commit message, or Git
-identity.
 
-Review binds the candidate, every canonical base/result hash and file mode, the
-prospective canonical mapping-set fingerprint, and the standardized commit
-contract. It records but does not fingerprint the whole `main` commit, so an
-unrelated advance does not stale otherwise identical mapping inputs. Staging
-rechecks the proposal against current `main` under a process-shared lock,
-holds one final candidate-receipt snapshot, constructs the commit with a private
-Git index, and durably records its exact identity. One atomic Git ref
-transaction verifies the current parent while creating only the fixed private
-ref. Production `main`, its index, and its worktree are never changed.
-Relevant Git crash locks make recovery unconfirmed and are never removed
-automatically. Ref, target, mode, journal, or unrelated-state ambiguity is
-preserved for inspection; no automatic reset or unconfirmed retry occurs.
-
-The warning remains `promotion_pending` while the commit exists under the
-private ref and becomes `production_validation_pending` after production
-contains it. If `main` advances first, exact unchanged target before-hashes
-permit an explicitly confirmed retirement and restaging on the new tip;
-changed targets fail closed. A later complete stable save acquisition records a
-privacy-safe receipt only when the running decoder's mapping identity and
-canonical mapping-set fingerprint match the deployed commit. The receipt also
-binds acquisition start time and the production commit captured when that
-runtime loaded; an acquisition begun before staging cannot clear the
-checkpoint. Receipt work is deferred until the outer save-operation and
-mutation boundaries have released, so it cannot delay Android foreground
-restoration. The observer is advisory: failure cannot invalidate the save or
-block automation, but it leaves the warning visible. Only the matching
-post-deployment decode durably records the receipt and then retires the exact
-private ref and transaction. Candidate and local-store failures remain
-diagnostic and do not become startup gates.
 `core/player_save.py` decodes The Tower's `playerInfo.dat` as an independent,
 read-only view of persistent profile configuration. It is intentionally not a
 replacement for action verification or a universal parser for arbitrary game
@@ -717,45 +681,43 @@ The control surface publishes the combined local-confirmation and candidate
 review queue as a persistent nonmodal warning. A `compatible_exact_revision`
 proposal is an atomic review artifact for both the authority owner and the
 exact structural mirror, with a base hash and scoped operation for each. The
-runtime decoder never applies that proposal. Server revision 40 instead offers
+runtime decoder never applies that proposal. Server revision 42 instead offers
 the same narrow operator workflow in both control-surface GUIs. It has no
-feature-worktree selection: the operator reviews one exact candidate and
-proposal while clean `main` and `develop` are at the same tip, then separately
-confirms creation of one verified child commit directly on `develop`. The
-client cannot supply a path, branch, target, operation, value, commit message,
-or Git identity.
+feature-worktree selection: the operator reviews one exact candidate and its
+mapping target hashes, then separately confirms creation of one verified child
+of current `main` under `refs/thetower/save-mapping-candidate`. The client
+cannot supply a path, ref, target, operation, value, commit message, or Git
+identity.
 
-Review binds and exposes the immutable equal base commit, every canonical
-base/result hash and file mode, the prospective canonical mapping-set
-fingerprint, and the standardized commit contract. Integration rechecks those
-facts under a process-shared lock, holds one final candidate-receipt snapshot,
-constructs the commit with a private Git index, durably records its exact
-identity, detaches the bound clean checkout at the base, and uses one Git ref
-transaction to verify `main` while compare-and-swapping only the named
-`develop` ref. An explicit Git switch then serializes the checkout refresh.
-Crash recovery accepts only a clean checkout at an exact detached transaction
-endpoint. A plain switch refuses and preserves a newly arriving edit; every
-partial index or worktree state remains unconfirmed. Relevant Git crash lock
-files likewise make recovery unconfirmed and are never removed automatically.
-It never
-writes or moves production `main`, promotes, restarts a service, changes
-runtime authority, or sends device input. Ref, target, mode, journal, or
-unrelated-state ambiguity is preserved for inspection; no automatic reset or
-retry occurs.
+Review binds the candidate, every canonical base/result hash and file mode, the
+prospective canonical mapping-set fingerprint, and the standardized commit
+contract. It records but does not fingerprint the whole `main` commit, so an
+unrelated advance does not stale otherwise identical mapping inputs. Staging
+rechecks the proposal against current `main` under a process-shared lock,
+holds one final candidate-receipt snapshot, constructs the commit with a private
+Git index, and durably records its exact identity. One atomic Git ref
+transaction verifies the current parent while creating only the fixed private
+ref. Production `main`, its index, and its worktree are never changed.
+Relevant Git crash locks make recovery unconfirmed and are never removed
+automatically. Ref, target, mode, journal, or unrelated-state ambiguity is
+preserved for inspection; no automatic reset or unconfirmed retry occurs.
 
-The warning remains `promotion_pending` after the commit reaches `develop` and
-`production_validation_pending` after production contains it. A later complete
-stable save acquisition records a privacy-safe receipt only when the running
-decoder's mapping identity and canonical mapping-set fingerprint match the
-deployed commit. The receipt also binds the acquisition start time and the
-production commit captured when that runtime loaded; an acquisition that began
-before the integration became available cannot clear the checkpoint. Receipt
-work is deferred until the outer save-operation and mutation boundaries have
-released, so it cannot delay Android foreground restoration. The observer is
-advisory: its failure cannot invalidate the save or block automation, but it
-leaves the warning visible. Only that matching post-deployment decode durably
-records the receipt and then retires the integration transaction. Candidate
-and local-store failures remain diagnostic and do not become startup gates.
+The warning remains `promotion_pending` while the commit exists under the
+private ref and becomes `production_validation_pending` after production
+contains it. If `main` advances first, exact unchanged target before-hashes
+permit an explicitly confirmed retirement and restaging on the new tip;
+changed targets fail closed. A later complete stable save acquisition records a
+privacy-safe receipt only when the running decoder's mapping identity and
+canonical mapping-set fingerprint match the deployed commit. The receipt also
+binds acquisition start time and the production commit captured when that
+runtime loaded; an acquisition begun before staging cannot clear the
+checkpoint. Receipt work is deferred until the outer save-operation and
+mutation boundaries have released, so it cannot delay Android foreground
+restoration. The observer is advisory: failure cannot invalidate the save or
+block automation, but it leaves the warning visible. Only the matching
+post-deployment decode durably records the receipt and then retires the exact
+private ref and transaction. Candidate and local-store failures remain
+diagnostic and do not become startup gates.
 
 ## Acquisition provenance and temporal authority
 
