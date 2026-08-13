@@ -410,7 +410,7 @@
     <div class="dialog-heading">
       <div>
         <span class="eyebrow">Canonical save mappings</span>
-        <h2>Review and integrate into develop</h2>
+        <h2>Review and stage for promotion</h2>
       </div>
       <button class="icon-button" type="button" data-close-dialog="saveMappingIntegrationDialog" aria-label="Close save-mapping review">Close</button>
     </div>
@@ -425,8 +425,8 @@
           <p id="saveMappingCandidateDetail" class="fine-print">Choose one durable observation.</p>
         </section>
         <section>
-          <h3>2. Develop eligibility</h3>
-          <div id="saveMappingRepositoryDetail" class="mapping-proposal muted">Loading main/develop readiness…</div>
+          <h3>2. Private staging eligibility</h3>
+          <div id="saveMappingRepositoryDetail" class="mapping-proposal muted">Loading main/staging readiness…</div>
         </section>
       </div>
       <div class="dialog-actions mapping-review-actions">
@@ -437,13 +437,13 @@
         <h3>3. Exact proposal</h3>
         <div id="saveMappingProposal" class="mapping-proposal muted">Review an exact proposal before integration.</div>
       </section>
-      <p id="saveMappingIntegrateStatus" class="fine-print">Integration remains disabled until this exact candidate is reviewed.</p>
+      <p id="saveMappingIntegrateStatus" class="fine-print">Staging remains disabled until this exact candidate is reviewed.</p>
       <div id="saveMappingResult" class="callout" hidden></div>
       <div class="dialog-actions mapping-review-actions">
         <button type="button" data-close-dialog="saveMappingIntegrationDialog">Close</button>
-        <button id="integrateSaveMappingButton" class="primary" type="button" disabled>Integrate reviewed mapping into develop…</button>
+        <button id="integrateSaveMappingButton" class="primary" type="button" disabled>Stage reviewed mapping for promotion…</button>
       </div>
-      <p class="fine-print">This narrow action creates one verified commit on clean, synchronized <code>develop</code>. It does not promote to production, restart services, change runtime authority, send device input, or alter the current battle. Conflicts and unsupported proposals remain ordinary development work.</p>
+      <p class="fine-print">This narrow action creates one verified child commit from current <code>main</code> under a private staging ref. It does not move <code>main</code>, touch the production index or worktree, restart services, change runtime authority, send device input, or alter the current battle. Conflicts and unsupported proposals remain ordinary development work.</p>
     </div>
   </dialog>
 

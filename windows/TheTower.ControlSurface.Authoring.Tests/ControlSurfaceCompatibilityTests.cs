@@ -44,7 +44,7 @@ public sealed class ControlSurfaceCompatibilityTests
             "save_backed_setup_capture_v2",
             result.MissingCapabilities);
         Assert.Contains(
-            "save_mapping_develop_integration_v1",
+            "save_mapping_staged_candidate_v1",
             result.MissingCapabilities);
         Assert.Contains(
             "save_mapping_review_status_v2",
@@ -345,7 +345,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                41,
+                42,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
@@ -368,7 +368,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "runtime_control_acknowledgements_v1",
                 "selected_strategy_process_start",
                 "save_backed_setup_capture_v2",
-                "save_mapping_develop_integration_v1",
+                "save_mapping_staged_candidate_v1",
                 "save_mapping_review_status_v2",
                 "strategy_aware_attach_v1",
                 "strategy_action_gate_v1",
@@ -476,6 +476,18 @@ public sealed class ControlSurfaceCompatibilityTests
         presentation = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
         Assert.Contains("production promotion", presentation.Title);
         Assert.Contains("awaiting exact production promotion", presentation.Detail);
+
+        active.Items =
+        [
+            new ConfirmedLocalMappingItem
+            {
+                State = "restaging_required",
+                Reason = "main advanced",
+            },
+        ];
+        presentation = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+        Assert.Equal("warning", presentation.Severity);
+        Assert.Contains("restaged", presentation.Title);
 
         active.Items = null!;
         var malformed = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);

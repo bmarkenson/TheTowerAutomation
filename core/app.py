@@ -122,7 +122,7 @@ from core.player_save_mapping_observer import (
 from core.player_save_mapping_candidates import (
     DEFAULT_MAPPING_CANDIDATE_RECEIPT_PATH,
 )
-from core.player_save_mapping_develop_integration import (
+from core.player_save_mapping_staged_candidate import (
     canonical_mapping_decode_start,
     canonical_mapping_runtime_commit,
     observe_canonical_mapping_decode,

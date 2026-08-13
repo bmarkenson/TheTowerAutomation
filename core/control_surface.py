@@ -71,7 +71,7 @@ from core.player_save_setup_capture import (
 from core.player_save import confirmed_local_mapping_status
 from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
 from core.player_save_mapping_candidates import AppendOnlyMappingCandidateStore
-from core.player_save_mapping_develop_integration import (
+from core.player_save_mapping_staged_candidate import (
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
     SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
     SaveMappingIntegrationError,
@@ -92,7 +92,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 41
+CONTROL_SURFACE_REVISION = 42
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -296,7 +296,7 @@ class ControlSurfaceService:
         return self.profile_store.catalog()
 
     def save_mapping_integration(self) -> dict[str, Any]:
-        """Return review candidates and fixed develop eligibility."""
+        """Return review candidates and private staging eligibility."""
 
         return self.save_mapping_integration_manager.catalog()
 
@@ -304,21 +304,21 @@ class ControlSurfaceService:
         self,
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Review or commit one exact mapping proposal directly to develop."""
+        """Review or stage one exact mapping proposal without moving main."""
 
         if not isinstance(request, Mapping):
             raise ControlSurfaceRequestError("Request body must be a JSON object")
         operation = str(request.get("operation") or "").strip().lower()
         required = {
             "review": {"operation", "candidate_record_id"},
-            "integrate": {
+            "stage": {
                 "operation",
                 "candidate_record_id",
                 "reviewed_proposal_fingerprint",
             },
         }
         if operation not in required:
-            raise ControlSurfaceRequestError("operation must be review or integrate")
+            raise ControlSurfaceRequestError("operation must be review or stage")
         if set(request) != required[operation]:
             raise ControlSurfaceRequestError(
                 f"{operation} accepts exactly: "
@@ -354,7 +354,7 @@ class ControlSurfaceService:
                 f"{secrets.token_hex(6)}"
             )
             action_warning = self._append_audit(
-                "Integrating reviewed canonical save mapping into develop "
+                "Staging reviewed canonical save mapping for promotion "
                 f"candidate={record_prefix} "
                 f"review={fingerprint_prefix} "
                 f"[OPERATION] id={operation_id}",
@@ -367,14 +367,14 @@ class ControlSurfaceService:
                     code="mapping_integration_audit_unavailable",
                 )
             try:
-                result = self.save_mapping_integration_manager.integrate(
+                result = self.save_mapping_integration_manager.stage(
                     candidate_record_id=candidate_record_id,
                     reviewed_proposal_fingerprint=reviewed_fingerprint,
                 )
             except SaveMappingIntegrationError as exc:
                 disposition = _save_mapping_integration_disposition(exc.code)
                 self._append_audit(
-                    "Canonical save mapping develop integration "
+                    "Canonical save mapping staging "
                     f"disposition={disposition} code={exc.code} "
                     f"[OPERATION] id={operation_id}",
                     level="RESULT",
@@ -382,22 +382,23 @@ class ControlSurfaceService:
                 raise
             except Exception as exc:
                 self._append_audit(
-                    "Canonical save mapping develop integration "
+                    "Canonical save mapping staging "
                     "disposition=unconfirmed code=unexpected_failure "
                     f"[OPERATION] id={operation_id}",
                     level="RESULT",
                 )
                 raise ControlSurfaceRequestError(
-                    "Canonical develop integration failed unexpectedly; inspect "
-                    "main, develop, and the durable transaction before continuing.",
+                    "Canonical mapping staging failed unexpectedly; inspect main, "
+                    "the private staging ref, and the durable transaction before "
+                    "continuing.",
                     status=500,
                     code="mapping_integration_unexpected_failure",
                 ) from exc
             result_warning = self._append_audit(
-                "Canonical save mapping develop integration "
-                "disposition=committed_to_develop "
-                f"candidate={record_prefix} commit={result.get('integration_commit')} "
-                f"committed=true promoted={str(bool(result.get('promoted'))).lower()} "
+                "Canonical save mapping staging "
+                "disposition=staged_for_promotion "
+                f"candidate={record_prefix} commit={result.get('staged_commit')} "
+                f"staged=true promoted={str(bool(result.get('promoted'))).lower()} "
                 "mapping_invariants=passed "
                 f"[OPERATION] id={operation_id}",
                 level="RESULT",

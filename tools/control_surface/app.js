@@ -250,8 +250,8 @@ function renderConfirmedLocalMapping(status) {
   reviewButton.hidden = !presentation.visible;
   reviewButton.disabled = !compatible;
   reviewButton.title = compatible
-    ? "Review an exact canonical proposal and commit it to eligible develop."
-    : "Linux API revision 40 with save_mapping_develop_integration_v1 is required.";
+    ? "Review an exact canonical proposal and stage it for promotion."
+    : "Linux API revision 42 with save_mapping_staged_candidate_v1 is required.";
 }
 
 function saveMappingCandidate() {
@@ -341,13 +341,13 @@ function renderSaveMappingCatalog(catalog) {
   }
   const repository = catalog.repository || {};
   const readiness = repository.integration_available
-    ? "Eligible: main and develop are clean and synchronized."
-    : repository.reason || "Direct develop integration is unavailable.";
+    ? "Eligible: main is clean and the private staging ref is empty."
+    : repository.reason || "Private-ref staging is unavailable.";
   setText(
     "saveMappingRepositoryDetail",
     `main ${repository.main_commit || "unknown"}\n`
-      + `develop ${repository.develop_commit || "unknown"}\n`
-      + `${repository.develop_path || "develop path unavailable"}\n${readiness}`,
+      + `staging ref ${repository.staging_ref || "unavailable"}\n`
+      + `staged ${repository.staged_commit || "empty"}\n${readiness}`,
   );
   setText(
     "saveMappingCatalogStatus",
@@ -404,7 +404,7 @@ function renderSaveMappingReview(review) {
   ));
   container.append(mappingProposalRow(
     "Repository snapshot",
-    `reviewed base ${review.reviewed_base_commit}\nmain ${review.repository?.main_commit}\ndevelop ${review.repository?.develop_commit}\nsynchronized ${String(review.repository?.synchronized)}`,
+    `reviewed base ${review.reviewed_base_commit}\ncurrent main ${review.repository?.main_commit}\nstaging ref ${review.repository?.staging_ref}\nstaged ${review.repository?.staged_commit || "empty"}`,
   ));
   const renderedTargets = new Map((review.rendered_targets || []).map(
     (target) => [`${target.path}\0${target.mapping_id}`, target],
@@ -428,8 +428,8 @@ function renderSaveMappingReview(review) {
   setText(
     "saveMappingIntegrateStatus",
     availability.available
-      ? "Ready to create one verified develop commit."
-      : availability.reason || "Develop integration is unavailable.",
+      ? "Ready to create one verified staged commit without moving main."
+      : availability.reason || "Private-ref staging is unavailable.",
   );
   if (review.recovery_required === true) {
     const result = byId("saveMappingResult");
@@ -440,7 +440,7 @@ function renderSaveMappingReview(review) {
     const detail = document.createElement("p");
     title.textContent = "Interrupted integration requires recovery";
     detail.textContent = availability.reason
-      || "Inspect main, develop, and the durable transaction before another action.";
+      || "Inspect main, the private staging ref, and the durable transaction before another action.";
     result.append(title, detail);
   }
   updateSaveMappingControls();
@@ -466,7 +466,7 @@ function renderSaveMappingResult(
   if (presentation.success) {
     container.append(mappingProposalRow(
       "Lifecycle state",
-      `commit: ${result.integration_commit}\ncommitted: ${String(result.committed)}\npromoted: ${String(result.promoted)}\nmapping invariants: ${result.mapping_invariants}\nproduction validation: ${result.promotion_validation}`,
+      `base: ${result.base_commit}\nstaging ref: ${result.staging_ref}\nstaged commit: ${result.staged_commit}\ncommitted: ${String(result.committed)}\nstaged: ${String(result.staged)}\npromoted: ${String(result.promoted)}\nmapping invariants: ${result.mapping_invariants}\nproduction validation: ${result.promotion_validation}`,
     ));
     for (const target of result.targets) {
       container.append(mappingProposalRow(
@@ -505,8 +505,8 @@ async function loadSaveMappingIntegrationCatalog() {
   try {
     const catalog = await api("/api/v1/save-mapping-integration");
     if (
-      catalog?.schema_version !== 2
-      || catalog?.capability !== "save_mapping_develop_integration_v1"
+      catalog?.schema_version !== 3
+      || catalog?.capability !== "save_mapping_staged_candidate_v1"
     ) {
       const error = new Error(
         "The server returned an incompatible save-mapping catalog.",
@@ -586,14 +586,14 @@ async function integrateSaveMappingProposal() {
   const confirmation = [
     review.recovery_required
       ? "Recover and verify this exact durable integration?"
-      : "Commit this exact proposal directly to develop?",
-    review.repository.develop_path,
+      : "Stage this exact proposal for production promotion?",
+    review.repository.staging_ref,
     `Fingerprint: ${review.reviewed_proposal_fingerprint}`,
     `Targets: ${targets.length}`,
     "",
     review.recovery_required
       ? "This retries only the durable reviewed identity and verifies exact Git refs and mappings. It does not create a second commit, promote, restart services, send device input, change runtime authority, or alter the current battle."
-      : "This creates one verified child commit and fast-forwards clean develop. It does not promote, restart services, send device input, change runtime authority, or alter the current battle.",
+      : "This creates one verified child of current main under a private staging ref. It does not move main, touch the production index or worktree, restart services, send device input, change runtime authority, or alter the current battle.",
   ].join("\n");
   if (!window.confirm(confirmation)) return;
   setSaveMappingBusy(true);
@@ -602,7 +602,7 @@ async function integrateSaveMappingProposal() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        operation: "integrate",
+        operation: "stage",
         candidate_record_id: candidateRecordId,
         reviewed_proposal_fingerprint: review.reviewed_proposal_fingerprint,
       }),
@@ -634,7 +634,7 @@ async function integrateSaveMappingProposal() {
     );
     toast(result.promoted
       ? "Canonical mapping is deployed; a fresh stable decode is pending"
-      : "Canonical mapping committed to develop; production promotion is pending");
+      : "Canonical mapping staged privately; production promotion is pending");
     if (result.warning) toast(result.warning, true);
     await refresh();
   } catch (error) {

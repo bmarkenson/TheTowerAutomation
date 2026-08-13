@@ -2,10 +2,10 @@
 
 Production services remain fixed to the `main` checkout. Promotion is operator-
 or explicitly assigned promotion-owner work. The exact candidate comes from a
-temporary feature branch or, only when several feature tips must ship together,
-a temporary integration branch. Complete the repository-change checklist before
-this procedure and [`live_preflight.md`](../live_preflight.md) before any
-service/device action.
+temporary feature branch, a temporary integration branch only when several
+feature tips must ship together, or the allowlisted private save-mapping staging
+ref. Complete the repository-change checklist before this procedure and
+[`live_preflight.md`](../live_preflight.md) before any service/device action.
 
 ## Prepare one exact candidate
 
@@ -28,15 +28,43 @@ turning branch cleanup into a release.
    branch and worktree from current `main`, integrates only those exact tips,
    and resolves combined changes there. Do not use a standing integration
    branch or pull unrelated ready work into the candidate.
-3. Record the candidate branch, worktree, and exact tip `D`. Freeze that branch
-   while its complete checkpoint and promotion are in progress. Any new commit,
-   ref movement, conflict resolution, or unexpected advance of `main` before
-   the guarded production fast-forward invalidates the candidate and requires
-   renewed review and validation.
+3. Record the candidate branch or private ref, worktree when one exists, and
+   exact tip `D`. Freeze that candidate while its applicable gate and promotion
+   are in progress. Any new commit, ref movement, conflict resolution, or
+   unexpected advance of `main` before the guarded production fast-forward
+   invalidates the candidate and requires renewed review and applicable
+   validation.
 
 Unrelated branches and worktrees may remain dirty or continue independently;
 they block promotion only if their work is included in, overlaps, or obscures
 the selected candidate.
+
+## Choose the candidate gate
+
+Validation follows the aggregate `M..D` change and remaining uncertainty, not
+the number of branches or Git operations used to produce it. Run focused tests,
+generators, static checks, and native builds while the candidate can still
+change. Freeze exact commit `D` only after those cheaper checks pass, then run
+the strongest applicable gate below once. When several feature tips are planned
+as one release, validate each feature proportionately while developing and run
+the combined candidate gate on the final integrated `D`; do not run the full
+suite once per feature and again merely because they were combined.
+
+| Aggregate candidate contents | Required candidate gate |
+| --- | --- |
+| Documentation, process guidance, completion evidence, or test-only changes | Link/diff/static checks and affected tests. No automatic full Python checkpoint. |
+| Only canonical player-save mapping JSON produced by the reviewed fast lane | Exact allowlisted diff, target hashes/modes, mapping schema/set invariants, and focused mapping-loader/consumer tests. No automatic full Python checkpoint. |
+| Native Windows client inputs with no shared Linux/runtime change | Affected Python/JavaScript contract tests, portable .NET tests, and the Release cross-build or publisher preflight. No automatic full Python checkpoint. |
+| Runtime Python, shared control-surface code, YAML, templates, runtime-read assets, generators, or broadly consumed configuration | Focused tests first, then one complete repository checkpoint at frozen `D`. |
+| Interpreter, lock files, persistent-state formats, installed units, migrations, or an otherwise uncertain cross-cutting change | One complete checkpoint at frozen `D` plus the specific rebuild, migration, or recovery proof for that boundary. |
+
+If several rows apply, use their combined requirements. Record the exact `D`,
+selected gate, result, and development-environment input fingerprint. A result
+may be reused only while `D`, the relevant tracked validation inputs, and that
+environment fingerprint remain exact. Fast-forwarding `main` to the already
+validated object does not change `D` and does not trigger another checkpoint.
+If validation or review causes a new commit, validate the new object; repetition
+is justified by a changed candidate, not by promotion itself.
 
 ## Promote one exact candidate
 
@@ -46,11 +74,12 @@ the selected candidate.
    every accepted source branch and exact source tip.
 2. Record production commit `M` and candidate commit `D`. Recheck both refs and
    prove that `M` is an ancestor of `D`.
-3. Run the complete checkpoint at `D` from the candidate worktree; review all
-   `M..D` commits and the aggregate diff. Resolve remaining uncertainty with
-   retained or live evidence as appropriate. Classify every publishable
-   Windows-package input in that diff; a source checkout update does not publish
-   the native client.
+3. Review all `M..D` commits and the aggregate diff. Verify the applicable
+   candidate gate above passed at exact `D`, running it now only when exact
+   evidence is absent or stale. Resolve remaining uncertainty with retained or
+   live evidence as appropriate. Classify every publishable Windows-package
+   input in that diff; a source checkout update does not publish the native
+   client.
 4. Create a unique annotated local tag at `M`, for example
    `production-before-20260804T210500Z-fe3c83b`. Never move or reuse it; pushing
    a tag is a separate operator decision.
@@ -74,43 +103,59 @@ the selected candidate.
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
 
-### Direct save-mapping integration
+### Direct save-mapping staging
 
-The control-surface save-mapping action commits to `develop`; it does not
-promote. Its routine lane is available only when the standing production and
-integration worktrees are clean, at their branch tips, and exactly
-synchronized. In either GUI, select the durable observation, inspect the fixed
-Develop eligibility panel, review the exact proposal and repository
-fingerprint, then confirm **Integrate reviewed mapping into develop…**. Success
-must identify one standardized commit, exact canonical target hashes, passed
-mapping invariants, `committed=true`, and `promoted=false`; production `main`
-must remain at the reviewed base.
+The control-surface save-mapping action stages one exact Git object; it does not
+move `main` or touch the production index or worktree. Its routine lane is
+available only when production is a clean `main` checkout at its tip and
+`refs/thetower/save-mapping-candidate` is empty. In either GUI, select the
+durable observation, inspect **Private staging eligibility**, review the exact
+proposal and target hashes, then confirm **Stage reviewed mapping for
+promotion…**.
 
-Treat that commit as the next `develop` candidate. Review its exact diff and
-provenance trailers, run the complete supported checkpoint, then continue at
-step 2 of this production procedure. This narrow lane does not replace the
-combined checkpoint, annotated rollback tag, service boundary, native-package
-publication when applicable, or production smoke test.
+The review fingerprint binds the mapping proposal, canonical target
+before/after hashes and modes, mapping-set fingerprint, candidate identity, and
+commit-message contract. It intentionally does not bind unrelated files or the
+whole `main` commit. On confirmation the server repeats that review against
+current `main`. If the mapping inputs are unchanged, it constructs the commit
+with a private index using current `main` as parent, verifies that only the
+allowlisted mapping JSON paths differ, and atomically creates the fixed private
+ref while verifying `main` did not move. Thus an unrelated `main` advance
+before confirmation does not force a new operator review, while the resulting
+candidate is still a direct fast-forward child of the current tip.
 
-Do not clear the persistent warning when the `develop` commit succeeds. It
-becomes **Save mapping awaiting production promotion**, then **Deployed save
-mapping awaiting fresh validation** after `main` contains the commit, and
-retires only when a later complete stable save proves the running decoder
-loaded the matching canonical mapping set. That observation is passive and
+Success must identify the fixed staging ref, actual base, staged commit, exact
+canonical target hashes, passed mapping invariants, `committed=true`,
+`staged=true`, and `promoted=false`. Treat that exact staged object as
+candidate `D`: inspect its diff and provenance trailers, run the mapping-only
+candidate gate, then continue at step 2 of this production procedure. Do not
+substitute a full repository checkpoint merely because the object is being
+promoted.
+
+Do not clear the persistent warning when staging succeeds. It becomes **Save
+mapping awaiting production promotion**, then **Deployed save mapping awaiting
+fresh validation** after `main` contains the commit, and retires only when a
+later complete stable save proves the running decoder loaded the matching
+canonical mapping set. The application then removes the exact private ref and
+journal; the commit remains reachable from `main`. That passive observation
 cannot change runtime authority or send input.
 
-A stale review, dirty worktree, unequal or changed Git tip, target/hash/mode
-drift, busy lock, or other proven pre-write rejection requires a fresh catalog
-and review. Never retry automatically. If the catalog reports exact integration
-recovery, the GUI makes only that same candidate reviewable; inspect its stored
-target hashes and fingerprint, then invoke Integrate once to continue its
-durable transaction. A response lost after the commit was fully recorded
-reappears as the promotion-pending commit rather than another write. If the
-catalog reports an unconfirmed result, malformed or legacy
-journal, moved ref, unrelated index/worktree state, or any outcome that cannot
-be proved exact, do not retry, edit targets, or move refs; inspect the recorded
-transaction and repository state and route the repair through ordinary
-development.
+A stale mapping review, target/hash/mode drift, dirty production worktree,
+occupied staging ref, busy lock, or other proven pre-write rejection requires a
+fresh catalog and review; never retry automatically. If the catalog reports
+exact integration recovery, only the same durable candidate remains actionable:
+inspect its stored target hashes and fingerprint, then invoke the staging action
+once to continue its transaction. A response lost after the ref was created
+reappears as the same promotion-pending commit rather than another write.
+
+If `main` advances after staging without containing the candidate, the old
+object is no longer a fast-forward candidate and the status reports
+`restaging_required`. Do not merge, cherry-pick, or promote it. Inspect and
+retire only that exact stale transaction/ref through a reviewed recovery, then
+review the unchanged mapping inputs and stage a new child of current `main`.
+A malformed or legacy journal, moved ref, target supersession, or any outcome
+that cannot be proved exact is unconfirmed: do not edit targets or move refs
+ad hoc; route the repair through ordinary owned development.
 
 ### Required Windows package publication
 
@@ -273,7 +318,7 @@ work is not obsolete and must remain untouched.
    There, create and review a normal revert commit for the promoted range, or a
    smaller fix-forward when it is clearer and equally quick. Do not commit in
    the production checkout or silently move `main` backward.
-4. Run the complete checkpoint for that exact recovery candidate and
+4. Run the applicable candidate gate for that exact recovery object and
    fast-forward `main` under the same clean-candidate rules before restarting.
 5. Restore a prior environment, installed unit, or persistent data only when
    that item changed during deployment, then restart and repeat the smoke test.

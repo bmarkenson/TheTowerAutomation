@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import base64
-import fcntl
 from datetime import datetime, timedelta
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -12,15 +11,16 @@ from types import SimpleNamespace
 
 import pytest
 
-import core.player_save_mapping_develop_integration as develop_integration
 from core.player_save_mapping_candidates import (
     AppendOnlyMappingCandidateStore,
     build_mapping_candidate_record,
     pending_mapping_candidate,
     resolve_mapping_candidates,
 )
-from core.player_save_mapping_develop_integration import (
+from core.player_save_mapping_staged_candidate import (
+    CanonicalDecodeReceiptStore,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
+    SAVE_MAPPING_STAGING_REF,
     SaveMappingIntegrationError,
     SaveMappingIntegrationManager,
 )
@@ -126,7 +126,6 @@ def _record(
 @pytest.fixture
 def integration_repository(tmp_path: Path):
     production = tmp_path / "TheTower"
-    develop = tmp_path / "TheTower-worktrees" / "dev"
     mapping_dir = production / "config" / "player_save_versions"
     mapping_dir.mkdir(parents=True)
     for name in ("data_9_game_1073.json", "data_9_game_1101.json"):
@@ -141,11 +140,6 @@ def integration_repository(tmp_path: Path):
     (production / "operator-owned.txt").write_text("base\n", encoding="utf-8")
     _git(production, "add", "config", "operator-owned.txt")
     _git(production, "commit", "-m", "mapping base")
-    _git(production, "branch", "develop")
-    develop.parent.mkdir(parents=True)
-    _git(production, "worktree", "add", str(develop), "develop")
-    for path in (develop / "config/player_save_versions").glob("*.json"):
-        path.chmod(0o664)
     store = AppendOnlyMappingCandidateStore(tmp_path / "receipts.jsonl")
     record = _record()
     store.append_once(record)
@@ -156,18 +150,26 @@ def integration_repository(tmp_path: Path):
         transaction_path=tmp_path / "integration-transaction.json",
         decode_receipt_path=tmp_path / "decode-receipts.jsonl",
     )
-    return production, develop, store, record, manager
+    return production, store, record, manager
 
 
 def _review(manager: SaveMappingIntegrationManager, record: dict) -> dict:
     return manager.review(candidate_record_id=record["record_id"])
 
 
-def _integrate(manager, record, review):
-    return manager.integrate(
+def _stage(manager, record, review):
+    return manager.stage(
         candidate_record_id=record["record_id"],
         reviewed_proposal_fingerprint=review["reviewed_proposal_fingerprint"],
     )
+
+
+def _transaction(manager: SaveMappingIntegrationManager) -> dict:
+    return json.loads(manager.transaction_path.read_text(encoding="utf-8"))
+
+
+def _promote(production: Path) -> None:
+    _git(production, "merge", "--ff-only", SAVE_MAPPING_STAGING_REF)
 
 
 def _start_evidence(production: Path, transaction: dict) -> dict[str, str]:
@@ -180,23 +182,56 @@ def _start_evidence(production: Path, transaction: dict) -> dict[str, str]:
     }
 
 
-def test_catalog_exposes_fixed_develop_eligibility_without_workspaces(
+def _snapshot(transaction: dict, *, fingerprint: str | None = None):
+    identity = transaction["mapping_identity"]
+    return SimpleNamespace(
+        shape_valid=True,
+        canonical_mapping_fingerprint=(
+            fingerprint or transaction["canonical_mapping_fingerprint"]
+        ),
+        mapping_id=identity["mapping_id"],
+        mapping_authority_id=identity["authority_mapping_id"],
+        mapping_structural_id=identity["structural_mapping_id"],
+        source_sha256="6" * 64,
+        captured_at="2026-08-10T12:05:00+00:00",
+    )
+
+
+def _unrelated_commit(production: Path, text: str = "advanced\n") -> str:
+    (production / "operator-owned.txt").write_text(text, encoding="utf-8")
+    _git(production, "add", "operator-owned.txt")
+    _git(production, "commit", "-m", "unrelated main advance")
+    return _git(production, "rev-parse", "main")
+
+
+def _detached_commit(production: Path, subject: str) -> str:
+    tree = _git(production, "rev-parse", "main^{tree}")
+    return _git(
+        production,
+        "commit-tree",
+        tree,
+        "-p",
+        _git(production, "rev-parse", "main"),
+        "-m",
+        subject,
+    )
+
+
+def test_catalog_needs_only_clean_main_and_empty_private_staging_ref(
     integration_repository,
 ):
-    production, develop, _store, record, manager = integration_repository
+    production, _store, record, manager = integration_repository
 
     catalog = manager.catalog()
 
     assert catalog["available"] is True
+    assert catalog["schema_version"] == 3
     assert catalog["capability"] == SAVE_MAPPING_INTEGRATION_CAPABILITY
-    assert "workspaces" not in catalog
     assert catalog["repository"] == {
         "main_commit": _git(production, "rev-parse", "main"),
-        "develop_commit": _git(production, "rev-parse", "develop"),
-        "synchronized": True,
+        "staging_ref": SAVE_MAPPING_STAGING_REF,
+        "staged_commit": None,
         "production_clean": True,
-        "develop_clean": True,
-        "develop_path": str(develop),
         "integration_available": True,
         "code": "",
         "reason": "",
@@ -205,63 +240,149 @@ def test_catalog_exposes_fixed_develop_eligibility_without_workspaces(
     assert catalog["items"][0]["review_available"] is True
 
 
-def test_review_is_nonmutating_and_binds_both_canonical_targets(
+def test_review_is_nonmutating_and_binds_only_mapping_inputs(
     integration_repository,
 ):
-    production, develop, _store, record, manager = integration_repository
+    production, _store, record, manager = integration_repository
     before = {
-        root: {
-            path.name: path.read_bytes()
-            for path in (root / "config/player_save_versions").glob("*.json")
-        }
-        for root in (production, develop)
+        path.name: path.read_bytes()
+        for path in (production / "config/player_save_versions").glob("*.json")
     }
 
     review = _review(manager, record)
 
+    assert review["schema_version"] == 3
     assert review["operation"] == "review"
-    assert review["integrate"] == {"available": True, "code": "", "reason": ""}
-    assert "workspace" not in review
+    assert review["stage"] == {"available": True, "code": "", "reason": ""}
     assert len(review["reviewed_proposal_fingerprint"]) == 64
     assert len(review["canonical_mapping_fingerprint"]) == 64
     assert [target["mapping_id"] for target in review["proposal"]["targets"]] == [
         "data-9-game-1073",
         "data-9-game-1101",
     ]
-    for root, files in before.items():
-        assert not _git(root, "status", "--porcelain")
-        for name, content in files.items():
-            assert (root / "config/player_save_versions" / name).read_bytes() == content
+    assert not _git(production, "status", "--porcelain")
+    assert {
+        path.name: path.read_bytes()
+        for path in (production / "config/player_save_versions").glob("*.json")
+    } == before
+    assert not _git(production, "for-each-ref", "--format=%(objectname)", SAVE_MAPPING_STAGING_REF)
 
 
-def test_real_group_writable_mapping_modes_are_normalized_to_git_regular_files(
+def test_stage_creates_one_private_candidate_and_leaves_main_index_and_tree_untouched(
     integration_repository,
 ):
-    production, develop, _store, record, manager = integration_repository
-
+    production, _store, record, manager = integration_repository
     review = _review(manager, record)
-    result = _integrate(manager, record, review)
+    base = _git(production, "rev-parse", "main")
+    tree = {
+        path.name: path.read_bytes()
+        for path in (production / "config/player_save_versions").glob("*.json")
+    }
 
-    assert {target["mode"] for target in review["rendered_targets"]} == {0o664}
+    result = _stage(manager, record, review)
+
+    commit = result["staged_commit"]
+    assert result["operation"] == "stage"
+    assert result["disposition"] == "staged_for_promotion"
+    assert result["staging_ref"] == SAVE_MAPPING_STAGING_REF
+    assert result["committed"] is True
+    assert result["staged"] is True
+    assert result["promoted"] is False
+    assert result["mapping_invariants"] == "passed"
+    assert result["promotion_validation"] == "pending"
+    assert result["idempotent"] is False
+    assert _git(production, "rev-parse", "main") == base
+    assert _git(production, "rev-parse", SAVE_MAPPING_STAGING_REF) == commit
+    assert _git(production, "rev-parse", f"{commit}^") == base
+    assert _git(production, "show", "-s", "--format=%s", commit).startswith(
+        "Stage save mapping candidate"
+    )
+    assert not _git(production, "status", "--porcelain")
+    assert _git(
+        production,
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        commit,
+    ).splitlines() == [
+        "config/player_save_versions/data_9_game_1073.json",
+        "config/player_save_versions/data_9_game_1101.json",
+    ]
+    assert {
+        path.name: path.read_bytes()
+        for path in (production / "config/player_save_versions").glob("*.json")
+    } == tree
+
+
+def test_unrelated_main_advance_does_not_invalidate_review(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    review = _review(manager, record)
+    reviewed_base = review["reviewed_base_commit"]
+    current_main = _unrelated_commit(production)
+
+    result = _stage(manager, record, review)
+
+    assert current_main != reviewed_base
+    assert result["base_commit"] == current_main
+    assert _git(production, "rev-parse", f"{result['staged_commit']}^") == current_main
+    assert _git(production, "rev-parse", "main") == current_main
+    assert _git(
+        production,
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        result["staged_commit"],
+    ).splitlines() == [
+        "config/player_save_versions/data_9_game_1073.json",
+        "config/player_save_versions/data_9_game_1101.json",
+    ]
+
+
+def test_mapping_target_change_invalidates_review(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    review = _review(manager, record)
+    path = production / "config/player_save_versions/data_9_game_1073.json"
+    path.write_bytes(path.read_bytes() + b"\n")
+    _git(production, "add", path.relative_to(production).as_posix())
+    _git(production, "commit", "-m", "change reviewed mapping input")
+
+    with pytest.raises(SaveMappingIntegrationError) as failure:
+        _stage(manager, record, review)
+
+    assert failure.value.code == "reviewed_proposal_stale"
+    assert not _git(production, "for-each-ref", "--format=%(objectname)", SAVE_MAPPING_STAGING_REF)
+
+
+def test_group_writable_files_stage_as_regular_git_files(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+
+    result = _stage(manager, record, _review(manager, record))
+
+    assert {target["mode"] for target in result["targets"]} == {0o664}
     for target in result["targets"]:
-        entry = _git(
+        assert _git(
             production,
             "ls-tree",
-            result["integration_commit"],
+            result["staged_commit"],
             "--",
             target["path"],
-        )
-        assert entry.startswith("100644 blob ")
-    assert not _git(develop, "status", "--porcelain")
+        ).startswith("100644 blob ")
 
 
-def test_executable_canonical_target_is_rejected_during_read_only_review(
+def test_executable_mapping_target_is_rejected_before_staging(
     integration_repository,
 ):
-    production, develop, _store, record, manager = integration_repository
+    production, _store, record, manager = integration_repository
     _git(production, "config", "core.fileMode", "false")
-    for root in (production, develop):
-        (root / "config/player_save_versions/data_9_game_1073.json").chmod(0o775)
+    (production / "config/player_save_versions/data_9_game_1073.json").chmod(0o775)
 
     with pytest.raises(SaveMappingIntegrationError) as failure:
         _review(manager, record)
@@ -270,10 +391,8 @@ def test_executable_canonical_target_is_rejected_during_read_only_review(
     assert not manager.transaction_path.exists()
 
 
-def test_missing_git_identity_disables_integration_before_confirmation(
-    integration_repository,
-):
-    production, _develop, _store, record, manager = integration_repository
+def test_missing_git_identity_disables_staging(integration_repository):
+    production, _store, record, manager = integration_repository
     _git(production, "config", "user.name", "")
     _git(production, "config", "user.email", "")
 
@@ -281,206 +400,201 @@ def test_missing_git_identity_disables_integration_before_confirmation(
 
     assert catalog["repository"]["integration_available"] is False
     assert catalog["repository"]["code"] == "git_identity_unavailable"
-    assert catalog["items"][0]["review_available"] is False
     with pytest.raises(SaveMappingIntegrationError) as failure:
         _review(manager, record)
     assert failure.value.code == "git_identity_unavailable"
 
 
-def test_contradictory_semantics_leave_the_routine_fast_lane(
-    integration_repository,
-):
-    _production, _develop, store, record, manager = integration_repository
-    conflicting = _record(
-        module_name="Contradictory Fixture Cannon Assist",
-        source_fingerprint="2" * 64,
-        recorded_at="2026-08-10T12:01:01+00:00",
+def test_contradictory_semantics_leave_the_routine_lane(integration_repository):
+    _production, store, record, manager = integration_repository
+    store.append_once(
+        _record(
+            module_name="Contradictory Fixture Cannon Assist",
+            source_fingerprint="2" * 64,
+            recorded_at="2026-08-10T12:01:01+00:00",
+        )
     )
-    store.append_once(conflicting)
 
     catalog = manager.catalog()
 
     assert len(catalog["items"]) == 2
     assert all(item["review_available"] is False for item in catalog["items"])
-    assert all(
-        item["review_code"]
-        == "mapping_candidate_requires_ordinary_development"
-        for item in catalog["items"]
-    )
     with pytest.raises(SaveMappingIntegrationError) as failure:
         _review(manager, record)
     assert failure.value.code == "mapping_candidate_requires_ordinary_development"
 
 
-def test_integrate_creates_one_verified_develop_commit_and_leaves_main_untouched(
+def test_retry_is_idempotent_and_does_not_create_another_commit(
     integration_repository,
 ):
-    production, develop, _store, record, manager = integration_repository
+    production, _store, record, manager = integration_repository
     review = _review(manager, record)
-    base = _git(production, "rev-parse", "main")
-    production_before = {
-        path.name: path.read_bytes()
-        for path in (production / "config/player_save_versions").glob("*.json")
-    }
+    first = _stage(manager, record, review)
+    count = _git(production, "rev-list", "--count", SAVE_MAPPING_STAGING_REF)
 
-    result = _integrate(manager, record, review)
+    repeated = _stage(manager, record, review)
 
-    commit = result["integration_commit"]
-    assert result["disposition"] == "committed_to_develop"
-    assert result["committed"] is True
-    assert result["promoted"] is False
-    assert result["mapping_invariants"] == "passed"
-    assert result["promotion_validation"] == "pending"
-    assert result["idempotent"] is False
-    assert _git(production, "rev-parse", "main") == base
-    assert _git(production, "rev-parse", "develop") == commit
-    assert _git(production, "rev-parse", f"{commit}^") == base
-    assert not _git(production, "status", "--porcelain")
-    assert not _git(develop, "status", "--porcelain")
-    assert _git(production, "diff-tree", "--no-commit-id", "--name-only", "-r", commit).splitlines() == [
-        "config/player_save_versions/data_9_game_1073.json",
-        "config/player_save_versions/data_9_game_1101.json",
-    ]
-    message = _git(production, "show", "-s", "--format=%B", commit)
-    assert message.startswith(
-        f"Integrate save mapping candidate {record['record_id'][:12]}"
-    )
-    assert f"Save-Mapping-Candidate-ID: {record['record_id']}" in message
-    assert (
-        f"Save-Mapping-Proposal-Fingerprint: "
-        f"{review['reviewed_proposal_fingerprint']}"
-    ) in message
-    for name, content in production_before.items():
-        assert (production / "config/player_save_versions" / name).read_bytes() == content
-
-
-def test_retry_after_lost_response_is_idempotent_and_does_not_create_a_commit(
-    integration_repository,
-):
-    production, _develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    first = _integrate(manager, record, review)
-    count = _git(production, "rev-list", "--count", "develop")
-
-    repeated = _integrate(manager, record, review)
-
-    assert repeated["integration_commit"] == first["integration_commit"]
+    assert repeated["staged_commit"] == first["staged_commit"]
     assert repeated["idempotent"] is True
-    assert _git(production, "rev-list", "--count", "develop") == count
+    assert _git(production, "rev-list", "--count", SAVE_MAPPING_STAGING_REF) == count
 
 
-def test_exact_retry_after_external_promotion_reports_current_promoted_state(
-    integration_repository,
-):
-    production, _develop, _store, record, manager = integration_repository
+def test_exact_retry_after_promotion_reports_promoted(integration_repository):
+    production, _store, record, manager = integration_repository
     review = _review(manager, record)
-    first = _integrate(manager, record, review)
-    _git(production, "merge", "--ff-only", "develop")
+    first = _stage(manager, record, review)
+    _promote(production)
 
-    repeated = _integrate(manager, record, review)
+    repeated = _stage(manager, record, review)
 
-    assert repeated["integration_commit"] == first["integration_commit"]
+    assert repeated["staged_commit"] == first["staged_commit"]
     assert repeated["idempotent"] is True
     assert repeated["promoted"] is True
 
 
-def test_catalog_tracks_promotion_then_fresh_decode_validation(
+def test_catalog_tracks_promotion_and_decode_then_retires_private_ref(
     integration_repository,
 ):
-    production, _develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    result = _integrate(manager, record, review)
-
+    production, _store, record, manager = integration_repository
+    result = _stage(manager, record, _review(manager, record))
     pending = manager.catalog()
     assert pending["items"][0]["state"] == "promotion_pending"
-    assert pending["items"][0]["integration_commit"] == result["integration_commit"]
+    assert pending["items"][0]["staged_commit"] == result["staged_commit"]
 
-    _git(production, "merge", "--ff-only", "develop")
+    _promote(production)
     deployed = manager.catalog()
     assert deployed["items"][0]["state"] == "production_validation_pending"
+    transaction = _transaction(manager)
 
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    identity = transaction["mapping_identity"]
-    snapshot = SimpleNamespace(
-        shape_valid=True,
-        canonical_mapping_fingerprint=transaction["canonical_mapping_fingerprint"],
-        mapping_id=identity["mapping_id"],
-        mapping_authority_id=identity["authority_mapping_id"],
-        mapping_structural_id=identity["structural_mapping_id"],
-        source_sha256="a" * 64,
-        captured_at="2026-08-12T20:00:00+00:00",
-    )
     assert manager.observe_canonical_decode(
-        snapshot,
+        _snapshot(transaction),
         start_evidence=_start_evidence(production, transaction),
     ) is True
     assert not manager.transaction_path.exists()
-
-    complete = manager.catalog()
-    assert complete["items"] == []
-    assert manager.status()["counts"]["integrated"] == 1
+    assert not _git(production, "for-each-ref", "--format=%(objectname)", SAVE_MAPPING_STAGING_REF)
+    assert manager.catalog()["items"] == []
 
 
-@pytest.mark.parametrize("root_name", ["production", "develop"])
-def test_dirty_standing_worktree_disables_review_without_writing(
+def test_main_advance_after_staging_is_reported_as_restaging_required(
     integration_repository,
-    root_name,
 ):
-    production, develop, _store, record, manager = integration_repository
-    root = production if root_name == "production" else develop
-    (root / "operator-note.txt").write_text("owned\n", encoding="utf-8")
+    production, _store, record, manager = integration_repository
+    review = _review(manager, record)
+    first = _stage(manager, record, review)
+    current_main = _unrelated_commit(production)
+
+    item = manager.status()["items"][0]
+
+    assert item["state"] == "restaging_required"
+    assert "main advanced" in item["reason"]
+    recovery = _review(manager, record)
+    assert recovery["recovery_required"] is True
+    assert "restage" in recovery["stage"]["reason"]
+
+    restaged = _stage(manager, record, recovery)
+
+    assert restaged["staged_commit"] != first["staged_commit"]
+    assert restaged["base_commit"] == current_main
+    assert _git(production, "rev-parse", SAVE_MAPPING_STAGING_REF) == restaged["staged_commit"]
+    assert _git(production, "rev-parse", f"{restaged['staged_commit']}^") == current_main
+
+
+def test_dirty_production_disables_review_without_writing(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    (production / "untracked.txt").write_text("operator work\n", encoding="utf-8")
 
     catalog = manager.catalog()
 
     assert catalog["repository"]["integration_available"] is False
-    assert catalog["items"][0]["review_available"] is False
+    assert catalog["repository"]["code"] == "production_worktree_dirty"
     with pytest.raises(SaveMappingIntegrationError) as failure:
         _review(manager, record)
-    assert failure.value.code == f"{root_name}_worktree_dirty"
+    assert failure.value.code == "production_worktree_dirty"
+    assert not manager.transaction_path.exists()
 
 
-def test_unequal_main_and_develop_tips_disable_fast_lane(integration_repository):
-    _production, develop, _store, record, manager = integration_repository
-    (develop / "unrelated.txt").write_text("integration work\n", encoding="utf-8")
-    _git(develop, "add", "unrelated.txt")
-    _git(develop, "commit", "-m", "unrelated develop integration")
+def test_restaging_recovers_after_exact_old_ref_was_retired(
+    integration_repository,
+):
+    production, store, record, manager = integration_repository
+    review = _review(manager, record)
+    _stage(manager, record, review)
+    current_main = _unrelated_commit(production)
+    recovery = _review(manager, record)
+
+    def interrupt(transition: str) -> None:
+        if transition == "stale_candidate_ref_retired":
+            raise RuntimeError("lost after exact ref retirement")
+
+    interrupted = SaveMappingIntegrationManager(
+        repository_root=production,
+        candidate_store=store,
+        lock_path=manager.lock_path,
+        transaction_path=manager.transaction_path,
+        decode_receipt_path=manager.decode_receipts.path,
+        transaction_fault_hook=interrupt,
+    )
+    with pytest.raises(RuntimeError, match="lost after exact ref retirement"):
+        _stage(interrupted, record, recovery)
+
+    assert manager.transaction_path.exists()
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        SAVE_MAPPING_STAGING_REF,
+    )
+    assert manager.status()["items"][0]["state"] == "restaging_required"
+
+    restaged = _stage(manager, record, _review(manager, record))
+
+    assert restaged["base_commit"] == current_main
+    assert _git(production, "rev-parse", SAVE_MAPPING_STAGING_REF) == restaged["staged_commit"]
+
+
+def test_existing_private_ref_blocks_another_candidate(integration_repository):
+    production, _store, record, manager = integration_repository
+    occupied = _detached_commit(production, "occupied staging ref")
+    _git(production, "update-ref", SAVE_MAPPING_STAGING_REF, occupied)
 
     catalog = manager.catalog()
 
-    assert catalog["repository"]["code"] == "repository_not_synchronized"
+    assert catalog["repository"]["staged_commit"] == occupied
+    assert catalog["repository"]["code"] == "staging_ref_occupied"
     with pytest.raises(SaveMappingIntegrationError) as failure:
         _review(manager, record)
-    assert failure.value.code == "repository_not_synchronized"
+    assert failure.value.code == "staging_ref_occupied"
 
 
 def test_busy_lock_reports_retryable_failure_without_mutation(
     integration_repository,
 ):
-    production, develop, _store, record, manager = integration_repository
+    production, _store, record, manager = integration_repository
     review = _review(manager, record)
     descriptor = os.open(manager.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(SaveMappingIntegrationError) as failure:
-            _integrate(manager, record, review)
+            _stage(manager, record, review)
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
 
     assert failure.value.code == "integration_busy"
-    assert _git(production, "rev-parse", "main") == _git(production, "rev-parse", "develop")
-    assert not _git(develop, "status", "--porcelain")
+    assert not manager.transaction_path.exists()
+    assert not _git(production, "for-each-ref", "--format=%(objectname)", SAVE_MAPPING_STAGING_REF)
 
 
-def test_crash_after_journal_is_recovered_only_by_explicit_retry(
+def test_crash_after_journal_recovers_only_by_explicit_retry(
     integration_repository,
 ):
-    production, develop, store, record, manager = integration_repository
+    production, store, record, manager = integration_repository
     review = _review(manager, record)
 
     def interrupt(transition: str) -> None:
         if transition == "journal_written":
-            raise SystemExit("simulated response loss")
+            raise RuntimeError("lost process")
 
     interrupted = SaveMappingIntegrationManager(
         repository_root=production,
@@ -490,143 +604,28 @@ def test_crash_after_journal_is_recovered_only_by_explicit_retry(
         decode_receipt_path=manager.decode_receipts.path,
         transaction_fault_hook=interrupt,
     )
-    with pytest.raises(SystemExit, match="simulated response loss"):
-        _integrate(interrupted, record, review)
+    with pytest.raises(RuntimeError, match="lost process"):
+        _stage(interrupted, record, review)
 
     assert manager.transaction_path.exists()
-    assert _git(production, "rev-parse", "main") == _git(production, "rev-parse", "develop")
-    assert not _git(develop, "status", "--porcelain")
-    catalog = manager.catalog()
-    assert catalog["items"][0]["state"] == "integration_recovery_required"
-    assert catalog["items"][0]["review_available"] is True
-    recovery_review = _review(manager, record)
-    assert recovery_review["recovery_required"] is True
-    assert recovery_review["reviewed_proposal_fingerprint"] == review[
-        "reviewed_proposal_fingerprint"
-    ]
-    recovered = _integrate(manager, record, recovery_review)
-    assert recovered["idempotent"] is True
-    assert recovered["committed"] is True
+    assert not _git(production, "for-each-ref", "--format=%(objectname)", SAVE_MAPPING_STAGING_REF)
+    assert manager.catalog()["items"][0]["state"] == "integration_recovery_required"
 
-
-def test_crash_after_develop_fast_forward_recovers_as_exact_idempotent_success(
-    integration_repository,
-):
-    production, _develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def interrupt(transition: str) -> None:
-        if transition == "develop_fast_forwarded":
-            raise SystemExit("simulated response loss after ref update")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit, match="after ref update"):
-        _integrate(interrupted, record, review)
-
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    expected_commit = transaction["integration"]["expected_commit"]
-    assert transaction["phase"] == "commit_ready"
-    assert _git(production, "rev-parse", "develop") == expected_commit
-
-    catalog = manager.catalog()
-    assert catalog["items"][0]["state"] == "integration_recovery_required"
-    assert catalog["items"][0]["review_available"] is True
-    recovery_review = _review(manager, record)
-    assert recovery_review["recovery_required"] is True
-    recovered = _integrate(manager, record, recovery_review)
-
-    assert recovered["integration_commit"] == expected_commit
-    assert recovered["idempotent"] is True
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    assert transaction["phase"] == "committed_to_develop"
-
-
-def test_ref_first_crash_recovers_only_the_exact_stale_develop_checkout(
-    integration_repository,
-):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-    base = _git(production, "rev-parse", "main")
-
-    def interrupt(transition: str) -> None:
-        if transition == "journal_written":
-            raise SystemExit("simulated crash before ref update")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit, match="before ref update"):
-        _integrate(interrupted, record, review)
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    expected = transaction["integration"]["expected_commit"]
-    _git(develop, "switch", "--detach", base)
-    _git(production, "update-ref", "refs/heads/develop", expected, base)
-    assert _git(develop, "status", "--porcelain") == ""
-
-    recovery_review = _review(manager, record)
-    recovered = _integrate(manager, record, recovery_review)
-
-    assert recovered["integration_commit"] == expected
-    assert recovered["idempotent"] is True
-    assert not _git(develop, "status", "--porcelain")
-
-
-def test_crash_after_atomic_ref_update_is_gui_recoverable_while_detached(
-    integration_repository,
-):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def interrupt(transition: str) -> None:
-        if transition == "develop_ref_updated":
-            raise SystemExit("simulated crash after atomic ref update")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit, match="atomic ref update"):
-        _integrate(interrupted, record, review)
-    assert _git(develop, "branch", "--show-current") == ""
-    assert not _git(develop, "status", "--porcelain")
-
-    catalog = manager.catalog()
-    assert catalog["available"] is True
-    assert catalog["items"][0]["state"] == "integration_recovery_required"
-    assert catalog["items"][0]["review_available"] is True
-    recovery_review = _review(manager, record)
-    recovered = _integrate(manager, record, recovery_review)
+    recovered = _stage(manager, record, review)
 
     assert recovered["idempotent"] is True
-    assert _git(develop, "branch", "--show-current") == "develop"
-    assert not _git(develop, "status", "--porcelain")
+    assert _git(production, "rev-parse", SAVE_MAPPING_STAGING_REF) == recovered["staged_commit"]
 
 
-def test_partial_post_cas_checkout_is_preserved_as_unconfirmed(
+def test_crash_after_ref_update_recovers_exact_staged_commit(
     integration_repository,
 ):
-    production, develop, store, record, manager = integration_repository
+    production, store, record, manager = integration_repository
     review = _review(manager, record)
 
     def interrupt(transition: str) -> None:
-        if transition == "develop_ref_updated":
-            raise SystemExit("simulated crash during checkout refresh")
+        if transition == "staging_ref_updated":
+            raise RuntimeError("lost response")
 
     interrupted = SaveMappingIntegrationManager(
         repository_root=production,
@@ -636,270 +635,27 @@ def test_partial_post_cas_checkout_is_preserved_as_unconfirmed(
         decode_receipt_path=manager.decode_receipts.path,
         transaction_fault_hook=interrupt,
     )
-    with pytest.raises(SystemExit, match="checkout refresh"):
-        _integrate(interrupted, record, review)
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    changed = next(target for target in transaction["targets"] if target["changed"])
-    target_path = develop / changed["path"]
-    target_path.write_bytes(base64.b64decode(changed["after_base64"]))
-    target_path.chmod(changed["mode"])
-    assert _git(develop, "branch", "--show-current") == ""
-    assert _git(develop, "status", "--porcelain")
+    with pytest.raises(RuntimeError, match="lost response"):
+        _stage(interrupted, record, review)
+    expected = _git(production, "rev-parse", SAVE_MAPPING_STAGING_REF)
+    assert _transaction(manager)["phase"] == "commit_ready"
 
-    catalog = manager.catalog()
-    assert catalog["items"][0]["state"] == "integration_unconfirmed"
-    assert catalog["items"][0]["review_available"] is False
-    assert target_path.read_bytes() == base64.b64decode(changed["after_base64"])
-
-
-@pytest.mark.parametrize("index_bits", range(4))
-@pytest.mark.parametrize("worktree_bits", range(4))
-def test_partial_checkout_recovery_matrix_is_actionable_only_when_clean(
-    integration_repository,
-    index_bits,
-    worktree_bits,
-):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def interrupt(transition: str) -> None:
-        if transition == "develop_ref_updated":
-            raise SystemExit("simulated crash during checkout refresh")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit):
-        _integrate(interrupted, record, review)
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    changed = [target for target in transaction["targets"] if target["changed"]]
-    assert len(changed) == 2
-    for index, target in enumerate(changed):
-        path = develop / target["path"]
-        index_source = (
-            transaction["integration"]["expected_commit"]
-            if index_bits & (1 << index)
-            else transaction["repository"]["base_commit"]
-        )
-        _git(
-            develop,
-            "update-index",
-            "--cacheinfo",
-            "100644",
-            _git(develop, "rev-parse", f"{index_source}:{target['path']}"),
-            target["path"],
-        )
-        content_key = "after_base64" if worktree_bits & (1 << index) else "before_base64"
-        path.write_bytes(base64.b64decode(target[content_key]))
-        path.chmod(target["mode"])
-
-    catalog = manager.catalog()
-    if index_bits or worktree_bits:
-        assert catalog["items"][0]["state"] == "integration_unconfirmed"
-        assert catalog["items"][0]["review_available"] is False
-        return
-    assert catalog["items"][0]["state"] == "integration_recovery_required"
-    recovery_review = _review(manager, record)
-    recovered = _integrate(manager, record, recovery_review)
+    recovered = _stage(manager, record, review)
 
     assert recovered["idempotent"] is True
-    assert _git(develop, "branch", "--show-current") == "develop"
-    assert not _git(develop, "status", "--porcelain")
+    assert recovered["staged_commit"] == expected
+    assert _transaction(manager)["phase"] == "staged"
 
 
-def test_unrelated_post_cas_checkout_state_is_not_advertised_for_recovery(
+def test_concurrent_main_advance_at_ref_boundary_is_preserved(
     integration_repository,
 ):
-    production, develop, store, record, manager = integration_repository
+    production, store, record, manager = integration_repository
     review = _review(manager, record)
 
-    def interrupt(transition: str) -> None:
-        if transition == "develop_ref_updated":
-            raise SystemExit("simulated crash during checkout refresh")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit):
-        _integrate(interrupted, record, review)
-    (develop / "operator-note.txt").write_text("preserve\n", encoding="utf-8")
-
-    catalog = manager.catalog()
-
-    assert catalog["items"][0]["state"] == "integration_unconfirmed"
-    assert catalog["items"][0]["review_available"] is False
-    assert (develop / "operator-note.txt").read_text(encoding="utf-8") == "preserve\n"
-
-
-@pytest.mark.parametrize(
-    ("transition", "lock_owner", "git_path"),
-    [
-        ("journal_written", "production", "refs/heads/develop"),
-        ("develop_ref_updated", "develop", "index"),
-    ],
-)
-def test_git_crash_lock_artifacts_disable_recovery_without_removal(
-    integration_repository,
-    transition,
-    lock_owner,
-    git_path,
-):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def interrupt(observed_transition: str) -> None:
-        if observed_transition == transition:
-            raise SystemExit("simulated killed Git operation")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit):
-        _integrate(interrupted, record, review)
-    owner = production if lock_owner == "production" else develop
-    resolved_git_path = Path(_git(owner, "rev-parse", "--git-path", git_path))
-    if not resolved_git_path.is_absolute():
-        resolved_git_path = owner / resolved_git_path
-    lock_path = Path(f"{resolved_git_path}.lock")
-    lock_path.write_text("crash artifact\n", encoding="utf-8")
-
-    catalog = manager.catalog()
-
-    assert catalog["items"][0]["state"] == "integration_unconfirmed"
-    assert catalog["items"][0]["review_available"] is False
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(manager, record, review)
-    assert failure.value.code == "commit_state_uncertain"
-    assert lock_path.read_text(encoding="utf-8") == "crash artifact\n"
-
-
-@pytest.mark.parametrize("race_kind", ["unrelated", "target"])
-def test_concurrent_edit_at_partial_recovery_switch_is_preserved_and_unconfirmed(
-    integration_repository,
-    monkeypatch,
-    race_kind,
-):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def interrupt(transition: str) -> None:
-        if transition == "develop_ref_updated":
-            raise SystemExit("simulated crash during checkout refresh")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit):
-        _integrate(interrupted, record, review)
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    recovery_review = _review(manager, record)
-    original = develop_integration._git_mutate
-    injected = False
-    if race_kind == "unrelated":
-        raced_path = develop / "operator-owned.txt"
-        marker = "concurrent operator edit\n"
-    else:
-        target = next(item for item in transaction["targets"] if item["changed"])
-        raced_path = develop / target["path"]
-        marker = "concurrent operator target edit\n"
-
-    def racing_git(repository_root, *arguments, **kwargs):
-        nonlocal injected
-        if (
-            arguments[:2] == ("switch", "--detach")
-            and not injected
-        ):
-            injected = True
-            raced_path.write_text(marker, encoding="utf-8")
-        return original(repository_root, *arguments, **kwargs)
-
-    monkeypatch.setattr(develop_integration, "_git_mutate", racing_git)
-
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(manager, record, recovery_review)
-
-    assert failure.value.code == "commit_state_uncertain"
-    assert raced_path.read_text(encoding="utf-8") == marker
-    assert _git(develop, "ls-files", "--unmerged") == ""
-    catalog = manager.catalog()
-    if catalog["available"]:
-        assert catalog["items"][0]["state"] == "integration_unconfirmed"
-        assert catalog["items"][0]["review_available"] is False
-    else:
-        assert catalog["items"] == []
-
-
-def test_promoted_commit_ready_recovery_binds_the_original_reviewed_base(
-    integration_repository,
-):
-    production, _develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-    base = review["reviewed_base_commit"]
-
-    def interrupt(transition: str) -> None:
-        if transition == "develop_fast_forwarded":
-            raise SystemExit("simulated response loss before phase update")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit, match="before phase update"):
-        _integrate(interrupted, record, review)
-    _git(production, "merge", "--ff-only", "develop")
-
-    recovery_review = _review(manager, record)
-    recovered = _integrate(manager, record, recovery_review)
-
-    assert recovery_review["reviewed_base_commit"] == base
-    assert recovery_review["repository"]["main_commit"] != base
-    assert recovered["base_commit"] == base
-    assert recovered["promoted"] is True
-    assert recovered["idempotent"] is True
-
-
-@pytest.mark.parametrize("transition", ["commit_created", "journal_written"])
-def test_new_conflicting_candidate_before_ref_update_closes_routine_lane(
-    integration_repository,
-    transition,
-):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-    base = _git(production, "rev-parse", "main")
-
-    def append_conflict(observed_transition: str) -> None:
-        if observed_transition == transition:
-            store.append_once(
-                _record(
-                    module_name="Contradictory Fixture Cannon Assist",
-                    source_fingerprint="8" * 64,
-                    recorded_at="2026-08-10T12:02:01+00:00",
-                )
-            )
+    def advance_main(transition: str) -> None:
+        if transition == "before_staging_ref_update":
+            _unrelated_commit(production, "concurrent\n")
 
     racing = SaveMappingIntegrationManager(
         repository_root=production,
@@ -907,528 +663,138 @@ def test_new_conflicting_candidate_before_ref_update_closes_routine_lane(
         lock_path=manager.lock_path,
         transaction_path=manager.transaction_path,
         decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=append_conflict,
+        transaction_fault_hook=advance_main,
     )
     with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(racing, record, review)
+        _stage(racing, record, review)
 
-    assert failure.value.code == "mapping_candidate_requires_ordinary_development"
-    assert _git(production, "rev-parse", "develop") == base
-    assert not _git(develop, "status", "--porcelain")
+    assert failure.value.code == "commit_state_uncertain"
+    assert (production / "operator-owned.txt").read_text(encoding="utf-8") == "concurrent\n"
+    assert not _git(production, "for-each-ref", "--format=%(objectname)", SAVE_MAPPING_STAGING_REF)
 
 
-@pytest.mark.parametrize("transition", ["journal_written", "develop_ref_updated"])
-def test_conflicting_candidate_blocks_interrupted_transaction_recovery(
+def test_concurrent_staging_ref_creation_is_preserved(
     integration_repository,
-    transition,
 ):
-    production, develop, store, record, manager = integration_repository
+    production, store, record, manager = integration_repository
     review = _review(manager, record)
+    other = _detached_commit(production, "concurrent staged candidate")
 
-    def interrupt(observed_transition: str) -> None:
-        if observed_transition == transition:
-            raise SystemExit("simulated response loss")
+    def occupy_ref(transition: str) -> None:
+        if transition == "before_staging_ref_update":
+            _git(production, "update-ref", SAVE_MAPPING_STAGING_REF, other)
 
-    interrupted = SaveMappingIntegrationManager(
+    racing = SaveMappingIntegrationManager(
         repository_root=production,
         candidate_store=store,
         lock_path=manager.lock_path,
         transaction_path=manager.transaction_path,
         decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit):
-        _integrate(interrupted, record, review)
-    store.append_once(
-        _record(
-            module_name="Contradictory Fixture Cannon Assist",
-            source_fingerprint="8" * 64,
-            recorded_at="2026-08-10T12:02:01+00:00",
-        )
-    )
-    branch_before = _git(develop, "branch", "--show-current")
-    catalog = manager.catalog()
-
-    assert catalog["items"][0]["state"] == "integration_unconfirmed"
-    assert catalog["items"][0]["review_available"] is False
-    with pytest.raises(SaveMappingIntegrationError):
-        _review(manager, record)
-
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(manager, record, review)
-
-    assert failure.value.code == "mapping_candidate_requires_ordinary_development"
-    assert _git(develop, "branch", "--show-current") == branch_before
-
-
-def test_concurrent_develop_ref_movement_is_preserved_and_reported_uncertain(
-    integration_repository,
-):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def move_develop(transition: str) -> None:
-        if transition == "before_develop_fast_forward":
-            (develop / "concurrent.txt").write_text("concurrent\n", encoding="utf-8")
-            _git(develop, "add", "concurrent.txt")
-            _git(develop, "commit", "-m", "concurrent develop commit")
-
-    drifting = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=move_develop,
+        transaction_fault_hook=occupy_ref,
     )
     with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(drifting, record, review)
+        _stage(racing, record, review)
 
     assert failure.value.code == "commit_state_uncertain"
-    assert _git(develop, "log", "-1", "--format=%s") == "concurrent develop commit"
-    assert manager.transaction_path.exists()
+    assert _git(production, "rev-parse", SAVE_MAPPING_STAGING_REF) == other
 
 
-def test_branch_switch_before_fast_forward_is_detected_without_mutating_it(
+def test_promoted_target_drift_is_unconfirmed(integration_repository):
+    production, _store, record, manager = integration_repository
+    _stage(manager, record, _review(manager, record))
+    _promote(production)
+    path = production / "config/player_save_versions/data_9_game_1073.json"
+    path.write_bytes(path.read_bytes() + b"\n")
+    _git(production, "add", path.relative_to(production).as_posix())
+    _git(production, "commit", "-m", "supersede staged target")
+
+    item = manager.status()["items"][0]
+
+    assert item["state"] == "integration_unconfirmed"
+    assert "superseded" in item["reason"]
+
+
+def test_legacy_develop_transaction_is_not_interpreted(
     integration_repository,
 ):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-    base = _git(production, "rev-parse", "main")
-
-    def switch_branch(transition: str) -> None:
-        if transition == "before_develop_fast_forward":
-            _git(develop, "switch", "-c", "operator-other")
-
-    drifting = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=switch_branch,
-    )
-
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(drifting, record, review)
-
-    assert failure.value.code == "commit_state_uncertain"
-    assert _git(production, "rev-parse", "develop") == base
-    assert _git(production, "rev-parse", "operator-other") == base
-
-
-def test_branch_switch_at_ref_command_cannot_advance_the_wrong_branch(
-    integration_repository,
-    monkeypatch,
-):
-    production, develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    base = _git(production, "rev-parse", "main")
-    original = develop_integration._git_mutate
-    switched = False
-
-    def racing_git(repository_root, *arguments, **kwargs):
-        nonlocal switched
-        if arguments and arguments[0] == "update-ref" and not switched:
-            switched = True
-            _git(develop, "switch", "-c", "operator-race")
-        return original(repository_root, *arguments, **kwargs)
-
-    monkeypatch.setattr(develop_integration, "_git_mutate", racing_git)
-
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(manager, record, review)
-
-    assert failure.value.code == "commit_state_uncertain"
-    assert _git(production, "rev-parse", "operator-race") == base
-    assert _git(develop, "status", "--porcelain") == ""
-    assert _git(production, "rev-parse", "develop") != base
-
-
-def test_branch_switch_at_checkout_refresh_cannot_dirty_the_other_branch(
-    integration_repository,
-    monkeypatch,
-):
-    production, develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    base = _git(production, "rev-parse", "main")
-    _git(production, "branch", "operator-existing", base)
-    original = develop_integration._git_mutate
-    switched = False
-
-    def racing_git(repository_root, *arguments, **kwargs):
-        nonlocal switched
-        if (
-            arguments[:3] == ("switch", "--no-guess", "develop")
-            and not switched
-        ):
-            switched = True
-            _git(develop, "switch", "operator-existing")
-        return original(repository_root, *arguments, **kwargs)
-
-    monkeypatch.setattr(develop_integration, "_git_mutate", racing_git)
-
-    result = _integrate(manager, record, review)
-
-    assert result["committed"] is True
-    assert _git(production, "rev-parse", "operator-existing") == base
-    assert _git(develop, "branch", "--show-current") == "develop"
-    assert not _git(develop, "status", "--porcelain")
-
-
-def test_main_movement_at_ref_transaction_cannot_advance_develop(
-    integration_repository,
-    monkeypatch,
-):
-    production, develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    base = _git(production, "rev-parse", "main")
-    original = develop_integration._git_mutate
-    moved = False
-
-    def racing_git(repository_root, *arguments, **kwargs):
-        nonlocal moved
-        if arguments and arguments[0] == "update-ref" and not moved:
-            moved = True
-            (production / "concurrent-main.txt").write_text(
-                "concurrent\n",
-                encoding="utf-8",
-            )
-            _git(production, "add", "concurrent-main.txt")
-            _git(production, "commit", "-m", "concurrent main commit")
-        return original(repository_root, *arguments, **kwargs)
-
-    monkeypatch.setattr(develop_integration, "_git_mutate", racing_git)
-
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(manager, record, review)
-
-    assert failure.value.code == "commit_state_uncertain"
-    assert _git(production, "rev-parse", "develop") == base
-    assert _git(develop, "branch", "--show-current") == "develop"
-    assert not _git(develop, "status", "--porcelain")
-
-
-def test_descendant_refs_are_unconfirmed_not_actionable_recovery(
-    integration_repository,
-):
-    production, develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def interrupt(transition: str) -> None:
-        if transition == "develop_fast_forwarded":
-            raise SystemExit("simulated response loss")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit):
-        _integrate(interrupted, record, review)
-    _git(production, "merge", "--ff-only", "develop")
-    (production / "main-descendant.txt").write_text("main\n", encoding="utf-8")
-    _git(production, "add", "main-descendant.txt")
-    _git(production, "commit", "-m", "main descendant")
-    (develop / "develop-descendant.txt").write_text("develop\n", encoding="utf-8")
-    _git(develop, "add", "develop-descendant.txt")
-    _git(develop, "commit", "-m", "develop descendant")
-
-    catalog = manager.catalog()
-
-    assert catalog["items"][0]["state"] == "integration_unconfirmed"
-    assert catalog["items"][0]["review_available"] is False
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _review(manager, record)
-    assert failure.value.code == "repository_not_synchronized"
-
-
-def test_promoted_recovery_rejects_superseded_production_targets(
-    integration_repository,
-):
-    production, _develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def interrupt(transition: str) -> None:
-        if transition == "develop_fast_forwarded":
-            raise SystemExit("simulated response loss")
-
-    interrupted = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=interrupt,
-    )
-    with pytest.raises(SystemExit):
-        _integrate(interrupted, record, review)
-    _git(production, "merge", "--ff-only", "develop")
-    target = production / "config/player_save_versions/data_9_game_1073.json"
-    target.write_text(target.read_text(encoding="utf-8") + " ", encoding="utf-8")
-    _git(production, "add", str(target.relative_to(production)))
-    _git(production, "commit", "-m", "supersede promoted canonical target")
-
-    catalog = manager.catalog()
-
-    assert catalog["items"][0]["state"] == "integration_unconfirmed"
-    assert "superseding" in catalog["items"][0]["reason"]
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(manager, record, review)
-    assert failure.value.code == "commit_state_uncertain"
-
-
-def test_production_dirtied_after_ref_update_prevents_success_claim(
-    integration_repository,
-):
-    production, _develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-
-    def dirty_production(transition: str) -> None:
-        if transition == "develop_fast_forwarded":
-            (production / "operator-note.txt").write_text(
-                "concurrent\n",
-                encoding="utf-8",
-            )
-
-    drifting = SaveMappingIntegrationManager(
-        repository_root=production,
-        candidate_store=store,
-        lock_path=manager.lock_path,
-        transaction_path=manager.transaction_path,
-        decode_receipt_path=manager.decode_receipts.path,
-        transaction_fault_hook=dirty_production,
-    )
-
-    with pytest.raises(SaveMappingIntegrationError) as failure:
-        _integrate(drifting, record, review)
-
-    assert failure.value.code == "commit_state_uncertain"
-    assert manager.transaction_path.exists()
-
-
-def test_later_develop_target_drift_is_not_advertised_for_promotion(
-    integration_repository,
-):
-    _production, develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    _integrate(manager, record, review)
-    target = develop / "config/player_save_versions/data_9_game_1073.json"
-    target.write_text(target.read_text(encoding="utf-8") + " ", encoding="utf-8")
-    _git(develop, "add", str(target.relative_to(develop)))
-    _git(develop, "commit", "-m", "supersede canonical target")
-
-    catalog = manager.catalog()
-
-    assert catalog["items"][0]["state"] == "integration_unconfirmed"
-    assert "superseded" in catalog["items"][0]["reason"]
-
-
-def test_divergent_main_is_not_advertised_as_fast_forward_promotion(
-    integration_repository,
-):
-    production, _develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    _integrate(manager, record, review)
-    (production / "production-only.txt").write_text("advance\n", encoding="utf-8")
-    _git(production, "add", "production-only.txt")
-    _git(production, "commit", "-m", "divergent production change")
-
-    catalog = manager.catalog()
-
-    assert catalog["items"][0]["state"] == "integration_unconfirmed"
-    assert "diverged" in catalog["items"][0]["reason"]
-
-
-def test_newer_identical_observation_does_not_hide_transaction_lifecycle(
-    integration_repository,
-):
-    _production, _develop, store, record, manager = integration_repository
-    review = _review(manager, record)
-    result = _integrate(manager, record, review)
-    store.append_once(
-        _record(
-            source_fingerprint="2" * 64,
-            recorded_at="2026-08-10T12:01:01+00:00",
-        )
-    )
-
-    catalog = manager.catalog()
-    transaction_item = next(
-        item
-        for item in catalog["items"]
-        if item.get("integration_commit") == result["integration_commit"]
-    )
-
-    assert transaction_item["state"] == "promotion_pending"
-
-
-def test_legacy_feature_preparation_journal_blocks_without_interpretation(
-    integration_repository,
-):
-    _production, _develop, _store, _record, manager = integration_repository
+    _production, _store, record, manager = integration_repository
     manager.transaction_path.write_text(
-        json.dumps({"kind": "save_mapping_preparation_transaction"}) + "\n",
+        json.dumps({"kind": "save_mapping_develop_integration_transaction"}),
         encoding="utf-8",
     )
 
-    catalog = manager.catalog()
+    with pytest.raises(SaveMappingIntegrationError) as failure:
+        _review(manager, record)
 
-    assert catalog["available"] is False
-    assert catalog["code"] == "legacy_transaction_recovery_required"
+    assert failure.value.code == "legacy_transaction_recovery_required"
 
 
-def test_decode_receipt_rejects_wrong_mapping_fingerprint(
+def test_decode_requires_matching_fingerprint_and_post_stage_start(
     integration_repository,
 ):
-    production, _develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    _integrate(manager, record, review)
-    _git(production, "merge", "--ff-only", "develop")
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    identity = transaction["mapping_identity"]
+    production, _store, record, manager = integration_repository
+    _stage(manager, record, _review(manager, record))
+    _promote(production)
+    transaction = _transaction(manager)
+    good_start = _start_evidence(production, transaction)
 
     assert manager.observe_canonical_decode(
-        SimpleNamespace(
-            shape_valid=True,
-            canonical_mapping_fingerprint="0" * 64,
-            mapping_id=identity["mapping_id"],
-            mapping_authority_id=identity["authority_mapping_id"],
-            mapping_structural_id=identity["structural_mapping_id"],
-            source_sha256="a" * 64,
-            captured_at="2026-08-12T20:00:00+00:00",
-        ),
-        start_evidence=_start_evidence(production, transaction),
+        _snapshot(transaction, fingerprint="0" * 64),
+        start_evidence=good_start,
     ) is False
-    assert not manager.decode_receipts.path.exists()
-
-
-def test_decode_receipt_is_recorded_once_for_repeated_stable_acquisitions(
-    integration_repository,
-):
-    production, _develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    _integrate(manager, record, review)
-    _git(production, "merge", "--ff-only", "develop")
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    identity = transaction["mapping_identity"]
-
-    def snapshot(source: str, captured_at: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            shape_valid=True,
-            canonical_mapping_fingerprint=transaction[
-                "canonical_mapping_fingerprint"
-            ],
-            mapping_id=identity["mapping_id"],
-            mapping_authority_id=identity["authority_mapping_id"],
-            mapping_structural_id=identity["structural_mapping_id"],
-            source_sha256=source,
-            captured_at=captured_at,
-        )
-
+    early = {
+        **good_start,
+        "acquired_at": (
+            datetime.fromisoformat(transaction["integration_available_since"])
+            - timedelta(seconds=1)
+        ).isoformat(),
+    }
     assert manager.observe_canonical_decode(
-        snapshot("a" * 64, "2026-08-12T20:00:00+00:00"),
-        start_evidence=_start_evidence(production, transaction),
-    ) is True
-    assert manager.observe_canonical_decode(
-        snapshot("b" * 64, "2026-08-12T20:01:00+00:00"),
-        start_evidence=_start_evidence(production, transaction),
+        _snapshot(transaction),
+        start_evidence=early,
     ) is False
-
-    records = manager.decode_receipts.list_records()
-    assert len(records) == 1
-    assert records[0]["acquisition_main_commit"] == _git(
-        production,
-        "rev-parse",
-        "main",
-    )
-    assert records[0]["acquisition_started_at"]
-
-
-def test_decode_receipt_requires_acquisition_to_start_after_integration(
-    integration_repository,
-):
-    production, _develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    _integrate(manager, record, review)
-    _git(production, "merge", "--ff-only", "develop")
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    identity = transaction["mapping_identity"]
-    too_early = datetime.fromisoformat(
-        transaction["integration_available_since"]
-    ) - timedelta(seconds=1)
-
-    observed = manager.observe_canonical_decode(
-        SimpleNamespace(
-            shape_valid=True,
-            canonical_mapping_fingerprint=transaction[
-                "canonical_mapping_fingerprint"
-            ],
-            mapping_id=identity["mapping_id"],
-            mapping_authority_id=identity["authority_mapping_id"],
-            mapping_structural_id=identity["structural_mapping_id"],
-            source_sha256="a" * 64,
-            captured_at="2026-08-12T20:00:00+00:00",
-        ),
-        start_evidence={
-            "main_commit": _git(production, "rev-parse", "main"),
-            "acquired_at": too_early.isoformat(),
-        },
-    )
-
-    assert observed is False
     assert manager.transaction_path.exists()
-    assert not manager.decode_receipts.path.exists()
+    assert _git(production, "rev-parse", SAVE_MAPPING_STAGING_REF)
 
 
-def test_decode_receipt_store_repairs_only_an_incomplete_final_line(
-    integration_repository,
-):
-    production, _develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    _integrate(manager, record, review)
-    _git(production, "merge", "--ff-only", "develop")
-    transaction = json.loads(manager.transaction_path.read_text(encoding="utf-8"))
-    identity = transaction["mapping_identity"]
-    assert manager.observe_canonical_decode(
-        SimpleNamespace(
-            shape_valid=True,
-            canonical_mapping_fingerprint=transaction[
-                "canonical_mapping_fingerprint"
-            ],
-            mapping_id=identity["mapping_id"],
-            mapping_authority_id=identity["authority_mapping_id"],
-            mapping_structural_id=identity["structural_mapping_id"],
-            source_sha256="a" * 64,
-            captured_at="2026-08-12T20:00:00+00:00",
-        ),
-        start_evidence=_start_evidence(production, transaction),
-    ) is True
-    with manager.decode_receipts.path.open("ab") as handle:
+def test_decode_receipt_store_is_idempotent_and_repairs_partial_tail(tmp_path):
+    path = tmp_path / "decode-receipts.jsonl"
+    store = CanonicalDecodeReceiptStore(path)
+    unsigned = {
+        "candidate_record_id": "1" * 64,
+        "integration_commit": "2" * 40,
+        "canonical_mapping_fingerprint": "3" * 64,
+        "snapshot_mapping_fingerprint": "3" * 64,
+        "snapshot_fingerprint": "4" * 64,
+        "acquisition_started_at": "2026-08-10T12:00:00+00:00",
+        "acquisition_main_commit": "5" * 40,
+        "captured_at": "2026-08-10T12:00:01+00:00",
+    }
+    from core.player_save_mapping_candidates import fingerprint_json
+
+    record = {
+        "schema_version": 2,
+        "receipt_id": fingerprint_json(unsigned),
+        **unsigned,
+    }
+
+    assert store.append_once(record) is True
+    assert store.append_once(record) is False
+    with path.open("ab") as handle:
         handle.write(b'{"partial"')
-
-    records = manager.decode_receipts.list_records()
-
-    assert len(records) == 1
-    assert manager.decode_receipts.path.read_bytes().endswith(b"\n")
+    assert store.list_records() == [record]
+    assert path.read_bytes().endswith(b"\n")
 
 
-def test_corrupt_decode_receipt_keeps_lifecycle_visible_as_unavailable(
+def test_complete_corrupt_decode_receipt_keeps_status_unavailable(
     integration_repository,
 ):
-    production, _develop, _store, record, manager = integration_repository
-    review = _review(manager, record)
-    _integrate(manager, record, review)
-    _git(production, "merge", "--ff-only", "develop")
-    manager.decode_receipts.path.write_text("not-json\n", encoding="utf-8")
+    production, _store, record, manager = integration_repository
+    _stage(manager, record, _review(manager, record))
+    _promote(production)
+    manager.decode_receipts.path.write_text("{}\n", encoding="utf-8")
 
-    catalog = manager.catalog()
     status = manager.status()
 
-    assert catalog["available"] is False
-    assert catalog["code"] == "decode_receipt_store_invalid"
     assert status["available"] is False
-    assert status["items"]
+    assert "invalid shape" in status["reason"]

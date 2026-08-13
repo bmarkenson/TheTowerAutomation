@@ -17,7 +17,7 @@
     <Border Grid.Row="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,0,0,10">
       <StackPanel>
         <TextBlock Text="CANONICAL SAVE MAPPINGS" Foreground="#62D5FF" FontSize="10" FontWeight="Bold" />
-        <TextBlock Text="Review and integrate into develop" FontSize="20" FontWeight="Bold" Margin="0,3,0,4" />
+        <TextBlock Text="Review and stage for promotion" FontSize="20" FontWeight="Bold" Margin="0,3,0,4" />
         <TextBlock x:Name="CatalogStatusText" Text="Loading the durable review queue…" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
       </StackPanel>
     </Border>
@@ -37,8 +37,8 @@
       </Border>
       <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="10">
         <StackPanel>
-          <TextBlock Text="2. DEVELOP ELIGIBILITY" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" />
-          <TextBox x:Name="RepositoryDetailText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="10" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" Text="Loading main/develop readiness…" />
+          <TextBlock Text="2. PRIVATE STAGING ELIGIBILITY" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" />
+          <TextBox x:Name="RepositoryDetailText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="10" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" Text="Loading main/staging readiness…" />
         </StackPanel>
       </Border>
     </Grid>
@@ -59,11 +59,11 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <TextBlock Grid.Column="0" x:Name="IntegrateStatusText" Text="Integration remains disabled until this exact candidate is reviewed." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" VerticalAlignment="Center" Margin="0,0,12,0" />
+      <TextBlock Grid.Column="0" x:Name="IntegrateStatusText" Text="Staging remains disabled until this exact candidate is reviewed." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" VerticalAlignment="Center" Margin="0,0,12,0" />
       <Button Grid.Column="1" x:Name="CloseButton" Content="Close" Click="Close_Click" Margin="3" />
       <Button Grid.Column="2" x:Name="RefreshButton" Content="Refresh catalog" Click="Refresh_Click" Margin="3" />
       <Button Grid.Column="3" x:Name="ReviewButton" Content="Review exact proposal" Click="Review_Click" Margin="3" IsEnabled="False" />
-      <Button Grid.Column="4" x:Name="IntegrateButton" Content="Integrate reviewed mapping into develop…" Click="Integrate_Click" Style="{StaticResource PrimaryButton}" Margin="3" IsEnabled="False" />
+      <Button Grid.Column="4" x:Name="IntegrateButton" Content="Stage reviewed mapping for promotion…" Click="Integrate_Click" Style="{StaticResource PrimaryButton}" Margin="3" IsEnabled="False" />
     </Grid>
   </Grid>
 </Window>

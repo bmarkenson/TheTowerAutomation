@@ -178,25 +178,27 @@ application again restores and foregrounds the existing main window, or flashes
 it on the taskbar if Windows declines the foreground request.
 
 **Tools > Save mapping integration…** and the persistent save-mapping banner's
-**Review mappings…** action open the revision-40 direct-integration UI. Choose
-one durable observation, verify the read-only Develop eligibility panel, review
-the exact proposal fingerprint, then accept the separate warning before
-integration. The client never submits a filesystem path, branch, target,
-patch operation, mapping value, commit message, or Git identity. Success shows
-the exact `develop` commit, target hashes, passed mapping invariants, and the
-still-pending production promotion and fresh-decode checkpoint. An exact lost
-response before transaction finalization reopens as a reviewable exact recovery
-and returns **Already committed to develop** when the ref had already moved. A
-fully recorded commit reappears as **Save mapping awaiting production
-promotion** instead of offering another write. An unprovable outcome remains an
-inspection warning.
+**Review mappings…** action open the revision-42 private-staging UI. Choose one
+durable observation, verify the read-only Private staging eligibility panel,
+review the exact proposal fingerprint, then accept the separate warning before
+staging. The client never submits a filesystem path, ref, target, patch
+operation, mapping value, commit message, or Git identity. Success shows the
+fixed private ref, actual `main` parent, staged commit, target hashes, passed
+mapping invariants, and the still-pending production promotion and fresh-decode
+checkpoint. Unrelated `main` changes before confirmation are accepted when the
+reviewed mapping inputs remain exact. An exact lost response before transaction
+finalization reopens as a reviewable recovery and returns **Already staged for
+promotion** when the ref had already moved. A fully recorded commit reappears as
+**Save mapping awaiting production promotion** instead of offering another
+write. An unprovable outcome remains an inspection warning.
 
-While review or Integrate is in flight, the selection, refresh, and Close
+While review or Stage is in flight, the selection, refresh, and Close
 controls are disabled and the window cannot be dismissed. Failed or lost
 requests are never retried automatically; the UI distinguishes a proven
 rejection from an unconfirmed outcome and surfaces any audit warning.
-Integration does not promote, control automation, restart a service, send
-device input, alter runtime authority, or change the current battle. The
+Staging does not move `main` or its index/worktree, promote, control automation,
+restart a service, send device input, alter runtime authority, or change the
+current battle. The
 persistent banner says **Save mapping awaiting production promotion** until the
 commit reaches `main`, then **Deployed save mapping awaiting fresh validation**
 until a complete stable save proves the deployed mapping is loaded.
@@ -1028,10 +1030,10 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 41, `current_battle_perks_v1`,
+current Windows build requires revision 42, `current_battle_perks_v1`,
 `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,
-`save_backed_setup_capture_v2`, `save_mapping_develop_integration_v1`,
+`save_backed_setup_capture_v2`, `save_mapping_staged_candidate_v1`,
 `save_mapping_review_status_v2`, `confirmed_local_mapping_status_v2`,
 `host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,
@@ -1096,16 +1098,18 @@ already configured:
 7. With no desired tunnel, close the GUI and confirm the companion exits after
    about 15 seconds. Then start a desired tunnel, sign out of Windows, sign back
    in, and confirm neither the host nor a tunnel starts automatically.
-8. With one durable mapping observation and clean, exactly synchronized
-   `main`/`develop`, open save-mapping integration from both **Tools** and the
-   persistent banner. Verify the fixed Develop eligibility panel, review the
-   exact proposal, change the candidate and confirm integration disables, then
-   review again. Cancel the warning once and prove both refs and worktrees stay
-   unchanged. Confirm integration once and verify one exact child commit reaches
-   only `develop`, both worktrees remain clean, and the result keeps promotion
-   and fresh validation pending. Simulate or inspect the documented recovery
-   states and confirm there is no automatic retry, service restart, runtime-
-   control change, or device input.
+8. With one durable mapping observation, clean `main`, and an empty private
+   save-mapping ref, open the workflow from both **Tools** and the persistent
+   banner. Verify Private staging eligibility, review the exact proposal,
+   change the candidate and confirm staging disables, then review again. Cancel
+   the warning once and prove `main`, its index/worktree, and the private ref
+   stay unchanged. Confirm staging once and verify one exact child of current
+   `main` reaches only `refs/thetower/save-mapping-candidate`; `main` remains
+   unchanged and clean, and the result keeps promotion and fresh validation
+   pending. Advance `main` with an unrelated test commit, confirm the same
+   mapping review can be explicitly restaged on that new tip, and exercise the
+   documented lost-response recovery without automatic retry, service restart,
+   runtime-control change, or device input.
 9. For revision 40, connect to a fresh exact-owner runtime snapshot after the
    relevant acknowledgement lines have moved more than 262 KiB behind the log
    tail, then after log rotation. Confirm Action Authority, terminal policy,
@@ -1148,6 +1152,7 @@ pending until they are actually exercised in a Windows WPF session. Linux
 cross-builds and portable compatibility tests do not count as that runtime
 validation. Revision-41 item 12 also remains pending; no live control or device
 request is needed merely to refresh these displays.
+Revision-42 item 8 remains pending until exercised in a Windows WPF session.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).

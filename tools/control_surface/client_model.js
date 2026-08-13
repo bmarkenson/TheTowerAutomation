@@ -147,6 +147,7 @@
       evidence_ambiguous: 0,
       integration_unconfirmed: 0,
       integration_recovery_required: 1,
+      restaging_required: 1,
       promotion_pending: 2,
       production_validation_pending: 3,
       authority_pending: 4,
@@ -168,6 +169,7 @@
       "evidence_ambiguous",
       "integration_unconfirmed",
       "integration_recovery_required",
+      "restaging_required",
       "promotion_pending",
       "production_validation_pending",
     ].includes(String(item?.state || ""))).sort((left, right) => (
@@ -187,7 +189,7 @@
     ].some((value) => states.has(value));
     const first = visibleItems[0];
     const winningState = String(first?.state || "");
-    const severity = dangerous || winningState === "integration_recovery_required"
+    const severity = dangerous || ["integration_recovery_required", "restaging_required"].includes(winningState)
       ? (dangerous ? "danger" : "warning")
       : ["authority_pending", "active_local", "review_required", "more_evidence_required"].includes(winningState)
         ? "warning" : "info";
@@ -195,6 +197,8 @@
       ? "A local save mapping needs attention"
       : winningState === "integration_recovery_required"
         ? "Save-mapping integration recovery requires direction"
+      : winningState === "restaging_required"
+        ? "Save mapping must be restaged on current main"
       : winningState === "promotion_pending"
         ? "Save mapping awaiting production promotion"
       : winningState === "production_validation_pending"
@@ -259,17 +263,16 @@
     const validRepository = repository
       && typeof repository === "object"
       && gitObject(repository.main_commit)
-      && gitObject(repository.develop_commit)
-      && typeof repository.develop_path === "string"
-      && repository.develop_path.length > 0
+      && typeof repository.staging_ref === "string"
+      && repository.staging_ref.startsWith("refs/")
+      && (repository.staged_commit == null
+        || gitObject(repository.staged_commit))
       && (recovery
         ? repository.integration_available === false
           && repository.code === "transaction_recovery_required"
         : repository.integration_available === true
-          && repository.synchronized === true
-          && repository.main_commit === repository.develop_commit
           && repository.production_clean === true
-          && repository.develop_clean === true);
+          && repository.staged_commit == null);
     const validProposalTarget = (target) => target
       && typeof target === "object"
       && mappingTargetPath(target.path)
@@ -310,15 +313,13 @@
           && target.mapping_id === rendered.mapping_id
           && target.expected_sha256 === rendered.before_sha256,
       ));
-    return review.schema_version === 2
-      && review.capability === "save_mapping_develop_integration_v1"
+    return review.schema_version === 3
+      && review.capability === "save_mapping_staged_candidate_v1"
       && review.operation === "review"
       && lowerHex64(candidate)
       && review.candidate_record_id === candidate
       && lowerHex64(review.reviewed_proposal_fingerprint)
       && gitObject(review.reviewed_base_commit)
-      && (recovery
-        || review.reviewed_base_commit === repository?.main_commit)
       && lowerHex64(review.canonical_mapping_fingerprint)
       && validRepository
       && proposal
@@ -336,9 +337,9 @@
 
   function saveMappingIntegrationCompatible(status) {
     return status?.api_version === 1
-      && Number(status?.server_revision) >= 40
+      && Number(status?.server_revision) >= 42
       && (status?.capabilities || []).includes(
-        "save_mapping_develop_integration_v1",
+        "save_mapping_staged_candidate_v1",
       );
   }
 
@@ -353,11 +354,11 @@
         reason: "Select the candidate, then review the exact proposal.",
       };
     }
-    const integrate = review.integrate || {};
+    const staging = review.stage || {};
     return {
-      available: integrate.available === true,
-      code: String(integrate.code || ""),
-      reason: String(integrate.reason || ""),
+      available: staging.available === true,
+      code: String(staging.code || ""),
+      reason: String(staging.reason || ""),
     };
   }
 
@@ -404,19 +405,20 @@
       )));
     const valid = result
       && typeof result === "object"
-      && result.schema_version === 2
-      && result.capability === "save_mapping_develop_integration_v1"
-      && result.operation === "integrate"
-      && result.disposition === "committed_to_develop"
+      && result.schema_version === 3
+      && result.capability === "save_mapping_staged_candidate_v1"
+      && result.operation === "stage"
+      && result.disposition === "staged_for_promotion"
       && typeof result.idempotent === "boolean"
       && expectedCandidate.length > 0
       && result.candidate_record_id === expectedCandidate
       && /^[0-9a-f]{64}$/.test(expectedFingerprint)
       && result.reviewed_proposal_fingerprint === expectedFingerprint
-      && result.base_commit === review?.reviewed_base_commit
-      && /^[0-9a-f]{40,64}$/.test(result.integration_commit || "")
-      && result.develop_commit === result.integration_commit
+      && gitObject(result.base_commit)
+      && result.staging_ref === review?.repository?.staging_ref
+      && gitObject(result.staged_commit)
       && result.committed === true
+      && result.staged === true
       && typeof result.promoted === "boolean"
       && (result.promoted !== true || result.idempotent === true)
       && result.mapping_invariants === "passed"
@@ -431,7 +433,7 @@
       code: valid ? "" : "integrated_result_invalid",
       reason: valid
         ? ""
-        : "The server response did not prove this exact reviewed proposal was committed to develop.",
+        : "The server response did not prove this exact reviewed proposal was staged without moving main.",
     };
   }
 
@@ -446,7 +448,7 @@
     if (!validation.valid) {
       return {
         success: false,
-        title: "Integration outcome is unconfirmed",
+        title: "Staging outcome is unconfirmed",
         detail: `${validation.reason} Refresh the catalog before taking another action.`,
         code: validation.code,
       };
@@ -455,9 +457,9 @@
     return {
       success: true,
       title: result.idempotent
-        ? "Already committed to develop"
-        : "Committed to develop",
-      detail: `${changed} canonical mapping file${changed === 1 ? "" : "s"} committed as ${result.integration_commit.slice(0, 12)}. Mapping invariants passed; ${result.promoted ? "a fresh stable decode remains pending" : "production promotion and a fresh stable decode remain pending"}.`,
+        ? "Already staged for promotion"
+        : "Staged for promotion",
+      detail: `${changed} canonical mapping file${changed === 1 ? "" : "s"} staged as ${result.staged_commit.slice(0, 12)}. Mapping invariants passed; ${result.promoted ? "a fresh stable decode remains pending" : "production promotion and a fresh stable decode remain pending"}.`,
       code: "",
     };
   }
@@ -472,18 +474,17 @@
         detail: `${message} This request did not acquire integration authority. Refresh after the active request finishes; do not retry automatically.`,
       };
     }
-    if (code === "develop_fast_forward_failed") {
+    if (code === "staging_ref_update_failed") {
       return {
         uncertain: false,
-        title: "Develop remained unchanged",
+        title: "Nothing was staged",
         detail: `${message} Refresh, verify the same review, and retry once only when directed.`,
       };
     }
     const safelyRejected = [
       "reviewed_proposal_stale",
-      "develop_worktree_dirty",
       "production_worktree_dirty",
-      "repository_not_synchronized",
+      "staging_ref_occupied",
       "proposal_base_changed",
     ].includes(code);
     if (safelyRejected || !integrateRequest) {
@@ -496,7 +497,7 @@
     return {
       uncertain: true,
       title: "Integration outcome is unconfirmed",
-      detail: `${message} Inspect main, develop, and the durable transaction before another action; do not retry automatically.`,
+      detail: `${message} Inspect main, the private staging ref, and the durable transaction before another action; do not retry automatically.`,
     };
   }
 

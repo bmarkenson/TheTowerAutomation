@@ -47,8 +47,8 @@ internal static class SaveMappingIntegrationViewModels
         string? candidateRecordId)
     {
         if (review is null
-            || review.SchemaVersion != 2
-            || review.Capability != "save_mapping_develop_integration_v1"
+            || review.SchemaVersion != 3
+            || review.Capability != "save_mapping_staged_candidate_v1"
             || review.Operation != "review"
             || !IsLowerHex64(candidateRecordId)
             || review.CandidateRecordId != candidateRecordId
@@ -61,17 +61,15 @@ internal static class SaveMappingIntegrationViewModels
         var repository = review.Repository;
         var recovery = review.RecoveryRequired;
         var repositoryValid = IsGitObject(repository.MainCommit)
-            && IsGitObject(repository.DevelopCommit)
-            && !string.IsNullOrWhiteSpace(repository.DevelopPath)
-            && (recovery || review.ReviewedBaseCommit == repository.MainCommit)
+            && repository.StagingRef.StartsWith("refs/", StringComparison.Ordinal)
+            && (repository.StagedCommit is null
+                || IsGitObject(repository.StagedCommit))
             && (recovery
                 ? !repository.IntegrationAvailable
                     && repository.Code == "transaction_recovery_required"
                 : repository.IntegrationAvailable
-                    && repository.Synchronized
                     && repository.ProductionClean
-                    && repository.DevelopClean
-                    && repository.MainCommit == repository.DevelopCommit);
+                    && repository.StagedCommit is null);
         var proposalTargets = Targets(review.Proposal);
         var renderedTargets = review.RenderedTargets ?? [];
         var proposalValid = review.Proposal.RecordId == candidateRecordId
@@ -128,9 +126,9 @@ internal static class SaveMappingIntegrationViewModels
                 "Select the observation, then review the exact proposal.");
         }
         return new(
-            review!.Integrate.Available,
-            review.Integrate.Code ?? "",
-            review.Integrate.Reason ?? "");
+            review!.Stage.Available,
+            review.Stage.Code ?? "",
+            review.Stage.Reason ?? "");
     }
 
     public static IReadOnlyList<SaveMappingProposalTarget> Targets(
@@ -152,16 +150,16 @@ internal static class SaveMappingIntegrationViewModels
     {
         if (repository is null)
         {
-            return "Develop eligibility is unavailable.";
+            return "Private staging eligibility is unavailable.";
         }
         var readiness = repository.IntegrationAvailable
-            ? "Eligible: main and develop are clean and synchronized."
+            ? "Eligible: main is clean and the private staging ref is empty."
             : string.IsNullOrWhiteSpace(repository.Reason)
-                ? "Direct develop integration is unavailable."
+                ? "Private-ref staging is unavailable."
                 : repository.Reason;
-        return $"main    {repository.MainCommit}{Environment.NewLine}"
-            + $"develop {repository.DevelopCommit}{Environment.NewLine}"
-            + $"path    {repository.DevelopPath}{Environment.NewLine}"
+        return $"main        {repository.MainCommit}{Environment.NewLine}"
+            + $"staging ref {repository.StagingRef}{Environment.NewLine}"
+            + $"staged      {repository.StagedCommit ?? "empty"}{Environment.NewLine}"
             + readiness;
     }
 
@@ -173,9 +171,9 @@ internal static class SaveMappingIntegrationViewModels
         text.AppendLine();
         text.AppendLine("REPOSITORY SNAPSHOT");
         text.AppendLine($"reviewed base {review.ReviewedBaseCommit}");
-        text.AppendLine($"main         {review.Repository.MainCommit}");
-        text.AppendLine($"develop      {review.Repository.DevelopCommit}");
-        text.AppendLine($"synchronized {review.Repository.Synchronized}");
+        text.AppendLine($"current main  {review.Repository.MainCommit}");
+        text.AppendLine($"staging ref   {review.Repository.StagingRef}");
+        text.AppendLine($"staged        {review.Repository.StagedCommit ?? "empty"}");
         foreach (var target in Targets(review.Proposal))
         {
             var rendered = (review.RenderedTargets ?? []).FirstOrDefault(item =>
@@ -219,18 +217,19 @@ internal static class SaveMappingIntegrationViewModels
         var valid = result is not null
             && review is not null
             && ReviewMatches(review, review.CandidateRecordId)
-            && result.SchemaVersion == 2
-            && result.Capability == "save_mapping_develop_integration_v1"
-            && result.Operation == "integrate"
-            && result.Disposition == "committed_to_develop"
+            && result.SchemaVersion == 3
+            && result.Capability == "save_mapping_staged_candidate_v1"
+            && result.Operation == "stage"
+            && result.Disposition == "staged_for_promotion"
             && result.Idempotent.HasValue
             && result.CandidateRecordId == review.CandidateRecordId
             && result.ReviewedProposalFingerprint
                 == review.ReviewedProposalFingerprint
-            && result.BaseCommit == review.ReviewedBaseCommit
-            && IsGitObject(result.IntegrationCommit)
-            && result.DevelopCommit == result.IntegrationCommit
+            && IsGitObject(result.BaseCommit)
+            && result.StagingRef == review.Repository.StagingRef
+            && IsGitObject(result.StagedCommit)
             && result.Committed is true
+            && result.Staged is true
             && result.Promoted.HasValue
             && (result.Promoted is not true || result.Idempotent is true)
             && result.MappingInvariants == "passed"
@@ -264,7 +263,7 @@ internal static class SaveMappingIntegrationViewModels
             valid ? "" : "integrated_result_invalid",
             valid
                 ? ""
-                : "The server response did not prove this exact reviewed proposal was committed to develop.");
+                : "The server response did not prove this exact reviewed proposal was staged without moving main.");
     }
 
     public static SaveMappingResultPresentation IntegratedResult(
@@ -278,18 +277,18 @@ internal static class SaveMappingIntegrationViewModels
         {
             return new(
                 false,
-                "Integration outcome is unconfirmed",
+                "Staging outcome is unconfirmed",
                 validation.Reason
                     + " Refresh the catalog before taking another action.",
                 validation.Code);
         }
         var changed = result!.Targets!.Count(target => target.Changed is true);
-        var commit = result.IntegrationCommit[..Math.Min(12, result.IntegrationCommit.Length)];
+        var commit = result.StagedCommit[..Math.Min(12, result.StagedCommit.Length)];
         return new(
             true,
             result.Idempotent is true
-                ? "Already committed to develop"
-                : "Committed to develop",
+                ? "Already staged for promotion"
+                : "Staged for promotion",
             $"{changed} canonical mapping file{(changed == 1 ? "" : "s")} "
                 + $"committed as {commit}. Mapping invariants passed; "
                 + (result.Promoted is true
@@ -313,8 +312,11 @@ internal static class SaveMappingIntegrationViewModels
             return text.ToString().TrimEnd();
         }
         text.AppendLine();
-        text.AppendLine($"commit: {result.IntegrationCommit}");
+        text.AppendLine($"base: {result.BaseCommit}");
+        text.AppendLine($"staging ref: {result.StagingRef}");
+        text.AppendLine($"staged commit: {result.StagedCommit}");
         text.AppendLine($"committed: {Lower(result.Committed)}");
+        text.AppendLine($"staged: {Lower(result.Staged)}");
         text.AppendLine($"promoted: {Lower(result.Promoted)}");
         text.AppendLine($"mapping invariants: {result.MappingInvariants}");
         text.AppendLine($"production validation: {result.PromotionValidation}");
@@ -348,32 +350,31 @@ internal static class SaveMappingIntegrationViewModels
                     + " This request did not acquire integration authority. "
                     + "Refresh after the active request finishes; do not retry automatically.");
         }
-        if (code == "develop_fast_forward_failed")
+        if (code == "staging_ref_update_failed")
         {
             return new(
                 false,
-                "Develop remained unchanged",
+                "Nothing was staged",
                 message
                     + " Refresh, verify the same review, and retry once only when directed.");
         }
         var safelyRejected = code is "reviewed_proposal_stale"
-            or "develop_worktree_dirty"
             or "production_worktree_dirty"
-            or "repository_not_synchronized"
+            or "staging_ref_occupied"
             or "proposal_base_changed";
         if (safelyRejected || !integrateRequest)
         {
             return new(
                 false,
-                integrateRequest ? "Integration rejected" : "Review unavailable",
+                integrateRequest ? "Staging rejected" : "Review unavailable",
                 message
-                    + " Nothing was committed by this request. Refresh and review again.");
+                    + " Nothing was staged by this request. Refresh and review again.");
         }
         return new(
             true,
             "Integration outcome is unconfirmed",
             message
-                + " Inspect main, develop, and the durable transaction before "
+                + " Inspect main, the private staging ref, and the durable transaction before "
                 + "another action; do not retry automatically.");
     }
 

@@ -1526,6 +1526,7 @@ def confirmed_local_mapping_status(
         "integration_unconfirmed",
         "production_validation_pending",
         "promotion_pending",
+        "restaging_required",
     }
     integration_candidate_ids = {
         str(item.get("candidate_record_id") or "")

@@ -517,8 +517,8 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/setup-capture` | Current runtime-issued capture status, availability, inactive captured-draft catalog, Module presets, and comparison Bases |
 | `POST` | `/api/v1/setup-capture` | Request a new forced-save capture, review a fingerprinted captured-versus-Base difference, save through the existing Module/Strategy owner, or cancel; never activate or publish |
 | `GET` | `/api/v1/setup-capture/drafts/{id}` | Reopen one immutable captured Strategy source in the ordinary authoring editor without selecting or activating it |
-| `GET` | `/api/v1/save-mapping-integration` | Durable review candidates and the fixed, read-only `main`/`develop` eligibility snapshot; never mutates a repository |
-| `POST` | `/api/v1/save-mapping-integration` | Review one server-generated canonical proposal or commit its exact reviewed fingerprint directly to an eligible `develop`; never promotes, restarts, changes runtime authority, or sends input |
+| `GET` | `/api/v1/save-mapping-integration` | Durable review candidates and the fixed, read-only `main`/private-ref staging snapshot; never mutates a repository |
+| `POST` | `/api/v1/save-mapping-integration` | Review one server-generated canonical proposal or stage its exact reviewed fingerprint under the fixed private ref; never moves `main`, promotes, restarts, changes runtime authority, or sends input |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -563,71 +563,67 @@ suppresses a UI check, or grants integration/revoke authority. A missing or
 unreadable status contract is shown as a compatibility/error state; canonical
 save mappings and their existing UI fallbacks remain runtime authority.
 
-Server revision 40 advertises `save_mapping_develop_integration_v1`. The
+Server revision 42 advertises `save_mapping_staged_candidate_v1`. The
 banner's **Review mappings…** action and the native **Tools > Save mapping
 integration…** item open the same explicit review workflow. Candidate is the
-only selection. A read-only **Develop eligibility** panel identifies the fixed
-linked `develop` checkout and shows both branch tips, cleanliness, exact
-synchronization, and any blocker. Requests cannot carry a filesystem path,
-branch, target, patch operation, mapping value, commit message, or Git identity.
-Review is read-only and binds the candidate receipt, equal `main`/`develop`
-base, proposal, exact before/after hashes and modes, prospective canonical
-mapping fingerprint, and standardized commit contract. The response exposes
-that immutable `reviewed_base_commit` separately from the current branch tips,
-so an exact recovery remains verifiable after production promotion. Any
-candidate or repository change invalidates an ordinary review.
+only selection. A read-only **Private staging eligibility** panel identifies
+current `main`, the fixed `refs/thetower/save-mapping-candidate` ref, its
+current object or empty state, production cleanliness, and any blocker.
+Requests cannot carry a filesystem path, ref, target, patch operation, mapping
+value, commit message, or Git identity.
 
-**Integrate reviewed mapping into develop…** requires a second operator
-confirmation and recomputes every guard under a process-shared lock. Production
-and `develop` must be clean, at their branch tips, and at the same exact commit;
-exactly one unlocked linked `develop` checkout must exist. The server renders
-the fixed allowlisted canonical JSON targets against both checkouts and requires
-identical bases. It then builds one child commit from a private temporary Git
-index, verifies its parent, exact path set, blobs, modes, message, and full
-candidate/fingerprint trailers, locks one final candidate-queue snapshot, and
-detaches the clean develop checkout at the reviewed base. One atomic Git ref
-transaction verifies `main` is still that base while compare-and-swapping the
-explicit `refs/heads/develop` name. Git then switches that same checkout to the
-advanced develop branch, serializing its index/worktree update with any other
-checkout command; a race can neither redirect the ref update nor stage the
-mapping onto another branch. `main` and its files remain unchanged. Both
-clients accept success
-only when the response proves the exact reviewed base and target set, candidate,
-review fingerprint, commit, before/after hashes and modes, passed mapping
-invariants, `committed=true`, and pending production validation. Initial
-integration must report `promoted=false`; an exact idempotent recovery after an
-external promotion reports the current promoted state instead of claiming that
-production is still unchanged.
+Review is read-only and binds the candidate receipt, proposal, exact target
+before/after hashes and modes, prospective canonical mapping fingerprint, and
+standardized commit contract. `reviewed_base_commit` remains visible for audit,
+but unrelated content and the whole `main` object are intentionally excluded
+from the reviewed proposal fingerprint. On a confirmed **Stage reviewed mapping
+for promotion…** request, the server recomputes the proposal against current
+`main`. The target hashes, modes, proposal, candidate identity, and mapping
+fingerprint must still match; an unrelated `main` advance is therefore allowed
+without weakening target-level stale-review protection.
 
-A private durable transaction records the exact generated commit before the
-`develop` ref update and remains through promotion. Response loss is idempotent
-only when the exact commit and repository state can be proved. A safely rejected
-review is refreshed and repeated; a proven unchanged fast-forward failure may
-be explicitly recovered once. That exact durable transaction reappears as a
-reviewable recovery item after a GUI refresh or restart; the second confirmation
-can retry only its stored candidate and fingerprint and cannot create a second
-commit. Automatic recovery accepts only a clean checkout at an exact detached
-transaction endpoint. A plain Git switch refuses and preserves any edit that
-arrives after that proof; every partial index or worktree state remains
-unconfirmed for ordinary inspection. Git `index.lock`, `HEAD.lock`, branch-ref
-lock, or `packed-refs.lock` crash artifacts also disable recovery and are never
-removed automatically.
-A moved ref, unrelated dirty state, malformed
-journal, or unprovable outcome remains visible for inspection and is never
-retried automatically or reset. Only one unresolved direct integration exists
-at a time.
+The server builds one child of current `main` with a private temporary Git
+index, verifies its parent, exact allowlisted path set, blobs, modes, message,
+and provenance trailers, then locks one final candidate-queue snapshot. One
+atomic Git ref transaction verifies `main` is still that parent while creating
+only the fixed private staging ref. It never updates `refs/heads/main`, the
+production index, or the production worktree. Both clients accept success only
+when the response proves the exact candidate/review identity, actual base,
+fixed staging ref, staged commit, target hashes/modes, passed mapping
+invariants, `committed=true`, `staged=true`, and pending production
+validation. Initial staging reports `promoted=false`; an exact idempotent retry
+after external promotion reports the current promoted state.
+
+A private durable transaction records the generated commit before ref creation
+and remains through promotion. Response loss is idempotent only when the exact
+commit, ref, and target state can be proved. The durable transaction reappears
+as a reviewable exact recovery after GUI refresh or restart; a second
+confirmation can retry only its stored candidate and fingerprint and cannot
+create a duplicate commit. Git ref or packed-ref lock artifacts disable recovery
+and are never removed automatically. A moved or occupied ref, dirty production
+state, changed target, malformed journal, or unprovable outcome remains visible
+for inspection and is never reset or retried automatically. Only one unresolved
+staged mapping exists at a time.
+
+If `main` advances after staging without containing the candidate, the status
+becomes `restaging_required`. When the current `main` target blobs still equal
+the reviewed before-hashes, the same explicit recovery confirmation retires
+only the exact old private ref and journal, re-renders the same proposal, and
+stages a new child of current `main`. A crash after exact old-ref retirement
+remains recoverable from the journal even though the ref is already empty.
+Target drift or a different ref object fails closed instead.
 
 The persistent banner reports **Save mapping awaiting production promotion**
-while the standardized commit exists only on `develop`, then **Deployed save
+while the exact object exists only under the private ref, then **Deployed save
 mapping awaiting fresh validation** after `main` contains it. A complete stable
 post-deployment acquisition appends one privacy-safe receipt only when the
 runtime-loaded authority/structural mappings and canonical fingerprint match
-the committed targets. Its durable receipt binds the acquisition's start time
-and the production commit loaded by that runtime. Receipt work runs after the
-outer ADB/mutation lifecycle has released. Observer failure never degrades a
-valid save or changes automation; it keeps the checkpoint visible. Only the
-matching production commit plus that fresh decode receipt retires the
-transaction and banner.
+the committed targets. Its durable receipt binds the acquisition start and
+production commit loaded by that runtime. Receipt work runs after the outer
+ADB/mutation lifecycle has released. Observer failure never degrades a valid
+save or changes automation; it keeps the checkpoint visible. The matching
+production commit plus fresh receipt retires the exact private ref and journal;
+the commit remains reachable from `main`.
 
 ### Structured Strategy Action Gate status
 

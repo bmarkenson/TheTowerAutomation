@@ -77,6 +77,13 @@ After `.venv` exists, run every project command through it:
 .venv/bin/python tools/development.py checkpoint
 ```
 
+`checkpoint` is the complete repository gate, not the default validation after
+each edit, feature commit, reconciliation, or promotion. Use focused tests while
+the candidate can still change. Run the complete gate only when the candidate
+class in the [production procedure](operations/production_promotion.md#choose-the-candidate-gate)
+requires it, once at the frozen exact candidate commit; reuse that exact result
+when promotion does not change the commit or environment inputs.
+
 Do not install packages ad hoc. The bootstrap's fingerprint, lock, completion,
 and isolation contract is in
 [`architecture/development_isolation.md`](architecture/development_isolation.md#development-python-environment).

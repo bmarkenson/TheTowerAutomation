@@ -7,22 +7,24 @@ public sealed class SaveMappingIntegrationViewModelTests
     private static readonly string CandidateId = new('a', 64);
 
     [Fact]
-    public void Revision_40_review_contract_deserializes_without_workspace()
+    public void Revision_42_review_contract_deserializes_without_workspace()
     {
         const string payload = """
         {
-          "schema_version": 2,
-          "capability": "save_mapping_develop_integration_v1",
+          "schema_version": 3,
+          "capability": "save_mapping_staged_candidate_v1",
           "operation": "review",
           "candidate_record_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "reviewed_proposal_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "reviewed_base_commit": "1111111111111111111111111111111111111111",
           "repository": {
             "main_commit":"main",
-            "develop_commit":"develop",
-            "synchronized":true,
+            "staging_ref":"refs/thetower/save-mapping-candidate",
+            "staged_commit":null,
+            "production_clean":true,
             "integration_available":true,
-            "develop_path":"/develop"
+            "code":"",
+            "reason":""
           },
           "proposal": {
             "schema_version": 2,
@@ -39,7 +41,7 @@ public sealed class SaveMappingIntegrationViewModelTests
               }]
             }]
           },
-          "integrate": {"available":true,"code":"","reason":""}
+          "stage": {"available":true,"code":"","reason":""}
         }
         """;
 
@@ -47,8 +49,8 @@ public sealed class SaveMappingIntegrationViewModelTests
             payload);
 
         Assert.NotNull(review);
-        Assert.Equal("save_mapping_develop_integration_v1", review.Capability);
-        Assert.True(review.Repository.Synchronized);
+        Assert.Equal("save_mapping_staged_candidate_v1", review.Capability);
+        Assert.Equal("refs/thetower/save-mapping-candidate", review.Repository.StagingRef);
         var operation = Assert.Single(Assert.Single(review.Proposal.Targets).Operations);
         Assert.Equal("add", operation.Operation);
         Assert.Equal(10, operation.Value.GetProperty("info_index").GetInt32());
@@ -85,14 +87,12 @@ public sealed class SaveMappingIntegrationViewModelTests
     {
         var review = Review();
         review.RecoveryRequired = true;
-        review.Repository.DevelopCommit = new string('b', 40);
-        review.Repository.Synchronized = false;
+        review.Repository.StagedCommit = new string('b', 40);
         review.Repository.ProductionClean = false;
-        review.Repository.DevelopClean = false;
         review.Repository.IntegrationAvailable = false;
         review.Repository.Code = "transaction_recovery_required";
         review.Proposal.Targets[0].Operations = [];
-        review.Integrate.Code = "transaction_recovery_required";
+        review.Stage.Code = "transaction_recovery_required";
 
         var available = SaveMappingIntegrationViewModels.IntegrateAvailability(
             review,
@@ -151,6 +151,7 @@ public sealed class SaveMappingIntegrationViewModelTests
         Assert.True(presentation.Success);
         Assert.Contains("Mapping invariants passed", presentation.Detail);
         Assert.Contains("committed: true", detail);
+        Assert.Contains("staged: true", detail);
         Assert.Contains("promoted: false", detail);
         Assert.Contains("production validation: pending", detail);
         Assert.Contains("Audit logging needs inspection.", detail);
@@ -161,6 +162,10 @@ public sealed class SaveMappingIntegrationViewModelTests
     {
         var result = IntegratedResult();
 
+        Assert.True(SaveMappingIntegrationViewModels.ValidateIntegratedResult(
+            result,
+            Review()).Valid);
+        result.BaseCommit = new string('9', 40);
         Assert.True(SaveMappingIntegrationViewModels.ValidateIntegratedResult(
             result,
             Review()).Valid);
@@ -192,8 +197,8 @@ public sealed class SaveMappingIntegrationViewModelTests
         result.Idempotent = true;
         var recovery = Review();
         recovery.RecoveryRequired = true;
-        recovery.Repository.MainCommit = result.IntegrationCommit;
-        recovery.Repository.DevelopCommit = result.IntegrationCommit;
+        recovery.Repository.MainCommit = result.StagedCommit;
+        recovery.Repository.StagedCommit = result.StagedCommit;
         recovery.Repository.IntegrationAvailable = false;
         recovery.Repository.Code = "transaction_recovery_required";
         recovery.Proposal.Targets[0].Operations = [];
@@ -212,14 +217,15 @@ public sealed class SaveMappingIntegrationViewModelTests
     {
         const string payload = """
         {
-          "schema_version":2,
-          "capability":"save_mapping_develop_integration_v1",
-          "operation":"integrate",
-          "disposition":"committed_to_develop",
+          "schema_version":3,
+          "capability":"save_mapping_staged_candidate_v1",
+          "operation":"stage",
+          "disposition":"staged_for_promotion",
           "candidate_record_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "reviewed_proposal_fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "integration_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "develop_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "base_commit":"cccccccccccccccccccccccccccccccccccccccc",
+          "staging_ref":"refs/thetower/save-mapping-candidate",
+          "staged_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "mapping_invariants":"passed",
           "promotion_validation":"pending",
           "targets":[{
@@ -246,20 +252,20 @@ public sealed class SaveMappingIntegrationViewModelTests
     public void Failure_copy_separates_safe_rejection_retry_and_uncertainty()
     {
         var rejected = SaveMappingIntegrationViewModels.Failure(
-            "repository_not_synchronized",
-            "Pending promotion.",
+            "staging_ref_occupied",
+            "Pending candidate.",
             integrateRequest: true);
         var uncertain = SaveMappingIntegrationViewModels.Failure(
             "commit_state_uncertain",
             "Inspect transaction.",
             integrateRequest: true);
         var unchanged = SaveMappingIntegrationViewModels.Failure(
-            "develop_fast_forward_failed",
-            "Develop stayed at base.",
+            "staging_ref_update_failed",
+            "Private ref stayed empty.",
             integrateRequest: true);
 
         Assert.False(rejected.Uncertain);
-        Assert.Contains("Nothing was committed", rejected.Detail);
+        Assert.Contains("Nothing was staged", rejected.Detail);
         Assert.True(uncertain.Uncertain);
         Assert.Contains("do not retry automatically", uncertain.Detail);
         Assert.False(unchanged.Uncertain);
@@ -268,8 +274,8 @@ public sealed class SaveMappingIntegrationViewModelTests
 
     private static SaveMappingIntegrationReview Review() => new()
     {
-        SchemaVersion = 2,
-        Capability = "save_mapping_develop_integration_v1",
+        SchemaVersion = 3,
+        Capability = "save_mapping_staged_candidate_v1",
         Operation = "review",
         CandidateRecordId = CandidateId,
         ReviewedProposalFingerprint = new string('a', 64),
@@ -277,12 +283,10 @@ public sealed class SaveMappingIntegrationViewModelTests
         Repository = new SaveMappingRepositoryStatus
         {
             MainCommit = new string('c', 40),
-            DevelopCommit = new string('c', 40),
-            Synchronized = true,
+            StagingRef = "refs/thetower/save-mapping-candidate",
+            StagedCommit = null,
             ProductionClean = true,
-            DevelopClean = true,
             IntegrationAvailable = true,
-            DevelopPath = "/develop",
         },
         CanonicalMappingFingerprint = new string('f', 64),
         Proposal = new SaveMappingProposal
@@ -323,7 +327,7 @@ public sealed class SaveMappingIntegrationViewModelTests
                 Mode = Convert.ToInt32("664", 8),
             },
         ],
-        Integrate = new BetterControlActionAvailability
+        Stage = new BetterControlActionAvailability
         {
             Available = true,
             Code = "",
@@ -333,17 +337,18 @@ public sealed class SaveMappingIntegrationViewModelTests
 
     private static SaveMappingIntegratedResult IntegratedResult() => new()
     {
-        SchemaVersion = 2,
-        Capability = "save_mapping_develop_integration_v1",
-        Operation = "integrate",
-        Disposition = "committed_to_develop",
+        SchemaVersion = 3,
+        Capability = "save_mapping_staged_candidate_v1",
+        Operation = "stage",
+        Disposition = "staged_for_promotion",
         Idempotent = false,
         CandidateRecordId = CandidateId,
         ReviewedProposalFingerprint = new string('a', 64),
         BaseCommit = new string('c', 40),
-        DevelopCommit = new string('b', 40),
-        IntegrationCommit = new string('b', 40),
+        StagingRef = "refs/thetower/save-mapping-candidate",
+        StagedCommit = new string('b', 40),
         Committed = true,
+        Staged = true,
         Promoted = false,
         MappingInvariants = "passed",
         PromotionValidation = "pending",

@@ -67,14 +67,13 @@ The repository uses linked Git worktrees, not separate repositories:
     integration/<outcome>     temporary combined candidate, only when needed
 ```
 
-`main` is production and the only permanent branch and checkout required by the
-workflow. Feature branches are temporary, and workers commit only their owned
-feature changes. A clean feature tip is the normal candidate for one coherent
-outcome. Only when two or more reviewed feature tips intentionally ship
-together does the explicitly assigned outcome coordinator create a temporary
-integration branch, resolve their combined state, and use its tip as the
-candidate. The promotion owner promotes exact validated commit `D` to `main`
-only by fast-forward.
+`main` is production. Feature branches are temporary, and workers commit only
+their owned feature changes. A clean feature tip is the normal candidate for
+one coherent outcome. Only when two or more reviewed feature tips intentionally
+ship together does the explicitly assigned outcome coordinator create a
+temporary integration branch, resolve their combined state, and use its tip as
+the candidate. The promotion owner promotes exact validated commit `D` to
+`main` only by fast-forward.
 
 Production is never switched to a feature or integration branch. Existing
 operator or parallel changes are preserved. A non-clean production checkout or
@@ -84,36 +83,42 @@ complete source tree for emulator access. Branch, HEAD, and an ordinary dirty
 summary are sufficient diagnostic context in a handoff or lease log.
 
 The save-mapping control-surface workflow is one narrow operator-maintenance
-exception to the feature-branch route, not general permission for agents or
-application features to write `develop`. It accepts only a durable server-
-generated mapping candidate while the standing `main` and `develop` worktrees
-are clean, at their branch tips, and exactly synchronized. After an exact read-
-only review and a separate operator confirmation, the production server may
-construct one standardized child commit containing only the fixed, tracked
-canonical mapping JSON targets and fast-forward the clean linked `develop`
-checkout to it. The client supplies no path, branch, target, patch, message,
-identity, or arbitrary value.
+exception to the feature-branch route. It accepts only a durable server-
+generated mapping candidate while the production `main` worktree is clean, at
+its branch tip, and the private `refs/thetower/save-mapping-candidate` ref is
+empty. The read-only review binds the proposal, canonical target before/after
+hashes and modes, and mapping-set invariants—not unrelated content elsewhere in
+`main`. After separate operator confirmation, the server re-renders those
+inputs against current `main`; if they are still exact, it uses a private Git
+index to construct one standardized child of that current tip and atomically
+creates the private staging ref while verifying that `main` did not move. The
+production branch, index, and worktree remain unchanged. The client supplies no
+path, ref, target, patch, message, identity, or arbitrary value.
 
-A private durable transaction binds the reviewed base, target hashes and modes,
-generated commit, and candidate provenance through production promotion and a
-fresh canonical decode. It permits only exact idempotent recovery; it never
-authorizes cleanup, reset, backward ref movement, production promotion, service
-restart, runtime-control change, or emulator input. Any conflict, unsupported
-proposal owner, unequal branch tips, unrelated work, or uncertain state leaves
-the routine lane and returns to an ordinary owned feature outcome. The direct
-commit still receives the complete `develop` checkpoint and normal production
-procedure before deployment.
+A private durable transaction binds the actual parent, target hashes and modes,
+generated commit, fixed staging ref, and candidate provenance through production
+promotion and a fresh canonical decode. It permits only exact idempotent
+recovery and exact retirement after validation; it never authorizes reset,
+backward branch movement, production promotion, service restart,
+runtime-control change, or emulator input. Target drift, an occupied or moved
+staging ref, unsupported proposal ownership, or uncertain state leaves the
+routine lane. Unrelated `main` changes before confirmation do not invalidate the
+review when the mapping inputs remain exact; an advance after staging makes the
+old commit non-promotable and requires restaging on current `main`. The staged
+commit receives the mapping-only candidate gate and normal production procedure
+before deployment.
 
 ### Staging, promotion, and rollback
 
-The project has no standing staging branch. The selected candidate worktree
-provides its own Python environment, the complete non-live checkpoint,
-retained-frame testing, and one exact release-candidate commit. A feature
-worktree supplies that boundary directly for a single-feature outcome; a
-temporary integration worktree supplies it only for an intentionally combined
-outcome. A permanent `develop` or `staging` branch, another long-lived checkout,
-or a second staging runtime would not provide meaningful live isolation: there
-is only one emulator, so a second runtime would still have to displace
+The project has no standing staging branch. The selected candidate
+worktree provides its own Python environment, proportionate pre-candidate
+testing, and one exact release-candidate commit. A feature worktree supplies
+that boundary directly for a single-feature outcome; a temporary integration
+worktree supplies it only for an intentionally combined outcome. The private
+save-mapping ref holds one exact Git object without a checkout and is not a
+general staging branch. A permanent `develop` or `staging` branch, long-lived
+checkout, or staging runtime would not provide meaningful live isolation:
+there is only one emulator, so a second runtime would still have to displace
 production to test it. A temporary clean checkout may be created for a specific
 reproducibility test, but it is not another promotion stage and receives no
 special emulator authority.
@@ -125,9 +130,9 @@ development.
 
 The normal release path is deliberately direct:
 
-1. select a clean feature tip, or create a temporary integration branch for an
-   intentionally combined outcome, and run the complete non-live gate at exact
-   candidate commit `D` in that worktree;
+1. select a clean feature tip, create a temporary integration branch for an
+   intentionally combined outcome, or accept the one allowlisted private
+   save-mapping ref, and run the candidate-class validation at exact commit `D`;
 2. record exact current production commit `M`, require `M` to be an ancestor of
    `D`, and require the production and candidate checkouts to have no unresolved
    local work;
@@ -164,8 +169,8 @@ units never use a development environment.
 
 ### Retained Phase-0 results
 
-The earlier Phase-0 prototype in the former standing `develop` checkout
-established several worthwhile contracts:
+The earlier Phase-0 integration prototype established several worthwhile
+contracts:
 
 - exact interpreter and direct dependency declarations are tracked;
 - runtime and development dependency closures are pinned;
@@ -205,12 +210,14 @@ relocate a completed virtual environment. Ad-hoc `pip install` remains
 unsupported because it causes accidental dependency drift, not because the
 environment is a security asset.
 
-The checkpoint isolates ordinary generated test output and runs the full
-repository-local suite. Installed host tools such as Tesseract may run in
-non-live tests. ADB-facing tests use fakes or mocks unless a thread has
-completed the live-runtime startup path and deliberately requested live
-validation. The supported entrypoint and operator workflow are documented in
-`docs/new_thread.md`.
+The complete checkpoint isolates ordinary generated test output and runs the
+full repository-local suite. It is one available candidate gate, not a required
+step after every edit or ref movement; the production procedure selects it only
+for candidate classes whose uncertainty spans the shared runtime. Installed
+host tools such as Tesseract may run in non-live tests. ADB-facing tests use
+fakes or mocks unless a thread has completed the live-runtime startup path and
+deliberately requested live validation. The supported entrypoint and operator
+workflow are documented in `docs/new_thread.md`.
 
 ## Screenshots, fixtures, and read-only ADB
 

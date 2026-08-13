@@ -37,11 +37,11 @@ public partial class SaveMappingIntegrationWindow : Window
     {
         await RunAsync(async cancellationToken =>
         {
-            ClearReview("Review an exact proposal before integration.");
+            ClearReview("Review an exact proposal before staging.");
             var catalog = await _api.GetSaveMappingIntegrationAsync(
                 cancellationToken);
-            if (catalog.SchemaVersion != 2
-                || catalog.Capability != "save_mapping_develop_integration_v1")
+            if (catalog.SchemaVersion != 3
+                || catalog.Capability != "save_mapping_staged_candidate_v1")
             {
                 throw new InvalidOperationException(
                     "The Linux service returned an incompatible save-mapping catalog.");
@@ -68,8 +68,8 @@ public partial class SaveMappingIntegrationWindow : Window
                 SaveMappingIntegrationViewModels.RepositoryText(
                     catalog.Repository);
             var readiness = catalog.Repository?.IntegrationAvailable is true
-                ? "main/develop eligible"
-                : "develop integration unavailable";
+                ? "main/private staging eligible"
+                : "private staging unavailable";
             CatalogStatusText.Text = catalog.Available
                 ? !string.IsNullOrWhiteSpace(catalog.Transaction?.Reason)
                     ? catalog.Transaction.Reason
@@ -144,9 +144,9 @@ public partial class SaveMappingIntegrationWindow : Window
                     candidate.RecordId);
             IntegrateButton.IsEnabled = availability.Available;
             IntegrateStatusText.Text = availability.Available
-                ? "Ready to create one verified develop commit."
+                ? "Ready to create one verified staged commit without moving main."
                 : string.IsNullOrWhiteSpace(availability.Reason)
-                    ? "Develop integration is unavailable."
+                    ? "Private-ref staging is unavailable."
                     : availability.Reason;
             if (review.RecoveryRequired)
             {
@@ -156,7 +156,7 @@ public partial class SaveMappingIntegrationWindow : Window
                 ResultText.Text = "Interrupted integration requires recovery"
                     + Environment.NewLine
                     + (string.IsNullOrWhiteSpace(availability.Reason)
-                        ? "Inspect main, develop, and the durable transaction before another action."
+                        ? "Inspect main, the private staging ref, and the durable transaction before another action."
                         : availability.Reason);
             }
         });
@@ -176,8 +176,8 @@ public partial class SaveMappingIntegrationWindow : Window
         var confirmation =
             (_review.RecoveryRequired
                 ? "Recover and verify this exact durable integration?\n\n"
-                : "Commit this exact proposal directly to develop?\n\n")
-            + $"{_review.Repository.DevelopPath}\n\n"
+                : "Stage this exact proposal for production promotion?\n\n")
+            + $"{_review.Repository.StagingRef}\n\n"
             + $"Fingerprint: {_review.ReviewedProposalFingerprint}\n"
             + $"Targets: {targets.Count}\n\n"
             + (_review.RecoveryRequired
@@ -185,13 +185,14 @@ public partial class SaveMappingIntegrationWindow : Window
                     + "exact Git refs and mappings. It does not create a second "
                     + "commit, promote, restart services, send device input, change "
                     + "runtime authority, or alter the current battle."
-                : "This creates one verified child commit and fast-forwards clean "
-                    + "develop. It does not promote, restart services, send device "
-                    + "input, change runtime authority, or alter the current battle.");
+                : "This creates one verified child of current main under a private "
+                    + "staging ref. It does not move main, touch the production index "
+                    + "or worktree, restart services, send device input, change runtime "
+                    + "authority, or alter the current battle.");
         if (MessageBox.Show(
             this,
             confirmation,
-            "Integrate canonical save mapping",
+            "Stage canonical save mapping",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
             MessageBoxResult.Cancel) != MessageBoxResult.OK)
@@ -208,7 +209,7 @@ public partial class SaveMappingIntegrationWindow : Window
             var result = await _api.IntegrateSaveMappingAsync(
                 new
                 {
-                    operation = "integrate",
+                    operation = "stage",
                     candidate_record_id = candidate.RecordId,
                     reviewed_proposal_fingerprint = reviewedFingerprint,
                 },
@@ -233,7 +234,7 @@ public partial class SaveMappingIntegrationWindow : Window
         ResultText.Text = "";
         IntegrateButton.IsEnabled = false;
         IntegrateStatusText.Text =
-            "Integration remains disabled until this exact candidate is reviewed.";
+            "Staging remains disabled until this exact candidate is reviewed.";
     }
 
     private async Task RunAsync(
@@ -322,7 +323,7 @@ public partial class SaveMappingIntegrationWindow : Window
         IntegrateStatusText.Text =
             result.Promoted is true
                 ? "Deployed — a fresh stable decode remains pending."
-                : "Committed to develop — production promotion and a fresh stable decode remain pending.";
+                : "Staged privately — production promotion and a fresh stable decode remain pending.";
         IntegrateButton.IsEnabled = false;
     }
 

@@ -1,9 +1,11 @@
-"""Narrow, reviewed fast lane for deterministic save mappings.
+"""Narrow, reviewed staging lane for deterministic save mappings.
 
 This module intentionally does not implement a general development workflow.
-It accepts only server-generated mapping proposals, only while clean ``main``
-and ``develop`` are at the same commit, and creates one verified child commit
-on ``develop``.  Promotion and runtime validation remain separate checkpoints.
+It accepts only server-generated mapping proposals, creates one verified child
+commit from clean ``main`` with a private Git index, and publishes that object
+under one private staging ref.  The production branch, index, and worktree are
+never advanced by this action.  Promotion and runtime validation remain
+separate checkpoints.
 """
 
 from __future__ import annotations
@@ -41,20 +43,20 @@ from core.player_save_mapping_integration import (
     _linked_worktrees,
     _read_regular_file,
     _render_proposal_targets,
-    _require_workspace_targets_match,
     _target_path,
     _write_all,
 )
 
 
-SAVE_MAPPING_INTEGRATION_CAPABILITY = "save_mapping_develop_integration_v1"
-SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION = 2
+SAVE_MAPPING_INTEGRATION_CAPABILITY = "save_mapping_staged_candidate_v1"
+SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION = 3
 SAVE_MAPPING_REVIEW_STATUS_CAPABILITY = "save_mapping_review_status_v2"
+SAVE_MAPPING_STAGING_REF = "refs/thetower/save-mapping-candidate"
 
-_TRANSACTION_KIND = "save_mapping_develop_integration_transaction"
-_TRANSACTION_SCHEMA_VERSION = 2
+_TRANSACTION_KIND = "save_mapping_staged_candidate_transaction"
+_TRANSACTION_SCHEMA_VERSION = 3
 _MAX_TRANSACTION_BYTES = 8 * 1024 * 1024
-_COMMIT_SUBJECT_PREFIX = "Integrate save mapping candidate"
+_COMMIT_SUBJECT_PREFIX = "Stage save mapping candidate"
 _CANDIDATE_TRAILER = "Save-Mapping-Candidate-ID"
 _PROPOSAL_TRAILER = "Save-Mapping-Proposal-Fingerprint"
 _RECEIPT_SCHEMA_VERSION = 2
@@ -163,9 +165,8 @@ def _transaction_document(
             "reviewed_proposal_fingerprint"
         ],
         "repository": {"base_commit": review["repository"]["main_commit"]},
-        "integration": {
-            "path": review["repository"]["develop_path"],
-            "branch": "develop",
+        "staging": {
+            "ref": SAVE_MAPPING_STAGING_REF,
             "expected_commit": expected_commit,
         },
         "mapping_identity": dict(review["mapping_identity"]),
@@ -189,7 +190,7 @@ def _validate_transaction_document(raw: object) -> dict[str, Any]:
         "candidate_record_id",
         "reviewed_proposal_fingerprint",
         "repository",
-        "integration",
+        "staging",
         "mapping_identity",
         "canonical_mapping_fingerprint",
         "integration_available_since",
@@ -202,11 +203,14 @@ def _validate_transaction_document(raw: object) -> dict[str, Any]:
             "commit_state_uncertain",
             "The canonical integration transaction is not a JSON object.",
         )
-    if raw.get("kind") == "save_mapping_preparation_transaction":
+    if raw.get("kind") in {
+        "save_mapping_preparation_transaction",
+        "save_mapping_develop_integration_transaction",
+    }:
         raise SaveMappingIntegrationError(
             "legacy_transaction_recovery_required",
-            "A legacy feature-worktree preparation journal remains. Inspect and "
-            "retire that prepared change before direct develop integration.",
+            "A legacy save-mapping transaction remains. Inspect and retire its "
+            "prepared branch state before using private-ref staging.",
         )
     if set(raw) != expected_keys:
         raise SaveMappingIntegrationError(
@@ -217,7 +221,7 @@ def _validate_transaction_document(raw: object) -> dict[str, Any]:
     if (
         raw.get("schema_version") != _TRANSACTION_SCHEMA_VERSION
         or raw.get("kind") != _TRANSACTION_KIND
-        or raw.get("phase") not in {"commit_ready", "committed_to_develop"}
+        or raw.get("phase") not in {"commit_ready", "staged"}
         or not _is_hex(raw.get("transaction_id"), 32)
         or not _is_hex(raw.get("candidate_record_id"), 64)
         or not _is_hex(raw.get("reviewed_proposal_fingerprint"), 64)
@@ -231,17 +235,16 @@ def _validate_transaction_document(raw: object) -> dict[str, Any]:
             "The canonical integration transaction identity is invalid.",
         )
     repository = raw.get("repository")
-    integration = raw.get("integration")
+    staging = raw.get("staging")
     identity = raw.get("mapping_identity")
     if (
         not isinstance(repository, Mapping)
         or set(repository) != {"base_commit"}
         or not _is_git_object(repository.get("base_commit"))
-        or not isinstance(integration, Mapping)
-        or set(integration) != {"path", "branch", "expected_commit"}
-        or not str(integration.get("path") or "")
-        or integration.get("branch") != "develop"
-        or not _is_git_object(integration.get("expected_commit"))
+        or not isinstance(staging, Mapping)
+        or set(staging) != {"ref", "expected_commit"}
+        or staging.get("ref") != SAVE_MAPPING_STAGING_REF
+        or not _is_git_object(staging.get("expected_commit"))
         or not isinstance(identity, Mapping)
         or set(identity) != {
             "mapping_id",
@@ -327,7 +330,7 @@ def _validate_transaction_document(raw: object) -> dict[str, Any]:
     return {
         **dict(raw),
         "repository": dict(repository),
-        "integration": dict(integration),
+        "staging": dict(staging),
         "mapping_identity": dict(identity),
         "targets": targets,
     }
@@ -596,14 +599,13 @@ class CanonicalDecodeReceiptStore:
 
 
 class SaveMappingIntegrationManager:
-    """Review and commit one deterministic candidate directly to ``develop``."""
+    """Review and stage one deterministic child commit without moving ``main``."""
 
     def __init__(
         self,
         *,
         repository_root: Path | str,
         candidate_store: AppendOnlyMappingCandidateStore,
-        development_root: Path | str | None = None,
         lock_path: Path | str | None = None,
         transaction_path: Path | str | None = None,
         decode_receipt_path: Path | str | None = None,
@@ -611,12 +613,6 @@ class SaveMappingIntegrationManager:
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.candidate_store = candidate_store
-        # Retained as a constructor compatibility seam; no feature discovery uses it.
-        self.development_root = (
-            Path(development_root).resolve()
-            if development_root is not None
-            else None
-        )
         self.lock_path = (
             Path(lock_path)
             if lock_path is not None
@@ -638,7 +634,7 @@ class SaveMappingIntegrationManager:
         self._transaction_fault_hook = transaction_fault_hook
 
     def catalog(self) -> dict[str, Any]:
-        """Return candidate review state without leaking projection failures."""
+        """Return staged-candidate review state without leaking projection failures."""
 
         try:
             return self._catalog()
@@ -662,14 +658,13 @@ class SaveMappingIntegrationManager:
             }
 
     def _catalog(self) -> dict[str, Any]:
-        """Build candidate review state and fixed develop eligibility."""
+        """Build candidate review state and fixed private-ref eligibility."""
 
         try:
             transaction = _load_transaction(self.transaction_path)
             base = (
                 self._lightweight_transaction_state(transaction)
                 if transaction is not None
-                and transaction["phase"] == "commit_ready"
                 else self._base_state()
             )
             status = self.candidate_lifecycle_status(
@@ -722,10 +717,12 @@ class SaveMappingIntegrationManager:
                     review_code=str(item.get("state")),
                     review_reason=str(item.get("reason") or ""),
                 )
-            elif item.get("state") == "integration_recovery_required":
+            elif item.get("state") in {
+                "integration_recovery_required",
+                "restaging_required",
+            }:
                 recoverable = bool(
                     transaction is not None
-                    and transaction["phase"] == "commit_ready"
                     and transaction["candidate_record_id"]
                     == item.get("candidate_record_id")
                 )
@@ -751,7 +748,10 @@ class SaveMappingIntegrationManager:
                 try:
                     record = self.candidate_store.get(item.get("record_id"))
                     self._require_routine_candidate(record)
-                    proposed_mapping_patch(record, repository_root=base["develop_path"])
+                    proposed_mapping_patch(
+                        record,
+                        repository_root=self.repository_root,
+                    )
                 except (OSError, PlayerSaveMappingCandidateError) as exc:
                     projected.update(
                         review_available=False,
@@ -782,7 +782,7 @@ class SaveMappingIntegrationManager:
         base: Optional[Mapping[str, Any]] = None,
         transaction: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Project candidate lifecycle across develop, production, and decode proof."""
+        """Project lifecycle across private staging, production, and decode proof."""
 
         current = dict(base or self._base_state())
         if transaction is None:
@@ -791,21 +791,11 @@ class SaveMappingIntegrationManager:
             store=self.candidate_store,
             repository_root=self.repository_root,
         )
-        develop_status = mapping_candidate_review_status(
-            store=self.candidate_store,
-            repository_root=current["develop_path"],
-        )
         if main_status.get("available") is not True:
             return main_status
-        if develop_status.get("available") is not True:
-            return develop_status
         main_items = {
             str(item.get("candidate_record_id")): dict(item)
             for item in main_status.get("items") or ()
-        }
-        develop_items = {
-            str(item.get("candidate_record_id")): dict(item)
-            for item in develop_status.get("items") or ()
         }
         if transaction is not None:
             candidate_id = transaction["candidate_record_id"]
@@ -827,10 +817,7 @@ class SaveMappingIntegrationManager:
                 record,
                 repository_root=self.repository_root,
             )
-            item = mapping_candidate_record_status(
-                record,
-                repository_root=current["develop_path"],
-            )
+            item = dict(main_candidate)
             lifecycle, reason = self._transaction_lifecycle(
                 transaction,
                 current,
@@ -839,24 +826,10 @@ class SaveMappingIntegrationManager:
             item.update(
                 state=lifecycle,
                 reason=reason,
-                integration_commit=transaction["integration"]["expected_commit"],
+                integration_commit=transaction["staging"]["expected_commit"],
+                staged_commit=transaction["staging"]["expected_commit"],
             )
             main_items[candidate_id] = item
-        else:
-            for candidate_id, develop_item in develop_items.items():
-                main_item = main_items.get(candidate_id)
-                if (
-                    develop_item.get("state") == "integrated"
-                    and main_item is not None
-                    and main_item.get("state") != "integrated"
-                ):
-                    main_item.update(
-                        state="integration_unconfirmed",
-                        reason=(
-                            "develop contains this mapping without a durable "
-                            "fast-lane integration record; ordinary review is required"
-                        ),
-                    )
         items = sorted(
             main_items.values(),
             key=lambda item: (
@@ -920,18 +893,20 @@ class SaveMappingIntegrationManager:
             }
 
     def review(self, *, candidate_record_id: object) -> dict[str, Any]:
-        """Return a non-mutating proposal bound to one synchronized base commit."""
+        """Return a non-mutating proposal bound to exact mapping inputs."""
 
         transaction = _load_transaction(self.transaction_path)
         if (
             transaction is not None
             and transaction["candidate_record_id"]
             == str(candidate_record_id or "").lower()
-            and transaction["phase"] == "commit_ready"
         ):
             base = self._lightweight_transaction_state(transaction)
             lifecycle, _reason = self._transaction_lifecycle(transaction, base)
-            if lifecycle == "integration_recovery_required":
+            if lifecycle in {
+                "integration_recovery_required",
+                "restaging_required",
+            }:
                 return self._recovery_review(transaction, base)
         base = self._base_state()
         if transaction is not None and self._transaction_validated(
@@ -946,23 +921,17 @@ class SaveMappingIntegrationManager:
             self._require_routine_candidate(record)
             proposal = proposed_mapping_patch(
                 record,
-                repository_root=base["develop_path"],
+                repository_root=self.repository_root,
             )
-            develop_targets = _render_proposal_targets(
-                proposal,
-                repository_root=base["develop_path"],
-                candidate_record=record,
-            )
-            production_targets = _render_proposal_targets(
+            staged_targets = _render_proposal_targets(
                 proposal,
                 repository_root=self.repository_root,
                 candidate_record=record,
             )
-            _require_workspace_targets_match(develop_targets, production_targets)
-            self._validate_target_scope(base["develop_path"], develop_targets)
+            self._validate_target_scope(self.repository_root, staged_targets)
             canonical_fingerprint = self._canonical_mapping_fingerprint(
-                base["develop_path"],
-                develop_targets,
+                self.repository_root,
+                staged_targets,
                 _mapping_identity(record),
             )
         except SaveMappingIntegrationError:
@@ -976,9 +945,8 @@ class SaveMappingIntegrationManager:
             "schema_version": SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION,
             "capability": SAVE_MAPPING_INTEGRATION_CAPABILITY,
             "candidate_record_id": record["record_id"],
-            "base_commit": base["main_commit"],
             "proposal": proposal,
-            "rendered_targets": [_public_target(target) for target in develop_targets],
+            "rendered_targets": [_public_target(target) for target in staged_targets],
             "canonical_mapping_fingerprint": canonical_fingerprint,
             "commit_contract": {
                 "subject_prefix": _COMMIT_SUBJECT_PREFIX,
@@ -987,25 +955,23 @@ class SaveMappingIntegrationManager:
             },
         }
         reviewed_fingerprint = fingerprint_json(fingerprint_payload)
-        integration = {"available": True, "code": "", "reason": ""}
+        staging = {"available": True, "code": "", "reason": ""}
         recovery_required = False
         if transaction is not None:
             matches = (
                 transaction["candidate_record_id"] == record["record_id"]
                 and transaction["reviewed_proposal_fingerprint"]
                 == reviewed_fingerprint
-                and transaction["repository"]["base_commit"]
-                == base["main_commit"]
             )
             recovery_required = True
-            integration = {
+            staging = {
                 "available": matches,
                 "code": "transaction_recovery_required",
                 "reason": (
-                    "An interrupted integration for this exact review can be "
+                    "Interrupted staging for this exact review can be "
                     "continued once; refresh after the result."
                     if matches
-                    else "An interrupted integration for another candidate must "
+                    else "Interrupted staging for another candidate must "
                     "be recovered first."
                 ),
             }
@@ -1021,9 +987,9 @@ class SaveMappingIntegrationManager:
             "canonical_mapping_fingerprint": canonical_fingerprint,
             "proposal": proposal,
             "rendered_targets": [
-                _public_target(target) for target in develop_targets
+                _public_target(target) for target in staged_targets
             ],
-            "integrate": integration,
+            "stage": staging,
             "recovery_required": recovery_required,
         }
 
@@ -1052,10 +1018,19 @@ class SaveMappingIntegrationManager:
             ],
         }
         repository = self._public_repository(base)
+        lifecycle, _lifecycle_reason = self._transaction_lifecycle(
+            transaction,
+            base,
+        )
+        restaging = lifecycle == "restaging_required"
         repository.update(
             integration_available=False,
             code="transaction_recovery_required",
-            reason="An exact durable integration transaction requires recovery.",
+            reason=(
+                "The exact candidate must be retired and restaged on current main."
+                if restaging
+                else "An exact durable staging transaction requires recovery."
+            ),
         )
         return {
             "schema_version": SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION,
@@ -1073,24 +1048,27 @@ class SaveMappingIntegrationManager:
             ],
             "proposal": proposal,
             "rendered_targets": [_public_target(target) for target in targets],
-            "integrate": {
+            "stage": {
                 "available": True,
                 "code": "transaction_recovery_required",
                 "reason": (
-                    "Retry this exact durable transaction once; Git refs and "
+                    "Retire only the exact old candidate and restage these unchanged "
+                    "mapping inputs on current main."
+                    if restaging
+                    else "Retry this exact durable transaction once; Git refs and "
                     "canonical invariants will be reverified before success."
                 ),
             },
             "recovery_required": True,
         }
 
-    def integrate(
+    def stage(
         self,
         *,
         candidate_record_id: object,
         reviewed_proposal_fingerprint: object,
     ) -> dict[str, Any]:
-        """Create and install the exact reviewed child commit on ``develop``."""
+        """Create and publish the exact reviewed child commit to the staging ref."""
 
         supplied = str(reviewed_proposal_fingerprint or "").strip().lower()
         if not _is_hex(supplied, 64):
@@ -1116,6 +1094,7 @@ class SaveMappingIntegrationManager:
                     idempotent=True,
                     promoted=True,
                 )
+                self._retire_staging_ref(transaction)
                 _remove_transaction(self.transaction_path)
                 if exact_retry:
                     return result
@@ -1131,29 +1110,46 @@ class SaveMappingIntegrationManager:
                         "transaction_recovery_required",
                         "An interrupted integration has a different reviewed identity.",
                     )
-                return self._apply_transaction(transaction, idempotent=True)
+                lifecycle, _reason = self._transaction_lifecycle(
+                    transaction,
+                    self._lightweight_transaction_state(transaction),
+                )
+                if lifecycle == "restaging_required":
+                    if _git_status(self.repository_root):
+                        raise SaveMappingIntegrationError(
+                            "production_worktree_dirty",
+                            "Production changed while restaging was confirmed.",
+                        )
+                    self._fault("before_stale_candidate_retirement")
+                    self._retire_staging_ref(transaction)
+                    self._fault("stale_candidate_ref_retired")
+                    _remove_transaction(self.transaction_path)
+                    self._fault("stale_candidate_retired")
+                    transaction = None
+                else:
+                    return self._apply_transaction(transaction, idempotent=True)
 
             review = self.review(candidate_record_id=candidate_record_id)
             if supplied != review["reviewed_proposal_fingerprint"]:
                 raise SaveMappingIntegrationError(
                     "reviewed_proposal_stale",
-                    "The proposal or synchronized repository snapshot changed; "
-                    "nothing was committed. Refresh and review again.",
+                    "The reviewed mapping inputs changed; nothing was staged. "
+                    "Refresh and review again.",
                 )
-            if review["integrate"]["available"] is not True:
+            if review["stage"]["available"] is not True:
                 raise SaveMappingIntegrationError(
-                    str(review["integrate"].get("code") or "integration_unavailable"),
-                    str(review["integrate"].get("reason") or "Integration is unavailable."),
+                    str(review["stage"].get("code") or "staging_unavailable"),
+                    str(review["stage"].get("reason") or "Staging is unavailable."),
                 )
             record = self.candidate_store.get(candidate_record_id)
             targets = _render_proposal_targets(
                 review["proposal"],
-                repository_root=Path(review["repository"]["develop_path"]),
+                repository_root=self.repository_root,
                 candidate_record=record,
             )
             message = _commit_message(record["record_id"], supplied)
             expected_commit = self._build_commit(
-                Path(review["repository"]["develop_path"]),
+                self.repository_root,
                 base_commit=review["repository"]["main_commit"],
                 targets=targets,
                 commit_message=message,
@@ -1187,9 +1183,9 @@ class SaveMappingIntegrationManager:
 
         try:
             transaction = _load_transaction(self.transaction_path)
-            if transaction is None or transaction["phase"] != "committed_to_develop":
+            if transaction is None or transaction["phase"] != "staged":
                 return False
-            expected = transaction["integration"]["expected_commit"]
+            expected = transaction["staging"]["expected_commit"]
             if not isinstance(start_evidence, Mapping):
                 return False
             acquisition_started_at = _utc_datetime(
@@ -1285,6 +1281,7 @@ class SaveMappingIntegrationManager:
                     == transaction["transaction_fingerprint"]
                     and self._matching_decode_receipt(current)
                 ):
+                    self._retire_staging_ref(current)
                     _remove_transaction(self.transaction_path)
             finally:
                 os.close(descriptor)
@@ -1298,36 +1295,23 @@ class SaveMappingIntegrationManager:
         *,
         idempotent: bool,
     ) -> dict[str, Any]:
-        if transaction["phase"] == "commit_ready":
-            if self._transaction_git_lock_present(transaction):
-                raise SaveMappingIntegrationError(
-                    "commit_state_uncertain",
-                    "Git integration lock artifacts remain; inspect them before "
-                    "retrying or changing repository state.",
-                )
-            try:
-                with self.candidate_store.locked_records() as candidate_records:
-                    self._validate_locked_candidate(
-                        transaction,
-                        candidate_records,
-                    )
-                    self._restore_detached_transaction_checkout(transaction)
-            except PlayerSaveMappingCandidateError as exc:
-                raise SaveMappingIntegrationError(
-                    _proposal_error_code(exc),
-                    _proposal_error_message(exc),
-                ) from exc
+        if self._transaction_git_lock_present(transaction):
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "Git lock artifacts remain; inspect them before retrying or "
+                "changing repository state.",
+            )
         self._verify_transaction_binding(transaction)
         base_commit = transaction["repository"]["base_commit"]
-        expected_commit = transaction["integration"]["expected_commit"]
-        develop_path = Path(transaction["integration"]["path"])
-        main_commit = _git_output(self.repository_root, "rev-parse", "refs/heads/main")
-        develop_commit = _git_output(
+        expected_commit = transaction["staging"]["expected_commit"]
+        main_commit = _git_output(
             self.repository_root,
             "rev-parse",
-            "refs/heads/develop",
+            "refs/heads/main",
         )
-        if develop_commit == expected_commit:
+        staged_commit = self._staging_ref_commit()
+
+        if staged_commit == expected_commit:
             if transaction["phase"] == "commit_ready":
                 try:
                     with self.candidate_store.locked_records() as candidate_records:
@@ -1340,12 +1324,12 @@ class SaveMappingIntegrationManager:
                         _proposal_error_code(exc),
                         _proposal_error_message(exc),
                     ) from exc
-            self._verify_committed_state(transaction)
-            if transaction["phase"] != "committed_to_develop":
+            self._verify_staged_state(transaction)
+            if transaction["phase"] != "staged":
                 transaction = _set_transaction_phase(
                     self.transaction_path,
                     transaction,
-                    "committed_to_develop",
+                    "staged",
                 )
             return _integration_result(
                 transaction,
@@ -1355,23 +1339,32 @@ class SaveMappingIntegrationManager:
                     "merge-base",
                     "--is-ancestor",
                     expected_commit,
-                    _git_output(
-                        self.repository_root,
-                        "rev-parse",
-                        "refs/heads/main",
-                    ),
+                    main_commit,
                 ),
             )
-        if develop_commit != base_commit or main_commit != base_commit:
+
+        if transaction["phase"] == "staged":
             raise SaveMappingIntegrationError(
                 "commit_state_uncertain",
-                "main or develop moved outside the reviewed integration; no ref "
-                "was changed automatically.",
+                "The private staging ref no longer points to the exact durable "
+                "candidate; no ref was changed automatically.",
             )
-        if _git_status(self.repository_root) or _git_status(develop_path):
+        if staged_commit is not None:
+            raise SaveMappingIntegrationError(
+                "staging_ref_occupied",
+                "The private staging ref contains another candidate; inspect and "
+                "retire it before continuing.",
+            )
+        if main_commit != base_commit:
             raise SaveMappingIntegrationError(
                 "commit_state_uncertain",
-                "main or develop changed after review; no ref was changed.",
+                "main moved outside the reviewed staging transaction; no ref was "
+                "changed automatically.",
+            )
+        if _git_status(self.repository_root):
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The production worktree changed after review; no ref was changed.",
             )
         self._verify_commit(
             expected_commit,
@@ -1382,13 +1375,13 @@ class SaveMappingIntegrationManager:
         try:
             with self.candidate_store.locked_records() as candidate_records:
                 self._validate_locked_candidate(transaction, candidate_records)
-                self._fault("before_develop_fast_forward")
+                self._fault("before_staging_ref_update")
                 self._verify_transaction_binding(transaction)
-                if _git_status(self.repository_root) or _git_status(develop_path):
+                if _git_status(self.repository_root):
                     raise SaveMappingIntegrationError(
                         "commit_state_uncertain",
-                        "main or develop changed immediately before integration; "
-                        "no ref was changed.",
+                        "The production worktree changed immediately before "
+                        "staging; no ref was changed.",
                     )
                 if (
                     _git_output(
@@ -1397,50 +1390,24 @@ class SaveMappingIntegrationManager:
                         "refs/heads/main",
                     )
                     != base_commit
-                    or _git_output(
-                        self.repository_root,
-                        "rev-parse",
-                        "refs/heads/develop",
-                    )
-                    != base_commit
+                    or self._staging_ref_commit() is not None
                 ):
                     raise SaveMappingIntegrationError(
                         "commit_state_uncertain",
-                        "main or develop moved immediately before integration; "
-                        "no ref was changed.",
+                        "main or the private staging ref moved immediately before "
+                        "staging; no ref was changed.",
                     )
-                detached = _git_mutate(
-                    develop_path,
-                    "switch",
-                    "--detach",
-                    base_commit,
-                    check=False,
-                )
-                if detached.returncode != 0:
-                    if self._transaction_git_lock_present(transaction):
-                        raise SaveMappingIntegrationError(
-                            "commit_state_uncertain",
-                            "Git integration lock artifacts appeared before the "
-                            "checkout boundary; inspect before continuing.",
-                        )
-                    raise SaveMappingIntegrationError(
-                        "develop_fast_forward_failed",
-                        "develop could not enter the verified checkout boundary; "
-                        "its ref remains at the reviewed base. Refresh before "
-                        "retrying once.",
-                    )
-                self._verify_detached_transaction_checkout(transaction)
                 try:
                     result = _git_mutate(
                         self.repository_root,
                         "update-ref",
                         "-m",
-                        "save-mapping direct develop integration",
+                        "stage reviewed save-mapping candidate",
                         "--stdin",
                         input_bytes=(
                             f"verify refs/heads/main {base_commit}\n"
-                            f"update refs/heads/develop {expected_commit} "
-                            f"{base_commit}\n"
+                            f"create {SAVE_MAPPING_STAGING_REF} "
+                            f"{expected_commit}\n"
                         ).encode("ascii"),
                         check=False,
                     )
@@ -1451,46 +1418,28 @@ class SaveMappingIntegrationManager:
                     "rev-parse",
                     "refs/heads/main",
                 )
-                observed = _git_output(
-                    self.repository_root,
-                    "rev-parse",
-                    "refs/heads/develop",
-                )
-                if observed != expected_commit:
-                    if observed == base_commit:
-                        self._restore_detached_transaction_checkout(transaction)
-                        if (
-                            observed_main == base_commit
-                            and not _git_status(self.repository_root)
-                            and not _git_status(develop_path)
-                            and not self._transaction_git_lock_present(transaction)
-                        ):
-                            raise SaveMappingIntegrationError(
-                                "develop_fast_forward_failed",
-                                "The verified ref transaction was not applied; "
-                                "main and develop remain clean at the reviewed "
-                                "base. Refresh before retrying once.",
-                            )
+                observed_staged = self._staging_ref_commit()
+                if observed_staged != expected_commit:
+                    if (
+                        observed_staged is None
+                        and observed_main == base_commit
+                        and not _git_status(self.repository_root)
+                        and not self._transaction_git_lock_present(transaction)
+                    ):
+                        raise SaveMappingIntegrationError(
+                            "staging_ref_update_failed",
+                            "The verified staging-ref transaction was not applied; "
+                            "main and its worktree remain unchanged at the reviewed "
+                            "base. Refresh before retrying once.",
+                        )
                     raise SaveMappingIntegrationError(
                         "commit_state_uncertain",
-                        "The main/develop ref transaction could not be proved exact.",
+                        "The main/staging ref transaction could not be proved exact.",
                     )
-                self._fault("develop_ref_updated")
-                # Switching from the exact detached base to the explicitly
-                # advanced develop branch lets Git serialize all index/worktree
-                # updates with concurrent checkout commands. A different branch
-                # is never used as the source or ref-update target.
-                self._restore_detached_transaction_checkout(transaction)
-                self._verify_transaction_binding(transaction)
-                if _git_status(develop_path):
-                    raise SaveMappingIntegrationError(
-                        "commit_state_uncertain",
-                        "develop advanced, but its checkout is not clean; inspect "
-                        "before continuing.",
-                    )
+                self._fault("staging_ref_updated")
                 if result.returncode != 0:
-                    # The explicit ref transaction is authoritative after a
-                    # lost or late command status.
+                    # The observed exact ref is authoritative after a lost or
+                    # late command status.
                     idempotent = True
         except PlayerSaveMappingCandidateError as exc:
             raise SaveMappingIntegrationError(
@@ -1498,14 +1447,13 @@ class SaveMappingIntegrationManager:
                 _proposal_error_message(exc),
             ) from exc
         self._verify_transaction_binding(transaction)
-        self._fault("develop_fast_forwarded")
-        self._verify_committed_state(transaction)
+        self._verify_staged_state(transaction)
         transaction = _set_transaction_phase(
             self.transaction_path,
             transaction,
-            "committed_to_develop",
+            "staged",
         )
-        self._fault("transaction_committed")
+        self._fault("transaction_staged")
         return _integration_result(
             transaction,
             idempotent=idempotent,
@@ -1528,121 +1476,52 @@ class SaveMappingIntegrationManager:
             )
         self._require_routine_candidate_records(matches[0], candidate_records)
 
-    def _restore_detached_transaction_checkout(
-        self,
-        transaction: Mapping[str, Any],
-    ) -> None:
-        """Finish only an exact transaction-owned partial checkout."""
+    def _staging_ref_commit(self) -> Optional[str]:
+        result = _git_output(
+            self.repository_root,
+            "for-each-ref",
+            "--format=%(objectname)",
+            SAVE_MAPPING_STAGING_REF,
+        ).strip()
+        if not result:
+            return None
+        if not _is_git_object(result):
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The private save-mapping staging ref is invalid.",
+            )
+        return result
 
-        base_commit = transaction["repository"]["base_commit"]
-        expected_commit = transaction["integration"]["expected_commit"]
-        develop_path = Path(transaction["integration"]["path"])
-        matches = [
-            item
-            for item in _linked_worktrees(self.repository_root)
-            if item.path == develop_path
-        ]
-        if len(matches) != 1:
-            raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "The durable develop checkout path is no longer unique.",
-            )
-        checkout = matches[0]
-        if (
-            checkout.branch == "develop"
-            and checkout.head in {base_commit, expected_commit}
-            and not _git_status(develop_path)
-        ):
+    def _retire_staging_ref(self, transaction: Mapping[str, Any]) -> None:
+        expected = transaction["staging"]["expected_commit"]
+        observed = self._staging_ref_commit()
+        if observed is None:
             return
-        if not self._transaction_checkout_recoverable(transaction, checkout):
+        if observed != expected:
             raise SaveMappingIntegrationError(
                 "commit_state_uncertain",
-                "The durable develop checkout is not clean at an exact "
-                "transaction endpoint.",
+                "The private staging ref moved to another object and was not retired.",
             )
-        if checkout.head == base_commit:
-            # A plain switch refuses any edit that arrives after the clean-state
-            # proof. It never rewrites that edit into conflict markers.
-            completed = _git_mutate(
-                develop_path,
-                "switch",
-                "--detach",
-                expected_commit,
-                check=False,
-            )
-            if completed.returncode != 0:
-                raise SaveMappingIntegrationError(
-                    "commit_state_uncertain",
-                    "The exact partial develop checkout could not be completed.",
-                )
-        refreshed = [
-            item
-            for item in _linked_worktrees(self.repository_root)
-            if item.path == develop_path
-            and item.branch == "(detached)"
-            and item.head == expected_commit
-            and not item.locked
-            and not item.prunable
-        ]
-        if len(refreshed) != 1 or _git_status(develop_path):
-            raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "The completed develop checkout is not the exact clean result.",
-            )
-        restored = _git_mutate(
-            develop_path,
-            "switch",
-            "--no-guess",
-            "develop",
+        result = _git_mutate(
+            self.repository_root,
+            "update-ref",
+            "-d",
+            SAVE_MAPPING_STAGING_REF,
+            expected,
             check=False,
         )
-        if restored.returncode != 0:
+        remaining = self._staging_ref_commit()
+        if remaining is None:
+            return
+        if remaining != expected:
             raise SaveMappingIntegrationError(
                 "commit_state_uncertain",
-                "The exact detached develop checkout could not be reattached.",
+                "The private staging ref changed while retirement was attempted.",
             )
-        self._verify_transaction_binding(transaction)
-        if _git_status(develop_path):
-            raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "The reattached develop checkout is not clean.",
-            )
-
-    def _transaction_checkout_recoverable(
-        self,
-        transaction: Mapping[str, Any],
-        checkout: Optional[object] = None,
-    ) -> bool:
-        """Prove a checkout is clean at one exact transaction endpoint."""
-
-        base_commit = transaction["repository"]["base_commit"]
-        expected_commit = transaction["integration"]["expected_commit"]
-        develop_path = Path(transaction["integration"]["path"])
-        try:
-            if checkout is None:
-                matches = [
-                    item
-                    for item in _linked_worktrees(self.repository_root)
-                    if item.path == develop_path
-                ]
-                if len(matches) != 1:
-                    return False
-                checkout = matches[0]
-            if (
-                checkout.branch not in {"develop", "(detached)"}
-                or checkout.head not in {base_commit, expected_commit}
-                or checkout.locked
-                or checkout.prunable
-            ):
-                return False
-            return not _git_status(develop_path)
-        except (
-            OSError,
-            UnicodeDecodeError,
-            ValueError,
-            SaveMappingIntegrationError,
-        ):
-            return False
+        raise SaveMappingIntegrationError(
+            "staging_ref_update_failed",
+            "The completed private staging ref could not be retired.",
+        )
 
     def _transaction_git_lock_present(
         self,
@@ -1650,63 +1529,50 @@ class SaveMappingIntegrationManager:
     ) -> bool:
         """Detect ordinary Git crash artifacts without removing any of them."""
 
-        develop_path = Path(transaction["integration"]["path"])
         try:
-            owners = (
-                (develop_path, "index"),
-                (develop_path, "HEAD"),
-                (self.repository_root, "refs/heads/develop"),
-                (self.repository_root, "refs/heads/main"),
-                (self.repository_root, "packed-refs"),
-            )
-            for owner, git_path in owners:
-                resolved = Path(_git_output(owner, "rev-parse", "--git-path", git_path))
+            for git_path in (
+                "index",
+                "HEAD",
+                transaction["staging"]["ref"],
+                "refs/heads/main",
+                "packed-refs",
+            ):
+                resolved = Path(
+                    _git_output(
+                        self.repository_root,
+                        "rev-parse",
+                        "--git-path",
+                        git_path,
+                    )
+                )
                 if not resolved.is_absolute():
-                    resolved = owner / resolved
+                    resolved = self.repository_root / resolved
                 if Path(f"{resolved}.lock").exists():
                     return True
         except (OSError, SaveMappingIntegrationError):
             return True
         return False
 
-    def _verify_detached_transaction_checkout(
-        self,
-        transaction: Mapping[str, Any],
-    ) -> None:
+    def _verify_staged_state(self, transaction: Mapping[str, Any]) -> None:
         base_commit = transaction["repository"]["base_commit"]
-        develop_path = Path(transaction["integration"]["path"])
-        matches = [
-            item
-            for item in _linked_worktrees(self.repository_root)
-            if item.path == develop_path
-            and item.branch == "(detached)"
-            and item.head == base_commit
-            and not item.locked
-            and not item.prunable
-        ]
-        if len(matches) != 1 or _git_status(develop_path):
-            raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "develop did not enter the exact clean detached integration boundary.",
-            )
-
-    def _verify_committed_state(self, transaction: Mapping[str, Any]) -> None:
-        base_commit = transaction["repository"]["base_commit"]
-        expected_commit = transaction["integration"]["expected_commit"]
-        develop_path = Path(transaction["integration"]["path"])
+        expected_commit = transaction["staging"]["expected_commit"]
         self._verify_commit(
             expected_commit,
             base_commit=base_commit,
             targets=_transaction_targets(transaction),
             commit_message=transaction["commit_message"],
         )
+        if self._staging_ref_commit() != expected_commit:
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The private staging ref no longer points to the exact candidate.",
+            )
         main_commit = _git_output(
             self.repository_root,
             "rev-parse",
             "refs/heads/main",
         )
         if main_commit != base_commit:
-            # Promotion may already have happened after a lost response.
             if not _git_success(
                 self.repository_root,
                 "merge-base",
@@ -1716,13 +1582,13 @@ class SaveMappingIntegrationManager:
             ):
                 raise SaveMappingIntegrationError(
                     "commit_state_uncertain",
-                    "Production moved without containing the integration commit.",
+                    "Production moved without containing the staged commit.",
                 )
             if not self._ref_targets_match(transaction, main_commit):
                 raise SaveMappingIntegrationError(
                     "commit_state_uncertain",
-                    "Production contains the integration commit, but its exact "
-                    "canonical targets were superseded.",
+                    "Production contains the staged commit, but its exact canonical "
+                    "targets were superseded.",
                 )
             record = self.candidate_store.get(transaction["candidate_record_id"])
             main_match = mapping_candidate_record_status(
@@ -1732,56 +1598,38 @@ class SaveMappingIntegrationManager:
             if main_match.get("state") != "integrated":
                 raise SaveMappingIntegrationError(
                     "commit_state_uncertain",
-                    "Production contains the integration commit, but its current "
+                    "Production contains the staged commit, but its current "
                     "canonical mapping no longer owns the candidate.",
                 )
-        if _git_output(
-            self.repository_root,
-            "rev-parse",
-            "refs/heads/develop",
-        ) != expected_commit:
-            raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "develop no longer points to the exact integration commit.",
-            )
         if not self._ref_targets_match(transaction, expected_commit):
             raise SaveMappingIntegrationError(
                 "commit_state_uncertain",
-                "The integration commit no longer contains its exact canonical targets.",
+                "The staged commit no longer contains its exact canonical targets.",
             )
-        if _git_status(develop_path):
+        if (
+            self._canonical_mapping_fingerprint_at_commit(
+                expected_commit,
+                transaction["mapping_identity"],
+            )
+            != transaction["canonical_mapping_fingerprint"]
+        ):
             raise SaveMappingIntegrationError(
                 "commit_state_uncertain",
-                "develop is not clean after canonical integration.",
+                "The staged canonical mapping set failed its reviewed invariants.",
             )
         if _git_status(self.repository_root):
             raise SaveMappingIntegrationError(
                 "commit_state_uncertain",
-                "Production is not clean after canonical integration.",
+                "Production is not clean after staging.",
             )
         self._verify_transaction_binding(transaction)
-        status = mapping_candidate_review_status(
-            store=self.candidate_store,
-            repository_root=develop_path,
-        )
-        if status.get("available") is not True:
-            raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "The committed develop mapping failed its canonical invariants.",
-            )
-        record = self.candidate_store.get(transaction["candidate_record_id"])
-        match = mapping_candidate_record_status(
-            record,
-            repository_root=develop_path,
-        )
-        if match.get("state") != "integrated":
-            raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "The committed develop mapping failed its canonical invariants.",
-            )
 
     def _verify_transaction_binding(self, transaction: Mapping[str, Any]) -> None:
-        worktrees = _linked_worktrees(self.repository_root)
+        if transaction["staging"]["ref"] != SAVE_MAPPING_STAGING_REF:
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The durable private staging ref identity changed.",
+            )
         main_commit = _git_output(
             self.repository_root,
             "rev-parse",
@@ -1789,7 +1637,7 @@ class SaveMappingIntegrationManager:
         )
         productions = [
             item
-            for item in worktrees
+            for item in _linked_worktrees(self.repository_root)
             if item.branch == "main"
             and item.path == self.repository_root
             and item.head == main_commit
@@ -1801,40 +1649,20 @@ class SaveMappingIntegrationManager:
                 "commit_state_uncertain",
                 "The bound production main worktree identity changed.",
             )
-        matches = [
-            item
-            for item in worktrees
-            if item.branch == "develop"
-            and item.path == Path(transaction["integration"]["path"]).resolve()
-            and item.head
-            == _git_output(
-                self.repository_root,
-                "rev-parse",
-                "refs/heads/develop",
-            )
-            and not item.locked
-            and not item.prunable
-        ]
-        if len(matches) != 1:
-            raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "The bound develop worktree identity changed.",
-            )
         self._validate_target_scope(
-            Path(transaction["integration"]["path"]),
+            self.repository_root,
             _transaction_targets(transaction),
         )
-
     def _build_commit(
         self,
-        develop_path: Path,
+        repository_root: Path,
         *,
         base_commit: str,
         targets: Sequence[_PreparedTarget],
         commit_message: str,
     ) -> str:
-        name = _git_config_value(develop_path, "user.name")
-        email = _git_config_value(develop_path, "user.email")
+        name = _git_config_value(repository_root, "user.name")
+        email = _git_config_value(repository_root, "user.email")
         if not name or not email:
             raise SaveMappingIntegrationError(
                 "git_identity_unavailable",
@@ -1850,12 +1678,12 @@ class SaveMappingIntegrationManager:
         index_path.unlink()
         environment = {"GIT_INDEX_FILE": str(index_path)}
         try:
-            _git_mutate(develop_path, "read-tree", base_commit, env=environment)
+            _git_mutate(repository_root, "read-tree", base_commit, env=environment)
             for target in targets:
                 if not target.changed:
                     continue
                 blob = _git_mutate(
-                    develop_path,
+                    repository_root,
                     "hash-object",
                     "-w",
                     "--stdin",
@@ -1863,7 +1691,7 @@ class SaveMappingIntegrationManager:
                 ).stdout.decode("ascii").strip()
                 mode = "100755" if target.mode & 0o111 else "100644"
                 _git_mutate(
-                    develop_path,
+                    repository_root,
                     "update-index",
                     "--add",
                     "--cacheinfo",
@@ -1871,12 +1699,12 @@ class SaveMappingIntegrationManager:
                     env=environment,
                 )
             tree = _git_mutate(
-                develop_path,
+                repository_root,
                 "write-tree",
                 env=environment,
             ).stdout.decode("ascii").strip()
             commit = _git_mutate(
-                develop_path,
+                repository_root,
                 "commit-tree",
                 tree,
                 "-p",
@@ -2017,65 +1845,102 @@ class SaveMappingIntegrationManager:
             structural_mapping_id=identity["structural_mapping_id"],
         )
 
+    def _canonical_mapping_fingerprint_at_commit(
+        self,
+        commit: str,
+        identity: Mapping[str, str],
+    ) -> str:
+        mappings: dict[str, Mapping[str, Any]] = {}
+        try:
+            paths = [
+                item.decode("utf-8", "surrogateescape")
+                for item in _git_bytes_mutate(
+                    self.repository_root,
+                    "ls-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    commit,
+                    "--",
+                    "config/player_save_versions",
+                ).split(b"\0")
+                if item
+            ]
+            for relative in sorted(paths):
+                path = Path(relative)
+                if (
+                    path.parent != Path("config/player_save_versions")
+                    or path.suffix != ".json"
+                ):
+                    continue
+                mapping = json.loads(
+                    _git_bytes_mutate(
+                        self.repository_root,
+                        "show",
+                        f"{commit}:{relative}",
+                    )
+                )
+                mappings[str(mapping["mapping_id"])] = mapping
+        except (
+            SaveMappingIntegrationError,
+            UnicodeDecodeError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as exc:
+            raise SaveMappingIntegrationError(
+                "canonical_mapping_validation_failed",
+                "The staged canonical mapping set could not be validated.",
+            ) from exc
+        return canonical_mapping_set_fingerprint(
+            mappings,
+            authority_mapping_id=identity["authority_mapping_id"],
+            structural_mapping_id=identity["structural_mapping_id"],
+        )
+
     def _base_state(self) -> dict[str, Any]:
         worktrees = _linked_worktrees(self.repository_root)
         production = next(
             (item for item in worktrees if item.path == self.repository_root),
             None,
         )
-        develops = [item for item in worktrees if item.branch == "develop"]
         if production is None or production.branch != "main":
             raise SaveMappingIntegrationError(
                 "production_role_invalid",
                 "The control surface repository root is not the linked main worktree.",
             )
-        if len(develops) != 1:
-            raise SaveMappingIntegrationError(
-                "develop_worktree_unavailable",
-                "Exactly one linked develop worktree is required.",
-            )
-        develop = develops[0]
-        main_commit = _git_output(self.repository_root, "rev-parse", "refs/heads/main")
-        develop_commit = _git_output(
+        main_commit = _git_output(
             self.repository_root,
             "rev-parse",
-            "refs/heads/develop",
+            "refs/heads/main",
         )
+        staged_commit = self._staging_ref_commit()
         production_clean = not _git_status(self.repository_root)
-        develop_clean = not _git_status(develop.path)
         identity_available = bool(
-            _git_config_value(develop.path, "user.name")
-            and _git_config_value(develop.path, "user.email")
+            _git_config_value(self.repository_root, "user.name")
+            and _git_config_value(self.repository_root, "user.email")
         )
         available = True
         code = ""
         reason = ""
-        if develop.locked or develop.prunable:
+        if production.locked or production.prunable:
             available = False
-            code = "develop_worktree_unavailable"
-            reason = "The linked develop worktree is locked or prunable."
+            code = "production_worktree_unavailable"
+            reason = "The production worktree is locked or prunable."
         elif production.head != main_commit:
             available = False
             code = "production_head_changed"
             reason = "The production worktree is not at the current main tip."
-        elif develop.head != develop_commit:
-            available = False
-            code = "develop_head_changed"
-            reason = "The develop worktree is not at the current develop tip."
         elif not production_clean:
             available = False
             code = "production_worktree_dirty"
             reason = "Production has tracked, staged, or untracked changes."
-        elif not develop_clean:
+        elif staged_commit is not None:
             available = False
-            code = "develop_worktree_dirty"
-            reason = "develop has tracked, staged, or untracked changes."
-        elif main_commit != develop_commit:
-            available = False
-            code = "repository_not_synchronized"
+            code = "staging_ref_occupied"
             reason = (
-                "main and develop are not at the same commit; finish the pending "
-                "integration or production promotion first."
+                "A private save-mapping candidate is already staged; finish or "
+                "inspect it before reviewing another."
             )
         elif not identity_available:
             available = False
@@ -2086,50 +1951,38 @@ class SaveMappingIntegrationManager:
             "code": code,
             "reason": reason,
             "main_commit": main_commit,
-            "develop_commit": develop_commit,
-            "synchronized": main_commit == develop_commit,
+            "staging_ref": SAVE_MAPPING_STAGING_REF,
+            "staged_commit": staged_commit,
             "production_clean": production_clean,
-            "develop_clean": develop_clean,
-            "develop_path": develop.path,
         }
 
     def _lightweight_transaction_state(
         self,
         transaction: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Read only refs needed by a persistent lifecycle projection."""
+        """Read only state needed by a persistent lifecycle projection."""
 
-        main_commit = _git_output(
-            self.repository_root,
-            "rev-parse",
-            "refs/heads/main",
-        )
-        develop_commit = _git_output(
-            self.repository_root,
-            "rev-parse",
-            "refs/heads/develop",
-        )
         return {
             "integration_available": False,
             "code": "",
             "reason": "",
-            "main_commit": main_commit,
-            "develop_commit": develop_commit,
-            "synchronized": main_commit == develop_commit,
-            "production_clean": False,
-            "develop_clean": False,
-            "develop_path": Path(transaction["integration"]["path"]),
+            "main_commit": _git_output(
+                self.repository_root,
+                "rev-parse",
+                "refs/heads/main",
+            ),
+            "staging_ref": transaction["staging"]["ref"],
+            "staged_commit": self._staging_ref_commit(),
+            "production_clean": not _git_status(self.repository_root),
         }
 
     @staticmethod
     def _public_repository(base: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "main_commit": base["main_commit"],
-            "develop_commit": base["develop_commit"],
-            "synchronized": base["synchronized"],
+            "staging_ref": base["staging_ref"],
+            "staged_commit": base["staged_commit"],
             "production_clean": base["production_clean"],
-            "develop_clean": base["develop_clean"],
-            "develop_path": str(base["develop_path"]),
             "integration_available": base["integration_available"],
             "code": base["code"],
             "reason": base["reason"],
@@ -2142,27 +1995,23 @@ class SaveMappingIntegrationManager:
         *,
         main_candidate: Optional[Mapping[str, Any]] = None,
     ) -> tuple[str, str]:
-        expected = transaction["integration"]["expected_commit"]
+        expected = transaction["staging"]["expected_commit"]
+        base_commit = transaction["repository"]["base_commit"]
+        main_commit = str(base["main_commit"])
+        staged_commit = base.get("staged_commit")
         main_contains = _git_success(
             self.repository_root,
             "merge-base",
             "--is-ancestor",
             expected,
-            str(base["main_commit"]),
+            main_commit,
         )
-        develop_contains = _git_success(
-            self.repository_root,
-            "merge-base",
-            "--is-ancestor",
-            expected,
-            str(base["develop_commit"]),
-        )
-        if transaction["phase"] != "committed_to_develop":
+        if transaction["phase"] == "commit_ready":
             if self._transaction_git_lock_present(transaction):
                 return (
                     "integration_unconfirmed",
-                    "Git integration lock artifacts remain; inspect them before "
-                    "retrying or changing repository state",
+                    "Git lock artifacts remain; inspect them before retrying or "
+                    "changing repository state",
                 )
             try:
                 self._validate_locked_candidate(
@@ -2175,100 +2024,45 @@ class SaveMappingIntegrationManager:
                     "Candidate evidence changed or conflicts with the durable "
                     "transaction; route this claim through ordinary development",
                 )
-            if main_contains and not self._ref_targets_match(
-                transaction,
-                str(base["main_commit"]),
-            ):
+            if staged_commit not in {None, expected}:
                 return (
                     "integration_unconfirmed",
-                    "Production contains superseding canonical target content "
-                    "outside the durable transaction",
+                    "The private staging ref contains an object outside the durable "
+                    "transaction",
                 )
-            if develop_contains and not self._ref_targets_match(
-                transaction,
-                str(base["develop_commit"]),
-            ):
-                return (
-                    "integration_unconfirmed",
-                    "develop contains superseding canonical target content "
-                    "outside the durable transaction",
-                )
-            if not self._transaction_checkout_recoverable(transaction):
-                return (
-                    "integration_unconfirmed",
-                    "The develop checkout contains state outside the exact "
-                    "transaction-owned partial recovery boundary",
-                )
-            main_exact = str(base["main_commit"]) == expected
-            develop_exact = str(base["develop_commit"]) == expected
-            base_exact = transaction["repository"]["base_commit"]
-            if main_exact and develop_exact:
-                if not self._ref_targets_match(
-                    transaction,
-                    str(base["main_commit"]),
-                ) or not self._ref_targets_match(
-                    transaction,
-                    str(base["develop_commit"]),
-                ):
+            if main_contains:
+                if not self._ref_targets_match(transaction, main_commit):
                     return (
                         "integration_unconfirmed",
-                        "A current branch contains superseding canonical target "
-                        "content outside the durable transaction",
-                    )
-                if main_candidate is None:
-                    record = self.candidate_store.get(
-                        transaction["candidate_record_id"]
-                    )
-                    main_candidate = mapping_candidate_record_status(
-                        record,
-                        repository_root=self.repository_root,
-                    )
-                if main_candidate.get("state") != "integrated":
-                    return (
-                        "integration_unconfirmed",
-                        "Production contains the generated commit but no longer "
-                        "owns the durable candidate",
-                    )
-                return (
-                    "integration_recovery_required",
-                    "The generated integration commit requires one exact "
-                    "recovery verification before promotion",
-                )
-            if str(base["main_commit"]) == base_exact and develop_exact:
-                if not self._ref_targets_match(
-                    transaction,
-                    str(base["develop_commit"]),
-                ):
-                    return (
-                        "integration_unconfirmed",
-                        "develop contains superseding canonical target content "
+                        "Production contains superseding canonical target content "
                         "outside the durable transaction",
                     )
                 return (
                     "integration_recovery_required",
-                    "The generated integration commit requires one exact "
-                    "recovery verification before promotion",
+                    "The staged commit requires one exact recovery verification",
                 )
-            if (
-                str(base["main_commit"]) == base_exact
-                and str(base["develop_commit"]) == base_exact
-            ):
+            if main_commit == base_commit and staged_commit in {None, expected}:
                 return (
                     "integration_recovery_required",
-                    "The generated integration commit requires one exact "
-                    "recovery verification before promotion",
+                    "The reviewed staged commit requires one exact retry to finish",
                 )
             return (
                 "integration_unconfirmed",
-                "Repository refs are not the exact base or generated commit "
-                "required for recovery; inspect before continuing",
+                "Repository refs moved outside the durable staging transaction; "
+                "inspect before continuing",
             )
+
         if main_contains:
-            if not self._ref_targets_match(transaction, str(base["main_commit"])):
+            if staged_commit not in {None, expected}:
                 return (
                     "integration_unconfirmed",
-                    "Production contains the integration commit but its exact "
-                    "canonical target content was superseded",
+                    "The private staging ref moved to another object",
+                )
+            if not self._ref_targets_match(transaction, main_commit):
+                return (
+                    "integration_unconfirmed",
+                    "Production contains the staged commit but its exact canonical "
+                    "target content was superseded",
                 )
             if main_candidate is None:
                 record = self.candidate_store.get(
@@ -2281,47 +2075,52 @@ class SaveMappingIntegrationManager:
             if main_candidate is None or main_candidate.get("state") != "integrated":
                 return (
                     "integration_unconfirmed",
-                    "Production contains the integration commit but its current "
-                    "canonical mapping no longer owns this candidate",
+                    "Production contains the staged commit but its current canonical "
+                    "mapping no longer owns this candidate",
                 )
             if self._matching_decode_receipt(transaction):
                 return (
                     "integrated",
-                    "production contains the integration commit and a fresh "
-                    "stable decode confirmed it",
+                    "production contains the staged commit and a fresh stable "
+                    "decode confirmed it",
                 )
             return (
                 "production_validation_pending",
                 f"Production contains {expected[:12]}; awaiting a fresh stable save decode",
             )
-        if develop_contains:
-            if base["main_commit"] != transaction["repository"]["base_commit"]:
+
+        if staged_commit == expected and main_commit == base_commit:
+            if not self._ref_targets_match(transaction, expected):
                 return (
                     "integration_unconfirmed",
-                    "Production diverged from the reviewed base; the integration "
-                    "is not a fast-forward promotion candidate",
-                )
-            if not self._ref_targets_match(transaction, str(base["develop_commit"])):
-                return (
-                    "integration_unconfirmed",
-                    "develop contains the integration commit but its exact "
-                    "canonical target content was superseded",
+                    "The private staging ref no longer contains the reviewed "
+                    "canonical targets",
                 )
             return (
                 "promotion_pending",
-                f"Committed to develop as {expected[:12]}; awaiting production promotion",
+                f"Staged as {expected[:12]}; awaiting production promotion",
             )
+
         if (
-            base["main_commit"] == transaction["repository"]["base_commit"]
-            and base["develop_commit"] == transaction["repository"]["base_commit"]
-        ):
-            return (
-                "integration_recovery_required",
-                "A reviewed integration commit is ready; explicitly retry once to recover it",
+            staged_commit in {None, expected}
+            and _git_success(
+                self.repository_root,
+                "merge-base",
+                "--is-ancestor",
+                base_commit,
+                main_commit,
             )
+        ) and self._ref_targets_match_before(transaction, main_commit):
+            return (
+                "restaging_required",
+                "main advanced after this candidate was staged; review the same "
+                "mapping inputs and restage it on the current tip",
+            )
+
         return (
             "integration_unconfirmed",
-            "Repository refs moved outside the durable integration transaction; inspect before continuing",
+            "Repository refs moved outside the durable staging transaction; "
+            "inspect before continuing",
         )
 
     def _ref_targets_match(
@@ -2351,6 +2150,33 @@ class SaveMappingIntegrationManager:
             return False
         return True
 
+    def _ref_targets_match_before(
+        self,
+        transaction: Mapping[str, Any],
+        commit: str,
+    ) -> bool:
+        try:
+            for target in _transaction_targets(transaction):
+                content = _git_bytes_mutate(
+                    self.repository_root,
+                    "show",
+                    f"{commit}:{target.path}",
+                )
+                if hashlib.sha256(content).hexdigest() != target.before_sha256:
+                    return False
+                entry = _git_output(
+                    self.repository_root,
+                    "ls-tree",
+                    commit,
+                    "--",
+                    target.path,
+                )
+                if not entry.startswith("100644 blob "):
+                    return False
+        except SaveMappingIntegrationError:
+            return False
+        return True
+
     def _transaction_validated(
         self,
         transaction: Mapping[str, Any],
@@ -2365,7 +2191,7 @@ class SaveMappingIntegrationManager:
             for record in self.decode_receipts.list_records()
             if record["candidate_record_id"] == transaction["candidate_record_id"]
             and record["integration_commit"]
-            == transaction["integration"]["expected_commit"]
+            == transaction["staging"]["expected_commit"]
         ]
         if not records:
             return False
@@ -2381,7 +2207,7 @@ class SaveMappingIntegrationManager:
                 self.repository_root,
                 "merge-base",
                 "--is-ancestor",
-                transaction["integration"]["expected_commit"],
+                transaction["staging"]["expected_commit"],
                 record["acquisition_main_commit"],
             )
             for record in records
@@ -2407,12 +2233,14 @@ class SaveMappingIntegrationManager:
                 "reviewed_proposal_fingerprint"
             ],
             "phase": transaction["phase"],
-            "integration_commit": transaction["integration"]["expected_commit"],
+            "staging_ref": transaction["staging"]["ref"],
+            "staged_commit": transaction["staging"]["expected_commit"],
             "state": lifecycle,
             "reason": reason,
             "recovery_required": lifecycle in {
                 "integration_recovery_required",
                 "integration_unconfirmed",
+                "restaging_required",
             },
         }
 
@@ -2504,17 +2332,18 @@ def _integration_result(
     return {
         "schema_version": SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION,
         "capability": SAVE_MAPPING_INTEGRATION_CAPABILITY,
-        "operation": "integrate",
-        "disposition": "committed_to_develop",
+        "operation": "stage",
+        "disposition": "staged_for_promotion",
         "idempotent": idempotent,
         "candidate_record_id": transaction["candidate_record_id"],
         "reviewed_proposal_fingerprint": transaction[
             "reviewed_proposal_fingerprint"
         ],
         "base_commit": transaction["repository"]["base_commit"],
-        "develop_commit": transaction["integration"]["expected_commit"],
-        "integration_commit": transaction["integration"]["expected_commit"],
+        "staging_ref": transaction["staging"]["ref"],
+        "staged_commit": transaction["staging"]["expected_commit"],
         "committed": True,
+        "staged": True,
         "promoted": promoted,
         "mapping_invariants": "passed",
         "promotion_validation": "pending",
@@ -2709,6 +2538,7 @@ __all__ = [
     "SAVE_MAPPING_INTEGRATION_CAPABILITY",
     "SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION",
     "SAVE_MAPPING_REVIEW_STATUS_CAPABILITY",
+    "SAVE_MAPPING_STAGING_REF",
     "SaveMappingIntegrationError",
     "SaveMappingIntegrationManager",
     "canonical_mapping_decode_start",

@@ -342,8 +342,11 @@ public sealed class SaveMappingIntegrationTransaction
     [JsonPropertyName("phase")]
     public string Phase { get; set; } = "";
 
-    [JsonPropertyName("integration_commit")]
-    public string IntegrationCommit { get; set; } = "";
+    [JsonPropertyName("staging_ref")]
+    public string StagingRef { get; set; } = "";
+
+    [JsonPropertyName("staged_commit")]
+    public string StagedCommit { get; set; } = "";
 
     [JsonPropertyName("state")]
     public string State { get; set; } = "";
@@ -360,20 +363,14 @@ public sealed class SaveMappingRepositoryStatus
     [JsonPropertyName("main_commit")]
     public string MainCommit { get; set; } = "";
 
-    [JsonPropertyName("develop_commit")]
-    public string DevelopCommit { get; set; } = "";
+    [JsonPropertyName("staging_ref")]
+    public string StagingRef { get; set; } = "";
 
-    [JsonPropertyName("synchronized")]
-    public bool Synchronized { get; set; }
+    [JsonPropertyName("staged_commit")]
+    public string? StagedCommit { get; set; }
 
     [JsonPropertyName("production_clean")]
     public bool ProductionClean { get; set; }
-
-    [JsonPropertyName("develop_clean")]
-    public bool DevelopClean { get; set; }
-
-    [JsonPropertyName("develop_path")]
-    public string DevelopPath { get; set; } = "";
 
     [JsonPropertyName("integration_available")]
     public bool IntegrationAvailable { get; set; }
@@ -465,8 +462,8 @@ public sealed class SaveMappingIntegrationReview
     [JsonPropertyName("rendered_targets")]
     public List<SaveMappingIntegratedTarget> RenderedTargets { get; set; } = [];
 
-    [JsonPropertyName("integrate")]
-    public BetterControlActionAvailability Integrate { get; set; } = new();
+    [JsonPropertyName("stage")]
+    public BetterControlActionAvailability Stage { get; set; } = new();
 
     [JsonPropertyName("recovery_required")]
     public bool RecoveryRequired { get; set; }
@@ -556,14 +553,17 @@ public sealed class SaveMappingIntegratedResult
     [JsonPropertyName("base_commit")]
     public string BaseCommit { get; set; } = "";
 
-    [JsonPropertyName("develop_commit")]
-    public string DevelopCommit { get; set; } = "";
+    [JsonPropertyName("staging_ref")]
+    public string StagingRef { get; set; } = "";
 
-    [JsonPropertyName("integration_commit")]
-    public string IntegrationCommit { get; set; } = "";
+    [JsonPropertyName("staged_commit")]
+    public string StagedCommit { get; set; } = "";
 
     [JsonPropertyName("committed")]
     public bool? Committed { get; set; }
+
+    [JsonPropertyName("staged")]
+    public bool? Staged { get; set; }
 
     [JsonPropertyName("promoted")]
     public bool? Promoted { get; set; }

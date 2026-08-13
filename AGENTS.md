@@ -24,9 +24,11 @@ changes this model.
   [production procedure](docs/operations/production_promotion.md).
 - The operator-confirmed save-mapping fast lane documented in
   [development isolation](docs/architecture/development_isolation.md) is the
-  sole application-owned exception: it may create one allowlisted commit on a
-  clean, exactly synchronized `develop`. It grants no agent, feature, or client
-  general permission to bypass feature branches or promote production.
+  sole application-owned exception: it may create one allowlisted child of
+  current `main` under the private save-mapping staging ref. It never moves
+  `main` or changes the production index or worktree. It grants no agent,
+  feature, or client general permission to bypass feature branches or promote
+  production.
 - Treat unrelated tracked and untracked changes as another participant's work.
   Do not overwrite, delete, stage, or incorporate them. Recheck status and each
   target diff immediately before editing, staging, or committing; reconcile a

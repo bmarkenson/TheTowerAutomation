@@ -37,7 +37,7 @@ from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
 from core.gate_decisions import build_gate_decision_options
-from core.player_save_mapping_develop_integration import SaveMappingIntegrationError
+from core.player_save_mapping_staged_candidate import SaveMappingIntegrationError
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
 
 
@@ -968,8 +968,8 @@ def test_status_exposes_local_mapping_lifecycle_without_blocking_health(tmp_path
 def test_save_mapping_integration_catalog_and_review_are_non_mutating(tmp_path):
     service = _service(tmp_path)
     catalog = {
-        "schema_version": 2,
-        "capability": "save_mapping_develop_integration_v1",
+        "schema_version": 3,
+        "capability": "save_mapping_staged_candidate_v1",
         "available": True,
         "reason": "",
         "repository": {},
@@ -980,9 +980,9 @@ def test_save_mapping_integration_catalog_and_review_are_non_mutating(tmp_path):
         "candidate_record_id": "a" * 64,
         "reviewed_proposal_fingerprint": "b" * 64,
         "proposal": {"schema_version": 2, "targets": []},
-        "integrate": {
+        "stage": {
             "available": False,
-            "code": "repository_not_synchronized",
+            "code": "staging_ref_occupied",
             "reason": "pending promotion",
         },
     }
@@ -1012,24 +1012,24 @@ def test_save_mapping_integrate_requires_exact_review_and_logs_one_pair(tmp_path
             "schema_version": 2,
             "targets": [{"path": "one.json"}, {"path": "two.json"}],
         },
-        "integrate": {"available": True, "code": "", "reason": ""},
+        "stage": {"available": True, "code": "", "reason": ""},
     }
     integrated = {
-        "operation": "integrate",
-        "disposition": "committed_to_develop",
-        "integration_commit": "e" * 40,
+        "operation": "stage",
+        "disposition": "staged_for_promotion",
+        "staged_commit": "e" * 40,
         "committed": True,
         "promoted": False,
         "mapping_invariants": "passed",
     }
     service.save_mapping_integration_manager.review = Mock(return_value=review)
-    service.save_mapping_integration_manager.integrate = Mock(
+    service.save_mapping_integration_manager.stage = Mock(
         return_value=integrated
     )
 
     result = service.apply_save_mapping_integration(
         {
-            "operation": "integrate",
+            "operation": "stage",
             "candidate_record_id": "a" * 64,
             "reviewed_proposal_fingerprint": "b" * 64,
         }
@@ -1049,7 +1049,7 @@ def test_save_mapping_integrate_requires_exact_review_and_logs_one_pair(tmp_path
         "save-mapping-aaaaaaaaaaaa-bbbbbbbbbbbb-"
     )
     assert len(operation_ids[0].rsplit("-", 1)[1]) == 12
-    assert "committed=true promoted=false mapping_invariants=passed" in activity
+    assert "staged=true promoted=false mapping_invariants=passed" in activity
 
 
 def test_save_mapping_integrate_attempts_have_unique_audit_identities(tmp_path):
@@ -1057,17 +1057,17 @@ def test_save_mapping_integrate_attempts_have_unique_audit_identities(tmp_path):
     review = {
         "reviewed_proposal_fingerprint": "b" * 64,
         "proposal": {"schema_version": 2, "targets": [{"path": "one.json"}]},
-        "integrate": {"available": True, "code": "", "reason": ""},
+        "stage": {"available": True, "code": "", "reason": ""},
     }
     service.save_mapping_integration_manager.review = Mock(return_value=review)
-    service.save_mapping_integration_manager.integrate = Mock(
+    service.save_mapping_integration_manager.stage = Mock(
         side_effect=SaveMappingIntegrationError(
             "commit_state_uncertain",
             "Inspect main, develop, and the transaction.",
         )
     )
     request = {
-        "operation": "integrate",
+        "operation": "stage",
         "candidate_record_id": "a" * 64,
         "reviewed_proposal_fingerprint": "b" * 64,
     }
@@ -1097,7 +1097,7 @@ def test_save_mapping_integrate_attempts_have_unique_audit_identities(tmp_path):
 
 def test_post_ref_transaction_write_failure_is_audited_as_unconfirmed(tmp_path):
     service = _service(tmp_path)
-    service.save_mapping_integration_manager.integrate = Mock(
+    service.save_mapping_integration_manager.stage = Mock(
         side_effect=SaveMappingIntegrationError(
             "transaction_write_failed",
             "The durable phase update could not be confirmed.",
@@ -1107,7 +1107,7 @@ def test_post_ref_transaction_write_failure_is_audited_as_unconfirmed(tmp_path):
     with pytest.raises(ControlSurfaceRequestError) as failure:
         service.apply_save_mapping_integration(
             {
-                "operation": "integrate",
+                "operation": "stage",
                 "candidate_record_id": "a" * 64,
                 "reviewed_proposal_fingerprint": "b" * 64,
             }
@@ -1121,7 +1121,7 @@ def test_post_ref_transaction_write_failure_is_audited_as_unconfirmed(tmp_path):
 def test_legacy_save_mapping_prepare_operation_is_rejected_without_audit(tmp_path):
     service = _service(tmp_path)
 
-    with pytest.raises(ControlSurfaceRequestError, match="review or integrate"):
+    with pytest.raises(ControlSurfaceRequestError, match="review or stage"):
         service.apply_save_mapping_integration(
             {
                 "operation": "prepare",
@@ -1136,7 +1136,7 @@ def test_legacy_save_mapping_prepare_operation_is_rejected_without_audit(tmp_pat
 
 def test_save_mapping_integrate_audits_stale_fingerprint_rejection(tmp_path):
     service = _service(tmp_path)
-    service.save_mapping_integration_manager.integrate = Mock(
+    service.save_mapping_integration_manager.stage = Mock(
         side_effect=SaveMappingIntegrationError(
             "reviewed_proposal_stale",
             "The reviewed proposal changed.",
@@ -1146,7 +1146,7 @@ def test_save_mapping_integrate_audits_stale_fingerprint_rejection(tmp_path):
     with pytest.raises(ControlSurfaceRequestError) as failure:
         service.apply_save_mapping_integration(
             {
-                "operation": "integrate",
+                "operation": "stage",
                 "candidate_record_id": "a" * 64,
                 "reviewed_proposal_fingerprint": "d" * 64,
             }
@@ -1179,7 +1179,7 @@ def test_save_mapping_integrate_rejects_malformed_identity_without_audit(
     with pytest.raises(ControlSurfaceRequestError):
         service.apply_save_mapping_integration(
             {
-                "operation": "integrate",
+                "operation": "stage",
                 "candidate_record_id": candidate_id,
                 "reviewed_proposal_fingerprint": fingerprint,
             }
@@ -3134,7 +3134,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 41" in native_compatibility
+    assert "MinimumServerRevision = 42" in native_compatibility
     assert '"bluestacks_maintenance_v1"' not in native_compatibility
     assert '"bluestacks_maintenance_v2"' in native_compatibility
     assert '"bluestacks_operator_restart_v1"' in native_compatibility
@@ -3147,8 +3147,8 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "confirmed_local_mapping_status_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_review_status_v2"' in native_compatibility
     assert "save_mapping_review_status_v2" in CONTROL_SURFACE_CAPABILITIES
-    assert '"save_mapping_develop_integration_v1"' in native_compatibility
-    assert "save_mapping_develop_integration_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_staged_candidate_v1"' in native_compatibility
+    assert "save_mapping_staged_candidate_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'id="confirmedLocalMappingAlert"' in html
     assert 'x:Name="ConfirmedLocalMappingBanner"' in native_xaml
     assert 'JsonPropertyName("confirmed_local_mappings")' in native_models
@@ -3690,8 +3690,8 @@ assert.strictEqual(model.confirmedLocalMappingPresentation({{
   items: [],
 }}).severity, 'danger');
 const mappingReview = {{
-  schema_version: 2,
-  capability: 'save_mapping_develop_integration_v1',
+  schema_version: 3,
+  capability: 'save_mapping_staged_candidate_v1',
   operation: 'review',
   candidate_record_id: 'a'.repeat(64),
   reviewed_proposal_fingerprint: 'c'.repeat(64),
@@ -3699,11 +3699,9 @@ const mappingReview = {{
   canonical_mapping_fingerprint: 'f'.repeat(64),
   repository: {{
     main_commit: '1'.repeat(40),
-    develop_commit: '1'.repeat(40),
-    synchronized: true,
+    staging_ref: 'refs/thetower/save-mapping-candidate',
+    staged_commit: null,
     production_clean: true,
-    develop_clean: true,
-    develop_path: '/develop',
     integration_available: true,
     code: '',
   }},
@@ -3725,7 +3723,7 @@ const mappingReview = {{
     changed: true,
     mode: 436,
   }}],
-  integrate: {{available: true, code: '', reason: ''}},
+  stage: {{available: true, code: '', reason: ''}},
 }};
 assert.strictEqual(
   model.saveMappingReviewIsCurrent(
@@ -3747,10 +3745,8 @@ const recoveryReview = {{
   repository: {{
     ...mappingReview.repository,
     main_commit: 'b'.repeat(40),
-    develop_commit: 'b'.repeat(40),
-    synchronized: false,
+    staged_commit: 'b'.repeat(40),
     production_clean: false,
-    develop_clean: false,
     integration_available: false,
     code: 'transaction_recovery_required',
   }},
@@ -3761,7 +3757,7 @@ const recoveryReview = {{
       operations: [],
     }})),
   }},
-  integrate: {{
+  stage: {{
     available: true,
     code: 'transaction_recovery_required',
     reason: 'retry exact durable transaction once',
@@ -3783,26 +3779,27 @@ assert.strictEqual(
 );
 assert.strictEqual(model.saveMappingIntegrationCompatible({{
   api_version: 1,
-  server_revision: 40,
-  capabilities: ['save_mapping_develop_integration_v1'],
+  server_revision: 42,
+  capabilities: ['save_mapping_staged_candidate_v1'],
 }}), true);
 assert.strictEqual(model.saveMappingIntegrationCompatible({{
   api_version: 1,
-  server_revision: 39,
-  capabilities: ['save_mapping_develop_integration_v1'],
+  server_revision: 41,
+  capabilities: ['save_mapping_staged_candidate_v1'],
 }}), false);
 const integratedResult = {{
-  schema_version: 2,
-  capability: 'save_mapping_develop_integration_v1',
-  operation: 'integrate',
-  disposition: 'committed_to_develop',
+  schema_version: 3,
+  capability: 'save_mapping_staged_candidate_v1',
+  operation: 'stage',
+  disposition: 'staged_for_promotion',
   idempotent: false,
   candidate_record_id: 'a'.repeat(64),
   reviewed_proposal_fingerprint: 'c'.repeat(64),
   base_commit: '1'.repeat(40),
-  integration_commit: 'b'.repeat(40),
-  develop_commit: 'b'.repeat(40),
+  staging_ref: 'refs/thetower/save-mapping-candidate',
+  staged_commit: 'b'.repeat(40),
   committed: true,
+  staged: true,
   promoted: false,
   mapping_invariants: 'passed',
   promotion_validation: 'pending',
@@ -3847,13 +3844,13 @@ for (const invalid of [
   ).valid, false);
 }}
 assert.strictEqual(model.saveMappingFailurePresentation({{
-  code: 'repository_not_synchronized', message: 'pending promotion',
+  code: 'staging_ref_occupied', message: 'pending candidate',
 }}).uncertain, false);
 assert.strictEqual(model.saveMappingFailurePresentation({{
   code: 'commit_state_uncertain', message: 'inspect',
 }}).uncertain, true);
 const unchanged = model.saveMappingFailurePresentation({{
-  code: 'develop_fast_forward_failed', message: 'Develop stayed at base.',
+  code: 'staging_ref_update_failed', message: 'Private ref stayed empty.',
 }});
 assert.strictEqual(unchanged.uncertain, false);
 assert.match(unchanged.detail, /retry once only when directed/);
@@ -3864,6 +3861,13 @@ const promotion = model.confirmedLocalMappingPresentation({{
 }});
 assert.strictEqual(promotion.severity, 'info');
 assert.match(promotion.title, /production promotion/);
+const restaging = model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: true,
+  items: [{{state: 'restaging_required', reason: 'main advanced'}}],
+}});
+assert.strictEqual(restaging.severity, 'warning');
+assert.match(restaging.title, /restaged/);
 const promotionDominatesQueue = model.confirmedLocalMappingPresentation({{
   schema_version: 2,
   available: true,
@@ -3892,8 +3896,8 @@ assert.match(promotionDominatesQueue.detail, /awaiting exact production promotio
     assert 'id="saveMappingIntegrationDialog"' in html
     assert 'id="saveMappingWorkspaceSelect"' not in html
     assert "reviewed_proposal_fingerprint" in browser
-    assert "Integrate reviewed mapping into develop" in html
-    assert "fast-forwards clean develop" in browser
+    assert "Stage reviewed mapping for promotion" in html
+    assert "private staging ref" in browser
     assert "saveMappingIntegratedResultValidation" in browser
     assert "saveMappingSelectionStillCurrent" in browser
     assert "Interrupted integration requires recovery" in browser
@@ -4635,8 +4639,8 @@ def test_http_save_mapping_integration_routes_catalog_review_and_integrate(
         service,
         "save_mapping_integration",
         lambda: {
-            "schema_version": 2,
-            "capability": "save_mapping_develop_integration_v1",
+            "schema_version": 3,
+            "capability": "save_mapping_staged_candidate_v1",
             "available": True,
             "items": [],
         },
@@ -4664,7 +4668,7 @@ def test_http_save_mapping_integration_routes_catalog_review_and_integrate(
         response = connection.getresponse()
         catalog = json.loads(response.read())
         assert response.status == 200
-        assert catalog["capability"] == "save_mapping_develop_integration_v1"
+        assert catalog["capability"] == "save_mapping_staged_candidate_v1"
 
         for payload in (
             {
@@ -4672,7 +4676,7 @@ def test_http_save_mapping_integration_routes_catalog_review_and_integrate(
                 "candidate_record_id": "a" * 64,
             },
             {
-                "operation": "integrate",
+                "operation": "stage",
                 "candidate_record_id": "a" * 64,
                 "reviewed_proposal_fingerprint": "c" * 64,
             },
@@ -4697,7 +4701,7 @@ def test_http_save_mapping_integration_routes_catalog_review_and_integrate(
                 "candidate_record_id": "a" * 64,
             },
             {
-                "operation": "integrate",
+                "operation": "stage",
                 "candidate_record_id": "a" * 64,
                 "reviewed_proposal_fingerprint": "c" * 64,
             },

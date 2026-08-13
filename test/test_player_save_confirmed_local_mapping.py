@@ -400,6 +400,7 @@ def test_status_is_nonblocking_and_reports_pending_integration(tmp_path):
         "integration_unconfirmed",
         "production_validation_pending",
         "promotion_pending",
+        "restaging_required",
     ],
 )
 def test_fast_lane_lifecycle_takes_precedence_over_local_confirmation(
