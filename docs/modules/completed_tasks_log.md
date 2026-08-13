@@ -39,6 +39,29 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 promotion serialization and completion-lifecycle guard
+
+- Commit `939141a` keeps candidate development and validation concurrent while
+  serializing the mutable production window with atomic compare-and-create of
+  local `refs/thetower/promotion-owner`. The exact candidate stays bound from
+  final rereads through deployment, `origin/main` publication, and cleanup;
+  every other thread sees and respects the owner during live preflight.
+- A competing acquisition fails instead of allowing two coordinators to act.
+  Exact compare-delete releases only the recorded candidate, and an abandoned
+  owner requires explicit recovery after production, remote, deployment, and
+  cleanup state are reconciled; elapsed time never clears the ref.
+- The existing completion lifecycle remains canonical in documentation
+  maintenance: remove completed work from its active owner, route concise
+  outcomes to the completion log or resolved issue dossier, and keep history
+  on demand. New focused regression scans `PENDING_DEVELOPMENT.md`, current
+  `docs/backlog/*.md`, and `docs/observed_issues.md` while excluding history,
+  and rejects completed checkbox markers in those active queues.
+- The lifecycle regression passed both tests. A disposable Git repository
+  proved exclusive acquisition, retained ownership after a competing acquire,
+  reflog attribution, and exact release. All 331 tracked local Markdown links
+  and anchors across 51 files resolved, and `git diff --check` passed. No
+  service, device, or live validation was required.
+
 ### 2026-08-13 workflow-guidance simplification audit
 
 - Commit `1dc4bfd` reduces universal startup guidance to routing and safeguards,
