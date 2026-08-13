@@ -25,7 +25,7 @@ or adding a documentation category. Keep one canonical statement and links.
 | Detailed active work | One matching `docs/backlog/*.md` file |
 | Active issue classification and routing | `docs/observed_issues.md` |
 | Issue dossiers, history, and durable evidence | `docs/issues/` as routed by its `README.md` |
-| Completed implementation outcomes | `docs/modules/completed_tasks_log.md` |
+| Concise completed-outcome index and non-issue completion records | `docs/modules/completed_tasks_log.md` |
 | Superseded reasoning or dated investigations | A clearly labeled history file |
 
 Do not track or routinely load API summaries. Generate an explicitly requested
@@ -57,9 +57,21 @@ row only for a genuinely new information class.
 - Put an actionable task in exactly one domain backlog. Change the root backlog
   only when domain routing or priority changes.
 - Keep active-task evidence only while it constrains remaining work.
-- At completion, remove the active item and record the outcome, commit, and
-  validation in the completed-task log. Complete any related issue transition.
-  Completed narrative is on-demand history, never active required reading.
+- At completion, remove the active item and create one durable outcome record.
+  For non-issue work, the completed-task log owns the concise outcome, relevant
+  commits, and validation. For an issue fix, the resolved dossier owns cause,
+  detailed evidence, resolution, commit, and regression; add only a concise
+  completed-task entry that links there instead of copying that narrative.
+  Complete the issue transition in the same outcome.
+- A commit that adds or corrects the completion record belongs to the outcome
+  it records; it does not create another outcome requiring a recursive
+  completion entry. When expensive candidate validation already passed before
+  purely documentary completion bookkeeping, apply the
+  [validation-dependency rule](operations/production_promotion.md#reuse-validation-by-dependency)
+  to the final candidate and run only the documentation checks added by that
+  bookkeeping.
+
+Completed narrative is on-demand history, never active required reading.
 
 ### Automatic documentation closure
 
@@ -70,17 +82,16 @@ input, or native-package input. Behavior-coupled documentation still receives
 its affected validation; running a test does not change the candidate class.
 
 Unless the operator requests a draft, review-only result, retained branch, or
-no promotion, the documentation coordinator owns the complete closure:
-freeze the exact validated feature tip, promote it to local production `main`
-without a rollback tag or service/runtime action, use the guarded fast-forward's
-exact-commit and clean-worktree verification while reusing unchanged candidate
-validation, publish that exact `main` tip to `origin/main`, and automatically
-retire that coordinator's exact clean integrated worktree and branch with non-
-force operations. Rerun only validation whose dependency boundary changed. An
-explicit no-publication instruction withholds only the remote step. Follow the
+no promotion, the documentation coordinator owns the complete closure defined
+by the
 [documentation-only production boundary](operations/production_promotion.md#promote-one-exact-candidate)
 and [integrated retirement](operations/production_promotion.md#integrated-feature-or-integration-branch)
-checks rather than duplicating them here.
+procedure. That standing authority covers local exact fast-forward promotion
+without a rollback tag or runtime action, exact-`main` publication, and
+non-force retirement of only the coordinator's exact clean integrated pair.
+An explicit no-publication instruction withholds only the remote step. Reuse or
+rerun validation under the production procedure's dependency rule rather than
+maintaining a second closure checklist here.
 
 Scope expansion beyond documentation ends this standing authority. A dirty or
 changed candidate or production checkout, local non-fast-forward, unique or
@@ -121,20 +132,24 @@ not protect it.
 
 ## Validation
 
-For each documentation change:
+First apply the repository-change preflight and immediate-before-mutation
+rechecks in [`new_thread.md`](new_thread.md#repository-change-preflight). The
+documentation-specific additions are:
 
-1. Recheck status and target diffs before editing, staging, and committing;
-   preserve unrelated work.
-2. Search all current inbound references to a moved path or heading. Historical
+1. Search all current inbound references to a moved path or heading. Historical
    prose may retain old path text, but its navigation must reach the owner.
-3. Verify every changed local Markdown target and anchor.
-4. Account for every active task or open issue before deleting or archiving it.
-5. Verify changed durable evidence is tracked, fixture-owned, or narrowly
+2. Verify every changed local Markdown target and anchor.
+3. Account for every active task or open issue before deleting or archiving it.
+4. Verify changed durable evidence is tracked, fixture-owned, or narrowly
    protected.
-6. For every new current document, verify one intentional inbound route, its
+5. For every new current document, verify one intentional inbound route, its
    stated load condition, and the absence of a new mandatory-reading cycle.
-7. Run `git diff --check` plus proportionate tests for generated, executable,
+6. Run `git diff --check` plus proportionate tests for generated, executable,
    schema-defining, or behavior-coupled documentation.
+
+These checks form the documentation portion of the candidate gate when run at
+its frozen dependency boundary; do not repeat them as a separate promotion or
+cleanup ritual when their inputs remain unchanged.
 
 Never put volatile runtime facts in durable guidance. They belong only in a
 freshly inspected diagnostic report or conditional handoff section.

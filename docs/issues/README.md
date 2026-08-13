@@ -20,7 +20,10 @@ each lifecycle its own stable ID and cross-link the records.
 
 - **Resolved:** retain the original symptom; add cause, resolution, fixing
   commit, and regression location; move the complete dossier to
-  [`resolved-2026.md`](resolved-2026.md); remove its active-index entry.
+  [`resolved-2026.md`](resolved-2026.md); remove its active-index entry. This
+  dossier remains the canonical detailed issue-completion record. Add only a
+  concise outcome and link in the completed-task log rather than repeating the
+  cause, evidence, resolution, and validation narrative there.
 - **Unconfirmed:** move an unreproduced, non-actionable report to
   [`unconfirmed-2026.md`](unconfirmed-2026.md) without calling it fixed.
   Preserve negative and later-success evidence, tests, and the exact evidence

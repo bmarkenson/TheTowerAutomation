@@ -1,8 +1,12 @@
 # Completed Tasks Log
 
-This on-demand history records completed outcomes, commits, and validation. It
-is not current policy, an active queue, or required startup reading; use the
-canonical document linked by an entry for current behavior.
+This on-demand history records concise completed outcomes, relevant commits,
+and validation. It is not current policy, an active queue, or required startup
+reading; use the canonical document linked by an entry for current behavior.
+For an issue fix, link the resolved dossier that owns the detailed cause,
+evidence, resolution, and regression instead of copying that narrative here.
+A completion-record commit is part of the outcome it records and does not need
+another completion entry of its own.
 
 ---
 

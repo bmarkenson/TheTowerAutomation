@@ -2,7 +2,9 @@
 
 This file is the routing index for live and production procedures. Before any
 process or device interaction, runtime diagnosis, live validation, or claim
-about volatile state, complete [`live_preflight.md`](live_preflight.md). Then
+about volatile state, complete [`live_preflight.md`](live_preflight.md) once at
+the current runtime, target, control, screen, and task boundary if it is not
+already complete. Arriving here from that preflight does not restart it. Then
 load only the operation that matches the task.
 
 | Need | Canonical procedure |

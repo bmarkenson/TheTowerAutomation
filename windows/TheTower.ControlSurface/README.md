@@ -7,6 +7,12 @@ per-user tunnel host.
 
 ## Publish
 
+This section is the canonical owner for building, verifying, rotating, and
+recovering the complete Windows package. When publication is part of a source
+promotion, also follow the
+[production procedure](../../docs/operations/production_promotion.md#required-windows-package-publication)
+for exact-commit eligibility, recorded hashes, smoke evidence, and closure.
+
 Install the .NET 8 SDK on the Windows build machine, then run PowerShell from
 this directory:
 

@@ -33,9 +33,11 @@ is changing. Search this index first, then read the linked domain file.
 - Follow
   [`docs/documentation_maintenance.md`](docs/documentation_maintenance.md)
   when adding, completing, moving, or archiving work.
-- Move completed outcomes to
+- Move completed non-issue outcomes to
   [`docs/modules/completed_tasks_log.md`](docs/modules/completed_tasks_log.md),
-  retaining commit and validation evidence where applicable.
+  retaining concise commit and validation evidence where applicable. For an
+  issue fix, keep detail in the resolved dossier and add only the concise
+  completed-outcome route required by documentation maintenance.
 - Move fixed anomalies from [`docs/observed_issues.md`](docs/observed_issues.md)
   to the resolved issue archive after recording the fix and regression.
 - The complete pre-split backlog is preserved in

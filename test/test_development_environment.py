@@ -393,6 +393,48 @@ def test_completed_invalid_environment_is_reported_without_mutation(
     assert {path.name: path.read_bytes() for path in final.iterdir()} == before
 
 
+def test_new_environment_runs_dependency_check_once_at_verification_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    fingerprint = _fingerprint(config)
+    final = _final(config, fingerprint)
+    final.mkdir(parents=True)
+    descriptions: list[str] = []
+
+    def successful_command(
+        command: list[str],
+        *,
+        description: str,
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        descriptions.append(description)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(development, "_run_checked", successful_command)
+    monkeypatch.setattr(
+        development,
+        "_expected_installed_distributions",
+        lambda _config: {},
+    )
+    monkeypatch.setattr(
+        development,
+        "_verify_environment_python",
+        lambda *_args, **_kwargs: None,
+    )
+
+    development.build_environment(config, IDENTITY, fingerprint, final)
+    development.verify_environment_contents(final, config, IDENTITY, fingerprint)
+
+    assert descriptions == [
+        "development virtual-environment creation",
+        "hash-verified bootstrap toolchain installation",
+        "hash-verified development dependency installation",
+        "completed environment dependency check",
+    ]
+
+
 def test_worktree_venv_selection_is_atomic_and_preserves_real_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -508,6 +550,7 @@ def test_lock_verification_and_regeneration_are_deterministic(
 ) -> None:
     config = _copy_lock_contract(tmp_path)
     locks = development.validate_lock_inputs(config)
+    interpreter_checks: list[development.EnvironmentConfig] = []
     before = {
         relative: (config.repository_root / relative).read_bytes()
         for relative in development.LOCK_SOURCES
@@ -519,7 +562,13 @@ def test_lock_verification_and_regeneration_are_deterministic(
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(development, "verify_interpreters", lambda _config: IDENTITY)
+    def verify_interpreters(
+        selected: development.EnvironmentConfig,
+    ) -> development.InterpreterIdentity:
+        interpreter_checks.append(selected)
+        return IDENTITY
+
+    monkeypatch.setattr(development, "verify_interpreters", verify_interpreters)
     monkeypatch.setattr(development, "_run_checked", successful_command)
     development.regenerate_locks(config)
     development.regenerate_locks(config)
@@ -529,7 +578,38 @@ def test_lock_verification_and_regeneration_are_deterministic(
         for relative in development.LOCK_SOURCES
     }
     assert all(locks.values())
+    assert interpreter_checks == [config, config]
     assert after == before
+
+
+def test_lock_command_delegates_its_single_interpreter_check_to_regeneration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    regenerated: list[development.EnvironmentConfig] = []
+
+    monkeypatch.setattr(
+        development,
+        "repository_root",
+        lambda: config.repository_root,
+    )
+    monkeypatch.setattr(development, "load_config", lambda _root: config)
+    monkeypatch.setattr(
+        development,
+        "verify_interpreters",
+        lambda _config: pytest.fail(
+            "main must not repeat regenerate_locks' interpreter check"
+        ),
+    )
+    monkeypatch.setattr(
+        development,
+        "regenerate_locks",
+        lambda selected: regenerated.append(selected),
+    )
+
+    assert development.main(["lock"]) == 0
+    assert regenerated == [config]
 
 
 def test_checkpoint_generated_state_is_isolated_while_host_tools_are_available(

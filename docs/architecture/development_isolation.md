@@ -131,55 +131,25 @@ Feature and integration work never modify the production checkout, production
 stop and restart the currently deployed `main` revision throughout ordinary
 development.
 
-The normal release path is deliberately direct:
+The release path remains direct: one exact clean candidate, one guarded
+fast-forward of production `main`, and no standing staging branch or runtime.
+Validation is bound to the inputs a check consumes, so history or ref movement
+alone does not repeat a check that consumes neither; changed source,
+environment, external, generated, or runtime dependencies do. Production-state
+rereads, rollback preparation,
+post-deployment smoke, exact remote publication, and cleanup ownership remain
+separate mutable boundaries.
 
-1. select a clean feature tip, create a temporary integration branch for an
-   intentionally combined outcome, or accept the one allowlisted private
-   save-mapping ref, and run the candidate-class validation at exact commit `D`;
-2. record exact current production commit `M`, require `M` to be an ancestor of
-   `D`, and require the production and candidate checkouts to have no unresolved
-   local work;
-3. review the complete `M..D` history and aggregate diff, then create a uniquely
-   named pre-deployment tag at `M` for every candidate except documentation-
-   only, whose parent remains available in ordinary `main` history;
-4. recheck that neither ref moved, stop each affected long-lived service when
-   the candidate boundary requires it, then fast-forward the production
-   checkout—while it remains on `main`—to exact commit `D`;
-5. for documentation-only, treat the guarded fast-forward's exact-commit and
-   clean-worktree verification plus the unchanged exact-`D` candidate gate as
-   complete post-promotion verification, rerunning only a check whose
-   validation dependency changed; otherwise update production dependencies
-   only when their tracked inputs changed, restart each affected service, and
-   perform a bounded production smoke test;
-6. after the applicable verification or smoke succeeds, unless the operator
-   explicitly withheld publication, require the live `origin/main` tip to be
-   absent or an ancestor of `D`, push only the explicit
-   `refs/heads/main:refs/heads/main` fast-forward, and verify the live remote at
-   exact `D` without publishing tags or temporary refs; and
-7. if the applicable verification or smoke fails instead, create and validate
-   a normal rollback or fix-forward on a temporary recovery feature branch
-   from current `main`, stopping affected services and restoring separately
-   changed environments or installed units only when those boundaries exist.
-
-Documentation-only closure is automatic unless the operator withholds it: the
-coordinator runs the proportionate documentation gate, fast-forwards `main`
-without a rollback tag or runtime action, uses the guarded fast-forward's exact-
-commit and clean-worktree verification while reusing unchanged candidate
-evidence, publishes exact `D` to `origin/main`, and uses non-force operations to
-remove only its exact clean integrated worktree and branch. An explicit no-
-publication request,
-unexpected remote non-fast-forward, known nonpublishable content, or
-network/authentication failure is reported without force-pushing or rewriting
-history and does not alone retain a clean integrated pair. Any candidate or
-cleanup ambiguity still retains the pair for review. Dependency,
-persistent-state format, and installed-systemd-unit changes require an explicit
-rollback plan for those non-Git effects; ordinary code changes do not acquire
-extra ceremony merely because they will be tested in production. Rewriting
+The executable candidate, validation-reuse, promotion, rollback, publication,
+and retirement checklist is owned only by
+[the production procedure](../operations/production_promotion.md).
+[Documentation maintenance](../documentation_maintenance.md#automatic-documentation-closure)
+owns the standing documentation-only authority, while the procedure applies
+it. Dependency, persistent-state format, and installed-systemd-unit changes
+still require an explicit rollback plan for their non-Git effects. Rewriting
 `main` backward is not the normal rollback mechanism, because a revert
 preserves what was deployed and why.
 
-The executable checklist is in
-[the production procedure](../operations/production_promotion.md).
 Add a separate release/staging layer only after repeated direct-promotion
 failures demonstrate a concrete capability it would provide.
 
@@ -235,11 +205,12 @@ environment is a security asset.
 The complete checkpoint isolates ordinary generated test output and runs the
 full repository-local suite. It is one available candidate gate, not a required
 step after every edit or ref movement; the production procedure selects it only
-for candidate classes whose uncertainty spans the shared runtime. Installed
-host tools such as Tesseract may run in non-live tests. ADB-facing tests use
-fakes or mocks unless a thread has completed the live-runtime startup path and
-deliberately requested live validation. The supported entrypoint and operator
-workflow are documented in `docs/new_thread.md`.
+for candidate classes whose uncertainty spans the shared runtime and reuses it
+while its dependency boundary remains exact. Installed host tools such as
+Tesseract may run in non-live tests. ADB-facing tests use fakes or mocks unless
+a thread has completed the live-runtime startup path and deliberately requested
+live validation. The supported entrypoint and operator workflow are documented
+in `docs/new_thread.md`.
 
 ## Screenshots, fixtures, and read-only ADB
 

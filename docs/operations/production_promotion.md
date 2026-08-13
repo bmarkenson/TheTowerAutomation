@@ -35,10 +35,13 @@ turning branch cleanup into a release.
    branch or pull unrelated ready work into the candidate.
 3. Record the candidate branch or private ref, worktree when one exists, and
    exact tip `D`. Freeze that candidate while its applicable gate and promotion
-   are in progress. Any new commit, ref movement, conflict resolution, or
-   unexpected advance of `main` before the guarded production fast-forward
-   invalidates the candidate and requires renewed review and applicable
-   validation.
+   are in progress. A candidate commit, ref movement, or conflict resolution
+   requires a new exact `D` and renewed review, but rerun only checks whose
+   dependencies changed. An advance of production `main` does not itself change
+   `D` or its validation inputs: discard the recorded `M`, repeat ancestry and
+   aggregate `M..D` review against the new tip, and rerun only baseline-dependent
+   checks whose inputs changed. If the new `main` is not an ancestor of `D`,
+   reconcile in the candidate worktree; that reconciliation creates a new `D`.
 
 Unrelated branches and worktrees may remain dirty or continue independently;
 they block promotion only if their work is included in, overlaps, or obscures
@@ -48,32 +51,50 @@ the selected candidate.
 
 Validation follows the aggregate `M..D` change and remaining uncertainty, not
 the number of branches or Git operations used to produce it. Run focused tests,
-generators, static checks, and native builds while the candidate can still
-change. Freeze exact commit `D` only after those cheaper checks pass, then run
-the strongest applicable gate below once. When several feature tips are planned
-as one release, validate each feature proportionately while developing and run
-the combined candidate gate on the final integrated `D`; do not run the full
-suite once per feature and again merely because they were combined.
+generators, static checks, and native builds while check inputs can still
+change, then run the strongest applicable gate below once per unchanged
+dependency boundary. Usually that boundary is final `D`. When several feature
+tips are planned as one release, validate each feature proportionately while
+developing and run the combined candidate gate on the final integrated content;
+do not run the full suite once per feature and again merely because they were
+combined.
 
 | Aggregate candidate contents | Required candidate gate |
 | --- | --- |
 | Documentation, process guidance, completion evidence, or test-only changes | Link/diff/static checks and affected tests. No automatic full Python checkpoint. |
 | Only canonical player-save mapping JSON produced by the reviewed fast lane | Exact allowlisted diff, target hashes/modes, mapping schema/set invariants, and focused mapping-loader/consumer tests. No automatic full Python checkpoint. |
-| Native Windows client inputs with no shared Linux/runtime change | Affected Python/JavaScript contract tests, portable .NET tests, and the Release cross-build or publisher preflight. No automatic full Python checkpoint. |
-| Runtime Python, shared control-surface code, YAML, templates, runtime-read assets, generators, or broadly consumed configuration | Focused tests first, then one complete repository checkpoint at frozen `D`. |
-| Interpreter, lock files, persistent-state formats, installed units, migrations, or an otherwise uncertain cross-cutting change | One complete checkpoint at frozen `D` plus the specific rebuild, migration, or recovery proof for that boundary. |
+| Native Windows client inputs with no shared Linux/runtime change | Affected Python/JavaScript contract tests, portable .NET tests, and the Release cross-build. Reserve the state-changing complete-package publisher for the required publication boundary below. No automatic full Python checkpoint. |
+| Runtime Python, shared control-surface code, YAML, templates, runtime-read assets, generators, or broadly consumed configuration | Focused tests first, then one complete repository checkpoint at the frozen validation boundary; compose it into final `D` under the rule below. |
+| Interpreter, lock files, persistent-state formats, installed units, migrations, or an otherwise uncertain cross-cutting change | One complete checkpoint at the frozen validation boundary plus the specific rebuild, migration, or recovery proof for that boundary; compose them into final `D` under the rule below. |
 
-If several rows apply, use their combined requirements. Record the exact `D`,
-selected gate, result, and any relevant development-environment input
-fingerprint. A result may be reused only while `D` and every tracked,
-environment, or external input on which that check depends remain exact.
-Fast-forwarding `main` to the already validated object changes none of those
-inputs and does not trigger another checkpoint.
-For documentation-only candidates, the unchanged exact-`D` content/link/static
-result remains the post-promotion evidence too. If validation or review causes
-a new commit, or another validation dependency changes, run the affected check
-against the new boundary; repetition is justified by a changed validation
-boundary, not by promotion itself.
+If several rows apply, use their combined requirements.
+
+### Reuse validation by dependency
+
+For each candidate-gate result, record the exact validation subject `V`,
+command or proof, result, and every tracked, environment, external, generated,
+or commit-identity input it actually consumed. Also record a relevant
+development-environment fingerprint when applicable. The final candidate remains exact `D`,
+but a result from `V` may satisfy `D` when review proves every one of those
+inputs is unchanged. A commit hash or ref name is not by itself a validation
+dependency unless the check consumes it. Unknown input coverage is stale
+evidence and requires the check to run at the new boundary.
+
+This rule permits purely documentary completion bookkeeping after an expensive
+code gate: run the documentation checks for the added record, prove that its
+diff changes none of the earlier gate's inputs, and compose those results for
+final `D`. It also permits a history-only merge or ref movement to reuse a
+content-based result. It does not permit reuse when source, discovered tests,
+configuration, generated inputs, toolchain/environment state, an external
+service or dataset, or consumed Git identity changed. Record `D`, the selected
+gate, each reused or fresh result, and that dependency comparison.
+
+Fast-forwarding `main` to already validated `D` changes none of those inputs
+and does not trigger another checkpoint. For documentation-only candidates,
+the unchanged content/link/static result remains the post-promotion evidence
+too. Rerun only an affected check whose dependency boundary changed;
+repetition is justified by changed inputs, not by a new commit, merge,
+promotion, publication, or cleanup step alone.
 
 ## Promote one exact candidate
 
@@ -84,9 +105,10 @@ boundary, not by promotion itself.
 2. Record production commit `M` and candidate commit `D`. Recheck both refs and
    prove that `M` is an ancestor of `D`.
 3. Review all `M..D` commits and the aggregate diff. Verify the applicable
-   candidate gate above passed at exact `D`, running it now only when exact
-   evidence is absent or stale. Resolve remaining uncertainty with retained or
-   live evidence as appropriate. Classify every publishable Windows-package
+   candidate gate above is complete for exact `D`, using fresh results or
+   dependency-proven reusable results and running only evidence that is absent
+   or stale. Resolve remaining uncertainty with retained or live evidence as
+   appropriate. Classify every publishable Windows-package
    input in that diff; a source checkout update does not publish the native
    client. Unless the operator explicitly withheld remote publication, read
    the live `origin` `refs/heads/main` tip, require it to be absent or an
@@ -103,8 +125,8 @@ boundary, not by promotion itself.
    object `D`, and verify `HEAD == main == D`. Abort on a non-fast-forward,
    changed ref, or newly dirty checkout.
 6. For documentation-only candidates, treat step 5's exact-commit and clean-
-   worktree verification plus the unchanged exact-`D` candidate gate as the
-   complete post-promotion verification. Rerun only an affected check whose
+   worktree verification plus the dependency-complete exact-`D` candidate gate
+   as the complete post-promotion verification. Rerun only an affected check whose
    validation dependency changed; perform no separate content/link/static
    smoke and no service or runtime action. For every other candidate, apply
    only separately reviewed non-Git changes, restart affected services, and
@@ -119,7 +141,7 @@ boundary, not by promotion itself.
 
 | Candidate contents | Production boundary |
 | --- | --- |
-| Documentation only | Fast-forward without a rollback tag or stopping automation; verify exact commit and worktree cleanliness, reuse unchanged exact-`D` candidate evidence, then automatically retire the exact clean integrated feature worktree/branch. |
+| Documentation only | Use steps 5–7 without a rollback tag, service stop, restart, or runtime smoke. |
 | Runtime Python, YAML, templates, or runtime-read assets | Stop automation before update; restart and smoke-test afterward. |
 | Control surface or shared modules | Stop/restart the control-surface service; also stop automation when shared runtime code changes. |
 | Native Windows package input | Complete the [required Windows package publication](#required-windows-package-publication) after the production checkout reaches `D`. |
@@ -189,20 +211,15 @@ tooling under `windows/TheTower.ControlSurface`, `windows/TheTower.TunnelHost`,
 `windows/TheTower.TunnelHost.Core`, and `windows/TheTower.TunnelProtocol`;
 documentation-only and test-only changes do not activate this boundary.
 
-After verifying that the production checkout is exactly `D`, run the supported
-[`publish-linux.sh`](../../windows/TheTower.ControlSurface/publish-linux.sh) or
-Windows `publish.ps1` workflow. It must stage and verify a complete
-self-contained package containing adjacent, nonempty
-`TheTower.ControlSurface.exe` and `TheTower.TunnelHost.exe` files before its
-guarded replacement of `windows/TheTower.ControlSurface/publish/win-x64`.
-The same operation must retain the former current package as
-`publish/previous/1`, move the former slot 1 to `publish/previous/2`, and prune
-only older packages after the new current package verifies successfully. A
-first or second publication may have fewer prior slots; every present slot must
-remain a complete two-executable package. Do not copy only one executable,
-mix files from different slots, publish from a different commit, or treat
-portable tests or an earlier package as satisfying the current-publication
-boundary.
+After verifying that the production checkout is exactly `D`, follow the native
+client's canonical [complete-package publisher](../../windows/TheTower.ControlSurface/README.md#publish).
+That workflow owns staging, complete-package verification, guarded replacement,
+rollback-slot rotation, and transaction recovery; do not reproduce its
+mechanics here. Require adjacent, nonempty `TheTower.ControlSurface.exe` and
+`TheTower.TunnelHost.exe` files in current and every retained slot. Do not copy
+only one executable, mix files from different slots, publish from a different
+commit, or treat portable tests, the candidate cross-build, or an earlier
+package as satisfying the current-publication boundary.
 
 Before reporting the promotion complete, record `D`, the publication time,
 size, and SHA-256 digest of both current executables. Also inventory every
@@ -218,14 +235,15 @@ before describing a package as deployed and validated on Windows.
 ### Native Windows package rollback
 
 If a post-publication Windows defect requires immediate artifact rollback,
-close the affected GUI, select one retained slot by its recorded hashes, and
-deploy that complete directory. Never combine its GUI with another slot's
-tunnel host. Record the chosen slot, hashes, associated source commit when
-known, destination, and Windows smoke result. This is a bounded artifact
-recovery, not a source rollback: create the normal reviewed revert or
-fix-forward on a temporary feature branch from current `main`, validate and
-promote that exact candidate, and republish from the resulting production
-commit so `publish/win-x64` again matches production source.
+close the affected GUI and follow the native publisher's
+[complete-package rollback rule](../../windows/TheTower.ControlSurface/README.md#publish),
+selecting one retained slot by its recorded hashes. Record the chosen slot,
+hashes, associated source commit when known, destination, and Windows smoke
+result. This is a bounded artifact recovery, not a source rollback: create the
+normal reviewed revert or fix-forward on a temporary feature branch from
+current `main`, validate and promote that exact candidate, and republish from
+the resulting production commit so `publish/win-x64` again matches production
+source.
 
 ## Close a successful promotion
 
@@ -241,10 +259,14 @@ post-promotion verification or smoke check succeeds:
 1. Recheck that production `HEAD` and `main` still equal exact candidate `D`,
    that `D` remains reachable from the retained candidate branch, and that the
    production and candidate worktrees are clean. Record the durable completion
-   and validation evidence before removing any temporary ref or checkout. If
-   tracked post-deployment evidence is still required, commit it on the retained
-   candidate branch or a new documentation-only feature branch and promote that
-   exact follow-up candidate; never commit it directly in production.
+   and validation evidence before removing any temporary ref or checkout. The
+   commit that records an outcome is part of that outcome and needs no recursive
+   completion entry. If tracked post-deployment evidence is still required,
+   commit it on the retained candidate branch or a new documentation-only
+   feature branch and promote that exact follow-up candidate; never commit it
+   directly in production. Keep publication and retirement pending until that
+   follow-up is integrated, then publish the final exact `main` once. Reuse the
+   earlier gate results whose dependencies that documentation did not change.
 2. Unless publication was explicitly withheld, reread the live remote `main`
    tip, require it to be absent or an ancestor of `D`, and push only the
    explicit fast-forward refspec `refs/heads/main:refs/heads/main`. Verify the
@@ -331,8 +353,11 @@ pretending the discarded commit was integrated:
    deletion path is authorized.
 
 After either disposition, re-list branches and worktrees, verify `main` and
-every retained checkout remain unchanged and clean, preserve rollback and
-archive tags, and run proportionate repository validation.
+every retained checkout remain unchanged and clean, and preserve rollback and
+archive tags. Removing an integrated or archived worktree/ref changes topology,
+not the validated candidate or its check inputs, so do not rerun repository
+validation solely for cleanup. Rerun only an affected check if cleanup exposes
+an unexpected change to one of its dependencies.
 
 ### Obsolete standing integration branch
 
@@ -360,8 +385,12 @@ work is not obsolete and must remain untouched.
    There, create and review a normal revert commit for the promoted range, or a
    smaller fix-forward when it is clearer and equally quick. Do not commit in
    the production checkout or silently move `main` backward.
-4. Run the applicable candidate gate for that exact recovery object and
-   fast-forward `main` under the same clean-candidate rules before restarting.
+4. Assemble the applicable candidate gate for that exact recovery object under
+   the dependency-reuse rule above. A revert whose validated inputs exactly
+   restore a recorded prior boundary may reuse those deterministic results; a
+   fix-forward or uncertain comparison reruns the affected checks. Fast-forward
+   `main` under the same clean-candidate rules before restarting. Prior runtime
+   success never replaces the fresh recovery smoke in step 5.
 5. Restore a prior environment, installed unit, or persistent data only when
    that item changed during deployment, then restart and repeat the smoke test.
 

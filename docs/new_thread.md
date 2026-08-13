@@ -40,11 +40,10 @@ validation evidence—not chat history—carry durable state. Before compaction 
 coordinator replacement could jeopardize continuity, checkpoint once in the
 owning artifact; use a handoff only when another top-level chat must continue.
 On completion, validate, commit, update the owning documentation, and close
-subagents. A documentation-only coordinator then completes the automatic
-promotion, exact `origin/main` publication, and integrated branch/worktree
-retirement routed by
-[`documentation_maintenance.md`](documentation_maintenance.md), unless the
-operator withheld that closure. Report that the coordinator is ready to
+subagents. A documentation-only coordinator follows the automatic closure
+routed by [`documentation_maintenance.md`](documentation_maintenance.md);
+that owner and the production procedure define the exact promotion,
+publication, and retirement steps. Report that the coordinator is ready to
 archive only after its applicable closure is complete or safely retained with
 the blocker recorded.
 
@@ -68,14 +67,18 @@ the blocker recorded.
 
 Never run a development bootstrap in
 `/home/brianm/dev/python/TheTower` or use its production-owned `.venv` from
-another worktree. In a feature or integration worktree, bootstrap a missing or
-mismatched environment only with:
+another worktree. In a new feature or integration worktree, invoke bootstrap
+directly; it creates or reuses the fingerprinted environment and selects it for
+that worktree. Do not run `status` first merely to decide whether bootstrap is
+needed, or immediately afterward to reconfirm a successful bootstrap. Use:
 
 ```bash
 /usr/bin/python3.12 tools/development.py bootstrap
 ```
 
-After `.venv` exists, run every project command through it:
+After `.venv` exists, run every project command through it. `status` is a
+read-only diagnostic for an intentionally non-mutating inspection or a failed
+selection, not a prerequisite or follow-up for `bootstrap` or `checkpoint`:
 
 ```bash
 .venv/bin/python tools/development.py status
@@ -87,8 +90,9 @@ After `.venv` exists, run every project command through it:
 each edit, feature commit, reconciliation, or promotion. Use focused tests while
 the candidate can still change. Run the complete gate only when the candidate
 class in the [production procedure](operations/production_promotion.md#choose-the-candidate-gate)
-requires it, once at the frozen exact candidate commit; reuse that exact result
-when promotion does not change the commit or environment inputs.
+requires it, once per unchanged validation-dependency boundary. The production
+procedure defines how the final exact candidate reuses a result when later
+commit or ref movement changes none of that check's inputs.
 
 Do not install packages ad hoc. The bootstrap's fingerprint, lock, completion,
 and isolation contract is in
