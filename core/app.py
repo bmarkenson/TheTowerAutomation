@@ -52,6 +52,7 @@ from core.ss_capture import (
     capture_and_save_screenshot,
     capture_and_save_screenshot_result,
 )
+from core.screen_geometry import SUPPORTED_DEVICE_SCREEN_SIZES
 from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
 from core.daily_gem_scheduler import DailyGemScheduler
@@ -588,6 +589,7 @@ class App:
         self._emulator_recovery_force_new_battle = False
         self._emulator_recovery_action_logged = False
         self._emulator_recovery_terminal_pending: Optional[Dict[str, Any]] = None
+        self._last_screenshot_capture_result = None
         self._control_observation_sequence = 0
         self._control_observation: Optional[Dict[str, Any]] = None
         self._terminal_home_continuation: Optional[Dict[str, Any]] = None
@@ -7536,7 +7538,7 @@ class App:
     def _advance_emulator_recovery(
         self,
         detection: Mapping[str, Any],
-        img: Frame,
+        img: Optional[Frame],
         *,
         now: Optional[float] = None,
     ) -> bool:
@@ -8016,6 +8018,52 @@ class App:
             self._emulator_recovery_next_action_at = monotonic_now + 15.0
             self._publish_action_authority()
         return True
+
+    def _is_emulator_recovery_landscape_launcher_capture(
+        self,
+        result: object,
+    ) -> bool:
+        """Return whether one native frame belongs to the held launch phase."""
+
+        if (
+            result is None
+            or getattr(result, "failure", None)
+            is not ScreenshotFailure.UNSUPPORTED_GEOMETRY
+            or getattr(result, "native_width", None) is None
+            or getattr(result, "native_height", None) is None
+        ):
+            return False
+        native_size = (int(result.native_width), int(result.native_height))
+        if (native_size[1], native_size[0]) not in SUPPORTED_DEVICE_SCREEN_SIZES:
+            return False
+        if not bool(
+            getattr(self, "_emulator_maintenance_hold_active", False)
+        ):
+            return False
+        supervisor = getattr(self, "_supervisor", None)
+        maintenance = getattr(supervisor, "emulator_maintenance", None)
+        if not (
+            isinstance(maintenance, Mapping)
+            and str(maintenance.get("state") or "") == "host_restarted"
+        ):
+            return False
+        runtime = maintenance.get("runtime")
+        return bool(
+            isinstance(runtime, Mapping)
+            and str(result.adb_target or "")
+            == str(runtime.get("adb_target") or "")
+        )
+
+    def _advance_emulator_recovery_from_landscape_launcher(self) -> bool:
+        """Launch The Tower when BlueStacks Home cannot supply portrait UI."""
+
+        result = getattr(self, "_last_screenshot_capture_result", None)
+        if not self._is_emulator_recovery_landscape_launcher_capture(result):
+            return False
+        return self._advance_emulator_recovery(
+            {"state": "UNKNOWN"},
+            None,
+        )
 
     @staticmethod
     def _interactive_development_evidence(
@@ -12321,6 +12369,7 @@ class App:
 
                 img = self._capture_frame()
                 if img is None:
+                    self._advance_emulator_recovery_from_landscape_launcher()
                     continue
 
                 detection = detect_state_and_overlays(img, log_matches=self._match_trace)
@@ -13357,6 +13406,7 @@ class App:
     def _capture_frame(self) -> Optional[Frame]:
         """Capture a new frame from the device, retrying once if ADB reconnects."""
         coordinator = self._adb_connection_coordinator
+        self._last_screenshot_capture_result = None
         if (
             not coordinator.capture_allowed()
             and not coordinator.ensure_connected()
@@ -13369,9 +13419,22 @@ class App:
             log_empty=False,
             report_adb_errors=False,
         )
+        self._last_screenshot_capture_result = result
         if result.frame is not None:
             coordinator.record_capture_success()
             return result.frame
+        if result.failure is ScreenshotFailure.UNSUPPORTED_GEOMETRY:
+            coordinator.record_capture_success(target=result.adb_target)
+            if self._is_emulator_recovery_landscape_launcher_capture(result):
+                time.sleep(1)
+                return None
+            log(
+                "Failed to capture screenshot while ADB remained connected "
+                f"({result.detail or result.failure.value}).",
+                level="FAIL",
+            )
+            time.sleep(2)
+            return None
 
         if not coordinator.ensure_connected():
             time.sleep(2)
@@ -13388,6 +13451,7 @@ class App:
             log_empty=False,
             report_adb_errors=False,
         )
+        self._last_screenshot_capture_result = retry
         if retry.frame is not None:
             coordinator.record_capture_success()
             return retry.frame

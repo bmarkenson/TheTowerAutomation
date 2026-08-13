@@ -27,6 +27,7 @@ from core.emulator_recovery import (
     normalize_runtime_recovery_ack,
 )
 from core.runtime_failure_policy import RuntimeFailureKind
+from core.ss_capture import ScreenshotCaptureResult, ScreenshotFailure
 from handlers.game_restarted_handler import (
     GameRestartedAction,
     handle_game_restarted,
@@ -718,6 +719,8 @@ def _recovery_app() -> App:
         battle_scope="run-1",
     )
     app._emulator_recovery_resume_attempts = 0
+    app._emulator_recovery_launch_attempts = 0
+    app._emulator_recovery_launch_dispatched_at = None
     app._emulator_recovery_home_attempts = 0
     app._emulator_recovery_home_dispatch = None
     app._emulator_recovery_next_action_at = 0.0
@@ -732,6 +735,74 @@ def _recovery_app() -> App:
     app._last_wave_conf = 90.0
     app._last_wave_ts = 0.0
     return app
+
+
+def test_landscape_bluestacks_home_dispatches_owned_tower_launch():
+    app = _recovery_app()
+    app._last_screenshot_capture_result = ScreenshotCaptureResult(
+        None,
+        ScreenshotFailure.UNSUPPORTED_GEOMETRY,
+        "Unsupported emulator resolution 1920x1080",
+        adb_target="localhost:5555",
+        native_width=1920,
+        native_height=1080,
+    )
+    accepted = SimpleNamespace(
+        attempted=True,
+        accepted=True,
+        uncertain=False,
+    )
+
+    with (
+        patch("core.app.time.monotonic", return_value=100.0),
+        patch(
+            "core.app.bring_to_foreground",
+            return_value=accepted,
+        ) as launcher,
+    ):
+        assert app._advance_emulator_recovery_from_landscape_launcher()
+
+    launcher.assert_called_once()
+    assert launcher.call_args.kwargs["input_reason"] == (
+        f"emulator_recovery request_id={REQUEST_ID}"
+    )
+    assert app._emulator_recovery_launch_attempts == 1
+    assert app._emulator_recovery_launch_dispatched_at == 100.0
+    assert app._set_emulator_recovery_ack.call_args.kwargs["state"] == (
+        "awaiting_welcome_back"
+    )
+
+
+def test_landscape_capture_cannot_launch_without_durable_recovery_hold():
+    app = _recovery_app()
+    app._emulator_maintenance_hold_active = False
+    app._last_screenshot_capture_result = ScreenshotCaptureResult(
+        None,
+        ScreenshotFailure.UNSUPPORTED_GEOMETRY,
+        native_width=1920,
+        native_height=1080,
+    )
+
+    with patch("core.app.bring_to_foreground") as launcher:
+        assert not app._advance_emulator_recovery_from_landscape_launcher()
+
+    launcher.assert_not_called()
+
+
+def test_landscape_capture_cannot_launch_for_a_different_runtime_target():
+    app = _recovery_app()
+    app._last_screenshot_capture_result = ScreenshotCaptureResult(
+        None,
+        ScreenshotFailure.UNSUPPORTED_GEOMETRY,
+        adb_target="localhost:5565",
+        native_width=1920,
+        native_height=1080,
+    )
+
+    with patch("core.app.bring_to_foreground") as launcher:
+        assert not app._advance_emulator_recovery_from_landscape_launcher()
+
+    launcher.assert_not_called()
 
 
 def test_runtime_resumes_welcome_back_then_falls_back_to_end_run():

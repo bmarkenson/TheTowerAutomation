@@ -21,6 +21,10 @@ _screen_sizes: dict[str, ScreenSize] = {}
 _screen_sizes_lock = threading.Lock()
 
 
+class UnsupportedDeviceScreenSize(ValueError):
+    """Report native geometry that cannot safely drive mapped UI input."""
+
+
 def validate_device_screen_size(width: int, height: int) -> ScreenSize:
     """Return a supported device size or raise a diagnostic error."""
 
@@ -32,7 +36,7 @@ def validate_device_screen_size(width: int, height: int) -> ScreenSize:
                 SUPPORTED_DEVICE_SCREEN_SIZES
             )
         )
-        raise ValueError(
+        raise UnsupportedDeviceScreenSize(
             f"Unsupported emulator resolution {size[0]}x{size[1]}; "
             f"supported resolutions are {supported}."
         )
@@ -92,6 +96,7 @@ def _device_key(device_id: Optional[str]) -> str:
 __all__ = [
     "CANONICAL_SCREEN_SIZE",
     "SUPPORTED_DEVICE_SCREEN_SIZES",
+    "UnsupportedDeviceScreenSize",
     "canonical_to_device_point",
     "clear_recorded_device_screen_sizes",
     "get_device_screen_size",
