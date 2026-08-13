@@ -72,8 +72,11 @@ their owned feature changes. A clean feature tip is the normal candidate for
 one coherent outcome. Only when two or more reviewed feature tips intentionally
 ship together does the explicitly assigned outcome coordinator create a
 temporary integration branch, resolve their combined state, and use its tip as
-the candidate. The promotion owner promotes exact validated commit `D` to
-`main` only by fast-forward.
+the candidate. A documentation-only coordinator owns exact fast-forward
+promotion and clean integrated branch/worktree retirement by default; every
+other promotion needs operator or explicitly assigned ownership. In all cases,
+the promotion owner advances `main` only to exact validated commit `D` by
+fast-forward.
 
 Production is never switched to a feature or integration branch. Existing
 operator or parallel changes are preserved. A non-clean production checkout or
@@ -137,24 +140,31 @@ The normal release path is deliberately direct:
    `D`, and require the production and candidate checkouts to have no unresolved
    local work;
 3. review the complete `M..D` history and aggregate diff, then create a uniquely
-   named pre-deployment tag at `M` so the prior source is easy to identify;
-4. recheck that neither ref moved, stop each affected long-lived service before
-   changing any file it may import or read, then fast-forward the production
+   named pre-deployment tag at `M` for every candidate except documentation-
+   only, whose parent remains available in ordinary `main` history;
+4. recheck that neither ref moved, stop each affected long-lived service when
+   the candidate boundary requires it, then fast-forward the production
    checkout—while it remains on `main`—to exact commit `D`;
-5. update production dependencies only when their tracked inputs changed,
-   restart each affected service, and perform a bounded production smoke test;
-   and
-6. if the smoke test fails, stop the affected service, create and validate a
-   normal rollback or fix-forward on a temporary recovery feature branch from
-   current `main`, fast-forward production to that exact candidate, restore any
-   separately changed environment or installed unit, and repeat the smoke test.
+5. for documentation-only, rerun the applicable content/link/static checks at
+   promoted `D`; otherwise update production dependencies only when their
+   tracked inputs changed, restart each affected service, and perform a bounded
+   production smoke test; and
+6. if the applicable smoke check fails, create and validate a normal rollback
+   or fix-forward on a temporary recovery feature branch from current `main`,
+   stopping affected services and restoring separately changed environments or
+   installed units only when those boundaries exist.
 
-Documentation-only promotion does not require a runtime stop. Dependency,
-persistent-state format, and installed-systemd-unit changes require an explicit
-rollback plan for those non-Git effects; ordinary code changes do not acquire
-extra ceremony merely because they will be tested in production. Rewriting
-`main` backward is not the normal rollback mechanism, because a revert preserves
-what was deployed and why.
+Documentation-only closure is automatic unless the operator withholds it: the
+coordinator runs the proportionate documentation gate, fast-forwards local
+`main` without a rollback tag or runtime action, verifies promoted content, and
+uses non-force operations to remove only its exact clean integrated worktree
+and branch. Remote publication remains separate. Any ambiguity or refused
+cleanup retains the pair for review. Dependency, persistent-state format, and
+installed-systemd-unit changes require an explicit rollback plan for those
+non-Git effects; ordinary code changes do not acquire extra ceremony merely
+because they will be tested in production. Rewriting `main` backward is not the
+normal rollback mechanism, because a revert preserves what was deployed and
+why.
 
 The executable checklist is in
 [the production procedure](../operations/production_promotion.md).
@@ -488,7 +498,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, assigned promotion ownership, and exact fast-forward promotion | No standing `develop`/staging branch, independent repository per worker, or source attestation |
+| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion/retirement ownership, assigned ownership for other outcomes, and exact fast-forward promotion | No standing `develop`/staging branch, retained clean integrated documentation worktree, independent repository per worker, or source attestation |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |
@@ -571,8 +581,9 @@ The useful regression seams are correspondingly small:
 - uncertain input is not automatically repeated;
 - release requires a fresh observation before production removes its hold; and
 - a single feature tip is the normal candidate, an assigned coordinator uses a
-  temporary integration branch only for a combined outcome, and the promotion
-  owner promotes only an exact clean validated fast-forward candidate.
+  temporary integration branch only for a combined outcome, every promotion
+  uses an exact clean validated fast-forward candidate, and documentation-only
+  closure automatically retires only its clean integrated feature pair.
 
 These tests protect the project from realistic accidents without turning a
 hobby automation repository into a same-user security system.

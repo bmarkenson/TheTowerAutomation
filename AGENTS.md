@@ -19,9 +19,13 @@ changes this model.
 - `main` is production and implementation belongs on temporary feature
   branches. A clean feature tip is the normal promotion candidate; use a
   temporary integration branch only when several reviewed feature tips must
-  ship together. Only the operator or an explicitly assigned promotion owner
-  updates `main` through the
-  [production procedure](docs/operations/production_promotion.md).
+  ship together. A documentation-only outcome gives its coordinator standing
+  ownership to promote the exact validated candidate to local `main` and
+  retire its clean integrated branch/worktree unless the operator withholds
+  that closure; follow
+  [documentation maintenance](docs/documentation_maintenance.md) and the
+  [production procedure](docs/operations/production_promotion.md). Every other
+  `main` update remains operator or explicitly assigned promotion-owner work.
 - The operator-confirmed save-mapping fast lane documented in
   [development isolation](docs/architecture/development_isolation.md) is the
   sole application-owned exception: it may create one allowlisted child of

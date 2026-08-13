@@ -1,11 +1,15 @@
 # Production Promotion and Rollback
 
 Production services remain fixed to the `main` checkout. Promotion is operator-
-or explicitly assigned promotion-owner work. The exact candidate comes from a
+or explicitly assigned promotion-owner work, except that a
+[documentation-only outcome](../documentation_maintenance.md#automatic-documentation-closure)
+gives its coordinator standing local promotion and integrated-retirement
+ownership unless the operator withholds it. The exact candidate comes from a
 temporary feature branch, a temporary integration branch only when several
-feature tips must ship together, or the allowlisted private save-mapping staging
-ref. Complete the repository-change checklist before this procedure and
-[`live_preflight.md`](../live_preflight.md) before any service/device action.
+feature tips must ship together, or the allowlisted private save-mapping
+staging ref. Complete the repository-change checklist before this procedure
+and [`live_preflight.md`](../live_preflight.md) before any service/device
+action.
 
 ## Prepare one exact candidate
 
@@ -80,23 +84,30 @@ is justified by a changed candidate, not by promotion itself.
    live evidence as appropriate. Classify every publishable Windows-package
    input in that diff; a source checkout update does not publish the native
    client.
-4. Create a unique annotated local tag at `M`, for example
-   `production-before-20260804T210500Z-fe3c83b`. Never move or reuse it; pushing
-   a tag is a separate operator decision.
+4. For every candidate except documentation-only, create a unique annotated
+   local tag at `M`, for example
+   `production-before-20260804T210500Z-fe3c83b`. Never move or reuse it;
+   pushing a tag is a separate operator decision. A documentation-only
+   promotion creates no rollback tag: its parent remains in ordinary `main`
+   history and no runtime or non-Git deployment state changes.
 5. Recheck that the candidate still names `D` and production still names `M`,
    select the boundary below, fast-forward the production checkout to exact
    object `D`, and verify `HEAD == main == D`. Abort on a non-fast-forward,
    changed ref, or newly dirty checkout.
-6. Apply only separately reviewed non-Git changes, restart affected services,
-   and perform a bounded production smoke test. Record the deployed commit and
-   result.
+6. For documentation-only candidates, rerun the applicable content/link/static
+   smoke checks at promoted `D`; perform no service or runtime action. For every
+   other candidate, apply only separately reviewed non-Git changes, restart
+   affected services, and perform a bounded production smoke test. Record the
+   promoted or deployed commit and result.
 7. Complete the [successful-promotion closure](#close-a-successful-promotion).
-   Deployment does not implicitly authorize a remote push, tag publication,
-   branch deletion, or worktree removal.
+   Documentation-only standing authority includes retirement of only its exact
+   clean integrated branch/worktree. No promotion implicitly authorizes a
+   remote push or tag publication, and every other branch/worktree retirement
+   remains separately approved.
 
 | Candidate contents | Production boundary |
 | --- | --- |
-| Documentation only | Fast-forward without stopping automation. |
+| Documentation only | Fast-forward without a rollback tag or stopping automation; rerun applicable content/link/static checks at promoted `D`, then automatically retire the exact clean integrated feature worktree/branch. |
 | Runtime Python, YAML, templates, or runtime-read assets | Stop automation before update; restart and smoke-test afterward. |
 | Control surface or shared modules | Stop/restart the control-surface service; also stop automation when shared runtime code changes. |
 | Native Windows package input | Complete the [required Windows package publication](#required-windows-package-publication) after the production checkout reaches `D`. |
@@ -206,8 +217,10 @@ commit so `publish/win-x64` again matches production source.
 
 ## Close a successful promotion
 
-Treat deployment, remote publication, and temporary-branch retirement as
-separate recorded decisions. After the smoke test succeeds:
+Treat remote publication as a separate recorded decision. Deployment and
+temporary-branch retirement are also separate decisions except that a
+documentation-only coordinator owns retirement of its exact clean integrated
+pair by default. After the applicable smoke check succeeds:
 
 1. Recheck that production `HEAD` and `main` still equal exact candidate `D`,
    that `D` remains reachable from the retained candidate branch, and that the
@@ -232,9 +245,12 @@ separate recorded decisions. After the smoke test succeeds:
    explicitly superseded or abandoned and eligible only for archived
    retirement; or retained/deferred with its owner and remaining work recorded.
    Ambiguity always selects retained/deferred.
-5. Apply the retirement procedure below only to exact approved objects. Recheck
-   branches, worktrees, ignored evidence, and concurrent ownership immediately
-   before each mutation, then finish by re-listing the complete topology.
+5. Apply the retirement procedure below only to exact approved objects. The
+   documentation-only standing authority approves only the current
+   coordinator's clean integrated pair; every other object requires separate
+   operator approval. Recheck branches, worktrees, ignored evidence, and
+   concurrent ownership immediately before each mutation, then finish by
+   re-listing the complete topology.
 
 ## Retire temporary work
 
@@ -251,15 +267,19 @@ Before either disposition:
    ignored files that could contain operator work or required evidence, and
    active ownership.
 2. Record the exact worktree path, local branch, tip commit, disposition, and
-   replacement or integration target. Obtain operator approval for those exact
-   local objects. Exclude `main`, rollback tags, remote branches, every active
+   replacement or integration target. The current documentation coordinator's
+   standing authority covers only its own exact clean pair after its tip is
+   integrated into `main`; obtain operator approval for every other local
+   object. Exclude `main`, rollback tags, remote branches, every active
    candidate, and every ambiguous item; remote deletion is always a separate
    decision.
 
 ### Integrated feature or integration branch
 
 Use this disposition only after promotion succeeds and the outcome's required
-validation and evidence are durable:
+validation and evidence are durable. Apply it automatically to the current
+documentation-only coordinator's exact pair; for every other outcome, wait for
+the approved disposition:
 
 1. Prove the branch tip is an ancestor of `main`. A merged label or patch-
    equivalent cherry-pick does not override uncertainty or the
@@ -311,9 +331,10 @@ work is not obsolete and must remain untouched.
 
 ## Failed smoke test
 
-1. Stop the affected service before changing files or environments again.
-2. Reinspect production and the recorded `M`, `D`, tag, and any new operator-
-   owned work.
+1. Stop the affected service, if any, before changing files or environments
+   again. Documentation-only content/static failure has no service action.
+2. Reinspect production and the recorded `M`, `D`, any rollback tag, and any
+   new operator-owned work.
 3. Create a temporary recovery feature branch and worktree from current `main`.
    There, create and review a normal revert commit for the promoted range, or a
    smaller fix-forward when it is clearer and equally quick. Do not commit in

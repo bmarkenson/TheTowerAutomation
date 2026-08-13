@@ -61,6 +61,31 @@ row only for a genuinely new information class.
   validation in the completed-task log. Complete any related issue transition.
   Completed narrative is on-demand history, never active required reading.
 
+### Automatic documentation closure
+
+An outcome is documentation-only when its aggregate candidate changes tracked
+guidance, planning, issue, completion, or history artifacts but no source,
+tests, configuration, generated output, runtime-read asset, dependency or unit
+input, or native-package input. Behavior-coupled documentation still receives
+its affected validation; running a test does not change the candidate class.
+
+Unless the operator requests a draft, review-only result, retained branch, or
+no promotion, the documentation coordinator owns the complete local closure:
+freeze the exact validated feature tip, promote it to local production `main`
+without a rollback tag or service/runtime action, verify the promoted content,
+and automatically retire that coordinator's exact clean integrated worktree
+and branch with non-force operations. Remote publication remains a separate
+operator decision. Follow the
+[documentation-only production boundary](operations/production_promotion.md#promote-one-exact-candidate)
+and [integrated retirement](operations/production_promotion.md#integrated-feature-or-integration-branch)
+checks rather than duplicating them here.
+
+Scope expansion beyond documentation ends this standing authority. A dirty or
+changed candidate or production checkout, non-fast-forward, unique or
+ambiguous branch content, active or unclear ownership, required evidence in
+ignored files, or refused cleanup retains the exact branch/worktree and is
+reported; never force the automatic path.
+
 ### Issues and evidence
 
 Follow [`issues/README.md`](issues/README.md) for stable IDs, active-index and
