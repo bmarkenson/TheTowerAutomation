@@ -58,18 +58,14 @@ row only for a genuinely new information class.
   only when domain routing or priority changes.
 - Keep active-task evidence only while it constrains remaining work.
 - At completion, remove the active item and create one durable outcome record.
-  For non-issue work, the completed-task log owns the concise outcome, relevant
-  commits, and validation. For an issue fix, the resolved dossier owns cause,
-  detailed evidence, resolution, commit, and regression; add only a concise
-  completed-task entry that links there instead of copying that narrative.
-  Complete the issue transition in the same outcome.
+  For non-issue work, the completed-task log owns its concise outcome, commits,
+  and validation. For an issue fix, the resolved dossier owns the detail; add
+  only a concise completed-task link and complete the issue transition.
 - A commit that adds or corrects the completion record belongs to the outcome
-  it records; it does not create another outcome requiring a recursive
-  completion entry. When expensive candidate validation already passed before
-  purely documentary completion bookkeeping, apply the
-  [validation-dependency rule](operations/production_promotion.md#reuse-validation-by-dependency)
-  to the final candidate and run only the documentation checks added by that
-  bookkeeping.
+  it records and needs no recursive completion entry. The production
+  procedure's narrow
+  [completion-record exception](operations/production_promotion.md#completion-record-exception)
+  covers an otherwise final code candidate followed only by that record.
 
 Completed narrative is on-demand history, never active required reading.
 
@@ -86,12 +82,10 @@ no promotion, the documentation coordinator owns the complete closure defined
 by the
 [documentation-only production boundary](operations/production_promotion.md#promote-one-exact-candidate)
 and [integrated retirement](operations/production_promotion.md#integrated-feature-or-integration-branch)
-procedure. That standing authority covers local exact fast-forward promotion
+procedure. The standing authority covers local exact fast-forward promotion
 without a rollback tag or runtime action, exact-`main` publication, and
 non-force retirement of only the coordinator's exact clean integrated pair.
-An explicit no-publication instruction withholds only the remote step. Reuse or
-rerun validation under the production procedure's dependency rule rather than
-maintaining a second closure checklist here.
+An explicit no-publication instruction withholds only the remote step.
 
 Scope expansion beyond documentation ends this standing authority. A dirty or
 changed candidate or production checkout, local non-fast-forward, unique or
@@ -147,9 +141,8 @@ documentation-specific additions are:
 6. Run `git diff --check` plus proportionate tests for generated, executable,
    schema-defining, or behavior-coupled documentation.
 
-These checks form the documentation portion of the candidate gate when run at
-its frozen dependency boundary; do not repeat them as a separate promotion or
-cleanup ritual when their inputs remain unchanged.
+These checks form the documentation candidate gate; an unchanged exact
+candidate does not need a second copy of them after promotion or cleanup.
 
 Never put volatile runtime facts in durable guidance. They belong only in a
 freshly inspected diagnostic report or conditional handoff section.

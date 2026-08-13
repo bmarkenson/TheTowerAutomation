@@ -125,18 +125,15 @@ diagnostic and cannot convert a degraded continuation into a shutdown.
 ## Process replacement and terminal recovery
 
 Before replacing a process, verify its current screen and let an in-flight
-guarded action reach a safe boundary. For a managed active-battle replacement,
-use the [guarded control-surface reload](managed_runtime.md#reload-automation-for-the-current-battle)
-rather than raw `systemctl`. The reload records the prior control intent, then
-temporarily persists an indefinite Pause while it stops the known owner and
-starts the replacement. This handoff Pause is a safety boundary, not a change
-in the operator's intended state. Only after the replacement proves its
-distinct host PID, matching held target lock, startup evidence, control
-acknowledgement, and first fresh observation does the reload restore the prior
-`RUNNING`, indefinite `PAUSED`, or unexpired timed Pause. A timed Pause that
-expires during the handoff resolves to `RUNNING`; any failure after Pause
-preparation remains `PAUSED`. Never kill a PID solely from possibly stale
-metadata.
+guarded action reach a safe boundary. Use the explicit
+[Stop Automation then Start Automation](managed_runtime.md#start-or-stop-automation)
+path rather than raw `systemctl`: Stop persists `STOPPED`, and Start launches a
+new process `PAUSED` with no battle workflow selected. After fresh evidence
+proves the distinct PID, exact target, held lock, and observed screen, issue a
+separate matching Start Battle or Attach to Battle intent and enable actions
+only when appropriate. Replacement never restores the previous action
+authority or battle intent implicitly. Never kill a PID solely from possibly
+stale metadata.
 
 To recover a preserved terminal after uncertain continuity:
 

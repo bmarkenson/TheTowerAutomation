@@ -133,15 +133,11 @@ development.
 
 The release path remains direct: one exact clean candidate, one guarded
 fast-forward of production `main`, and no standing staging branch or runtime.
-Validation is bound to the inputs a check consumes, so history or ref movement
-alone does not repeat a check that consumes neither; changed source,
-environment, external, generated, or runtime dependencies do. Production-state
-rereads, rollback preparation,
-post-deployment smoke, exact remote publication, and cleanup ownership remain
-separate mutable boundaries.
+Production-state rereads, rollback preparation, post-deployment smoke, exact
+remote publication, and cleanup ownership remain separate mutable boundaries.
 
-The executable candidate, validation-reuse, promotion, rollback, publication,
-and retirement checklist is owned only by
+The executable candidate, validation, promotion, rollback, publication, and
+retirement checklist is owned only by
 [the production procedure](../operations/production_promotion.md).
 [Documentation maintenance](../documentation_maintenance.md#automatic-documentation-closure)
 owns the standing documentation-only authority, while the procedure applies
@@ -205,12 +201,11 @@ environment is a security asset.
 The complete checkpoint isolates ordinary generated test output and runs the
 full repository-local suite. It is one available candidate gate, not a required
 step after every edit or ref movement; the production procedure selects it only
-for candidate classes whose uncertainty spans the shared runtime and reuses it
-while its dependency boundary remains exact. Installed host tools such as
-Tesseract may run in non-live tests. ADB-facing tests use fakes or mocks unless
-a thread has completed the live-runtime startup path and deliberately requested
-live validation. The supported entrypoint and operator workflow are documented
-in `docs/new_thread.md`.
+for candidate classes whose uncertainty spans the shared runtime. Installed
+host tools such as Tesseract may run in non-live tests. ADB-facing tests use
+fakes or mocks unless a thread has completed the live-runtime startup path and
+deliberately requested live validation. The supported entrypoint and operator
+workflow are documented in `docs/new_thread.md`.
 
 ## Screenshots, fixtures, and read-only ADB
 

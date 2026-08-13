@@ -32,10 +32,6 @@ control, lock, PID, ADB, or screen facts.
 ```text
 Continue TheTower work in <assigned checkout> on <assigned branch>.
 
-Follow the automatically loaded AGENTS.md and read docs/new_thread.md. Choose
-the smallest applicable startup path; complete docs/live_preflight.md before
-process/device interaction or a volatile-state claim.
-
 Outcome:
 <one concrete result>
 

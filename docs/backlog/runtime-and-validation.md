@@ -346,9 +346,9 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
   recurrence, then distinguish a missed detail-open tap from unsettled
   Workshop scroll geometry or a detail-template miss before changing retry or
   stabilization behavior.
-- [ ] Confirm normal gate re-arming after guarded **Reload automation for
-  current battle** at the next authoritative boundary under a Strategy that
-  declares gates; No Strategy itself has none.
+- [ ] Confirm normal gate re-arming after explicit **Stop Automation**, **Start
+  Automation**, and a separate matching battle intent at the next authoritative
+  boundary under a Strategy that declares gates; No Strategy itself has none.
 - [ ] Diagnose the unexpectedly early Tier 18 Farm ending recorded in
   [open issue dossier](../issues/open-2026.md#tier-18-farm-ended-at-wave-2644-without-completed-session-preflight).
   Reproduce a clean, fully validated Farm start at 720p before attributing the

@@ -39,13 +39,12 @@ rather than raw logs.
 validation evidence—not chat history—carry durable state. Before compaction or
 coordinator replacement could jeopardize continuity, checkpoint once in the
 owning artifact; use a handoff only when another top-level chat must continue.
-On completion, validate, commit, update the owning documentation, and close
-subagents. A documentation-only coordinator follows the automatic closure
-routed by [`documentation_maintenance.md`](documentation_maintenance.md);
-that owner and the production procedure define the exact promotion,
-publication, and retirement steps. Report that the coordinator is ready to
-archive only after its applicable closure is complete or safely retained with
-the blocker recorded.
+Read-only outcomes stop after reporting their evidence. For repository-changing
+work, validate, commit, update the owning documentation, and close subagents. A
+documentation-only coordinator follows the automatic closure routed by
+[`documentation_maintenance.md`](documentation_maintenance.md). Report that the
+coordinator is ready to archive only after its applicable closure is complete
+or safely retained with the blocker recorded.
 
 ## Repository-change preflight
 
@@ -67,32 +66,27 @@ the blocker recorded.
 
 Never run a development bootstrap in
 `/home/brianm/dev/python/TheTower` or use its production-owned `.venv` from
-another worktree. In a new feature or integration worktree, invoke bootstrap
-directly; it creates or reuses the fingerprinted environment and selects it for
-that worktree. Do not run `status` first merely to decide whether bootstrap is
-needed, or immediately afterward to reconfirm a successful bootstrap. Use:
+another worktree. In a new feature or integration worktree, run bootstrap
+directly; it creates or reuses the fingerprinted environment and selects it:
 
 ```bash
 /usr/bin/python3.12 tools/development.py bootstrap
 ```
 
-After `.venv` exists, run every project command through it. `status` is a
-read-only diagnostic for an intentionally non-mutating inspection or a failed
-selection, not a prerequisite or follow-up for `bootstrap` or `checkpoint`:
+After `.venv` exists, run every project command through it. Use `status` only
+to diagnose an intentionally non-mutating checkout or a failed selection; do
+not bracket a successful `bootstrap` or `checkpoint` with it:
 
 ```bash
 .venv/bin/python tools/development.py status
-.venv/bin/python tools/development.py bootstrap
-.venv/bin/python tools/development.py checkpoint
 ```
 
 `checkpoint` is the complete repository gate, not the default validation after
-each edit, feature commit, reconciliation, or promotion. Use focused tests while
-the candidate can still change. Run the complete gate only when the candidate
-class in the [production procedure](operations/production_promotion.md#choose-the-candidate-gate)
-requires it, once per unchanged validation-dependency boundary. The production
-procedure defines how the final exact candidate reuses a result when later
-commit or ref movement changes none of that check's inputs.
+each edit or commit. Use focused tests while the candidate can still change,
+and run `.venv/bin/python tools/development.py checkpoint` only when the
+candidate table in the
+[production procedure](operations/production_promotion.md#choose-the-candidate-gate)
+requires it.
 
 Do not install packages ad hoc. The bootstrap's fingerprint, lock, completion,
 and isolation contract is in
