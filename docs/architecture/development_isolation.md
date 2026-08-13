@@ -77,7 +77,10 @@ ownership; every other promotion needs operator or explicitly assigned
 ownership. In all cases, the promotion owner advances `main` only to exact
 validated commit `D` by fast-forward, publishes that exact tip by default, and
 retires the outcome's clean integrated temporary work unless a retention guard
-applies.
+applies. Candidate development and validation remain concurrent, while one
+atomically acquired private Git ref serializes the mutable production window
+from final rereads through deployment, publication, and cleanup. Remote
+fast-forward rules remain the guard against a publisher from another clone.
 
 Production is never switched to a feature or integration branch. Existing
 operator or parallel changes are preserved. A non-clean production checkout or
@@ -477,7 +480,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion ownership, assigned ownership for other outcomes, exact fast-forward promotion, default main-only remote publication, and default retirement of clean integrated temporary work | No standing `develop`/staging branch, speculative retention of integrated worktrees, independent repository per worker, or source attestation |
+| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion ownership, assigned ownership for other outcomes, one private ref serializing production mutation, exact fast-forward promotion, default main-only remote publication, and default retirement of clean integrated temporary work | No standing `develop`/staging branch, concurrent production mutations, speculative retention of integrated worktrees, independent repository per worker, or source attestation |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |

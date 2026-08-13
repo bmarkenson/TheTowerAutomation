@@ -127,7 +127,10 @@ documentation-specific additions are:
    protected.
 5. For every new current document, verify one intentional inbound route, its
    stated load condition, and the absence of a new mandatory-reading cycle.
-6. Run `git diff --check` plus proportionate tests for generated, executable,
+6. When active work or completion lifecycle changes, run
+   `.venv/bin/python -m pytest -q test/test_documentation_lifecycle.py`; it
+   rejects completed task markers in current queues while excluding history.
+7. Run `git diff --check` plus proportionate tests for generated, executable,
    schema-defining, or behavior-coupled documentation.
 
 These checks form the documentation candidate gate; an unchanged exact

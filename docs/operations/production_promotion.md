@@ -6,7 +6,7 @@ or explicitly assigned promotion-owner work; a
 gives its coordinator standing promotion ownership. Promotion ownership
 includes publishing the exact successful `main` tip unless the operator
 withholds it and retiring clean integrated temporary work by default. It never
-includes tags or temporary refs. The exact candidate comes from a
+includes publishing tags or temporary refs. The exact candidate comes from a
 temporary feature branch, a temporary integration branch only when several
 feature tips must ship together, or the allowlisted private save-mapping
 staging ref. Complete the repository-change checklist before this procedure
@@ -85,7 +85,43 @@ integrated temporary ref/worktree does not change the candidate and does not by
 itself repeat candidate validation. Mutable production rereads, artifact work,
 and post-deployment smoke remain separate requirements below.
 
+## Own one mutable promotion transaction
+
+Candidate development and validation may proceed in parallel. Before creating
+a rollback tag or changing production `main`, services, published artifacts,
+`origin/main`, or the promotion's cleanup topology, atomically acquire the
+local private `refs/thetower/promotion-owner` ref for frozen candidate `D`. It
+serializes the shared production transaction; the remote fast-forward rule
+separately guards publishers from another clone.
+
+1. Inspect the ref first. If it exists, make no production or promotion-
+   topology mutation. Its object and reflog identify the in-progress candidate
+   and recorded branch/worktree; age alone never proves it stale.
+2. Acquire it with compare-and-create from any linked checkout:
+
+   ```bash
+   git update-ref --create-reflog \
+     -m "promotion <candidate-branch> <candidate-worktree>" \
+     refs/thetower/promotion-owner <D> \
+     0000000000000000000000000000000000000000
+   ```
+
+   Failure means another transaction won the race. Stop, inspect
+   `git reflog show -1 refs/thetower/promotion-owner`, and do not retry around
+   that owner.
+3. Verify the ref equals `D` and keep it unchanged through successful-
+   promotion closure. If a changed `main` requires candidate reconciliation,
+   compare-delete the ref at exact old `D`, create and validate the new
+   candidate, then acquire it again; never repoint an active ownership ref.
+4. If the recorded owner cannot finish, only an explicitly assigned recovery
+   owner may inspect candidate, production, remote, deployment, and cleanup
+   state, bring them to a recorded coherent boundary, and compare-delete the
+   exact ref. Never auto-clear it or delete it merely to unblock another
+   promotion.
+
 ## Promote one exact candidate
+
+Enter this section only while `refs/thetower/promotion-owner` names exact `D`.
 
 1. Require clean candidate and production worktrees. Any unclear production or
    candidate change, staged file, unmerged entry, or unresolved nonignored
@@ -279,6 +315,20 @@ or smoke check succeeds:
    disposition. Recheck immediately before each mutation and finish by
    re-listing the topology. A withheld or failed remote publication does not by
    itself make an integrated branch unique or prevent safe retirement.
+6. After publication disposition, retirement, and final topology verification
+   are complete, release only this transaction and inspect the result:
+
+   ```bash
+   git update-ref -d refs/thetower/promotion-owner <D>
+   git rev-parse --verify --quiet refs/thetower/promotion-owner
+   ```
+
+   The compare-delete cannot remove a different candidate's ownership. No ref
+   confirms the promotion lane is idle; if another ref is already present, a
+   later transaction acquired the lane after release and must remain untouched.
+   If active recovery still requires production mutation, retain the ownership
+   ref and hand off that exact state instead of allowing a second promotion to
+   overlap it.
 
 ## Retire temporary work
 

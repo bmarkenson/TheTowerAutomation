@@ -19,11 +19,15 @@ changes this model.
 - `main` is production and implementation belongs on temporary feature
   branches. Use temporary integration only when several reviewed feature tips
   must ship together. A promotion owner follows the
-  [production procedure](docs/operations/production_promotion.md) through exact
-  fast-forward, `origin/main` publication, and default retirement of clean
-  integrated temporary work. Documentation-only coordinators have standing
-  promotion ownership; every other `main` update requires the operator or an
-  explicitly assigned promotion owner.
+  [production procedure](docs/operations/production_promotion.md) through its
+  exclusive mutable transaction, exact fast-forward, `origin/main`
+  publication, and default retirement of clean integrated temporary work.
+  While the procedure's private coordination ref exists, other threads may
+  continue candidate work and validation but must not mutate the production
+  checkout, services, published artifacts, `origin/main`, or promotion cleanup
+  topology. Documentation-only coordinators have standing promotion ownership;
+  every other `main` update requires the operator or an explicitly assigned
+  promotion owner.
 - The operator-confirmed save-mapping fast lane documented in
   [development isolation](docs/architecture/development_isolation.md) is the
   only application-owned feature-branch exception. It may stage one allowlisted
