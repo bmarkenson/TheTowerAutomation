@@ -39,6 +39,24 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 documentation candidate-validation reuse
+
+- Commit `50eb1bd` removes the unconditional second content/link/static smoke
+  after a documentation-only fast-forward. The frozen exact-`D` candidate gate
+  remains the post-promotion evidence when the commit and every validation
+  dependency remain unchanged.
+- The guarded fast-forward already verifies `HEAD == main == D` and the clean
+  production worktree. Together with the unchanged candidate evidence, those
+  checks are the complete documentation post-promotion verification; no
+  service or runtime action is introduced.
+- A new commit or changed tracked, environment, or external input reruns only
+  the affected check. Promotion itself is not treated as a changed validation
+  boundary merely because the same Git object is checked out at production.
+- The correction passed `git diff --check`, changed-link target and anchor
+  checks, and a current-canonical search for the superseded unconditional
+  documentation re-smoke wording. No project Python, service, device, or live
+  validation was required for this guidance-only change.
+
 ### 2026-08-13 automatic production-main publication
 
 - Commit `6602562` makes publication of the exact successful production
