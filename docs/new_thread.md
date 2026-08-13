@@ -40,8 +40,9 @@ validation evidence—not chat history—carry durable state. Before compaction 
 coordinator replacement could jeopardize continuity, checkpoint once in the
 owning artifact; use a handoff only when another top-level chat must continue.
 On completion, validate, commit, update the owning documentation, and close
-subagents. A documentation-only coordinator then completes the automatic local
-promotion and integrated branch/worktree retirement routed by
+subagents. A documentation-only coordinator then completes the automatic
+promotion, exact `origin/main` publication, and integrated branch/worktree
+retirement routed by
 [`documentation_maintenance.md`](documentation_maintenance.md), unless the
 operator withheld that closure. Report that the coordinator is ready to
 archive only after its applicable closure is complete or safely retained with

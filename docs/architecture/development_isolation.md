@@ -148,23 +148,31 @@ The normal release path is deliberately direct:
 5. for documentation-only, rerun the applicable content/link/static checks at
    promoted `D`; otherwise update production dependencies only when their
    tracked inputs changed, restart each affected service, and perform a bounded
-   production smoke test; and
-6. if the applicable smoke check fails, create and validate a normal rollback
-   or fix-forward on a temporary recovery feature branch from current `main`,
-   stopping affected services and restoring separately changed environments or
-   installed units only when those boundaries exist.
+   production smoke test;
+6. after the applicable smoke succeeds, unless the operator explicitly withheld
+   publication, require the live `origin/main` tip to be absent or an ancestor
+   of `D`, push only the explicit `refs/heads/main:refs/heads/main`
+   fast-forward, and verify the live remote at exact `D` without publishing
+   tags or temporary refs; and
+7. if the applicable smoke fails instead, create and validate a normal
+   rollback or fix-forward on a temporary recovery feature branch from current
+   `main`, stopping affected services and restoring separately changed
+   environments or installed units only when those boundaries exist.
 
 Documentation-only closure is automatic unless the operator withholds it: the
-coordinator runs the proportionate documentation gate, fast-forwards local
-`main` without a rollback tag or runtime action, verifies promoted content, and
-uses non-force operations to remove only its exact clean integrated worktree
-and branch. Remote publication remains separate. Any ambiguity or refused
-cleanup retains the pair for review. Dependency, persistent-state format, and
-installed-systemd-unit changes require an explicit rollback plan for those
-non-Git effects; ordinary code changes do not acquire extra ceremony merely
-because they will be tested in production. Rewriting `main` backward is not the
-normal rollback mechanism, because a revert preserves what was deployed and
-why.
+coordinator runs the proportionate documentation gate, fast-forwards `main`
+without a rollback tag or runtime action, verifies promoted content, publishes
+exact `D` to `origin/main`, and uses non-force operations to remove only its
+exact clean integrated worktree and branch. An explicit no-publication request,
+unexpected remote non-fast-forward, known nonpublishable content, or
+network/authentication failure is reported without force-pushing or rewriting
+history and does not alone retain a clean integrated pair. Any candidate or
+cleanup ambiguity still retains the pair for review. Dependency,
+persistent-state format, and installed-systemd-unit changes require an explicit
+rollback plan for those non-Git effects; ordinary code changes do not acquire
+extra ceremony merely because they will be tested in production. Rewriting
+`main` backward is not the normal rollback mechanism, because a revert
+preserves what was deployed and why.
 
 The executable checklist is in
 [the production procedure](../operations/production_promotion.md).
@@ -498,7 +506,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion/retirement ownership, assigned ownership for other outcomes, and exact fast-forward promotion | No standing `develop`/staging branch, retained clean integrated documentation worktree, independent repository per worker, or source attestation |
+| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion/publication/retirement ownership, assigned ownership for other outcomes, exact fast-forward promotion, and default main-only remote publication | No standing `develop`/staging branch, retained clean integrated documentation worktree, independent repository per worker, or source attestation |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |
@@ -582,7 +590,8 @@ The useful regression seams are correspondingly small:
 - release requires a fresh observation before production removes its hold; and
 - a single feature tip is the normal candidate, an assigned coordinator uses a
   temporary integration branch only for a combined outcome, every promotion
-  uses an exact clean validated fast-forward candidate, and documentation-only
+  uses an exact clean validated fast-forward candidate, publishes only that
+  successful `main` tip to `origin/main` by default, and documentation-only
   closure automatically retires only its clean integrated feature pair.
 
 These tests protect the project from realistic accidents without turning a

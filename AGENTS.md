@@ -19,10 +19,13 @@ changes this model.
 - `main` is production and implementation belongs on temporary feature
   branches. A clean feature tip is the normal promotion candidate; use a
   temporary integration branch only when several reviewed feature tips must
-  ship together. A documentation-only outcome gives its coordinator standing
-  ownership to promote the exact validated candidate to local `main` and
-  retire its clean integrated branch/worktree unless the operator withholds
-  that closure; follow
+  ship together. Promotion ownership includes publishing the exact successful
+  `main` tip to `origin/main` by an explicit fast-forward refspec unless the
+  operator withholds remote publication; it never includes tags or temporary
+  refs. A documentation-only outcome gives its coordinator standing ownership
+  to promote and publish the exact validated candidate and retire its clean
+  integrated branch/worktree unless the operator withholds that closure;
+  follow
   [documentation maintenance](docs/documentation_maintenance.md) and the
   [production procedure](docs/operations/production_promotion.md). Every other
   `main` update remains operator or explicitly assigned promotion-owner work.

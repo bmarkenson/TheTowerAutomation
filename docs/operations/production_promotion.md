@@ -3,8 +3,9 @@
 Production services remain fixed to the `main` checkout. Promotion is operator-
 or explicitly assigned promotion-owner work, except that a
 [documentation-only outcome](../documentation_maintenance.md#automatic-documentation-closure)
-gives its coordinator standing local promotion and integrated-retirement
-ownership unless the operator withholds it. The exact candidate comes from a
+gives its coordinator standing promotion, `origin/main` publication, and
+integrated-retirement ownership unless the operator withholds it. The exact
+candidate comes from a
 temporary feature branch, a temporary integration branch only when several
 feature tips must ship together, or the allowlisted private save-mapping
 staging ref. Complete the repository-change checklist before this procedure
@@ -83,7 +84,10 @@ is justified by a changed candidate, not by promotion itself.
    evidence is absent or stale. Resolve remaining uncertainty with retained or
    live evidence as appropriate. Classify every publishable Windows-package
    input in that diff; a source checkout update does not publish the native
-   client.
+   client. Unless the operator explicitly withheld remote publication, read
+   the live `origin` `refs/heads/main` tip, require it to be absent or an
+   ancestor of `D`, and stop before local promotion if the candidate contains
+   anything known to be unsuitable for that remote.
 4. For every candidate except documentation-only, create a unique annotated
    local tag at `M`, for example
    `production-before-20260804T210500Z-fe3c83b`. Never move or reuse it;
@@ -100,10 +104,11 @@ is justified by a changed candidate, not by promotion itself.
    affected services, and perform a bounded production smoke test. Record the
    promoted or deployed commit and result.
 7. Complete the [successful-promotion closure](#close-a-successful-promotion).
-   Documentation-only standing authority includes retirement of only its exact
-   clean integrated branch/worktree. No promotion implicitly authorizes a
-   remote push or tag publication, and every other branch/worktree retirement
-   remains separately approved.
+   Promotion ownership includes default publication of exact `D` to
+   `origin/main`, but never publication of tags or temporary refs.
+   Documentation-only standing authority also includes retirement of only its
+   exact clean integrated branch/worktree; every other branch/worktree
+   retirement remains separately approved.
 
 | Candidate contents | Production boundary |
 | --- | --- |
@@ -217,10 +222,14 @@ commit so `publish/win-x64` again matches production source.
 
 ## Close a successful promotion
 
-Treat remote publication as a separate recorded decision. Deployment and
-temporary-branch retirement are also separate decisions except that a
-documentation-only coordinator owns retirement of its exact clean integrated
-pair by default. After the applicable smoke check succeeds:
+Publish the exact successful `main` tip to `origin/main` as part of promotion
+unless the operator explicitly requests no publication. Known nonpublishable
+content, an unexpected remote non-fast-forward, or a network/authentication
+failure also stops that step; none authorizes a force-push, rewritten history,
+or a different destination. Deployment and temporary-branch retirement remain
+separate decisions except that a documentation-only coordinator owns
+retirement of its exact clean integrated pair by default. After the applicable
+smoke check succeeds:
 
 1. Recheck that production `HEAD` and `main` still equal exact candidate `D`,
    that `D` remains reachable from the retained candidate branch, and that the
@@ -229,12 +238,15 @@ pair by default. After the applicable smoke check succeeds:
    tracked post-deployment evidence is still required, commit it on the retained
    candidate branch or a new documentation-only feature branch and promote that
    exact follow-up candidate; never commit it directly in production.
-2. If the operator elects to publish production, read the live remote `main`
-   tip, require it to be an ancestor of `D`, and push only the explicit
-   fast-forward refspec `refs/heads/main:refs/heads/main`. Verify the live
-   remote tip equals `D` afterward and reconcile the local remote-tracking ref.
-   A normal push publishes every commit reachable from `D`, with its existing
-   ancestry and metadata; it is not a tip-only snapshot.
+2. Unless publication was explicitly withheld, reread the live remote `main`
+   tip, require it to be absent or an ancestor of `D`, and push only the
+   explicit fast-forward refspec `refs/heads/main:refs/heads/main`. Verify the
+   live remote tip equals `D` afterward and reconcile the local remote-tracking
+   ref. A normal push publishes every commit reachable from `D`, with its
+   existing ancestry and metadata; it is not a tip-only snapshot. On a changed
+   or non-fast-forward remote, known nonpublishable content, or a
+   network/authentication failure, leave local `main` at `D`, report the exact
+   unpublished state, and do not retry through a force or alternate ref.
 3. Do not automatically publish rollback tags, archive tags, temporary
    branches, or bundles with `main`. A remote feature or integration branch is
    the supported way to publish branch-only interim commits, while tag
@@ -250,7 +262,9 @@ pair by default. After the applicable smoke check succeeds:
    coordinator's clean integrated pair; every other object requires separate
    operator approval. Recheck branches, worktrees, ignored evidence, and
    concurrent ownership immediately before each mutation, then finish by
-   re-listing the complete topology.
+   re-listing the complete topology. A withheld or failed remote publication
+   does not by itself make an integrated branch unique or prevent an otherwise
+   authorized clean retirement.
 
 ## Retire temporary work
 
