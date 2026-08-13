@@ -72,11 +72,12 @@ their owned feature changes. A clean feature tip is the normal candidate for
 one coherent outcome. Only when two or more reviewed feature tips intentionally
 ship together does the explicitly assigned outcome coordinator create a
 temporary integration branch, resolve their combined state, and use its tip as
-the candidate. A documentation-only coordinator owns exact fast-forward
-promotion and clean integrated branch/worktree retirement by default; every
-other promotion needs operator or explicitly assigned ownership. In all cases,
-the promotion owner advances `main` only to exact validated commit `D` by
-fast-forward.
+the candidate. A documentation-only coordinator has standing promotion
+ownership; every other promotion needs operator or explicitly assigned
+ownership. In all cases, the promotion owner advances `main` only to exact
+validated commit `D` by fast-forward, publishes that exact tip by default, and
+retires the outcome's clean integrated temporary work unless a retention guard
+applies.
 
 Production is never switched to a feature or integration branch. Existing
 operator or parallel changes are preserved. A non-clean production checkout or
@@ -134,7 +135,7 @@ development.
 The release path remains direct: one exact clean candidate, one guarded
 fast-forward of production `main`, and no standing staging branch or runtime.
 Production-state rereads, rollback preparation, post-deployment smoke, exact
-remote publication, and cleanup ownership remain separate mutable boundaries.
+remote publication, and guarded cleanup remain explicit mutable boundaries.
 
 The executable candidate, validation, promotion, rollback, publication, and
 retirement checklist is owned only by
@@ -476,7 +477,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion/publication/retirement ownership, assigned ownership for other outcomes, exact fast-forward promotion, and default main-only remote publication | No standing `develop`/staging branch, retained clean integrated documentation worktree, independent repository per worker, or source attestation |
+| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion ownership, assigned ownership for other outcomes, exact fast-forward promotion, default main-only remote publication, and default retirement of clean integrated temporary work | No standing `develop`/staging branch, speculative retention of integrated worktrees, independent repository per worker, or source attestation |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |
@@ -561,8 +562,8 @@ The useful regression seams are correspondingly small:
 - a single feature tip is the normal candidate, an assigned coordinator uses a
   temporary integration branch only for a combined outcome, every promotion
   uses an exact clean validated fast-forward candidate, publishes only that
-  successful `main` tip to `origin/main` by default, and documentation-only
-  closure automatically retires only its clean integrated feature pair.
+  successful `main` tip to `origin/main` by default, and retires the outcome's
+  clean integrated temporary branch/worktree pairs by default.
 
 These tests protect the project from realistic accidents without turning a
 hobby automation repository into a same-user security system.

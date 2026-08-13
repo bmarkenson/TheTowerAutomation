@@ -57,6 +57,8 @@ row only for a genuinely new information class.
 - Put an actionable task in exactly one domain backlog. Change the root backlog
   only when domain routing or priority changes.
 - Keep active-task evidence only while it constrains remaining work.
+- Do not retain checked items or dated implementation checkpoints in an active
+  backlog; completion belongs in the completion owner and Git history.
 - At completion, remove the active item and create one durable outcome record.
   For non-issue work, the completed-task log owns its concise outcome, commits,
   and validation. For an issue fix, the resolved dossier owns the detail; add
@@ -78,25 +80,12 @@ input, or native-package input. Behavior-coupled documentation still receives
 its affected validation; running a test does not change the candidate class.
 
 Unless the operator requests a draft, review-only result, retained branch, or
-no promotion, the documentation coordinator owns the complete closure defined
-by the
-[documentation-only production boundary](operations/production_promotion.md#promote-one-exact-candidate)
-and [integrated retirement](operations/production_promotion.md#integrated-feature-or-integration-branch)
-procedure. The standing authority covers local exact fast-forward promotion
-without a rollback tag or runtime action, exact-`main` publication, and
-non-force retirement of only the coordinator's exact clean integrated pair.
-An explicit no-publication instruction withholds only the remote step.
-
-Scope expansion beyond documentation ends this standing authority. A dirty or
-changed candidate or production checkout, local non-fast-forward, unique or
-ambiguous branch content, active or unclear ownership, required evidence in
-ignored files, or refused cleanup retains the exact branch/worktree and is
-reported; never force the automatic path. An explicit remote-publication
-withhold, unexpected remote non-fast-forward, known nonpublishable content, or
-network/authentication failure leaves the local promotion intact and is
-reported without force-pushing or rewriting history. Such a remote condition
-alone does not make an otherwise clean integrated pair unique or block its
-automatic retirement.
+no promotion, its coordinator has standing promotion ownership and follows the
+[exact-candidate production procedure](operations/production_promotion.md#promote-one-exact-candidate)
+through publication and default clean integrated retirement. Scope expansion
+beyond documentation ends that standing authority. Any ordinary promotion or
+cleanup guard retains the exact state and is reported; never force the
+automatic path.
 
 ### Issues and evidence
 

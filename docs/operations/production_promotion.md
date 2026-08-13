@@ -1,11 +1,12 @@
 # Production Promotion and Rollback
 
 Production services remain fixed to the `main` checkout. Promotion is operator-
-or explicitly assigned promotion-owner work, except that a
+or explicitly assigned promotion-owner work; a
 [documentation-only outcome](../documentation_maintenance.md#automatic-documentation-closure)
-gives its coordinator standing promotion, `origin/main` publication, and
-integrated-retirement ownership unless the operator withholds it. The exact
-candidate comes from a
+gives its coordinator standing promotion ownership. Promotion ownership
+includes publishing the exact successful `main` tip unless the operator
+withholds it and retiring clean integrated temporary work by default. It never
+includes tags or temporary refs. The exact candidate comes from a
 temporary feature branch, a temporary integration branch only when several
 feature tips must ship together, or the allowlisted private save-mapping
 staging ref. Complete the repository-change checklist before this procedure
@@ -120,10 +121,9 @@ and post-deployment smoke remain separate requirements below.
    commit and result.
 7. Complete the [successful-promotion closure](#close-a-successful-promotion).
    Promotion ownership includes default publication of exact `D` to
-   `origin/main`, but never publication of tags or temporary refs.
-   Documentation-only standing authority also includes retirement of only its
-   exact clean integrated branch/worktree; every other branch/worktree
-   retirement remains separately approved.
+   `origin/main` and retirement of the outcome's clean integrated temporary
+   branches and worktrees. Retain one only when an explicit request or a
+   guard in the retirement procedure applies.
 
 | Candidate contents | Production boundary |
 | --- | --- |
@@ -237,10 +237,9 @@ Publish the exact successful `main` tip to `origin/main` as part of promotion
 unless the operator explicitly requests no publication. Known nonpublishable
 content, an unexpected remote non-fast-forward, or a network/authentication
 failure also stops that step; none authorizes a force-push, rewritten history,
-or a different destination. Deployment and temporary-branch retirement remain
-separate decisions except that a documentation-only coordinator owns
-retirement of its exact clean integrated pair by default. After the applicable
-post-promotion verification or smoke check succeeds:
+or a different destination. Publication and retirement are normal closure
+duties of the promotion owner. After the applicable post-promotion verification
+or smoke check succeeds:
 
 1. Recheck that production `HEAD` and `main` still equal exact candidate `D`,
    that `D` remains reachable from the retained candidate branch, and that the
@@ -272,14 +271,14 @@ post-promotion verification or smoke check succeeds:
    explicitly superseded or abandoned and eligible only for archived
    retirement; or retained/deferred with its owner and remaining work recorded.
    Ambiguity always selects retained/deferred.
-5. Apply the retirement procedure below only to exact approved objects. The
-   documentation-only standing authority approves only the current
-   coordinator's clean integrated pair; every other object requires separate
-   operator approval. Recheck branches, worktrees, ignored evidence, and
-   concurrent ownership immediately before each mutation, then finish by
-   re-listing the complete topology. A withheld or failed remote publication
-   does not by itself make an integrated branch unique or prevent an otherwise
-   authorized clean retirement.
+5. Apply the retirement procedure below to every clean exact integrated
+   temporary branch/worktree involved in the outcome. Retain an object when the
+   operator requests it, ownership is active or unclear, the worktree contains
+   unique changes or evidence, ancestry is ambiguous, or a non-force cleanup
+   command refuses it. Superseded or abandoned work uses its separate explicit
+   disposition. Recheck immediately before each mutation and finish by
+   re-listing the topology. A withheld or failed remote publication does not by
+   itself make an integrated branch unique or prevent safe retirement.
 
 ## Retire temporary work
 
@@ -296,19 +295,17 @@ Before either disposition:
    ignored files that could contain operator work or required evidence, and
    active ownership.
 2. Record the exact worktree path, local branch, tip commit, disposition, and
-   replacement or integration target. The current documentation coordinator's
-   standing authority covers only its own exact clean pair after its tip is
-   integrated into `main`; obtain operator approval for every other local
-   object. Exclude `main`, rollback tags, remote branches, every active
-   candidate, and every ambiguous item; remote deletion is always a separate
-   decision.
+   integration or replacement target. Exclude `main`, rollback tags, remote
+   branches, every active candidate, and every ambiguous item; remote deletion
+   is always a separate decision.
 
 ### Integrated feature or integration branch
 
 Use this disposition only after promotion succeeds and the outcome's required
-validation and evidence are durable. Apply it automatically to the current
-documentation-only coordinator's exact pair; for every other outcome, wait for
-the approved disposition:
+validation and evidence are durable. It is the default for every clean exact
+pair involved in the promoted outcome. A possible later follow-up is not a
+retention reason: the integrated commit is on `main`, and a new branch and
+worktree can be created from current `main` when needed.
 
 1. Prove the branch tip is an ancestor of `main`. A merged label or patch-
    equivalent cherry-pick does not override uncertainty or the
