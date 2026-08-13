@@ -39,6 +39,26 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 direct candidate promotion and private save-mapping staging
+
+- Commit `d29396e` removes the standing `develop` branch from the normal release
+  path. One coherent feature now supplies its candidate directly; intentionally
+  combined features use a disposable integration branch, and promotion reuses
+  validation for the exact unchanged candidate instead of repeating a full
+  regression merely because a ref was fast-forwarded.
+- Candidate gates now follow the aggregate change. Documentation/test-only,
+  mapping-only, native-only, shared-runtime, and dependency/migration changes
+  receive proportionate evidence, with one full checkpoint reserved for the
+  frozen exact candidate when its contents require it.
+- The save-mapping fast lane now creates one verified child of current `main`
+  under `refs/thetower/save-mapping-candidate` without moving `main` or touching
+  its index/worktree. Review binds the allowlisted target hashes, modes,
+  proposal, mapping-set invariants, identity, and commit contract rather than
+  unrelated files or the whole `main` commit. An unrelated pre-stage advance is
+  accepted; a post-stage advance requires exact retirement and restaging.
+- Pre-freeze validation passed 168 affected Python/JavaScript contract tests,
+  189 portable .NET tests, and the Release `win-x64` cross-publish build.
+
 ### 2026-08-13 replay-safe collectors during BlueStacks recovery
 
 - A second operator restart (`b753da46e13d4a4a8a196d661fd7af93`)
