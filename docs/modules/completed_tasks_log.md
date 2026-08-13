@@ -43,6 +43,42 @@ another completion entry of its own.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 complete development-process dependency audit
+
+- Commit `ec9b70b` audits startup, worktree/bootstrap selection, validation and
+  checkpoint choice, candidate preparation, integration, promotion, rollback,
+  remote publication, documentation lifecycle, completion recording, and
+  temporary retirement under one dependency-boundary rule.
+- A new environment now receives one final `pip check` before its completion
+  marker instead of the same check in both build and verification. Lock
+  regeneration owns its one interpreter check, and startup guidance invokes
+  bootstrap once while reserving `status` for diagnosis rather than bracketing
+  bootstrap with the same environment verification.
+- Candidate evidence is recorded by the tracked, environment, external,
+  generated, and Git-identity inputs each check consumes. Pure completion
+  bookkeeping, history-only movement, an unchanged candidate after `main`
+  advances, exact prior-tree recovery, fast-forward promotion, publication,
+  and temporary-ref cleanup no longer trigger unrelated deterministic checks.
+  Candidate/production cleanliness, ownership and ancestry guards, live remote
+  rereads, rollback preparation, artifact verification and recovery, changed
+  dependency checks, and post-deployment runtime smoke remain mandatory.
+- The production procedure is the sole executable promotion/rollback owner;
+  architecture and documentation maintenance retain concise authority routers.
+  The native-client README owns package mechanics, resolved issue dossiers own
+  detailed issue completion, and the completed-task log is their concise route.
+  The live-operation router also no longer implies rereading the preflight that
+  led to it.
+- Focused development-environment and coordination coverage passed 32 tests.
+  Exact implementation boundary `ec9b70b` with environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`
+  passed the complete checkpoint: compilation, state-definition validation,
+  clickmap integrity with zero errors, and all 2,486 tests in 377.21 seconds.
+  The final completion-only delta passed `git diff --check`, all 118 local-link
+  target/anchor checks, and current-guidance searches for the removed competing
+  rules. The log is outside the checkpoint command paths, test references, and
+  environment fingerprint inputs, so that exact gate was reused. No service,
+  device, remote, or other live validation was required.
+
 ### 2026-08-13 documentation candidate-validation reuse
 
 - Commit `50eb1bd` removes the unconditional second content/link/static smoke
