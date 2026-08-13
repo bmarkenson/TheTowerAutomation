@@ -39,6 +39,31 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 automatic documentation promotion and cleanup
+
+- Commit `a34b995` gives each documentation-only coordinator standing
+  ownership to promote its exact validated feature tip to local production
+  `main` and automatically retire only its own clean integrated worktree and
+  branch unless the operator requests a draft, review-only result, retained
+  branch, or no promotion. Remote publication remains separately authorized.
+- The aggregate-diff boundary excludes source, tests, configuration, generated
+  output, runtime-read assets, dependency/unit inputs, and native-package
+  inputs. Documentation promotion creates no rollback tag or service/runtime
+  action, while behavior-coupled guidance still receives affected tests.
+- Automatic retirement rechecks the exact pair, ignored evidence, ownership,
+  cleanliness, and ancestry before non-force `git worktree remove` and
+  `git branch -d`. Scope expansion, ambiguity, unique content, or any refusal
+  retains the pair for review rather than forcing cleanup.
+- The outcome first proved that
+  `feature/direct-promotion-doc-consistency` and its clean worktree both named
+  already-promoted `ae7b58a`, then retired that exact pair with non-force
+  operations.
+- The policy change passed `git diff --check`, changed-link and anchor checks,
+  exact documentation-classification and cleanup-guard searches, and a search
+  across current canonical guidance for stale exclusive-promotion or
+  unconditional rollback-tag wording. No project Python, service, device, or
+  live validation was required for this guidance-only change.
+
 ### 2026-08-13 direct candidate promotion and private save-mapping staging
 
 - Commit `d29396e` removes the standing `develop` branch from the normal release
