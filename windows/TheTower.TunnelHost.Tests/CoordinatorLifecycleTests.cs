@@ -44,6 +44,45 @@ public sealed class CoordinatorLifecycleTests
     }
 
     [Fact]
+    public async Task ConfigureUpdatesDefaultsWithoutRestartingActiveTunnel()
+    {
+        var apiProcess = new FakeProcess(903);
+        var store = new MemoryConfigurationStore();
+        var coordinator = Coordinator(
+            new FakeFactory(apiProcess),
+            new FakeFactory(new FakeProcess(904)),
+            store);
+        var original = ProtocolTests.TestConfiguration();
+        await coordinator.HandleAsync(
+            Request(
+                TunnelHostCommand.StartTunnel,
+                tunnel: TunnelKind.Api,
+                configuration: original),
+            CancellationToken.None);
+        var changed = original with
+        {
+            LocalApiPort = 8877,
+            RemoteApiPort = 8877,
+        };
+
+        var response = await coordinator.HandleAsync(
+            Request(
+                TunnelHostCommand.Configure,
+                configuration: changed),
+            CancellationToken.None);
+
+        Assert.Equal(changed, store.Configuration);
+        Assert.Equal(changed, response.Snapshot?.Configuration);
+        Assert.True(response.Snapshot?.ApiTunnel.Desired);
+        Assert.Equal(903, response.Snapshot?.ApiTunnel.ProcessId);
+        Assert.Equal(
+            "8787:127.0.0.1:8787",
+            response.Snapshot?.ApiTunnel.ActiveEndpoint?.ForwardSpecification);
+        Assert.False(apiProcess.StopRequested);
+        await coordinator.DisposeAsync();
+    }
+
+    [Fact]
     public async Task NewHostLoadsConfigurationButDoesNotReplayDesiredTunnels()
     {
         var store = new MemoryConfigurationStore

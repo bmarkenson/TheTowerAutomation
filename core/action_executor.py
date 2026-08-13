@@ -36,6 +36,9 @@ from core.target_priority import (
     ensure_target_priority_order,
     observe_target_priority_order,
 )
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_ui_evidence,
+)
 from core.level_skip_initializer import initialize_level_skips
 from core.damage_adjuster import (
     configure_damage_slider,
@@ -51,6 +54,10 @@ from core.gc_preflight import (
     summarize_gc_preflight_variations,
 )
 from core.gate_decisions import merge_profile_skip_waivers
+from core.runtime_failure_policy import (
+    RuntimeFailureKind,
+    decide_runtime_failure,
+)
 from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
 )
@@ -65,38 +72,202 @@ from handlers.ad_gem_handler import (
 Action = Dict[str, Any]
 
 
-def _repair_mismatch_attempt_limit(action: Mapping[str, Any]) -> int:
-    """Return a safe, backwards-compatible retry threshold for one action."""
-
-    try:
-        attempts = int(action.get("repair_mismatch_attempts", 1))
-    except (TypeError, ValueError):
-        return 1
-    return max(1, attempts)
-
-
-def _repair_mismatch_failure_key(
-    failed_checks: Iterable[Any],
-    *,
-    reason: str,
-) -> str:
-    """Identify consecutive authoritative mismatches without volatile detail."""
-
-    normalized = sorted(
-        {
-            str(check).strip()
-            for check in failed_checks
-            if str(check).strip()
-        }
-    )
-    return json.dumps(normalized or [str(reason).strip()], sort_keys=True)
-
-
 def _reset_repair_mismatch_attempts(mv: Dict[str, Any]) -> None:
-    """Clear only the automatic retry evidence owned by session preflight."""
+    """Clear legacy automatic-repair counters after a completed check."""
 
     mv["gc_session_preflight_repair_attempts"] = 0
     mv["gc_session_preflight_repair_failure_key"] = ""
+
+
+def _record_attached_rule_disposition(
+    mv: Dict[str, Any],
+    *,
+    rule_id: str,
+    disposition: str,
+    action: str,
+) -> None:
+    """Make one attached-validation rule terminal for this attachment."""
+
+    if not rule_id:
+        return
+    dispositions = mv.setdefault("attached_validation_rule_dispositions", {})
+    if isinstance(dispositions, dict):
+        dispositions[rule_id] = {
+            "disposition": disposition,
+            "action": action,
+        }
+
+
+def _record_attached_observation_result(
+    mv: Dict[str, Any],
+    *,
+    check_id: str,
+    matched: bool,
+    reason: str,
+) -> None:
+    """Complete one attached read-only check and retain any degradation."""
+
+    mv[f"{check_id}_checked"] = True
+    if matched:
+        return
+
+    raw_failed_checks = mv.get("gc_session_preflight_failed_checks", ())
+    if not isinstance(raw_failed_checks, (list, tuple, set, frozenset)):
+        raw_failed_checks = ()
+    failed_checks = {
+        str(value).strip()
+        for value in raw_failed_checks
+        if str(value).strip()
+    }
+    failed_checks.add(check_id)
+    detail = str(reason or "attached observation unavailable").strip()
+    message = f"{check_id} attached observation: {detail}"
+    prior_reason = str(mv.get("gc_session_preflight_last_reason") or "").strip()
+    mv["gc_session_preflight_degraded"] = True
+    mv["gc_session_preflight_disposition"] = "continue_degraded"
+    mv["gc_session_preflight_failed_checks"] = sorted(failed_checks)
+    mv["gc_session_preflight_last_reason"] = (
+        "; ".join(dict.fromkeys((prior_reason, message)))
+        if prior_reason
+        else message
+    )
+    report = mv.get("gc_session_preflight_evidence")
+    report_payload = dict(report) if isinstance(report, Mapping) else {}
+    raw_report_checks = report_payload.get("failed_checks", ())
+    if not isinstance(raw_report_checks, (list, tuple, set, frozenset)):
+        raw_report_checks = ()
+    report_checks = {
+        str(value).strip()
+        for value in raw_report_checks
+        if str(value).strip()
+    }
+    report_checks.add(check_id)
+    attached_controls = report_payload.get("attached_control_checks")
+    attached_control_payload = (
+        dict(attached_controls)
+        if isinstance(attached_controls, Mapping)
+        else {}
+    )
+    attached_control_payload[check_id] = {
+        "valid": False,
+        "disposition": "continue_degraded",
+        "reason": detail,
+    }
+    report_payload.update(
+        {
+            "valid": False,
+            "degraded": True,
+            "disposition": "continue_degraded",
+            "failed_checks": sorted(report_checks),
+            "attached_control_checks": attached_control_payload,
+        }
+    )
+    mv["gc_session_preflight_evidence"] = report_payload
+
+    existing = mv.get("gc_running_configuration_degradation")
+    existing_payload = dict(existing) if isinstance(existing, Mapping) else {}
+    raw_explicit_checks = existing_payload.get("failed_checks", ())
+    if not isinstance(raw_explicit_checks, (list, tuple, set, frozenset)):
+        raw_explicit_checks = ()
+    explicit_checks = {
+        str(value).strip()
+        for value in raw_explicit_checks
+        if str(value).strip()
+    }
+    explicit_checks.add(check_id)
+    explicit_reason = str(existing_payload.get("reason") or "").strip()
+    raw_sources = existing_payload.get("sources", ())
+    if not isinstance(raw_sources, (list, tuple, set, frozenset)):
+        raw_sources = ()
+    explicit_sources = {
+        str(value).strip()
+        for value in raw_sources
+        if str(value).strip()
+    }
+    existing_source = str(existing_payload.get("source") or "").strip()
+    if existing_source:
+        explicit_sources.add(existing_source)
+    explicit_sources.add("attachment_observation")
+    raw_reasons_by_source = existing_payload.get("reasons_by_source")
+    reasons_by_source = (
+        {
+            str(key).strip(): str(value).strip()
+            for key, value in raw_reasons_by_source.items()
+            if str(key).strip() and str(value).strip()
+        }
+        if isinstance(raw_reasons_by_source, Mapping)
+        else {}
+    )
+    if (
+        existing_source
+        and explicit_reason
+        and existing_source not in reasons_by_source
+    ):
+        reasons_by_source[existing_source] = explicit_reason
+    prior_observation_reason = reasons_by_source.get(
+        "attachment_observation",
+        "",
+    )
+    reasons_by_source["attachment_observation"] = (
+        "; ".join(
+            dict.fromkeys((prior_observation_reason, message))
+        )
+        if prior_observation_reason
+        else message
+    )
+    existing_payload.update(
+        {
+            "schema_version": 1,
+            "source": "attachment_observation",
+            "sources": sorted(explicit_sources),
+            "reason": "; ".join(
+                dict.fromkeys(reasons_by_source.values())
+            ),
+            "reasons_by_source": reasons_by_source,
+            "failed_checks": sorted(explicit_checks),
+        }
+    )
+    mv["gc_running_configuration_degradation"] = existing_payload
+
+
+def _complete_session_preflight_degraded(
+    mv: Optional[Dict[str, Any]],
+    *,
+    reason: str,
+    failed_checks: Iterable[str] = (),
+) -> None:
+    """Release a recoverable validation failure under the global policy."""
+
+    if mv is None:
+        return
+    normalized_reason = str(reason or "validation unavailable").strip()
+    checks = sorted(
+        {
+            str(check_id).strip()
+            for check_id in failed_checks
+            if str(check_id).strip()
+        }
+    )
+    decision = decide_runtime_failure(RuntimeFailureKind.VALIDATION_UNAVAILABLE)
+    mv["gc_session_preflight_attempted"] = True
+    mv["gc_session_preflight_completed"] = True
+    mv["gc_session_preflight_blocked"] = False
+    mv["gc_session_preflight_degraded"] = True
+    mv["gc_session_preflight_disposition"] = decision.disposition.value
+    mv["gc_session_preflight_last_status"] = "unavailable"
+    mv["gc_session_preflight_last_reason"] = normalized_reason
+    mv["gc_session_preflight_failed_checks"] = checks
+    mv["gc_session_preflight_repair_required"] = False
+    mv["gc_session_preflight_repair_in_progress"] = False
+    mv["gc_session_preflight_restart_available"] = False
+    mv["gc_session_preflight_evidence"] = {
+        "valid": False,
+        "degraded": True,
+        "disposition": decision.disposition.value,
+        "failed_checks": checks,
+        "reason": normalized_reason,
+    }
+    _reset_repair_mismatch_attempts(mv)
 
 
 def _bind_save_backed_home_evidence(
@@ -241,12 +412,33 @@ def execute_actions(
     mv = None
     if ctx is not None:
         mv = ctx.data.setdefault("mission_vars", {})
+    attachment_context = bool(
+        ctx is not None
+        and (
+            ctx.data.get("startup_gates_deferred") is True
+            or ctx.data.get("manual_return_reconciliation_active") is True
+        )
+    )
     for act in actions or []:
+        t = None
+        attachment_validation = False
+        attachment_rule_id = ""
         try:
             t = (act or {}).get("type")
             is_strategy_action = bool((act or {}).get("_strategy"))
             if is_strategy_action and isinstance(act, dict):
                 act.pop("_strategy", None)
+            if isinstance(act, dict):
+                attachment_validation = bool(
+                    act.pop("_attachment_validation", False)
+                )
+                attachment_rule_id = str(
+                    act.pop("_attachment_rule_id", "") or ""
+                ).strip()
+            if attachment_validation and t == "target_priority_ensure":
+                # Attach may inspect this normally repairable setting, but the
+                # accepted battle must remain untouched.
+                t = "target_priority_observe"
 
             last_state = mv.get("last_detection_state") if mv is not None else None
 
@@ -274,6 +466,40 @@ def execute_actions(
                 log_mission(
                     f"[EXEC] Skip {t or 'unknown'} because action authority was lost",
                     "DEBUG",
+                )
+                continue
+
+            attachment_safe_actions = {
+                "damage_slider_configure",
+                "gc_session_preflight",
+                "orb_distance_configure",
+                "session_preflight",
+                "sleep",
+                "target_priority_observe",
+            }
+            if attachment_validation and t not in attachment_safe_actions:
+                action_name = str(t or "unknown").strip().lower() or "unknown"
+                check_id = f"attached_action_{action_name}"
+                if mv is not None:
+                    _record_attached_observation_result(
+                        mv,
+                        check_id=check_id,
+                        matched=False,
+                        reason=(
+                            f"action {action_name!r} has no read-only Attach "
+                            "disposition and was suppressed"
+                        ),
+                    )
+                    _record_attached_rule_disposition(
+                        mv,
+                        rule_id=attachment_rule_id,
+                        disposition="suppressed_degraded",
+                        action=action_name,
+                    )
+                log_mission(
+                    "[ATTACH] Suppressed non-read-only attached-validation "
+                    f"action {action_name!r}; Automation continues degraded",
+                    "WARN",
                 )
                 continue
 
@@ -410,7 +636,12 @@ def execute_actions(
                         "DEBUG",
                     )
                     continue
-                mode = str(act.get("mode") or "").strip().lower()
+                requested_mode = str(act.get("mode") or "").strip().lower()
+                mode = (
+                    "observe"
+                    if attachment_context and requested_mode == "enforce"
+                    else requested_mode
+                )
                 result = configure_damage_slider(
                     act.get("value"),
                     mode=mode,
@@ -422,6 +653,13 @@ def execute_actions(
                         mv["damage_slider_checked"] = result.success
                     elif mode == "observe":
                         mv["damage_slider_observed"] = True
+                        if attachment_context:
+                            _record_attached_observation_result(
+                                mv,
+                                check_id="damage_slider",
+                                matched=bool(result.success),
+                                reason=str(result.reason),
+                            )
                 log_mission(
                     "[DAMAGE_SLIDER] "
                     f"mode={mode} "
@@ -430,7 +668,7 @@ def execute_actions(
                     f"final={format_damage_percentage(result.final)} "
                     f"steps={result.steps} success={result.success} "
                     f"reason={result.reason}",
-                    "INFO" if result.success or mode == "observe" else "WARN",
+                    "INFO" if result.success else "WARN",
                 )
             elif t == "orb_distance_configure":
                 if is_strategy_action and last_state not in allowed_states:
@@ -440,7 +678,12 @@ def execute_actions(
                         "DEBUG",
                     )
                     continue
-                mode = str(act.get("mode") or "").strip().lower()
+                requested_mode = str(act.get("mode") or "").strip().lower()
+                mode = (
+                    "observe"
+                    if attachment_context and requested_mode == "enforce"
+                    else requested_mode
+                )
                 orb_distance_kwargs = {
                     "range_basis": act.get("range_basis"),
                     "extra": act.get("extra"),
@@ -463,6 +706,13 @@ def execute_actions(
                         mv["orb_distance_checked"] = result.success
                     elif mode == "observe":
                         mv["orb_distance_observed"] = True
+                        if attachment_context:
+                            _record_attached_observation_result(
+                                mv,
+                                check_id="orb_distance",
+                                matched=bool(result.success),
+                                reason=str(result.reason),
+                            )
                 log_mission(
                     "[ORB_DISTANCE] "
                     f"mode={mode} range={result.range_observed}/"
@@ -474,15 +724,27 @@ def execute_actions(
                     f"final=({result.final_extra},{result.final_workshop}) "
                     f"steps=({result.extra_steps},{result.workshop_steps}) "
                     f"success={result.success} reason={result.reason}",
-                    "INFO" if result.success or mode == "observe" else "WARN",
+                    "INFO" if result.success else "WARN",
                 )
             elif t == "target_priority_ensure":
                 if is_strategy_action and last_state not in allowed_states:
                     log_mission(f"[EXEC] Skip target_priority_ensure while state={last_state}", "DEBUG")
                     continue
                 expected_order = act.get("order")
+                attachment_context = bool(
+                    ctx is not None
+                    and (
+                        ctx.data.get("startup_gates_deferred") is True
+                        or ctx.data.get("manual_return_reconciliation_active")
+                        is True
+                    )
+                )
                 save_coordinator = (
-                    ctx.data.get("player_save_preflight_coordinator")
+                    ctx.data.get(
+                        "player_save_attachment_evidence"
+                        if attachment_context
+                        else "player_save_preflight_coordinator"
+                    )
                     if ctx is not None
                     else None
                 )
@@ -497,16 +759,56 @@ def execute_actions(
                 def observe_target_repair() -> None:
                     nonlocal target_repaired
                     target_repaired = True
+                    close_mapping_window = getattr(
+                        save_coordinator,
+                        "close_mapping_candidate_window",
+                        None,
+                    )
+                    if callable(close_mapping_window):
+                        close_mapping_window("target_priority_repair_started")
 
                 record_ui_verification = getattr(
                     save_coordinator,
                     "record_ui_verification",
                     None,
                 )
+                record_mapping_observation = getattr(
+                    save_coordinator,
+                    "record_mapping_observation",
+                    None,
+                )
+
+                def observe_initial_target_priority(
+                    actual: Iterable[str],
+                ) -> None:
+                    values = [str(value) for value in actual]
+                    if callable(record_mapping_observation):
+                        try:
+                            record_mapping_observation(
+                                "target_priority",
+                                build_mapping_candidate_ui_evidence(
+                                    "target_priority",
+                                    canonical_values=values,
+                                    locator_values={
+                                        f"rank:{index}": value
+                                        for index, value in enumerate(values)
+                                    },
+                                ),
+                            )
+                        except Exception as exc:
+                            log(
+                                "[PLAYER_SAVE_MAPPING] Initial Target Priority "
+                                f"observation failed: {exc}",
+                                "DEBUG",
+                            )
                 if callable(record_ui_verification) or callable(
                     getattr(save_coordinator, "invalidate", None)
                 ):
                     target_kwargs["repair_observer_fn"] = observe_target_repair
+                if callable(record_mapping_observation):
+                    target_kwargs["initial_evidence_observer_fn"] = (
+                        observe_initial_target_priority
+                    )
                 used_ui = False
                 ui_contradiction = False
                 if (
@@ -584,15 +886,75 @@ def execute_actions(
                     )
                     continue
                 expected_order = act.get("order")
+                attachment_context = bool(
+                    ctx is not None
+                    and (
+                        ctx.data.get("startup_gates_deferred") is True
+                        or ctx.data.get("manual_return_reconciliation_active")
+                        is True
+                    )
+                )
+                save_coordinator = (
+                    ctx.data.get(
+                        "player_save_attachment_evidence"
+                        if attachment_context
+                        else "player_save_preflight_coordinator"
+                    )
+                    if ctx is not None
+                    else None
+                )
                 if expected_order is None:
                     observation = observe_target_priority_order()
                 else:
                     observation = observe_target_priority_order(
                         expected=expected_order
                     )
+                record_mapping_observation = getattr(
+                    save_coordinator,
+                    "record_mapping_observation",
+                    None,
+                )
+                if observation.observed and callable(record_mapping_observation):
+                    values = list(observation.actual)
+                    try:
+                        record_mapping_observation(
+                            "target_priority",
+                            build_mapping_candidate_ui_evidence(
+                                "target_priority",
+                                canonical_values=values,
+                                locator_values={
+                                    f"rank:{index}": value
+                                    for index, value in enumerate(values)
+                                },
+                            ),
+                        )
+                    except Exception as exc:
+                        log(
+                            "[PLAYER_SAVE_MAPPING] Target Priority observation "
+                            f"failed: {exc}",
+                            "DEBUG",
+                        )
                 if mv is not None:
                     mv["target_priority_observed"] = True
                     mv["target_priority_observation"] = observation.as_dict()
+                    if attachment_validation:
+                        matched = bool(
+                            observation.observed
+                            and (
+                                observation.matches is True
+                                or expected_order is None
+                            )
+                        )
+                        _record_attached_observation_result(
+                            mv,
+                            check_id="target_priority",
+                            matched=matched,
+                            reason=(
+                                "the observed Target Priority did not match"
+                                if observation.observed
+                                else "Target Priority could not be observed"
+                            ),
+                        )
                 log_mission(
                     "[EXEC] target_priority_observe "
                     f"observed={observation.observed} matches={observation.matches}",
@@ -607,16 +969,30 @@ def execute_actions(
                     continue
                 requirements = act.get("requirements")
                 if not isinstance(requirements, dict):
+                    reason = "session preflight profile requirements are missing"
+                    _complete_session_preflight_degraded(
+                        mv,
+                        reason=reason,
+                        failed_checks=("session_preflight",),
+                    )
                     log_mission(
-                        "[SESSION_PREFLIGHT] Missing profile requirements",
-                        "ERROR",
+                        "[SESSION_PREFLIGHT] Missing profile requirements; "
+                        "Automation continues degraded",
+                        "WARN",
                     )
                     continue
                 validator = str(act.get("validator") or "farm").strip().lower()
                 if validator not in {"farm", "tournament"}:
+                    reason = f"unsupported session preflight validator {validator!r}"
+                    _complete_session_preflight_degraded(
+                        mv,
+                        reason=reason,
+                        failed_checks=("session_preflight",),
+                    )
                     log_mission(
-                        f"[SESSION_PREFLIGHT] Unsupported validator {validator!r}",
-                        "ERROR",
+                        "[SESSION_PREFLIGHT] Unsupported validator "
+                        f"{validator!r}; Automation continues degraded",
+                        "WARN",
                     )
                     continue
                 if mv is not None:
@@ -644,13 +1020,11 @@ def execute_actions(
                 manual_return_context = bool(
                     ctx.data.get("manual_return_reconciliation_active") is True
                 )
-                attached_route = bool(
-                    (
-                        act.get("stay_in_battle_when_attached") is True
-                        and attached_context
-                    )
-                    or manual_return_context
-                )
+                # A process attachment never owns a current-battle teardown or
+                # Home repair.  Its save-first pass stays in the battle for
+                # every strategy; the action flag remains a source-level
+                # declaration rather than an authority grant.
+                attached_route = bool(attached_context or manual_return_context)
                 if mv is not None:
                     save_coordinator = (
                         ctx.data.get("player_save_attachment_evidence")
@@ -686,65 +1060,224 @@ def execute_actions(
                         )
                 if attached_route:
                     preflight_kwargs["stay_in_battle"] = True
-                if validator == "tournament":
-                    result = run_read_only_gc_preflight(
-                        effective_requirements,
-                        validate_fn=validate_tournament_session_preflight_screens,
-                        **preflight_kwargs,
+                if attached_route or "allow_repair" in act:
+                    preflight_kwargs["allow_repair"] = bool(
+                        act.get("allow_repair", True)
+                    ) and not attached_route
+                try:
+                    if validator == "tournament":
+                        result = run_read_only_gc_preflight(
+                            effective_requirements,
+                            validate_fn=(
+                                validate_tournament_session_preflight_screens
+                            ),
+                            **preflight_kwargs,
+                        )
+                    else:
+                        result = run_read_only_gc_preflight(
+                            effective_requirements,
+                            **preflight_kwargs,
+                        )
+                except Exception as exc:
+                    reason = f"session preflight validator failed: {exc}"
+                    _complete_session_preflight_degraded(
+                        mv,
+                        reason=reason,
+                        failed_checks=("session_preflight",),
                     )
-                else:
-                    result = run_read_only_gc_preflight(
-                        effective_requirements,
-                        **preflight_kwargs,
+                    log_mission(
+                        "[SESSION_PREFLIGHT] Validator failed; Automation "
+                        f"continues degraded: {exc}",
+                        "WARN",
                     )
+                    continue
                 evidence_payload = (
                     result.evidence.as_dict()
                     if result.evidence is not None
                     else {}
+                )
+                previous_evidence_payload = (
+                    mv.get("gc_session_preflight_evidence")
+                    if mv is not None
+                    else None
                 )
                 if mv is not None:
                     mv["gc_session_preflight_last_status"] = result.status.value
                     mv["gc_session_preflight_last_reason"] = result.reason
                     mv["gc_session_preflight_evidence"] = evidence_payload
                 if result.status is GcPreflightNavigationStatus.COMPLETE:
+                    reported_mismatches = evidence_payload.get(
+                        "reported_attachment_mismatches"
+                    )
+                    deferred_checks = evidence_payload.get("deferred_checks")
+                    attachment_degraded = bool(
+                        attached_route
+                        and (
+                            (
+                                isinstance(reported_mismatches, Mapping)
+                                and reported_mismatches
+                            )
+                            or (
+                                isinstance(deferred_checks, (list, tuple))
+                                and deferred_checks
+                            )
+                        )
+                    )
+                    attachment_failed_checks: set[str] = set()
+                    if isinstance(reported_mismatches, Mapping):
+                        attachment_failed_checks.update(
+                            str(check_id) for check_id in reported_mismatches
+                        )
+                    if isinstance(deferred_checks, (list, tuple)):
+                        attachment_failed_checks.update(
+                            str(check_id) for check_id in deferred_checks
+                        )
+                    existing_degradation = (
+                        mv.get("gc_running_configuration_degradation")
+                        if mv is not None
+                        else None
+                    )
+                    degradation_sources: set[str] = set()
+                    if isinstance(existing_degradation, Mapping):
+                        source = str(
+                            existing_degradation.get("source") or ""
+                        ).strip()
+                        if source:
+                            degradation_sources.add(source)
+                        raw_sources = existing_degradation.get("sources", ())
+                        if isinstance(
+                            raw_sources,
+                            (list, tuple, set, frozenset),
+                        ):
+                            degradation_sources.update(
+                                str(value).strip()
+                                for value in raw_sources
+                                if str(value).strip()
+                            )
+                    retained_attachment_observation = bool(
+                        attached_route
+                        and "attachment_observation" in degradation_sources
+                    )
+                    if retained_attachment_observation:
+                        attachment_degraded = True
+                        raw_existing_checks = existing_degradation.get(
+                            "failed_checks",
+                            (),
+                        )
+                        if isinstance(
+                            raw_existing_checks,
+                            (list, tuple, set, frozenset),
+                        ):
+                            attachment_failed_checks.update(
+                                str(check_id)
+                                for check_id in raw_existing_checks
+                                if str(check_id).strip()
+                            )
+                        if isinstance(previous_evidence_payload, Mapping):
+                            attached_controls = previous_evidence_payload.get(
+                                "attached_control_checks"
+                            )
+                            if isinstance(attached_controls, Mapping):
+                                evidence_payload[
+                                    "attached_control_checks"
+                                ] = copy.deepcopy(dict(attached_controls))
+                        evidence_payload.update(
+                            {
+                                "valid": False,
+                                "degraded": True,
+                                "disposition": "continue_degraded",
+                            }
+                        )
+                    sorted_attachment_failed_checks = sorted(
+                        attachment_failed_checks
+                    )
+                    if sorted_attachment_failed_checks:
+                        evidence_payload["failed_checks"] = (
+                            sorted_attachment_failed_checks
+                        )
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = True
-                        mv["gc_session_preflight_failed_checks"] = []
+                        mv["gc_session_preflight_degraded"] = (
+                            attachment_degraded
+                        )
+                        mv["gc_session_preflight_disposition"] = (
+                            "continue_degraded"
+                            if attachment_degraded
+                            else "verified"
+                        )
+                        mv["gc_session_preflight_failed_checks"] = (
+                            sorted_attachment_failed_checks
+                        )
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
+                        mv["gc_no_battle_setup_degraded"] = False
+                        mv["gc_no_battle_setup_failure"] = {}
+                        if not attachment_degraded:
+                            existing_source = str(
+                                (
+                                    existing_degradation.get("source")
+                                    if isinstance(
+                                        existing_degradation,
+                                        Mapping,
+                                    )
+                                    else ""
+                                )
+                                or ""
+                            ).strip()
+                            if existing_source not in {
+                                "attachment_applicability",
+                                "attachment_observation",
+                            }:
+                                mv.pop(
+                                    "gc_running_configuration_degradation",
+                                    None,
+                                )
+                                mv.pop("gc_degraded_home_repair", None)
                         _reset_repair_mismatch_attempts(mv)
                     variation_summary = summarize_gc_preflight_variations(
                         evidence_payload
                     )
                     completion = "[SESSION_PREFLIGHT] Session validation completed"
                     if variation_summary:
-                        completion += (
-                            "; module variation observed — " + variation_summary
+                        variation_kind = (
+                            "immutable attachment mismatch reported"
+                            if evidence_payload.get(
+                                "reported_attachment_mismatches"
+                            )
+                            else "module variation observed"
                         )
-                    log_mission(completion, "INFO")
+                        completion += (
+                            f"; {variation_kind} — " + variation_summary
+                        )
+                    if attachment_degraded:
+                        deferred_only = bool(
+                            not reported_mismatches
+                            and attached_route
+                            and isinstance(deferred_checks, (list, tuple))
+                            and deferred_checks
+                        )
+                        completion = (
+                            "[SESSION_PREFLIGHT] Attachment validation could not "
+                            "verify Home-only checks; Automation continues "
+                            "degraded and verification/repair is deferred to Home"
+                            if deferred_only
+                            else "[SESSION_PREFLIGHT] Attachment validation flagged "
+                            "configuration gaps; Automation continues degraded "
+                            "and repair is deferred to Home"
+                        )
+                    log_mission(
+                        completion,
+                        "WARN" if attachment_degraded else "INFO",
+                    )
                     log_mission(
                         "[SESSION_PREFLIGHT] completed_evidence="
                         + json.dumps(evidence_payload, sort_keys=True),
                         "DEBUG",
                     )
                 elif result.status is GcPreflightNavigationStatus.MISMATCH:
-                    mismatch_policy = str(
-                        act.get("mismatch_policy") or "block"
-                    ).strip().lower()
-                    observation_only = mismatch_policy == "notify"
-                    home_repair_available = bool(
-                        result.evidence is not None
-                        and getattr(
-                            result.evidence,
-                            "requires_no_battle_repair",
-                            False,
-                        )
-                    )
-                    repairable = bool(
-                        not observation_only
-                        and act.get("allow_repair", True)
-                        and home_repair_available
+                    decision = decide_runtime_failure(
+                        RuntimeFailureKind.CONFIGURATION_MISMATCH
                     )
                     failed_checks = list(
                         getattr(result.evidence, "failed_checks", ())
@@ -752,113 +1285,63 @@ def execute_actions(
                     mismatch_summary = summarize_gc_preflight_mismatch(
                         evidence_payload
                     )
-                    repair_requested = repairable
-                    retry_attempt = 0
-                    retry_limit = _repair_mismatch_attempt_limit(act)
-                    if repairable and mv is not None:
-                        failure_key = _repair_mismatch_failure_key(
-                            failed_checks,
-                            reason=result.reason,
-                        )
-                        prior_key = str(
-                            mv.get("gc_session_preflight_repair_failure_key")
-                            or ""
-                        )
-                        try:
-                            prior_attempts = (
-                                int(
-                                    mv.get(
-                                        "gc_session_preflight_repair_attempts"
-                                    )
-                                    or 0
-                                )
-                                if prior_key == failure_key
-                                else 0
-                            )
-                        except (TypeError, ValueError):
-                            prior_attempts = 0
-                        retry_attempt = prior_attempts + 1
-                        repair_requested = retry_attempt >= retry_limit
-                        mv["gc_session_preflight_repair_attempts"] = (
-                            retry_attempt
-                        )
-                        mv["gc_session_preflight_repair_failure_key"] = (
-                            failure_key
-                        )
-                    elif mv is not None:
-                        _reset_repair_mismatch_attempts(mv)
                     if mv is not None:
-                        mv["gc_session_preflight_completed"] = False
-                        mv["gc_session_preflight_blocked"] = bool(
-                            not observation_only
-                            and (not repairable or repair_requested)
+                        # A conclusive mismatch is still a completed check.  It
+                        # cannot globally halt strategy or lifecycle input.
+                        mv["gc_session_preflight_completed"] = True
+                        mv["gc_session_preflight_degraded"] = True
+                        mv["gc_session_preflight_disposition"] = (
+                            decision.disposition.value
                         )
+                        mv["gc_session_preflight_blocked"] = False
                         mv["gc_session_preflight_failed_checks"] = failed_checks
-                        mv["gc_session_preflight_repair_required"] = (
-                            repair_requested
-                        )
+                        mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
-                        mv["gc_session_preflight_restart_available"] = (
-                            home_repair_available
-                        )
-                        if repairable and not repair_requested:
-                            mv["gc_session_preflight_attempted"] = False
-                        if repair_requested:
-                            mv["gc_no_battle_setup_completed"] = False
-                    if repairable and not repair_requested:
-                        log_mission(
-                            "[SESSION_PREFLIGHT] Transient no-battle "
-                            "configuration mismatch "
-                            f"(attempt {retry_attempt} of {retry_limit}) — "
-                            f"{mismatch_summary}. Read-only validation will "
-                            "retry after cooldown.",
-                            "INFO",
-                        )
-                    elif repair_requested:
-                        log_mission(
-                            "[SESSION_PREFLIGHT] No-battle configuration mismatch; "
-                            f"{retry_attempt} matching attempts exhausted — "
-                            f"{mismatch_summary}. Guarded stop/repair/restart "
-                            "requested.",
-                            "WARN",
-                        )
-                    elif observation_only:
-                        log_mission(
-                            "[SESSION_PREFLIGHT] Read-only observer mismatch "
-                            f"recorded — {mismatch_summary}. Observation and "
-                            "terminal capture continue without operator action.",
-                            "WARN",
-                        )
-                    else:
-                        log_mission(
-                            "[SESSION_PREFLIGHT] Configuration mismatch is not "
-                            f"repairable at Home — {mismatch_summary}. Automation "
-                            "remains blocked.",
-                            "WARN",
-                        )
+                        mv["gc_session_preflight_restart_available"] = False
+                        _reset_repair_mismatch_attempts(mv)
+                    log_mission(
+                        "[SESSION_PREFLIGHT] Configuration mismatch flagged — "
+                        f"{mismatch_summary}. Automation continues in degraded "
+                        "mode; only a safe Home boundary may repair it.",
+                        "WARN",
+                    )
                     log_mission(
                         "[SESSION_PREFLIGHT] mismatch_evidence="
                         + json.dumps(evidence_payload, sort_keys=True),
                         "DEBUG",
                     )
                 else:
+                    battle_ended = (
+                        result.status
+                        is GcPreflightNavigationStatus.BATTLE_ENDED
+                    )
+                    decision = decide_runtime_failure(
+                        RuntimeFailureKind.VALIDATION_UNAVAILABLE
+                    )
                     if mv is not None:
-                        mv["gc_session_preflight_completed"] = False
-                        mv["gc_session_preflight_attempted"] = False
+                        mv["gc_session_preflight_completed"] = not battle_ended
+                        mv["gc_session_preflight_attempted"] = not battle_ended
+                        mv["gc_session_preflight_degraded"] = not battle_ended
+                        mv["gc_session_preflight_disposition"] = (
+                            "battle_ended"
+                            if battle_ended
+                            else decision.disposition.value
+                        )
+                        mv["gc_session_preflight_blocked"] = False
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
                         mv["gc_session_preflight_failed_checks"] = []
                         _reset_repair_mismatch_attempts(mv)
-                    interrupted_level = (
-                        "INFO"
-                        if result.status
-                        is GcPreflightNavigationStatus.BATTLE_ENDED
-                        else "WARN"
-                    )
+                    interrupted_level = "INFO" if battle_ended else "WARN"
                     log_mission(
                         f"[SESSION_PREFLIGHT] Validation interrupted "
-                        f"status={result.status.value} reason={result.reason}",
+                        f"status={result.status.value} reason={result.reason}; "
+                        + (
+                            "the battle ended before another action"
+                            if battle_ended
+                            else "automation continues in degraded mode"
+                        ),
                         interrupted_level,
                     )
             elif t in {"ultimate_set_all_on", "ultimate_ensure_state"}:
@@ -894,7 +1377,67 @@ def execute_actions(
                         mv["ultimate_targets"] = targets
             else:
                 log(f"[EXEC] Unknown action: {act}", "WARN")
+            if attachment_validation and mv is not None:
+                _record_attached_rule_disposition(
+                    mv,
+                    rule_id=attachment_rule_id,
+                    disposition="observed",
+                    action=str(t or "unknown"),
+                )
         except Exception as e:
+            if mv is not None and t in {
+                "gc_session_preflight",
+                "session_preflight",
+            }:
+                _complete_session_preflight_degraded(
+                    mv,
+                    reason=f"session preflight failed unexpectedly: {e}",
+                    failed_checks=("session_preflight",),
+                )
+                log(
+                    "[EXEC] Session preflight failed unexpectedly; Automation "
+                    f"continues degraded: {e}",
+                    "WARN",
+                )
+                continue
+            if (
+                attachment_context
+                and mv is not None
+                and (
+                    t in {
+                        "damage_slider_configure",
+                        "orb_distance_configure",
+                    }
+                    or (
+                        attachment_validation
+                        and t == "target_priority_observe"
+                    )
+                )
+            ):
+                check_id = {
+                    "damage_slider_configure": "damage_slider",
+                    "orb_distance_configure": "orb_distance",
+                    "target_priority_observe": "target_priority",
+                }[str(t)]
+                _record_attached_observation_result(
+                    mv,
+                    check_id=check_id,
+                    matched=False,
+                    reason=f"observer failed: {e}",
+                )
+                log(
+                    f"[EXEC] Attached {check_id} observation failed; "
+                    f"Automation continues degraded: {e}",
+                    "WARN",
+                )
+                if attachment_validation:
+                    _record_attached_rule_disposition(
+                        mv,
+                        rule_id=attachment_rule_id,
+                        disposition="observer_failed_degraded",
+                        action=str(t),
+                    )
+                continue
             log(f"[EXEC] Exception during action {act}: {e}", "ERROR")
 
 

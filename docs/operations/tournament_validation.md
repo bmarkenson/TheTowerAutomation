@@ -29,14 +29,21 @@ Restore the previous state only under the agent-owned Pause cleanup rules; do
 not blindly Resume a pre-existing Pause or changed battle.
 
 To continue passive observation after a validated check, the managed
-Tournament profile may attach without restarting the battle:
+Tournament profile may be selected before attaching without restarting the
+battle:
 
 ```bash
 .venv/bin/python main.py --adb-port PORT --strategy tournament --no-restart
 ```
 
-It attempts the same read-only session validation once, then limits action
-authority to enabled reward collectors and the natural terminal handler. It
-does not buy upgrades, repair configuration, Surrender, auto-return Home,
-enter a Tournament, or start an ordinary battle. The architecture contract is
+Attach first proves Tournament identity. A compatible selection becomes the
+active Tournament Strategy; an incompatible or unprovable selection observes
+degraded and remains pending for the next safe boundary. The attached
+Tournament performs its session inventory and Damage Slider/Orb Distance
+checks once in read-only mode. Mismatch, unavailable evidence, or validator
+failure marks the battle degraded and does not Pause or repeat the pass. It
+does not buy upgrades, repair configuration, Surrender, enter a Tournament, or
+start an ordinary battle. Its normal reward collectors and natural terminal
+handler remain eligible, and the selected terminal policy still owns what
+happens after results. The architecture contract is
 [`Tournament exclusive validation and observer profile`](../architecture/runtime.md#tournament-exclusive-validation-and-observer-profile).

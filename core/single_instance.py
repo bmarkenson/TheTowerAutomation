@@ -32,6 +32,19 @@ class SingleInstanceLock:
         self.target = str(target)
         self.path = Path(path) if path is not None else lock_path_for_target(self.target)
         self._handle: Optional[IO[str]] = None
+        self._metadata: dict[str, object] = {}
+
+    def _write_metadata(self, metadata: dict[str, object]) -> None:
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("single-instance lock is not acquired")
+        handle.seek(0)
+        handle.truncate()
+        json.dump(metadata, handle, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+        self._metadata = dict(metadata)
 
     def acquire(self) -> None:
         if self._handle is not None:
@@ -49,18 +62,47 @@ class SingleInstanceLock:
                 f"Automation is already running for {self.target}: {owner}"
             ) from exc
 
-        metadata = {
+        metadata: dict[str, object] = {
             "pid": os.getpid(),
             "state": "held",
             "target": self.target,
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
-        handle.seek(0)
-        handle.truncate()
-        json.dump(metadata, handle, sort_keys=True)
-        handle.write("\n")
-        handle.flush()
         self._handle = handle
+        try:
+            self._write_metadata(metadata)
+        except Exception:
+            self._handle = None
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
+            raise
+
+    def bind_runtime_owner(
+        self,
+        *,
+        runtime_id: str,
+        target_generation: int,
+    ) -> None:
+        """Bind held-lock metadata to one exact runtime target generation."""
+
+        normalized_runtime_id = str(runtime_id).strip()
+        if not normalized_runtime_id:
+            raise ValueError("runtime_id must not be empty")
+        if (
+            isinstance(target_generation, bool)
+            or not isinstance(target_generation, int)
+            or target_generation < 1
+        ):
+            raise ValueError("target_generation must be a positive integer")
+        self._write_metadata(
+            {
+                **self._metadata,
+                "runtime_id": normalized_runtime_id,
+                "target_generation": target_generation,
+            }
+        )
 
     def release(self) -> None:
         handle = self._handle
@@ -73,12 +115,25 @@ class SingleInstanceLock:
                 "released_at": datetime.now(timezone.utc).isoformat(),
                 "state": "released",
                 "target": self.target,
+                **(
+                    {
+                        "runtime_id": self._metadata["runtime_id"],
+                        "target_generation": self._metadata[
+                            "target_generation"
+                        ],
+                    }
+                    if "runtime_id" in self._metadata
+                    and "target_generation" in self._metadata
+                    else {}
+                ),
             }
             handle.seek(0)
             handle.truncate()
             json.dump(metadata, handle, sort_keys=True)
             handle.write("\n")
             handle.flush()
+            os.fsync(handle.fileno())
+            self._metadata = dict(metadata)
         finally:
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

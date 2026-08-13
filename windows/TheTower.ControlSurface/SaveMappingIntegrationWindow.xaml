@@ -1,0 +1,69 @@
+<Window x:Class="TheTower.ControlSurface.SaveMappingIntegrationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Save mapping integration"
+        Width="1040" Height="790" MinWidth="820" MinHeight="620"
+        Background="#0A0E16" Foreground="#EDF2F7"
+        WindowStartupLocation="CenterOwner">
+  <Grid Margin="14">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <Border Grid.Row="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,0,0,10">
+      <StackPanel>
+        <TextBlock Text="CANONICAL SAVE MAPPINGS" Foreground="#62D5FF" FontSize="10" FontWeight="Bold" />
+        <TextBlock Text="Review and integrate into develop" FontSize="20" FontWeight="Bold" Margin="0,3,0,4" />
+        <TextBlock x:Name="CatalogStatusText" Text="Loading the durable review queue…" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="1" Margin="0,0,0,10">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="10" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+      <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="10">
+        <StackPanel>
+          <TextBlock Text="1. OBSERVATION" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" />
+          <ComboBox x:Name="CandidateBox" DisplayMemberPath="Label" SelectionChanged="Selection_Changed" Margin="0,5,0,0" />
+          <TextBlock x:Name="CandidateDetailText" Text="Choose one durable observation." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,5,0,0" />
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="10">
+        <StackPanel>
+          <TextBlock Text="2. DEVELOP ELIGIBILITY" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" />
+          <TextBox x:Name="RepositoryDetailText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="10" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" Text="Loading main/develop readiness…" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <GroupBox Grid.Row="2" Header="3. Exact reviewed proposal">
+      <TextBox x:Name="ProposalText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="10" Text="Review an exact proposal before integration." />
+    </GroupBox>
+
+    <Border Grid.Row="3" x:Name="ResultPanel" Visibility="Collapsed" Background="#102B24" BorderBrush="#49D69D" BorderThickness="1" CornerRadius="9" Padding="10" Margin="0,10,0,0">
+      <TextBox x:Name="ResultText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxHeight="190" FontFamily="Consolas" FontSize="10" Background="Transparent" BorderThickness="0" />
+    </Border>
+
+    <Grid Grid.Row="4" Margin="0,10,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0" x:Name="IntegrateStatusText" Text="Integration remains disabled until this exact candidate is reviewed." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" VerticalAlignment="Center" Margin="0,0,12,0" />
+      <Button Grid.Column="1" x:Name="CloseButton" Content="Close" Click="Close_Click" Margin="3" />
+      <Button Grid.Column="2" x:Name="RefreshButton" Content="Refresh catalog" Click="Refresh_Click" Margin="3" />
+      <Button Grid.Column="3" x:Name="ReviewButton" Content="Review exact proposal" Click="Review_Click" Margin="3" IsEnabled="False" />
+      <Button Grid.Column="4" x:Name="IntegrateButton" Content="Integrate reviewed mapping into develop…" Click="Integrate_Click" Style="{StaticResource PrimaryButton}" Margin="3" IsEnabled="False" />
+    </Grid>
+  </Grid>
+</Window>

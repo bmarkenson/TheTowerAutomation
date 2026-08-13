@@ -29,6 +29,9 @@ from core.perk_save_monitor import (
     merge_terminal_perk_tail,
 )
 from core.terminal_save_report import terminal_save_report_complete
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_ui_evidence,
+)
 
 
 MORE_STATS_INDICATOR = "indicators.more_stats"
@@ -82,6 +85,9 @@ def handle_game_over(
     report_disposition: Optional[Mapping[str, Any]] = None,
     captured_at: Optional[datetime] = None,
     battle_id: Optional[str] = None,
+    mapping_observation_fn: Optional[
+        Callable[[str, Mapping[str, Any]], int]
+    ] = None,
 ):
     """
     Handle the GAME OVER flow: collect best-effort stats and follow its route.
@@ -89,9 +95,10 @@ def handle_game_over(
     Workflow:
       1) Capture the initial Game Stats dialog in memory.
       2) Use a proven save-backed final Perk inventory. If only an exact saved
-         prefix exists, inspect the newest terminal Perk viewport and reconcile
-         its tail without a full-list scroll. Capture the complete ordered list
-         only when no usable saved prefix exists, then return to Game Stats.
+         prefix exists, start at the newest terminal Perk edge and scroll only
+         until an unchanged saved-recency marker is reached. Capture the
+         complete ordered list only when no usable saved prefix exists, then
+         return to Game Stats.
       3) Prefer the causally bound, exact-version save History projection.
       4) If save evidence is unavailable or contradicts Game Stats, open More
          Stats and copy the complete report through Android's clipboard service.
@@ -159,6 +166,7 @@ def handle_game_over(
                 session_id=session_id,
                 disposition=disposition,
                 action_guard_fn=action_guard_fn,
+                mapping_observation_fn=mapping_observation_fn,
             )
         except Exception as exc:
             # Data extraction is deliberately subordinate to the selected
@@ -258,13 +266,19 @@ def handle_game_over(
         )
     if before_terminal_action is not None:
         before_terminal_action()
+    selected_mode = mode
+    terminal_action_guard = _terminal_route_action_guard(
+        selected_mode,
+        control_sync=control_sync,
+        action_guard_fn=action_guard_fn,
+    )
     if return_home_after_battle:
         mode = ExecMode.HOME
     if mode == ExecMode.HOME:
         if not tap_if_visible(
             "buttons.home:game_over",
             retries=1,
-            action_guard_fn=action_guard_fn,
+            action_guard_fn=terminal_action_guard,
         ):
             return _abort_handler(
                 "Go Home from Game Stats",
@@ -280,7 +294,7 @@ def handle_game_over(
         if not tap_if_visible(
             "buttons.retry:game_over",
             retries=1,
-            action_guard_fn=action_guard_fn,
+            action_guard_fn=terminal_action_guard,
         ):
             return _abort_handler(
                 "Retry Game",
@@ -318,6 +332,9 @@ def _capture_game_over_stats(
     session_id: str,
     disposition: Optional[Mapping[str, Any]],
     action_guard_fn: Optional[Callable[[], bool]],
+    mapping_observation_fn: Optional[
+        Callable[[str, Mapping[str, Any]], int]
+    ],
 ) -> _GameOverStatsCaptureOutcome:
     """Attempt terminal collection without owning the Home/Retry decision."""
 
@@ -359,6 +376,11 @@ def _capture_game_over_stats(
         captured_at=captured_at,
     )
     if record is not None:
+        _record_game_over_mapping_observation(
+            record,
+            mapping_observation_fn,
+            observed_at=captured_at,
+        )
         attach_battle_perks(record, perks)
         if disposition is not None:
             record["report_disposition"] = copy.deepcopy(dict(disposition))
@@ -473,6 +495,13 @@ def _capture_game_over_stats(
                 report_disposition=disposition,
             )
 
+    if completed_record is not None:
+        _record_game_over_mapping_observation(
+            completed_record,
+            mapping_observation_fn,
+            observed_at=captured_at,
+        )
+
     # More Stats is optional, but leaving its modal open would block the
     # authoritative Home/Retry control. Close it under the same live guard and
     # verify Game Stats before reporting the collection route complete.
@@ -494,6 +523,67 @@ def _capture_game_over_stats(
         )
     time.sleep(1.2)
     return _GameOverStatsCaptureOutcome(record=completed_record)
+
+
+def _record_game_over_mapping_observation(
+    record: Mapping[str, Any],
+    callback: Optional[Callable[[str, Mapping[str, Any]], int]],
+    *,
+    observed_at: datetime,
+) -> None:
+    """Submit the normalized terminal cause before leaving its UI boundary."""
+
+    if callback is None:
+        return
+    quality = record.get("quality")
+    if not isinstance(quality, Mapping) or quality.get("valid") is not True:
+        return
+    killed_by = _terminal_record_killed_by(record)
+    if not killed_by:
+        return
+    try:
+        evidence = build_mapping_candidate_ui_evidence(
+            "battle_history_killed_by",
+            canonical_values=[killed_by],
+            locator_values={"killed_by": killed_by},
+            observed_at=observed_at,
+        )
+        callback("battle_history_killed_by", evidence)
+    except Exception as exc:
+        log(
+            "[PLAYER_SAVE_MAPPING] Game Over mapping observation failed "
+            f"without affecting terminal routing: {exc}",
+            "WARN",
+        )
+
+
+def _terminal_record_killed_by(record: Mapping[str, Any]) -> str:
+    game_stats = record.get("game_stats")
+    fields = game_stats.get("fields") if isinstance(game_stats, Mapping) else None
+    value = fields.get("killed_by") if isinstance(fields, Mapping) else None
+    if isinstance(value, Mapping):
+        normalized = str(value.get("value") or "").strip()
+        if normalized:
+            return normalized
+    more_stats = record.get("more_stats")
+    sections = (
+        more_stats.get("sections")
+        if isinstance(more_stats, Mapping)
+        else None
+    )
+    if not isinstance(sections, list):
+        return ""
+    for section in sections:
+        if not (
+            isinstance(section, Mapping)
+            and section.get("key") == "battle_report"
+            and isinstance(section.get("rows"), list)
+        ):
+            continue
+        for row in section["rows"]:
+            if isinstance(row, Mapping) and row.get("key") == "killed_by":
+                return str(row.get("value") or "").strip()
+    return ""
 
 
 def restore_game_stats_for_terminal_route(
@@ -544,6 +634,34 @@ def _wait_for_game_over_direction(
             time.sleep(1)
             continue
         return AUTOMATION.mode
+
+
+def _terminal_route_action_guard(
+    selected_mode: ExecMode,
+    *,
+    control_sync: Optional[Callable[[], None]],
+    action_guard_fn: Optional[Callable[[], bool]],
+) -> Callable[[], bool]:
+    """Keep one terminal tap bound to the direction selected for it."""
+
+    def allowed() -> bool:
+        try:
+            if control_sync is not None:
+                control_sync()
+            if (
+                AUTOMATION.state is not RunState.RUNNING
+                or AUTOMATION.mode is not selected_mode
+            ):
+                return False
+            return action_guard_fn is None or bool(action_guard_fn())
+        except Exception as exc:
+            log(
+                f"[GAME_OVER] Terminal-route authority check failed: {exc}",
+                "ERROR",
+            )
+            return False
+
+    return allowed
 
 
 def _capture_game_over_perks(
@@ -662,10 +780,11 @@ def _capture_game_over_perks(
 
 
 def _capture_game_over_perk_tail(
+    monitoring: Mapping[str, Any],
     *,
     action_guard_fn: Optional[Callable[[], bool]] = None,
 ):
-    """Capture only the newest terminal Perk viewport and restore Game Stats."""
+    """Capture from the newest Perk edge through known saved recency."""
 
     game_stats_screen = capture_adb_screenshot()
     if game_stats_screen is None or not _game_stats_visible(game_stats_screen):
@@ -719,12 +838,57 @@ def _capture_game_over_perk_tail(
         settle_s=0.8,
         action_guard_fn=action_guard_fn,
     )
-    frames = [top.screenshot] if top.screenshot is not None else []
+    capture_reason = f"top_{top.reason}"
+    inventory_complete = False
+    if top.screenshot is None:
+        frames = []
+        source_complete = False
+    elif not top.success:
+        frames = [top.screenshot]
+        source_complete = False
+    else:
+        probe_frames = []
+
+        def saved_recency_reached(frame):
+            probe_frames.append(frame)
+            try:
+                probe = _terminal_perk_prefix_record(
+                    probe_frames,
+                    source_complete=True,
+                    source_reason="saved_recency_probe",
+                    inventory_complete=False,
+                )
+                _inventory, merge = merge_terminal_perk_tail(
+                    monitoring,
+                    probe,
+                )
+            except Exception:
+                return None
+            if merge.get("overlap_marker") is not None:
+                return "saved_recency_marker_reached"
+            return None
+
+        capture = capture_scroll_to_edge(
+            "gesture_targets.goto_next:perks",
+            source_label=PERKS_INDICATOR,
+            screenshot=top.screenshot,
+            progress_region=PERKS_CONTENT_REGION,
+            max_swipes=20,
+            settle_s=0.8,
+            stop_fn=saved_recency_reached,
+            action_guard_fn=action_guard_fn,
+        )
+        frames = list(capture.screenshots)
+        source_complete = capture.success
+        capture_reason = capture.reason
+        inventory_complete = capture.success and capture.reason == "edge_reached"
+
     try:
-        perks = ocr_selected_perks(
+        perks = _terminal_perk_prefix_record(
             frames,
-            source_complete=top.success,
-            source_reason=f"newest_visible_prefix:{top.reason}",
+            source_complete=source_complete,
+            source_reason=f"newest_saved_recency_prefix:{capture_reason}",
+            inventory_complete=inventory_complete,
         )
     except Exception as exc:
         log(f"[BATTLE_PERKS] Top-prefix OCR failed: {exc}", "ERROR", console=True)
@@ -733,31 +897,49 @@ def _capture_game_over_perk_tail(
             source_complete=False,
             source_reason=f"top_prefix_ocr_failed:{exc}",
         )
-    perks = dict(perks)
-    quality = dict(perks.get("quality") or {})
-    quality.update(
-        {
-            "scope_complete": bool(top.success),
-            "inventory_complete": False,
-            "capture_scope": "newest_visible_prefix",
-        }
-    )
-    perks.update(
-        {
-            "source_method": "terminal_perks_top_prefix_ocr",
-            "capture_scope": "newest_visible_prefix",
-            "quality": quality,
-        }
-    )
     log(
-        "[BATTLE_PERKS] Captured the newest terminal Perk prefix without "
-        "scrolling through the complete inventory",
+        f"[BATTLE_PERKS] Captured {len(frames)} terminal Perk viewport(s) "
+        f"from the newest edge through {capture_reason}",
         "DEBUG",
     )
     restored = _close_game_over_perks(
         action_guard_fn=action_guard_fn,
     )
     return perks, frames, restored
+
+
+def _terminal_perk_prefix_record(
+    frames,
+    *,
+    source_complete: bool,
+    source_reason: str,
+    inventory_complete: bool,
+):
+    """Describe one contiguous newest-first prefix for saved-tail merging."""
+
+    perks = dict(
+        ocr_selected_perks(
+            frames,
+            source_complete=source_complete,
+            source_reason=source_reason,
+        )
+    )
+    quality = dict(perks.get("quality") or {})
+    quality.update(
+        {
+            "scope_complete": bool(source_complete),
+            "inventory_complete": bool(inventory_complete),
+            "capture_scope": "newest_prefix_until_saved_recency",
+        }
+    )
+    perks.update(
+        {
+            "source_method": "terminal_perks_saved_recency_prefix_ocr",
+            "capture_scope": "newest_prefix_until_saved_recency",
+            "quality": quality,
+        }
+    )
+    return perks
 
 
 def _close_game_over_perks(
@@ -840,6 +1022,7 @@ def _resolve_game_over_perks(
     )
     if can_reconcile_top:
         terminal_ui, frames, restored = _capture_game_over_perk_tail(
+            monitoring,
             action_guard_fn=action_guard_fn,
         )
         if not restored:

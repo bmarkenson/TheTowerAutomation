@@ -15,12 +15,40 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\TheTower.ControlSurface\ApiClient.cs"
+             Link="ApiClient.cs" />
+    <Compile Include="..\TheTower.ControlSurface\BlueStacksInstanceController.cs"
+             Link="BlueStacksInstanceController.cs" />
+    <Compile Include="..\TheTower.ControlSurface\BlueStacksMaintenanceCoordinator.cs"
+             Link="BlueStacksMaintenanceCoordinator.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostPerformanceModels.cs"
+             Link="HostPerformanceModels.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostPerformanceAggregateWindow.cs"
+             Link="HostPerformanceAggregateWindow.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostPerformanceTracker.cs"
+             Link="HostPerformanceTracker.cs" />
+    <Compile Include="..\TheTower.ControlSurface\WindowsHostPerformanceSampler.cs"
+             Link="WindowsHostPerformanceSampler.cs" />
+    <Compile Include="..\TheTower.ControlSurface\WindowsGpuPerformanceSampler.cs"
+             Link="WindowsGpuPerformanceSampler.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostPerformanceSpool.cs"
+             Link="HostPerformanceSpool.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostPerformanceUploadBatch.cs"
+             Link="HostPerformanceUploadBatch.cs" />
     <Compile Include="..\TheTower.ControlSurface\Models.cs" Link="Models.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostProcessAttribution.cs"
+             Link="HostProcessAttribution.cs" />
+    <Compile Include="..\TheTower.ControlSurface\GateDecisionPresentation.cs"
+             Link="GateDecisionPresentation.cs" />
     <Compile Include="..\TheTower.ControlSurface\ControlSurfaceCompatibility.cs"
              Link="ControlSurfaceCompatibility.cs" />
     <Compile Include="..\TheTower.ControlSurface\StrategyAuthoringViewModels.cs"
              Link="StrategyAuthoringViewModels.cs" />
     <Compile Include="..\TheTower.ControlSurface\StrategyStructuredEditorViewModels.cs"
              Link="StrategyStructuredEditorViewModels.cs" />
+    <Compile Include="..\TheTower.ControlSurface\StrategySelectionCoordinator.cs"
+             Link="StrategySelectionCoordinator.cs" />
+    <Compile Include="..\TheTower.ControlSurface\SaveMappingIntegrationViewModels.cs"
+             Link="SaveMappingIntegrationViewModels.cs" />
   </ItemGroup>
 </Project>

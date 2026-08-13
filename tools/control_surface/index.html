@@ -43,6 +43,15 @@
       </div>
     </section>
 
+    <section id="confirmedLocalMappingAlert" class="persistent-alert" aria-live="polite" hidden>
+      <div>
+        <span class="eyebrow">Save mapping</span>
+        <strong id="confirmedLocalMappingTitle">Local mapping integration pending</strong>
+        <p id="confirmedLocalMappingDetail"></p>
+      </div>
+      <button id="reviewSaveMappingsButton" type="button">Review mappings…</button>
+    </section>
+
     <section class="dashboard-grid">
       <article class="panel control-panel">
         <div class="panel-heading">
@@ -139,7 +148,7 @@
             <button id="attachBattleButton" type="button" data-control-action="attach_battle">Attach to Battle</button>
           </div>
           <p id="battleWorkflowSummary" class="fine-print">Waiting for fresh game-boundary evidence.</p>
-          <p class="fine-print">Start Battle is only for verified New Battle at Home and runs normal new-run gates. Attach is only for a verified active or resumable battle.</p>
+          <p class="fine-print">Start Battle is only for verified New Battle at Home and runs normal new-run gates. Attach is only for a verified active or resumable battle; it uses the accepted Strategy, observes incompatible battles as degraded, and never repairs the attached battle.</p>
         </div>
 
         <div class="lifecycle-control">
@@ -394,6 +403,47 @@
         <button id="cancelTournamentLaunchButton" class="danger" type="button">Cancel launch</button>
         <button id="startTournamentLaunchButton" class="primary" type="button">Start Tournament</button>
       </div>
+    </div>
+  </dialog>
+
+  <dialog id="saveMappingIntegrationDialog" class="battle-dialog mapping-integration-dialog">
+    <div class="dialog-heading">
+      <div>
+        <span class="eyebrow">Canonical save mappings</span>
+        <h2>Review and integrate into develop</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-dialog="saveMappingIntegrationDialog" aria-label="Close save-mapping review">Close</button>
+    </div>
+    <div class="dialog-body">
+      <p id="saveMappingCatalogStatus" class="muted">Loading the durable review queue…</p>
+      <div class="mapping-integration-grid">
+        <section>
+          <h3>1. Observation</h3>
+          <select id="saveMappingCandidateSelect" aria-label="Mapping observation">
+            <option value="">Select a mapping observation…</option>
+          </select>
+          <p id="saveMappingCandidateDetail" class="fine-print">Choose one durable observation.</p>
+        </section>
+        <section>
+          <h3>2. Develop eligibility</h3>
+          <div id="saveMappingRepositoryDetail" class="mapping-proposal muted">Loading main/develop readiness…</div>
+        </section>
+      </div>
+      <div class="dialog-actions mapping-review-actions">
+        <button id="refreshSaveMappingCatalogButton" type="button">Refresh catalog</button>
+        <button id="reviewSaveMappingProposalButton" type="button" disabled>Review exact proposal</button>
+      </div>
+      <section class="mapping-proposal-section">
+        <h3>3. Exact proposal</h3>
+        <div id="saveMappingProposal" class="mapping-proposal muted">Review an exact proposal before integration.</div>
+      </section>
+      <p id="saveMappingIntegrateStatus" class="fine-print">Integration remains disabled until this exact candidate is reviewed.</p>
+      <div id="saveMappingResult" class="callout" hidden></div>
+      <div class="dialog-actions mapping-review-actions">
+        <button type="button" data-close-dialog="saveMappingIntegrationDialog">Close</button>
+        <button id="integrateSaveMappingButton" class="primary" type="button" disabled>Integrate reviewed mapping into develop…</button>
+      </div>
+      <p class="fine-print">This narrow action creates one verified commit on clean, synchronized <code>develop</code>. It does not promote to production, restart services, change runtime authority, send device input, or alter the current battle. Conflicts and unsupported proposals remain ordinary development work.</p>
     </div>
   </dialog>
 

@@ -73,9 +73,17 @@ handled through its read-only validation action before other attached work.
 `attached_validation_only` prevents that synthetic validation rule from
 becoming ordinary run behavior.
 
+Eligibility is not mutation authority. During Attach, the executor downshifts
+every configuration action—including otherwise repairable Auto Pick, Poison
+Swamp Stun, Damage Slider, and Orb Distance actions—to observation. A mismatch,
+unsupported action, missing result, or validator exception completes the check
+as degraded; it must not retain the attachment hold or repeat each heartbeat.
+
 Session-preflight requirements, fallbacks, gate rules, and the relevant
-attachment policy contribute to the reuse fingerprint. Changing them therefore
-invalidates an older completion receipt instead of silently reusing it.
+attachment policy contribute to the reusable session receipt fingerprint. The
+Attach request separately fingerprints the complete resolved Strategy
+definition, so source changes after request acceptance cannot alter the
+in-flight attachment.
 
 Validate builder changes with at least the focused builder/profile tests and
 the repository checkpoint required by `docs/new_thread.md`; live validation is

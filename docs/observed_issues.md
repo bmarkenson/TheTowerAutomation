@@ -12,6 +12,24 @@ current runtime state.
 
 ## Global live-preflight hazards
 
+### Free Ticket modal stranded a completed-battle launch and exposed background controls
+
+**Stable ID:** `ISSUE-2026-041` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A known Free Ticket modal appeared after a verified Home Battle dispatch;
+  launch authority was consumed before `RUNNING`, while Home and its ad-gem
+  remained detectable behind the modal and restarted a bounded collector on
+  every heartbeat. Treat blocking primaries as non-actionable background,
+  retain the exact launch until its postcondition, allow one typed modal
+  recovery and one fresh-Home retry, and circuit-break exhausted transactions.
+- Load the [dossier](issues/open-2026.md#free-ticket-modal-stranded-a-completed-battle-launch-and-exposed-background-controls)
+  before changing blocking-screen precedence, Home launch completion, or
+  cross-heartbeat retry behavior, and for live confirmation or recurrence.
+  Commit `af3d1b0` is deployed and its managed active-battle handoff passed.
+  Next: observe one natural no-battle launch boundary without manufacturing a
+  battle or modal; [state/recovery
+  backlog](backlog/state-and-detection.md#state-coverage-and-recovery).
+
 ### Owned validation cleanup survived a later running-battle transition
 
 **Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `confirmed_unresolved`
@@ -55,11 +73,20 @@ current runtime state.
 
 - Two T19 runs kept near-normal effective speed but
   processed far fewer enemies and combos; host scheduling is an inference, so
-  do not change strategy or speed policy from this evidence alone.
+  do not change strategy or speed policy from this evidence alone. On
+  2026-08-10, an operator-reported lower-CPH sequence recovered after a manual
+  BlueStacks restart, supporting but not proving emulator aging.
 - Load the [dossier](issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed)
   for a throughput recurrence, T19 causal analysis, or host-correlation work.
-  Next: pair exact loadout/locks with host counters and targeted frame summaries;
-  see the [runtime backlog](backlog/runtime-and-validation.md).
+  Revision 41 adds a confirmed operator path, visible handle evidence, and a
+  conservative default-off exact-instance mitigation with exact-listener
+  aging continuity across GUI sessions. The first operator transaction proved
+  exact `Pie64` replacement and downstream Welcome Back/catch-up; its landscape
+  launcher gap is repaired in `7ce123c` and awaits one hands-free repeat. Next:
+  verify that launch plus sampler/client reconciliation and one detector
+  decision, while pairing any recurrence with exact loadout/locks and host
+  counters; see the
+  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Windows performance telemetry exceeded its client CPU budget
 
@@ -77,8 +104,9 @@ current runtime state.
 **Stable ID:** `ISSUE-2026-005` · **Lifecycle:** `unresolved_pending_recurrence_evidence`
 
 - One authorized source tap yielded only `unknown`
-  post-tap evidence although Retry verified Stun off; the gate must still block
-  Battle start without a waiver.
+  post-tap evidence although Retry verified Stun off. Preserve the diagnostic
+  evidence, but a bounded verifier failure must release Battle launch in
+  degraded mode under the global runtime failure policy.
 - Load the [dossier](issues/open-2026.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap)
   on recurrence or before changing this verifier. Next: retain the final frame
   and detail/off/on confidences; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
@@ -179,12 +207,33 @@ current runtime state.
 
 - Native selection lacked accepted/current/pending feedback, and a later
   same-ID publication was incorrectly treated as the definition already
-  loaded; preserve unsent choices and keep queue/adopt actions explicit,
-  definition-aware, and boundary-aware.
+  loaded. Preserve failed choices; genuine active-process dropdown changes and
+  successful active-process publication/restore must queue next-boundary use
+  automatically, while stopped publication/restore updates only the visible
+  Start selection and active-battle adoption stays explicit, definition-aware,
+  and boundary-aware.
 - Load the [dossier](issues/open-2026.md#native-strategy-selection-did-not-report-acceptance-or-live-disposition)
   for native strategy confirmation or recurrence. Next: verify same-ID
-  publication/reload, the dropdown's explicit activation actions, queue/adopt
-  feedback, and Pause preservation on Windows; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
+  publication/reload, automatic dropdown queueing, conditional retry,
+  explicit active adoption, feedback, and Pause preservation on Windows;
+  [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
+
+### Long action-log retention made current controls appear pending
+
+**Stable ID:** `ISSUE-2026-038` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A healthy exact-owner runtime reported correct Strategy Scope and authority,
+  but current acknowledgements disappeared after their audit lines aged beyond
+  the adapter's 262 KiB tail. The repair publishes exact state, mode, speed,
+  ADB, and Strategy receipts in the atomic runtime channel and makes WPF render
+  authoritative Strategy Scope; revision 37 is deployed on Linux and its
+  Windows package is published, while Windows runtime confirmation remains
+  pending. Action logs remain audit-only.
+- Load the [dossier](issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending)
+  for a recurrence, acknowledgement-channel change, or Windows confirmation.
+  Next: verify long-run and rotated-log presentation, Strategy current/pending,
+  paused ADB handoff, and setup-capture availability in WPF without issuing a
+  refresh request; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Windows client could not identify or reload a stale Linux control service
 
@@ -218,17 +267,6 @@ current runtime state.
 - Load the [dossier](issues/open-2026.md#battle-history-filter-dropdowns-required-repeated-clicks)
   for filter/input recurrence or Windows confirmation. Next: verify one-click
   mouse/keyboard behavior across refreshes; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
-
-### Open in-battle side menu suppressed Mission reward scheduling
-
-**Stable ID:** `ISSUE-2026-015` · **Lifecycle:** `repair_awaiting_confirmation`
-
-- Scheduling ignored a verified open-menu badge;
-  dispatch must select badge evidence from the authoritative open/closed overlay
-  and retain normal action guards.
-- Load the [dossier](issues/open-2026.md#open-in-battle-side-menu-suppressed-mission-reward-scheduling)
-  for open-menu claims, recurrence, or scheduler changes. Next: observe one safe
-  claim from that state; [handler backlog](backlog/handlers.md#mission-rewards).
 
 ### Live ADB target move could not be applied by a paused runtime
 

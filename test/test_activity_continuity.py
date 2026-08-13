@@ -76,6 +76,7 @@ def _save_metadata(
         "schema_version": 2,
         "source": "player_save",
         "mapping_id": "data-9-game-1073",
+        "effective_mapping_fingerprint": "9" * 64,
         "identity_schema_version": 1,
         "fingerprint": fingerprint,
         "tier": tier,
@@ -190,6 +191,9 @@ def _terminal_handoff(
         },
         "source": {
             "mapping_id": latest["mapping_id"],
+            "effective_mapping_fingerprint": latest[
+                "effective_mapping_fingerprint"
+            ],
             "source_fingerprint": "c" * 64,
             "runtime_session_fingerprint": boundary_evidence[
                 "runtime_session"
@@ -1269,7 +1273,7 @@ def test_blocked_active_attachment_save_never_opens_history_ui(
         save_reads.append(kwargs)
         return PlayerSaveHistoryReadResult(
             PlayerSaveHistoryReadStatus.BLOCKED,
-            "active_attachment_restored_source_boundary_unverified",
+            "active_attachment_restored_source_convergence_timeout",
             background_dispatched=True,
             operator_workflow_interrupted=True,
         )
@@ -1292,7 +1296,7 @@ def test_blocked_active_attachment_save_never_opens_history_ui(
     assert save_reads[0]["serialize_active_attachment"] is True
     assert ui_reads == []
     assert outcome.operator_workflow_interruption_reason == (
-        "active_attachment_restored_source_boundary_unverified"
+        "active_attachment_restored_source_convergence_timeout"
     )
 
 

@@ -51,6 +51,7 @@ def running_attachment_observations(
             source_activity_scope_id=source_scope_id,
             target_binding=PlayerSaveTargetBinding(target, target_generation),
             mapping_id=mapping_id,
+            effective_mapping_fingerprint="9" * 64,
             active_round_identity_fingerprint=round_identity,
             captured_at=captured_at,
             acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,

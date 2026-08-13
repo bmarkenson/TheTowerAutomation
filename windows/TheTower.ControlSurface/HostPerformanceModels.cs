@@ -58,8 +58,36 @@ public sealed class HostPerformanceAggregate
     [JsonPropertyName("metrics")]
     public Dictionary<string, double> Metrics { get; set; } = [];
 
+    [JsonPropertyName("bluestacks_listener")]
+    public HostPerformanceBlueStacksListener? BlueStacksListener { get; set; }
+
     [JsonPropertyName("gpu_competitors")]
     public List<HostPerformanceGpuCompetitor> GpuCompetitors { get; set; } = [];
+
+    [JsonPropertyName("process_attribution")]
+    public List<HostPerformanceProcessAttribution> ProcessAttribution
+        { get; set; } = [];
+}
+
+public sealed record HostPerformanceBlueStacksListener
+{
+    [JsonPropertyName("host_id")]
+    public string HostId { get; set; } = "";
+
+    [JsonPropertyName("adb_port")]
+    public int AdbPort { get; set; }
+
+    [JsonPropertyName("process_id")]
+    public int ProcessId { get; set; }
+
+    [JsonPropertyName("process_started_at")]
+    public string ProcessStartedAt { get; set; } = "";
+
+    [JsonPropertyName("executable_path")]
+    public string ExecutablePath { get; set; } = "";
+
+    [JsonPropertyName("instance_name")]
+    public string InstanceName { get; set; } = "";
 }
 
 public sealed class HostPerformanceGpuCompetitor
@@ -86,6 +114,30 @@ public sealed class HostPerformanceGpuCompetitor
     public long SharedMemoryBytesMaximum { get; set; }
 }
 
+public sealed class HostPerformanceProcessAttribution
+{
+    [JsonPropertyName("process_id")]
+    public int ProcessId { get; set; }
+
+    [JsonPropertyName("process_name")]
+    public string ProcessName { get; set; } = "";
+
+    [JsonPropertyName("sample_count")]
+    public int SampleCount { get; set; }
+
+    [JsonPropertyName("cpu_percent_avg")]
+    public double? CpuPercentAverage { get; set; }
+
+    [JsonPropertyName("cpu_percent_max")]
+    public double? CpuPercentMaximum { get; set; }
+
+    [JsonPropertyName("working_set_bytes_max")]
+    public long WorkingSetBytesMaximum { get; set; }
+
+    [JsonPropertyName("private_bytes_max")]
+    public long PrivateBytesMaximum { get; set; }
+}
+
 public sealed class HostPerformancePublishResponse
 {
     [JsonPropertyName("schema_version")]
@@ -107,10 +159,26 @@ public sealed class HostPerformancePublishResponse
     public string? ServerRunId { get; set; }
 }
 
+internal sealed class HostPerformanceRejectedAggregate
+{
+    [JsonPropertyName("aggregate_id")]
+    public string AggregateId { get; set; } = "";
+
+    [JsonPropertyName("rejected_at_utc")]
+    public string RejectedAtUtc { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("aggregate")]
+    public HostPerformanceAggregate Aggregate { get; set; } = new();
+}
+
 internal sealed record HostPerformanceContext(
     int? AdbPort,
     string? RunId,
-    DateTimeOffset ObservedAtUtc);
+    DateTimeOffset ObservedAtUtc,
+    BlueStacksRecoveryTarget? BlueStacksTarget);
 
 internal sealed record HostPerformanceSample
 {
@@ -130,6 +198,8 @@ internal sealed record HostPerformanceSample
     public double? BlueStacksIoWriteBytesPerSecond { get; init; }
     public int BlueStacksThreadCount { get; init; }
     public int BlueStacksHandleCount { get; init; }
+    public HostPerformanceBlueStacksListener? BlueStacksListener { get; init; }
+    public string? BlueStacksListenerError { get; init; }
     public bool GpuCountersAvailable { get; init; }
     public double? HostGpuPercent { get; init; }
     public long? HostGpuDedicatedMemoryBytes { get; init; }
@@ -141,6 +211,11 @@ internal sealed record HostPerformanceSample
     public IReadOnlyList<HostGpuProcessSample> GpuCompetitors { get; init; } = [];
     public double? GpuSampleDurationMilliseconds { get; init; }
     public string? GpuError { get; init; }
+    public HostProcessAttributionState ProcessAttributionState { get; init; }
+    public int ProcessAttributionProcessCount { get; init; }
+    public IReadOnlyList<HostProcessObservation> ProcessAttribution
+        { get; init; } = [];
+    public double? ProcessAttributionSampleDurationMilliseconds { get; init; }
     public double? ControlSurfaceCpuPercent { get; init; }
     public double SampleDurationMilliseconds { get; init; }
 }
@@ -151,6 +226,21 @@ internal sealed record HostGpuProcessSample(
     double GpuPercent,
     long DedicatedMemoryBytes,
     long SharedMemoryBytes);
+
+internal sealed record HostProcessObservation(
+    int ProcessId,
+    string ProcessName,
+    double? CpuPercent,
+    long WorkingSetBytes,
+    long PrivateBytes);
+
+public enum HostProcessAttributionState
+{
+    Inactive,
+    Arming,
+    Active,
+    Recovering,
+}
 
 public enum HostPerformanceHealthState
 {
@@ -179,6 +269,10 @@ public sealed record HostPerformanceSnapshot
     public double? BlueStacksCpuPercent { get; init; }
     public double? BlueStacksCpuCorePercent { get; init; }
     public long? BlueStacksWorkingSetBytes { get; init; }
+    public int? BlueStacksThreadCount { get; init; }
+    public int? BlueStacksHandleCount { get; init; }
+    public HostPerformanceBlueStacksListener? BlueStacksListener { get; init; }
+    public string? BlueStacksListenerError { get; init; }
     public double? BlueStacksIoReadBytesPerSecond { get; init; }
     public double? BlueStacksIoWriteBytesPerSecond { get; init; }
     public bool GpuCountersAvailable { get; init; }
@@ -192,9 +286,18 @@ public sealed record HostPerformanceSnapshot
         { get; init; } = [];
     public double? GpuSampleDurationMilliseconds { get; init; }
     public string? GpuError { get; init; }
+    public double? ControlSurfaceCpuPercent { get; init; }
+    public double? OtherWindowsCpuPercent { get; init; }
+    public HostProcessAttributionState ProcessAttributionState { get; init; }
+    public int ProcessAttributionProcessCount { get; init; }
+    public IReadOnlyList<HostPerformanceProcessAttribution> ProcessAttribution
+        { get; init; } = [];
+    public double? ProcessAttributionSampleDurationMilliseconds { get; init; }
     public double? SampleDurationMilliseconds { get; init; }
     public int PendingAggregateCount { get; init; }
     public long DroppedAggregateCount { get; init; }
+    public int RejectedAggregateCount { get; init; }
+    public string? LastRejectedAggregateReason { get; init; }
     public bool UploadEnabled { get; init; }
     public DateTimeOffset? LastUploadedAtUtc { get; init; }
     public string? UploadError { get; init; }

@@ -52,6 +52,7 @@ PERK_PROGRESS_TEXT_REGION = (400, 25, 340, 71)
 # The largest retained real lead is 191 waves. Keep margin for future profiles
 # while rejecting separator artifacts such as ``705`` becoming ``7705``.
 MAX_PERK_SCHEDULE_LEAD_WAVES = 250
+MAX_PERK_SCHEDULE_PREFIX_ARTIFACT_DIGITS = 2
 INVALID_PROGRESS_WARNING_FRAMES = 3
 PWR_FAMILY = "perk_wave_requirement"
 BOUNDARY_COVERAGE_COMPLETE = "complete"
@@ -214,6 +215,63 @@ class PerkProgress:
         if self.status == "complete":
             return ("complete", None)
         return None
+
+
+def _reconcile_perk_progress_wave(
+    progress: PerkProgress,
+    observed_wave: Optional[int],
+) -> PerkProgress:
+    """Validate a top-bar schedule against the independent battle wave.
+
+    The animated separator can join one or two noise digits to the front of
+    the real next-wave token.  Prefer the complete OCR token, then accept only
+    the longest minimally trimmed suffix that is plausible from the separate
+    battle-wave observation.  Split, substituted, or trailing noise remains
+    invalid.
+    """
+
+    if (
+        progress.status not in {"scheduled", "invalid_schedule"}
+        or type(observed_wave) is not int
+        or observed_wave < 0
+        or type(progress.next_wave) is not int
+    ):
+        return progress
+    next_wave = progress.next_wave
+    if not _scheduled_progress_is_plausible(observed_wave, next_wave):
+        digits = str(next_wave)
+        for prefix_length in range(
+            1,
+            min(
+                MAX_PERK_SCHEDULE_PREFIX_ARTIFACT_DIGITS,
+                len(digits) - 1,
+            )
+            + 1,
+        ):
+            suffix = digits[prefix_length:]
+            if suffix.startswith("0"):
+                continue
+            candidate = int(suffix)
+            if _scheduled_progress_is_plausible(observed_wave, candidate):
+                next_wave = candidate
+                break
+    status = (
+        "scheduled"
+        if _scheduled_progress_is_plausible(observed_wave, next_wave)
+        else "invalid_schedule"
+    )
+    if (
+        progress.current_wave == observed_wave
+        and progress.next_wave == next_wave
+        and progress.status == status
+    ):
+        return progress
+    return replace(
+        progress,
+        status=status,
+        current_wave=observed_wave,
+        next_wave=next_wave,
+    )
 
 
 @dataclass(frozen=True)
@@ -1932,7 +1990,10 @@ class PerkTimelineObserver:
         self._sync_persistence_scope(restore=True)
         state = str(detection.get("state") or "UNKNOWN")
         if state == "RUNNING":
-            progress = progress_fn(screenshot)
+            progress = _reconcile_perk_progress_wave(
+                progress_fn(screenshot),
+                wave,
+            )
             self._record_progress_health(progress)
             self.tracker.observe(
                 progress,
@@ -2465,7 +2526,72 @@ def measure_perk_progress(
     source_fingerprint = hashlib.sha256(crop.tobytes()).hexdigest()
     enlarged = cv2.resize(crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
     raw_text, confidence = text_fn(enlarged)
+    progress = _perk_progress_from_ocr(
+        raw_text,
+        confidence,
+        observed_at=observed_at,
+        source_fingerprint=source_fingerprint,
+    )
+    if (
+        progress.status == "scheduled"
+        or (
+            progress.status in {"complete", "selection_pending"}
+            and progress.confidence >= DEFAULT_CONFIDENCE_THRESHOLD
+        )
+    ):
+        return progress
+
+    # The terminal button uses outlined white text over a saturated purple
+    # fill.  Raw-color Tesseract can collapse the retained real ``View Perks``
+    # fixture to a short fragment even though numeric progress remains clear.
+    # Retry only an unreadable, implausible, or low-confidence result so the
+    # ordinary numeric path keeps its single OCR pass.
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    _threshold, isolated = cv2.threshold(
+        gray,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    )
+    isolated = cv2.resize(
+        isolated,
+        None,
+        fx=3,
+        fy=3,
+        interpolation=cv2.INTER_CUBIC,
+    )
+    retry_text, retry_confidence = text_fn(isolated)
+    retry = _perk_progress_from_ocr(
+        retry_text,
+        retry_confidence,
+        observed_at=observed_at,
+        source_fingerprint=source_fingerprint,
+    )
+    if (
+        retry.status == "scheduled"
+        or (
+            retry.status in {"complete", "selection_pending"}
+            and retry.confidence >= DEFAULT_CONFIDENCE_THRESHOLD
+        )
+    ):
+        return retry
+    return progress
+
+
+def _perk_progress_from_ocr(
+    raw_text: Any,
+    confidence: Any,
+    *,
+    observed_at: str,
+    source_fingerprint: str,
+) -> PerkProgress:
+    """Normalize one OCR pass without changing its source provenance."""
+
     normalized = " ".join(str(raw_text or "").split())
+    try:
+        normalized_confidence = float(confidence)
+    except (TypeError, ValueError):
+        normalized_confidence = -1.0
     upper = normalized.upper()
     if "VIEW" in upper and "PERK" in upper:
         return PerkProgress(
@@ -2473,7 +2599,7 @@ def measure_perk_progress(
             None,
             None,
             normalized,
-            float(confidence),
+            normalized_confidence,
             observed_at,
             source_fingerprint,
         )
@@ -2483,7 +2609,7 @@ def measure_perk_progress(
             None,
             None,
             normalized,
-            float(confidence),
+            normalized_confidence,
             observed_at,
             source_fingerprint,
         )
@@ -2504,7 +2630,7 @@ def measure_perk_progress(
             current_wave,
             next_wave,
             normalized,
-            float(confidence),
+            normalized_confidence,
             observed_at,
             source_fingerprint,
         )
@@ -2513,7 +2639,7 @@ def measure_perk_progress(
         None,
         None,
         normalized,
-        float(confidence),
+        normalized_confidence,
         observed_at,
         source_fingerprint,
     )

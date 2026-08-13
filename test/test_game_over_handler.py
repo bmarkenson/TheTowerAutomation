@@ -2,8 +2,9 @@
 # test/test_game_over_handler.py
 
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 import cv2
 import numpy as np
 
@@ -11,6 +12,7 @@ from handlers.game_over_handler import (
     _capture_game_over_perk_tail,
     _capture_game_over_perks,
     _game_stats_visible,
+    _record_game_over_mapping_observation,
     _resolve_game_over_perks,
     _save_battle_stats_record,
     _wait_for_game_over_direction,
@@ -18,7 +20,7 @@ from handlers.game_over_handler import (
 )
 from core.run_state import AUTOMATION, ExecMode, RunState
 from core.matcher import get_match
-from core.scrolling import ScrollResult
+from core.scrolling import ScrollCaptureResult, ScrollResult
 from utils.logger import log
 
 
@@ -156,36 +158,67 @@ def test_perks_capture_retries_close_until_game_stats_is_restored():
     ]
 
 
-def test_terminal_tail_capture_never_scrolls_through_the_full_inventory():
-    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+def test_terminal_tail_capture_starts_at_top_and_stops_at_saved_recency():
+    top_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    marker_frame = np.ones((1920, 1080, 3), dtype=np.uint8)
     parsed = {
         "source_method": "ocr",
         "order_semantics": "latest_selected_first",
         "selected": [{"display_text": "Orbs +1", "confidence": 95.0}],
         "quality": {"valid": True, "source_complete": True},
     }
+    monitoring = {"checkpoint": {"picks": [], "levels": [], "saved_wave": 1}}
+
+    def capture_until_marker(*_args, **kwargs):
+        stop_fn = kwargs["stop_fn"]
+        assert kwargs["screenshot"] is top_frame
+        assert stop_fn(top_frame) is None
+        assert stop_fn(marker_frame) == "saved_recency_marker_reached"
+        return ScrollCaptureResult(
+            True,
+            (top_frame, marker_frame),
+            1,
+            "saved_recency_marker_reached",
+        )
 
     with (
-        patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+        patch(
+            "handlers.game_over_handler.capture_adb_screenshot",
+            return_value=top_frame,
+        ),
         patch("handlers.game_over_handler._game_stats_visible", return_value=True),
-        patch("handlers.game_over_handler._wait_for_visible", return_value=frame),
+        patch(
+            "handlers.game_over_handler._wait_for_visible",
+            return_value=top_frame,
+        ),
         patch(
             "handlers.game_over_handler.scroll_to_edge",
-            return_value=ScrollResult(True, frame, 2, "edge_reached"),
-        ),
+            return_value=ScrollResult(True, top_frame, 2, "edge_reached"),
+        ) as top_scroll,
         patch("handlers.game_over_handler.ocr_selected_perks", return_value=parsed),
+        patch(
+            "handlers.game_over_handler.merge_terminal_perk_tail",
+            side_effect=(
+                (None, {"overlap_marker": None}),
+                (None, {"overlap_marker": {"perk_key": "max_health"}}),
+            ),
+        ),
         patch("handlers.game_over_handler.tap_if_visible", return_value=True),
         patch("handlers.game_over_handler._close_game_over_perks", return_value=True),
-        patch("handlers.game_over_handler.capture_scroll_to_edge") as full_scroll,
+        patch(
+            "handlers.game_over_handler.capture_scroll_to_edge",
+            side_effect=capture_until_marker,
+        ) as progressive_scroll,
     ):
-        result, frames, restored = _capture_game_over_perk_tail()
+        result, frames, restored = _capture_game_over_perk_tail(monitoring)
 
-    assert result["capture_scope"] == "newest_visible_prefix"
+    assert result["capture_scope"] == "newest_prefix_until_saved_recency"
     assert result["quality"]["scope_complete"] is True
     assert result["quality"]["inventory_complete"] is False
-    assert frames == [frame]
+    assert frames == [top_frame, marker_frame]
     assert restored is True
-    full_scroll.assert_not_called()
+    assert top_scroll.call_args.args[0] == "gesture_targets.goto_top:perks"
+    progressive_scroll.assert_called_once()
 
 
 def test_proven_final_prefix_skips_terminal_perks_navigation():
@@ -275,7 +308,10 @@ def test_malformed_complete_looking_inventory_preserves_terminal_perks_navigatio
     )
     assert frames == ["frame"]
     assert restored is True
-    capture_perks.assert_called_once_with(action_guard_fn=None)
+    capture_perks.assert_called_once_with(
+        context["perk_save_monitoring"],
+        action_guard_fn=None,
+    )
 
 
 def test_pending_saved_prefix_uses_only_terminal_top_reconciliation():
@@ -349,7 +385,10 @@ def test_pending_saved_prefix_uses_only_terminal_top_reconciliation():
     assert perks["terminal_tail"]["aggregates"][0]["perk_key"] == "orbs"
     assert frames == ["top-frame"]
     assert restored is True
-    capture_top.assert_called_once_with(action_guard_fn=None)
+    capture_top.assert_called_once_with(
+        context["perk_save_monitoring"],
+        action_guard_fn=None,
+    )
     capture_full.assert_not_called()
 
 
@@ -397,7 +436,7 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
     tap.assert_called_once_with(
         "buttons.home:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
     action_log.assert_called_once_with(
         "Completing the finished battle",
@@ -497,7 +536,7 @@ def test_unavailable_stats_capture_does_not_block_retry():
     tap.assert_called_once_with(
         "buttons.retry:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
 
 
@@ -548,7 +587,7 @@ def test_guarded_preflight_repair_forces_home_after_control_allows_actions():
     tap.assert_called_once_with(
         "buttons.home:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
 
 
@@ -573,7 +612,7 @@ def test_required_post_run_home_inventory_bypasses_wait_mode():
     tap.assert_called_once_with(
         "buttons.home:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
 
 
@@ -636,7 +675,7 @@ def test_game_over_wait_reports_completed_actions_before_polling_for_direction()
     tap.assert_called_once_with(
         "buttons.home:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
     assert action_log.call_count == 2
     action_log.assert_any_call(
@@ -691,6 +730,48 @@ def test_game_over_finalizes_boundary_before_terminal_navigation():
         ("tap", "buttons.retry:game_over"),
         ("scope", None),
     ]
+
+
+def test_mode_change_after_selection_blocks_the_stale_terminal_tap():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    dispatched = []
+
+    def guarded_tap(_label, **kwargs):
+        allowed = kwargs["action_guard_fn"]()
+        if allowed:
+            dispatched.append(_label)
+        return allowed
+
+    try:
+        with (
+            patch(
+                "handlers.game_over_handler.tap_if_visible",
+                side_effect=guarded_tap,
+            ),
+            patch(
+                "handlers.game_over_handler.capture_adb_screenshot",
+                return_value=None,
+            ),
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            outcome = handle_game_over(
+                capture_stats=False,
+                before_terminal_action=lambda: setattr(
+                    AUTOMATION,
+                    "mode",
+                    ExecMode.HOME,
+                ),
+            )
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    assert not outcome.route_completed
+    assert outcome.route == "pending_retry"
+    assert dispatched == []
 
 
 def test_game_over_wait_polls_control_and_blocks_retry_while_paused():
@@ -851,7 +932,12 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
             "valid": True,
             "retain_source_images": False,
             "warnings": [],
-        }
+        },
+        "game_stats": {
+            "fields": {
+                "killed_by": {"value": "Boss", "raw": "B0ss"},
+            }
+        },
     }
     perks = {
         "selected": [
@@ -869,6 +955,7 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
         "collection": "full_terminal_ui",
         "representative": False,
     }
+    mapping_observations = []
     try:
         with (
             patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
@@ -889,6 +976,11 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
             result = handle_game_over(
                 capture_stats=True,
                 report_disposition=disposition,
+                mapping_observation_fn=(
+                    lambda check_id, evidence: mapping_observations.append(
+                        (check_id, evidence)
+                    )
+                ),
             )
     finally:
         AUTOMATION.mode = original_mode
@@ -900,6 +992,12 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
     assert record["perks"] == perks
     assert record["report_disposition"] == disposition
     assert persist.call_args.kwargs["perks_frames"] == [frame]
+    assert len(mapping_observations) == 1
+    check_id, evidence = mapping_observations[0]
+    assert check_id == "battle_history_killed_by"
+    assert evidence["canonical_values"] == ["Boss"]
+    assert evidence["locator_values"] == {"killed_by": "Boss"}
+    assert "B0ss" not in str(evidence)
     assert [call.args[0] for call in tap.call_args_list] == [
         "buttons.more_stats:game_over",
         "buttons.close:more_stats",
@@ -916,6 +1014,9 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
             "warnings": [],
         },
         "more_stats": {"quality": {"row_count": 144}},
+        "game_stats": {
+            "fields": {"killed_by": {"value": "Boss", "raw": "B0ss"}}
+        },
     }
     perks = {
         "selected": [
@@ -960,6 +1061,9 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
                     "terminal_save_report": _complete_terminal_save_report(),
                 },
                 report_disposition=disposition,
+                mapping_observation_fn=lambda *_args: (_ for _ in ()).throw(
+                    RuntimeError("diagnostic write failed")
+                ),
             )
     finally:
         AUTOMATION.mode = original_mode
@@ -977,6 +1081,22 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
     assert [call.args[0] for call in tap.call_args_list] == [
         "buttons.home:game_over"
     ]
+
+
+def test_terminal_mapping_observation_never_uses_raw_ocr_text():
+    observations = []
+    _record_game_over_mapping_observation(
+        {
+            "quality": {"valid": True},
+            "game_stats": {
+                "fields": {"killed_by": {"value": None, "raw": "B0ss"}}
+            },
+        },
+        lambda check_id, evidence: observations.append((check_id, evidence)),
+        observed_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+    )
+
+    assert observations == []
 
 
 def run_test():

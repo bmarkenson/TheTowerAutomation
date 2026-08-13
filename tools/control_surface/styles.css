@@ -126,6 +126,29 @@ main { max-width: 1440px; margin: 0 auto; padding: 0 1.5rem 4rem; }
 .status-strip-meta span { display: block; color: var(--muted); font-size: .7rem; margin-bottom: .18rem; }
 .status-strip-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; font-size: .95rem; }
 
+.persistent-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: .85rem;
+  background: rgba(21, 31, 49, .92);
+  box-shadow: var(--shadow);
+}
+.persistent-alert[hidden] { display: none; }
+.persistent-alert strong { display: block; font-size: .88rem; }
+.persistent-alert p { margin: .35rem 0 0; color: var(--muted); font-size: .76rem; line-height: 1.45; }
+.persistent-alert.warning { border-color: rgba(241, 191, 91, .45); }
+.persistent-alert.warning strong { color: #f7d58f; }
+.persistent-alert.danger { border-color: rgba(255, 113, 135, .5); }
+.persistent-alert.danger strong { color: #ffacb9; }
+.persistent-alert.info { border-color: rgba(98, 213, 255, .38); }
+.persistent-alert.info strong { color: #9ee8ff; }
+.persistent-alert > button { flex: 0 0 auto; }
+
 .dashboard-grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 1rem; }
 .panel {
   min-width: 0;
@@ -168,6 +191,7 @@ input, select { width: 100%; padding: .68rem .75rem; }
 .detail-list dd { margin: 0; max-width: 65%; text-align: right; overflow-wrap: anywhere; font-size: .78rem; font-weight: 700; }
 .callout { margin-top: 1rem; padding: .75rem; border-radius: .6rem; font-size: .75rem; line-height: 1.45; }
 .callout.warning { color: #f7d58f; background: rgba(241, 191, 91, .08); border: 1px solid rgba(241, 191, 91, .28); }
+.callout.success { color: #9cf0cd; background: rgba(73, 214, 157, .08); border: 1px solid rgba(73, 214, 157, .28); }
 
 .wide-panel { margin-top: 1rem; }
 .table-wrap { overflow-x: auto; }
@@ -231,6 +255,17 @@ dialog::backdrop { background: rgba(1, 4, 10, .78); backdrop-filter: blur(3px); 
 .form-grid label { color: var(--muted); font-size: .75rem; font-weight: 700; }
 .form-grid input, .form-grid select { display: block; margin-top: .35rem; }
 .capture-actions { margin-top: 1rem; flex-wrap: wrap; }
+.mapping-integration-dialog h3 { margin: 0 0 .65rem; font-size: .88rem; }
+.mapping-integration-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.mapping-integration-grid section { min-width: 0; padding: .9rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--panel-2); }
+.mapping-path { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mapping-review-actions { margin-top: 1rem; flex-wrap: wrap; }
+.mapping-proposal-section { margin-top: 1.2rem; }
+.mapping-proposal { display: grid; gap: .65rem; max-height: 25rem; overflow: auto; padding: .8rem; border: 1px solid var(--border); border-radius: .7rem; background: rgba(8, 13, 23, .7); }
+.mapping-proposal-row { min-width: 0; padding: .7rem; border: 1px solid rgba(38, 51, 73, .75); border-radius: .55rem; background: var(--panel-2); }
+.mapping-proposal-row strong { display: block; margin-bottom: .4rem; font-size: .74rem; }
+.mapping-proposal-row pre { margin: 0; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; font: .68rem/1.45 "Cascadia Code", Consolas, monospace; }
+#saveMappingResult p { margin: .35rem 0 .7rem; }
 
 .toast { position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 20; max-width: 24rem; padding: .8rem 1rem; border: 1px solid var(--border); border-radius: .7rem; background: #172338; box-shadow: var(--shadow); font-size: .78rem; }
 .toast.error { color: #ffacb9; border-color: rgba(255, 113, 135, .45); }
@@ -240,6 +275,11 @@ dialog::backdrop { background: rgba(1, 4, 10, .78); backdrop-filter: blur(3px); 
   .control-panel { grid-row: span 2; }
   .status-strip { align-items: flex-start; }
   .status-strip-meta { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 720px) {
+  .persistent-alert { align-items: stretch; flex-direction: column; }
+  .mapping-integration-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 720px) {

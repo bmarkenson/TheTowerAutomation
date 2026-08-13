@@ -8,6 +8,387 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Pause allowed the remainder of an already-authorized compound action
+
+**Stable ID:** `ISSUE-2026-040` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-08-11 at 12:08 PDT while an enabled running-battle action
+  was adjusting Damage Slider on `localhost:5555`.
+- **Symptom:** The operator clicked **Automation Paused**, but automated input
+  continued. The durable Pause request was created at 12:08:19; Damage Slider
+  inputs still dispatched at approximately 12:08:31, 12:08:36, and 12:08:39,
+  the compound action completed at 12:08:44, and the runtime acknowledged
+  Pause at 12:08:46. No input followed acknowledgement, but the roughly
+  27-second click-to-acknowledgement interval violated the expected immediate
+  stop at the next input boundary.
+- **Evidence:** The exact state request ID and action log put the control write,
+  three later `INPUT` records, compound completion, and acknowledgement in that
+  order. Static tracing showed that process-local action guards could retain a
+  stale authorization across later taps, while a separate Control Surface
+  process wrote the control file without sharing the runtime's final dispatch
+  lock. The native client also serialized the control POST behind a status GET,
+  making the click slower to reach Linux. The reported misconfiguration popup
+  was consistent with the deployed older native behavior, which automatically
+  opened a nonblocking attached-battle advisory even though no decision was
+  required.
+- **Cause:** Control persistence and device-input dispatch had no common
+  cross-process linearization point. A compound route could therefore start
+  its next input using authority checked before Pause existed. Low-level ADB
+  mutations also lacked a uniform timeout/outcome contract, so forced-save and
+  watchdog transactions could classify an intermediate timeout before giving
+  their required restoration a chance to prove the final source safe.
+- **Resolution:** Commit `9add674` adds one reentrant file-backed boundary shared
+  by every mutating ADB dispatch and durable Pause, Stop, Take Manual Control,
+  terminal-policy, and input-owner write. Passive prechecks do not hold it; the
+  exact first input refreshes authority under it, and a lifecycle transaction
+  that has already changed the source retains it only through mandatory source
+  restoration. Thus one already-dispatched atomic command may finish, but no
+  later compound step can begin after Pause is accepted. Missing control state
+  and legacy identity-less `RUNNING` now initialize Paused. ADB calls are
+  bounded and return typed attempt/uncertainty outcomes; forced-save and
+  watchdog owners defer catastrophic judgment until restoration is resolved.
+  Recoverable reporting remains nonblocking. The native client cancels a stale
+  status GET and sends Automation-authority, manual-control, and terminal-policy
+  POSTs immediately, while nonblocking attachment advisories no longer open
+  automatically and are labeled as optional review.
+- **Regression:** Cross-process/thread races prove that Pause waits for at most
+  the currently atomic dispatch and blocks the next input, can persist during
+  passive lifecycle prechecks, and cannot strand forced-save restoration.
+  Stop/Enable, Stop/Take Manual Control, terminal-policy, input-owner, startup
+  identity, serializer timeout/restoration, watchdog interruption/retry, and
+  diagnostic-log failures have dedicated coverage. Native presentation tests
+  require a nonblocking advisory to say that no decision is required.
+- **Validation:** The implementation passed all 2,339 Python tests in 361.32
+  seconds, all 143 portable native compatibility tests, and a Release
+  `win-x64` WPF cross-build with zero errors. Exact final candidate `054d171`
+  then passed the supported checkpoint: compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,339 tests in 366.13 seconds. Its 143 native tests and Release WPF
+  build also passed. The only .NET warning was the sandbox's read-only NuGet
+  vulnerability cache. Two independent final reviews found no remaining
+  runtime-safety or global-policy blocker after the final native ordering and
+  advisory-documentation correction.
+- **Deployment:** The implementation was promoted from `822afaa` through exact
+  `054d171`. Rollback tags
+  `production-before-20260811T220159Z-822afaa` and
+  `production-before-20260811T221609Z-58f203b` retain both production
+  boundaries. The rollout preserved the operator Pause and sent no device
+  input. Updated control-surface PID `148078` started automation PID `148448`,
+  runtime `36e6f4290f6c4eba8b4fe0458b02f1db`, on the held
+  `localhost:5555` target; the later WPF-only promotion did not restart that
+  Linux runtime. At 15:18:22 PDT all five exact receipts were current,
+  effective authority remained `paused`, observation was fresh, and no
+  catastrophic hold or Strategy Gate was active. The last `INPUT` record
+  remained the reported 12:08:39 tap.
+  The final complete Windows package was published from `054d171` at 15:17
+  PDT. Current Control Surface is 72,430,797 bytes with SHA-256
+  `ccf582a8db116225ae0354660d8c29daa4fd1a6b5de06b9ab50371e4e0abee93`;
+  current Tunnel Host is 35,172,121 bytes with SHA-256
+  `9592be0ce6563ba4d4c4f3ec19ae59df579e3f293f38f66f92400881e5255e90`.
+  Retained slot 1 is the intermediate `bde889e` package and slot 2 is the prior
+  `775da5f` package. An already-running older Windows executable must be fully
+  closed and relaunched to receive the immediate-POST and advisory behavior;
+  cross-publication is not Windows runtime execution.
+- **Fixed by:** `9add674`, `054d171`.
+
+### Return Control re-Paused automation for a skipped configuration mismatch
+
+**Stable ID:** `ISSUE-2026-039` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-08-11 at approximately 01:08 PDT while returning from
+  manual control on `localhost:5555`.
+- **Symptom:** Explicit Enable reached `RUNNING` twice, but Return Control's
+  save reconciliation then restored global Pause. The only reported mismatch
+  was `perk_bans`, even though active Strategy `farm_t19_ad_assist` explicitly
+  skipped that check. The operator could therefore appear unable to re-enable
+  automation.
+- **Evidence:** Fresh revision-37 status showed the manual workflow in
+  `awaiting_configuration` with `refresh_status=trusted_mismatch_paused`, Home
+  New Battle observation, and `perk_bans` as the sole mismatch. The deployed
+  interrupted-workflow Enable fix `5ce801b` was present, and both Enable
+  requests had been acknowledged as `RUNNING`; the later reconciliation path,
+  not a stale Windows click or server acknowledgement, caused the Pause.
+- **Cause:** Return reconciliation did not subtract profile-owned skipped
+  checks before comparing configuration. More broadly, recoverable mismatch,
+  validation, repair, evidence, and reporting paths could still create or
+  retain global Pause, Strategy Gate, or terminal authority holds.
+- **Resolution:** A global typed failure policy now repairs recoverable
+  problems at an already-safe boundary or flags them and continues degraded.
+  Only lost/corrupt control authority, lost exact-target ownership, failure to
+  restore the source after lifecycle input, or an uncertain dispatched-input
+  result may automatically Pause. Return now applies profile skips; active
+  mismatches complete degraded, and Home repair exhaustion also releases the
+  workflow with its exact failure. When Continue is already selected as a
+  degraded strategy battle ends, terminal handling now returns Home, rearms the
+  next profile's ordinary setup, and repairs before its one-shot continuation;
+  navigation retries retain that route and repair exhaustion still continues
+  degraded.
+- **Regression:** `test/test_runtime_failure_policy.py` proves that only the
+  four catastrophic classes select Pause and statically forbids generic App
+  Pause/Strategy-Gate calls. Better Control, Home setup, action-authority,
+  Tournament, session-preflight, and terminal tests cover degraded release,
+  profile skips, legacy-gate migration, catastrophic restoration loss,
+  retained Home-route retry, repair-before-launch ordering, and the fact that
+  `WAIT` is not overridden.
+- **Validation:** The affected combined suite passed 470 tests. The supported
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan notices, and all 2,225 tests in
+  360.86 seconds. The Home-first follow-up passed 535 affected tests and a
+  second supported checkpoint with all 2,232 tests in 362.15 seconds. Exact
+  candidate `12ad795` passed a fresh promotion checkpoint with all 2,232 tests
+  in 357.50 seconds and was deployed on 2026-08-11 behind rollback tag
+  `production-before-20260811T162652Z-d9305fc`. A replacement-runtime Attach
+  and active-Strategy smoke preserved the existing battle and reached steady
+  `RUNNING`; the original Return Control mismatch and degraded Game Over/Home
+  repair paths still await natural post-fix boundary observation.
+- **Fixed by:** `1b16db9`, `4ac5237`.
+
+### Open in-battle side menu suppressed Mission reward scheduling
+
+**Stable ID:** `ISSUE-2026-015` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-07-20 at 13:01 during an active Tier 18 Farm battle.
+- **Symptom:** The in-battle Mission control displayed a red badge with four
+  pending rewards, but the running automation made no Mission reward probe or
+  claim attempt.
+- **Evidence:** Fresh control, owner-PID, ADB, screenshot, and action-log
+  inspection confirmed a live `RUNNING` process on `localhost:5555`. The frame
+  was authoritatively classified as `RUNNING/MENU_OPEN`; the open-menu badge
+  detector reported Daily Missions available, while the scheduler's
+  closed-menu attention-dot detector correctly reported false. Static tracing
+  found that orchestration always used the closed-menu detector even though
+  the reward handler already accepts a verified open side menu.
+- **Safety response:** Diagnosis used read-only capture and process inspection.
+  The active battle was not paused, tapped, restarted, exited, or Surrendered.
+- **Cause:** Mission reward orchestration always consulted the closed-menu
+  attention-dot detector, so an authoritatively open menu suppressed scheduling
+  even when its section badges proved rewards were available.
+- **Resolution:** Commit `2b4315d` selects section-badge evidence for a verified
+  open menu and the attention dot for a verified closed menu while retaining
+  the existing action, state, and exact-target guards.
+- **Regression:** `test/test_mission_reward_handler.py` covers open-menu section
+  badges, closed-menu attention-dot scheduling, and ambiguous-overlay refusal.
+- **Validation:** On 2026-08-09, production PID `804073` remained `RUNNING` on
+  `localhost:5555` with `MENU_OPEN` through the 17:31:45 status observation.
+  At 17:32:42 the scheduler selected the visible Daily and Event section badges
+  from that state, entered its exclusive Mission reward route, and completed at
+  17:35:01 after claiming nine rewards: two Daily rewards, including one weekly
+  chest, and seven Event rewards. It released route ownership, closed the menu,
+  and returned to a fresh running-battle observation without a Surrender or
+  battle transition.
+- **Fixed by:** `2b4315d`.
+
+### Reattached battle stalled on the terminal View Perks opener
+
+**Stable ID:** `ISSUE-2026-036` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 after automation restarted and attached to an
+  already-running Tier 19 battle whose Perk choices were exhausted.
+- **Symptom:** Attached-session preflight needed to verify Auto Pick Perks from
+  the UI because it had no reusable current-battle evidence for that check.
+  The top-bar control had changed from numeric Perk progress to `View Perks`,
+  so `navigation.open_perks` repeatedly failed its 0.90 safe-tap match and the
+  exclusive preflight could not advance. The failed match sent no input.
+- **Evidence:** The action log placed process exit, restart, battle attachment,
+  strategy adoption, and preflight in that order. A bounded exact-target frame
+  retained as `test/fixtures/open_perks_complete_20260809.png` showed the
+  terminal control. Its former template scored about 0.59, while save-backed
+  observations showed the active battle and completed Perk progression were
+  otherwise healthy.
+- **Safety response:** Diagnosis used read-only runtime evidence and one bounded
+  exact-target capture. No Pause change, navigation, Exit, Surrender, battle
+  transition, restart, or other device input was sent for the repair.
+- **Cause:** The safe-tap template covered the numeric-progress form of the
+  in-battle Perks opener but not its terminal `View Perks` form. Reattachment
+  correctly invokes exclusive session preflight; the defect was the incomplete
+  target authority used by that preflight, not ordinary mid-battle validation.
+- **Resolution:** Commit `41fc1fd` replaces the dynamic 20x70 crop with the
+  invariant 12x60 right frame of the same in-battle opener. Numeric progress
+  and terminal forms now share one target-specific match while the preflight's
+  existing `RUNNING` state guard remains in force.
+- **Regression:** `test/test_tap_safety.py` requires the opener to match an
+  ordinary active-wave frame, a dynamic-progress frame, and the terminal
+  retained frame. It also requires rejection of Home and the pre-battle Perks
+  configuration screen.
+- **Validation:** Both label-compatible grayscale/zero-padding and detector
+  color/default-padding probes accepted all three positive frames above 0.90
+  and rejected both non-battle frames below 0.90. After merging the later
+  weekly-chest promotions, the combined Perks, preflight, timeline, mission,
+  and initialization slice passed 288 tests. The exact merged candidate's
+  supported checkpoint passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,065 tests in 347.55 seconds.
+- **Fixed by:** `41fc1fd`.
+
+### Replacement runtime could not recover a fresh preserved Game Over
+
+**Stable ID:** `ISSUE-2026-037` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-08-10 during the production rollout of terminal Perk
+  reconciliation, after a natural Tier 19 battle ended while replacement
+  runtime boundaries were being exercised.
+- **Symptom:** A replacement process freshly and exactly observed `GAME_OVER`
+  with `WAIT` acknowledged, but the initial-intent operator-workflow hold kept
+  the normal terminal handler from dispatching. A later Take/Return Control
+  attempt left a durable `interrupted` manual workflow whose unavailable
+  terminal evidence then made ordinary Enable unavailable on subsequent
+  replacements.
+- **Evidence:** Runtime and control-surface state agreed on the current PID,
+  `localhost:5555`, target generation, fresh Game Over observation, and
+  explicit `WAIT`; logs nevertheless contained no terminal-handler action.
+  After the process boundary, the manual workflow was terminalized as
+  `interrupted`, but its preserved `terminal_evidence.status=unavailable`
+  continued to participate in the active-manual uncertainty gate.
+- **Safety response:** Recovery did not seed completion state, attach the
+  replacement to the stale battle, bypass a startup gate, or Surrender. The
+  terminal handler remained limited to fresh exact runtime/PID/target,
+  generation, observation, scope, owner, control, and workflow evidence.
+- **Cause:** Terminal dispatch did not recognize the narrow case where the
+  initial-intent `OPERATOR_WORKFLOW` hold preserves a fresh Game Over under the
+  explicit `WAIT` policy. Separately, Enable availability treated unavailable
+  terminal evidence as blocking without first requiring the associated manual
+  workflow to still be active.
+- **Resolution:** Commit `909d2d5` adds the exact preserved-Game-Over recovery
+  predicate and revalidates it inside the handler before any terminal action.
+  Commit `5ce801b` retains fail-closed behavior for active manual workflows but
+  excludes terminalized `interrupted` records from that live uncertainty
+  gate.
+- **Regression:** `test/test_better_control_model.py` covers every recovery
+  predicate boundary, preserved-terminal dispatch, active unavailable manual
+  evidence blocking Enable, and the same record becoming nonblocking after it
+  is interrupted.
+- **Validation:** Exact candidate `5ce801b` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,198 tests in 350.13 seconds. In production,
+  replacement PID `2837669` recovered the fresh preserved terminal, completed
+  the top-to-bottom 27-Perk and 144-row Stats capture, obeyed `WAIT`, returned
+  Home only after explicit `HOME`, and then completed an explicit Start Battle
+  workflow to fresh `RUNNING` at wave 20 with `farm_t19_ad_assist` active.
+- **Fixed by:** `909d2d5`, `5ce801b`.
+
+### Weekly Mission collector rewound an already-claimed track
+
+**Stable ID:** `ISSUE-2026-035` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 the operator reported that the mission collector
+  returned to the start of the weekly chest bar even though the visible earlier
+  milestones already showed collection checkmarks.
+- **Symptom:** When no glowing weekly chest was present in the entry frame, the
+  handler restarted a bounded left-to-right traversal. This also happened on a
+  post-claim recheck and on later badge probes whose unchanged weekly progress
+  had already been reviewed.
+- **Evidence:** Static inspection found that
+  `_find_weekly_mission_chest()` recognized only the claimable chest template
+  before unconditionally calling `scroll_to_edge()`. The retained claimed
+  `20/35` frame contains four distinct checkmarks and no claim target; its
+  paired claimable frame has the same progress, three checks, and the glowing
+  fourth chest. Historical production logs from 2026-08-07 show an offscreen
+  chest found after a complete left-to-right scan and then a six-swipe rewind
+  and repeat traversal immediately after that chest was claimed. A rollout
+  observation on 2026-08-09 exposed the other important case: the unchanged
+  `35/35` track reopened at its right edge with visible claimed milestones
+  `(15, 20, 25, 30, 35)` and repeated the same six gestures.
+- **Safety response:** A shifted sequence ending at `35` was not treated as
+  proof about hidden earlier milestones. The collector retains its bounded full
+  traversal on the first ambiguous view and records reusable coverage only
+  after reaching both edges without finding a claim target. Visible targets
+  still win before every shortcut.
+- **Cause:** The earlier offscreen-chest repair was intentionally stateless. It
+  had neither milestone-label evidence to distinguish a real prefix beginning
+  at `5`, nor route-local knowledge that the current claim loop had just scanned
+  everything to the left, nor cycle-scoped knowledge that unchanged unlocked
+  progress had already received a complete review.
+- **Resolution:** Commit `3747659` added authoritative `completed N/35` OCR and
+  distinct-check counting for the fully visible all-claimed case. Commit
+  `7707b69` OCRs the milestone under every visible check and searches right
+  immediately only for an exact contiguous prefix `(5, 10, ...)`; gaps,
+  shifted windows, incomplete OCR, and low confidence still normalize first.
+  Commit `c43293d` carries explicit left-search coverage through the current
+  claim loop and retains a completed whole-track review in process for the same
+  unlocked-chest count and Monday-00:00-UTC cycle. A visible claim, a changed
+  unlock count, a weekly reset, uncertain progress, failure to prove the left
+  edge, or anything other than a confirmed right-edge miss invalidates or
+  bypasses the retained review.
+- **Regression:** `test/test_mission_reward_handler.py` exercises retained
+  claimed, claimable, and partial-viewport frames; exact prefix acceptance;
+  shifted and gapped rejection; post-claim rightward continuation; unchanged
+  progress reuse; progress and cycle invalidation; action-guard propagation;
+  and the original offscreen discovery fallback.
+- **Validation:** The final mission/action-authority and App-focused suites
+  passed 69 and 139 tests. The complete supported checkpoint passed twice at
+  exact commit `c43293d`: compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,063 tests.
+  The first production pass from a fresh process conservatively traversed the
+  shifted `35/35` viewport once, found no target, and recorded complete coverage
+  through milestone `35` for unchanged-progress reuse. The next naturally
+  scheduled production probe observed the same progress, returned
+  `weekly_progress_already_reviewed` with zero swipes, and emitted no weekly
+  track navigation input.
+- **Deployment:** Production was fast-forwarded to `c43293d` after rollback tag
+  `production-before-20260809T190132Z-7707b69` was created. The managed runtime
+  reattached to the same active battle through save-backed continuity, passed
+  session preflight, and returned to steady state. No Windows package input
+  changed.
+- **Fixed by:** `3747659`, `7707b69`, and `c43293d`.
+
+### Perk top-bar OCR ignored the independent battle-wave observation
+
+**Stable ID:** `ISSUE-2026-034` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-09 during an active Tier 19 Farm battle after the
+  save-backed Perk timeline was deployed.
+- **Symptom:** The passive top-bar reader repeatedly rejected schedules such as
+  raw `3089)/773124` and `31227/°3124`, even though the independent battle wave
+  and later clean frames established the real pairs as `3089 / 3124` and
+  `3122 / 3124`. The current run accumulated 57 rejected observations and two
+  three-frame warning streaks; both streaks recovered, every schedule boundary
+  through 3124 was still recorded, and exact saved Perk picks remained valid.
+- **Evidence:** Fresh read-only preflight correlated the active PID, target,
+  acknowledgement, observation, action log, and persisted timeline. One
+  bounded exact-target capture showed clean `3133 / 3206`; the unchanged OCR
+  crop and Tesseract settings read that frame correctly. The failures were
+  therefore intermittent separator/token contamination rather than a
+  persistent geometry mismatch.
+- **Safety response:** The existing 250-wave lead guard rejected the corrupt
+  values without opening Perks or sending input. Diagnosis sent no Pause,
+  restart, navigation, Exit, or Surrender action, and production was not
+  changed.
+- **Cause:** The observer already received the separately detected battle wave
+  but used it only as recorded metadata. Schedule validity and transition
+  gating still trusted the top bar's OCR current-wave token. The animated
+  separator could also join one or two extra leading digits to the OCR
+  next-wave token.
+- **Resolution:** Commit `105fd78` makes the independent battle wave the
+  current-wave authority for numeric top-bar schedules. It prefers the full OCR
+  next-wave token, then permits only the longest minimally trimmed suffix after
+  removing at most two leading artifact digits when that suffix satisfies the
+  same 250-wave lead. Split, substituted, trailing, more heavily prefixed, or
+  still-implausible values remain invalid read-only retries. Two stable
+  observations are still required, and save-backed Perk identity, ordering,
+  levels, and pick waves are unchanged.
+- **Regression:** `test/test_perk_timeline.py` covers the reported prefixed
+  next-wave form, contaminated current-wave form, a schedule already passed by
+  the independent wave, unreconciled parsing, and persistent irrecoverable
+  retry behavior.
+- **Validation:** The focused Perk timeline suite passed 43 tests. After
+  merging current `develop`, the combined Perk/save/terminal/run-initialization
+  slice passed 222 tests, and the supported checkpoint passed compilation,
+  state-definition validation, clickmap integrity with zero errors and the
+  established 44 orphan candidates, and all 2,056 tests. The exact integrated
+  production candidate `a98ec0f` repeated that checkpoint in 352.31 seconds.
+- **Deployment:** Production advanced from `dd51aa2` behind rollback tag
+  `production-before-20260809T171630Z-dd51aa2` to exact candidate `a98ec0f`.
+  Automation stopped cleanly after its in-flight mission-reward route reached
+  a result, then replacement PID `376160` acquired the `localhost:5555` lock.
+  Save-backed attachment confirmed the same active Tier 19 battle, the runtime
+  explicitly adopted `farm_t19_ad_assist`, and its exclusive session preflight
+  completed with active requirements valid and no Strategy Action Gate. A
+  fresh unpaused `RUNNING` heartbeat at wave 3292 established steady state.
+  No Surrender, Game Over, in-game Home, Retry, or new battle was issued. This
+  source-only change had no Windows package input, so native publication was
+  neither required nor performed.
+- **Fixed by:** `105fd78`.
+
 ### Perk repair trusted transient Ban reads and local viewport edges
 
 **Stable ID:** `ISSUE-2026-033` · **Lifecycle:** `resolved`

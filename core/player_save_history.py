@@ -109,6 +109,7 @@ class PlayerSaveHistoryReadResult:
     )
     background_dispatched: bool = False
     operator_workflow_interrupted: bool = False
+    source_restored: bool = True
 
     @property
     def complete(self) -> bool:
@@ -197,6 +198,9 @@ def history_metadata_from_acquisition(
             "schema_version": ACTIVITY_HISTORY_METADATA_SCHEMA_VERSION,
             "source": PLAYER_SAVE_HISTORY_SOURCE,
             "mapping_id": identity.mapping_id,
+            "effective_mapping_fingerprint": (
+                snapshot.effective_mapping_fingerprint
+            ),
             "identity_schema_version": (
                 PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION
             ),
@@ -313,13 +317,22 @@ def running_attachment_temporal_binding_from_acquisition(
     mapping_id = str(
         getattr(acquisition.snapshot, "mapping_id", None) or ""
     ).strip()
-    if not mapping_id:
+    effective_mapping_fingerprint = str(
+        getattr(
+            acquisition.snapshot,
+            "effective_mapping_fingerprint",
+            None,
+        )
+        or ""
+    ).strip()
+    if not mapping_id or len(effective_mapping_fingerprint) != 64:
         return None
     return RunningAttachmentTemporalBinding(
         runtime_session_id=context.runtime_session_id,
         source_activity_scope_id=context.activity_scope_id,
         target_binding=acquisition.binding,
         mapping_id=mapping_id,
+        effective_mapping_fingerprint=effective_mapping_fingerprint,
         active_round_identity_fingerprint=(
             str(active_round_identity_fingerprint).strip()
         ),
@@ -455,12 +468,16 @@ class PlayerSaveHistoryReader:
                 action_guard_fn=action_guard_fn,
             )
 
+        # Control/action authority is checked outside the exact-target lock so
+        # every path keeps the global mutation -> target lock order.  Binding,
+        # scope, and source are revalidated while handoff is excluded.
+        if not _action_allowed(action_guard_fn):
+            return _blocked("history_source_binding_unverified")
         with self._acquirer.locked_operation():
             binding = self._acquirer.current_binding()
             if (
                 binding is None
                 or not _scope_matches(self._scope_fn, expected_scope_id)
-                or not _action_allowed(action_guard_fn)
                 or not self._source_matches(
                     normalized_source,
                     expected_home_control,
@@ -494,14 +511,15 @@ class PlayerSaveHistoryReader:
                 }
                 or not self._acquirer.binding_matches(binding)
                 or not _scope_matches(self._scope_fn, expected_scope_id)
-                or not _action_allowed(action_guard_fn)
                 or not self._source_matches(
                     normalized_source,
                     expected_home_control,
                 )
             ):
                 return _blocked("history_source_binding_lost")
-            return observed
+        if not _action_allowed(action_guard_fn):
+            return _blocked("history_source_binding_lost")
+        return observed
 
     def _read_serialized_active_attachment(
         self,
@@ -550,12 +568,28 @@ class PlayerSaveHistoryReader:
             stable_initial_source=True,
         )
         if serialized.status is GuardedSerializationStatus.BLOCKED:
+            if (
+                serialized.reason
+                == "background_serialization_dispatch_unavailable"
+                and not serialized.lifecycle_input_attempted
+                and not serialized.background_dispatched
+            ):
+                # The host proved KEYCODE_HOME never started, so the attached
+                # battle remains safely on-screen.  Save serialization is
+                # unavailable, but that is recoverable evidence loss: let the
+                # established guarded UI/degraded path finish the attachment
+                # instead of retaining its input hold indefinitely.
+                return _ui_fallback(
+                    "active_attachment_background_serialization_dispatch_unavailable"
+                )
             return _blocked(
                 f"active_attachment_{serialized.reason}",
                 background_dispatched=serialized.background_dispatched,
                 operator_workflow_interrupted=(
                     serialized.background_dispatched
+                    or serialized.lifecycle_input_attempted
                 ),
+                source_restored=serialized.source_restored,
             )
         acquisition = serialized.acquisition
         snapshot = serialized.snapshot
@@ -717,6 +751,14 @@ def history_sources_compatible(
         == str(second.get("mapping_id") or "")
         and first.get("identity_schema_version")
         == second.get("identity_schema_version")
+        and (
+            str(first.get("source") or "") != PLAYER_SAVE_HISTORY_SOURCE
+            or (
+                str(first.get("effective_mapping_fingerprint") or "")
+                and str(first.get("effective_mapping_fingerprint") or "")
+                == str(second.get("effective_mapping_fingerprint") or "")
+            )
+        )
         and str(first.get("fingerprint") or "")
         and str(second.get("fingerprint") or "")
     )
@@ -862,6 +904,7 @@ def _blocked(
     *,
     background_dispatched: bool = False,
     operator_workflow_interrupted: bool = False,
+    source_restored: bool = True,
 ) -> PlayerSaveHistoryReadResult:
     return PlayerSaveHistoryReadResult(
         PlayerSaveHistoryReadStatus.BLOCKED,
@@ -869,6 +912,7 @@ def _blocked(
         safe_ui_fallback=False,
         background_dispatched=background_dispatched,
         operator_workflow_interrupted=operator_workflow_interrupted,
+        source_restored=source_restored,
     )
 
 

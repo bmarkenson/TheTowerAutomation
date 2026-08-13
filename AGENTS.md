@@ -22,6 +22,11 @@ changes this model.
   ship together. Only the operator or an explicitly assigned promotion owner
   updates `main` through the
   [production procedure](docs/operations/production_promotion.md).
+- The operator-confirmed save-mapping fast lane documented in
+  [development isolation](docs/architecture/development_isolation.md) is the
+  sole application-owned exception: it may create one allowlisted commit on a
+  clean, exactly synchronized `develop`. It grants no agent, feature, or client
+  general permission to bypass feature branches or promote production.
 - Treat unrelated tracked and untracked changes as another participant's work.
   Do not overwrite, delete, stage, or incorporate them. Recheck status and each
   target diff immediately before editing, staging, or committing; reconcile a

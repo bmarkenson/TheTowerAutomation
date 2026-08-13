@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import threading
 import time
@@ -47,6 +48,15 @@ from core.gate_decisions import startup_gate_context_for_strategy
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
+from core.emulator_degradation import (
+    AUTOMATIC_RESTART_COOLDOWN,
+    assess_emulator_degradation,
+    load_comparable_battles,
+)
+from core.emulator_recovery import (
+    normalize_emulator_maintenance,
+    normalize_runtime_recovery_ack,
+)
 from core.host_performance import (
     DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS,
     HostPerformancePayloadError,
@@ -57,6 +67,15 @@ from core.module_presets import ModulePresetConflictError, ModulePresetError
 from core.player_save_setup_capture import (
     SetupCaptureError,
     module_preset_source_from_capture,
+)
+from core.player_save import confirmed_local_mapping_status
+from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
+from core.player_save_mapping_candidates import AppendOnlyMappingCandidateStore
+from core.player_save_mapping_develop_integration import (
+    SAVE_MAPPING_INTEGRATION_CAPABILITY,
+    SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
+    SaveMappingIntegrationError,
+    SaveMappingIntegrationManager,
 )
 from core.strategy_profiles import (
     STRATEGY_AUTHORING_OPERATIONS,
@@ -70,30 +89,40 @@ from utils.logger import DEFAULT_ACTIVITY_SCOPE_FILENAME
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
+EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 32
+CONTROL_SURFACE_REVISION = 41
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "better_control_model_v1",
     "better_control_model_v2",
     "completed_battle_discard",
+    "confirmed_local_mapping_status_v2",
     "current_battle_perks_v1",
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
     "explicit_strategy_disposition",
     "game_speed_target",
     "host_performance_gpu_v1",
+    "host_performance_process_attribution_v1",
     "host_performance_telemetry_v1",
+    "bluestacks_maintenance_v2",
+    "bluestacks_operator_restart_v1",
+    "bluestacks_listener_lifetime_telemetry_v1",
     "interactive_development_lease_v1",
     "managed_custom_module_presets_v1",
     "observed_game_speed",
     "persistent_adb_connection_v1",
+    "runtime_control_acknowledgements_v1",
     "save_backed_setup_capture_v1",
     "save_backed_setup_capture_v2",
+    SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
+    SAVE_MAPPING_INTEGRATION_CAPABILITY,
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
+    "strategy_aware_attach_v1",
     "strategy_authoring_profile_lifecycle_v1",
     "strategy_authoring_local_loadout_editors_v1",
     "strategy_authoring_preset_local_copy_v1",
@@ -147,26 +176,7 @@ _STATUS_SUMMARY_RE = re.compile(
     r"(?:\s*\|\s*Speed=(?P<speed>[^|]+?))?\s*$"
 )
 _STATUS_DETAIL_PREFIX = "[STATUS_DETAIL] "
-_STATE_ACK_RE = re.compile(
-    r"^\[CTRL] State set to (?P<value>RUNNING|PAUSED|STOPPED) via control file"
-    r"(?: request_id=(?P<request_id>[A-Za-z0-9._:-]{1,128}))?$"
-)
-_MODE_ACK_RE = re.compile(
-    r"^\[CTRL] Mode set to (?P<value>NEXT_BATTLE|RETRY|WAIT|HOME) "
-    r"via control file"
-    r"(?: request_id=(?P<request_id>[A-Za-z0-9._:-]{1,128}))?$"
-)
-_GAME_SPEED_TARGET_ACK_RE = re.compile(
-    r"^\[CTRL] Game speed target set to "
-    r"(?P<value>x(?:[0-5]\.[05]|6\.[03])) via control file$"
-)
-_ADB_TARGET_ACK_RE = re.compile(
-    r"^\[CTRL] ADB target set to (?P<value>localhost:(?:[1-9]\d{0,4})) via control file$"
-)
-_STRATEGY_ACK_RE = re.compile(
-    r"^\[CTRL] Strategy set to "
-    r"(?P<value>[a-z][a-z0-9_]{2,47}) via control file$"
-)
+_CONTROL_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 
 
 class ControlSurfaceRequestError(ValueError):
@@ -214,6 +224,9 @@ class ControlSurfaceService:
         adb_connection_manager: Optional[PersistentAdbConnectionManager] = None,
         strategy_profile_dir: Path | str = "config/strategies/custom",
         module_preset_dir: Path | str = "config/loadouts/custom/modules",
+        confirmed_local_mapping_dir: Path | str = (
+            "config/player_save_versions/local"
+        ),
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.control_path = self._resolve_path(control_file)
@@ -243,6 +256,18 @@ class ControlSurfaceService:
         self.stale_after_seconds = max(1, int(stale_after_seconds))
         self.strategy_profile_dir = self._resolve_path(strategy_profile_dir)
         self.module_preset_dir = self._resolve_path(module_preset_dir)
+        self.confirmed_local_mapping_store = ConfirmedLocalMappingStore(
+            self._resolve_path(confirmed_local_mapping_dir)
+        )
+        self.mapping_candidate_store = AppendOnlyMappingCandidateStore(
+            self._resolve_path(
+                "logs/player_save_mapping_candidates/receipts-v2.jsonl"
+            )
+        )
+        self.save_mapping_integration_manager = SaveMappingIntegrationManager(
+            repository_root=self.repository_root,
+            candidate_store=self.mapping_candidate_store,
+        )
         self.profile_store = StrategyProfileStore(
             profile_directory=self.strategy_profile_dir,
             module_preset_directory=self.module_preset_dir,
@@ -255,12 +280,137 @@ class ControlSurfaceService:
         self.process_manager = process_manager
         self.adb_connection_manager = adb_connection_manager
         self._process_action_lock = threading.Lock()
+        self._control_mutation_lock = threading.Lock()
         self._battle_mutation_lock = threading.RLock()
+        self._emulator_degradation_cache_lock = threading.Lock()
+        self._emulator_degradation_cache: Optional[
+            tuple[float, tuple[object, ...], dict[str, Any]]
+        ] = None
+        self._emulator_battle_history_cache: Optional[
+            tuple[tuple[int, int], list[dict[str, Any]]]
+        ] = None
 
     def strategy_profiles(self) -> dict[str, Any]:
         """Return the constrained profile-editor catalog."""
 
         return self.profile_store.catalog()
+
+    def save_mapping_integration(self) -> dict[str, Any]:
+        """Return review candidates and fixed develop eligibility."""
+
+        return self.save_mapping_integration_manager.catalog()
+
+    def apply_save_mapping_integration(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Review or commit one exact mapping proposal directly to develop."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        operation = str(request.get("operation") or "").strip().lower()
+        required = {
+            "review": {"operation", "candidate_record_id"},
+            "integrate": {
+                "operation",
+                "candidate_record_id",
+                "reviewed_proposal_fingerprint",
+            },
+        }
+        if operation not in required:
+            raise ControlSurfaceRequestError("operation must be review or integrate")
+        if set(request) != required[operation]:
+            raise ControlSurfaceRequestError(
+                f"{operation} accepts exactly: "
+                + ", ".join(sorted(required[operation]))
+            )
+        candidate_record_id = request.get("candidate_record_id")
+        if not isinstance(candidate_record_id, str) or re.fullmatch(
+            r"[0-9a-f]{64}", candidate_record_id
+        ) is None:
+            raise ControlSurfaceRequestError(
+                "candidate_record_id must be exactly 64 lowercase hexadecimal characters"
+            )
+        try:
+            if operation == "review":
+                return self.save_mapping_integration_manager.review(
+                    candidate_record_id=candidate_record_id,
+                )
+
+            reviewed_fingerprint = request.get(
+                "reviewed_proposal_fingerprint"
+            )
+            if not isinstance(reviewed_fingerprint, str) or re.fullmatch(
+                r"[0-9a-f]{64}", reviewed_fingerprint
+            ) is None:
+                raise ControlSurfaceRequestError(
+                    "reviewed_proposal_fingerprint must be exactly 64 lowercase "
+                    "hexadecimal characters"
+                )
+            record_prefix = str(candidate_record_id or "")[:12]
+            fingerprint_prefix = str(reviewed_fingerprint or "")[:12]
+            operation_id = (
+                f"save-mapping-{record_prefix}-{fingerprint_prefix}-"
+                f"{secrets.token_hex(6)}"
+            )
+            action_warning = self._append_audit(
+                "Integrating reviewed canonical save mapping into develop "
+                f"candidate={record_prefix} "
+                f"review={fingerprint_prefix} "
+                f"[OPERATION] id={operation_id}",
+                level="ACTION",
+            )
+            if action_warning:
+                raise ControlSurfaceRequestError(
+                    "Canonical integration audit could not be written; nothing was changed.",
+                    status=503,
+                    code="mapping_integration_audit_unavailable",
+                )
+            try:
+                result = self.save_mapping_integration_manager.integrate(
+                    candidate_record_id=candidate_record_id,
+                    reviewed_proposal_fingerprint=reviewed_fingerprint,
+                )
+            except SaveMappingIntegrationError as exc:
+                disposition = _save_mapping_integration_disposition(exc.code)
+                self._append_audit(
+                    "Canonical save mapping develop integration "
+                    f"disposition={disposition} code={exc.code} "
+                    f"[OPERATION] id={operation_id}",
+                    level="RESULT",
+                )
+                raise
+            except Exception as exc:
+                self._append_audit(
+                    "Canonical save mapping develop integration "
+                    "disposition=unconfirmed code=unexpected_failure "
+                    f"[OPERATION] id={operation_id}",
+                    level="RESULT",
+                )
+                raise ControlSurfaceRequestError(
+                    "Canonical develop integration failed unexpectedly; inspect "
+                    "main, develop, and the durable transaction before continuing.",
+                    status=500,
+                    code="mapping_integration_unexpected_failure",
+                ) from exc
+            result_warning = self._append_audit(
+                "Canonical save mapping develop integration "
+                "disposition=committed_to_develop "
+                f"candidate={record_prefix} commit={result.get('integration_commit')} "
+                f"committed=true promoted={str(bool(result.get('promoted'))).lower()} "
+                "mapping_invariants=passed "
+                f"[OPERATION] id={operation_id}",
+                level="RESULT",
+            )
+            if result_warning:
+                result["warning"] = result_warning
+            return result
+        except SaveMappingIntegrationError as exc:
+            raise ControlSurfaceRequestError(
+                str(exc),
+                status=_save_mapping_integration_error_status(exc.code),
+                code=exc.code,
+            ) from exc
 
     def strategy_authoring(self) -> dict[str, Any]:
         """Return the additive sparse Base/Strategy authoring catalog."""
@@ -1083,6 +1233,7 @@ class ControlSurfaceService:
                 "mode": "UNKNOWN",
                 "game_speed_target": MAXIMUM_GAME_SPEED_TARGET,
                 "game_speed_target_updated_at": None,
+                "game_speed_target_request_id": None,
                 "adb_port": None,
                 "resume_at": None,
                 "remaining_seconds": None,
@@ -1092,6 +1243,7 @@ class ControlSurfaceService:
                 "mode_updated_at": None,
                 "mode_request_id": None,
                 "adb_port_updated_at": None,
+                "adb_port_request_id": None,
                 "strategy": None,
                 "strategy_apply_mode": "next_boundary",
                 "strategy_updated_at": None,
@@ -1105,6 +1257,8 @@ class ControlSurfaceService:
                 },
                 "interactive_development_lease": None,
                 "interactive_development_lease_error": None,
+                "emulator_maintenance": None,
+                "emulator_maintenance_error": None,
                 "battle_workflow": None,
                 "battle_workflow_error": None,
                 "manual_control": None,
@@ -1130,11 +1284,15 @@ class ControlSurfaceService:
                 ),
                 None,
             )
-        acknowledgements = self._latest_acknowledgements(lines, control)
         runtime = self._runtime_evidence()
         strategy_action_gate = self._strategy_action_gate_status(
             now=current_time,
             runtime=runtime,
+        )
+        current_run = self._load_activity_scope()
+        acknowledgements = self._latest_acknowledgements(
+            strategy_action_gate,
+            control,
         )
         interactive_development_lease = (
             self._interactive_development_lease_status(
@@ -1142,6 +1300,17 @@ class ControlSurfaceService:
                 runtime_authority=strategy_action_gate,
                 now=current_time,
             )
+        )
+        host_maintenance = self._host_maintenance_status(
+            control=control,
+            runtime_authority=strategy_action_gate,
+        )
+        emulator_degradation = self._emulator_degradation_status(
+            control=control,
+            runtime_authority=strategy_action_gate,
+            current_run=current_run,
+            host_maintenance=host_maintenance,
+            now=current_time,
         )
         process_service = (
             self.process_manager.status() if self.process_manager is not None else None
@@ -1156,8 +1325,15 @@ class ControlSurfaceService:
             process_service,
         )
         healthy = bool(runtime["active"] and observation and not observation["stale"])
-        current_run = self._load_activity_scope()
         current_battle_perks = self._current_battle_perks(current_run)
+        confirmed_local_mappings = confirmed_local_mapping_status(
+            store=self.confirmed_local_mapping_store,
+            candidate_store=self.mapping_candidate_store,
+            repository_root=self.repository_root,
+            candidate_status=(
+                self.save_mapping_integration_manager.status()
+            ),
+        )
         control_model = self._better_control_model_status(
             control=control,
             acknowledgements=acknowledgements,
@@ -1188,13 +1364,709 @@ class ControlSurfaceService:
                 else None
             ),
             "current_battle_perks": current_battle_perks,
+            "confirmed_local_mappings": confirmed_local_mappings,
             "strategy_action_gate": strategy_action_gate,
             "interactive_development_lease": interactive_development_lease,
+            "host_maintenance": host_maintenance,
+            "emulator_degradation": emulator_degradation,
             "control_model": control_model,
             "runtime": runtime,
             "process_service": process_service,
             "adb_connection": adb_connection,
         }
+
+    def _host_maintenance_status(
+        self,
+        *,
+        control: Mapping[str, Any],
+        runtime_authority: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Join a durable host request to its fresh runtime-owned hold proof."""
+
+        request = control.get("emulator_maintenance")
+        request = dict(request) if isinstance(request, Mapping) else None
+        control_model = runtime_authority.get("control_model")
+        acknowledgement = normalize_runtime_recovery_ack(
+            control_model.get("emulator_maintenance")
+            if isinstance(control_model, Mapping)
+            else None
+        )
+        fresh = bool(
+            acknowledgement is not None
+            and runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_exact_runtime") is True
+        )
+        matching = bool(
+            request is not None
+            and acknowledgement is not None
+            and acknowledgement.get("request_id") == request.get("request_id")
+            and acknowledgement.get("runtime") == request.get("runtime")
+            and acknowledgement.get("battle_scope")
+            == request.get("battle_scope")
+        )
+        holds = runtime_authority.get("holds")
+        hold_installed = any(
+            isinstance(item, Mapping)
+            and item.get("hold") == "emulator_maintenance"
+            for item in (holds if isinstance(holds, list) else [])
+        )
+        host_restart_authorized = bool(
+            request is not None
+            and request.get("state") == "requested"
+            and fresh
+            and matching
+            and hold_installed
+            and acknowledgement.get("state") == "host_restart_authorized"
+        )
+        if control.get("emulator_maintenance_error"):
+            reason = str(control["emulator_maintenance_error"])
+        elif request is None:
+            reason = "no BlueStacks maintenance is requested"
+        elif request.get("state") == "terminal":
+            reason = str(
+                request.get("terminal_reason") or "maintenance is terminal"
+            )
+        elif not fresh:
+            reason = "fresh runtime maintenance acknowledgement is unavailable"
+        elif not matching:
+            reason = "runtime maintenance ownership does not match the request"
+        elif not hold_installed:
+            reason = "the suppressive emulator-maintenance hold is not installed"
+        elif host_restart_authorized:
+            reason = "the runtime authorized the exact Windows host restart"
+        else:
+            reason = str(
+                acknowledgement.get("reason")
+                if acknowledgement is not None
+                else "runtime recovery is pending"
+            )
+        return {
+            "schema_version": 1,
+            "request": request,
+            "runtime_acknowledgement": acknowledgement,
+            "acknowledgement_fresh": fresh,
+            "owner_matches_request": matching,
+            "hold_installed": hold_installed,
+            "host_restart_authorized": host_restart_authorized,
+            "active": bool(
+                request is not None and request.get("state") != "terminal"
+            ),
+            "exclude_from_degradation": bool(
+                acknowledgement is not None
+                and acknowledgement.get("exclude_from_degradation") is True
+            ),
+            "operator_restart": self._operator_restart_availability(
+                control=control,
+                runtime_authority=runtime_authority,
+                request=request,
+            ),
+            "reason": reason,
+        }
+
+    @staticmethod
+    def _operator_restart_availability(
+        *,
+        control: Mapping[str, Any],
+        runtime_authority: Mapping[str, Any],
+        request: Optional[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        if control.get("emulator_maintenance_error"):
+            return {
+                "available": False,
+                "code": "maintenance_state_invalid",
+                "reason": str(control.get("emulator_maintenance_error")),
+            }
+        if request is not None and request.get("state") != "terminal":
+            return {
+                "available": False,
+                "code": "maintenance_active",
+                "reason": "a BlueStacks maintenance request is already active",
+            }
+        if str(control.get("state") or "").upper() != "RUNNING":
+            return {
+                "available": False,
+                "code": "control_not_running",
+                "reason": "Automation must be Enabled before restart",
+            }
+        control_model = runtime_authority.get("control_model")
+        strategy_scope = (
+            control_model.get("strategy_scope")
+            if isinstance(control_model, Mapping)
+            else None
+        )
+        active_strategy = (
+            str(strategy_scope.get("active_battle") or "").strip().lower()
+            if isinstance(strategy_scope, Mapping)
+            else ""
+        )
+        if not active_strategy or active_strategy in {"none", "tournament"}:
+            return {
+                "available": False,
+                "code": "strategy_ineligible",
+                "reason": "operator restart is limited to an active Farm battle",
+            }
+        holds = runtime_authority.get("holds")
+        strategy_authority = runtime_authority.get("strategy_action_authority")
+        lifecycle_authority = runtime_authority.get(
+            "lifecycle_action_authority"
+        )
+        ready = bool(
+            runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_exact_runtime") is True
+            and runtime_authority.get("active_battle") is True
+            and str(runtime_authority.get("runtime_battle_scope") or "")
+            and str(runtime_authority.get("primary_state") or "").upper()
+            == "RUNNING"
+            and isinstance(runtime_authority.get("owner"), Mapping)
+            and not (holds if isinstance(holds, list) else [])
+            and isinstance(strategy_authority, Mapping)
+            and strategy_authority.get("allowed") is True
+            and isinstance(lifecycle_authority, Mapping)
+            and lifecycle_authority.get("allowed") is True
+        )
+        if not ready:
+            return {
+                "available": False,
+                "code": "runtime_not_ready",
+                "reason": "fresh unheld RUNNING battle authority is required",
+            }
+        return {
+            "available": True,
+            "code": "available",
+            "reason": "fresh RUNNING Farm battle authority is available",
+        }
+
+    def _emulator_degradation_status(
+        self,
+        *,
+        control: Mapping[str, Any],
+        runtime_authority: Mapping[str, Any],
+        current_run: Optional[Mapping[str, Any]],
+        host_maintenance: Mapping[str, Any],
+        now: float,
+    ) -> dict[str, Any]:
+        """Return a conservative, side-effect-free automatic-restart decision."""
+
+        assessed_at = datetime.fromtimestamp(now, tz=timezone.utc)
+        control_model = runtime_authority.get("control_model")
+        strategy_scope = (
+            control_model.get("strategy_scope")
+            if isinstance(control_model, Mapping)
+            else None
+        )
+        current_strategy = (
+            str(strategy_scope.get("active_battle") or "").strip().lower()
+            if isinstance(strategy_scope, Mapping)
+            else ""
+        )
+        run_id = (
+            str(current_run.get("run_id") or "").strip()
+            if isinstance(current_run, Mapping)
+            else ""
+        )
+        if not run_id:
+            return {
+                "schema_version": 1,
+                "assessed_at": assessed_at.isoformat(timespec="seconds"),
+                "status": "ineligible",
+                "automatic_ready": False,
+                "reason": "an active runtime battle scope is required",
+                "current_run_id": None,
+                "current_strategy": current_strategy or None,
+                "candidate_battle_ids": [],
+                "baseline_battle_ids": [],
+            }
+        try:
+            listener_marker = (
+                self.host_performance_store.current_bluestacks_lifetime_marker(
+                    current_run_id=run_id,
+                )
+            )
+        except (OSError, HostPerformanceStorageError) as exc:
+            return {
+                "schema_version": 1,
+                "assessed_at": assessed_at.isoformat(timespec="seconds"),
+                "status": "telemetry_unavailable",
+                "automatic_ready": False,
+                "reason": f"degradation evidence is unavailable: {exc}",
+                "current_run_id": run_id,
+                "current_strategy": current_strategy or None,
+                "candidate_battle_ids": [],
+                "baseline_battle_ids": [],
+            }
+        cache_key = (run_id, current_strategy, listener_marker)
+        with self._emulator_degradation_cache_lock:
+            cached = self._emulator_degradation_cache
+            if (
+                cached is not None
+                and cached[1] == cache_key
+                and 0 <= now - cached[0] < EMULATOR_DEGRADATION_CACHE_SECONDS
+            ):
+                assessment = dict(cached[2])
+            else:
+                try:
+                    try:
+                        battle_dir_stat = self.battles_dir.stat()
+                        battle_signature = (
+                            battle_dir_stat.st_mtime_ns,
+                            battle_dir_stat.st_size,
+                        )
+                    except FileNotFoundError:
+                        battle_signature = (-1, -1)
+                    battle_cache = self._emulator_battle_history_cache
+                    if (
+                        battle_cache is not None
+                        and battle_cache[0] == battle_signature
+                    ):
+                        battles = list(battle_cache[1])
+                    else:
+                        battles = load_comparable_battles(self.battles_dir)
+                        self._emulator_battle_history_cache = (
+                            battle_signature,
+                            list(battles),
+                        )
+                    aggregates = (
+                        self.host_performance_store.recent_bluestacks_lifetime_aggregates(
+                            current_run_id=run_id,
+                            since=assessed_at - timedelta(hours=12),
+                        )
+                    )
+                except (OSError, HostPerformanceStorageError) as exc:
+                    return {
+                        "schema_version": 1,
+                        "assessed_at": assessed_at.isoformat(timespec="seconds"),
+                        "status": "telemetry_unavailable",
+                        "automatic_ready": False,
+                        "reason": f"degradation evidence is unavailable: {exc}",
+                        "current_run_id": run_id,
+                        "current_strategy": current_strategy or None,
+                        "candidate_battle_ids": [],
+                        "baseline_battle_ids": [],
+                    }
+                assessment = assess_emulator_degradation(
+                    battles,
+                    aggregates,
+                    current_strategy=current_strategy,
+                    current_run_id=run_id,
+                    assessed_at=assessed_at,
+                )
+                self._emulator_degradation_cache = (
+                    now,
+                    cache_key,
+                    dict(assessment),
+                )
+        assessment["cooldown_seconds"] = int(
+            AUTOMATIC_RESTART_COOLDOWN.total_seconds()
+        )
+
+        def suppress(status: str, reason: str) -> dict[str, Any]:
+            return {
+                **assessment,
+                "status": status,
+                "automatic_ready": False,
+                "reason": reason,
+            }
+
+        if control.get("emulator_maintenance_error"):
+            return suppress(
+                "maintenance_state_invalid",
+                str(control.get("emulator_maintenance_error")),
+            )
+        durable = host_maintenance.get("request")
+        if isinstance(durable, Mapping):
+            if durable.get("state") != "terminal":
+                return suppress(
+                    "maintenance_active",
+                    "a BlueStacks maintenance request is already active",
+                )
+            if str(durable.get("battle_scope") or "") == run_id:
+                return suppress(
+                    "already_recovered_this_battle",
+                    "automatic recovery is limited to once per battle",
+                )
+            try:
+                terminal_at = datetime.fromisoformat(
+                    str(durable.get("terminal_at") or "")
+                )
+                if terminal_at.tzinfo is None:
+                    terminal_at = terminal_at.replace(tzinfo=timezone.utc)
+                remaining = AUTOMATIC_RESTART_COOLDOWN - (
+                    assessed_at - terminal_at.astimezone(timezone.utc)
+                )
+            except (TypeError, ValueError):
+                remaining = timedelta(0)
+            if remaining > timedelta(0):
+                blocked = suppress(
+                    "cooldown",
+                    "the eight-hour automatic-restart cooldown is active",
+                )
+                blocked["cooldown_remaining_seconds"] = int(
+                    remaining.total_seconds()
+                )
+                return blocked
+        if assessment.get("automatic_ready") is not True:
+            return assessment
+        if control.get("state") != "RUNNING":
+            return suppress(
+                "control_not_running",
+                "Automation must be Enabled before automatic recovery",
+            )
+        holds = runtime_authority.get("holds")
+        strategy_authority = runtime_authority.get("strategy_action_authority")
+        lifecycle_authority = runtime_authority.get("lifecycle_action_authority")
+        runtime_ready = bool(
+            runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_exact_runtime") is True
+            and runtime_authority.get("active_battle") is True
+            and str(runtime_authority.get("runtime_battle_scope") or "")
+            == run_id
+            and str(runtime_authority.get("primary_state") or "").upper()
+            == "RUNNING"
+            and isinstance(runtime_authority.get("owner"), Mapping)
+            and not (holds if isinstance(holds, list) else [])
+            and isinstance(strategy_authority, Mapping)
+            and strategy_authority.get("allowed") is True
+            and isinstance(lifecycle_authority, Mapping)
+            and lifecycle_authority.get("allowed") is True
+        )
+        if not runtime_ready:
+            return suppress(
+                "runtime_not_ready",
+                "fresh unheld RUNNING battle authority is required",
+            )
+        return assessment
+
+    def apply_host_maintenance(
+        self,
+        request: Mapping[str, Any],
+        *,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Serialize request creation and host transitions with control writes."""
+
+        with self._control_mutation_lock:
+            return self._apply_host_maintenance_locked(request, now=now)
+
+    def _apply_host_maintenance_locked(
+        self,
+        request: Mapping[str, Any],
+        *,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Request maintenance or apply one exact Windows host transition."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        operation = str(request.get("operation") or "").strip().lower()
+        request_id = str(request.get("request_id") or "").strip().lower()
+        if operation not in {
+            "request",
+            "request_operator",
+            "acknowledge",
+            "complete",
+            "fail",
+        }:
+            raise ControlSurfaceRequestError(
+                "operation must be request, request_operator, acknowledge, "
+                "complete, or fail"
+            )
+        if operation == "request":
+            return self._request_emulator_maintenance(
+                request,
+                initiator="automatic_detector",
+                now=now,
+            )
+        if operation == "request_operator":
+            return self._request_emulator_maintenance(
+                request,
+                initiator="operator",
+                now=now,
+            )
+        if not request_id:
+            raise ControlSurfaceRequestError("request_id is required")
+        current = self.status(now=now)
+        maintenance = current.get("host_maintenance") or {}
+        durable = maintenance.get("request")
+        if not isinstance(durable, Mapping) or durable.get("request_id") != request_id:
+            raise ControlSurfaceRequestError(
+                "Host maintenance request ID does not match",
+                status=409,
+                code="maintenance_request_mismatch",
+            )
+        observed_at = datetime.fromtimestamp(
+            datetime.now().timestamp() if now is None else float(now)
+        ).astimezone().isoformat(timespec="seconds")
+        host_ack = {
+            "host_id": request.get("host_id"),
+            "adb_port": request.get("adb_port"),
+            "process_id": request.get("process_id"),
+            "process_started_at": request.get("process_started_at"),
+            "executable_path": request.get("executable_path"),
+            "instance_name": request.get("instance_name"),
+            "observed_at": observed_at,
+        }
+        host_completion = {
+            **host_ack,
+            "previous_process_id": request.get("previous_process_id"),
+            "previous_process_started_at": request.get(
+                "previous_process_started_at"
+            ),
+        }
+        try:
+            if operation == "acknowledge":
+                if durable.get("state") == "host_acknowledged" and (
+                    _same_host_transition(
+                        durable.get("host_ack"),
+                        host_ack,
+                        include_previous=False,
+                    )
+                ):
+                    saved = dict(durable)
+                elif maintenance.get("host_restart_authorized") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(
+                            maintenance.get("reason")
+                            or "the runtime has not authorized host mutation"
+                        ),
+                        status=409,
+                        code="maintenance_not_authorized",
+                    )
+                else:
+                    saved = (
+                        self.control_store.acknowledge_emulator_maintenance_host(
+                            request_id,
+                            host_ack=host_ack,
+                            now=now,
+                        )
+                    )
+            elif operation == "complete":
+                if durable.get("state") == "host_restarted" and (
+                    _same_host_transition(
+                        durable.get("host_completion"),
+                        host_completion,
+                        include_previous=True,
+                    )
+                ):
+                    saved = dict(durable)
+                else:
+                    saved = self.control_store.complete_emulator_maintenance_host(
+                        request_id,
+                        host_completion=host_completion,
+                        now=now,
+                    )
+            else:
+                failure_reason = " ".join(
+                    str(request.get("reason") or "").split()
+                )[:256]
+                if not failure_reason:
+                    raise ControlSurfaceRequestError(
+                        "fail requires a bounded reason"
+                    )
+                if durable.get("state") not in {"requested", "terminal"}:
+                    raise ControlSurfaceRequestError(
+                        "Host failure cannot release recovery after the exact "
+                        "process acknowledgement; source restoration must be "
+                        "reconciled first",
+                        status=409,
+                        code="maintenance_reconciliation_required",
+                    )
+                saved = (
+                    dict(durable)
+                    if durable.get("state") == "terminal"
+                    else self.control_store.finish_emulator_maintenance(
+                        request_id,
+                        disposition="host_failed",
+                        reason=failure_reason,
+                        source="windows-bluestacks-maintenance",
+                        now=now,
+                    )
+                )
+        except ControlSurfaceRequestError:
+            raise
+        except (ControlDirectiveError, ValueError) as exc:
+            raise ControlSurfaceRequestError(
+                str(exc),
+                status=409,
+                code="maintenance_conflict",
+            ) from exc
+        response = self.status(now=now)
+        response["request"] = {
+            "accepted": True,
+            "action": "host_maintenance",
+            "disposition": operation,
+            "request_id": request_id,
+        }
+        response["host_maintenance"]["request"] = saved
+        return response
+
+    def _request_emulator_maintenance(
+        self,
+        request: Mapping[str, Any],
+        *,
+        initiator: str,
+        now: Optional[float],
+    ) -> dict[str, Any]:
+        """Create one detector or operator request bound before the hold."""
+
+        current = self.status(now=now)
+        assessment = current.get("emulator_degradation") or {}
+        maintenance = current.get("host_maintenance") or {}
+        if initiator == "automatic_detector" and (
+            assessment.get("automatic_ready") is not True
+        ):
+            raise ControlSurfaceRequestError(
+                str(
+                    assessment.get("reason")
+                    or "automatic BlueStacks recovery is not ready"
+                ),
+                status=409,
+                code="emulator_degradation_not_ready",
+            )
+        if initiator == "operator":
+            availability = maintenance.get("operator_restart") or {}
+            if availability.get("available") is not True:
+                raise ControlSurfaceRequestError(
+                    str(
+                        availability.get("reason")
+                        or "operator BlueStacks restart is unavailable"
+                    ),
+                    status=409,
+                    code=str(
+                        availability.get("code")
+                        or "operator_restart_unavailable"
+                    ),
+                )
+        authority = current.get("strategy_action_gate") or {}
+        owner = authority.get("owner")
+        current_run = current.get("current_run")
+        if not isinstance(owner, Mapping) or not isinstance(
+            current_run, Mapping
+        ):
+            raise ControlSurfaceRequestError(
+                "fresh runtime ownership and battle scope are required",
+                status=409,
+                code="maintenance_runtime_unavailable",
+            )
+        battle_scope = str(current_run.get("run_id") or "")
+        if (
+            not battle_scope
+            or str(authority.get("runtime_battle_scope") or "")
+            != battle_scope
+        ):
+            raise ControlSurfaceRequestError(
+                "the runtime battle scope changed before maintenance creation",
+                status=409,
+                code="maintenance_runtime_unavailable",
+            )
+        observed_at = datetime.fromtimestamp(
+            datetime.now().timestamp() if now is None else float(now)
+        ).astimezone().isoformat(timespec="seconds")
+        host_target = {
+            "host_id": request.get("host_id"),
+            "adb_port": request.get("adb_port"),
+            "process_id": request.get("process_id"),
+            "process_started_at": request.get("process_started_at"),
+            "executable_path": request.get("executable_path"),
+            "instance_name": request.get("instance_name"),
+            "observed_at": observed_at,
+        }
+        host = assessment.get("host_evidence")
+        if initiator == "automatic_detector":
+            listener = (
+                host.get("listener_identity")
+                if isinstance(host, Mapping)
+                else None
+            )
+            if (
+                not isinstance(host, Mapping)
+                or host.get("identity_scope")
+                != "exact_listener_lifetime"
+                or not isinstance(listener, Mapping)
+                or not _same_bluestacks_listener_identity(
+                    listener,
+                    host_target,
+                )
+            ):
+                raise ControlSurfaceRequestError(
+                    "the live BlueStacks listener does not match detector evidence",
+                    status=409,
+                    code="emulator_host_identity_mismatch",
+                )
+        trigger = {
+            "request_kind": initiator,
+            "schema_version": assessment.get("schema_version"),
+            "assessed_at": assessment.get("assessed_at"),
+            "candidate_battle_ids": assessment.get("candidate_battle_ids", []),
+            "baseline_battle_ids": assessment.get("baseline_battle_ids", []),
+            "candidate_cph_ratio": assessment.get("candidate_cph_ratio"),
+            "individual_cph_ratios": assessment.get(
+                "individual_cph_ratios", []
+            ),
+            "effective_game_speed_ratio": assessment.get(
+                "effective_game_speed_ratio"
+            ),
+            "host_sample_count": (
+                host.get("sample_count") if isinstance(host, Mapping) else None
+            ),
+            "handle_ratio": (
+                host.get("handle_ratio") if isinstance(host, Mapping) else None
+            ),
+            "handle_delta": (
+                host.get("handle_delta") if isinstance(host, Mapping) else None
+            ),
+        }
+        runtime = {
+            "runtime_id": str(owner.get("runtime_id") or ""),
+            "pid": owner.get("pid"),
+            "adb_target": str(owner.get("adb_target") or ""),
+            "target_generation": owner.get("target_generation"),
+            "state_request_id": current.get("control", {}).get(
+                "state_request_id"
+            ),
+        }
+        try:
+            saved = self.control_store.request_emulator_maintenance(
+                reason=(
+                    "operator requested a coordinated BlueStacks restart"
+                    if initiator == "operator"
+                    else str(
+                        assessment.get("reason") or "degradation detected"
+                    )
+                ),
+                source=(
+                    "windows-control-surface-operator"
+                    if initiator == "operator"
+                    else "windows-control-surface"
+                ),
+                runtime=runtime,
+                battle_scope=battle_scope,
+                initiator=initiator,
+                host_target=host_target,
+                trigger=trigger,
+                now=now,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            raise ControlSurfaceRequestError(
+                str(exc),
+                status=409,
+                code="maintenance_conflict",
+            ) from exc
+        response = self.status(now=now)
+        response["request"] = {
+            "accepted": True,
+            "action": "host_maintenance",
+            "disposition": (
+                "operator_requested"
+                if initiator == "operator"
+                else "automatic_requested"
+            ),
+            "request_id": saved["request_id"],
+        }
+        response["host_maintenance"]["request"] = saved
+        return response
 
     def apply_interactive_development_lease(
         self,
@@ -1420,7 +2292,20 @@ class ControlSurfaceService:
                 ),
             )
         except HostPerformancePayloadError as exc:
-            raise ControlSurfaceRequestError(str(exc)) from exc
+            aggregate_index = exc.aggregate_index
+            raise ControlSurfaceRequestError(
+                str(exc),
+                code=(
+                    "invalid_host_performance_aggregate"
+                    if aggregate_index is not None
+                    else "invalid_host_performance_request"
+                ),
+                details=(
+                    {"aggregate_index": aggregate_index}
+                    if aggregate_index is not None
+                    else None
+                ),
+            ) from exc
         except HostPerformanceStorageError as exc:
             raise ControlSurfaceRequestError(
                 f"Unable to persist host-performance telemetry: {exc}",
@@ -1432,7 +2317,7 @@ class ControlSurfaceService:
 
         if not isinstance(request, Mapping):
             raise ControlSurfaceRequestError("Request body must be a JSON object")
-        with self._process_action_lock:
+        with self._control_mutation_lock:
             return self._apply_control_locked(request)
 
     def _apply_control_locked(
@@ -1476,8 +2361,6 @@ class ControlSurfaceService:
                         current.get("control_model", {})
                         .get("strategy_scope", {})
                         .get("startup_default")
-                        if action == "start_battle"
-                        else None
                     ),
                     source="control-surface",
                 )
@@ -1546,30 +2429,14 @@ class ControlSurfaceService:
                     "Requested Return Control reconciliation; automation remains Paused"
                 )
             elif action == "pause":
-                current = self.status()
-                availability = (
-                    current.get("control_model", {})
-                    .get("actions", {})
-                    .get("pause", {})
-                )
-                if availability.get("available") is not True:
+                runtime_live = bool(self._runtime_evidence().get("active"))
+                if not runtime_live and self.process_manager is not None:
+                    runtime_live = bool(self.process_manager.status().get("active"))
+                if not runtime_live:
                     raise ControlSurfaceRequestError(
-                        str(availability.get("reason") or "Pause is unavailable"),
+                        "Start Automation before pausing action authority",
                         status=409,
-                        code=str(availability.get("code") or "unavailable"),
-                    )
-                active_manual = current.get("control_model", {}).get(
-                    "manual_control"
-                )
-                if (
-                    isinstance(active_manual, Mapping)
-                    and active_manual.get("status")
-                    not in MANUAL_CONTROL_TERMINAL_STATUSES
-                ):
-                    raise ControlSurfaceRequestError(
-                        "Take/Return Control owns the indefinite Pause",
-                        status=409,
-                        code="manual_control_active",
+                        code="process_stopped",
                     )
                 minutes = request.get("minutes")
                 resume_at = None
@@ -1594,30 +2461,28 @@ class ControlSurfaceService:
                         )
                     resume_at = datetime.now().timestamp() + (parsed_minutes * 60)
                     description = f"for {parsed_minutes:g} minutes"
-                if (
-                    minutes is None
-                    and current["control"].get("state") == "PAUSED"
-                    and current["control"].get("resume_at") is None
-                ):
-                    state_ack = current.get("acknowledgements", {}).get("state")
-                    if (
-                        isinstance(state_ack, Mapping)
-                        and state_ack.get("acknowledges_current") is True
-                    ):
-                        disposition = "no_op"
-                        audit = "Automation is already indefinitely Paused"
-                    else:
-                        disposition = "pending"
-                        audit = "Automation Pause is awaiting runtime acknowledgement"
-                else:
-                    self.control_store.set_state(
-                        "PAUSED",
+                try:
+                    saved = self.control_store.set_paused_unless_stopped(
                         resume_at=resume_at,
                         source="control-surface",
                     )
+                except ControlDirectiveError as exc:
+                    raise ControlSurfaceRequestError(
+                        str(exc), status=409, code="control_invalid"
+                    ) from exc
+                if str(saved.get("state") or "").upper() == "STOPPED":
+                    disposition = "no_op"
+                    audit = "Automation is already STOPPED; Pause did not override Stop"
+                else:
                     audit = f"Requested PAUSED {description}"
             elif action == "enable":
                 current = self.status()
+                effective_authority = str(
+                    current.get("control_model", {})
+                    .get("action_authority", {})
+                    .get("effective")
+                    or "unknown"
+                ).lower()
                 availability = (
                     current.get("control_model", {})
                     .get("actions", {})
@@ -1641,6 +2506,14 @@ class ControlSurfaceService:
                         status=409,
                         code="manual_control_invalid",
                     )
+                state_ack = current.get("acknowledgements", {}).get("state")
+                durable_state = str(
+                    current.get("control", {}).get("state") or ""
+                ).upper()
+                runtime_requires_fresh_enable = bool(
+                    durable_state == "RUNNING"
+                    and effective_authority != "enabled"
+                )
                 manual = current.get("control_model", {}).get("manual_control")
                 if (
                     isinstance(manual, Mapping)
@@ -1650,6 +2523,7 @@ class ControlSurfaceService:
                     if manual.get("status") not in {
                         "return_requested",
                         "awaiting_enable",
+                        "reconciling",
                         "awaiting_configuration",
                         "awaiting_manual_correction",
                     }:
@@ -1658,7 +2532,16 @@ class ControlSurfaceService:
                             status=409,
                             code="return_control_required",
                         )
-                    if manual.get("status") == "awaiting_enable":
+                    enable_already_requested = bool(
+                        manual.get("status") == "awaiting_enable"
+                        and str(
+                            current.get("control", {}).get("state") or ""
+                        ).upper()
+                        == "RUNNING"
+                        and current.get("control", {}).get("resume_at") is None
+                        and not runtime_requires_fresh_enable
+                    )
+                    if enable_already_requested:
                         disposition = "pending"
                         manual_control = dict(manual)
                         audit = "Automation Enable is already pending acknowledgement"
@@ -1667,23 +2550,78 @@ class ControlSurfaceService:
                             "awaiting_configuration",
                             "awaiting_manual_correction",
                         }
-                        manual_control = (
-                            self.control_store.enable_after_return_control(
-                                str(manual.get("manual_control_id") or ""),
+                        if manual.get("status") == "reconciling":
+                            if durable_state == "RUNNING":
+                                if runtime_requires_fresh_enable:
+                                    self.control_store.set_state(
+                                        "RUNNING",
+                                        source="control-surface",
+                                    )
+                                    audit = (
+                                        "Requested a fresh Automation Enable "
+                                        "while Return Control reporting remains "
+                                        "pending"
+                                    )
+                                else:
+                                    disposition = "no_op"
+                                    audit = (
+                                        "Automation is already Enabled; Return "
+                                        "Control reporting remains pending"
+                                    )
+                            else:
+                                self.control_store.set_state(
+                                    "RUNNING",
+                                    source="control-surface",
+                                )
+                                audit = (
+                                    "Requested Automation Enabled while Return "
+                                    "Control reporting remains pending"
+                                )
+                            manual_control = dict(manual)
+                        elif (
+                            runtime_requires_fresh_enable
+                            and manual.get("status") == "awaiting_enable"
+                            and str(
+                                current.get("control", {}).get("state") or ""
+                            ).upper()
+                            == "RUNNING"
+                        ):
+                            self.control_store.set_state(
+                                "RUNNING",
                                 source="control-surface",
                             )
-                        )
-                        audit = (
-                            "Requested Automation Enabled for a new Return "
-                            "Control configuration refresh"
-                            if retrying_configuration
-                            else "Requested Automation Enabled; Return Control "
-                            "must refresh save evidence before ordinary input"
-                        )
+                            manual_control = dict(manual)
+                            audit = (
+                                "Requested a fresh Automation Enable after "
+                                "the runtime remained safely Paused during "
+                                "Return Control"
+                            )
+                        else:
+                            manual_control = (
+                                self.control_store.enable_after_return_control(
+                                    str(manual.get("manual_control_id") or ""),
+                                    source="control-surface",
+                                )
+                            )
+                            audit = (
+                                "Requested Automation Enabled for a new Return "
+                                "Control configuration refresh"
+                                if retrying_configuration
+                                else "Requested Automation Enabled; Return Control "
+                                "must refresh save evidence before ordinary input"
+                            )
                 else:
-                    state_ack = current.get("acknowledgements", {}).get("state")
                     if current["control"].get("state") == "RUNNING":
-                        if (
+                        if runtime_requires_fresh_enable:
+                            self.control_store.set_state(
+                                "RUNNING",
+                                source="control-surface",
+                            )
+                            audit = (
+                                "Requested a fresh Automation Enable after "
+                                "the runtime remained safely Paused"
+                            )
+                        elif (
                             isinstance(state_ack, Mapping)
                             and state_ack.get("acknowledges_current") is True
                         ):
@@ -1711,12 +2649,10 @@ class ControlSurfaceService:
                     disposition = "no_op"
                     audit = "Automation input is already STOPPED"
                 else:
-                    self.control_store.interrupt_operator_workflows(
+                    self.control_store.set_state_and_interrupt_operator_workflows(
+                        "STOPPED",
                         "legacy STOPPED authority directive requested",
                         source="control-surface",
-                    )
-                    self.control_store.set_state(
-                        "STOPPED", source="control-surface"
                     )
                     audit = (
                         "Requested legacy STOPPED authority directive; process "
@@ -2046,15 +2982,12 @@ class ControlSurfaceService:
                             apply_mode="next_boundary",
                             source="control-surface-process-start",
                         )
-                    self.control_store.interrupt_operator_workflows(
-                        "a new automation process boundary started",
-                        source="control-surface-process-start",
-                    )
-                    # Process lifecycle and input authority are separate.  A
-                    # new process starts Paused and waits for explicit intent.
-                    self.control_store.set_state(
-                        "PAUSED", source="control-surface-process-start"
-                    )
+                    with self._control_mutation_lock:
+                        self.control_store.set_state_and_interrupt_operator_workflows(
+                            "PAUSED",
+                            "a new automation process boundary started",
+                            source="control-surface-process-start",
+                        )
                     if self.adb_connection_manager is not None:
                         self.adb_connection_manager.ensure_target(
                             before.get("adb_target"),
@@ -2069,9 +3002,11 @@ class ControlSurfaceService:
                 after = manager.status()
                 if not after.get("active"):
                     try:
-                        self.control_store.set_state(
-                            "STOPPED", source="control-surface-start-failure"
-                        )
+                        with self._control_mutation_lock:
+                            self.control_store.set_state(
+                                "STOPPED",
+                                source="control-surface-start-failure",
+                            )
                     except ControlDirectiveError:
                         pass
                 self._append_audit(f"Failed to start service: {exc}")
@@ -2091,14 +3026,13 @@ class ControlSurfaceService:
                 else:
                     # Persist intent before systemd signals the process so any live
                     # loop that observes the transition stops dispatching actions.
-                    self.control_store.interrupt_operator_workflows(
-                        "automation process stopped",
-                        source="control-surface-process-stop",
-                    )
-                    self.control_store.set_state(
-                        "STOPPED", source="control-surface-process-stop"
-                    )
-                    stopped = manager.stop()
+                    with self._control_mutation_lock:
+                        self.control_store.set_state_and_interrupt_operator_workflows(
+                            "STOPPED",
+                            "automation process stopped",
+                            source="control-surface-process-stop",
+                        )
+                        stopped = manager.stop()
                     if self.adb_connection_manager is not None:
                         self.adb_connection_manager.ensure_target(
                             stopped.get("adb_target"),
@@ -2329,17 +3263,22 @@ class ControlSurfaceService:
             )
 
         try:
-            pause_log_offset = _file_size(self.action_log)
+            previous_observation_id = str(
+                (
+                    (before.get("control_model") or {}).get("observation")
+                    or {}
+                ).get("observation_id")
+                or ""
+            )
             self.control_store.set_state(
                 "PAUSED",
                 source="control-surface-attached-restart",
             )
             self._wait_for_attached_restart_pause(
                 previous_pid=previous_pid,
-                log_offset=pause_log_offset,
+                previous_observation_id=previous_observation_id,
             )
 
-            log_offset = _file_size(self.action_log)
             stopped = manager.stop()
             if self.adb_connection_manager is not None:
                 self.adb_connection_manager.ensure_target(
@@ -2383,7 +3322,6 @@ class ControlSurfaceService:
 
             self._wait_for_replacement_runtime(
                 replacement_pid=replacement_pid,
-                log_offset=log_offset,
             )
 
             restored_state = original_state
@@ -2460,9 +3398,9 @@ class ControlSurfaceService:
         self,
         *,
         previous_pid: int,
-        log_offset: int,
+        previous_observation_id: str = "",
     ) -> dict[str, Any]:
-        """Require post-request Pause acknowledgement and fresh RUNNING proof."""
+        """Require an exact Pause receipt and a later runtime observation."""
 
         deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
         last_missing: list[str] = []
@@ -2470,31 +3408,23 @@ class ControlSurfaceService:
             status = self.status()
             process = status.get("process_service") or {}
             runtime = status.get("runtime") or {}
-            observation = status.get("observation") or {}
-            expected_state_request_id = status.get("control", {}).get(
-                "state_request_id"
+            acknowledgement = (
+                (status.get("acknowledgements") or {}).get("state") or {}
             )
-            appended = _lines_from_offset(self.action_log, log_offset)
-            parsed = [entry for line in appended if (entry := _parse_log_line(line))]
-            pause_indices = [
-                index
-                for index, entry in enumerate(parsed)
-                if (
-                    (match := _STATE_ACK_RE.fullmatch(entry["message"]))
-                    and match.group("value") == "PAUSED"
-                    and (
-                        expected_state_request_id is None
-                        or match.group("request_id")
-                        == expected_state_request_id
-                    )
-                )
-            ]
-            pause_consumed = bool(pause_indices)
+            observation = (
+                (status.get("control_model") or {}).get("observation") or {}
+            )
+            pause_consumed = bool(
+                acknowledgement.get("acknowledges_current") is True
+                and acknowledgement.get("value") == "PAUSED"
+            )
+            observation_id = str(observation.get("observation_id") or "")
             fresh_status = bool(
-                pause_indices
-                and any(
-                    index > pause_indices[-1] and entry["level"] == "STATUS"
-                    for index, entry in enumerate(parsed)
+                observation.get("available") is True
+                and observation_id
+                and (
+                    not previous_observation_id
+                    or observation_id != previous_observation_id
                 )
             )
             matching_owner = any(
@@ -2512,10 +3442,11 @@ class ControlSurfaceService:
                 last_missing.append("PAUSED control acknowledgement")
             if not fresh_status:
                 last_missing.append("post-request status observation")
-            elif observation.get("state") != "RUNNING":
+            elif observation.get("primary_state") != "RUNNING":
                 raise AutomationProcessError(
                     "Attached restart paused safely but the fresh runtime "
-                    f"observation was {observation.get('state') or 'UNKNOWN'}, "
+                    "observation was "
+                    f"{observation.get('primary_state') or 'UNKNOWN'}, "
                     "not RUNNING"
                 )
             if not last_missing:
@@ -2531,7 +3462,6 @@ class ControlSurfaceService:
         self,
         *,
         replacement_pid: int,
-        log_offset: int,
     ) -> dict[str, Any]:
         deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
         last_missing: list[str] = []
@@ -2539,43 +3469,25 @@ class ControlSurfaceService:
             status = self.status()
             process = status.get("process_service") or {}
             runtime = status.get("runtime") or {}
-            expected_state_request_id = status.get("control", {}).get(
-                "state_request_id"
+            acknowledgement = (
+                (status.get("acknowledgements") or {}).get("state") or {}
             )
-            appended = _lines_from_offset(self.action_log, log_offset)
-            parsed = [entry for line in appended if (entry := _parse_log_line(line))]
+            control_model = status.get("control_model") or {}
+            observation = control_model.get("observation") or {}
             matching_owner = any(
                 instance.get("active") and instance.get("pid") == replacement_pid
                 for instance in runtime.get("instances", [])
             )
-            policy_indices = [
-                index
-                for index, entry in enumerate(parsed)
-                if "[RUN_INIT] Startup gate policy=next_run" in entry["message"]
-            ]
-            pause_indices = [
-                index
-                for index, entry in enumerate(parsed)
-                if (
-                    (match := _STATE_ACK_RE.fullmatch(entry["message"]))
-                    and match.group("value") == "PAUSED"
-                    and (
-                        expected_state_request_id is None
-                        or match.group("request_id")
-                        == expected_state_request_id
-                    )
-                )
-                and policy_indices
-                and index > policy_indices[-1]
-            ]
-            policy_loaded = bool(policy_indices)
-            pause_consumed = bool(pause_indices)
+            policy_loaded = (
+                control_model.get("startup_gate_policy") == "next_run"
+            )
+            pause_consumed = bool(
+                acknowledgement.get("acknowledges_current") is True
+                and acknowledgement.get("value") == "PAUSED"
+            )
             first_status = bool(
-                pause_indices
-                and any(
-                    index > pause_indices[-1] and entry["level"] == "STATUS"
-                    for index, entry in enumerate(parsed)
-                )
+                observation.get("available") is True
+                and observation.get("observation_id")
             )
             last_missing = []
             if not (
@@ -2586,7 +3498,7 @@ class ControlSurfaceService:
             if not matching_owner:
                 last_missing.append("replacement ADB lock")
             if not policy_loaded:
-                last_missing.append("next_run startup log")
+                last_missing.append("next_run startup policy acknowledgement")
             if not pause_consumed:
                 last_missing.append("PAUSED control acknowledgement")
             if not first_status:
@@ -3110,107 +4022,86 @@ class ControlSurfaceService:
 
     def _latest_acknowledgements(
         self,
-        lines: Sequence[str],
+        runtime_authority: Mapping[str, Any],
         control: Mapping[str, Any],
     ) -> dict[str, Any]:
-        state_ack = None
-        mode_ack = None
-        game_speed_target_ack = None
-        adb_target_ack = None
-        strategy_ack = None
-        state_updated_at = control.get("state_updated_at")
-        mode_updated_at = control.get("mode_updated_at")
-        game_speed_target_updated_at = control.get(
-            "game_speed_target_updated_at"
-        )
-        adb_port_updated_at = control.get("adb_port_updated_at")
-        strategy_updated_at = control.get("strategy_updated_at")
-        legacy_updated_at = (
-            control.get("updated_at")
-            if (
-                state_updated_at is None
-                and mode_updated_at is None
-                and adb_port_updated_at is None
+        """Project only fresh, exact runtime-owned directive receipts."""
+
+        published = runtime_authority.get("acknowledgements")
+        if not isinstance(published, Mapping):
+            published = {}
+
+        def receipt(
+            field: str,
+            expected_value: object,
+            expected_request_id: object,
+        ) -> Optional[dict[str, Any]]:
+            candidate = published.get(field)
+            if not isinstance(candidate, Mapping):
+                return None
+            value = str(candidate.get("value") or "").strip()
+            request_id = str(candidate.get("request_id") or "").strip()
+            acknowledged_at = _parse_timestamp(
+                candidate.get("acknowledged_at")
             )
+            if (
+                not value
+                or not _CONTROL_REQUEST_ID_RE.fullmatch(request_id)
+                or acknowledged_at is None
+            ):
+                return None
+            requested_id = str(expected_request_id or "").strip()
+            return {
+                "value": value,
+                "at": acknowledged_at.isoformat(timespec="seconds"),
+                "request_id": request_id,
+                "acknowledges_current": bool(
+                    requested_id
+                    and request_id == requested_id
+                    and value == expected_value
+                ),
+            }
+
+        target = control.get("game_speed_target")
+        expected_speed = (
+            f"x{target:.1f}"
+            if isinstance(target, (int, float))
+            and not isinstance(target, bool)
             else None
         )
-        for line in reversed(lines):
-            entry = _parse_log_line(line)
-            if not entry:
-                continue
-            if state_ack is None and (match := _STATE_ACK_RE.fullmatch(entry["message"])):
-                state_ack = _ack_entry(
-                    entry,
-                    match.group("value"),
-                    control.get("state"),
-                    state_updated_at or legacy_updated_at,
-                    acknowledged_request_id=match.group("request_id"),
-                    expected_request_id=control.get("state_request_id"),
-                )
-            if mode_ack is None and (match := _MODE_ACK_RE.fullmatch(entry["message"])):
-                mode_value = normalize_automation_mode(match.group("value"))
-                mode_ack = _ack_entry(
-                    entry,
-                    mode_value,
-                    control.get("mode"),
-                    mode_updated_at or legacy_updated_at,
-                    acknowledged_request_id=match.group("request_id"),
-                    expected_request_id=control.get("mode_request_id"),
-                )
-            if game_speed_target_ack is None and (
-                match := _GAME_SPEED_TARGET_ACK_RE.fullmatch(entry["message"])
-            ):
-                target = control.get("game_speed_target")
-                expected_target = (
-                    f"x{target:.1f}"
-                    if isinstance(target, (int, float))
-                    and not isinstance(target, bool)
-                    else None
-                )
-                game_speed_target_ack = _ack_entry(
-                    entry,
-                    match.group("value"),
-                    expected_target,
-                    game_speed_target_updated_at,
-                )
-            if adb_target_ack is None and (
-                match := _ADB_TARGET_ACK_RE.fullmatch(entry["message"])
-            ):
-                expected_port = control.get("adb_port")
-                expected_target = (
-                    f"localhost:{expected_port}"
-                    if isinstance(expected_port, int)
-                    else None
-                )
-                adb_target_ack = _ack_entry(
-                    entry,
-                    match.group("value"),
-                    expected_target,
-                    adb_port_updated_at,
-                )
-            if strategy_ack is None and (
-                match := _STRATEGY_ACK_RE.fullmatch(entry["message"])
-            ):
-                strategy_ack = _ack_entry(
-                    entry,
-                    match.group("value"),
-                    control.get("strategy"),
-                    strategy_updated_at,
-                )
-            if (
-                state_ack is not None
-                and mode_ack is not None
-                and game_speed_target_ack is not None
-                and (control.get("adb_port") is None or adb_target_ack is not None)
-                and (control.get("strategy") is None or strategy_ack is not None)
-            ):
-                break
+        expected_port = control.get("adb_port")
+        expected_adb_target = (
+            f"localhost:{expected_port}"
+            if isinstance(expected_port, int)
+            and not isinstance(expected_port, bool)
+            else None
+        )
         return {
-            "state": state_ack,
-            "mode": mode_ack,
-            "game_speed_target": game_speed_target_ack,
-            "adb_target": adb_target_ack,
-            "strategy": strategy_ack,
+            "state": receipt(
+                "state",
+                control.get("state"),
+                control.get("state_request_id"),
+            ),
+            "mode": receipt(
+                "mode",
+                control.get("mode"),
+                control.get("mode_request_id"),
+            ),
+            "game_speed_target": receipt(
+                "game_speed_target",
+                expected_speed,
+                control.get("game_speed_target_request_id"),
+            ),
+            "adb_target": receipt(
+                "adb_target",
+                expected_adb_target,
+                control.get("adb_port_request_id"),
+            ),
+            "strategy": receipt(
+                "strategy",
+                control.get("strategy"),
+                control.get("strategy_request_id"),
+            ),
         }
 
     def _strategy_action_gate_status(
@@ -3232,6 +4123,7 @@ class ControlSurfaceService:
                 "runtime_active": False,
                 "owner": None,
                 "owner_matches_active_runtime": False,
+                "owner_matches_exact_runtime": False,
                 "gate_id": None,
                 "strategy": None,
                 "battle_scope": None,
@@ -3279,6 +4171,7 @@ class ControlSurfaceService:
                 "auxiliary_route": None,
                 "interactive_development_lease": None,
                 "control_model": None,
+                "acknowledgements": None,
                 "path": self._display_path(self.strategy_action_gate_path),
             }
             if error:
@@ -3317,6 +4210,18 @@ class ControlSurfaceService:
                 "the runtime-owned Strategy Gate snapshot has no valid owner PID"
             )
         owner_target = str(owner.get("adb_target") or "").strip()
+        owner_runtime_id = str(owner.get("runtime_id") or "").strip()
+        raw_target_generation = owner.get("target_generation")
+        owner_target_generation = (
+            raw_target_generation
+            if isinstance(raw_target_generation, int)
+            and not isinstance(raw_target_generation, bool)
+            and raw_target_generation >= 1
+            else None
+        )
+        exact_owner_declared = bool(
+            owner_runtime_id and owner_target_generation is not None
+        )
         observed_at = str(payload.get("observed_at") or "").strip()
         try:
             observed_timestamp = datetime.fromisoformat(observed_at).timestamp()
@@ -3343,7 +4248,19 @@ class ControlSurfaceService:
                 or owner_target == "unknown"
                 or str(instance.get("target") or "") == owner_target
             )
+            and (
+                not exact_owner_declared
+                or (
+                    str(instance.get("runtime_id") or "")
+                    == owner_runtime_id
+                    and instance.get("target_generation")
+                    == owner_target_generation
+                )
+            )
             for instance in (instances if isinstance(instances, list) else [])
+        )
+        owner_matches_exact_runtime = bool(
+            exact_owner_declared and owner_matches
         )
         runtime_active = payload.get("runtime_active") is True
         stale = bool(
@@ -3394,12 +4311,28 @@ class ControlSurfaceService:
         ):
             runtime_control_model = None
         elif runtime_control_model.get("observation") is not None:
+            normalized_observation = validate_observation(
+                runtime_control_model.get("observation")
+            )
+            if (
+                exact_owner_declared
+                and isinstance(normalized_observation, Mapping)
+                and normalized_observation.get("target_generation")
+                != owner_target_generation
+            ):
+                normalized_observation = None
             runtime_control_model = {
                 **dict(runtime_control_model),
-                "observation": validate_observation(
-                    runtime_control_model.get("observation")
-                ),
+                "observation": normalized_observation,
             }
+        runtime_acknowledgements = payload.get("acknowledgements")
+        if not (
+            not stale
+            and owner_matches_exact_runtime
+            and isinstance(runtime_acknowledgements, Mapping)
+            and runtime_acknowledgements.get("schema_version") == 1
+        ):
+            runtime_acknowledgements = None
         return {
             "schema_version": 1,
             "available": True,
@@ -3410,11 +4343,13 @@ class ControlSurfaceService:
             "stale_after_seconds": stale_after,
             "runtime_active": runtime_active,
             "owner": {
-                "runtime_id": str(owner.get("runtime_id") or ""),
+                "runtime_id": owner_runtime_id,
                 "pid": owner_pid,
                 "adb_target": owner_target or "unknown",
+                "target_generation": owner_target_generation,
             },
             "owner_matches_active_runtime": owner_matches,
+            "owner_matches_exact_runtime": owner_matches_exact_runtime,
             "gate_id": payload.get("gate_id"),
             "strategy": payload.get("strategy"),
             "battle_scope": payload.get("battle_scope"),
@@ -3470,6 +4405,11 @@ class ControlSurfaceService:
             "control_model": (
                 dict(runtime_control_model)
                 if isinstance(runtime_control_model, Mapping)
+                else None
+            ),
+            "acknowledgements": (
+                dict(runtime_acknowledgements)
+                if isinstance(runtime_acknowledgements, Mapping)
                 else None
             ),
             "path": self._display_path(self.strategy_action_gate_path),
@@ -3736,8 +4676,15 @@ class ControlSurfaceService:
         runtime_observation = None
         runtime_lifecycle: Mapping[str, Any] = {}
         runtime_strategy_scope: Mapping[str, Any] = {}
+        runtime_catastrophic_pause_hold: Mapping[str, Any] = {}
+        runtime_startup_gate_policy: Optional[str] = None
         runtime_model = runtime_authority.get("control_model")
         if isinstance(runtime_model, Mapping):
+            startup_gate_policy = str(
+                runtime_model.get("startup_gate_policy") or ""
+            ).strip().lower()
+            if startup_gate_policy in STARTUP_GATE_POLICIES:
+                runtime_startup_gate_policy = startup_gate_policy
             runtime_observation = validate_observation(
                 runtime_model.get("observation")
             )
@@ -3747,6 +4694,11 @@ class ControlSurfaceService:
             raw_strategy_scope = runtime_model.get("strategy_scope")
             if isinstance(raw_strategy_scope, Mapping):
                 runtime_strategy_scope = raw_strategy_scope
+            raw_catastrophic_hold = runtime_model.get(
+                "catastrophic_pause_hold"
+            )
+            if isinstance(raw_catastrophic_hold, Mapping):
+                runtime_catastrophic_pause_hold = raw_catastrophic_hold
         observation_age_seconds: Optional[int] = None
         if runtime_observation is not None:
             observed_at = _parse_timestamp(runtime_observation.get("observed_at"))
@@ -3822,6 +4774,13 @@ class ControlSurfaceService:
             and setup_capture.get("status")
             in {"requested", "acknowledged", "capturing"}
         )
+        emulator_maintenance = normalize_emulator_maintenance(
+            control.get("emulator_maintenance")
+        )
+        maintenance_busy = bool(
+            emulator_maintenance is not None
+            and emulator_maintenance.get("state") != "terminal"
+        )
 
         def action_availability(
             action_key: str,
@@ -3834,6 +4793,14 @@ class ControlSurfaceService:
                     "available": False,
                     "code": "control_invalid",
                     "reason": control_error,
+                }
+            if maintenance_busy:
+                return {
+                    "available": False,
+                    "code": "emulator_maintenance_active",
+                    "reason": (
+                        "BlueStacks recovery currently owns all game input"
+                    ),
                 }
             if not process_live:
                 return {
@@ -3920,12 +4887,19 @@ class ControlSurfaceService:
             return {
                 "available": True,
                 "code": "available",
-                "reason": "the explicit intent matches fresh observation",
+                "reason": (
+                    "Attach will use the accepted selected Strategy; a battle "
+                    "that is incompatible or cannot be verified will continue "
+                    "observation-only and degraded"
+                    if action_key == "attach_battle"
+                    else "the explicit intent matches fresh observation"
+                ),
             }
 
         take_manual_available = bool(
             not control_error
             and process_live
+            and state_request != "STOPPED"
             and evidence is not None
             and not manual_busy
             and not manual_error
@@ -3941,18 +4915,22 @@ class ControlSurfaceService:
                     "control_invalid"
                     if control_error
                     else (
-                        "manual_control_invalid"
-                        if manual_error
+                        "process_stopping"
+                        if state_request == "STOPPED"
                         else (
-                            "manual_control_active"
-                            if manual_busy
+                            "manual_control_invalid"
+                            if manual_error
                             else (
-                                "setup_capture_active"
-                                if setup_capture_input_busy
+                                "manual_control_active"
+                                if manual_busy
                                 else (
-                                    "fresh_observation_unavailable"
-                                    if process_live
-                                    else "process_stopped"
+                                    "setup_capture_active"
+                                    if setup_capture_input_busy
+                                    else (
+                                        "fresh_observation_unavailable"
+                                        if process_live
+                                        else "process_stopped"
+                                    )
                                 )
                             )
                         )
@@ -3966,15 +4944,19 @@ class ControlSurfaceService:
                     control_error
                     if control_error
                     else (
-                        manual_error
-                        if manual_error
+                        "Start Automation before requesting manual control"
+                        if state_request == "STOPPED"
                         else (
-                            "manual control is already in progress"
-                            if manual_busy
+                            manual_error
+                            if manual_error
                             else (
-                                "save-backed setup capture currently owns device input"
-                                if setup_capture_input_busy
-                                else "fresh live observation is required"
+                                "manual control is already in progress"
+                                if manual_busy
+                                else (
+                                    "save-backed setup capture currently owns device input"
+                                    if setup_capture_input_busy
+                                    else "fresh live observation is required"
+                                )
                             )
                         )
                     )
@@ -4094,29 +5076,66 @@ class ControlSurfaceService:
             isinstance(strategy_ack, Mapping)
             and strategy_ack.get("acknowledges_current") is True
         )
-        acknowledged_strategy = (
-            str(strategy_ack.get("value") or "").strip().lower()
-            if isinstance(strategy_ack, Mapping)
-            else ""
+        runtime_scope_current = bool(
+            runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_active_runtime") is True
         )
+        authoritative_runtime_scope = bool(
+            runtime_scope_current
+            and runtime_authority.get("owner_matches_exact_runtime") is True
+            and "startup_default" in runtime_strategy_scope
+            and "pending_next_boundary" in runtime_strategy_scope
+        )
+        runtime_startup_strategy = str(
+            runtime_strategy_scope.get("startup_default") or ""
+        ).strip().lower()
         runtime_active_strategy = str(
             runtime_strategy_scope.get("active_battle") or ""
         ).strip().lower()
         active_strategy = (
             runtime_active_strategy
-            if runtime_lifecycle.get("active_battle_adopted") is True
+            if runtime_scope_current
+            and runtime_lifecycle.get("active_battle_adopted") is True
             and runtime_active_strategy
             else None
         )
-        pending_strategy = (
-            configured_strategy
-            if control.get("strategy_apply_mode") == "next_boundary"
-            and (
-                not strategy_ack_current
-                or active_strategy != configured_strategy
-            )
-            else None
+        startup_strategy = (
+            runtime_startup_strategy
+            if authoritative_runtime_scope and runtime_startup_strategy
+            else str(process.get("strategy") or configured_strategy)
         )
+        if authoritative_runtime_scope:
+            pending_strategy = (
+                str(
+                    runtime_strategy_scope.get("pending_next_boundary")
+                    or ""
+                ).strip().lower()
+                or None
+            )
+            pending_active_strategy = (
+                str(
+                    runtime_strategy_scope.get("pending_active_battle")
+                    or ""
+                ).strip().lower()
+                or None
+            )
+        else:
+            pending_strategy = (
+                configured_strategy
+                if control.get("strategy_apply_mode") == "next_boundary"
+                and (
+                    not strategy_ack_current
+                    or active_strategy != configured_strategy
+                )
+                else None
+            )
+            pending_active_strategy = (
+                configured_strategy
+                if control.get("strategy_apply_mode") == "active_battle"
+                and not strategy_ack_current
+                else None
+            )
         mode = str(control.get("mode") or "NEXT_BATTLE").upper()
         terminal_labels = {
             "NEXT_BATTLE": "continue_automatically",
@@ -4145,12 +5164,14 @@ class ControlSurfaceService:
             else None
         )
         terminal_evidence_unavailable = bool(
-            isinstance(manual_terminal, Mapping)
+            manual_busy
+            and isinstance(manual_terminal, Mapping)
             and manual_terminal.get("status") == "unavailable"
         )
         enable_available = bool(
             not control_error
             and process_live
+            and state_request != "STOPPED"
             and not manual_error
             and not terminal_evidence_unavailable
             and (
@@ -4159,6 +5180,7 @@ class ControlSurfaceService:
                 in {
                     "return_requested",
                     "awaiting_enable",
+                    "reconciling",
                     "awaiting_configuration",
                     "awaiting_manual_correction",
                 }
@@ -4169,6 +5191,9 @@ class ControlSurfaceService:
             enable_reason = control_error
         elif not process_live:
             enable_code = "process_stopped"
+            enable_reason = "Start Automation before enabling actions"
+        elif state_request == "STOPPED":
+            enable_code = "process_stopping"
             enable_reason = "Start Automation before enabling actions"
         elif manual_error:
             enable_code = "manual_control_invalid"
@@ -4182,6 +5207,7 @@ class ControlSurfaceService:
         elif manual_busy and manual.get("status") not in {
             "return_requested",
             "awaiting_enable",
+            "reconciling",
             "awaiting_configuration",
             "awaiting_manual_correction",
         }:
@@ -4203,8 +5229,6 @@ class ControlSurfaceService:
         pause_available = bool(
             not control_error
             and process_live
-            and not manual_error
-            and not manual_busy
         )
         if control_error:
             pause_code = "control_invalid"
@@ -4212,15 +5236,12 @@ class ControlSurfaceService:
         elif not process_live:
             pause_code = "process_stopped"
             pause_reason = "Start Automation before pausing action authority"
-        elif manual_error:
-            pause_code = "manual_control_invalid"
-            pause_reason = manual_error
-        elif manual_busy:
-            pause_code = "manual_control_active"
-            pause_reason = "Take/Return Control already owns action authority"
         else:
             pause_code = "available"
-            pause_reason = "request zero automated device input"
+            pause_reason = (
+                "request zero automated device input; Pause remains available "
+                "during every workflow"
+            )
 
         manage_active_battle_available = bool(
             not control_error
@@ -4405,8 +5426,24 @@ class ControlSurfaceService:
                 "request a new forced save and review without applying anything",
             )
 
+        if maintenance_busy:
+            maintenance_unavailable = {
+                "available": False,
+                "code": "emulator_maintenance_active",
+                "reason": "BlueStacks recovery currently owns all game input",
+            }
+            take_manual = dict(maintenance_unavailable)
+            return_control = dict(maintenance_unavailable)
+            manage_active_battle_available = False
+            manage_active_battle_code = "emulator_maintenance_active"
+            manage_active_battle_reason = maintenance_unavailable["reason"]
+            capture_available = False
+            capture_code = "emulator_maintenance_active"
+            capture_reason = maintenance_unavailable["reason"]
+
         return {
             "schema_version": 1,
+            "startup_gate_policy": runtime_startup_gate_policy,
             "process": {
                 "state": process_state,
                 "live": process_live,
@@ -4428,6 +5465,13 @@ class ControlSurfaceService:
                 "acknowledged": state_ack_current,
                 "effective": effective_authority,
                 "observation_continues_while_paused": True,
+                "catastrophic_hold": bool(
+                    runtime_catastrophic_pause_hold.get("active") is True
+                ),
+                "catastrophic_hold_reason": (
+                    str(runtime_catastrophic_pause_hold.get("reason") or "")
+                    or None
+                ),
                 "meaning": (
                     "Paused means zero automated device input; observation may continue. "
                     "Enabled permits guarded actions and does not assert that the game is RUNNING."
@@ -4435,12 +5479,21 @@ class ControlSurfaceService:
             },
             "observation": observation,
             "strategy_scope": {
-                "startup_default": str(process.get("strategy") or configured_strategy),
+                "startup_default": startup_strategy,
                 "active_battle": active_strategy,
                 "pending_next_boundary": pending_strategy,
+                "pending_active_battle": pending_active_strategy,
                 "request_id": control.get("strategy_request_id"),
                 "observation_only": bool(
                     runtime_strategy_scope.get("observation_only") is True
+                ),
+                "degradation": (
+                    dict(runtime_strategy_scope["degradation"])
+                    if isinstance(
+                        runtime_strategy_scope.get("degradation"),
+                        Mapping,
+                    )
+                    else None
                 ),
             },
             "when_battle_ends": {
@@ -4536,10 +5589,21 @@ class ControlSurfaceService:
             held = _is_lock_held(path)
             pid = metadata.get("pid")
             alive = _pid_alive(pid)
+            runtime_id = str(metadata.get("runtime_id") or "").strip()
+            raw_target_generation = metadata.get("target_generation")
+            target_generation = (
+                raw_target_generation
+                if isinstance(raw_target_generation, int)
+                and not isinstance(raw_target_generation, bool)
+                and raw_target_generation >= 1
+                else None
+            )
             item = {
                 "file": path.name,
                 "pid": pid if isinstance(pid, int) else None,
                 "target": metadata.get("target"),
+                "runtime_id": runtime_id or None,
+                "target_generation": target_generation,
                 "metadata_state": metadata.get("state"),
                 "started_at": metadata.get("started_at"),
                 "released_at": metadata.get("released_at"),
@@ -4577,6 +5641,38 @@ class ControlSurfaceService:
         except OSError as exc:
             return f"Control changed, but audit logging failed: {exc}"
         return None
+
+
+def _save_mapping_integration_error_status(code: str) -> int:
+    if code in {
+        "mapping_candidate_record_not_found",
+    }:
+        return 404
+    if code in {
+        "git_inspection_failed",
+        "integration_lock_unavailable",
+        "commit_state_uncertain",
+        "transaction_write_failed",
+        "legacy_transaction_recovery_required",
+        "decode_receipt_store_invalid",
+        "decode_receipt_conflict",
+        "canonical_status_unavailable",
+    }:
+        return 503
+    return 409
+
+
+def _save_mapping_integration_disposition(code: str) -> str:
+    if code in {
+        "commit_state_uncertain",
+        "transaction_write_failed",
+        "transaction_recovery_required",
+        "legacy_transaction_recovery_required",
+        "decode_receipt_conflict",
+        "canonical_status_unavailable",
+    }:
+        return "unconfirmed"
+    return "failed"
 
 
 def _battle_summary(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -4668,6 +5764,80 @@ def _battle_sort_key(item: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _same_host_transition(
+    stored: object,
+    candidate: Mapping[str, object],
+    *,
+    include_previous: bool,
+) -> bool:
+    if not isinstance(stored, Mapping):
+        return False
+    keys = [
+        "host_id",
+        "adb_port",
+        "process_id",
+        "process_started_at",
+        "executable_path",
+        "instance_name",
+    ]
+    if include_previous:
+        keys.extend(["previous_process_id", "previous_process_started_at"])
+    return all(stored.get(key) == candidate.get(key) for key in keys)
+
+
+def _same_bluestacks_listener_identity(
+    stored: object,
+    candidate: Mapping[str, object],
+) -> bool:
+    if not isinstance(stored, Mapping):
+        return False
+    try:
+        stored_port = int(stored.get("adb_port"))
+        candidate_port = int(candidate.get("adb_port"))
+        stored_pid = int(stored.get("process_id"))
+        candidate_pid = int(candidate.get("process_id"))
+        stored_started_text = str(
+            stored.get("process_started_at") or ""
+        ).strip()
+        candidate_started_text = str(
+            candidate.get("process_started_at") or ""
+        ).strip()
+        if (
+            not stored_started_text
+            or len(stored_started_text) > 64
+            or not candidate_started_text
+            or len(candidate_started_text) > 64
+        ):
+            return False
+        stored_started = datetime.fromisoformat(
+            stored_started_text.replace("Z", "+00:00")
+        )
+        candidate_started = datetime.fromisoformat(
+            candidate_started_text.replace("Z", "+00:00")
+        )
+    except (TypeError, ValueError):
+        return False
+    if stored_started.tzinfo is None or candidate_started.tzinfo is None:
+        return False
+    normalized_stored_path = str(
+        stored.get("executable_path") or ""
+    ).replace("\\", "/").casefold()
+    normalized_candidate_path = str(
+        candidate.get("executable_path") or ""
+    ).replace("\\", "/").casefold()
+    return bool(
+        str(stored.get("host_id") or "").casefold()
+        == str(candidate.get("host_id") or "").casefold()
+        and stored_port == candidate_port
+        and stored_pid == candidate_pid
+        and stored_started_text == candidate_started_text
+        and normalized_stored_path
+        and normalized_stored_path == normalized_candidate_path
+        and str(stored.get("instance_name") or "").casefold()
+        == str(candidate.get("instance_name") or "").casefold()
+    )
+
+
 def _utc_datetime(value: Optional[datetime]) -> datetime:
     current = datetime.now(timezone.utc) if value is None else value
     if current.tzinfo is None:
@@ -4724,26 +5894,6 @@ def _tail_line_records_with_source(
         )
         cursor += len(raw_line)
     return records, f"{source.st_dev}:{source.st_ino}", size
-
-
-def _file_size(path: Path) -> int:
-    try:
-        return path.stat().st_size
-    except OSError:
-        return 0
-
-
-def _lines_from_offset(path: Path, offset: int) -> list[str]:
-    """Read complete log lines appended after a captured byte offset."""
-
-    try:
-        with path.open("rb") as handle:
-            size = handle.seek(0, os.SEEK_END)
-            handle.seek(offset if 0 <= offset <= size else 0)
-            data = handle.read()
-    except OSError:
-        return []
-    return data.decode("utf-8", errors="replace").splitlines()
 
 
 def _attach_operation_ids(
@@ -5031,40 +6181,6 @@ def _parse_timestamp(value: object) -> Optional[datetime]:
     if parsed.tzinfo is None:
         parsed = parsed.astimezone()
     return parsed
-
-
-def _ack_entry(
-    entry: Mapping[str, str],
-    value: str,
-    expected_value: object,
-    expected_updated_at: object,
-    *,
-    acknowledged_request_id: object = None,
-    expected_request_id: object = None,
-) -> dict[str, Any]:
-    acknowledged_at = _parse_timestamp(entry.get("timestamp"))
-    requested_at = _parse_timestamp(expected_updated_at)
-    observed_request_id = str(acknowledged_request_id or "").strip() or None
-    requested_id = str(expected_request_id or "").strip() or None
-    is_current = value == expected_value
-    if requested_id is not None:
-        is_current = bool(
-            is_current and observed_request_id == requested_id
-        )
-    elif requested_at is not None:
-        is_current = bool(
-            is_current
-            and acknowledged_at is not None
-            and acknowledged_at >= requested_at
-        )
-    return {
-        "value": value,
-        "at": acknowledged_at.isoformat(timespec="seconds")
-        if acknowledged_at
-        else entry.get("timestamp"),
-        "request_id": observed_request_id,
-        "acknowledges_current": is_current,
-    }
 
 
 def _none_if_dash(value: str) -> Optional[str]:

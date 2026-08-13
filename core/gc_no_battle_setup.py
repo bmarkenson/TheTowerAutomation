@@ -48,6 +48,9 @@ from core.player_save import (
     SAVE_ACCEPTED_DISPOSITIONS,
     SAVE_MISMATCH_DISPOSITION,
 )
+from core.player_save_mapping_candidates import (
+    build_mapping_candidate_ui_evidence,
+)
 from core.poison_swamp_stun import (
     PoisonSwampStunResult,
     ensure_poison_swamp_stun,
@@ -224,6 +227,8 @@ def run_gc_no_battle_setup(
     save_decisions: Mapping[str, Mapping[str, Any]] | None = None,
     snapshot_invalidation_fn: Callable[..., None] | None = None,
     save_ui_verification_fn: Callable[..., bool] | None = None,
+    save_mapping_observation_fn: Callable[..., int] | None = None,
+    save_mapping_window_close_fn: Callable[[str], None] | None = None,
     capture_fn: Callable[[], Any] = capture_adb_screenshot,
     detector: Callable[[Any], Mapping[str, Any]] = detect_state_and_overlays,
     detect_home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
@@ -321,18 +326,26 @@ def run_gc_no_battle_setup(
 
     def guarded_safe_tap(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return original_safe_tap_fn(*args, **kwargs)
 
     def guarded_safe_long_press(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return original_safe_long_press_fn(*args, **kwargs)
 
     def guarded_visible_tap(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return original_tap_visible_fn(*args, **kwargs)
 
     def guarded_swipe(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return original_swipe_fn(*args, **kwargs)
 
     def guarded_workshop_swipe(*args, **kwargs):
@@ -352,6 +365,8 @@ def run_gc_no_battle_setup(
     snapshot_invalidated = False
     ui_verified_checks: dict[str, str] = {}
     contradictions: list[str] = []
+    mapping_candidates_recorded = 0
+    mapping_observations_allowed = True
 
     def save_accepted(check_id: str) -> bool:
         return not snapshot_invalidated and check_id in accepted_save_decisions
@@ -450,7 +465,75 @@ def run_gc_no_battle_setup(
         )
         return normalized
 
+    def record_mapping_observation(
+        check_id: str,
+        payload: Mapping[str, Any],
+    ) -> None:
+        nonlocal mapping_candidates_recorded
+        if (
+            save_mapping_observation_fn is None
+            or snapshot_invalidated
+            or not mapping_observations_allowed
+        ):
+            return
+        try:
+            recorded = save_mapping_observation_fn(check_id, payload)
+        except Exception as exc:
+            log(
+                "[PLAYER_SAVE_MAPPING] Home observation callback failed: "
+                f"check={check_id} reason={exc}; setup authority is unchanged",
+                "DEBUG",
+            )
+            return
+        if type(recorded) is int and recorded > 0:
+            mapping_candidates_recorded += recorded
+
+    def begin_repair(reason: str) -> None:
+        nonlocal mapping_observations_allowed
+        if not mapping_observations_allowed:
+            return
+        mapping_observations_allowed = False
+        if save_mapping_window_close_fn is not None:
+            try:
+                save_mapping_window_close_fn(reason)
+            except Exception:
+                log(
+                    "[PLAYER_SAVE_MAPPING] Candidate window close callback "
+                    "failed; later observations remain disabled locally",
+                    "DEBUG",
+                )
+
+    def record_module_mapping_observation(module_evidence: Any) -> None:
+        if getattr(module_evidence, "fully_observed", False) is not True:
+            return
+        slots = tuple(getattr(module_evidence, "slots", ()) or ())
+        if len(slots) != 8:
+            return
+        locator_values: dict[str, str] = {}
+        locator_scopes: dict[str, dict[str, str]] = {}
+        for slot in slots:
+            slot_key = str(getattr(slot, "slot_key", "") or "")
+            family = str(getattr(slot, "family", "") or "")
+            role = str(getattr(slot, "role", "") or "")
+            actual = getattr(slot, "actual", None)
+            if not slot_key or not family or not role or actual is None:
+                return
+            locator_values[slot_key] = str(actual)
+            locator_scopes[slot_key] = {
+                "slot_key": slot_key,
+                "family": family,
+                "role": role,
+            }
+        payload = build_mapping_candidate_ui_evidence(
+            "modules",
+            canonical_values=list(locator_values.values()),
+            locator_values=locator_values,
+            locator_scopes=locator_scopes,
+        )
+        record_mapping_observation("modules", payload)
+
     def record_repair(description: str) -> None:
+        begin_repair(f"home_repair:{description}")
         repairs.append(description)
         log(
             f"[HOME_PREFLIGHT] Repair completed; {description}",
@@ -497,6 +580,9 @@ def run_gc_no_battle_setup(
         )
         save_payload["remaining_carry"] = list(
             save_payload["remaining_accepted_checks"]
+        )
+        save_payload["mapping_candidates_recorded"] = (
+            mapping_candidates_recorded
         )
 
     current = screenshot if screenshot is not None else capture_fn()
@@ -697,6 +783,10 @@ def run_gc_no_battle_setup(
                         check_id
                         for check_id in perk_fields
                         if check_id in active_waivers or save_accepted(check_id)
+                    ),
+                    mapping_observation_fn=record_mapping_observation,
+                    repair_observer_fn=lambda check_id: begin_repair(
+                        f"perk_repair:{check_id}"
                     ),
                     sleep_fn=sleep_fn,
                     operator_workflow=False,
@@ -1114,6 +1204,19 @@ def run_gc_no_battle_setup(
                 detector,
                 tap_visible_fn,
                 sleep_fn,
+                initial_evidence_observer_fn=lambda observed: (
+                    record_mapping_observation(
+                        current_check,
+                        build_mapping_candidate_ui_evidence(
+                            current_check,
+                            canonical_values=list(observed),
+                            locator_values={},
+                        ),
+                    )
+                ),
+                repair_observer_fn=lambda: begin_repair(
+                    "guardian_chip_repair"
+                ),
             )
             record_ui_verification(
                 current_check,
@@ -1199,6 +1302,7 @@ def run_gc_no_battle_setup(
             module_repairs: list[Any] = []
 
             def observe_module_repairs(slots: Sequence[Any]) -> None:
+                begin_repair("module_loadout_repair")
                 module_repairs.extend(slots)
 
             module_evidence = ensure_modules_fn(
@@ -1210,6 +1314,9 @@ def run_gc_no_battle_setup(
                 swipe_fn=swipe_fn,
                 sleep_fn=sleep_fn,
                 repair_observer_fn=observe_module_repairs,
+                initial_evidence_observer_fn=(
+                    record_module_mapping_observation
+                ),
             )
             if not module_evidence.valid:
                 raise _SetupFailure(
@@ -1256,6 +1363,7 @@ def run_gc_no_battle_setup(
                 modules,
                 requirements["modules"],
             )
+            record_module_mapping_observation(module_evidence)
             module_payload = module_evidence.as_dict()
             module_payload.update(mode=module_mode, checked=True)
             record_ui_verification(current_check, changed=False)
@@ -2043,6 +2151,9 @@ def _ensure_guardian_loadout(
     detector,
     tap_visible_fn,
     sleep_fn,
+    *,
+    initial_evidence_observer_fn: Callable[[Sequence[str]], None] | None = None,
+    repair_observer_fn: Callable[[], None] | None = None,
 ):
     required_chips = {str(chip).strip() for chip in required or ()}
     if required_chips == {"Fetch", "Summon", "Scout"}:
@@ -2097,6 +2208,32 @@ def _ensure_guardian_loadout(
     }
     current = frame
     changed: list[str] = []
+    repair_announced = False
+
+    def announce_repair() -> None:
+        nonlocal repair_announced
+        if repair_announced:
+            return
+        repair_announced = True
+        if repair_observer_fn is not None:
+            repair_observer_fn()
+
+    initial_states = set(detector(current).get("secondary_states") or ())
+    known_guardians = {"Attack", "Ally", "Fetch", "Scout", "Summon"}
+    initial_guardians = sorted(
+        chip
+        for chip in known_guardians
+        if f"GUARDIAN_{chip.upper()}_EQUIPPED" in initial_states
+    )
+    if len(initial_guardians) == 3 and initial_evidence_observer_fn is not None:
+        try:
+            initial_evidence_observer_fn(tuple(initial_guardians))
+        except Exception as exc:
+            log(
+                "[PLAYER_SAVE_MAPPING] Initial Guardian observation callback "
+                f"failed: {exc}",
+                "DEBUG",
+            )
     for (
         expected_secondary,
         replacement_source_secondary,
@@ -2110,6 +2247,7 @@ def _ensure_guardian_loadout(
             replacement_source_secondary is not None
             and replacement_source_secondary in detected
         ):
+            announce_repair()
             current = _replace_guardian_chip(
                 current,
                 wrong_label=wrong_label,
@@ -2146,6 +2284,7 @@ def _ensure_guardian_loadout(
             replacement_source_secondary is not None
             and replacement_source_secondary in detected
         ):
+            announce_repair()
             current = _replace_guardian_chip(
                 current,
                 wrong_label=wrong_label,
@@ -2163,6 +2302,7 @@ def _ensure_guardian_loadout(
                 .title()
             )
             continue
+        announce_repair()
         if not tap_visible_fn(inventory_label, screenshot=current, retries=1):
             raise _SetupFailure(
                 f"Guardian empty-slot target missing: {inventory_label}"
@@ -2383,10 +2523,14 @@ def recover_gc_no_battle_setup_home(
 
     def guarded_safe_tap(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return safe_tap_fn(*args, **kwargs)
 
     def guarded_visible_tap(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return tap_visible_fn(*args, **kwargs)
 
     return _recover_home(

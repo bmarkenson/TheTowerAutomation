@@ -21,6 +21,7 @@ from utils.logger import log
 from core.adb_utils import resolve_adb_device, screencap_png, screencap_raw
 from core.screen_geometry import (
     CANONICAL_SCREEN_SIZE,
+    UnsupportedDeviceScreenSize,
     record_device_screen_size,
 )
 
@@ -34,6 +35,7 @@ class ScreenshotFailure(str, Enum):
     EMPTY = "empty"
     MALFORMED = "malformed"
     INCOMPLETE = "incomplete"
+    UNSUPPORTED_GEOMETRY = "unsupported_geometry"
     ERROR = "error"
 
 
@@ -184,7 +186,18 @@ def capture_adb_screenshot_result(
 
             captured_at = datetime.now(timezone.utc)
             native_height, native_width = img.shape[:2]
-            img = normalize_device_screenshot(img, device_id=device_id)
+            try:
+                img = normalize_device_screenshot(img, device_id=device_id)
+            except UnsupportedDeviceScreenSize as exc:
+                return ScreenshotCaptureResult(
+                    None,
+                    ScreenshotFailure.UNSUPPORTED_GEOMETRY,
+                    str(exc),
+                    captured_at=captured_at,
+                    adb_target=device_id,
+                    native_width=native_width,
+                    native_height=native_height,
+                )
             if img is not None:
                 _log_incomplete_capture_recovery("PNG", attempt)
                 return ScreenshotCaptureResult(

@@ -31,6 +31,13 @@
       <Setter Property="Foreground" Value="#FFACB9" />
       <Setter Property="BorderBrush" Value="#8D4050" />
     </Style>
+    <Style x:Key="DashboardCard" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="12" />
+    </Style>
     <Style x:Key="ActiveSelectionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Background" Value="#0E4E67" />
       <Setter Property="Foreground" Value="#BCEEFF" />
@@ -72,6 +79,112 @@
           <Setter Property="Foreground" Value="#7890AC" />
         </Trigger>
       </Style.Triggers>
+    </Style>
+    <Style TargetType="Expander">
+      <Setter Property="Background" Value="#182338" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#344660" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="OverridesDefaultStyle" Value="True" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type Expander}">
+            <Grid SnapsToDevicePixels="True">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+              <ToggleButton x:Name="HeaderToggle"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Foreground="{TemplateBinding Foreground}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                            Padding="{TemplateBinding Padding}"
+                            Content="{TemplateBinding Header}"
+                            ContentTemplate="{TemplateBinding HeaderTemplate}"
+                            IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border x:Name="HeaderChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2"
+                            Padding="{TemplateBinding Padding}">
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          Content="{TemplateBinding Content}"
+                                          ContentTemplate="{TemplateBinding ContentTemplate}"
+                                          RecognizesAccessKey="True"
+                                          TextElement.Foreground="{TemplateBinding Foreground}" />
+                        <Path Grid.Column="1"
+                              x:Name="Chevron"
+                              Width="8"
+                              Height="5"
+                              Margin="8,0,0,0"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Data="M 0 0 L 4 4 L 8 0"
+                              Stroke="{TemplateBinding Foreground}"
+                              StrokeThickness="1.5"
+                              Stretch="Fill" />
+                      </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="HeaderChrome" Property="Background" Value="#1B2A42" />
+                        <Setter TargetName="HeaderChrome" Property="BorderBrush" Value="#4B617F" />
+                      </Trigger>
+                      <Trigger Property="IsKeyboardFocused" Value="True">
+                        <Setter TargetName="HeaderChrome" Property="BorderBrush" Value="#62D5FF" />
+                      </Trigger>
+                      <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="HeaderChrome" Property="Background" Value="#0E3448" />
+                        <Setter TargetName="HeaderChrome" Property="BorderBrush" Value="#62D5FF" />
+                        <Setter TargetName="Chevron" Property="Data" Value="M 0 4 L 4 0 L 8 4" />
+                      </Trigger>
+                      <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Foreground" Value="#7890AC" />
+                        <Setter TargetName="HeaderChrome" Property="Background" Value="#121B2B" />
+                        <Setter TargetName="HeaderChrome" Property="BorderBrush" Value="#263349" />
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <Border Grid.Row="1"
+                      x:Name="ExpandSite"
+                      Visibility="Collapsed"
+                      Background="#111827"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="1,0,1,1"
+                      Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                  Content="{TemplateBinding Content}"
+                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                  TextElement.Foreground="{TemplateBinding Foreground}" />
+              </Border>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsExpanded" Value="True">
+                <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style TargetType="ComboBox">
       <Setter Property="Background" Value="#182338" />
@@ -243,6 +356,30 @@
       <Setter Property="Foreground" Value="#93A4BB" />
       <Setter Property="Padding" Value="8" />
       <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style TargetType="Menu">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style TargetType="MenuItem">
+      <Setter Property="Background" Value="#111827" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#263349" />
+      <Setter Property="Padding" Value="10,6" />
+      <Style.Triggers>
+        <Trigger Property="IsHighlighted" Value="True">
+          <Setter Property="Background" Value="#0E4E67" />
+          <Setter Property="Foreground" Value="#BCEEFF" />
+        </Trigger>
+        <Trigger Property="IsSubmenuOpen" Value="True">
+          <Setter Property="Background" Value="#0E4E67" />
+          <Setter Property="Foreground" Value="#BCEEFF" />
+        </Trigger>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Foreground" Value="#5F6F85" />
+        </Trigger>
+      </Style.Triggers>
     </Style>
     <Style TargetType="TabItem">
       <Setter Property="Background" Value="#151F31" />

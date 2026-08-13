@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 import hashlib
 import json
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionType,
@@ -34,9 +34,13 @@ class PlayerSaveTemporalClass(str, Enum):
 ROUND_INVARIANT_ATTACHMENT_CHECKS = frozenset(
     {
         "workshop_preset",
+        "free_upgrade_locks",
         "guardian_chips",
         "bots_preset",
         "modules",
+        "perk_bans",
+        "perk_first_choice",
+        "perk_auto_pick_order",
     }
 )
 POINT_IN_TIME_ATTACHMENT_CHECKS = frozenset({"cards_deck"})
@@ -61,6 +65,7 @@ class RunningAttachmentTemporalBinding:
     source_activity_scope_id: str = field(repr=False)
     target_binding: PlayerSaveTargetBinding = field(repr=False)
     mapping_id: str
+    effective_mapping_fingerprint: str
     active_round_identity_fingerprint: str
     captured_at: str
     acquisition_type: PlayerSaveAcquisitionType
@@ -71,6 +76,9 @@ class RunningAttachmentTemporalBinding:
             "runtime_session_id": self.runtime_session_id,
             "source_activity_scope_id": self.source_activity_scope_id,
             "mapping_id": self.mapping_id,
+            "effective_mapping_fingerprint": (
+                self.effective_mapping_fingerprint
+            ),
             "active_round_identity_fingerprint": (
                 self.active_round_identity_fingerprint
             ),
@@ -81,6 +89,16 @@ class RunningAttachmentTemporalBinding:
             if not normalized:
                 raise ValueError(f"running attachment requires {name}")
             object.__setattr__(self, name, normalized)
+        if not (
+            len(self.effective_mapping_fingerprint) == 64
+            and all(
+                character in "0123456789abcdef"
+                for character in self.effective_mapping_fingerprint
+            )
+        ):
+            raise ValueError(
+                "running attachment requires effective mapping fingerprint"
+            )
         if not isinstance(self.target_binding, PlayerSaveTargetBinding):
             raise TypeError("running attachment requires a typed target binding")
         if self.acquisition_type is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION:
@@ -106,6 +124,7 @@ class RunningAttachmentTemporalBinding:
         return _fingerprint(
             "round-claim",
             self.mapping_id,
+            self.effective_mapping_fingerprint,
             self.target_binding.fingerprint,
             self.activity_scope_id,
             self.active_round_identity_fingerprint,
@@ -147,6 +166,9 @@ class RunningAttachmentTemporalBinding:
         return {
             "schema_version": 1,
             "mapping_id": self.mapping_id,
+            "effective_mapping_fingerprint": (
+                self.effective_mapping_fingerprint
+            ),
             "runtime_session": _fingerprint(
                 "runtime-session",
                 self.runtime_session_id,
@@ -247,16 +269,30 @@ class RunningAttachmentSaveObservations:
 
 @dataclass
 class BoundRunningAttachmentSaveEvidence:
-    """One-use consumer view that rechecks scope/target at consumption time."""
+    """One-use consumer view that rechecks scope/target at consumption time.
+
+    The forced attachment save is a current, exact-bound observation for every
+    complete projected fact.  Temporal class controls how a later mismatch is
+    handled; it does not make a parsed fact ineligible for this one attachment
+    preflight.
+    """
 
     observations: RunningAttachmentSaveObservations
     context_fn: Callable[[], Any] = field(repr=False)
+    mapping_observer: Any = field(default=None, repr=False)
     _consumed: set[str] = field(default_factory=set, init=False, repr=False)
     _invalidated: bool = field(default=False, init=False, repr=False)
 
-    def consume(self, check_id: str) -> Any:
+    @property
+    def is_running_attachment(self) -> bool:
+        return True
+
+    def _current_fact(
+        self,
+        check_id: str,
+    ) -> Optional[RunningAttachmentSaveFact]:
         normalized = str(check_id or "").strip()
-        if self._invalidated or normalized in self._consumed:
+        if self._invalidated:
             return None
         try:
             context = self.context_fn()
@@ -266,11 +302,61 @@ class BoundRunningAttachmentSaveEvidence:
         if not self.observations.matches_context(context):
             self._invalidated = True
             return None
-        fact = self.observations.fact(normalized)
-        if (
-            fact is None
-            or fact.temporal_class is not PlayerSaveTemporalClass.ROUND_INVARIANT
-        ):
+        return self.observations.fact(normalized)
+
+    def record_mapping_observation(
+        self,
+        check_id: str,
+        ui_evidence: Mapping[str, Any],
+    ) -> int:
+        """Retain review evidence without making it a consumable save fact."""
+
+        observer = self.mapping_observer
+        callback = getattr(observer, "record_mapping_observation", None)
+        if not callable(callback) or self._invalidated:
+            return 0
+        try:
+            context = self.context_fn()
+        except Exception:
+            self._invalidated = True
+            return 0
+        if not self.observations.matches_context(context):
+            self._invalidated = True
+            close = getattr(observer, "close", None)
+            if callable(close):
+                close("running_attachment_context_changed")
+            return 0
+        return int(callback(check_id, ui_evidence) or 0)
+
+    def close_mapping_candidate_window(self, reason: str) -> None:
+        observer = self.mapping_observer
+        close = getattr(observer, "close", None)
+        if callable(close):
+            close(reason)
+
+    def temporal_class(
+        self,
+        check_id: str,
+    ) -> Optional[PlayerSaveTemporalClass]:
+        """Return the current exact-bound fact class without consuming it."""
+
+        fact = self._current_fact(check_id)
+        return fact.temporal_class if fact is not None else None
+
+    def mismatch_is_report_only(self, check_id: str) -> bool:
+        """Whether this active battle makes the saved mismatch immutable."""
+
+        return (
+            self.temporal_class(check_id)
+            is PlayerSaveTemporalClass.ROUND_INVARIANT
+        )
+
+    def consume(self, check_id: str) -> Any:
+        normalized = str(check_id or "").strip()
+        if normalized in self._consumed:
+            return None
+        fact = self._current_fact(normalized)
+        if fact is None:
             return None
         self._consumed.add(normalized)
         return fact.copied_value()

@@ -318,6 +318,31 @@ def validate_battle_workflow(value: object) -> Optional[dict[str, Any]]:
         "requested_at": requested_at,
         "evidence": evidence,
     }
+    if value.get("strategy") is not None:
+        strategy = _bounded(value.get("strategy"), 100)
+        if strategy is None:
+            return None
+        result["strategy"] = strategy.strip().lower()
+    if value.get("strategy_request_id") is not None:
+        strategy_request_id = _bounded(
+            value.get("strategy_request_id"),
+            100,
+        )
+        if strategy_request_id is None or "strategy" not in result:
+            return None
+        result["strategy_request_id"] = strategy_request_id
+    if value.get("strategy_definition_fingerprint") is not None:
+        strategy_fingerprint = _bounded(
+            value.get("strategy_definition_fingerprint"),
+            100,
+        )
+        if (
+            not _sha256(strategy_fingerprint)
+            or result.get("strategy") in {None, "none"}
+            or "strategy_request_id" not in result
+        ):
+            return None
+        result["strategy_definition_fingerprint"] = strategy_fingerprint
     _copy_optional_fields(
         value,
         result,
@@ -325,18 +350,27 @@ def validate_battle_workflow(value: object) -> Optional[dict[str, Any]]:
         text=("reason", "updated_by"),
         mappings=("acknowledgement", "save_receipt", "configuration"),
     )
-    if intent == "attach_battle" and status in {
-        "ready",
-        "completed",
-    }:
+    if intent == "attach_battle" and status in {"ready", "completed"}:
         receipt = validate_save_reconciliation_receipt(
             result.get("save_receipt"),
             expected_kind="running_attachment_reconciliation",
             expected_workflow_id=request_id,
         )
-        if receipt is None:
+        if receipt is not None:
+            result["save_receipt"] = receipt
+        elif status == "ready":
             return None
-        result["save_receipt"] = receipt
+        else:
+            configuration = result.get("configuration")
+            if not (
+                isinstance(configuration, Mapping)
+                and configuration.get("schema_version") == 1
+                and configuration.get("stage") == "completed"
+                and configuration.get("reporting_status") == "unavailable"
+                and configuration.get("attachment_mode") == "observation_only"
+                and configuration.get("degraded") is True
+            ):
+                return None
     return result
 
 
@@ -433,6 +467,7 @@ def validate_setup_capture_preview(
         "status",
         "mapping_id",
         "mapping_maturity",
+        "effective_mapping_fingerprint",
         "captured_at",
         "acquisition",
         "settings",
@@ -445,6 +480,9 @@ def validate_setup_capture_preview(
     }:
         return None
     mapping_id = _bounded(value.get("mapping_id"), 128)
+    effective_mapping_fingerprint = value.get(
+        "effective_mapping_fingerprint"
+    )
     maturity = str(value.get("mapping_maturity") or "").strip().lower()
     captured_at = _aware_timestamp(value.get("captured_at"))
     acquisition = _validated_forced_acquisition_provenance(
@@ -457,6 +495,7 @@ def validate_setup_capture_preview(
         or value.get("status") not in {"complete", "partial"}
         or mapping_id is None
         or maturity not in {"candidate", "validated"}
+        or not _sha256(effective_mapping_fingerprint)
         or captured_at is None
         or acquisition is None
         or acquisition["timing"]["captured_at"] != captured_at
@@ -638,6 +677,9 @@ def validate_setup_capture_preview(
         "status": str(value["status"]),
         "mapping_id": mapping_id,
         "mapping_maturity": maturity,
+        "effective_mapping_fingerprint": str(
+            effective_mapping_fingerprint
+        ),
         "captured_at": captured_at,
         "acquisition": acquisition,
         "settings": canonical_settings,
@@ -1617,9 +1659,13 @@ def _validated_running_temporal_provenance(
     if not isinstance(value, Mapping) or value.get("schema_version") != 1:
         return None
     mapping_id = _bounded(value.get("mapping_id"), 128)
+    effective_mapping_fingerprint = value.get(
+        "effective_mapping_fingerprint"
+    )
     captured_at = _aware_timestamp(value.get("captured_at"))
     if (
         mapping_id is None
+        or not _sha256(effective_mapping_fingerprint)
         or captured_at is None
         or value.get("acquisition_type")
         != PlayerSaveAcquisitionType.FORCED_SERIALIZATION.value
@@ -1634,6 +1680,9 @@ def _validated_running_temporal_provenance(
     return {
         "schema_version": 1,
         "mapping_id": mapping_id,
+        "effective_mapping_fingerprint": str(
+            effective_mapping_fingerprint
+        ),
         "runtime_session": str(value["runtime_session"]),
         "source_activity_scope": str(value["source_activity_scope"]),
         "target_generation": str(value["target_generation"]),

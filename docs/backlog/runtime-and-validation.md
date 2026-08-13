@@ -15,6 +15,44 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for incompatible versions, shape
   changes, stale data, mismatches, and unmapped settings.
+  - [x] Add strict same-boundary unmapped-value receipts, deterministic local
+    future-decode confirmation for Module `infoIndex` gaps, effective-mapping
+    provenance, dual-target exact-revision proposals, terminal killed-by and
+    league observation, and a persistent nonmodal review queue. Candidate
+    evidence never self-promotes tracked mappings or grants input authority.
+  - [ ] After promotion, validate receipt/local-confirmation behavior only at
+    ordinary Home, attachment, and terminal boundaries. Review each persistent
+    receipt and integrate accepted values into every required canonical owner
+    and exact structural mirror; do not create or end a battle for evidence.
+    - [x] The 2026-08-10 production attachment used bound save evidence for
+      every supported active check except one unresolved Module value. Its
+      pre-mutation UI fallback deterministically confirmed cannon-assist
+      `infoIndex 10` as `Astral Deliverance`; the exact-version local event is
+      active for later fresh decodes and the runtime reached steady state with
+      no gate, repair, Surrender, or new battle.
+    - [x] Candidate
+      `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`
+      was reviewed and atomically integrated into both `data-9-game-1073`
+      authority and the `data-9-game-1101` structural mirror by `dbe3d34`.
+      The first production attachment afterward reported Modules, including
+      cannon-assist `infoIndex 10` as `Astral Deliverance`, from
+      `bound_player_save_preflight` without opening Modules; the durable local
+      event now reports `integrated` because canonical owner and mirror agree.
+    - [ ] Exercise the remaining Home and terminal candidate paths only when
+      those boundaries occur naturally.
+    - [ ] Diagnose why that production attachment's continuity projector
+      rejected battle-history entry 29 at `chainlightningdamage` as a malformed
+      value. Determine whether the game emitted a valid negative/sentinel stat
+      before relaxing any invariant. The guarded Battle History fallback
+      completed safely, and independent configuration projections—including
+      Modules, Auto Pick, perk order, and Ultimate Weapons—remained save-backed.
+  - [ ] Add a guarded operator revoke/reacquire workflow for a locally
+    confirmed Module value. Acquire Pause or otherwise stop new-battle input,
+    revoke with generation/document-fingerprint compare-and-swap, close mapping
+    observation windows, invalidate only affected Module evidence, force a
+    fresh decode, and resume only after the new effective mapping fingerprint
+    is reconciled. The store-level append-only revoke/CAS/capacity contract is
+    implemented; no current UI grants this authority.
   - [ ] Independently validate the version-1101 Tournament generator before
     enabling it, and calibrate the two new per-wave enemy counters only if they
     gain a consumer. Retain scheduled UI audits; any semantic discrepancy in an
@@ -155,6 +193,20 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         Upgrade locks, Auto Pick, Target Priority, and Ultimate Weapon checks
         without opening their UI; any unsupported or changed check must fall
         back independently.
+      - [ ] Confirm one replacement-process attachment with a complete mapped
+        forced save opens no Cards, Workshop, Bots, Guardians, Modules, Free
+        Upgrade-lock, Perk-configuration, Target Priority, Auto Pick, or
+        Ultimate Weapon UI. Also confirm authoritative Module, Free Upgrade-lock,
+        and Perk Auto Pick-order mismatches are each logged once and continue
+        without configuration UI or Home-repair authority, while an
+        intentionally unparseable Module fact uses Modules UI and applies the
+        same report-only result when that fallback is fully observed.
+        - [x] The 2026-08-09
+          [production smoke](../modules/completed_tasks_log.md#2026-08-09-save-backed-attached-session-preflight)
+          confirmed per-fact suppression for every projectable requirement and
+          the bounded Modules fallback for an unprojectable assist-module fact.
+          Free Upgrade locks deferred without blocking. This intentionally did
+          not claim the remaining complete-save or mismatch cases above.
       - [ ] Confirm Tournament Results → Home reuses its valid terminal handoff
         without reacquisition.
       - [ ] Confirm one natural-terminal bundle fans out without duplicate
@@ -176,9 +228,11 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
         acquisition/timeline progress with no in-battle
         `navigation.open_perks` input. At natural Game Over, confirm a proved
         exhausted final prefix performs zero Perks navigation, or a nonfinal
-        bound prefix visits only the newest viewport and never dispatches
-        `gesture_targets.goto_next:perks`. Retain the record to confirm exact
-        saved picks and any terminal uncertainty are rendered separately.
+        bound prefix proves the newest/top edge and dispatches
+        `gesture_targets.goto_next:perks` only until the first unchanged
+        saved-recency marker (or the actual list edge). Retain the record to
+        confirm exact saved picks and any terminal uncertainty are rendered
+        separately.
   - [ ] Confirm the deployed direct-Retry repair on the next ordinary
     `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
     retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh
@@ -254,6 +308,25 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       versus active behavior, and restoration. Only if natural transitions are
       insufficient may a later coordinator authorize one owned bounded
       calibration.
+      - [x] Increase the server-owned interactive-development request and
+        heartbeat window from 30 to 120 seconds. The first authorized live
+        calibration showed that background-input quiescence, runtime
+        acknowledgement, fresh visual guards, and the input helper's required
+        dispatch reserve could consume the former window before one guarded
+        multi-screen operation. The 120-second server policy keeps the lease
+        bounded and preserves every existing Pause/Stop, runtime-owner, target,
+        battle-boundary, release, acknowledgement, and per-input rejection
+        rule. Commit `d77bca3` was promoted behind rollback tag
+        `production-before-20260810T232148Z-785d786`; its input-free smoke
+        request proved an exact 120-second expiry, matching active runtime
+        acknowledgement, suppressive hold, and normal fresh-observation
+        release.
+      - [ ] Resume the authorized changed/restored calibration only after a
+        fresh preflight confirms a steady running battle. The 2026-08-10
+        pre-deployment attempt ended at a natural Game
+        Over before the first Orb value mutation; the panel had already been
+        closed, the lease was terminal with no external hold, and the last
+        authoritative pair remained Extra `30.00m` / Workshop `39.00m`.
     - [ ] Continue routing incompatible versions and shapes, unknown IDs or
       values, unsupported Module requests, and Damage Slider through UI. A
       unique exact-evidence mapping attempt may use the existing fail-closed
@@ -743,6 +816,47 @@ stages:
       09:33:44, observed the overlay removed at 09:33:53, and completed its
       bounded floating-gem scan at 09:33:57. No Surrender or test battle
       boundary was used.
+  - Global runtime failure-policy checkpoint (2026-08-11, feature branch):
+    - [x] Commit `1b16db9` makes configuration mismatch, unavailable
+      validation/evidence, exhausted bounded repair, reporting failure, and
+      expired workflow evidence globally recoverable. An already-safe boundary
+      repairs immediately; otherwise the exact problem is flagged and
+      automation continues degraded.
+    - [x] Only lost/corrupt control authority, lost exact-target ownership,
+      failure to restore the source after lifecycle input, or an uncertain
+      dispatched-input result may automatically persist Pause. Explicit
+      operator Pause, Stop, and Take Manual Control remain independent intent.
+      Static regression prevents App from using generic state persistence or
+      creating a session-preflight Strategy Gate.
+    - [x] Return Control now applies profile skips before comparison. Active or
+      resumable mismatches complete degraded and release Return; Home New
+      repairs at the current safe boundary and releases degraded if evidence or
+      repair exhausts. Recoverable setup-capture, terminal reporting, legacy
+      gate, and orphan-validation outcomes likewise release their owners.
+    - [x] Follow-up commit `4ac5237` makes the next safe boundary actionable:
+      when Continue is already selected for a configuration-degraded strategy
+      battle, Game Over returns Home rather than Retry, retains that route
+      across a failed terminal tap, applies the next Strategy, and runs ordinary
+      bounded profile setup before an exact one-shot continuation. Exhausted
+      repair still launches degraded, and `WAIT` is not overridden.
+    - [x] The affected combined suite passed 470 tests. The supported
+      checkpoint passed compilation, state-definition validation, clickmap
+      validation with zero errors and the established 44 orphan notices, and
+      all 2,225 tests in 360.86 seconds.
+    - [x] The Home-first affected suite passed 535 tests. A second supported
+      checkpoint passed compilation, state-definition validation, clickmap
+      integrity with zero errors and the established 44 orphan notices, and all
+      2,232 tests in 362.15 seconds.
+    - [x] Exact candidate `12ad795` passed a fresh 2,232-test promotion
+      checkpoint and was deployed on 2026-08-11 behind rollback tag
+      `production-before-20260811T162652Z-d9305fc`. Replacement runtime
+      `c7408508ab0a421a98f724e4474d9ba0` completed save-backed Attach, active
+      `farm_t19_ad_assist` adoption, session validation, and a steady-state
+      smoke without Pause or an authority hold.
+    - [ ] Observe the original Return Control mismatch or degraded Game
+      Over/Home-first repair at a natural post-deployment boundary. The
+      deployment smoke preserved an already-running battle and did not
+      manufacture either boundary.
   - Home launch-authority correction checkpoint (2026-08-08, feature branch):
     - [x] Commit `b36f878` requires fresh `RUNNING`, an active No Strategy
       observation, and lifecycle-owned active-battle evidence before granting
@@ -835,6 +949,62 @@ stages:
       collected the already-visible five-gem Home reward and stayed Home; no
       Start Battle intent, battle transition, Surrender, or manufactured test
       boundary was used. Native Windows usability remains pending.
+  - Durable acknowledgement and Strategy Scope correction checkpoint
+    (2026-08-10, feature branch):
+    - [x] Server revision 37 and capability
+      `runtime_control_acknowledgements_v1` publish exact applied state, mode,
+      speed, ADB, and Strategy receipts in the existing atomic runtime-owned
+      authority channel. The envelope must match runtime ID, PID, target, and
+      target generation in the active lock; each field must match the current
+      request ID and value. Legacy/implicit defaults gain IDs at startup without
+      an operator refresh, while action-log messages remain audit-only.
+    - [x] Action Authority, terminal policy, setup-capture availability, paused
+      ADB handoff, and speed/ADB indicators now consume those durable receipts.
+      Attached-restart readiness also uses the exact receipt, fresh runtime
+      observation, and replacement startup-policy snapshot rather than appended
+      log position. No runtime authority semantics or input routes changed.
+    - [x] WPF renders Linux `control_model.strategy_scope` for startup, current,
+      pending-next, and pending-active presentation. Compatibility reconstruction
+      runs only without `better_control_model_v2`; dirty selection, failed retry,
+      same-ID publication, stopped-process, and explicit active adoption remain
+      under the existing selection coordinator.
+    - [x] Repository regressions cover a valid receipt beyond 262 KiB of later
+      log output, rotation, stale/wrong runtime/PID/target/generation rejection,
+      exact request replacement, all five receipt types, authoritative Strategy
+      Scope versus missing/contradictory legacy evidence, and portable WPF
+      current/pending presentation. The expanded affected Python aggregate
+      passes 465 tests, the concurrent-promotion boundary slice passes 203
+      tests, and all 139 portable native tests pass. The Release WPF project
+      cross-builds with zero errors. The supported checkpoint passes
+      compilation, state-definition
+      validation, clickmap integrity with zero errors and the established 44
+      orphan candidates, and all 2,211 Python tests in 353.14 seconds after
+      rebasing onto current `develop` at `adf2176`.
+    - [x] Production and `develop` advanced from `adf2176` to exact `3460d5c`
+      behind rollback tag `production-before-20260811T025615Z-adf2176`.
+      Control-surface PID `2864662` served revision 37. Replacement automation
+      PID `2866425` acquired the exact runtime/target/generation-1 lock while
+      preserving the operator-owned Pause; all five current receipts matched
+      their values and request IDs, Action Authority remained `paused`, the
+      terminal policy was acknowledged, and Strategy Scope contained no false
+      pending state. The promotion smoke used no device input or control
+      refresh request. A separately issued Start Battle request then completed
+      at 20:02 PDT; a read-only follow-up found the same runtime healthy and
+      `RUNNING`, with exact replacement state and Strategy receipts and all
+      five current acknowledgements true.
+    - [x] The complete revision-37 Windows package was published from exact
+      `3460d5c`. Current Control Surface is 72,429,586 bytes with SHA-256
+      `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`;
+      current Tunnel Host is 35,172,117 bytes with SHA-256
+      `cabad7e7fadb26f29c494a54eea8ed0fa717e6035376b6805b25d19457aec828`.
+      Retained slots contain exact prior packages `d836532` and `dbe3d34`.
+    - [ ] Run the revision-37 Windows checks in
+      [`../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation`](../../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation):
+      preserve every indicator across long noisy output and rotation without a
+      refresh request, and verify authoritative Strategy current/pending/startup
+      rendering plus dirty/retry/same-ID/stopped/active-adoption behavior. No
+      Windows runtime or device validation is claimed here; see
+      [ISSUE-2026-038](../issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending).
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,
@@ -913,8 +1083,45 @@ stages:
     approximately `0.83%` process CPU clean and `1.9%` under contention,
     exceeding the `<0.5%` non-frame telemetry target. Profile sampler work
     separately from UI and other process activity, retain complete evidence
-    cadence, and validate both clean and contended cases. Track evidence in
+    cadence, and validate both clean and contended cases. Include the dedicated
+    threshold-triggered process-attribution scan-duration metric, confirm the
+    dormant path adds no second process enumeration, and distinguish scan cost
+    from the already measured total client CPU. Track evidence in
     [`ISSUE-2026-003`](../issues/open-2026.md#windows-performance-telemetry-exceeded-its-client-cpu-budget).
+  - [ ] Validate and calibrate the default-off BlueStacks degradation recovery
+    on Windows. Verify the installed `HD-Player.exe`, instance name from a
+    BlueStacks-created shortcut, exact `bluestacks.conf` instance/port mapping,
+    and listener owner before using it. Confirm revision-41 Diagnostics shows
+    current handles/threads and exact-PID low-water/recent/ratio/delta/window
+    evidence, and that the same BlueStacks lifetime continues across a GUI-only
+    restart. First exercise the confirmed **Restart BlueStacks…** command with
+    automatic recovery disabled; then retain one detector decision. For both,
+    confirm the durable pre-hold target, target-edit lock, client-close
+    reconciliation, sampler-baseline reset, and end-to-end Welcome Back
+    catch-up. Exercise the End run/New Battle branch only at an explicitly
+    authorized boundary.
+    Compare false-positive/false-negative behavior with exact run/configuration
+    and exact-listener-lifetime cross-run host telemetry before changing the trigger
+    thresholds. This completes mitigation validation but does not by itself
+    resolve the cause tracked in
+    [`ISSUE-2026-002`](../issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
+    The first revision-41 operator attempt identified the installed `Pie64`
+    mapping but could not bind its listener because module-level process
+    inspection returned Access Denied even from an elevated client. Commit
+    `b087989` replaced module enumeration with limited-information native
+    path/start-time reads. The repeated operator test then bound and replaced
+    the exact listener, reconnected ADB, handled Welcome Back/Resume, held the
+    replay through the old high-water, and released normally. It also
+    exposed one Linux gap: BlueStacks Home was `1920x1080`, so the portrait
+    capture guard prevented the package launcher until the operator opened only
+    The Tower. Commit `7ce123c` now routes that typed exact-target landscape
+    boundary solely to the bounded package launch. The next operator restart
+    confirmed hands-free package launch and Welcome Back Resume, then observed
+    a fifty-wave rollback despite Intro Sprint not being confirmed. The runtime
+    now keeps that replay out of progression accounting while allowing its
+    independently guarded in-battle gem, daily-gem, and reward collectors.
+    GUI-close reconciliation, sampler-baseline/session continuity, one detector
+    decision, and the explicitly authorized fallback branch remain outstanding.
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
     second client, as tracked in
@@ -922,22 +1129,16 @@ stages:
 
 ### Agreed operator-control sequence
 
-The first implementation target is Battle History filter reliability. The
-remaining order is provisional and can change as operator use supplies better
-evidence.
+The operator selected the native dashboard redesign in item 9 as the current
+implementation target on 2026-08-08. The remaining order is provisional and
+can change as operator use supplies better evidence.
 
 1. [ ] Verify the repaired Battle History filter input on Windows: the window
    opens without terminating the app, one click opens all three combo boxes,
    each popup remains usable across independent refreshes, and mouse and
    keyboard selection work normally. Track confirmation in
    [`ISSUE-2026-014`](../issues/open-2026.md#battle-history-filter-dropdowns-required-repeated-clicks).
-2. [ ] Preserve an ineligible live ADB-port edit as an explicit draft instead
-   of silently replacing it with the active port.
-   - Explain that a live switch requires an acknowledged indefinite Pause and
-     has not yet been applied.
-   - Reset the draft only after a successful switch or an explicit operator
-     revert; keep the existing validation and rollback behavior.
-3. [ ] Publish a structured atomic runtime-status snapshot and revise the
+2. [ ] Publish a structured atomic runtime-status snapshot and revise the
    normal Status presentation around operator-relevant fields.
    - Make directive, acknowledgement, process evidence, run state, wave,
      current Coins/min, and pause/recovery state authoritative API fields so
@@ -954,17 +1155,17 @@ evidence.
      outcomes from the estimate.
    - Resolve the stale-running top-bar defect tracked in
      [`ISSUE-2026-012`](../issues/open-2026.md#native-top-bar-retained-a-running-directive-after-automation-stopped).
-4. [ ] Extend concise human-readable requirement results to in-battle
+3. [ ] Extend concise human-readable requirement results to in-battle
    session-preflight and recovery checks, including expected state, observed
    state, and final disposition such as passed, failed, waived, or fallback.
-5. [ ] Publish and display Peak Coins/min for the active and completed run.
+4. [ ] Publish and display Peak Coins/min for the active and completed run.
    - Maintain the active peak within an authoritative run boundary and expose
      it through the runtime snapshot; after a mid-battle attach, label a peak
      that cannot be recovered as `since attach`.
    - Derive the completed peak from accepted `coin_rate_samples` and include it
      in the battle report. Do not label Coins/min multiplied by 60 as realized
      Coins/hour.
-6. [ ] Generalize the guarded return-to-game timer to known recoverable panels,
+5. [ ] Generalize the guarded return-to-game timer to known recoverable panels,
    including Wave Stats (`WAVE_PANEL`).
    - Validate an authoritative close control and post-action return to the
      running battle for each supported panel instead of assuming the existing
@@ -974,22 +1175,37 @@ evidence.
      countdown or Pause block in the runtime snapshot and GUI.
    - Add return-now, extend, and cancel only as explicit runtime directives
      with freshness and ownership checks.
-7. [ ] Verify boundary-aware Strategy changes on Windows: immediate accepted-
-   request feedback, current/pending display, selection retention, pending
-   replacement/cancellation, stale-server warning and explicit reload,
-   active-battle adoption, and an acknowledged paused Workshop application
-   without changing Pause. Track confirmation in
+6. [ ] Verify boundary-aware Strategy changes on Windows. During an active
+   process, one genuine dropdown selection must submit the existing normal
+   next-boundary `set_strategy` request exactly once; polling and other
+   programmatic selection changes must submit nothing. Accepted requests clear
+   dirty state, while rejection or transport failure retains the visible dirty
+   choice and exposes one retry affordance without enabling request storms.
+   Selecting Current must replace a different pending Strategy, while an
+   already-current selection with no pending request and an already-queued
+   next-boundary selection remain no-ops. **Switch this battle** remains a
+   separate explicit fresh-evidence active-adoption request. A stopped process
+   still uses the visible selection on Start; saving a startup default without
+   starting remains a separate explicit action. While the process is active,
+   successful Strategy publication and restore-as-new must automatically follow
+   with the same next-boundary request, including for a same-ID revision; when
+   stopped, they update only the visible Start selection. Base publication does
+   not send a process request. Confirm
+   immediate sending/accepted/queued/failed feedback, current/pending display,
+   dirty/failed selection retention across polling, stale-server warning and
+   explicit reload, active-battle adoption, and an acknowledged paused Workshop
+   application without changing Pause. Track confirmation in
    [`ISSUE-2026-010`](../issues/open-2026.md#native-strategy-selection-did-not-report-acceptance-or-live-disposition)
    and
    [`ISSUE-2026-011`](../issues/open-2026.md#windows-client-could-not-identify-or-reload-a-stale-linux-control-service).
-8. [ ] Rework Battle History filters after the input defect is fixed and their
+7. [ ] Rework Battle History filters after the input defect is fixed and their
    real behavior can be evaluated.
    - Prioritize useful distinctions such as type, Tier, strategy, outcome,
      quality, and date range. Retain wave range only if operator use justifies
      it, otherwise move it to an advanced view or remove it.
    - Make filter semantics clear when the client has loaded only a bounded
      newest-record page.
-9. [ ] Define and implement report disposition for short, interrupted,
+8. [ ] Define and implement report disposition for short, interrupted,
    configuration-repair, surrendered, and manually aborted battles.
    - Prefer evidence-based inference. A causally bound terminal save whose
      mapped `killedBy` value is `Surrender` identifies a surrendered run;
@@ -1012,8 +1228,280 @@ evidence.
    - If operator use still requires permanent discard, expose only a confirmed,
      audited exact-record operation through the versioned API. Never add
      arbitrary path or file-deletion authority and never delete automatically.
-10. [ ] Validate the revised dashboard layout on Windows at minimum, default,
-    and maximized sizes.
-11. [ ] Confirm on Windows that the optional Token tooltip and Setup placement
-    make clear that it is only for an explicitly authenticated adapter or
-    reverse proxy and should remain blank for the normal loopback SSH tunnel.
+9. [ ] Redesign and validate the native operational dashboard around one
+    glanceable Overview plus full-width Activity, Perks, and System pages.
+    The existing narrow tabbed sidebar, permanently visible completed-battle
+    summary/activity split, wrapped tab headers, and long Controls scroll are
+    superseded as the design target by this specification.
+    - **Outcome and lifecycle.** Keep this item as the disposable coordinator
+      for the whole-window redesign. The current authority, API, and workflow
+      contracts remain canonical in
+      [`../architecture/control_surface.md`](../architecture/control_surface.md);
+      this item owns active layout requirements, implementation slices, and
+      validation evidence only. Update current architecture and operator
+      guidance with every slice that changes visible behavior. At completion,
+      record the result in the completed-task log and remove this active
+      specification rather than retaining a second current contract.
+    - **Layout baseline.** Optimize first for the operator's approximately
+      `1300x1000` preferred window, then validate the declared `1120x720`
+      minimum, the existing `1500x940` default, and maximized presentation.
+      Overview must not require structural vertical scrolling at the preferred,
+      default, or maximized sizes. At minimum size, reflow and compact before
+      allowing one page-scoped fallback scrollbar. Activity, Perks, History,
+      and diagnostic lists may scroll inside their own data regions; ordinary
+      controls and page chrome must not.
+    - **Application chrome and global state.** Replace the healthy-state row of
+      service/tunnel action buttons with a compact application header, a
+      grouped connection-health affordance, and **View**, **Tools**, and
+      **Preferences** navigation. The group must retain separately labelled
+      Linux service, HTTP, API SSH, and ADB SSH states even when four healthy
+      values compress into one line. Preserve a full-width global alert region
+      that can stack simultaneous API-compatibility, Strategy Action Gate,
+      startup-gate decision, Tournament-launch review, and other actionable
+      conditions without conflating them with global Pause. A healthy detail
+      may collapse; a failure and its bounded recovery action must never be
+      hidden in Preferences or below a scroll boundary. Acknowledgement-timeout
+      alerts remain a reserved type until authoritative timeout status exists;
+      do not infer them from polling age.
+    - **Responsive status.** Present process lifecycle, automation action
+      authority, observed game state, Strategy scope, and terminal policy as
+      separate labelled concepts. Make `Stopped` unambiguous while retaining
+      saved next-start intent separately; never render a persisted directive
+      as proof that the process is live. Use responsive rows or wrapping cards
+      rather than equal-width cells that allow long values to collide. Show
+      battle-only metrics only when relevant, avoid seas of `-`, and retain
+      target-versus-observed speed plus acknowledgement/staleness evidence.
+    - **Overview page.** Keep only current decisions and consequences in the
+      everyday page:
+      - An authority card keeps explicit Automation **Paused** and **Enabled**
+        selections with requested/acknowledged/pending/rejected presentation.
+        Timed pauses share a compact secondary affordance; handler-specific
+        Pause/Resume must integrate with this owner rather than create another
+        authority control.
+      - One exact battle-action slot may present **Start Battle** only for a
+        verified new-battle boundary or **Attach to Battle** only for a
+        verified resumable/active boundary. Ambiguous state presents neither;
+        the client never chooses or substitutes a workflow silently.
+      - One manual-authority area presents **Take Manual Control** or
+        **Return Control** with the existing reconciliation state. Manual
+        Surrender collection policy appears only when manual control makes it
+        relevant and never grants Surrender authority.
+      - A run-configuration card keeps selected/current/pending Strategy
+        distinct. During an active process, a genuine dropdown selection itself
+        commits the normal next-boundary request; **Switch this battle** remains
+        a separate explicit active-adoption action. A stopped process retains
+        explicit startup-default persistence. While the process is active,
+        successful Strategy publication or restore-as-new automatically follows
+        with the normal next-boundary request, including when its stable ID
+        equals Current; when stopped, it updates only the visible Start
+        selection. Neither path switches the current battle. Show target/observed
+        speed and future terminal
+        policy without turning any of them into an immediate Start/Resume
+        action.
+      - **Configure next run**, save-backed **Capture current setup as...**,
+        Strategy Profiles, and Battle History remain discoverable through the
+        relevant field or **Tools**, but their separate dialogs are not
+        redesigned by this outcome.
+      - Existing startup-gate decisions and Tournament-launch receipts keep
+        their automatic prompts plus a persistent, state-bound review action
+        in the stacked alert region or Overview; they are not hidden merely
+        because their former Controls position is removed.
+      - Reduce the latest completed battle to a compact summary with a clear
+        History route. Raw Activity, host telemetry, connection forms, and
+        runtime evidence are not permanently visible on Overview.
+    - **Activity and Perks pages.** Give each existing data surface the full
+      workspace width. Activity retains independent one-second refresh,
+      current-run scope, level filters, newest following, local clear/restore,
+      complete-copy text, and stable user interaction during status/battle
+      refresh. Perks retains checkpoint time/wave, most-recent-first inventory,
+      and stable selection/scroll while an unchanged battle scope refreshes.
+    - **System page.** Group infrastructure health and bounded repair by
+      responsibility: Linux API/HTTP/API SSH/ADB SSH, automation process
+      lifecycle, tunnel host, ADB target, host telemetry, and detailed runtime
+      evidence. Start/Stop Automation remains independent from Pause/Enable
+      and Start/Attach. Show configured, requested/draft, and active ADB target
+      distinctly; preserve an ineligible local draft until successful apply or
+      explicit **Revert**, and state that live handoff requires acknowledged
+      indefinite Pause. Host sampling and service/tunnel restart actions live
+      here rather than competing with routine commands. Keep the prior
+      meaningful game transition as a compact Diagnostics detail outside the
+      Operational Activity narrative.
+    - **Preferences.** Put stable connection and presentation choices behind a
+      modal or otherwise bounded Preferences surface: API URL, optional
+      in-memory bearer token, SSH destination, forwarding-port defaults,
+      layout/display defaults, and future opt-in notifications or grace-period
+      defaults when their owning runtime capabilities exist. The token remains
+      blank for the normal loopback SSH route and is never persisted. Live
+      Pause/Enable, Start/Attach, service repair, active speed, terminal policy,
+      and Strategy adoption are operations, not preferences. **Reset layout**
+      belongs under **View** or presentation preferences and must reuse the
+      existing settings owner.
+    - **Contextual alerts and future API slots.** Reserve one consistent
+      Overview/global pattern, normally absent, for requirement results and
+      runtime-owned recovery. When later API work publishes authoritative
+      values, it may show current/queued Strategy, elapsed/expected duration,
+      Peak Coins/min (including `since attach`), expected-versus-observed
+      requirement results, or a non-running recovery countdown. **Return
+      now**, **Extend**, and **Cancel** appear only after explicit
+      freshness/ownership-checked runtime directives exist; the GUI never
+      substitutes direct taps or derives these facts from Activity text.
+    - **Interaction and accessibility.** No primary value or action may
+      overlap, rely on clipped text, or wrap top-level navigation into multiple
+      rows at the supported widths. Preserve unsent edits across polling;
+      periodic refresh must not steal focus, close a popup, replace a dirty
+      draft, overwrite a failed/retryable Strategy selection, reset list
+      position, or delay Activity. Programmatic Strategy option/selection
+      reconciliation must never synthesize user intent or submit a request.
+      Communicate selection, pending, warning, and error with text/shape in
+      addition to color. Keep
+      keyboard navigation, visible focus, access keys, disabled-action reasons,
+      and logical tab order. Persist the selected page and valid window
+      placement, migrating or safely ignoring the superseded sidebar/splitter
+      settings.
+    - **Adjacent backlog integration.** Treat broader report disposition and
+      Battle History outcome/date filtering as later data-model work: provide a
+      contextual run/history location but do not add a permanent discard or
+      infer an outcome in WPF. Keep the repaired History popup/update behavior
+      as an acceptance constraint. Optional screenshots, analytics/trend
+      charts, PresentMon telemetry, multiple ADB targets, custom-YAML
+      selection, and expanded-access security remain separate future work.
+      Native authoring-catalog smoke, single-instance confirmation, and host
+      sampler CPU attribution also stay in their existing workstreams; layout
+      work must not increase passive client CPU or change telemetry cadence.
+    - **Implementation slices.** Land coordinated slices in order:
+      1. [x] Replace the split/sidebar shell with responsive global status and
+         full-width Overview, Activity, Perks, and System navigation; move
+         existing named controls without changing API requests or authority.
+         Keep them in the MainWindow namescope, guard hidden-page Activity
+         scrolling, persist a stable string page ID, map or safely ignore the
+         legacy sidebar/splitter settings, and update current architecture and
+         operator guidance in the same slice.
+      2. [x] Separate stable Preferences from System operations, add explicit
+         ADB draft/applied presentation, and preserve the existing validated
+         apply/rollback contract.
+      3. [x] Compact Overview actions and helper copy through contextual
+         presentation while preserving every requested/acknowledged and
+         exact-workflow distinction.
+      4. [x] Add only those reserved status/alert fields whose authoritative
+         server models and runtime directives exist; leave absent capabilities
+         absent rather than synthesizing them in the client.
+      5. [x] Make active-process Strategy selection commit the normal
+         next-boundary request exactly once, retain only a failure-time retry,
+         and keep active-battle adoption explicit. Preserve stopped-process and
+         polling behavior. While the process is active, follow each successful
+         Strategy publication or restore-as-new with the same normal
+         next-boundary request, forcing the same-ID definition-aware path without
+         adding a revision-specific runtime payload or changing Base publication.
+         When stopped, update only the visible Start selection.
+      6. [ ] Cross-build and run focused native/static regressions, then perform
+         Windows keyboard/mouse and visual smoke at minimum, preferred,
+         default, and maximized sizes, including 100% and 125% display scaling.
+         Verify no ordinary Overview scroll, collision, truncated primary
+         action, refresh-driven interaction loss, authority ambiguity, or
+         passive CPU regression. Re-run the outstanding Better Control,
+         Strategy, incompatibility-banner, Token, and History-input usability
+         checks at natural safe boundaries without manufacturing a battle.
+         Confirm the optional Token guidance and Setup placement remain clear
+         for the normal blank-token loopback SSH route.
+    - **2026-08-08 slice-one checkpoint.** The feature worktree now uses the
+      full-width four-page shell, bounded System subpages, compact four-signal
+      health group, responsive two-row status, menu routes, hidden-Activity
+      scroll guard, and stable dashboard/System page IDs with legacy numeric
+      selection migration. Existing controls remain in the MainWindow
+      namescope and request/authority behavior is unchanged. The WPF project
+      cross-builds on Linux; 70 focused Python/static tests and all 97 native
+      authoring tests pass, and the repository checkpoint passes compile,
+      state-definition/clickmap integrity, and all 2,036 Python tests. Windows
+      visual, mouse/keyboard, 100%/125% scaling, preferred/minimum-size
+      no-scroll, and passive-CPU validation remain open under slice 6 and are
+      not inferred from the cross-build.
+    - **2026-08-09 slice-two checkpoint.** Stable API URL, memory-only token,
+      SSH/forwarding defaults, startup host sampling, and dashboard reset now
+      live in a validated modal Preferences surface. Saving updates local and
+      tunnel-host defaults without starting or restarting a tunnel; System
+      keeps desired/active transport operations visible. The managed ADB
+      control separately presents configured next-start, requested/
+      acknowledged, active-runtime, and dirty local-draft targets. Polling
+      preserves invalid or ineligible drafts until Revert or successful apply,
+      and the existing Linux process endpoint remains the sole validated
+      apply/rollback authority. The WPF project cross-builds; 71 focused
+      Python/static tests, all 97 native authoring tests, and all 18 tunnel-host
+      lifecycle tests pass. The repository checkpoint passes compile,
+      state-definition/clickmap integrity, and all 2,052 Python tests. Windows
+      modal focus, keyboard/access-key, scaling, and visual validation remain
+      open under slice 6.
+    - **2026-08-09 slice-three checkpoint.** Overview now uses a compact
+      authority row with secondary timed Pause, one server-authoritative
+      Start/Attach slot, and one contextual Take/Return slot whose manual
+      Surrender collection choice appears only with Take. Current,
+      pending-next/startup, and selected Strategy remain separately labelled;
+      request, capture, one-run-skip, and Tournament validation explanations
+      collapse when they have no current consequence. Target/observed speed and
+      requested/acknowledged terminal policy remain explicit, and the collapsed
+      latest-battle card keeps a useful summary plus History route. The WPF
+      project cross-builds; 72 focused Python/static tests, all 97 native
+      authoring tests, and all 18 tunnel-host lifecycle tests pass. The
+      repository checkpoint passes compile, state-definition/clickmap
+      integrity, and all 2,053 Python tests. Windows visual, interaction,
+      scaling, and preferred/minimum-size no-scroll validation remain open
+      under slice 6.
+    - **2026-08-09 slice-four checkpoint.** The status band now models the
+      already-published atomic Linux server timestamp and combines it only with
+      the authoritative current activity-scope start to show run elapsed while
+      the managed process is active. Wave and Coins/min collapse unless a fresh
+      active-battle observation owns their values. The audit found no owned
+      expected-duration, Peak Coins/min, expected-versus-observed requirement,
+      or recovery-countdown fields and no guarded Return/Extend/Cancel recovery
+      directives, so those reserved slots remain absent. The WPF project
+      cross-builds; 73 focused Python/static tests, all 97 native authoring
+      tests, and all 18 tunnel-host lifecycle tests pass. The repository
+      checkpoint passes compile, state-definition/clickmap integrity, and all
+      2,054 Python tests. Windows runtime validation remained open under slice
+      6; the later Strategy behavior slice is tracked above.
+    - **2026-08-09 slice-five checkpoint.** A genuine active-process Strategy
+      dropdown change now sends one normal next-boundary `set_strategy` request;
+      programmatic reconciliation stays silent, accepted requests clear dirty
+      state, and failed requests retain the visible choice with a conditional
+      Retry. Token ownership, publication deduplication, deferred-publication
+      coalescing, and dirty polling protection prevent stale responses or
+      refreshes from replacing newer intent. **Switch this battle** remains the
+      only active-adoption action. Strategy publication and restore-as-new now
+      select the published revision and use the same boundary request while the
+      process is active, including for same-ID revisions; when stopped they only
+      update the visible Start selection, and Base publication sends no process
+      request. The WPF project cross-builds; 74 focused Python/static tests and
+      all 120 portable native authoring/coordinator tests pass. The supported
+      repository checkpoint passes compile, state-definition/clickmap
+      integrity, and all 2,058 Python tests. Windows visual, mouse/keyboard,
+      scaling, process-state, failure/retry, and same-ID publication validation
+      remain open under slice 6; no live runtime or device action was performed.
+    - **2026-08-09 production publication checkpoint.** Exact candidate
+      `b2d282f` passed the supported checkpoint with all 2,081 tests, all 120
+      portable native authoring/coordinator tests, all 18 tunnel-host tests,
+      the Release WPF cross-build, and `git diff --check`. Production advanced
+      from `9d45ff2` behind rollback tag
+      `production-before-20260809T233246Z-9d45ff2`. The aggregate production
+      delta contained only native dashboard inputs, documentation, and tests,
+      so automation and the Linux control-surface service were not restarted.
+      The bounded post-promotion check kept automation PID `804073` RUNNING on
+      its existing `localhost:5555` target with fresh observation, acknowledged
+      control and Strategy, and no Strategy Gate.
+    - The complete Windows package was published from `b2d282f` at 16:33 PDT.
+      `TheTower.ControlSurface.exe` is 72,385,088 bytes with SHA-256
+      `3bb666175f7e0b1b5d731f30c92cee8b71581a3979bfc00f49bd018d69e4d0f4`;
+      `TheTower.TunnelHost.exe` is 35,172,103 bytes with SHA-256
+      `e23aada8aa3992bbc866fcebd3ec2a22d043902e088f2a4cb78abdba0ff63c68`.
+      Rollback slot 1 retains the complete `5f93cba` package: 72,363,007-byte
+      GUI `c13e709f307d32f979dc9fff300cfcfb467133ac2602fce584582f36ed3abe72`
+      and 35,172,117-byte host
+      `387a2d5d620b8ced392b2d00dc2628a5a1e8333af866d074b6b3f5ac8286221d`.
+      Slot 2 retains the complete `3acb45a` package: 72,358,911-byte GUI
+      `934c529b9e2772667e5d821ff847dce4b7e4ac439af20986aa331eed313c8e8d`
+      and 35,172,086-byte host
+      `aaf4c2de9b3b1b3ed41b3c136e29c238005e823580423201c412d79b523352ca`.
+      All six files independently identify as nonempty Windows x64 PE
+      executables. Cross-publication does not execute WPF; the complete
+      Windows visual, interaction, scaling, process-state, failure/retry, and
+      same-ID publication acceptance in slice 6 remains pending.
+    - Defer drag-to-reorder, floating panes, and extensive per-card hiding until
+      operator use of the redesigned pages demonstrates a concrete need.

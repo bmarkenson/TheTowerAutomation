@@ -121,6 +121,18 @@ def test_adb_target_snapshot_tracks_ownership_handoffs_and_release(
     assert acquired.target == "localhost:5555"
     assert acquired.generation == 1
     assert acquired.owned is True
+    acquired_owner = json.loads(
+        (tmp_path / "automation-5555.lock").read_text(encoding="utf-8")
+    )
+    assert acquired_owner["runtime_id"] == session.runtime_id
+    assert acquired_owner["target_generation"] == 1
+    session.bind_runtime_owner("supervisor-runtime")
+    rebound_owner = json.loads(
+        (tmp_path / "automation-5555.lock").read_text(encoding="utf-8")
+    )
+    assert session.runtime_id == "supervisor-runtime"
+    assert rebound_owner["runtime_id"] == "supervisor-runtime"
+    assert rebound_owner["target_generation"] == 1
 
     assert not session.handoff("localhost:5565", validate=lambda: False)
     assert session.snapshot() == acquired
@@ -129,6 +141,11 @@ def test_adb_target_snapshot_tracks_ownership_handoffs_and_release(
     assert handed_off.target == "localhost:5565"
     assert handed_off.generation == 2
     assert handed_off.owned is True
+    handed_off_owner = json.loads(
+        (tmp_path / "automation-5565.lock").read_text(encoding="utf-8")
+    )
+    assert handed_off_owner["runtime_id"] == session.runtime_id
+    assert handed_off_owner["target_generation"] == 2
 
     session.release()
     released = session.snapshot()

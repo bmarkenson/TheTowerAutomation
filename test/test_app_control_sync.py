@@ -126,6 +126,51 @@ def test_connected_capture_corruption_retains_terminal_failure():
     )
 
 
+def test_landscape_launcher_capture_is_retained_without_retry_noise():
+    coordinator = MagicMock()
+    coordinator.capture_allowed.return_value = True
+    app = App.__new__(App)
+    app._adb_connection_coordinator = coordinator
+    app._emulator_maintenance_hold_active = True
+    app._supervisor = SimpleNamespace(
+        emulator_maintenance={
+            "state": "host_restarted",
+            "runtime": {"adb_target": "localhost:5555"},
+        }
+    )
+    landscape = ScreenshotCaptureResult(
+        None,
+        ScreenshotFailure.UNSUPPORTED_GEOMETRY,
+        "Unsupported emulator resolution 1920x1080",
+        adb_target="localhost:5555",
+        native_width=1920,
+        native_height=1080,
+    )
+
+    with (
+        patch(
+            "core.app.capture_and_save_screenshot_result",
+            return_value=landscape,
+        ) as capture,
+        patch("core.app.time.sleep") as sleep,
+        patch("core.app.log") as app_log,
+    ):
+        assert app._capture_frame() is None
+
+    capture.assert_called_once_with(
+        log_capture=False,
+        log_empty=False,
+        report_adb_errors=False,
+    )
+    coordinator.ensure_connected.assert_not_called()
+    coordinator.record_capture_success.assert_called_once_with(
+        target="localhost:5555"
+    )
+    assert app._last_screenshot_capture_result is landscape
+    sleep.assert_called_once_with(1)
+    app_log.assert_not_called()
+
+
 def test_paused_target_handoff_forces_validation_and_records_fresh_capture():
     app = App.__new__(App)
     app._blind_tapper_suspended = False

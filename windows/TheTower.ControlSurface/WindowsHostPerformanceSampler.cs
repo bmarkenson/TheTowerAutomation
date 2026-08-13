@@ -12,18 +12,32 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         1,
         Environment.ProcessorCount);
     private readonly Process _controlSurfaceProcess = Process.GetCurrentProcess();
+    private readonly IBlueStacksInstanceController _blueStacksController;
     private readonly WindowsGpuPerformanceSampler _gpuSampler = new();
+    private readonly HostProcessAttributionGate _processAttributionGate = new();
     private readonly Dictionary<int, ProcessTotals> _previousProcessTotals = [];
+    private readonly Dictionary<int, ProcessAttributionTotals>
+        _previousProcessAttributionTotals = [];
     private readonly Dictionary<int, string> _processNames = [];
     private readonly HashSet<int> _blueStacksProcessIds = [];
     private readonly List<TrackedProcess> _blueStacksProcesses = [];
     private SystemTimes? _previousSystemTimes;
     private TimeSpan? _previousControlSurfaceCpu;
     private DateTimeOffset? _previousSampleAtUtc;
+    private DateTimeOffset? _previousProcessAttributionAtUtc;
     private int _samplesUntilDiscovery;
+    private BlueStacksRecoveryTarget? _listenerTarget;
+    private HostPerformanceBlueStacksListener? _blueStacksListener;
+    private string? _blueStacksListenerError;
     private double? _cpuFrequencyMhz;
     private double? _cpuFrequencyRatio;
     private bool _disposed;
+
+    public WindowsHostPerformanceSampler(
+        IBlueStacksInstanceController blueStacksController)
+    {
+        _blueStacksController = blueStacksController;
+    }
 
     public HostPerformanceSample Sample(HostPerformanceContext context)
     {
@@ -36,16 +50,29 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
                 0.001,
                 (sampledAtUtc - _previousSampleAtUtc.Value).TotalSeconds);
 
-        if (_samplesUntilDiscovery <= 0)
+        var hostCpuPercent = ReadHostCpuPercent();
+        var (memoryUsedPercent, availableMemoryBytes) = ReadMemory();
+        var processAttributionState = _processAttributionGate.Update(
+            sampledAtUtc,
+            hostCpuPercent,
+            memoryUsedPercent,
+            availableMemoryBytes);
+        var processRefresh = ProcessRefreshResult.Empty;
+        var listenerTargetChanged = !Equals(
+            _listenerTarget,
+            context.BlueStacksTarget);
+        if (_samplesUntilDiscovery <= 0 || listenerTargetChanged)
         {
-            RefreshBlueStacksProcesses();
+            processRefresh = RefreshProcesses(
+                sampledAtUtc,
+                processAttributionState is HostProcessAttributionState.Active
+                    or HostProcessAttributionState.Recovering);
             RefreshCpuFrequency();
+            RefreshBlueStacksListener(context.BlueStacksTarget);
             _samplesUntilDiscovery = ProcessDiscoveryIntervalSamples;
         }
         _samplesUntilDiscovery--;
 
-        var hostCpuPercent = ReadHostCpuPercent();
-        var (memoryUsedPercent, availableMemoryBytes) = ReadMemory();
         var processMetrics = ReadBlueStacksMetrics(elapsedSeconds);
         var gpuMetrics = _gpuSampler.Sample(
             _blueStacksProcessIds,
@@ -75,6 +102,8 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
                 processMetrics.IoWriteBytesPerSecond,
             BlueStacksThreadCount = processMetrics.ThreadCount,
             BlueStacksHandleCount = processMetrics.HandleCount,
+            BlueStacksListener = _blueStacksListener,
+            BlueStacksListenerError = _blueStacksListenerError,
             GpuCountersAvailable = gpuMetrics.Available,
             HostGpuPercent = gpuMetrics.HostGpuPercent,
             HostGpuDedicatedMemoryBytes =
@@ -90,13 +119,56 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
             GpuSampleDurationMilliseconds =
                 gpuMetrics.SampleDurationMilliseconds,
             GpuError = gpuMetrics.Error,
+            ProcessAttributionState = processAttributionState,
+            ProcessAttributionProcessCount = processRefresh.ProcessCount,
+            ProcessAttribution = processRefresh.Attribution,
+            ProcessAttributionSampleDurationMilliseconds =
+                processRefresh.SampleDurationMilliseconds,
             ControlSurfaceCpuPercent = controlSurfaceCpuPercent,
             SampleDurationMilliseconds = sampleTimer.Elapsed.TotalMilliseconds,
         };
     }
 
-    private void RefreshBlueStacksProcesses()
+    private void RefreshBlueStacksListener(BlueStacksRecoveryTarget? target)
     {
+        _listenerTarget = target;
+        _blueStacksListener = null;
+        _blueStacksListenerError = null;
+        if (target is null)
+        {
+            _blueStacksListenerError =
+                "BlueStacks listener target is not configured.";
+            return;
+        }
+        try
+        {
+            var identity = _blueStacksController.Inspect(
+                target,
+                requireSingleActiveInstance: true);
+            _blueStacksListener = new HostPerformanceBlueStacksListener
+            {
+                HostId = identity.HostId,
+                AdbPort = identity.AdbPort,
+                ProcessId = identity.ProcessId,
+                ProcessStartedAt = identity.ProcessStartedAtText,
+                ExecutablePath = identity.ExecutablePath,
+                InstanceName = target.InstanceName,
+            };
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or ArgumentException
+                or System.ComponentModel.Win32Exception)
+        {
+            _blueStacksListenerError = exception.Message;
+        }
+    }
+
+    private ProcessRefreshResult RefreshProcesses(
+        DateTimeOffset sampledAtUtc,
+        bool collectAttribution)
+    {
+        var attributionElapsedTicks = 0L;
         foreach (var tracked in _blueStacksProcesses)
         {
             tracked.Process.Dispose();
@@ -104,35 +176,125 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         _blueStacksProcesses.Clear();
         _blueStacksProcessIds.Clear();
         _processNames.Clear();
+        var attributionTotals = new Dictionary<int, ProcessAttributionTotals>();
 
         foreach (var process in Process.GetProcesses())
         {
+            var retained = false;
             try
             {
                 var processId = process.Id;
-                var processName = process.ProcessName;
+                var processName = BoundedProcessName(processId, process.ProcessName);
                 _processNames[processId] = processName;
-                if (!IsBlueStacksProcessName(processName))
+                if (IsBlueStacksProcessName(processName))
                 {
-                    process.Dispose();
+                    process.Refresh();
+                    _blueStacksProcessIds.Add(processId);
+                    _blueStacksProcesses.Add(
+                        new TrackedProcess(
+                            process,
+                            SafeProcessValue(() => process.Threads.Count),
+                            SafeProcessValue(() => process.HandleCount)));
+                    retained = true;
                     continue;
                 }
-                process.Refresh();
-                _blueStacksProcessIds.Add(processId);
-                _blueStacksProcesses.Add(
-                    new TrackedProcess(
-                        process,
-                        SafeProcessValue(() => process.Threads.Count),
-                        SafeProcessValue(() => process.HandleCount)));
+                if (collectAttribution
+                    && processId != _controlSurfaceProcess.Id
+                    && processId > 0)
+                {
+                    var attributionStarted = Stopwatch.GetTimestamp();
+                    try
+                    {
+                        process.Refresh();
+                        attributionTotals[processId] =
+                            new ProcessAttributionTotals(
+                                processName,
+                                process.TotalProcessorTime,
+                                Math.Max(0, process.WorkingSet64),
+                                Math.Max(0, process.PrivateMemorySize64));
+                    }
+                    finally
+                    {
+                        attributionElapsedTicks +=
+                            Stopwatch.GetTimestamp() - attributionStarted;
+                    }
+                }
             }
             catch (Exception exception) when (
                 exception is InvalidOperationException
                     or System.ComponentModel.Win32Exception
                     or NotSupportedException)
             {
-                process.Dispose();
+                // Processes can exit or deny inspection during discovery.
+            }
+            finally
+            {
+                if (!retained)
+                {
+                    process.Dispose();
+                }
             }
         }
+
+        if (!collectAttribution)
+        {
+            _previousProcessAttributionTotals.Clear();
+            _previousProcessAttributionAtUtc = null;
+            return ProcessRefreshResult.Empty;
+        }
+
+        var attributionProcessingStarted = Stopwatch.GetTimestamp();
+        var elapsedSeconds = _previousProcessAttributionAtUtc is null
+            ? (double?)null
+            : Math.Max(
+                0.001,
+                (sampledAtUtc - _previousProcessAttributionAtUtc.Value)
+                    .TotalSeconds);
+        var observations = new List<HostProcessObservation>(
+            attributionTotals.Count);
+        foreach (var (processId, totals) in attributionTotals)
+        {
+            double? cpuPercent = null;
+            if (elapsedSeconds is > 0
+                && _previousProcessAttributionTotals.TryGetValue(
+                    processId,
+                    out var previous)
+                && string.Equals(
+                    totals.ProcessName,
+                    previous.ProcessName,
+                    StringComparison.Ordinal)
+                && totals.CpuTime >= previous.CpuTime)
+            {
+                cpuPercent = Math.Clamp(
+                    (totals.CpuTime - previous.CpuTime).TotalSeconds
+                        / elapsedSeconds.Value
+                        * 100.0
+                        / _logicalProcessorCount,
+                    0.0,
+                    100.0);
+            }
+            observations.Add(
+                new HostProcessObservation(
+                    processId,
+                    totals.ProcessName,
+                    cpuPercent,
+                    totals.WorkingSetBytes,
+                    totals.PrivateBytes));
+        }
+
+        _previousProcessAttributionTotals.Clear();
+        foreach (var (processId, totals) in attributionTotals)
+        {
+            _previousProcessAttributionTotals[processId] = totals;
+        }
+        _previousProcessAttributionAtUtc = sampledAtUtc;
+        var selected = HostProcessAttributionSelector.Select(observations);
+        attributionElapsedTicks +=
+            Stopwatch.GetTimestamp() - attributionProcessingStarted;
+        return new ProcessRefreshResult(
+            attributionTotals.Count,
+            selected,
+            attributionElapsedTicks * 1000.0 / Stopwatch.Frequency);
     }
 
     internal static bool IsBlueStacksProcessName(string processName) =>
@@ -364,6 +526,18 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         }
     }
 
+    private static string BoundedProcessName(int processId, string value)
+    {
+        var normalized = new string(
+                value.Where(character => !char.IsControl(character)).ToArray())
+            .Trim();
+        if (normalized.Length == 0)
+        {
+            return $"PID {processId}";
+        }
+        return normalized.Length <= 128 ? normalized : normalized[..128];
+    }
+
     private static ulong ToUInt64(FileTime value) =>
         ((ulong)value.High << 32) | value.Low;
 
@@ -374,6 +548,10 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         _previousControlSurfaceCpu = null;
         _previousSampleAtUtc = null;
         _previousProcessTotals.Clear();
+        _previousProcessAttributionTotals.Clear();
+        _previousProcessAttributionAtUtc = null;
+        _samplesUntilDiscovery = 0;
+        _processAttributionGate.Reset();
         _gpuSampler.ResetRateBaseline();
     }
 
@@ -404,6 +582,23 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         long PrivateBytes,
         ulong IoReadBytes,
         ulong IoWriteBytes);
+
+    private readonly record struct ProcessAttributionTotals(
+        string ProcessName,
+        TimeSpan CpuTime,
+        long WorkingSetBytes,
+        long PrivateBytes);
+
+    private readonly record struct ProcessRefreshResult(
+        int ProcessCount,
+        IReadOnlyList<HostProcessObservation> Attribution,
+        double? SampleDurationMilliseconds)
+    {
+        public static ProcessRefreshResult Empty { get; } = new(
+            0,
+            [],
+            null);
+    }
 
     private readonly record struct SystemTimes(
         ulong Idle,

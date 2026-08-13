@@ -10,6 +10,38 @@ def _text(name: str) -> str:
     return (WPF / name).read_text(encoding="utf-8")
 
 
+def test_wpf_nonblocking_preflight_advisories_do_not_auto_open():
+    code = _text("MainWindow.xaml.cs")
+    presentation = _text("GateDecisionPresentation.cs")
+
+    assert "if (pendingGate is { Blocking: true }" in code
+    assert '"Review preflight advisory"' in code
+    assert '"A nonblocking preflight advisory is available"' in presentation
+    assert '"No decision is required;' in presentation
+
+
+def test_wpf_control_posts_are_ordered_against_status_refreshes():
+    code = _text("MainWindow.xaml.cs")
+    control_handler = code.split(
+        "private async void Control_Click", 1
+    )[1].split("private async void Mode_Click", 1)[0]
+    mode_handler = code.split(
+        "private async void Mode_Click", 1
+    )[1].split(
+        "private async void GameSpeedTargetBox_SelectionChanged", 1
+    )[0]
+
+    assert "_controlMutationGate = new(1, 1)" in code
+    for handler in (control_handler, mode_handler):
+        cancel = handler.index("_refreshCancellation?.Cancel();")
+        post = handler.index("PostControlAsync")
+        render_gate = handler.index("await _refreshGate.WaitAsync();")
+        assert cancel < post < render_gate
+        assert "await _controlMutationGate.WaitAsync();" in handler
+        assert "_controlMutationGate.Release();" in handler
+        assert "await RefreshStatusAsync(force: true);" in handler
+
+
 def test_wpf_authoring_shell_groups_catalogs_and_registry_sections():
     xaml = _text("StrategyProfilesWindow.xaml")
     code = _text("StrategyProfilesWindow.xaml.cs")
@@ -211,6 +243,52 @@ def test_native_combo_theme_keeps_closed_and_dropdown_text_high_contrast():
     assert '<Trigger Property="IsSelected" Value="True">' in item_style
 
 
+def test_native_expander_theme_owns_complete_high_contrast_chrome():
+    app_xaml = _text("App.xaml")
+    expander_style = app_xaml.split('<Style TargetType="Expander">', 1)[1].split(
+        "</Style>", 1
+    )[0]
+
+    assert '<Setter Property="Background" Value="#182338" />' in expander_style
+    assert '<Setter Property="Foreground" Value="#EDF2F7" />' in expander_style
+    assert '<Setter Property="OverridesDefaultStyle" Value="True" />' in expander_style
+    assert '<ControlTemplate TargetType="{x:Type Expander}">' in expander_style
+    assert 'x:Name="HeaderChrome"' in expander_style
+    assert 'TextElement.Foreground="{TemplateBinding Foreground}"' in expander_style
+    assert 'Stroke="{TemplateBinding Foreground}"' in expander_style
+    assert 'x:Name="ExpandSite"' in expander_style
+    assert '<Trigger Property="IsExpanded" Value="True">' in expander_style
+    assert '<Trigger Property="IsEnabled" Value="False">' in expander_style
+    assert '<Setter Property="Foreground" Value="#7890AC" />' in expander_style
+
+
+def test_native_dashboard_uses_header_width_and_prioritizes_host_health():
+    xaml = _text("MainWindow.xaml")
+    code = _text("MainWindow.xaml.cs")
+    header = xaml.split('x:Name="HeaderHealthButton"', 1)[1].split(
+        "</Button>", 1
+    )[0]
+    diagnostics = xaml.split('<TabItem Header="Diagnostics"', 1)[1].split(
+        "</TabItem>", 1
+    )[0]
+
+    assert 'HorizontalAlignment="Stretch"' in header
+    assert 'HorizontalContentAlignment="Stretch"' in header
+    assert header.count('<ColumnDefinition Width="*" />') == 4
+    assert 'Grid.Row="1"' not in header
+    assert diagnostics.index('x:Name="HostPerformancePanel"') < diagnostics.index(
+        'x:Name="RuntimeServiceDetailText"'
+    )
+    assert 'Text="SERVICE &amp; CONFIGURATION"' in diagnostics
+    assert 'Text="RUNTIME &amp; OBSERVATION"' in diagnostics
+    assert "RuntimeServiceDetailText.Text = string.Join(" in code
+    service_detail = code.split(
+        "RuntimeServiceDetailText.Text = string.Join(", 1
+    )[1].split("RuntimeDetailText.Text = string.Join(", 1)[0]
+    assert "Configured next-start strategy:" in service_detail
+    assert "Current runtime strategy:" not in service_detail
+
+
 def test_native_choice_labels_remain_readable_when_editor_is_disabled():
     app_xaml = _text("App.xaml")
 
@@ -278,10 +356,13 @@ def test_portable_view_model_suite_covers_editors_states_and_round_trips():
     )
     assert "OrbLocalEditorEmitsExactlyThreeUnnormalizedTextFields" in tests
     assert "ComputedDisplayPropertiesRemainReadOnly" in tests
-    assert "BasePinReviewCoversFirstAttachmentWithoutImplyingActivation" in tests
+    assert (
+        "BasePinReviewExplainsPublicationQueueWithoutCurrentBattleSwitch"
+        in tests
+    )
 
 
-def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
+def test_wpf_rebase_and_publish_reviews_explain_next_boundary_use():
     xaml = _text("StrategyProfilesWindow.xaml")
     code = _text("StrategyProfilesWindow.xaml.cs")
     view_models = _text("StrategyAuthoringViewModels.cs")
@@ -302,11 +383,18 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert 'builder.AppendLine("BASE PIN REVIEW")' in view_models
     assert "draft's pinned Base reference" in view_models
     assert "StrategyAuthoringReviewFormatter.FormatPublishReview" in code
-    assert "Publishing will not activate this Strategy" in view_models
+    assert "Publishing does not switch the current battle" in view_models
+    assert "queues its latest definition for the next battle" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 32" in compatibility
+    assert "MinimumServerRevision = 41" in compatibility
+    assert '"save_mapping_develop_integration_v1"' in compatibility
+    assert '"bluestacks_maintenance_v1"' not in compatibility
+    assert '"bluestacks_maintenance_v2"' in compatibility
+    assert '"bluestacks_operator_restart_v1"' in compatibility
+    assert '"bluestacks_listener_lifetime_telemetry_v1"' in compatibility
     assert '"better_control_model_v2"' in compatibility
+    assert '"runtime_control_acknowledgements_v1"' in compatibility
     assert '"current_battle_perks_v1"' in compatibility
     assert '"save_backed_setup_capture_v2"' in compatibility
     capture_code = _text("SetupCaptureWindow.xaml.cs")
@@ -321,6 +409,30 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert '"strategy_authoring_profile_lifecycle_v1"' in compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in compatibility
     assert '"strategy_authoring_v1"' in compatibility
+
+
+def test_wpf_save_mapping_integration_requires_review_and_second_confirmation():
+    xaml = _text("SaveMappingIntegrationWindow.xaml")
+    code = _text("SaveMappingIntegrationWindow.xaml.cs")
+    api_client = _text("ApiClient.cs")
+
+    assert 'Text="1. OBSERVATION"' in xaml
+    assert 'Text="2. DEVELOP ELIGIBILITY"' in xaml
+    assert 'Header="3. Exact reviewed proposal"' in xaml
+    assert "ReviewSaveMappingIntegrationAsync" in api_client
+    assert "IntegrateSaveMappingAsync" in api_client
+    assert "SaveMappingIntegrationViewModels.ReviewMatches" in code
+    assert '"Integrate canonical save mapping"' in code
+    assert "MessageBoxImage.Warning" in code
+    assert "fast-forwards clean" in code
+    assert "ValidateIntegratedResult" in code
+    assert "CandidateBox.IsEnabled = !busy" in code
+    assert "WorkspaceBox" not in code
+    assert "Closing += Window_Closing" in code
+    assert "Interrupted integration requires recovery" in code
+    assert "do not retry automatically" in _text(
+        "SaveMappingIntegrationViewModels.cs"
+    )
 
 
 def test_wpf_profile_local_loadout_controls_use_only_nested_server_metadata():
@@ -512,10 +624,11 @@ def test_wpf_history_review_restore_conflict_and_retired_lineage_workflow():
 
     assert 'x:Name="HistoryButton"' in authoring_xaml
     assert 'Content="History..."' in authoring_xaml
-    assert "new StrategyHistoryWindow(_api)" in authoring_code
+    assert "new StrategyHistoryWindow(_api, _publishedStrategyHandler)" in authoring_code
     assert "history.StrategyRestored +=" in authoring_code
     assert "await LoadCatalogAsync(selectedKind, selectedId)" in authoring_code
-    assert "Runtime selection and activation are unchanged" in authoring_code
+    assert "args.UseMessage" in authoring_code
+    assert "args.UseSucceeded is false" in authoring_code
 
     assert 'Text="Immutable Strategy History"' in history_xaml
     assert 'x:Name="LineagesList"' in history_xaml
@@ -531,7 +644,12 @@ def test_wpf_history_review_restore_conflict_and_retired_lineage_workflow():
     assert "reviewed_restore_fingerprint = _review.ReviewedRestoreFingerprint" in history_code
     assert "RestoreButton.IsEnabled = false" in history_code
     assert "Any open Strategy draft remains unchanged" in history_code
-    assert "will not select or activate the Strategy" in history_code
+    assert "will select the Strategy" in history_code
+    assert "queues its new latest definition" in history_code
+    assert "uses it for Start Automation" in history_code
+    assert "_publishedStrategyHandler" in history_code
+    assert "useResult?.Succeeded" in history_code
+    assert "useResult?.Message" in history_code
     assert "StrategyHistoryReviewFormatter.FormatComparison" in history_code
     assert "Generated plan fingerprint changed" in view_models
     assert "explicit Ignore changes" in view_models

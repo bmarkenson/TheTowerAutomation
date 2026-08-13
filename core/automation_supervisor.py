@@ -21,8 +21,10 @@ Public usage (simplified):
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import math
 import os
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -37,6 +39,7 @@ from core.control_directives import (
     ControlDirectiveStore,
     MAXIMUM_GAME_SPEED_TARGET,
     normalize_automation_mode,
+    normalize_emulator_maintenance,
     normalize_game_speed_target,
     normalize_interactive_development_lease,
 )
@@ -46,8 +49,13 @@ from core.control_model import (
     validate_setup_capture,
 )
 from core.strategy_profiles import is_configurable_strategy
-from utils.logger import log, log_action_intent, log_result
+from utils.logger import log as _write_log, log_action_intent, log_result
 from core.run_state import AUTOMATION
+from core.runtime_failure_policy import (
+    RuntimeFailureDisposition,
+    RuntimeFailureKind,
+    decide_runtime_failure,
+)
 from core.input import tap_if_visible
 from core.label_tapper import is_visible
 from core.matcher import get_match as _get_match
@@ -59,6 +67,15 @@ Frame = NDArray[np.uint8]
 
 
 _ALLOWED_STATES = {"RUNNING", "PAUSED", "STOPPED"}
+
+
+def log(*args, **kwargs):
+    """Keep control authority independent of recoverable log I/O failure."""
+
+    try:
+        return _write_log(*args, **kwargs)
+    except Exception:
+        return None
 
 
 class AutomationSupervisor:
@@ -77,7 +94,39 @@ class AutomationSupervisor:
     ) -> None:
         self.control_file = Path(control_file)
         self._control_store = ControlDirectiveStore(self.control_file)
+        self._control_apply_lock = threading.RLock()
+        self._control_read_failed = False
+        self._control_read_failure_logged = False
+        self._catastrophic_pause_latched = False
+        self._catastrophic_pause_state_revision: object = None
+        self._catastrophic_pause_reason: Optional[str] = None
+        try:
+            added_request_ids = (
+                self._control_store.ensure_request_identities()
+            )
+        except ControlDirectiveError as exc:
+            added_request_ids = {}
+            log(
+                "[CTRL] Could not add exact identities to legacy control "
+                f"directives: {exc}",
+                "WARN",
+            )
+        if added_request_ids:
+            log(
+                "[CTRL] Added exact request identities to legacy fields: "
+                + ", ".join(sorted(added_request_ids)),
+                "INFO",
+            )
         initial_directives = self._load_control_directive()
+        initial_state = initial_directives.get("state")
+        if (
+            isinstance(initial_state, str)
+            and initial_state.strip().upper() in _ALLOWED_STATES
+        ):
+            # Close the startup window before App wiring, ADB connection, or
+            # acknowledgement publication. Exact receipts are still recorded
+            # only when apply_control() consumes the directive normally.
+            AUTOMATION.state = initial_state.strip().upper()
         self._strategy_request = self._parse_strategy_request(initial_directives)
         self._game_speed_target = self._parse_game_speed_target(
             initial_directives.get("game_speed_target")
@@ -93,6 +142,17 @@ class AutomationSupervisor:
             normalize_interactive_development_lease(
                 initial_directives.get("interactive_development_lease")
             )
+        )
+        self._interactive_development_lease_error = bool(
+            initial_directives.get("interactive_development_lease") is not None
+            and self._interactive_development_lease is None
+        )
+        self._emulator_maintenance = normalize_emulator_maintenance(
+            initial_directives.get("emulator_maintenance")
+        )
+        self._emulator_maintenance_error = bool(
+            initial_directives.get("emulator_maintenance") is not None
+            and self._emulator_maintenance is None
         )
         self._battle_workflow = validate_battle_workflow(
             initial_directives.get("battle_workflow")
@@ -139,6 +199,15 @@ class AutomationSupervisor:
         self._last_deferred_adb_request: Optional[Tuple[int, object]] = None
         self._next_adb_handoff_attempt_at = 0.0
         self._unexpected_manual_yield_emergency = False
+        self._control_acknowledgements: Dict[
+            str, Optional[Dict[str, object]]
+        ] = {
+            "state": None,
+            "mode": None,
+            "game_speed_target": None,
+            "adb_target": None,
+            "strategy": None,
+        }
 
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
@@ -209,6 +278,40 @@ class AutomationSupervisor:
         )
 
     @property
+    def interactive_development_lease_error(self) -> bool:
+        """Return whether external-development input authority is malformed."""
+
+        return bool(self._interactive_development_lease_error)
+
+    @property
+    def input_authority_error(self) -> Optional[str]:
+        """Return the malformed directive that makes input ownership unknown."""
+
+        for label, present in (
+            (
+                "interactive-development-lease",
+                self._interactive_development_lease_error,
+            ),
+            ("manual-control", self._manual_control_error),
+            ("battle-workflow", self._battle_workflow_error),
+            ("setup-capture", self._setup_capture_error),
+            ("emulator-maintenance", self._emulator_maintenance_error),
+        ):
+            if present:
+                return label
+        return None
+
+    @property
+    def emulator_maintenance(self) -> Optional[Dict[str, object]]:
+        """Return the latest validated BlueStacks maintenance directive."""
+
+        return (
+            deepcopy(self._emulator_maintenance)
+            if self._emulator_maintenance is not None
+            else None
+        )
+
+    @property
     def battle_workflow(self) -> Optional[Dict[str, object]]:
         """Return the latest validated explicit battle workflow directive."""
 
@@ -253,6 +356,85 @@ class AutomationSupervisor:
         return str(value or "UNKNOWN").strip().upper()
 
     @property
+    def runtime_id(self) -> str:
+        """Return this supervisor's process-lifetime runtime identity."""
+
+        return self._runtime_id
+
+    @property
+    def dispatch_control_lock_path(self) -> str:
+        """Return the shared ordering boundary for control and device input."""
+
+        return str(self._control_store.dispatch_lock_path)
+
+    @property
+    def control_acknowledgements(self) -> Dict[str, object]:
+        """Return exact runtime-applied directive receipts for publication."""
+
+        return {
+            "schema_version": 1,
+            **deepcopy(self._control_acknowledgements),
+        }
+
+    def acknowledge_strategy(
+        self,
+        strategy: str,
+        request_id: object,
+    ) -> bool:
+        """Record Strategy application only for the exact current request."""
+
+        normalized_strategy = str(strategy or "").strip().lower()
+        normalized_request_id = str(request_id or "").strip()
+        current = self._strategy_request
+        if (
+            current is None
+            or normalized_strategy != str(current[0]).strip().lower()
+            or normalized_request_id != str(current[1] or "").strip()
+        ):
+            return False
+        return self._record_control_acknowledgement(
+            "strategy",
+            normalized_strategy,
+            normalized_request_id,
+        )
+
+    def defer_strategy_request_to_next_boundary(
+        self,
+        strategy: str,
+        request_id: object,
+        *,
+        source: str = "runtime-strategy-deferral",
+    ) -> bool:
+        """Persistently downshift one exact active-battle request."""
+
+        normalized_strategy = str(strategy or "").strip().lower()
+        normalized_request_id = str(request_id or "").strip()
+        try:
+            directives = self._control_store.defer_strategy_request_to_next_boundary(
+                normalized_strategy,
+                normalized_request_id,
+                source=source,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[CTRL] Could not defer active-battle Strategy request to "
+                f"the next boundary: {exc}",
+                "WARN",
+            )
+            return False
+        if directives is None:
+            return False
+        parsed = self._parse_strategy_request(directives)
+        if parsed != (
+            normalized_strategy,
+            normalized_request_id,
+            "next_boundary",
+        ):
+            return False
+        self._strategy_request = parsed
+        return True
+
+    @property
     def control_request_identity(self) -> Dict[str, object]:
         """Return the exact state and terminal-policy directives in force."""
 
@@ -271,10 +453,42 @@ class AutomationSupervisor:
 
         return bool(self._unexpected_manual_yield_emergency)
 
+    @property
+    def catastrophic_pause_hold(self) -> Dict[str, object]:
+        """Describe the local hold that requires one newer Enable request."""
+
+        return {
+            "active": bool(self._catastrophic_pause_latched),
+            "reason": self._catastrophic_pause_reason,
+        }
+
     def apply_control(self) -> bool:
         """Apply directives and report whether tracked control intent changed."""
 
+        with AUTOMATION.quiescence_boundary():
+            with self._control_apply_lock:
+                return self._apply_control_locked()
+
+    def _apply_control_locked(self) -> bool:
+        """Apply one serialized persistent-control snapshot."""
+
         directives = self._load_control_directive()
+        if self._control_read_failed:
+            # Durable control is the sole operator authority.  If it cannot be
+            # read, fail closed locally before any later device mutation; do
+            # not manufacture an acknowledgement for unknown intent.  Keep a
+            # process-local catastrophic hold so recovery of an older RUNNING
+            # directive cannot silently resume input; a fresh Enable request
+            # is required after control authority was unavailable.
+            if self.control_state == "STOPPED":
+                return False
+            changed = self.control_state != "PAUSED"
+            self._latch_catastrophic_pause(
+                "durable control authority became unreadable"
+            )
+            self._last_applied_state = None
+            self._apply_state("PAUSED")
+            return changed
         control_directive_changed = False
         if directives:
             state_revision = (
@@ -286,6 +500,34 @@ class AutomationSupervisor:
                 state_revision is not None
                 and state_revision != self._last_state_directive_revision
             )
+            requested_state = str(directives.get("state") or "").upper()
+            if self._catastrophic_pause_latched and requested_state == "RUNNING":
+                if self._catastrophic_pause_state_revision is None:
+                    # The first readable RUNNING snapshot after authority was
+                    # lost is the stale baseline, not proof of a new Enable.
+                    self._catastrophic_pause_state_revision = state_revision
+                elif (
+                    state_revision is not None
+                    and state_revision
+                    != self._catastrophic_pause_state_revision
+                ):
+                    self._catastrophic_pause_latched = False
+                    self._catastrophic_pause_state_revision = None
+                    self._catastrophic_pause_reason = None
+                    log(
+                        "[RUNTIME_POLICY] Fresh Enable request released the "
+                        "catastrophic control hold",
+                        "INFO",
+                        console=True,
+                    )
+            elif (
+                self._catastrophic_pause_latched
+                and requested_state == "PAUSED"
+                and state_revision is not None
+            ):
+                # A successfully persisted catastrophic Pause becomes the
+                # baseline that the later explicit Enable must replace.
+                self._catastrophic_pause_state_revision = state_revision
             self._last_state_directive_revision = state_revision
             mode_revision = (
                 directives.get("mode_request_id")
@@ -334,6 +576,17 @@ class AutomationSupervisor:
                     directives.get("interactive_development_lease")
                 )
             )
+            self._interactive_development_lease_error = bool(
+                directives.get("interactive_development_lease") is not None
+                and self._interactive_development_lease is None
+            )
+            self._emulator_maintenance = normalize_emulator_maintenance(
+                directives.get("emulator_maintenance")
+            )
+            self._emulator_maintenance_error = bool(
+                directives.get("emulator_maintenance") is not None
+                and self._emulator_maintenance is None
+            )
             self._battle_workflow = validate_battle_workflow(
                 directives.get("battle_workflow")
             )
@@ -357,10 +610,20 @@ class AutomationSupervisor:
             )
             if self._unexpected_manual_yield_emergency and self._manual_control:
                 self._unexpected_manual_yield_emergency = False
+            held_running = bool(
+                self._catastrophic_pause_latched
+                and requested_state == "RUNNING"
+            )
             self._apply_state(
-                directives.get("state"),
-                acknowledge_unchanged=state_directive_changed,
-                request_id=directives.get("state_request_id"),
+                "PAUSED" if held_running else directives.get("state"),
+                acknowledge_unchanged=(
+                    state_directive_changed and not held_running
+                ),
+                request_id=(
+                    None
+                    if held_running
+                    else directives.get("state_request_id")
+                ),
             )
             self._apply_mode(
                 directives.get("mode"),
@@ -370,11 +633,15 @@ class AutomationSupervisor:
             self._apply_game_speed_target(
                 directives.get("game_speed_target"),
                 acknowledge_unchanged=game_speed_target_changed,
+                request_id=directives.get(
+                    "game_speed_target_request_id"
+                ),
             )
             self._sync_pause_deadline(directives)
             self._apply_adb_port(
                 directives.get("adb_port"),
                 directives.get("adb_port_updated_at"),
+                request_id=directives.get("adb_port_request_id"),
             )
 
         if self._unexpected_manual_yield_emergency:
@@ -608,6 +875,34 @@ class AutomationSupervisor:
             return None
         self._interactive_development_lease = deepcopy(lease)
         return deepcopy(lease)
+
+    def finish_emulator_maintenance(
+        self,
+        request_id: str,
+        *,
+        disposition: str,
+        reason: str,
+        now: Optional[float] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Persist one terminal result owned by this recovery runtime."""
+
+        try:
+            maintenance = self._control_store.finish_emulator_maintenance(
+                request_id,
+                disposition=disposition,
+                reason=reason,
+                source="runtime-emulator-recovery",
+                now=now,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[EMULATOR_RECOVERY] Failed recording terminal maintenance "
+                f"state: {exc}",
+                "WARN",
+            )
+            return None
+        self._emulator_maintenance = deepcopy(maintenance)
+        return deepcopy(maintenance)
 
     def exclusive_validation_receipt(
         self,
@@ -938,8 +1233,8 @@ class AutomationSupervisor:
             return
         self._exclusive_validation = dict(ledger or {})
 
-    def persist_state(self, state: str) -> bool:
-        """Persist and immediately apply a runtime-owned state transition."""
+    def _persist_runtime_state(self, state: str, *, source: str) -> bool:
+        """Persist one already-authorized runtime state transition."""
 
         normalized = str(state).strip().upper()
         if normalized not in _ALLOWED_STATES:
@@ -950,7 +1245,7 @@ class AutomationSupervisor:
         try:
             saved = self._control_store.set_state(
                 normalized,
-                source="runtime",
+                source=source,
             )
         except ControlDirectiveError as exc:
             log(f"[CTRL] Failed writing control file: {exc}", "WARN")
@@ -960,6 +1255,100 @@ class AutomationSupervisor:
         self._last_state_directive_revision = request_id
         self._apply_state(normalized, request_id=request_id)
         return True
+
+    def pause_for_operator_authority(self, reason: str) -> bool:
+        """Persist a Pause explicitly selected by, or yielded to, the operator."""
+
+        log(
+            "[RUNTIME_POLICY] Operator authority requested Pause: "
+            f"{str(reason or 'operator request').strip()}",
+            "INFO",
+        )
+        return self._persist_runtime_state(
+            "PAUSED",
+            source="runtime-operator-authority",
+        )
+
+    def pause_for_catastrophic_failure(
+        self,
+        kind: RuntimeFailureKind,
+        *,
+        reason: str,
+    ) -> bool:
+        """Persist the only automatic Pause permitted by global policy."""
+
+        decision = decide_runtime_failure(kind)
+        if decision.disposition is not RuntimeFailureDisposition.PAUSE_FOR_SAFETY:
+            raise ValueError(
+                f"{kind.value} is recoverable and cannot globally Pause automation"
+            )
+        # The local safety latch must precede every fallible diagnostic or
+        # persistence operation.  Otherwise a logger failure could let the
+        # next guard reapply stale durable RUNNING authority.
+        self._latch_catastrophic_pause(reason)
+        try:
+            saved = self._control_store.set_paused_unless_stopped(
+                source="runtime-catastrophic-failure"
+            )
+        except ControlDirectiveError as exc:
+            try:
+                log(f"[CTRL] Failed writing control file: {exc}", "WARN")
+            except Exception:
+                pass
+            return False
+
+        saved_state = str(saved.get("state") or "").strip().upper()
+        request_id = saved.get("state_request_id")
+        self._last_state_directive_revision = request_id
+        self._last_applied_state = None
+        if saved_state == "STOPPED":
+            # Explicit Stop always outranks automatic Pause, including when a
+            # command reports uncertainty after Stop was persisted.
+            self._catastrophic_pause_latched = False
+            self._catastrophic_pause_state_revision = None
+            self._catastrophic_pause_reason = None
+            self._apply_state("STOPPED", request_id=request_id)
+            try:
+                log(
+                    "[RUNTIME_POLICY] Catastrophic result arrived after "
+                    "explicit Stop; STOPPED authority was preserved",
+                    "ERROR",
+                )
+            except Exception:
+                pass
+            return True
+
+        self._apply_state("PAUSED", request_id=request_id)
+        self._catastrophic_pause_state_revision = request_id
+        try:
+            log(
+                "[RUNTIME_POLICY] Catastrophic failure Paused automation: "
+                f"kind={kind.value} "
+                f"reason={str(reason or 'unavailable').strip()}",
+                "ERROR",
+            )
+        except Exception:
+            pass
+        return True
+
+    def _latch_catastrophic_pause(self, reason: str) -> None:
+        """Require a newer explicit RUNNING request after an unsafe gap."""
+
+        if self.control_state == "STOPPED":
+            # An explicit Stop is stricter than a catastrophic Pause and must
+            # never be weakened when durable authority or reporting fails.
+            return
+        if not self._catastrophic_pause_latched:
+            self._catastrophic_pause_state_revision = getattr(
+                self,
+                "_last_state_directive_revision",
+                None,
+            )
+        self._catastrophic_pause_latched = True
+        self._catastrophic_pause_reason = str(reason or "catastrophic failure")
+        # This is deliberately independent of the control-file write.  A
+        # failed persistence attempt must still stop this process immediately.
+        AUTOMATION.state = "PAUSED"
 
     def transition_battle_workflow(
         self,
@@ -1412,10 +1801,108 @@ class AutomationSupervisor:
     # ------------------------------ helpers ---------------------------------
     def _load_control_directive(self) -> Dict[str, object]:
         try:
-            return self._control_store.read()
+            directives = self._control_store.read()
         except ControlDirectiveError as exc:
-            log(f"[CTRL] Failed reading control file: {exc}", "WARN")
+            self._control_read_failed = True
+            self._latch_catastrophic_pause(
+                "durable control authority became unreadable"
+            )
+            if not self._control_read_failure_logged:
+                log(
+                    "[CTRL] Failed reading control file; device mutation is "
+                    f"blocked until authority recovers: {exc}",
+                    "WARN",
+                )
+                self._control_read_failure_logged = True
             return {}
+        authority_error = self._core_state_authority_error(directives)
+        if authority_error is not None:
+            self._control_read_failed = True
+            raw_state = directives.get("state")
+            if (
+                isinstance(raw_state, str)
+                and raw_state.strip().upper() == "STOPPED"
+            ):
+                # A malformed identity cannot authorize action, but the
+                # stricter durable STOPPED value is still safe to honor. Do
+                # not acknowledge the malformed request envelope.
+                AUTOMATION.state = "STOPPED"
+            else:
+                self._latch_catastrophic_pause(authority_error)
+            if not self._control_read_failure_logged:
+                log(
+                    "[CTRL] Durable state authority is missing or malformed; "
+                    f"device mutation is blocked: {authority_error}",
+                    "WARN",
+                )
+                self._control_read_failure_logged = True
+            return {}
+        if self._control_read_failure_logged:
+            log(
+                "[CTRL] Control-file authority recovered; applying the "
+                "current durable directive",
+                "INFO",
+            )
+        self._control_read_failed = False
+        self._control_read_failure_logged = False
+        return directives
+
+    @staticmethod
+    def _core_state_authority_error(
+        directives: Mapping[str, object],
+    ) -> Optional[str]:
+        """Validate the exact durable Pause/Stop authority identity."""
+
+        state = directives.get("state")
+        normalized_state = (
+            state.strip().upper() if isinstance(state, str) else ""
+        )
+        if normalized_state not in _ALLOWED_STATES:
+            return "durable control state is missing or unsupported"
+        raw_request_id = directives.get("state_request_id")
+        request_id = (
+            raw_request_id.strip() if isinstance(raw_request_id, str) else ""
+        )
+        if (
+            not request_id
+            or len(request_id) > 128
+            or any(
+                not character.isascii()
+                or not (character.isalnum() or character in "._:-")
+                for character in request_id
+            )
+        ):
+            return "durable control state request identity is missing or malformed"
+        return None
+
+    def _record_control_acknowledgement(
+        self,
+        field: str,
+        value: str,
+        request_id: object,
+    ) -> bool:
+        """Replace one receipt only after the exact directive was applied."""
+
+        normalized_request_id = str(request_id or "").strip()
+        if (
+            field not in self._control_acknowledgements
+            or not normalized_request_id
+            or len(normalized_request_id) > 128
+            or any(
+                not character.isascii()
+                or not (character.isalnum() or character in "._:-")
+                for character in normalized_request_id
+            )
+        ):
+            return False
+        self._control_acknowledgements[field] = {
+            "value": str(value),
+            "request_id": normalized_request_id,
+            "acknowledged_at": datetime.now(timezone.utc)
+            .astimezone()
+            .isoformat(timespec="seconds"),
+        }
+        return True
 
     def _apply_state(
         self,
@@ -1434,17 +1921,16 @@ class AutomationSupervisor:
             if str(request_id or "").strip()
             else ""
         )
-        if normalized == self._last_applied_state:
-            if acknowledge_unchanged:
-                log(
-                    f"[CTRL] State set to {normalized} via control file"
-                    f"{request_suffix}",
-                    "INFO",
-                    console=True,
-                )
+        actual_matches = self.control_state == normalized
+        if (
+            normalized == self._last_applied_state
+            and actual_matches
+            and not acknowledge_unchanged
+        ):
             return
         try:
-            AUTOMATION.state = normalized
+            if not actual_matches:
+                AUTOMATION.state = normalized
             log(
                 f"[CTRL] State set to {normalized} via control file"
                 f"{request_suffix}",
@@ -1452,8 +1938,16 @@ class AutomationSupervisor:
                 console=True,
             )
             self._last_applied_state = normalized
+            self._record_control_acknowledgement(
+                "state",
+                normalized,
+                request_id,
+            )
         except Exception as exc:
-            log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
+            try:
+                log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
+            except Exception:
+                pass
 
     def _apply_mode(
         self,
@@ -1481,6 +1975,11 @@ class AutomationSupervisor:
                     "INFO",
                     console=True,
                 )
+                self._record_control_acknowledgement(
+                    "mode",
+                    normalized,
+                    request_id,
+                )
             return
         try:
             AUTOMATION.mode = normalized
@@ -1491,6 +1990,11 @@ class AutomationSupervisor:
                 console=True,
             )
             self._last_applied_mode = normalized
+            self._record_control_acknowledgement(
+                "mode",
+                normalized,
+                request_id,
+            )
         except Exception as exc:
             log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")
 
@@ -1499,6 +2003,7 @@ class AutomationSupervisor:
         target: object,
         *,
         acknowledge_unchanged: bool = False,
+        request_id: object = None,
     ) -> None:
         normalized = self._parse_game_speed_target(target)
         self._game_speed_target = normalized
@@ -1510,6 +2015,11 @@ class AutomationSupervisor:
                     "INFO",
                     console=True,
                 )
+                self._record_control_acknowledgement(
+                    "game_speed_target",
+                    f"x{normalized:.1f}",
+                    request_id,
+                )
             return
         self._last_applied_game_speed_target = normalized
         log(
@@ -1518,14 +2028,25 @@ class AutomationSupervisor:
             "INFO",
             console=True,
         )
+        self._record_control_acknowledgement(
+            "game_speed_target",
+            f"x{normalized:.1f}",
+            request_id,
+        )
 
-    def _apply_adb_port(self, port: object, updated_at: object) -> None:
+    def _apply_adb_port(
+        self,
+        port: object,
+        updated_at: object,
+        *,
+        request_id: object = None,
+    ) -> None:
         if isinstance(port, bool) or not isinstance(port, int):
             return
         if not 1 <= port <= 65535 or self._adb_port_handoff is None:
             return
 
-        request = (port, updated_at)
+        request = (port, request_id or updated_at)
         if request == self._last_applied_adb_request:
             return
         target = f"localhost:{port}"
@@ -1535,6 +2056,11 @@ class AutomationSupervisor:
                 f"[CTRL] ADB target set to {target} via control file",
                 "INFO",
                 console=True,
+            )
+            self._record_control_acknowledgement(
+                "adb_target",
+                target,
+                request_id,
             )
             return
         if not self.is_paused:
@@ -1562,6 +2088,11 @@ class AutomationSupervisor:
                 f"[CTRL] ADB target set to {target} via control file",
                 "INFO",
                 console=True,
+            )
+            self._record_control_acknowledgement(
+                "adb_target",
+                target,
+                request_id,
             )
             return
 
@@ -1613,7 +2144,12 @@ class AutomationSupervisor:
 
     def _auto_resume_if_needed(self) -> None:
         deadline = self._pause_resume_at
-        if not self.is_paused or deadline is None or time.time() < deadline:
+        if (
+            self._catastrophic_pause_latched
+            or not self.is_paused
+            or deadline is None
+            or time.time() < deadline
+        ):
             return
 
         try:

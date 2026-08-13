@@ -46,14 +46,19 @@ replacement, inspect fresh observation and issue a new exact battle intent.
 
 **When this battle ends** is future policy, not a Home command. **Continue
 automatically** normally taps Retry directly when the next ordinary Game Over
-is handled. **Wait** retains the supported terminal boundary, and **Return to /
-stay Home** follows its verified Home route. Selecting Continue while already
-at Home records and acknowledges only that future policy; it does not run save
+is handled. If that strategy battle carries a flagged configuration problem at
+Game Over, Continue instead returns Home, applies any pending next Strategy,
+and runs that profile's normal bounded setup before starting another battle. A
+failed Go Home action retries from fresh terminal evidence; exhausted setup is
+reported and the next battle still starts degraded. **Wait** retains the
+supported terminal boundary, and **Return to / stay Home** follows its verified
+Home route without authorizing a launch. Selecting Continue while already at
+Home records and acknowledges only that future policy; it does not run save
 preflight, repair configuration, tap Battle, or tap Resume.
 
 Some completed-terminal workflows must reach Home before another battle can
-start: No Strategy post-run inventory, an operator-authorized configuration
-repair, and Tournament Results dismissal. If Continue was already selected
+start: degraded-battle repair, No Strategy post-run inventory, and Tournament
+Results dismissal. If Continue was already selected
 for that exact terminal boundary, the runtime may carry one process-local
 continuation through the owned Home work. It is bound to the exact runtime,
 target generation, activity scope, and terminal-time state/policy request IDs;
@@ -91,24 +96,35 @@ guarded exact-target serialization and restores the source. A usable save
 binds active-round identity to the final activity scope. If the save is absent,
 uses an unsupported revision, has an incompatible shape, or cannot be
 projected after safe restoration, the runtime automatically uses guarded
-Battle History instead and writes a target/scope-bound UI receipt. `ready`
-means the existing battle is validated for observation-only attachment through
-one of those routes; it does not select a Strategy. A changed owner, target,
-scope, action authority, or unproved restoration still blocks input and leaves
-Automation Paused.
+Battle History instead. The Attach request freezes the complete accepted
+Strategy definition at the request boundary, so a later selection cannot
+change the battle being attached:
 
-To monitor and collect without changing the battle, leave the active Strategy
-as **No Strategy** after attachment. To apply the selected Strategy, use the
-separate **Switch this battle** action only after attachment completes. That
-adoption does not authorize Surrender. If a Strategy later reports a problem
-that can only be fixed between battles, automation may Surrender only when the
-runtime offers **Surrender this battle and repair setup** and the operator
-selects that exact one-shot option. It records the nonrepresentative result,
-returns to verified Home, and lets ordinary Home repair and the separately
-selected future-battle policy continue. Continue can launch from that Home
-only through the separate terminal-bound continuation described above. The
-repair permission itself does not select a later battle or grant Surrender
-authority beyond that exact repair.
+- **No Strategy** intentionally adopts the battle as an observer and is not by
+  itself degraded.
+- A selected Strategy whose battle kind and, for Farm, tier are proved
+  compatible becomes the active Strategy for that battle. A configuration
+  mismatch is recorded as degraded, but Attach does not repair the running
+  battle.
+- An incompatible or unprovable selected Strategy adopts the battle as a
+  degraded observer. The selection remains pending for the next safe battle
+  boundary.
+
+That degraded observer cannot later be turned into a Strategy-run battle with
+**Switch this battle**. The client disables the action when it has authoritative
+status; Linux independently downshifts any raced or older active-battle request
+to the next boundary without changing its request identity. Intentional **No
+Strategy** observation remains eligible for a later explicit switch.
+
+All attached-battle configuration checks are observational. They may inspect
+supported UI, but cannot change Damage Slider, Orb Distance, Auto Pick, Poison
+Swamp Stun, a preset, a loadout, or any other configuration. A check failure,
+unsupported field, unusable save after safe restoration, or status-reporting
+failure completes degraded and releases automation. Only loss of the exact
+owner, target, scope, action authority, source restoration, or certainty about
+a dispatched input is catastrophic and leaves Automation Paused. A failed
+receipt write never turns a successfully adopted battle into a global input
+hold; the runtime retains its exact process-local claim and retries reporting.
 
 ## Take and return manual control
 
@@ -131,8 +147,9 @@ Game Over evidence; Tournament Results, unknown state, or missing target/scope
 binding is visibly unavailable. Explicit **Enable Automation** then authorizes
 only reconciliation. The runtime first requests a newly forced save (or the
 bound Game Over natural save). If it is usable, mapped evidence reconciles
-battle identity and configuration; a trusted mismatch Pauses for operator
-review. If the save is unusable after safe restoration, active and resumable
+battle identity and configuration after profile and one-run skips are removed.
+A trusted mismatch completes Return with degraded evidence and does not restore
+Pause. If the save is unusable after safe restoration, active and resumable
 Return uses Battle History plus every supported active-Strategy UI verifier,
 Home New uses every supported Home configuration verifier, and Game Over uses
 the full Game Stats/Perks/More Stats collector. Each route writes a bound typed
@@ -143,12 +160,10 @@ authority binding after backgrounding, Return becomes failed/interrupted and
 Automation remains Paused.
 Do not retry by repeatedly selecting Enable; start a new explicit Return only
 after reviewing the reported boundary.
-If the forced save succeeds but the bounded Home UI repair exhausts instead,
-Return reports `awaiting_manual_correction` with the failed check and exact
-reason. Make the reported manual change while Pause remains acknowledged, then
-select Enable once. That explicit retry discards the former process-local claim
-and requests a new serialization before any UI validation; it never reuses the
-old receipt or retries from a heartbeat.
+At Home New, a mismatch is repaired immediately because the boundary is already
+safe. If evidence is unavailable or bounded repair exhausts, Return completes
+degraded with the failed check and exact reason. Automation remains Enabled;
+the workflow does not wait for a manual correction or another Enable.
 
 ## Capture a manually changed setup
 
@@ -169,18 +184,11 @@ state and does not disable ordinary Battle History/configuration UI monitoring.
 Capture is the deliberate exception to full UI fallback because no supported
 UI route can produce one coherent, reviewable authoring snapshot. Fresh
 active/resumable evidence that contradicts the requested battle
-reports `failed` and enters a Strategy Gate so observation and safe gem
-collectors continue. A proved Home New contradiction, or an attempted
+reports `failed`, releases capture ownership, and preserves the prior authority
+when source restoration is proved. A proved Home New contradiction, or an attempted
 lifecycle transition whose source restoration cannot be proved, reports
 `failed` and persists Automation Paused. Review the reported boundary before
 requesting another capture.
-
-There is one deliberate no-input path for manual changes: if Return Control
-already forced an exact active-battle save and then Paused on a trusted mismatch,
-**Capture current setup as…** may review that retained process-local acquisition.
-The UI identifies it as Return Control evidence. It requests no second refresh,
-does not use a durable receipt as replay authority, and saving the result does
-not resolve Return Control or resume automation.
 
 Save either a new immutable managed Module preset or a custom Strategy draft.
 The Base is comparison-only, unresolved fields remain explicit, and saving

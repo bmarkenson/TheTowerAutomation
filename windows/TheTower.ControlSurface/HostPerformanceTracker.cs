@@ -5,15 +5,15 @@ public sealed class HostPerformanceTracker : IDisposable
     private const int SampleIntervalMilliseconds = 1000;
     private const int AggregateSampleCount = 10;
     private const int RawRingCapacity = 120;
-    private const int UploadBatchSize = 120;
     private const int MaximumGpuCompetitors = 5;
+    private const int MaximumProcessAttributionPerResource = 4;
     private static readonly TimeSpan RunContextFreshness =
         TimeSpan.FromSeconds(15);
 
     private readonly object _stateGate = new();
     private readonly ControlSurfaceApi _api;
     private readonly HostPerformanceSpool _spool = new();
-    private readonly WindowsHostPerformanceSampler _sampler = new();
+    private readonly WindowsHostPerformanceSampler _sampler;
     private readonly Queue<HostPerformanceSample> _rawSamples = new();
     private readonly ManualResetEvent _stopEvent = new(false);
     private readonly AutoResetEvent _samplingStateChanged = new(false);
@@ -23,7 +23,8 @@ public sealed class HostPerformanceTracker : IDisposable
     private HostPerformanceContext _context = new(
         null,
         null,
-        DateTimeOffset.MinValue);
+        DateTimeOffset.MinValue,
+        null);
     private Thread? _sampleThread;
     private Task? _uploadTask;
     private long _sequence;
@@ -34,10 +35,20 @@ public sealed class HostPerformanceTracker : IDisposable
     private string? _samplerError;
     private bool _started;
     private bool _disposed;
+    private int _resetRateBaselinesRequested;
 
-    public HostPerformanceTracker(ControlSurfaceApi api)
+    public HostPerformanceTracker(ControlSurfaceApi api) : this(
+        api,
+        new BlueStacksInstanceController())
+    {
+    }
+
+    internal HostPerformanceTracker(
+        ControlSurfaceApi api,
+        IBlueStacksInstanceController blueStacksController)
     {
         _api = api;
+        _sampler = new WindowsHostPerformanceSampler(blueStacksController);
         _sequence = _spool.NextSequence;
     }
 
@@ -93,9 +104,23 @@ public sealed class HostPerformanceTracker : IDisposable
         PublishSnapshot();
     }
 
+    public void ResetSamplerRateBaselines()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Interlocked.Exchange(ref _resetRateBaselinesRequested, 1);
+        _samplingStateChanged.Set();
+    }
+
     public void UpdateServerContext(
         int? adbPort,
         string? runId,
+        bool uploadEnabled)
+        => UpdateServerContext(adbPort, runId, null, uploadEnabled);
+
+    internal void UpdateServerContext(
+        int? adbPort,
+        string? runId,
+        BlueStacksRecoveryTarget? blueStacksTarget,
         bool uploadEnabled)
     {
         lock (_stateGate)
@@ -103,7 +128,8 @@ public sealed class HostPerformanceTracker : IDisposable
             _context = new HostPerformanceContext(
                 adbPort,
                 string.IsNullOrWhiteSpace(runId) ? null : runId.Trim(),
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                blueStacksTarget);
             _uploadEnabled = uploadEnabled;
         }
         if (uploadEnabled)
@@ -147,6 +173,13 @@ public sealed class HostPerformanceTracker : IDisposable
                     SampleIntervalMilliseconds);
                 try
                 {
+                    if (Interlocked.Exchange(
+                        ref _resetRateBaselinesRequested,
+                        0) == 1)
+                    {
+                        FlushAggregateWindow(aggregateWindow);
+                        _sampler.ResetRateBaselines();
+                    }
                     var context = CurrentSampleContext();
                     var sample = _sampler.Sample(context);
                     lock (_stateGate)
@@ -160,9 +193,15 @@ public sealed class HostPerformanceTracker : IDisposable
                     }
 
                     if (aggregateWindow.Count > 0
-                        && !SameCorrelation(
-                            aggregateWindow[0].Context,
-                            sample.Context))
+                        && (HostPerformanceAggregateWindow.HasDiscontinuity(
+                                aggregateWindow[^1].TimestampUtc,
+                                sample.TimestampUtc)
+                            || !SameCorrelation(
+                                aggregateWindow[0].Context,
+                                sample.Context)
+                            || HostPerformanceAggregateWindow.HasListenerDiscontinuity(
+                                aggregateWindow[^1].BlueStacksListener,
+                                sample.BlueStacksListener)))
                     {
                         EnqueueAggregate(aggregateWindow);
                         aggregateWindow.Clear();
@@ -230,7 +269,8 @@ public sealed class HostPerformanceTracker : IDisposable
         HostPerformanceContext left,
         HostPerformanceContext right) =>
         left.AdbPort == right.AdbPort
-        && string.Equals(left.RunId, right.RunId, StringComparison.Ordinal);
+        && string.Equals(left.RunId, right.RunId, StringComparison.Ordinal)
+        && Equals(left.BlueStacksTarget, right.BlueStacksTarget);
 
     private void EnqueueAggregate(IReadOnlyList<HostPerformanceSample> samples)
     {
@@ -356,6 +396,20 @@ public sealed class HostPerformanceTracker : IDisposable
             metrics,
             "gpu_sample_duration_ms",
             samples.Select(sample => sample.GpuSampleDurationMilliseconds));
+        var processAttributionSamples = samples
+            .Where(sample =>
+                sample.ProcessAttributionSampleDurationMilliseconds is not null)
+            .ToArray();
+        AddMinimumAndMaximum(
+            metrics,
+            "process_attribution_process_count",
+            processAttributionSamples.Select(sample =>
+                (double?)sample.ProcessAttributionProcessCount));
+        AddAverageAndMaximum(
+            metrics,
+            "process_attribution_sample_duration_ms",
+            processAttributionSamples.Select(sample =>
+                sample.ProcessAttributionSampleDurationMilliseconds));
         AddAverageAndMaximum(
             metrics,
             "control_surface_cpu_percent",
@@ -385,8 +439,10 @@ public sealed class HostPerformanceTracker : IDisposable
                     == DateTimeOffset.MinValue
                 ? null
                 : FormatTimestamp(last.Context.ObservedAtUtc),
+            BlueStacksListener = first.BlueStacksListener,
             Metrics = metrics,
             GpuCompetitors = BuildGpuCompetitors(samples),
+            ProcessAttribution = BuildProcessAttribution(samples),
         };
     }
 
@@ -421,6 +477,73 @@ public sealed class HostPerformanceTracker : IDisposable
             .ToList();
     }
 
+    private static List<HostPerformanceProcessAttribution>
+        BuildProcessAttribution(IReadOnlyList<HostPerformanceSample> samples)
+    {
+        var candidates = samples
+            .SelectMany(sample => sample.ProcessAttribution)
+            .GroupBy(
+                process => (process.ProcessId, process.ProcessName))
+            .Select(group =>
+            {
+                var cpuValues = group
+                    .Where(process => process.CpuPercent is not null)
+                    .Select(process => process.CpuPercent!.Value)
+                    .ToArray();
+                return new HostPerformanceProcessAttribution
+                {
+                    ProcessId = group.Key.ProcessId,
+                    ProcessName = group.Key.ProcessName,
+                    SampleCount = group.Count(),
+                    CpuPercentAverage = cpuValues.Length == 0
+                        ? null
+                        : cpuValues.Average(),
+                    CpuPercentMaximum = cpuValues.Length == 0
+                        ? null
+                        : cpuValues.Max(),
+                    WorkingSetBytesMaximum = group.Max(process =>
+                        process.WorkingSetBytes),
+                    PrivateBytesMaximum = group.Max(process =>
+                        process.PrivateBytes),
+                };
+            })
+            .ToArray();
+        var selected = new List<HostPerformanceProcessAttribution>(
+            HostProcessAttributionSelector.MaximumSelectedProcesses);
+        var identities = new HashSet<(int ProcessId, string ProcessName)>();
+        AddDistinctProcessAttribution(
+            candidates
+                .Where(process => process.CpuPercentMaximum > 0.0)
+                .OrderByDescending(process => process.CpuPercentMaximum)
+                .ThenByDescending(process => process.PrivateBytesMaximum)
+                .Take(MaximumProcessAttributionPerResource),
+            selected,
+            identities);
+        AddDistinctProcessAttribution(
+            candidates
+                .Where(process => process.WorkingSetBytesMaximum > 0)
+                .OrderByDescending(process => process.WorkingSetBytesMaximum)
+                .ThenByDescending(process => process.PrivateBytesMaximum)
+                .Take(MaximumProcessAttributionPerResource),
+            selected,
+            identities);
+        return selected;
+    }
+
+    private static void AddDistinctProcessAttribution(
+        IEnumerable<HostPerformanceProcessAttribution> source,
+        ICollection<HostPerformanceProcessAttribution> destination,
+        ISet<(int ProcessId, string ProcessName)> identities)
+    {
+        foreach (var process in source)
+        {
+            if (identities.Add((process.ProcessId, process.ProcessName)))
+            {
+                destination.Add(process);
+            }
+        }
+    }
+
     private async Task UploadLoopAsync(CancellationToken cancellationToken)
     {
         var retryDelay = TimeSpan.FromSeconds(1);
@@ -446,25 +569,26 @@ public sealed class HostPerformanceTracker : IDisposable
                 continue;
             }
 
-            var batch = _spool.Peek(UploadBatchSize);
+            var candidates = _spool.Peek(
+                HostPerformanceUploadBatch.MaximumAggregateCount);
+            HostPerformanceUploadPayload? upload = null;
             try
             {
+                upload = HostPerformanceUploadBatch.Prepare(candidates);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(12));
                 var response = await _api.PostHostPerformanceAsync(
-                    new HostPerformanceBatch
-                    {
-                        Aggregates = batch.ToList(),
-                    },
+                    upload,
                     timeout.Token);
-                if (response.Received != batch.Count)
+                if (response.Received != upload.Aggregates.Count)
                 {
                     throw new InvalidOperationException(
                         "The Linux service acknowledged an unexpected "
                         + "host-performance batch size.");
                 }
-                _spool.Acknowledge(batch.Select(item => item.AggregateId));
+                _spool.Acknowledge(
+                    upload.Aggregates.Select(item => item.AggregateId));
                 lock (_stateGate)
                 {
                     _lastUploadedAtUtc = DateTimeOffset.UtcNow;
@@ -487,6 +611,51 @@ public sealed class HostPerformanceTracker : IDisposable
                         + "in the local spool.";
                 }
                 PublishSnapshot();
+                if (!await DelayForRetry(retryDelay, cancellationToken))
+                {
+                    return;
+                }
+                retryDelay = NextRetryDelay(retryDelay);
+            }
+            catch (ControlSurfaceApiException exception) when (
+                upload is not null
+                && HostPerformanceUploadBatch.TryGetRejectedAggregateIndex(
+                    exception,
+                    upload.Aggregates.Count,
+                    out _))
+            {
+                HostPerformanceUploadBatch.TryGetRejectedAggregateIndex(
+                    exception,
+                    upload.Aggregates.Count,
+                    out var rejectedIndex);
+                var rejected = upload.Aggregates[rejectedIndex];
+                var quarantined = _spool.Reject(
+                    rejected.AggregateId,
+                    exception.Message);
+                lock (_stateGate)
+                {
+                    _uploadError = quarantined
+                        ? "Linux rejected one host-performance aggregate on "
+                            + "schema validation. "
+                            + "It was preserved locally and later "
+                            + "telemetry will continue uploading."
+                        : exception.Message
+                            + " The rejected aggregate could not be preserved "
+                            + "separately, so telemetry remains in the local "
+                            + "spool.";
+                }
+                PublishSnapshot();
+                if (quarantined)
+                {
+                    retryDelay = TimeSpan.FromSeconds(1);
+                    if (!await DelayForRetry(
+                        TimeSpan.FromSeconds(1),
+                        cancellationToken))
+                    {
+                        return;
+                    }
+                    continue;
+                }
                 if (!await DelayForRetry(retryDelay, cancellationToken))
                 {
                     return;
@@ -587,6 +756,11 @@ public sealed class HostPerformanceTracker : IDisposable
             recent.Select(sample => sample.BlueStacksGpuPercent));
         var gpuSampleDuration = Average(
             recent.Select(sample => sample.GpuSampleDurationMilliseconds));
+        var controlSurfaceCpu = Average(
+            recent.Select(sample => sample.ControlSurfaceCpuPercent));
+        var processAttributionDuration = Average(
+            recent.Select(sample =>
+                sample.ProcessAttributionSampleDurationMilliseconds));
         var sampleDuration = Average(
             recent.Select(sample =>
                 (double?)sample.SampleDurationMilliseconds));
@@ -614,6 +788,14 @@ public sealed class HostPerformanceTracker : IDisposable
             BlueStacksCpuPercent = blueStacksCpu,
             BlueStacksCpuCorePercent = blueStacksCoreCpu,
             BlueStacksWorkingSetBytes = last?.BlueStacksWorkingSetBytes,
+            BlueStacksThreadCount = last is { BlueStacksProcessCount: > 0 }
+                ? last.BlueStacksThreadCount
+                : null,
+            BlueStacksHandleCount = last is { BlueStacksProcessCount: > 0 }
+                ? last.BlueStacksHandleCount
+                : null,
+            BlueStacksListener = last?.BlueStacksListener,
+            BlueStacksListenerError = last?.BlueStacksListenerError,
             BlueStacksIoReadBytesPerSecond = Average(
                 recent.Select(sample =>
                     sample.BlueStacksIoReadBytesPerSecond)),
@@ -633,15 +815,56 @@ public sealed class HostPerformanceTracker : IDisposable
             GpuCompetitors = BuildGpuCompetitors(recent),
             GpuSampleDurationMilliseconds = gpuSampleDuration,
             GpuError = last?.GpuError,
+            ControlSurfaceCpuPercent = controlSurfaceCpu,
+            OtherWindowsCpuPercent = OtherWindowsCpuPercent(
+                hostCpu,
+                blueStacksCpu,
+                controlSurfaceCpu,
+                last?.BlueStacksProcessCount ?? 0),
+            ProcessAttributionState = last?.ProcessAttributionState
+                ?? HostProcessAttributionState.Inactive,
+            ProcessAttributionProcessCount = recent
+                .Where(sample =>
+                    sample.ProcessAttributionSampleDurationMilliseconds is not null)
+                .Select(sample => sample.ProcessAttributionProcessCount)
+                .DefaultIfEmpty(0)
+                .Max(),
+            ProcessAttribution = BuildProcessAttribution(recent),
+            ProcessAttributionSampleDurationMilliseconds =
+                processAttributionDuration,
             SampleDurationMilliseconds = sampleDuration,
             PendingAggregateCount = _spool.PendingCount,
             DroppedAggregateCount = _spool.DroppedCount,
+            RejectedAggregateCount = _spool.RejectedCount,
+            LastRejectedAggregateReason = _spool.LastRejectionReason,
             UploadEnabled = uploadEnabled,
             LastUploadedAtUtc = lastUploadedAtUtc,
             UploadError = uploadError,
             StorageError = _spool.StorageError,
             SamplerError = samplerError,
         };
+    }
+
+    private static double? OtherWindowsCpuPercent(
+        double? hostCpuPercent,
+        double? blueStacksCpuPercent,
+        double? controlSurfaceCpuPercent,
+        int blueStacksProcessCount)
+    {
+        if (hostCpuPercent is null || controlSurfaceCpuPercent is null)
+        {
+            return null;
+        }
+        if (blueStacksProcessCount > 0 && blueStacksCpuPercent is null)
+        {
+            return null;
+        }
+        return Math.Clamp(
+            hostCpuPercent.Value
+                - (blueStacksCpuPercent ?? 0.0)
+                - controlSurfaceCpuPercent.Value,
+            0.0,
+            100.0);
     }
 
     private static (HostPerformanceHealthState State, string Label)

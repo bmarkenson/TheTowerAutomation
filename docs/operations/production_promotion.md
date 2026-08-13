@@ -74,6 +74,44 @@ the selected candidate.
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
 
+### Direct save-mapping integration
+
+The control-surface save-mapping action commits to `develop`; it does not
+promote. Its routine lane is available only when the standing production and
+integration worktrees are clean, at their branch tips, and exactly
+synchronized. In either GUI, select the durable observation, inspect the fixed
+Develop eligibility panel, review the exact proposal and repository
+fingerprint, then confirm **Integrate reviewed mapping into develop…**. Success
+must identify one standardized commit, exact canonical target hashes, passed
+mapping invariants, `committed=true`, and `promoted=false`; production `main`
+must remain at the reviewed base.
+
+Treat that commit as the next `develop` candidate. Review its exact diff and
+provenance trailers, run the complete supported checkpoint, then continue at
+step 2 of this production procedure. This narrow lane does not replace the
+combined checkpoint, annotated rollback tag, service boundary, native-package
+publication when applicable, or production smoke test.
+
+Do not clear the persistent warning when the `develop` commit succeeds. It
+becomes **Save mapping awaiting production promotion**, then **Deployed save
+mapping awaiting fresh validation** after `main` contains the commit, and
+retires only when a later complete stable save proves the running decoder
+loaded the matching canonical mapping set. That observation is passive and
+cannot change runtime authority or send input.
+
+A stale review, dirty worktree, unequal or changed Git tip, target/hash/mode
+drift, busy lock, or other proven pre-write rejection requires a fresh catalog
+and review. Never retry automatically. If the catalog reports exact integration
+recovery, the GUI makes only that same candidate reviewable; inspect its stored
+target hashes and fingerprint, then invoke Integrate once to continue its
+durable transaction. A response lost after the commit was fully recorded
+reappears as the promotion-pending commit rather than another write. If the
+catalog reports an unconfirmed result, malformed or legacy
+journal, moved ref, unrelated index/worktree state, or any outcome that cannot
+be proved exact, do not retry, edit targets, or move refs; inspect the recorded
+transaction and repository state and route the repair through ordinary
+development.
+
 ### Required Windows package publication
 
 Any promotion whose aggregate `M..D` diff changes an input to either published

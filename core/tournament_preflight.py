@@ -281,6 +281,14 @@ def validate_tournament_session_preflight_screens(
     module_boundary_evidence: Mapping[str, Any] | None = None,
     accepted_sections: Mapping[str, Mapping[str, Any]] | None = None,
     deferred_checks: Sequence[Any] | None = None,
+    ultimate_weapons_source: str = "ui",
+    attachment_requirement_checks: Mapping[
+        str, Mapping[str, Any]
+    ] | None = None,
+    reported_attachment_mismatches: Mapping[
+        str, Mapping[str, Any]
+    ] | None = None,
+    attachment_report_only_requirements: Mapping[str, Any] | None = None,
 ) -> GcSessionPreflightEvidence:
     """Validate Tournament presets, loadouts, and controls without Perks."""
 
@@ -297,6 +305,7 @@ def validate_tournament_session_preflight_screens(
         module_mode=module_mode,
         ultimate_requirements=ultimate_requirements,
         ultimate_observations=ultimate_observations,
+        ultimate_weapons_source=ultimate_weapons_source,
         detector=detector,
         section_specs=TOURNAMENT_SECTION_SPECS,
         auto_pick_perks_required=False,
@@ -305,6 +314,11 @@ def validate_tournament_session_preflight_screens(
         module_boundary_evidence=module_boundary_evidence,
         accepted_sections=accepted_sections,
         deferred_checks=deferred_checks,
+        attachment_requirement_checks=attachment_requirement_checks,
+        reported_attachment_mismatches=reported_attachment_mismatches,
+        attachment_report_only_requirements=(
+            attachment_report_only_requirements
+        ),
     )
 
 

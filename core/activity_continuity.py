@@ -73,6 +73,7 @@ class ActivityContinuityOutcome:
     ] = None
     running_attachment_context: Optional[PlayerSaveAttachmentContext] = None
     operator_workflow_interruption_reason: Optional[str] = None
+    operator_workflow_source_restored: Optional[bool] = None
     ui_monitoring_fallback: bool = False
     ui_fallback_complete: bool = False
     ui_fallback_reason: str = ""
@@ -560,6 +561,11 @@ class ActivityContinuityCoordinator:
                     recapture=True,
                     operator_workflow_interruption_reason=(
                         save_result.reason
+                        if save_result.operator_workflow_interrupted
+                        else None
+                    ),
+                    operator_workflow_source_restored=(
+                        save_result.source_restored
                         if save_result.operator_workflow_interrupted
                         else None
                     ),
@@ -1268,6 +1274,15 @@ def _normalize_history_metadata(raw: Any) -> Optional[dict[str, Any]]:
             "tier": raw.get("tier"),
             "wave": raw.get("wave"),
         }
+        effective_mapping_fingerprint = str(
+            raw.get("effective_mapping_fingerprint") or ""
+        ).strip()
+        if source == "player_save" and len(effective_mapping_fingerprint) != 64:
+            return None
+        if effective_mapping_fingerprint:
+            result["effective_mapping_fingerprint"] = (
+                effective_mapping_fingerprint
+            )
         for key in (
             "battle_date",
             "entry_count",

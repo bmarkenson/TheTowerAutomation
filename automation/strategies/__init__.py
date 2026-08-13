@@ -28,7 +28,11 @@ class NoOpStrategy(BaseStrategy):
     name = "none"
 
 
-def get_strategy(name: str) -> Optional[BaseStrategy]:
+def get_strategy(
+    name: str,
+    *,
+    profile_directory: Path | str | None = None,
+) -> Optional[BaseStrategy]:
     nm = (name or "").strip().lower()
     if nm in ("", "none"):
         return None
@@ -41,7 +45,7 @@ def get_strategy(name: str) -> Optional[BaseStrategy]:
             / f"{profile_name}.strategy.yaml"
         )
         return YamlStrategy.from_file(str(path))
-    custom_plan = load_published_strategy_plan(nm)
+    custom_plan = load_published_strategy_plan(nm, profile_directory)
     if custom_plan is not None:
         return YamlStrategy(custom_plan)
     raise ValueError(UNKNOWN_STRATEGY_MSG)

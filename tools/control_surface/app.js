@@ -11,6 +11,11 @@ const state = {
   captureCatalogLoading: false,
   captureReview: null,
   captureReviewInput: null,
+  saveMappingCatalog: null,
+  saveMappingReview: null,
+  saveMappingResult: null,
+  saveMappingBusy: false,
+  saveMappingSelectionGeneration: 0,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -44,7 +49,11 @@ async function api(path, options = {}) {
     throw new Error("Access token required");
   }
   if (!response.ok) {
-    throw new Error(payload.error || `Request failed (${response.status})`);
+    const error = new Error(payload.error || `Request failed (${response.status})`);
+    error.code = payload.code || "";
+    error.details = payload.details || null;
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -96,6 +105,8 @@ function renderStatus(payload) {
   const processService = payload.process_service;
   const controlModel = payload.control_model || {};
   const directive = control.state || "UNKNOWN";
+
+  renderConfirmedLocalMapping(payload.confirmed_local_mappings);
 
   setText("directiveState", directive);
   byId("directiveState").className = `state-pill ${directive.toLowerCase()}`;
@@ -214,6 +225,428 @@ function renderStatus(payload) {
   );
   renderExclusiveValidation(control);
   renderGateDecision(control.gate_decision);
+}
+
+function renderConfirmedLocalMapping(status) {
+  const presentation = clientModel.confirmedLocalMappingPresentation(status);
+  const alert = byId("confirmedLocalMappingAlert");
+  alert.hidden = !presentation.visible;
+  alert.className = `persistent-alert ${presentation.severity}`;
+  const signature = JSON.stringify([
+    presentation.visible,
+    presentation.severity,
+    presentation.title,
+    presentation.detail,
+  ]);
+  if (alert.dataset.presentationSignature !== signature) {
+    alert.dataset.presentationSignature = signature;
+    setText("confirmedLocalMappingTitle", presentation.title);
+    setText("confirmedLocalMappingDetail", presentation.detail);
+  }
+  const reviewButton = byId("reviewSaveMappingsButton");
+  const compatible = clientModel.saveMappingIntegrationCompatible(
+    state.lastStatus,
+  );
+  reviewButton.hidden = !presentation.visible;
+  reviewButton.disabled = !compatible;
+  reviewButton.title = compatible
+    ? "Review an exact canonical proposal and commit it to eligible develop."
+    : "Linux API revision 40 with save_mapping_develop_integration_v1 is required.";
+}
+
+function saveMappingCandidate() {
+  const recordId = byId("saveMappingCandidateSelect").value;
+  return (state.saveMappingCatalog?.items || []).find(
+    (item) => item.record_id === recordId,
+  ) || null;
+}
+
+function saveMappingSelection() {
+  return {
+    candidateRecordId: byId("saveMappingCandidateSelect").value,
+    generation: state.saveMappingSelectionGeneration,
+  };
+}
+
+function saveMappingSelectionStillCurrent(selection) {
+  const current = saveMappingSelection();
+  return current.generation === selection.generation
+    && current.candidateRecordId === selection.candidateRecordId;
+}
+
+function updateSaveMappingControls() {
+  const item = saveMappingCandidate();
+  const reviewButton = byId("reviewSaveMappingProposalButton");
+  const integrateButton = byId("integrateSaveMappingButton");
+  reviewButton.disabled = state.saveMappingBusy
+    || !item
+    || item.review_available !== true;
+  const availability = clientModel.saveMappingIntegrateAvailability(
+    state.saveMappingReview,
+    byId("saveMappingCandidateSelect").value,
+  );
+  integrateButton.disabled = state.saveMappingBusy
+    || state.saveMappingResult != null
+    || !availability.available;
+}
+
+function setSaveMappingBusy(busy) {
+  state.saveMappingBusy = busy;
+  byId("saveMappingCandidateSelect").disabled = busy;
+  byId("refreshSaveMappingCatalogButton").disabled = busy;
+  document.querySelectorAll(
+    '[data-close-dialog="saveMappingIntegrationDialog"]',
+  ).forEach((button) => {
+    button.disabled = busy;
+  });
+  updateSaveMappingControls();
+}
+
+function clearSaveMappingReview(message = "Review an exact proposal before integration.") {
+  state.saveMappingReview = null;
+  state.saveMappingResult = null;
+  byId("saveMappingProposal").replaceChildren();
+  byId("saveMappingProposal").className = "mapping-proposal muted";
+  byId("saveMappingProposal").textContent = message;
+  byId("saveMappingResult").hidden = true;
+  byId("saveMappingResult").replaceChildren();
+  byId("integrateSaveMappingButton").disabled = true;
+}
+
+function saveMappingCandidateLabel(item) {
+  const scope = item?.scope?.slot_key ? ` · ${item.scope.slot_key}` : "";
+  const value = item?.raw_value == null
+    ? ""
+    : ` · ${item.raw_value} → ${item.semantic_value || "unknown"}`;
+  return `${humanize(item?.check_id || "save mapping")}${scope}${value}`;
+}
+
+function renderSaveMappingCatalog(catalog) {
+  state.saveMappingSelectionGeneration += 1;
+  state.saveMappingCatalog = catalog;
+  const candidateSelect = byId("saveMappingCandidateSelect");
+  candidateSelect.replaceChildren(new Option("Select a mapping observation…", ""));
+  for (const item of catalog.items || []) {
+    const option = new Option(saveMappingCandidateLabel(item), item.record_id);
+    option.title = item.reason || "";
+    candidateSelect.append(option);
+  }
+  const transactionCandidate = String(
+    catalog.transaction?.candidate_record_id || "",
+  );
+  if ((catalog.items || []).some(
+    (item) => item.record_id === transactionCandidate,
+  )) {
+    candidateSelect.value = transactionCandidate;
+  }
+  const repository = catalog.repository || {};
+  const readiness = repository.integration_available
+    ? "Eligible: main and develop are clean and synchronized."
+    : repository.reason || "Direct develop integration is unavailable.";
+  setText(
+    "saveMappingRepositoryDetail",
+    `main ${repository.main_commit || "unknown"}\n`
+      + `develop ${repository.develop_commit || "unknown"}\n`
+      + `${repository.develop_path || "develop path unavailable"}\n${readiness}`,
+  );
+  setText(
+    "saveMappingCatalogStatus",
+    catalog.available === false
+      ? catalog.reason || "Save-mapping integration catalog is unavailable."
+      : catalog.transaction?.reason
+        ? catalog.transaction.reason
+        : `${(catalog.items || []).length} observation(s) · ${readiness}`,
+  );
+  renderSaveMappingSelection();
+}
+
+function renderSaveMappingSelection() {
+  const item = saveMappingCandidate();
+  clearSaveMappingReview();
+  setText(
+    "saveMappingCandidateDetail",
+    item
+      ? `${item.mapping_id} · ${item.state} · ${item.reason || "Review pending"}`
+      : "Choose one durable observation.",
+  );
+  const reviewButton = byId("reviewSaveMappingProposalButton");
+  reviewButton.title = item?.review_available === false
+    ? item.review_reason || "This observation is not reviewable."
+    : "Review the exact server-generated proposal.";
+  updateSaveMappingControls();
+}
+
+function mappingProposalTargets(proposal) {
+  if (proposal?.schema_version === 2) return proposal.targets || [];
+  return proposal?.target
+    ? [{ ...proposal.target, operations: proposal.operations || [] }]
+    : [];
+}
+
+function mappingProposalRow(title, detail) {
+  const row = document.createElement("div");
+  row.className = "mapping-proposal-row";
+  const heading = document.createElement("strong");
+  const body = document.createElement("pre");
+  heading.textContent = title;
+  body.textContent = detail;
+  row.append(heading, body);
+  return row;
+}
+
+function renderSaveMappingReview(review) {
+  const container = byId("saveMappingProposal");
+  container.replaceChildren();
+  container.className = "mapping-proposal";
+  container.append(mappingProposalRow(
+    "Reviewed proposal fingerprint",
+    review.reviewed_proposal_fingerprint,
+  ));
+  container.append(mappingProposalRow(
+    "Repository snapshot",
+    `reviewed base ${review.reviewed_base_commit}\nmain ${review.repository?.main_commit}\ndevelop ${review.repository?.develop_commit}\nsynchronized ${String(review.repository?.synchronized)}`,
+  ));
+  const renderedTargets = new Map((review.rendered_targets || []).map(
+    (target) => [`${target.path}\0${target.mapping_id}`, target],
+  ));
+  for (const target of mappingProposalTargets(review.proposal)) {
+    const rendered = renderedTargets.get(
+      `${target.path}\0${target.mapping_id}`,
+    );
+    const operations = (target.operations || []).map(
+      (operation) => `${operation.op} ${operation.path}\n${JSON.stringify(operation.value, null, 2)}`,
+    ).join("\n\n") || "Already present; no operation for this target.";
+    container.append(mappingProposalRow(
+      `${target.mapping_id} · ${target.path}`,
+      `base ${target.expected_sha256}\nafter ${rendered?.after_sha256 || "unknown"}\nmode ${Number.isInteger(rendered?.mode) ? `0${rendered.mode.toString(8)}` : "unknown"}\nstate ${target.state || "pending"}\n${operations}`,
+    ));
+  }
+  const availability = clientModel.saveMappingIntegrateAvailability(
+    review,
+    byId("saveMappingCandidateSelect").value,
+  );
+  setText(
+    "saveMappingIntegrateStatus",
+    availability.available
+      ? "Ready to create one verified develop commit."
+      : availability.reason || "Develop integration is unavailable.",
+  );
+  if (review.recovery_required === true) {
+    const result = byId("saveMappingResult");
+    result.replaceChildren();
+    result.hidden = false;
+    result.className = "callout warning";
+    const title = document.createElement("strong");
+    const detail = document.createElement("p");
+    title.textContent = "Interrupted integration requires recovery";
+    detail.textContent = availability.reason
+      || "Inspect main, develop, and the durable transaction before another action.";
+    result.append(title, detail);
+  }
+  updateSaveMappingControls();
+}
+
+function renderSaveMappingResult(
+  result,
+  review,
+) {
+  const presentation = clientModel.saveMappingIntegratedPresentation(
+    result,
+    review,
+  );
+  const container = byId("saveMappingResult");
+  container.replaceChildren();
+  container.hidden = false;
+  container.className = `callout ${presentation.success ? "success" : "warning"}`;
+  const title = document.createElement("strong");
+  const detail = document.createElement("p");
+  title.textContent = presentation.title;
+  detail.textContent = presentation.detail;
+  container.append(title, detail);
+  if (presentation.success) {
+    container.append(mappingProposalRow(
+      "Lifecycle state",
+      `commit: ${result.integration_commit}\ncommitted: ${String(result.committed)}\npromoted: ${String(result.promoted)}\nmapping invariants: ${result.mapping_invariants}\nproduction validation: ${result.promotion_validation}`,
+    ));
+    for (const target of result.targets) {
+      container.append(mappingProposalRow(
+        `${target.mapping_id} · ${target.path}`,
+        `${target.before_sha256}\n→ ${target.after_sha256}`,
+      ));
+    }
+    if (result.warning) {
+      container.append(mappingProposalRow("Audit warning", result.warning));
+    }
+  }
+  return presentation;
+}
+
+function renderSaveMappingFailure(error, integrateRequest) {
+  const presentation = clientModel.saveMappingFailurePresentation(
+    error,
+    integrateRequest,
+  );
+  const container = byId("saveMappingResult");
+  container.replaceChildren();
+  container.hidden = false;
+  container.className = `callout ${presentation.uncertain ? "warning" : "info"}`;
+  const title = document.createElement("strong");
+  const detail = document.createElement("p");
+  title.textContent = presentation.title;
+  detail.textContent = presentation.detail;
+  container.append(title, detail);
+  return presentation;
+}
+
+async function loadSaveMappingIntegrationCatalog() {
+  if (state.saveMappingBusy) return;
+  setSaveMappingBusy(true);
+  clearSaveMappingReview("Loading save-mapping integration catalog…");
+  try {
+    const catalog = await api("/api/v1/save-mapping-integration");
+    if (
+      catalog?.schema_version !== 2
+      || catalog?.capability !== "save_mapping_develop_integration_v1"
+    ) {
+      const error = new Error(
+        "The server returned an incompatible save-mapping catalog.",
+      );
+      error.code = "catalog_contract_invalid";
+      throw error;
+    }
+    renderSaveMappingCatalog(catalog);
+  } catch (error) {
+    setText("saveMappingCatalogStatus", error.message);
+    clearSaveMappingReview("The catalog could not be loaded.");
+    renderSaveMappingFailure(error, false);
+    toast(error.message, true);
+  } finally {
+    setSaveMappingBusy(false);
+  }
+}
+
+async function openSaveMappingIntegration() {
+  const dialog = byId("saveMappingIntegrationDialog");
+  if (!dialog.open) dialog.showModal();
+  await loadSaveMappingIntegrationCatalog();
+}
+
+async function reviewSaveMappingProposal() {
+  if (state.saveMappingBusy) return;
+  const selection = saveMappingSelection();
+  const { candidateRecordId } = selection;
+  if (!candidateRecordId) return;
+  setSaveMappingBusy(true);
+  clearSaveMappingReview("Reviewing exact proposal…");
+  try {
+    const review = await api("/api/v1/save-mapping-integration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "review",
+        candidate_record_id: candidateRecordId,
+      }),
+    });
+    if (
+      !saveMappingSelectionStillCurrent(selection)
+      || !clientModel.saveMappingReviewIsCurrent(
+        review,
+        candidateRecordId,
+      )
+    ) {
+      const error = new Error(
+        "The returned review does not match the current exact selection.",
+      );
+      error.code = "review_contract_invalid";
+      throw error;
+    }
+    state.saveMappingReview = review;
+    renderSaveMappingReview(review);
+  } catch (error) {
+    clearSaveMappingReview("Review unavailable. Refresh and review again.");
+    const presentation = renderSaveMappingFailure(error, false);
+    setText("saveMappingIntegrateStatus", presentation.detail);
+    toast(error.message, true);
+  } finally {
+    setSaveMappingBusy(false);
+  }
+}
+
+async function integrateSaveMappingProposal() {
+  if (state.saveMappingBusy) return;
+  const review = state.saveMappingReview;
+  const selection = saveMappingSelection();
+  const { candidateRecordId } = selection;
+  const availability = clientModel.saveMappingIntegrateAvailability(
+    review,
+    candidateRecordId,
+  );
+  if (!availability.available) return;
+  const targets = mappingProposalTargets(review.proposal);
+  const confirmation = [
+    review.recovery_required
+      ? "Recover and verify this exact durable integration?"
+      : "Commit this exact proposal directly to develop?",
+    review.repository.develop_path,
+    `Fingerprint: ${review.reviewed_proposal_fingerprint}`,
+    `Targets: ${targets.length}`,
+    "",
+    review.recovery_required
+      ? "This retries only the durable reviewed identity and verifies exact Git refs and mappings. It does not create a second commit, promote, restart services, send device input, change runtime authority, or alter the current battle."
+      : "This creates one verified child commit and fast-forwards clean develop. It does not promote, restart services, send device input, change runtime authority, or alter the current battle.",
+  ].join("\n");
+  if (!window.confirm(confirmation)) return;
+  setSaveMappingBusy(true);
+  try {
+    const result = await api("/api/v1/save-mapping-integration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "integrate",
+        candidate_record_id: candidateRecordId,
+        reviewed_proposal_fingerprint: review.reviewed_proposal_fingerprint,
+      }),
+    });
+    if (!saveMappingSelectionStillCurrent(selection)) {
+      const error = new Error(
+        "The GUI selection changed while integration was in flight.",
+      );
+      error.code = "selection_changed_during_integration";
+      throw error;
+    }
+    const validation = clientModel.saveMappingIntegratedResultValidation(
+      result,
+      review,
+    );
+    if (!validation.valid) {
+      const error = new Error(validation.reason);
+      error.code = validation.code;
+      throw error;
+    }
+    state.saveMappingResult = result;
+    const presentation = renderSaveMappingResult(
+      result,
+      review,
+    );
+    setText(
+      "saveMappingIntegrateStatus",
+      presentation.detail,
+    );
+    toast(result.promoted
+      ? "Canonical mapping is deployed; a fresh stable decode is pending"
+      : "Canonical mapping committed to develop; production promotion is pending");
+    if (result.warning) toast(result.warning, true);
+    await refresh();
+  } catch (error) {
+    clearSaveMappingReview(
+      "The reviewed proposal was invalidated. Refresh and review again.",
+    );
+    const presentation = renderSaveMappingFailure(error, true);
+    setText("saveMappingIntegrateStatus", presentation.detail);
+    toast(error.message, true);
+  } finally {
+    setSaveMappingBusy(false);
+  }
 }
 
 function renderBetterControlModel(model, compatible, captureCompatible, controlError) {
@@ -1229,7 +1662,13 @@ document.addEventListener("click", (event) => {
     return;
   }
   const close = event.target.closest("[data-close-dialog]");
-  if (close) byId(close.dataset.closeDialog).close();
+  if (close) {
+    if (
+      close.dataset.closeDialog === "saveMappingIntegrationDialog"
+      && state.saveMappingBusy
+    ) return;
+    byId(close.dataset.closeDialog).close();
+  }
 });
 
 byId("customPauseForm").addEventListener("submit", (event) => {
@@ -1284,6 +1723,33 @@ byId("battleRows").addEventListener("keydown", (event) => {
 });
 
 byId("authButton").addEventListener("click", showAuthDialog);
+byId("reviewSaveMappingsButton").addEventListener(
+  "click",
+  openSaveMappingIntegration,
+);
+byId("refreshSaveMappingCatalogButton").addEventListener(
+  "click",
+  loadSaveMappingIntegrationCatalog,
+);
+byId("saveMappingCandidateSelect").addEventListener(
+  "change",
+  () => {
+    if (state.saveMappingBusy) return;
+    state.saveMappingSelectionGeneration += 1;
+    renderSaveMappingSelection();
+  },
+);
+byId("saveMappingIntegrationDialog").addEventListener("cancel", (event) => {
+  if (state.saveMappingBusy) event.preventDefault();
+});
+byId("reviewSaveMappingProposalButton").addEventListener(
+  "click",
+  reviewSaveMappingProposal,
+);
+byId("integrateSaveMappingButton").addEventListener(
+  "click",
+  integrateSaveMappingProposal,
+);
 byId("configureRunButton").addEventListener("click", openRunConfiguration);
 byId("captureSetupButton").addEventListener("click", openSetupCapture);
 byId("retryCaptureButton").addEventListener("click", retrySetupCapture);

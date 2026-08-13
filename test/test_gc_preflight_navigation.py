@@ -5,6 +5,8 @@ import numpy as np
 
 from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
+from core.gc_module_loadout import gc_module_loadout_evidence_from_assignments
+from core.gc_preflight import summarize_gc_preflight_mismatch
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     _ensure_auto_pick_perks_enabled,
@@ -230,6 +232,29 @@ def test_mismatch_result_names_the_wrong_module_in_operator_summary():
     )
 
 
+def test_mismatch_summary_uses_save_attachment_expected_and_observed_values():
+    summary = summarize_gc_preflight_mismatch(
+        {
+            "failed_checks": ["free_upgrade_locks"],
+            "attachment_requirement_checks": {
+                "free_upgrade_locks": {
+                    "source": "player_save",
+                    "expected": ["attack", "utility"],
+                    "observed": ["utility"],
+                    "valid": False,
+                    "blocking": True,
+                    "disposition": "mismatch",
+                }
+            },
+        }
+    )
+
+    assert summary == (
+        'Free Upgrade locks: expected ["attack", "utility"], observed '
+        '["utility"]'
+    )
+
+
 def test_complete_result_surfaces_observed_module_variation():
     evidence_payload = {
         "module_mode": "observe",
@@ -424,6 +449,62 @@ def test_attached_route_defers_workshop_without_going_home():
     assert "buttons.battle_control:home" not in ui.static_taps
 
 
+def test_attached_route_marks_save_only_check_unavailable_without_carrier():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(
+            valid=True,
+            deferred_checks=("card_recharge_modes",),
+            reported_attachment_mismatches={},
+        )
+
+    result = run_read_only_gc_preflight(
+        {
+            **PREFLIGHT_REQUIREMENTS,
+            "card_recharge_modes": {
+                "Demon Mode": "auto_reactivate",
+            },
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attached validation must stay in battle")
+        ),
+        swipe_fn=ui.swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {
+            "left": boxes,
+            "right": [],
+        },
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    check = validated["attachment_requirement_checks"][
+        "card_recharge_modes"
+    ]
+    assert check["disposition"] == "unavailable_deferred"
+    assert check["source"] == "ui_fallback"
+    assert check["valid"] is None
+    assert check["blocking"] is False
+
+
 def test_attached_route_uses_bound_workshop_save_evidence_without_going_home():
     ui = _FakeUi()
     boxes = [
@@ -481,7 +562,7 @@ def test_attached_route_uses_bound_workshop_save_evidence_without_going_home():
     assert "buttons.battle_control:home" not in ui.static_taps
 
 
-def test_attached_route_uses_all_bound_round_invariant_save_evidence():
+def test_attached_route_uses_every_complete_bound_save_fact_without_ui():
     ui = _FakeUi()
     boxes = [
         UpgradeBox(
@@ -497,10 +578,25 @@ def test_attached_route_uses_all_bound_round_invariant_save_evidence():
         "generator_primary": "Project Funding",
     }
     carried = {
+        "cards_deck": "Tournament",
+        "card_recharge_modes": {
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
+        },
         "workshop_preset": "Tourney",
+        "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
         "bots_preset": "Amplify",
         "guardian_chips": ["Scout", "Attack", "Ally"],
         "modules": observed_modules,
+        "auto_pick_perks": True,
+        "perk_first_choice": "perk_wave_requirement",
+        "perk_bans": ["interest"],
+        "perk_auto_pick_order": ["perk_wave_requirement", "game_speed"],
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
@@ -522,9 +618,21 @@ def test_attached_route_uses_all_bound_round_invariant_save_evidence():
     result = run_read_only_gc_preflight(
         {
             "cards_deck": "Tournament",
+            "card_recharge_modes": {
+                "Demon Mode": "auto_reactivate",
+                "Nuke": "ready_after_recharge",
+            },
             "workshop_preset": "Tourney",
+            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
             "bots_preset": "Amplify",
             "guardian_chips": ["Attack", "Ally", "Scout"],
+            "auto_pick_perks": True,
+            "perk_first_choice": "perk_wave_requirement",
+            "perk_bans": ["interest"],
+            "perk_auto_pick_order": [
+                "perk_wave_requirement",
+                "game_speed",
+            ],
             "ultimate_weapons": ULTIMATE_REQUIREMENTS,
             "loadout_policies": {"modules": "observe"},
             "modules": MODULE_REQUIREMENTS,
@@ -538,11 +646,16 @@ def test_attached_route_uses_all_bound_round_invariant_save_evidence():
         ),
         swipe_fn=ui.swipe,
         event_swipe_fn=ui.event_swipe,
-        detect_boxes_fn=lambda _frame, **_kwargs: {
-            "left": boxes,
-            "right": [],
-        },
-        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete bound UW facts must avoid UI")
+            )
+        ),
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete bound Stun facts must avoid UI")
+            )
+        ),
         player_save_preflight=bound,
         stay_in_battle=True,
         sleep_fn=lambda _seconds: None,
@@ -552,6 +665,10 @@ def test_attached_route_uses_all_bound_round_invariant_save_evidence():
     assert result.status is GcPreflightNavigationStatus.COMPLETE
     assert result.reason == "all requirements verified"
     assert validated["accepted_sections"] == {
+        "cards": {
+            "disposition": "save_match",
+            "source": "bound_player_save_preflight",
+        },
         "workshop": {
             "disposition": "save_match",
             "source": "bound_player_save_preflight",
@@ -570,9 +687,22 @@ def test_attached_route_uses_all_bound_round_invariant_save_evidence():
     assert module_boundary["disposition"] == "save_observation"
     assert module_boundary["fully_observed"] is True
     assert module_boundary["valid"] is False
+    assert validated["ultimate_weapons_source"] == (
+        "bound_player_save_preflight"
+    )
+    assert set(validated["attachment_requirement_checks"]) == {
+        "card_recharge_modes",
+        "perk_first_choice",
+        "perk_bans",
+        "perk_auto_pick_order",
+    }
+    assert all(
+        check["disposition"] == "save_match"
+        for check in validated["attachment_requirement_checks"].values()
+    )
     assert "deferred_checks" not in validated
-    assert "navigation.Cards" in ui.visible_taps
-    assert ui.swipes
+    assert "navigation.Cards" not in ui.visible_taps
+    assert ui.swipes == []
     assert "navigation.menu_modules" not in ui.visible_taps
     assert "navigation.menu_event" not in ui.visible_taps
     assert "navigation.menu_guild" not in ui.visible_taps
@@ -681,7 +811,7 @@ def test_bound_new_battle_carry_skips_all_redundant_configuration_ui():
     assert ui.swipes == []
 
 
-def test_attached_route_keeps_ui_fallback_for_invariant_mismatches():
+def test_attached_route_reports_immutable_mismatches_without_ui():
     ui = _FakeUi()
     boxes = [
         UpgradeBox(
@@ -719,7 +849,11 @@ def test_attached_route_keeps_ui_fallback_for_invariant_mismatches():
         validated.update(kwargs)
         return SimpleNamespace(
             valid=True,
-            deferred_checks=("workshop_preset",),
+            deferred_checks=(),
+            reported_attachment_mismatches=kwargs.get(
+                "reported_attachment_mismatches",
+                {},
+            ),
         )
 
     result = run_read_only_gc_preflight(
@@ -752,15 +886,557 @@ def test_attached_route_keeps_ui_fallback_for_invariant_mismatches():
     )
 
     assert result.status is GcPreflightNavigationStatus.COMPLETE
-    assert result.reason == "active requirements verified; boundary checks deferred"
-    assert validated["deferred_checks"] == ("workshop_preset",)
-    assert "accepted_sections" not in validated
-    assert "module_boundary_evidence" not in validated
-    assert "navigation.menu_modules" in ui.visible_taps
-    assert "navigation.menu_event" in ui.visible_taps
-    assert "navigation.menu_guild" in ui.visible_taps
+    assert result.reason == (
+        "active requirements checked; immutable mismatches reported"
+    )
+    assert set(validated["reported_attachment_mismatches"]) == {
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+        "modules",
+    }
+    assert {
+        section: evidence["disposition"]
+        for section, evidence in validated["accepted_sections"].items()
+    } == {
+        "workshop": "save_mismatch_reported",
+        "bots": "save_mismatch_reported",
+        "guardians": "save_mismatch_reported",
+    }
+    assert validated["module_boundary_evidence"]["disposition"] == (
+        "save_mismatch_reported"
+    )
+    # Cards had no parsed save fact, so its existing UI fallback remains.
+    assert "navigation.Cards" in ui.visible_taps
+    assert "navigation.menu_modules" not in ui.visible_taps
+    assert "navigation.menu_event" not in ui.visible_taps
+    assert "navigation.menu_guild" not in ui.visible_taps
     assert "navigation.goto_workshop_home" not in ui.static_taps
     assert "buttons.battle_control:home" not in ui.static_taps
+
+
+def test_round_invariant_mismatches_are_nonblocking_for_running_attachment():
+    ui = _FakeUi()
+    carried = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": {
+            **MODULE_REQUIREMENTS,
+            "generator_primary": "Project Funding",
+        },
+        "free_upgrade_locks": ["Shockwave Size"],
+        "perk_first_choice": "damage",
+        "perk_bans": ["interest"],
+        "perk_auto_pick_order": ["damage"],
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    result = run_read_only_gc_preflight(
+        {
+            "cards_deck": "Farm",
+            "workshop_preset": "Farm",
+            "bots_preset": "Farm",
+            "guardian_chips": ["Fetch", "Summon", "Scout"],
+            "modules": dict(MODULE_REQUIREMENTS),
+            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+            "perk_first_choice": "perk_wave_requirement",
+            "perk_bans": [],
+            "perk_auto_pick_order": ["game_speed", "damage"],
+            "auto_pick_perks": True,
+            "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+            "loadout_policies": {"modules": "enforce"},
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attachment must not attempt Home repair")
+        ),
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete bound UW facts must avoid UI")
+            )
+        ),
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete bound Stun facts must avoid UI")
+            )
+        ),
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.reason == (
+        "active requirements checked; immutable mismatches reported"
+    )
+    assert result.evidence is not None and result.evidence.valid
+    assert result.evidence.failed_checks == ()
+    assert not result.evidence.requires_no_battle_repair
+    rendered = result.evidence.as_dict()
+    assert rendered["modules"]["matches_expected"] is False
+    assert rendered["modules"]["blocking_valid"] is True
+    assert rendered["auto_pick_perks"]["source"] == (
+        "bound_player_save_preflight"
+    )
+    assert rendered["ultimate_weapons"]["source"] == (
+        "bound_player_save_preflight"
+    )
+    assert set(rendered["reported_attachment_mismatches"]) == {
+        "free_upgrade_locks",
+        "modules",
+        "perk_bans",
+        "perk_first_choice",
+        "perk_auto_pick_order",
+    }
+    assert all(
+        mismatch["disposition"] == "save_mismatch_reported"
+        for mismatch in rendered["reported_attachment_mismatches"].values()
+    )
+    assert rendered["free_upgrade_locks"]["status"] == (
+        "save_mismatch_reported"
+    )
+    assert rendered["free_upgrade_locks"]["boundary"] == "ACTIVE_BATTLE"
+    assert rendered["free_upgrade_locks"]["valid"] is False
+    assert rendered["free_upgrade_locks"]["blocking_valid"] is True
+    assert ui.static_taps == []
+    assert ui.visible_taps == []
+    assert ui.swipes == []
+
+
+def test_running_attachment_does_not_evaluate_waived_save_only_check():
+    ui = _FakeUi()
+    carried = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": dict(MODULE_REQUIREMENTS),
+        "auto_pick_perks": True,
+        "perk_bans": ["interest"],
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    result = run_read_only_gc_preflight(
+        {
+            "cards_deck": "Farm",
+            "workshop_preset": "Farm",
+            "bots_preset": "Farm",
+            "guardian_chips": ["Fetch", "Summon", "Scout"],
+            "modules": dict(MODULE_REQUIREMENTS),
+            "auto_pick_perks": True,
+            "perk_bans": [],
+            "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+            "loadout_policies": {"modules": "enforce"},
+            "_gate_waivers": {
+                "perk_bans": {
+                    "source": "strategy_profile",
+                    "scope": "every_run",
+                }
+            },
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attachment must not attempt Home repair")
+        ),
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete bound UW facts must avoid UI")
+            )
+        ),
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.evidence is not None and result.evidence.valid
+    assert "perk_bans" not in result.evidence.attachment_requirement_checks
+    assert "perk_bans" not in result.evidence.reported_attachment_mismatches
+    assert result.evidence.waivers["perk_bans"]["scope"] == "every_run"
+    assert bound.consume("perk_bans") == ["interest"]
+    assert ui.static_taps == []
+    assert ui.visible_taps == []
+
+
+def test_unparsed_module_fact_uses_ui_but_still_reports_immutable_mismatch():
+    ui = _FakeUi()
+    carried = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
+    }
+    observed_modules = {
+        **MODULE_REQUIREMENTS,
+        "generator_primary": "Project Funding",
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    with patch(
+        "core.gc_preflight.evaluate_gc_module_loadout",
+        return_value=gc_module_loadout_evidence_from_assignments(
+            MODULE_REQUIREMENTS,
+            observed_modules,
+        ),
+    ):
+        result = run_read_only_gc_preflight(
+            {
+                "cards_deck": "Farm",
+                "workshop_preset": "Farm",
+                "bots_preset": "Farm",
+                "guardian_chips": ["Fetch", "Summon", "Scout"],
+                "modules": dict(MODULE_REQUIREMENTS),
+                "auto_pick_perks": True,
+                "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+                "loadout_policies": {"modules": "enforce"},
+            },
+            capture_fn=ui.capture,
+            detector=ui.detect,
+            safe_tap_fn=ui.safe_tap,
+            tap_visible_fn=ui.visible_tap,
+            go_home_fn=lambda: (_ for _ in ()).throw(
+                AssertionError("attachment must not attempt Home repair")
+            ),
+            detect_boxes_fn=lambda *_args, **_kwargs: (
+                (_ for _ in ()).throw(
+                    AssertionError("complete bound UW facts must avoid UI")
+                )
+            ),
+            player_save_preflight=bound,
+            stay_in_battle=True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.evidence is not None and result.evidence.valid
+    mismatch = result.evidence.reported_attachment_mismatches["modules"]
+    assert mismatch["source"] == "ui_fallback"
+    assert mismatch["disposition"] == "ui_mismatch_reported"
+    assert mismatch["observed"] == observed_modules
+    assert "navigation.menu_modules" in ui.visible_taps
+    assert "navigation.goto_workshop_home" not in ui.static_taps
+
+
+def test_complete_mutable_save_mismatch_blocks_without_confirmation_ui():
+    ui = _FakeUi()
+    carried = {
+        "cards_deck": "Tournament",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": dict(MODULE_REQUIREMENTS),
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    result = run_read_only_gc_preflight(
+        {
+            "cards_deck": "Farm",
+            "workshop_preset": "Farm",
+            "bots_preset": "Farm",
+            "guardian_chips": ["Fetch", "Summon", "Scout"],
+            "modules": dict(MODULE_REQUIREMENTS),
+            "auto_pick_perks": True,
+            "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+            "loadout_policies": {"modules": "enforce"},
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attachment must not attempt Home repair")
+        ),
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete bound UW facts must avoid UI")
+            )
+        ),
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.MISMATCH
+    assert result.evidence is not None
+    assert result.evidence.failed_checks == ("cards_deck",)
+    assert result.evidence.attachment_requirement_checks["cards_deck"][
+        "disposition"
+    ] == "save_mismatch"
+    assert "navigation.Cards" not in ui.visible_taps
+    assert "navigation.menu_modules" not in ui.visible_taps
+
+
+def test_saved_poison_stun_mismatch_is_reported_without_attached_repair():
+    ui = _FakeUi()
+    carried = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": dict(MODULE_REQUIREMENTS),
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "on",
+        "spotlight_missiles": "on",
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    repairs = []
+
+    def ensure_stun(**kwargs):
+        repairs.append(kwargs["required_state"])
+        return _stun_off_result(ui, changed=True)
+
+    result = run_read_only_gc_preflight(
+        {
+            "cards_deck": "Farm",
+            "workshop_preset": "Farm",
+            "bots_preset": "Farm",
+            "guardian_chips": ["Fetch", "Summon", "Scout"],
+            "modules": dict(MODULE_REQUIREMENTS),
+            "auto_pick_perks": True,
+            "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+            "loadout_policies": {"modules": "enforce"},
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attachment must not attempt Home repair")
+        ),
+        swipe_fn=ui.swipe,
+        detect_boxes_fn=lambda *_args, **_kwargs: {
+            "left": boxes,
+            "right": [],
+        },
+        ensure_poison_swamp_stun_fn=ensure_stun,
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        allow_repair=False,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.MISMATCH
+    assert result.evidence is not None and not result.evidence.valid
+    assert repairs == []
+    assert result.evidence.as_dict()["ultimate_weapons"]["source"] == "mixed"
+    assert ui.swipes[:3] == [("towards_top", "extended")] * 3
+    assert ui.swipes[3:] == [("towards_bottom", "medium")] * 5
+
+
+def test_saved_spotlight_missiles_off_blocks_without_confirmation_ui():
+    ui = _FakeUi()
+    carried = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "modules": dict(MODULE_REQUIREMENTS),
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "off",
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    result = run_read_only_gc_preflight(
+        {
+            **PREFLIGHT_REQUIREMENTS,
+            "cards_deck": "Farm",
+            "workshop_preset": "Farm",
+            "bots_preset": "Farm",
+            "guardian_chips": ["Fetch", "Summon", "Scout"],
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attachment must not attempt Home repair")
+        ),
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete saved UW facts must avoid UI")
+            )
+        ),
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete saved Stun facts must avoid UI")
+            )
+        ),
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.MISMATCH
+    assert result.evidence is not None
+    assert result.evidence.failed_checks == ("ultimate_weapons",)
+    assert result.evidence.as_dict()["ultimate_weapons"]["source"] == (
+        "bound_player_save_preflight"
+    )
+    assert ui.static_taps == []
+    assert ui.visible_taps == []
+    assert ui.swipes == []
+
+
+def test_saved_auto_pick_mismatch_is_measured_without_attached_repair():
+    ui = _FakeUi()
+    carried = {
+        "modules": dict(MODULE_REQUIREMENTS),
+        "auto_pick_perks": False,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"} for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
+    }
+    bound = BoundRunningAttachmentSaveEvidence(
+        running_attachment_observations(carried),
+        lambda: SimpleNamespace(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        ),
+    )
+
+    def measure(frame):
+        return SimpleNamespace(
+            valid_region=True,
+            enabled=bool(frame[220:310, 255:355].any()),
+            region=(255, 220, 100, 90),
+        )
+
+    result = run_read_only_gc_preflight(
+        PREFLIGHT_REQUIREMENTS,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attachment must not attempt Home repair")
+        ),
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("complete bound UW facts must avoid UI")
+            )
+        ),
+        measure_auto_pick_fn=measure,
+        player_save_preflight=bound,
+        stay_in_battle=True,
+        allow_repair=False,
+        sleep_fn=lambda _seconds: None,
+        validate_fn=lambda **_kwargs: SimpleNamespace(
+            valid=False,
+            deferred_checks=(),
+            reported_attachment_mismatches={},
+        ),
+    )
+
+    assert result.status is GcPreflightNavigationStatus.MISMATCH
+    assert ui.static_taps.count("buttons.perks:auto_pick") == 0
+    assert "navigation.open_perks" in ui.static_taps
+    assert ui.swipes == []
 
 
 def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections():

@@ -38,6 +38,19 @@ from core.player_save_acquisition import (
     PlayerSaveNaturalBoundary,
     PlayerSaveTargetBinding,
 )
+from core.player_save_confirmed_local_mapping import (
+    ConfirmedLocalMappingError,
+    ConfirmedLocalMappingStore,
+    active_confirmations,
+)
+from core.player_save_mapping_candidates import (
+    AppendOnlyMappingCandidateStore,
+    PlayerSaveMappingCandidateError,
+    canonical_mapping_set_fingerprint,
+    fingerprint_json,
+    mapping_candidate_review_status,
+    pending_mapping_candidate,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,7 +61,7 @@ PLAYER_SAVE_DEVICE_PATH = (
 )
 MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
-SNAPSHOT_SCHEMA_VERSION = 3
+SNAPSHOT_SCHEMA_VERSION = 6
 RAW_FIELD_MANIFEST_SCHEMA_VERSION = 1
 REVISION_COMPATIBILITY_SCHEMA_VERSION = 1
 RAW_FIELD_DISPOSITION_NAMES = frozenset(
@@ -130,6 +143,10 @@ class PlayerSaveSnapshot:
     mapping_resolution: str = "exact"
     mapping_authority_id: Optional[str] = None
     mapping_structural_id: Optional[str] = None
+    mapping_semantic_fingerprint: Optional[str] = None
+    canonical_mapping_fingerprint: Optional[str] = None
+    effective_mapping_fingerprint: Optional[str] = None
+    confirmed_local_mappings: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def mapping_supported(self) -> bool:
@@ -162,6 +179,10 @@ class PlayerSaveSnapshot:
                 "resolution": self.mapping_resolution,
                 "authority_id": self.mapping_authority_id,
                 "structural_id": self.mapping_structural_id,
+                "semantic_fingerprint": self.mapping_semantic_fingerprint,
+                "canonical_fingerprint": self.canonical_mapping_fingerprint,
+                "effective_fingerprint": self.effective_mapping_fingerprint,
+                "confirmed_local": dict(self.confirmed_local_mappings),
             },
             "warnings": list(self.warnings),
             "profile_summary": dict(self.profile_summary),
@@ -186,6 +207,17 @@ class _MappingResolution:
     warnings: tuple[str, ...] = ()
     authority_mapping_id: Optional[str] = None
     structural_mapping_id: Optional[str] = None
+
+
+def _empty_confirmed_local_projection() -> dict[str, Any]:
+    return {
+        "available": True,
+        "generation": 0,
+        "document_fingerprint": None,
+        "applied_event_ids": [],
+        "blocked_checks": [],
+        "items": [],
+    }
 
 
 def read_player_save_file(path: Path | str) -> PlayerSaveSnapshot:
@@ -251,7 +283,11 @@ def decode_player_save_bytes(
         data_version=data_version,
         game_version=game_version,
     )
-    mapping = mapping_resolution.mapping
+    mapping = (
+        deepcopy(mapping_resolution.mapping)
+        if mapping_resolution.mapping is not None
+        else None
+    )
     warnings = list(mapping_resolution.warnings)
     if mapping is None:
         if not warnings:
@@ -293,12 +329,61 @@ def decode_player_save_bytes(
     shape_warnings = list(mapping_resolution.shape_warnings)
     warnings.extend(shape_warnings)
     shape_valid = not shape_warnings
+    mapping_semantic_fingerprint = _mapping_semantic_fingerprint(
+        mapping,
+        authority_mapping_id=mapping_resolution.authority_mapping_id,
+        structural_mapping_id=mapping_resolution.structural_mapping_id,
+    )
+    canonical_mapping_fingerprint = canonical_mapping_set_fingerprint(
+        {
+            str(candidate["mapping_id"]): candidate
+            for candidate in _load_mappings()
+        },
+        authority_mapping_id=mapping_resolution.authority_mapping_id,
+        structural_mapping_id=mapping_resolution.structural_mapping_id,
+    )
+    confirmed_local = _empty_confirmed_local_projection()
+    if shape_valid:
+        mapping, confirmed_local, local_warnings = (
+            _apply_confirmed_local_mappings(
+                mapping,
+                data_version=data_version,
+                game_version=game_version,
+                root_class=root_class,
+                mapping_resolution=mapping_resolution.resolution,
+                authority_mapping_id=mapping_resolution.authority_mapping_id,
+                structural_mapping_id=mapping_resolution.structural_mapping_id,
+                dependency_fingerprint=mapping_semantic_fingerprint,
+            )
+        )
+        warnings.extend(local_warnings)
+    effective_mapping_fingerprint = (
+        _effective_mapping_fingerprint(
+            mapping,
+            canonical_dependency_fingerprint=mapping_semantic_fingerprint,
+            mapping_resolution=mapping_resolution.resolution,
+            authority_mapping_id=mapping_resolution.authority_mapping_id,
+            structural_mapping_id=mapping_resolution.structural_mapping_id,
+            confirmed_local=confirmed_local,
+        )
+        if shape_valid
+        else None
+    )
     checks: dict[str, SaveCheckEvidence] = {}
     profile_summary: dict[str, Any] = {}
     profile_progression: dict[str, Any] = {}
     runtime_save: Optional[NormalizedRuntimeSave] = None
     if shape_valid:
         checks = _build_checks(decoded, mapping, captured_at=stamp)
+        for blocked_check in confirmed_local["blocked_checks"]:
+            if blocked_check == "modules":
+                checks[blocked_check] = _unmapped_module_evidence(
+                    ("moduleEquipped", "assistModuleSlots"),
+                    "confirmed local module mapping requires UI fallback",
+                    diagnostics={
+                        "confirmed_local_mapping": dict(confirmed_local),
+                    },
+                )
         profile_summary = _build_profile_summary(decoded, mapping)
         capture = {
             "captured_at": stamp.isoformat(),
@@ -330,6 +415,10 @@ def decode_player_save_bytes(
             warnings.append(
                 "The selected runtime projection failed closed: "
                 f"{exc}. Runtime save evidence requires UI fallback."
+            )
+        if runtime_save is not None:
+            checks["battle_history_killed_by"] = (
+                _battle_history_killed_by_evidence(runtime_save, mapping)
             )
     else:
         warnings.append(
@@ -371,6 +460,10 @@ def decode_player_save_bytes(
         mapping_resolution=mapping_resolution.resolution,
         mapping_authority_id=mapping_resolution.authority_mapping_id,
         mapping_structural_id=mapping_resolution.structural_mapping_id,
+        mapping_semantic_fingerprint=mapping_semantic_fingerprint,
+        canonical_mapping_fingerprint=canonical_mapping_fingerprint,
+        effective_mapping_fingerprint=effective_mapping_fingerprint,
+        confirmed_local_mappings=confirmed_local,
     )
 
 
@@ -526,6 +619,9 @@ def reconcile_requirements(
 
         decisions[str(check_id)] = {
             "mapping_id": snapshot.mapping_id,
+            "effective_mapping_fingerprint": (
+                snapshot.effective_mapping_fingerprint
+            ),
             "disposition": disposition,
             "reason": reason,
             "snapshot_trusted": snapshot_trusted,
@@ -577,6 +673,9 @@ def reconcile_requirements(
         "mapping_resolution": snapshot.mapping_resolution,
         "mapping_authority_id": snapshot.mapping_authority_id,
         "mapping_structural_id": snapshot.mapping_structural_id,
+        "effective_mapping_fingerprint": (
+            snapshot.effective_mapping_fingerprint
+        ),
         "validated_checks": list(snapshot.validated_checks),
         "freshness_verified": bool(freshness_verified),
         "snapshot_trust": {
@@ -947,6 +1046,520 @@ def _compatible_mapping(
     else:
         effective.pop("profile_progression", None)
     return effective
+
+
+def _mapping_semantic_fingerprint(
+    mapping: Mapping[str, Any],
+    *,
+    authority_mapping_id: Optional[str],
+    structural_mapping_id: Optional[str],
+) -> str:
+    """Fingerprint the canonical dependency used by local module evidence."""
+
+    structural_compatibility = None
+    structural_id = str(structural_mapping_id or "")
+    if structural_id:
+        try:
+            structural_compatibility = deepcopy(
+                _mapping_by_id(structural_id).get("revision_compatibility")
+            )
+        except PlayerSaveError:
+            structural_compatibility = deepcopy(
+                mapping.get("revision_compatibility")
+            )
+
+    return fingerprint_json(
+        {
+            "schema_version": 1,
+            "mapping_id": str(mapping.get("mapping_id") or ""),
+            "authority_mapping_id": str(authority_mapping_id or ""),
+            "structural_mapping_id": structural_id,
+            "identity": deepcopy(mapping.get("identity")),
+            "maturity": str(mapping.get("maturity") or ""),
+            "validated_checks": sorted(
+                str(value) for value in mapping.get("validated_checks") or ()
+            ),
+            "structural_revision_compatibility": structural_compatibility,
+            "module_loadout": mapping.get("module_loadout"),
+        }
+    )
+
+
+def _effective_mapping_fingerprint(
+    mapping: Mapping[str, Any],
+    *,
+    canonical_dependency_fingerprint: str,
+    mapping_resolution: str,
+    authority_mapping_id: Optional[str],
+    structural_mapping_id: Optional[str],
+    confirmed_local: Mapping[str, Any],
+) -> str:
+    """Fingerprint the exact effective authority used by this snapshot."""
+
+    lifecycle = [
+        {
+            "event_id": item.get("event_id"),
+            "candidate_record_id": item.get("candidate_record_id"),
+            "state": item.get("state"),
+            "check_id": item.get("check_id"),
+            "raw_value": item.get("raw_value"),
+            "semantic_value": item.get("semantic_value"),
+            "scope": item.get("scope"),
+        }
+        for item in confirmed_local.get("items") or ()
+        if isinstance(item, Mapping)
+    ]
+    return fingerprint_json(
+        {
+            "schema_version": 1,
+            "canonical_dependency_fingerprint": (
+                canonical_dependency_fingerprint
+            ),
+            "identity": deepcopy(mapping.get("identity")),
+            "mapping_id": str(mapping.get("mapping_id") or ""),
+            "mapping_resolution": str(mapping_resolution or ""),
+            "authority_mapping_id": str(authority_mapping_id or ""),
+            "structural_mapping_id": str(structural_mapping_id or ""),
+            "module_loadout": deepcopy(mapping.get("module_loadout")),
+            "confirmed_local": {
+                "available": confirmed_local.get("available") is True,
+                "generation": confirmed_local.get("generation"),
+                "document_fingerprint": confirmed_local.get(
+                    "document_fingerprint"
+                ),
+                "applied_event_ids": list(
+                    confirmed_local.get("applied_event_ids") or ()
+                ),
+                "blocked_checks": list(
+                    confirmed_local.get("blocked_checks") or ()
+                ),
+                "lifecycle": lifecycle,
+            },
+        }
+    )
+
+
+def _apply_confirmed_local_mappings(
+    mapping: dict[str, Any],
+    *,
+    data_version: Optional[int],
+    game_version: Optional[int],
+    root_class: str,
+    mapping_resolution: str,
+    authority_mapping_id: Optional[str],
+    structural_mapping_id: Optional[str],
+    dependency_fingerprint: str,
+    store: Optional[ConfirmedLocalMappingStore] = None,
+) -> tuple[dict[str, Any], dict[str, Any], tuple[str, ...]]:
+    """Apply safe local additions to a clone for this fresh decode only."""
+
+    projection = _empty_confirmed_local_projection()
+    if (
+        mapping_resolution
+        not in {"exact", "compatible_exact_revision"}
+        or type(data_version) is not int
+        or type(game_version) is not int
+    ):
+        return mapping, projection, ()
+    owner = store or ConfirmedLocalMappingStore()
+    try:
+        document = owner.load(data_version, game_version)
+    except (ConfirmedLocalMappingError, OSError) as exc:
+        projection.update(
+            available=False,
+            blocked_checks=[],
+            items=[
+                {
+                    "state": "invalid_local_store",
+                    "check_id": "modules",
+                    "reason": str(exc),
+                }
+            ],
+        )
+        return (
+            mapping,
+            projection,
+            (
+                "The confirmed-local player-save mapping store is invalid; "
+                "canonical Module mappings remain authoritative and unknown "
+                "values continue through UI fallback.",
+            ),
+        )
+    if document is None:
+        return mapping, projection, ()
+    identity = document["identity"]
+    expected_identity = {
+        "mapping_id": str(mapping.get("mapping_id") or ""),
+        "data_version": data_version,
+        "game_version": game_version,
+        "root_class": root_class,
+    }
+    projection["generation"] = document["generation"]
+    projection["document_fingerprint"] = fingerprint_json(document)
+    if identity != expected_identity:
+        projection.update(
+            available=False,
+            blocked_checks=[],
+            items=[
+                {
+                    "state": "identity_conflict",
+                    "check_id": "modules",
+                    "reason": "local confirmation identity does not match the save",
+                }
+            ],
+        )
+        return (
+            mapping,
+            projection,
+            (
+                "The confirmed-local player-save mapping identity changed; "
+                "the local overlay was ignored while canonical Module "
+                "mappings remain authoritative.",
+            ),
+        )
+
+    applied: list[str] = []
+    items: list[dict[str, Any]] = []
+    for event in active_confirmations(document):
+        lifecycle = _confirmed_local_event_lifecycle(
+            identity,
+            event,
+            dependency_fingerprint=dependency_fingerprint,
+        )
+        item = _confirmed_local_item(identity, event, lifecycle)
+        if lifecycle in {"integrated", "mirror_pending"}:
+            items.append(item)
+            continue
+        if lifecycle == "canonical_conflict":
+            items.append(item)
+            continue
+        if lifecycle == "reconfirmation_required":
+            items.append(item)
+            continue
+        slot = _module_slot_spec(mapping, event["scope"])
+        if slot is None:
+            item["state"] = "reconfirmation_required"
+            item["reason"] = "canonical module slot is unavailable"
+            items.append(item)
+            continue
+        options = slot.get("values")
+        if not isinstance(options, list):
+            item["state"] = "reconfirmation_required"
+            item["reason"] = "canonical module values are unavailable"
+            items.append(item)
+            continue
+        options.append(
+            {
+                "info_index": event["raw_value"],
+                "name": event["semantic_value"],
+            }
+        )
+        applied.append(event["event_id"])
+        item["state"] = (
+            "authority_pending"
+            if lifecycle == "authority_pending"
+            else "active_local"
+        )
+        item["reason"] = "local exact-version confirmation is active"
+        items.append(item)
+    projection.update(
+        applied_event_ids=applied,
+        blocked_checks=[],
+        items=items,
+    )
+    warnings: tuple[str, ...] = ()
+    if applied:
+        warnings = (
+            "A locally confirmed exact-version Module mapping was applied "
+            "to this fresh save decode; canonical repository integration is "
+            "still pending.",
+        )
+    if any(
+        item.get("state")
+        in {"canonical_conflict", "reconfirmation_required"}
+        for item in items
+    ):
+        warnings += (
+            "A confirmed-local Module mapping conflicted with or outlived its "
+            "canonical dependency; the local event was ignored and canonical "
+            "values remain authoritative.",
+        )
+    return mapping, projection, warnings
+
+
+def _module_slot_spec(
+    mapping: Mapping[str, Any],
+    scope: Mapping[str, Any],
+) -> Optional[dict[str, Any]]:
+    role = str(scope.get("role") or "")
+    slots = (mapping.get("module_loadout") or {}).get(role)
+    if role not in {"primary", "assist"} or not isinstance(slots, list):
+        return None
+    matches = [
+        slot
+        for slot in slots
+        if isinstance(slot, dict)
+        and slot.get("slot_key") == scope.get("slot_key")
+        and slot.get("family") == scope.get("family")
+        and slot.get("role") == role
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _canonical_module_event_lifecycle(event: Mapping[str, Any]) -> str:
+    """Classify repository owner/mirror integration for one local event."""
+
+    try:
+        authority = _mapping_by_id(str(event["authority_mapping_id"]))
+        structural = _mapping_by_id(str(event["structural_mapping_id"]))
+    except (KeyError, PlayerSaveError):
+        return "reconfirmation_required"
+    owner_state = _canonical_module_event_state(authority, event)
+    mirror_state = _canonical_module_event_state(structural, event)
+    if "conflict" in {owner_state, mirror_state}:
+        return "canonical_conflict"
+    if owner_state == "match" and mirror_state == "match":
+        return "integrated"
+    if owner_state == "match":
+        return "mirror_pending"
+    if mirror_state == "match":
+        return "authority_pending"
+    if "unavailable" in {owner_state, mirror_state}:
+        return "reconfirmation_required"
+    return "active_local"
+
+
+def _confirmed_local_event_lifecycle(
+    identity: Mapping[str, Any],
+    event: Mapping[str, Any],
+    *,
+    dependency_fingerprint: Optional[str] = None,
+) -> str:
+    """Use one lifecycle classifier for both decode and status projection."""
+
+    lifecycle = _canonical_module_event_lifecycle(event)
+    if lifecycle in {"integrated", "mirror_pending", "canonical_conflict"}:
+        return lifecycle
+    current_dependency = dependency_fingerprint
+    if current_dependency is None:
+        current_dependency = _current_module_event_dependency_fingerprint(
+            identity,
+            event,
+        )
+    if (
+        current_dependency is None
+        or event.get("dependency_fingerprint") != current_dependency
+    ):
+        return "reconfirmation_required"
+    return lifecycle
+
+
+def _current_module_event_dependency_fingerprint(
+    identity: Mapping[str, Any],
+    event: Mapping[str, Any],
+) -> Optional[str]:
+    try:
+        authority_id = str(event["authority_mapping_id"])
+        structural_id = str(event["structural_mapping_id"])
+        authority = _mapping_by_id(authority_id)
+        structural = _mapping_by_id(structural_id)
+        resolution = str(event["mapping_resolution"])
+        if resolution == "exact":
+            mapping = deepcopy(structural)
+        elif resolution == "compatible_exact_revision":
+            mapping = _compatible_mapping(
+                structural=structural,
+                authority=authority,
+                data_version=int(identity["data_version"]),
+                game_version=int(identity["game_version"]),
+                mapping_id=str(identity["mapping_id"]),
+                retain_exact_profile_progression=True,
+            )
+        else:
+            return None
+        return _mapping_semantic_fingerprint(
+            mapping,
+            authority_mapping_id=authority_id,
+            structural_mapping_id=structural_id,
+        )
+    except (KeyError, TypeError, ValueError, PlayerSaveError):
+        return None
+
+
+def _canonical_module_event_state(
+    mapping: Mapping[str, Any],
+    event: Mapping[str, Any],
+) -> str:
+    module_loadout = mapping.get("module_loadout") or {}
+    specs = [
+        *(
+            module_loadout.get("primary")
+            if isinstance(module_loadout.get("primary"), list)
+            else []
+        ),
+        *(
+            module_loadout.get("assist")
+            if isinstance(module_loadout.get("assist"), list)
+            else []
+        ),
+    ]
+    known_values = _known_module_values(specs)
+    if known_values is None:
+        return "unavailable"
+    raw_value = event["raw_value"]
+    semantic = event["semantic_value"]
+    known_semantic = known_values.get(raw_value)
+    if known_semantic is not None and known_semantic != semantic:
+        return "conflict"
+    semantic_raw = next(
+        (
+            info_index
+            for info_index, name in known_values.items()
+            if name == semantic
+        ),
+        None,
+    )
+    if semantic_raw is not None and semantic_raw != raw_value:
+        return "conflict"
+    slot = _module_slot_spec(mapping, event["scope"])
+    if slot is None:
+        return "unavailable"
+    options = _module_value_options(slot)
+    if options is None:
+        return "unavailable"
+    for info_index, name in options:
+        if info_index == raw_value:
+            return "match" if name == semantic else "conflict"
+        if name == semantic:
+            return "conflict"
+    return "absent"
+
+
+def _confirmed_local_item(
+    identity: Mapping[str, Any],
+    event: Mapping[str, Any],
+    lifecycle: str,
+) -> dict[str, Any]:
+    reasons = {
+        "active_local": "canonical integration is pending",
+        "authority_pending": "canonical authority integration is pending",
+        "mirror_pending": "exact-version mirror integration is pending",
+        "integrated": "canonical owner and exact-version mirror agree",
+        "canonical_conflict": "canonical mapping conflicts with local evidence",
+        "reconfirmation_required": "canonical mapping dependency is unavailable",
+    }
+    return {
+        "event_id": event["event_id"],
+        "candidate_record_id": event["candidate_record_id"],
+        "mapping_id": identity["mapping_id"],
+        "data_version": identity["data_version"],
+        "game_version": identity["game_version"],
+        "check_id": event["check_id"],
+        "value_kind": event["value_kind"],
+        "raw_value": event["raw_value"],
+        "semantic_value": event["semantic_value"],
+        "scope": dict(event["scope"]),
+        "state": lifecycle,
+        "reason": reasons[lifecycle],
+        "recorded_at": event["recorded_at"],
+    }
+
+
+def confirmed_local_mapping_status(
+    *,
+    store: Optional[ConfirmedLocalMappingStore] = None,
+    candidate_store: Optional[AppendOnlyMappingCandidateStore] = None,
+    repository_root: Path | str = ROOT,
+    candidate_status: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Project durable local authority and review receipts for status UIs."""
+
+    owner = store or ConfirmedLocalMappingStore()
+    if candidate_status is None:
+        candidate_status = mapping_candidate_review_status(
+            store=candidate_store,
+            repository_root=repository_root,
+        )
+    try:
+        documents = owner.list_documents()
+    except (ConfirmedLocalMappingError, OSError) as exc:
+        return {
+            "schema_version": 2,
+            "available": False,
+            "blocks_startup": False,
+            "items": list(candidate_status.get("items") or ()),
+            "counts": {
+                **dict(candidate_status.get("counts") or {}),
+                "invalid_local_store": 1,
+            },
+            "reason": str(exc),
+        }
+    items: list[dict[str, Any]] = []
+    for document in documents:
+        revoked = {
+            event["target_event_id"]
+            for event in document["events"]
+            if event["event_type"] == "revoke"
+        }
+        for event in document["events"]:
+            if event["event_type"] != "accept":
+                continue
+            lifecycle = (
+                "revoked"
+                if event["event_id"] in revoked
+                else _confirmed_local_event_lifecycle(
+                    document["identity"],
+                    event,
+                )
+            )
+            item = _confirmed_local_item(
+                document["identity"],
+                event,
+                lifecycle if lifecycle != "revoked" else "integrated",
+            )
+            if lifecycle == "revoked":
+                item["state"] = "revoked"
+                item["reason"] = "local confirmation was explicitly revoked"
+            items.append(item)
+    integration_lifecycle_states = {
+        "integration_recovery_required",
+        "integration_unconfirmed",
+        "production_validation_pending",
+        "promotion_pending",
+    }
+    integration_candidate_ids = {
+        str(item.get("candidate_record_id") or "")
+        for item in candidate_status.get("items") or ()
+        if item.get("state") in integration_lifecycle_states
+    }
+    items = [
+        item
+        for item in items
+        if item["candidate_record_id"] not in integration_candidate_ids
+    ]
+    confirmed_candidate_ids = {
+        item["candidate_record_id"]
+        for item in items
+        if item["state"] != "revoked"
+    }
+    candidate_items = [
+        dict(item)
+        for item in candidate_status.get("items") or ()
+        if item.get("candidate_record_id") not in confirmed_candidate_ids
+    ]
+    combined_items = [*items, *candidate_items]
+    counts: dict[str, int] = {}
+    for item in combined_items:
+        state = item["state"]
+        counts[state] = counts.get(state, 0) + 1
+    return {
+        "schema_version": 2,
+        "available": candidate_status.get("available") is not False,
+        "blocks_startup": False,
+        "items": combined_items,
+        "counts": counts,
+        "reason": str(candidate_status.get("reason") or ""),
+    }
 
 
 def _decoded_additional_fields(
@@ -1428,6 +2041,20 @@ def _build_checks(
     perk_ids = mapping.get("perk_ids") or {}
     first_id = _exact_int(decoded.get("firstPerkIndex"))
     first_name = perk_ids.get(str(first_id)) if first_id is not None else None
+    first_candidates: list[dict[str, Any]] = []
+    if first_id is not None and first_id >= 0 and first_name is None:
+        candidate = _pending_mapping_candidate(
+            value_kind="perk_id",
+            raw_value=first_id,
+            pairing_method="exact_locator",
+            locator="selected",
+            expected_observation_count=1,
+            known_semantic_values=tuple(
+                str(value) for value in perk_ids.values()
+            ),
+        )
+        if candidate is not None:
+            first_candidates.append(candidate)
     checks["perk_first_choice"] = SaveCheckEvidence(
         check_id="perk_first_choice",
         status="observed" if first_name else "unmapped",
@@ -1435,6 +2062,7 @@ def _build_checks(
         source_fields=("firstPerkIndex",),
         reason="" if first_name else f"unmapped perk id {first_id}",
         authority={"kind": "matching_value"},
+        diagnostics={"mapping_candidates": first_candidates},
     )
 
     bans, bans_complete, bans_reason = _validated_selected_id_slots(
@@ -1451,6 +2079,14 @@ def _build_checks(
         complete=bans_complete,
         reason=bans_reason,
         authority={"kind": "matching_value"},
+        diagnostics={
+            "mapping_candidates": _selected_slot_mapping_candidates(
+                decoded.get("bannedPerksIndex"),
+                perk_ids,
+                mapping.get("perk_bans"),
+                value_kind="perk_id",
+            )
+        },
     )
 
     raw_auto_order = decoded.get("autoPickOrder")
@@ -1473,6 +2109,20 @@ def _build_checks(
         complete=order_complete,
         reason=order_reason,
         authority={"kind": "prefix", "maximum_length": ranked_count or 0},
+        diagnostics={
+            "mapping_candidates": _ranked_mapping_candidates(
+                raw_auto_order,
+                perk_ids,
+                ranked_count=ranked_count,
+                total_count=(
+                    _optional_int(auto_order_spec.get("total_count"))
+                    if isinstance(auto_order_spec, Mapping)
+                    else None
+                ),
+                value_kind="perk_id",
+                observation_count_policy="minimum",
+            )
+        },
     )
 
     locks, unmanaged_locks, unmapped_lock_count, lock_complete, lock_reason = (
@@ -1517,6 +2167,15 @@ def _build_checks(
             "kind": "complete_order",
             "values": [str(value) for value in target_ids.values()],
         },
+        diagnostics={
+            "mapping_candidates": _ranked_mapping_candidates(
+                decoded.get("targetPriorityList"),
+                target_ids,
+                ranked_count=len(target_ids),
+                total_count=len(target_ids),
+                value_kind="target_priority_id",
+            )
+        },
     )
 
     guardian_spec = mapping.get("guardian_chips")
@@ -1543,6 +2202,14 @@ def _build_checks(
         complete=guardians_complete,
         reason=guardians_reason,
         authority={"kind": "matching_value"},
+        diagnostics={
+            "mapping_candidates": _known_list_mapping_candidates(
+                decoded.get("guardianChipSlot"),
+                mapping.get("guardian_chip_ids") or {},
+                expected_count=guardian_slot_count,
+                value_kind="guardian_chip_id",
+            )
+        },
     )
 
     checks["ultimate_weapons"] = _ultimate_weapon_evidence(decoded, mapping)
@@ -1574,6 +2241,41 @@ def _build_checks(
         reason=str(tournament_conditions.get("reason") or ""),
         authority={"kind": "matching_value"},
     )
+    league = tournament_conditions.get("league")
+    league_id = (
+        _exact_int(league.get("id"))
+        if isinstance(league, Mapping)
+        else None
+    )
+    league_name = (
+        str(league.get("name") or "").strip()
+        if isinstance(league, Mapping)
+        else ""
+    )
+    league_reason = str(tournament_conditions.get("reason") or "")
+    league_candidates: list[dict[str, Any]] = []
+    if league_reason == "league_mapping_not_validated" and league_id is not None:
+        candidate = _pending_mapping_candidate(
+            value_kind="tournament_league_id",
+            raw_value=league_id,
+            pairing_method="exact_locator",
+            locator="league",
+            expected_observation_count=1,
+            known_semantic_values=("Legend League",),
+        )
+        if candidate is not None:
+            league_candidates.append(candidate)
+    league_complete = bool(tournament_complete and league_name)
+    checks["tournament_league"] = SaveCheckEvidence(
+        check_id="tournament_league",
+        status="observed" if league_complete else "unmapped",
+        value=league_name if league_complete else None,
+        source_fields=(str(tournament_spec.get("league_field") or "leagueID"),),
+        complete=league_complete,
+        reason="" if league_complete else league_reason or "tournament league unavailable",
+        authority={"kind": "matching_value"},
+        diagnostics={"mapping_candidates": league_candidates},
+    )
     for check_id, reason in (mapping.get("unmapped_checks") or {}).items():
         checks[str(check_id)] = SaveCheckEvidence(
             check_id=str(check_id),
@@ -1584,6 +2286,60 @@ def _build_checks(
             reason=str(reason),
         )
     return checks
+
+
+def _battle_history_killed_by_evidence(
+    runtime_save: NormalizedRuntimeSave,
+    mapping: Mapping[str, Any],
+) -> SaveCheckEvidence:
+    """Expose a semantic-neutral terminal cause discriminator for UI pairing."""
+
+    tail = runtime_save.battle_history_tail
+    entry = tail.entry
+    if tail.completed_entry_status == "observed" and entry is not None:
+        return SaveCheckEvidence(
+            check_id="battle_history_killed_by",
+            status="observed",
+            value=entry.killed_by,
+            source_fields=("battleHistory[-1].killedBy",),
+            complete=True,
+            authority={"kind": "matching_value"},
+        )
+    reason = str(tail.completed_entry_reason or "")
+    identity = tail.identity
+    raw_value = getattr(identity, "killed_by_id", None)
+    candidates: list[dict[str, Any]] = []
+    if reason == f"unmapped_killed_by_id:{raw_value}" and type(raw_value) is int:
+        killed_by_ids = (
+            ((mapping.get("runtime_save") or {}).get("battle_history") or {}).get(
+                "killed_by_ids"
+            )
+            or {}
+        )
+        candidate = _pending_mapping_candidate(
+            value_kind="battle_history_killed_by_id",
+            raw_value=raw_value,
+            pairing_method="exact_locator",
+            locator="killed_by",
+            expected_observation_count=1,
+            known_semantic_values=tuple(
+                str(value)
+                for value in killed_by_ids.values()
+                if str(value).strip()
+            ),
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+    return SaveCheckEvidence(
+        check_id="battle_history_killed_by",
+        status="unmapped",
+        value=None,
+        source_fields=("battleHistory[-1].killedBy",),
+        complete=False,
+        reason=reason or "completed battle cause unavailable",
+        authority={"kind": "matching_value"},
+        diagnostics={"mapping_candidates": candidates},
+    )
 
 
 def _card_recharge_mode_evidence(
@@ -1717,6 +2473,168 @@ def _validated_known_id_list(
     if unknown:
         return [], False, _unknown_id_reason(label, unknown)
     return [str(names[str(value)]) for value in values], True, ""
+
+
+def _selected_slot_mapping_candidates(
+    raw: Any,
+    names: Mapping[str, Any],
+    raw_spec: Any,
+    *,
+    value_kind: str,
+) -> list[dict[str, Any]]:
+    """Retain structurally sound unknown selected-slot discriminators."""
+
+    spec = raw_spec if isinstance(raw_spec, Mapping) else {}
+    slot_count = _optional_int(spec.get("slot_count"))
+    empty_id = _optional_int(spec.get("empty_id"))
+    if (
+        slot_count is None
+        or empty_id is None
+        or not _is_sequence(raw)
+        or len(raw) != slot_count
+    ):
+        return []
+    numeric = [_exact_int(value) for value in raw]
+    if any(value is None for value in numeric):
+        return []
+    selected: list[int] = []
+    empty_seen = False
+    for value in numeric:
+        assert value is not None
+        if value == empty_id:
+            empty_seen = True
+            continue
+        if empty_seen:
+            return []
+        selected.append(value)
+    if len(selected) != len(set(selected)):
+        return []
+    return _singleton_remainder_candidates(
+        selected,
+        names,
+        value_kind=value_kind,
+    )
+
+
+def _known_list_mapping_candidates(
+    raw: Any,
+    names: Mapping[str, Any],
+    *,
+    expected_count: Optional[int],
+    value_kind: str,
+) -> list[dict[str, Any]]:
+    """Retain unknown IDs from one exact-length unique semantic set."""
+
+    if (
+        expected_count is None
+        or not _is_sequence(raw)
+        or len(raw) != expected_count
+    ):
+        return []
+    numeric = [_exact_int(value) for value in raw]
+    if any(value is None for value in numeric):
+        return []
+    values = [int(value) for value in numeric if value is not None]
+    if len(values) != len(set(values)):
+        return []
+    return _singleton_remainder_candidates(
+        values,
+        names,
+        value_kind=value_kind,
+    )
+
+
+def _singleton_remainder_candidates(
+    numeric: Sequence[int],
+    names: Mapping[str, Any],
+    *,
+    value_kind: str,
+) -> list[dict[str, Any]]:
+    known_values = tuple(str(value) for value in names.values())
+    peers = tuple(
+        str(names[str(value)]) for value in numeric if str(value) in names
+    )
+    candidates: list[dict[str, Any]] = []
+    for value in numeric:
+        if value < 0 or str(value) in names:
+            continue
+        candidate = _pending_mapping_candidate(
+            value_kind=value_kind,
+            raw_value=value,
+            pairing_method="singleton_remainder",
+            locator="selected",
+            expected_observation_count=len(numeric),
+            known_semantic_values=known_values,
+            peer_semantic_values=peers,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
+
+
+def _ranked_mapping_candidates(
+    raw: Any,
+    names: Mapping[str, Any],
+    *,
+    ranked_count: Optional[int],
+    total_count: Optional[int],
+    value_kind: str,
+    observation_count_policy: str = "exact",
+) -> list[dict[str, Any]]:
+    """Retain unknown numeric IDs only where UI exposes the same rank."""
+
+    if (
+        ranked_count is None
+        or total_count is None
+        or ranked_count <= 0
+        or total_count < ranked_count
+        or not _is_sequence(raw)
+        or len(raw) != total_count
+    ):
+        return []
+    numeric = [_exact_int(value) for value in raw]
+    if any(value is None for value in numeric):
+        return []
+    values = [int(value) for value in numeric if value is not None]
+    if len(values) != len(set(values)):
+        return []
+    known_values = tuple(str(value) for value in names.values())
+    candidates: list[dict[str, Any]] = []
+    for rank, value in enumerate(values[:ranked_count]):
+        if value < 0 or str(value) in names:
+            continue
+        peer_limit = (
+            rank + 1
+            if observation_count_policy == "minimum"
+            else ranked_count
+        )
+        peer_locator_values = {
+            f"rank:{peer_rank}": str(names[str(peer_value)])
+            for peer_rank, peer_value in enumerate(values[:peer_limit])
+            if str(peer_value) in names
+        }
+        candidate = _pending_mapping_candidate(
+            value_kind=value_kind,
+            raw_value=value,
+            pairing_method="exact_locator",
+            locator=f"rank:{rank}",
+            expected_observation_count=peer_limit,
+            observation_count_policy=observation_count_policy,
+            known_semantic_values=known_values,
+            peer_locator_values=peer_locator_values,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
+
+
+def _pending_mapping_candidate(**kwargs: Any) -> Optional[dict[str, Any]]:
+    """Keep optional discovery metadata from affecting save availability."""
+
+    try:
+        return pending_mapping_candidate(**kwargs)
+    except PlayerSaveMappingCandidateError:
+        return None
 
 
 def _map_id_sequence(
@@ -1901,6 +2819,7 @@ def _module_loadout_evidence(
         or not _is_sequence(assist_specs)
         or len(primary_specs) != 4
         or len(assist_specs) != 4
+        or not _module_loadout_specs_are_valid(primary_specs, assist_specs)
     ):
         return SaveCheckEvidence(
             check_id="modules",
@@ -1927,6 +2846,13 @@ def _module_loadout_evidence(
     assignments: dict[str, str] = {}
     supported_names: dict[str, list[str]] = {}
     slot_diagnostics: list[dict[str, str]] = []
+    mapping_candidates: list[dict[str, Any]] = []
+    known_module_values = _known_module_values((*primary_specs, *assist_specs))
+    if known_module_values is None:
+        return _unmapped_module_evidence(
+            source_fields,
+            "module infoIndex mapping changed",
+        )
     for raw_spec in primary_specs:
         if not isinstance(raw_spec, Mapping):
             return _unmapped_module_evidence(
@@ -1949,6 +2875,8 @@ def _module_loadout_evidence(
             assignments,
             supported_names,
             slot_diagnostics,
+            mapping_candidates,
+            known_module_values,
             raw_spec,
             item,
         )
@@ -1990,6 +2918,7 @@ def _module_loadout_evidence(
             )
         assist_by_type[slot_type] = module_items[0]
 
+    assist_specs_by_type: dict[int, Mapping[str, Any]] = {}
     for raw_spec in assist_specs:
         if not isinstance(raw_spec, Mapping):
             return _unmapped_module_evidence(
@@ -1997,7 +2926,65 @@ def _module_loadout_evidence(
                 "Assist module mapping changed",
             )
         slot_type = _exact_int(raw_spec.get("type"))
-        item = assist_by_type.get(slot_type) if slot_type is not None else None
+        family = str(raw_spec.get("family") or "").strip()
+        if (
+            slot_type is None
+            or slot_type < 0
+            or slot_type in assist_specs_by_type
+            or not family
+        ):
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module type mapping changed",
+            )
+        assist_specs_by_type[slot_type] = raw_spec
+
+    observed_types = set(assist_by_type)
+    expected_types = set(assist_specs_by_type)
+    resolved_assist_items = dict(assist_by_type)
+    if observed_types != expected_types:
+        unknown_types = observed_types - expected_types
+        missing_types = expected_types - observed_types
+        if len(unknown_types) != 1 or len(missing_types) != 1:
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module slot membership changed",
+            )
+        unknown_type = next(iter(unknown_types))
+        missing_type = next(iter(missing_types))
+        known_families = tuple(
+            str(item.get("family")) for item in assist_specs_by_type.values()
+        )
+        peer_families = tuple(
+            str(assist_specs_by_type[slot_type].get("family"))
+            for slot_type in sorted(observed_types & expected_types)
+        )
+        type_candidate = _pending_mapping_candidate(
+            value_kind="module_assist_type",
+            raw_value=unknown_type,
+            pairing_method="singleton_remainder",
+            locator="assist_type",
+            expected_observation_count=4,
+            known_semantic_values=known_families,
+            peer_semantic_values=peer_families,
+            scope={"role": "assist"},
+        )
+        if type_candidate is None:
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module slot membership changed",
+            )
+        mapping_candidates.append(type_candidate)
+        resolved_assist_items[missing_type] = assist_by_type[unknown_type]
+
+    for raw_spec in assist_specs:
+        assert isinstance(raw_spec, Mapping)
+        slot_type = _exact_int(raw_spec.get("type"))
+        item = (
+            resolved_assist_items.get(slot_type)
+            if slot_type is not None
+            else None
+        )
         if item is None:
             return _unmapped_module_evidence(
                 source_fields,
@@ -2007,12 +2994,38 @@ def _module_loadout_evidence(
             assignments,
             supported_names,
             slot_diagnostics,
+            mapping_candidates,
+            known_module_values,
             raw_spec,
             item,
         )
         if failure:
             return _unmapped_module_evidence(source_fields, failure)
 
+    if mapping_candidates:
+        for candidate in mapping_candidates:
+            candidate["peer_locator_values"] = dict(assignments)
+        info_roles = {
+            str(candidate.get("scope", {}).get("role") or "")
+            for candidate in mapping_candidates
+            if candidate.get("value_kind") == "module_info_index"
+        }
+        if info_roles == {"primary"}:
+            candidate_reason = "unsupported primary module infoIndex"
+        elif info_roles == {"assist"}:
+            candidate_reason = "unsupported assist module infoIndex"
+        elif info_roles:
+            candidate_reason = "unsupported module infoIndex values"
+        else:
+            candidate_reason = "unsupported Assist module type"
+        return _unmapped_module_evidence(
+            source_fields,
+            candidate_reason,
+            diagnostics={
+                "slots": slot_diagnostics,
+                "mapping_candidates": mapping_candidates,
+            },
+        )
     if len(assignments) != 8:
         return _unmapped_module_evidence(
             source_fields,
@@ -2033,10 +3046,55 @@ def _module_loadout_evidence(
     )
 
 
+def _module_loadout_specs_are_valid(
+    primary_specs: Sequence[Any],
+    assist_specs: Sequence[Any],
+) -> bool:
+    """Validate all eight exact slots before retaining unknown values."""
+
+    families = {"cannon", "armor", "generator", "core"}
+    expected_scopes = {
+        (f"{family}_{role}", family, role)
+        for family in families
+        for role in ("primary", "assist")
+    }
+    scopes: set[tuple[str, str, str]] = set()
+    primary_indices: set[int] = set()
+    assist_types: set[int] = set()
+    for role, specs, discriminator, seen in (
+        ("primary", primary_specs, "array_index", primary_indices),
+        ("assist", assist_specs, "type", assist_types),
+    ):
+        for raw_spec in specs:
+            if not isinstance(raw_spec, Mapping):
+                return False
+            slot_key = str(raw_spec.get("slot_key") or "").strip()
+            family = str(raw_spec.get("family") or "").strip()
+            configured_role = str(raw_spec.get("role") or "").strip()
+            numeric = _exact_int(raw_spec.get(discriminator))
+            scope = (slot_key, family, configured_role)
+            if (
+                family not in families
+                or configured_role != role
+                or slot_key != f"{family}_{role}"
+                or scope in scopes
+                or numeric is None
+                or numeric < 0
+                or numeric in seen
+                or _module_value_options(raw_spec) is None
+            ):
+                return False
+            scopes.add(scope)
+            seen.add(numeric)
+    return scopes == expected_scopes and primary_indices == set(range(4))
+
+
 def _record_mapped_module_assignment(
     assignments: dict[str, str],
     supported_names: dict[str, list[str]],
     diagnostics: list[dict[str, str]],
+    mapping_candidates: list[dict[str, Any]],
+    known_module_values: Mapping[int, str],
     spec: Mapping[str, Any],
     item: Mapping[str, Any],
 ) -> str:
@@ -2056,12 +3114,41 @@ def _record_mapped_module_assignment(
         return "module slot mapping changed"
     if observed_info_index is None:
         return f"{role.title()} module infoIndex is unavailable"
+    if observed_info_index < 0:
+        return f"{role.title()} module infoIndex is invalid"
     selected = next(
         (option for option in options if option[0] == observed_info_index),
         None,
     )
     if selected is None:
-        return f"unsupported {role} module infoIndex"
+        candidate = _pending_mapping_candidate(
+            value_kind="module_info_index",
+            raw_value=observed_info_index,
+            pairing_method="exact_locator",
+            locator=slot_key,
+            expected_observation_count=8,
+            known_semantic_values=tuple(known_module_values.values()),
+            known_raw_semantic_value=known_module_values.get(
+                observed_info_index
+            ),
+            scope={
+                "slot_key": slot_key,
+                "family": family,
+                "role": role,
+            },
+        )
+        if candidate is None:
+            return f"unsupported {role} module infoIndex"
+        mapping_candidates.append(candidate)
+        diagnostics.append(
+            {
+                "slot_key": slot_key,
+                "family": family,
+                "role": role,
+                "mapping_status": "unmapped",
+            }
+        )
+        return ""
     _info_index, name = selected
     assignments[slot_key] = name
     supported_names[slot_key] = [option_name for _index, option_name in options]
@@ -2074,6 +3161,26 @@ def _record_mapped_module_assignment(
         }
     )
     return ""
+
+
+def _known_module_values(
+    specs: Sequence[Any],
+) -> Optional[dict[int, str]]:
+    values: dict[int, str] = {}
+    for raw_spec in specs:
+        if not isinstance(raw_spec, Mapping):
+            return None
+        options = _module_value_options(raw_spec)
+        if options is None:
+            return None
+        for info_index, name in options:
+            prior = values.get(info_index)
+            if prior is not None and prior != name:
+                return None
+            values[info_index] = name
+    if len(values) != len(set(values.values())):
+        return None
+    return values
 
 
 def _module_value_options(
@@ -2121,6 +3228,8 @@ def _is_typed_object(value: Any, expected_class: str) -> bool:
 def _unmapped_module_evidence(
     source_fields: tuple[str, str],
     reason: str,
+    *,
+    diagnostics: Optional[Mapping[str, Any]] = None,
 ) -> SaveCheckEvidence:
     return SaveCheckEvidence(
         check_id="modules",
@@ -2134,6 +3243,7 @@ def _unmapped_module_evidence(
             "assignments": {},
             "supported_names": {},
         },
+        diagnostics=dict(diagnostics or {}),
     )
 
 

@@ -39,6 +39,1203 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 replay-safe collectors during BlueStacks recovery
+
+- A second operator restart (`b753da46e13d4a4a8a196d661fd7af93`)
+  completed hands-free. Windows durably acknowledged listener PID 137952,
+  waited through BlueStacks' promotional graceful-close dialog, and verified
+  replacement PID 122132 at 02:14:41 PDT. Linux recovered ADB, launched The
+  Tower at 02:14:55, tapped the distinct Welcome Back Resume at 02:15:34, and
+  retained the same battle scope.
+- The resumed battle fell from captured high-water wave 4092 to wave 4042—a
+  fifty-wave rollback despite Intro Sprint not being confirmed—then reached
+  4092 and completed with disposition `resumed` at 02:18:59. Completion remains
+  bound to the captured high-water rather than a presumed rollback count.
+- Commit `d6aee01` keeps replayed waves out of wave-monotonic, Coins/min, Perk,
+  activation, Strategy, and lifecycle owners while reopening the existing
+  independently guarded collector lane after fresh same-battle `RUNNING`
+  evidence. In-battle ad gems, floating-gem scans, daily gems, and
+  Daily/Weekly/Event/Guild rewards retain their normal exact-screen,
+  battle-scope, route-ownership, and final Pause checks. Welcome Back,
+  source-restoration, fallback, and pre-restart phases remain exclusive.
+- Focused replay/authority/control-surface coverage passed 227 tests. The
+  feature checkpoint passed all 2,519 tests in 394.73 seconds, and the exact
+  `develop` candidate passed all 2,519 again in 389.49 seconds.
+- Production `main` and `develop` advanced to `d6aee01` behind rollback tag
+  `production-before-20260813T095051Z-ed7ba20`. Replacement automation PID
+  3048462 acquired exact target `localhost:5555`; explicit Attach request
+  `6c98cddf7dce436a8a75d502e61bf476` proved same-battle continuity, adopted
+  `farm_t19_ad_assist` without repair, and returned to acknowledged `RUNNING`.
+- The complete native package was published at 02:53 PDT. Current executable
+  SHA-256 values are `a51381325dd9fdf3a029dc04d6fd4871a1a7e60ff51381f075fa344f6917c871`
+  for the 72,477,518-byte Control Surface and
+  `1c1de580b47e3fb04ab7dd31a2c4aa3d762e06e5e825715f1457c4064e245c2e`
+  for the 35,172,113-byte Tunnel Host. Retained slot 1 is the prior `b087989`
+  package: its 72,477,552-byte Control Surface is
+  `4b57f0abc55b75188c3e3bae162559cb04ba7f90d7b808d7c878d336d0b185f1`
+  and its 35,172,104-byte Tunnel Host is
+  `4f6d8e7dfff6607ba0c07a2bdfa9923c932196b8f82a72825b0c04ecde12db2b`.
+  Retained slot 2 is the prior `40f414e` package: its 72,474,917-byte Control
+  Surface is
+  `3002d9d4b6aa53b1e998af78698708444d589bf0afb5dac3c8c5606904f7cab1`
+  and its 35,172,119-byte Tunnel Host is
+  `ebe1073a86d4731e64995b53816553ca45b9cca47430684f79615bf0fd817c19`.
+  A later operator restart still needs to confirm collector activity
+  specifically inside the replay window; no extra restart was manufactured
+  for validation.
+
+### 2026-08-13 first coordinated BlueStacks restart and launcher repair
+
+- The revision-41 Windows client completed the exact host mutation for operator
+  request `7a2beace3b944e8782ff4080a0b361ba`: installed instance `Pie64` moved from
+  listener PID 17712 to PID 137952 and ADB returned on `localhost:5555`.
+  BlueStacks Home then presented `1920x1080`, which the canonical portrait
+  capture boundary correctly refused to treat as mapped UI but, unintentionally,
+  also prevented the existing package launcher from running.
+- The operator opened only The Tower. The still-owned Linux transaction then
+  launched/foregrounded the package, tapped the distinct Welcome Back Resume
+  once, observed a lowest rollback wave of 3759, caught up to high-water 3765,
+  and persisted terminal disposition `resumed` at 01:51:19 PDT. No fallback,
+  Surrender, or replacement battle was used, and the completed recovery is
+  excluded from degradation calibration.
+- Commit `7ce123c` makes unsupported native geometry a typed capture result and
+  allows only a fresh exact-target `1920x1080`/`1280x720` transpose, under the
+  durable `host_restarted` maintenance hold, to reach the existing bounded
+  package launcher. The frame is never normalized, published as canonical UI,
+  or used for coordinates. Missing hold, request phase, target identity, or
+  transpose shape still fails closed.
+- Compilation, state-definition validation, clickmap integrity with zero
+  errors, and all 2,517 tests passed in 395.93 seconds. Runtime code reached
+  production behind rollback tag
+  `production-before-20260813T090251Z-b087989`. Replacement PID 2973042
+  freshly observed the active Tier-19 battle, completed explicit Attach request
+  `07d3da5c0f48463980e966e4ce5a6a5c`, adopted `farm_t19_ad_assist`, and returned
+  to acknowledged `RUNNING`. No native Windows package input changed, so the
+  published WPF/Tunnel Host package remains the `b087989` build.
+
+### 2026-08-12 coordinated BlueStacks restart controls
+
+- Commit `40f414e` adds a confirmed **System > Diagnostics > Restart
+  BlueStacks…** command through the same durable Linux/Windows recovery
+  handshake as the default-off detector. Operator creation bypasses only the
+  performance decision, opt-in, cooldown, and once-per-battle gates; it still
+  requires fresh unheld exact-owner `RUNNING` Farm authority. Both initiators
+  bind the exact Windows path, instance, listener port, host, PID, and process
+  start time before Linux installs its no-input hold. A changed process before
+  acknowledgement fails without host mutation, while a resumability failure
+  uses the established End run/New Battle fallback.
+- The Windows sampler now carries exact listener identity across GUI sampling
+  sessions, while resetting on a listener or configured-target change. The
+  detector requires 16 sampled minutes, stable process coverage, and sustained
+  handle growth from that exact lifetime. Diagnostics shows current summed
+  BlueStacks handles/threads plus detector recent/low-water/ratio/delta/window,
+  exact PID, and GUI-session evidence separately from coordinator progress.
+  Linux and Windows ADB ports remain independently correlated and need not be
+  numerically equal.
+- Request submission, close, tunnel-port reconciliation, replacement startup,
+  and lost-response recovery were hardened around immutable targets. A request
+  with an unknown POST outcome retains its local target lock until compatible
+  status proves active, terminal, or idle; close reconciles without creating a
+  new automatic request. Post-ack recovery verifies or kills only the exact old
+  PID/start/path and never accepts a replacement listener until the configured
+  instance maps to the durable port.
+- The exact candidate passed compilation, state-definition validation,
+  clickmap integrity with zero errors, and all 2,512 Python tests in 394.33
+  seconds. All 204 focused Python/API/native-source contracts and 188 portable
+  Control Surface tests passed. The Release WPF cross-build and guarded
+  complete-package publisher completed successfully; the only output was the
+  known read-only NuGet vulnerability-cache warning.
+- Production and `develop` advanced from `82f1496` to `40f414e` behind
+  annotated rollback tag
+  `production-before-20260813T035629Z-82f1496`. The supported process endpoint
+  stopped automation PID `2175232` cleanly before the control surface stopped.
+  Revision-41 control-surface PID `2629646` then served the new capability
+  contract. Replacement automation PID `2630070` / runtime
+  `7b06b00056dd4334996dd2c1b01d7601` acquired exact target
+  `localhost:5555`, started Paused, and attached to the preserved Tier-19
+  battle through request `daf9fa5268394319af00b7d82c5e14d5`. It proved
+  save-backed same-battle continuity, adopted `farm_t19_ad_assist` without
+  repair, and reached steady `RUNNING` with normal Strategy/lifecycle authority
+  and server-authorized operator restart.
+- The complete Windows package was published from exact `40f414e` at 21:01
+  PDT. Current Control Surface is 72,474,917 bytes with SHA-256
+  `3002d9d4b6aa53b1e998af78698708444d589bf0afb5dac3c8c5606904f7cab1`;
+  current Tunnel Host is 35,172,119 bytes with SHA-256
+  `ebe1073a86d4731e64995b53816553ca45b9cca47430684f79615bf0fd817c19`.
+  Retained slot 1 is the prior `95aa11d` package: 72,464,645-byte Control
+  Surface `4568363f37b4fe2ac33b76fa20334de5084d169ab0db6906322fffbb57a2c4c9`
+  and 35,172,119-byte Tunnel Host
+  `0bf8a68ab735993c193c68da51befcaadc72266f8819c9a2b18137d762cb3821`.
+  Slot 2 is the prior `e46aee8` package: 72,462,225-byte Control Surface
+  `77c9fdb448fda65e1fdc334cdc9720a08b685a3dc42e64d93b52370dadd98e64`
+  and 35,172,106-byte Tunnel Host
+  `d0203bf09c47561c95d32e076dce0aa8b357f8a09ae0f3637076046798e8b27e`.
+  Publication and Linux-side success do not establish WPF runtime behavior;
+  the revision-41 handles display, GUI-session continuity, confirmation, exact
+  process restart, Welcome Back/Resume, and fallback remain the bounded Windows
+  production smoke.
+
+### 2026-08-12 host telemetry schema-rejection recovery
+
+- Commit `95aa11d` closes the remaining FIFO poison-record failure exposed by
+  the bounded uploader. Production evidence separated the two failures: the old
+  client repeatedly received HTTP `413`; the byte-bounded client then received
+  HTTP `400` through 17:07:11 PDT, followed by uninterrupted `200` responses
+  beginning at 17:07:41. The backlog flushed in about 14 seconds and normal
+  ten-second publication remained successful afterward.
+- The retained database proves collateral loss without proving that every
+  missing aggregate was invalid: accepted sequence jumps from `22098` to
+  `22226`, so 127 records were not ingested. The last accepted window ended at
+  16:05:07 PDT and the first surviving window began at 17:06:48, while the
+  missing sequence count represents only about 21 minutes at nominal cadence.
+  This strongly supports, but does not prove, one roughly 40-minute
+  sleep/scheduler gap inside the first missing aggregate, with valid neighbors
+  later evicted while its batch remained rejected.
+- The sampler now closes a partial aggregate across a greater-than-five-second
+  scheduler, sleep, or wall-clock discontinuity. Linux schema errors identify
+  the exact aggregate index with a typed response. The client durably preserves
+  only that record and reason in the bounded
+  `host-performance-rejected.jsonl` spool, atomically removes only its UUID
+  from pending, and retries valid neighbors. Request-level errors, untrusted
+  indexes, and local preservation/checkpoint failures remove nothing. The GUI
+  distinguishes rejected records from capacity drops.
+- The exact candidate passed compilation, state-definition validation,
+  clickmap integrity with zero errors, and all 2,479 Python tests in 390.99
+  seconds. All 21 focused host-performance tests and 169 portable native tests
+  passed. The Release WPF cross-build completed with zero warnings and zero
+  errors; only the known read-only NuGet vulnerability-cache warning appeared
+  during portable testing/publication.
+- Production and `develop` advanced from `8bed089` to `95aa11d` behind annotated
+  rollback tag `production-before-20260813T003834Z-8bed089`. Restarting only
+  `thetower-control-surface.service` replaced PID `2174850` with `2339142`.
+  Automation remained active under PID `2175232`, exact target
+  `localhost:5555` remained connected, and a fresh post-restart observation and
+  successful host-performance `200` upload completed the Linux smoke.
+- The complete Windows package was published from exact `95aa11d` at 17:40
+  PDT. Current Control Surface is 72,464,645 bytes with SHA-256
+  `4568363f37b4fe2ac33b76fa20334de5084d169ab0db6906322fffbb57a2c4c9`;
+  current Tunnel Host is 35,172,119 bytes with SHA-256
+  `0bf8a68ab735993c193c68da51befcaadc72266f8819c9a2b18137d762cb3821`.
+  Retained slot 1 is the prior `e46aee8` package: 72,462,225-byte Control
+  Surface `77c9fdb448fda65e1fdc334cdc9720a08b685a3dc42e64d93b52370dadd98e64`
+  and 35,172,106-byte Tunnel Host
+  `d0203bf09c47561c95d32e076dce0aa8b357f8a09ae0f3637076046798e8b27e`.
+  Slot 2 is the prior `4bff966` package: 72,460,718-byte Control Surface
+  `70b7026560fd84252cd8d652be4014f427fb98836c221967a325d0c31d2d7c5c`
+  and 35,172,116-byte Tunnel Host
+  `988724eedb669dba10187333e2639a55568ef4ba342ed98c429b0aa766effc32`.
+  Native lifecycle validation remains the bounded Windows relaunch smoke;
+  publication and Linux-side success do not prove the new WPF process is
+  running.
+
+### 2026-08-12 bounded host telemetry uploads and diagnostics layout
+
+- Commit `e46aee8` fixes the enriched host-performance spool deadlock observed
+  after process attribution was enabled. The client no longer always posts 120
+  aggregates: it measures the serialized ordered candidates, chooses the
+  largest prefix below a conservative `480 KiB` body boundary for the server's
+  `512 KiB` endpoint limit, and sends those exact bytes. Oversized records remain
+  durable and visible as an upload error rather than being discarded.
+- System Diagnostics now keeps health, telemetry state, and sampling control in
+  a stable header, then maps the unchanged values into **Windows Host**,
+  **BlueStacks**, and **Other Windows Load** groups. This replaces the unrelated
+  wide flowing rows that truncated telemetry and split competing-process
+  evidence from its context at the operator's window size.
+- The exact candidate passed the complete repository checkpoint: compilation,
+  state-definition validation, clickmap integrity with zero errors, and all
+  2,478 Python tests in 390.40 seconds. All 160 portable Control Surface tests
+  and 18 Tunnel Host tests passed. The Release WPF cross-build and guarded
+  complete-package publisher passed; only the known read-only NuGet
+  vulnerability-cache warnings remained.
+- Production and `develop` advanced from `54aeb97` to `e46aee8` behind annotated
+  rollback tag `production-before-20260812T235339Z-54aeb97`. This was a native
+  Windows-only boundary, so no Linux service, automation process, ADB owner, or
+  battle was restarted.
+- The complete Windows package was published from exact `e46aee8` at 16:54 PDT.
+  Current Control Surface is 72,462,225 bytes with SHA-256
+  `77c9fdb448fda65e1fdc334cdc9720a08b685a3dc42e64d93b52370dadd98e64`;
+  current Tunnel Host is 35,172,106 bytes with SHA-256
+  `d0203bf09c47561c95d32e076dce0aa8b357f8a09ae0f3637076046798e8b27e`.
+  Retained slot 1 is the prior `4bff966` package: 72,460,718-byte Control
+  Surface `70b7026560fd84252cd8d652be4014f427fb98836c221967a325d0c31d2d7c5c`
+  and 35,172,116-byte Tunnel Host
+  `988724eedb669dba10187333e2639a55568ef4ba342ed98c429b0aa766effc32`.
+  Slot 2 is the prior `c568111` package: 72,459,365-byte Control Surface
+  `89abf22573f2785f30e9b9673fde42558220277b0ed323c63b75f3c63c88ef82`
+  and 35,172,106-byte Tunnel Host
+  `098798d54ee44062a2c990c53b5483141295473208ca65afb4290463338fd5d8`.
+  Publication is not Windows execution; queue drainage, cleared upload status,
+  and the grouped layout remain the bounded native relaunch smoke.
+
+### 2026-08-12 direct-develop save-mapping integration rollout
+
+- Commit `4bff966` replaces the persistent feature-worktree selector with a
+  narrow, reviewed integration lane that creates one standardized child commit
+  directly on synchronized `develop`. Both GUIs now show read-only Develop
+  eligibility, the exact candidate and target hashes/modes, and a second
+  confirmation that explicitly does not promote, restart, send input, or
+  change a battle. Server/native revision 40 advertises
+  `save_mapping_develop_integration_v1`,
+  `save_mapping_review_status_v2`, and
+  `confirmed_local_mapping_status_v2`; incompatible older clients fail the
+  compatibility gate instead of presenting the retired selector.
+- The implementation uses a private Git index, exact reviewed base/target
+  fingerprints, a durable phase journal, an atomic main-verify/develop-update
+  ref transaction, and passive post-promotion decode receipts. A lost response
+  is idempotent. Promotion and fresh production validation remain persistent
+  GUI states. Dirty or moved refs, candidate conflicts, target drift, stale Git
+  locks, foreign or partial index/worktree state, and any result that cannot be
+  proved exact are non-actionable and fail closed without deleting locks,
+  overwriting concurrent work, or retrying automatically.
+- Three independent adversarial reviews covered backend transaction safety,
+  crash/recovery behavior, and browser/native contract parity. The exact
+  integrated `develop` commit passed compilation, state-definition validation,
+  clickmap integrity with zero errors, `git diff --check`, and all 2,478 Python
+  tests in 391.85 seconds. The merged production-overlap slice passed 284
+  Python tests, JavaScript syntax/import checks passed, and all 158 portable
+  native tests passed. Reconciliation with revision-39 BlueStacks recovery
+  changed its compatibility fixture and user-facing minimum-revision message
+  to derive revision 40 from the shared constant rather than retaining a stale
+  literal.
+- Production and `develop` advanced from `698fd1a` to exact `4bff966` behind
+  annotated rollback tag
+  `production-before-20260812T225711Z-698fd1a`. The supported process endpoint
+  stopped automation PID `1945953` cleanly and released its exact
+  `localhost:5555` lock before the control surface stopped. Revision-40
+  control-surface PID `2174850` then served the new capability/catalog
+  contract with clean synchronized main/develop, no pending transaction, and
+  no review candidate. The existing Astral Deliverance module observation
+  remained canonically `integrated`.
+- Replacement automation PID `2175232` / runtime
+  `bfee4d2f636440748b52560965ae0428` acquired the exact target lock, started
+  Paused, and attached to the preserved Tier-19 battle through request
+  `bd4a53ed7fdd456a874427947f59cc8a`. It bound fresh save continuity, adopted
+  `farm_t19_ad_assist` without repairing the active battle, reached steady
+  `RUNNING` at wave 4599, and retained current state/mode/speed/target/Strategy
+  acknowledgements. The attachment log sourced Modules, Auto Pick, Perk order,
+  and Ultimate Weapons from `bound_player_save_preflight`; it did not navigate
+  to Modules. Immutable Free Upgrade locks lacked authoritative no-battle
+  evidence, so they were logged as deferred to Home and automation continued,
+  as designed.
+- The complete Windows package was published from exact `4bff966` at 15:58
+  PDT. Current Control Surface is 72,460,718 bytes with SHA-256
+  `70b7026560fd84252cd8d652be4014f427fb98836c221967a325d0c31d2d7c5c`;
+  current Tunnel Host is 35,172,116 bytes with SHA-256
+  `988724eedb669dba10187333e2639a55568ef4ba342ed98c429b0aa766effc32`.
+  Retained slot 1 is the prior `c568111` package: 72,459,365-byte Control
+  Surface `89abf22573f2785f30e9b9673fde42558220277b0ed323c63b75f3c63c88ef82`
+  and 35,172,106-byte Tunnel Host
+  `098798d54ee44062a2c990c53b5483141295473208ca65afb4290463338fd5d8`.
+  Slot 2 is the prior `5c1ac19` package: 72,432,042-byte Control Surface
+  `258f136e025d73913c6d7952d8fea31d73fddb0d95ed848c961d716134243c39`
+  and 35,172,100-byte Tunnel Host
+  `2474ffc85f7cc40bb2a8aab0b61761ef9e9b0d740e3cc8ef6cb86098f0bc17`.
+  Publication is not Windows execution; the revision-40 native dialog remains
+  covered by portable contract tests rather than a Windows runtime smoke.
+- The service journal's recurring host-performance upload 400/413 responses
+  were present before this rollout and continued afterward. They are not a
+  save-mapping regression and did not affect the API, ADB owner, attachment,
+  or steady-run smoke; this record does not characterize unrelated telemetry
+  upload health as clean.
+
+### 2026-08-12 BlueStacks recovery forward port
+
+- Forward-ported the default-off automatic restart candidate onto production
+  anchor `5b28ce9` and the current revision-39 control, dispatch, blocking-modal,
+  player-save, runtime-failure, and native diagnostics contracts. The durable
+  request now binds runtime/PID/ADB target/target generation/state-request ID
+  and battle scope. Windows durably binds executable/instance/port plus the
+  exact listener PID/start time, rejects ambiguous multi-instance hosts, keeps
+  one process handle through stop, locks target edits during recovery, and
+  coordinates client close across an acknowledged mutation.
+- `GAME_RESTARTED` is a nonterminal blocking primary. Welcome Back Resume and
+  End run are separate fresh-frame, typed, bounded transactions. Android launch
+  and Home Resume/New Battle retain non-replayable postcondition receipts;
+  exact-owner Free Ticket recovery permits only one stable-Home retry. A
+  positively nonresumable run receives an interrupted, nonrepresentative,
+  analytics-excluded terminal disposition before the configured replacement
+  battle. Safely restored source evidence releases the local input hold even if
+  only the durable terminal reporting receipt remains to retry.
+- BlueStacks handle aging now uses the current host/session/ADB-port history
+  across battle boundaries rather than resetting its low-water comparison at
+  every run. The official v28.0.6 patch note confirms the diagnostic rollback
+  expectation of five waves, or fifty with Intro Sprint; the actual completion
+  boundary remains the captured pre-restart wave high-water.
+- The exact forward-port candidate passed Python compilation, state-definition
+  validation, clickmap integrity with zero errors, `git diff --check`, and all
+  2,421 Python tests. The production WPF cross-build then exposed a missing
+  explicit `System.IO` import that the portable project supplied implicitly;
+  fix commit `c568111` repeated the complete checkpoint with all 2,421 tests in
+  367.56 seconds and all 158 portable native contract/state-machine tests. Its
+  Release self-contained WPF cross-build and complete two-executable publisher
+  passed with zero errors; only the sandbox read-only NuGet vulnerability-cache
+  warnings remained.
+- Production and `develop` advanced from `5b28ce9` through exact package source
+  `c568111` behind annotated rollback tag
+  `production-before-20260812T221144Z-5b28ce9`. The guarded managed handoff
+  stopped PID `1565008`, restarted control-surface PID `1944706`, and attached
+  replacement automation PID `1945953` / runtime
+  `260a9b7fcd2a48d294220e2b9ad90da3` to the preserved ordinary Tier-19 battle.
+  Exact Attach request `7ec2589cac044e5c8fe4f456423dd74c` proved source
+  restoration and same-battle save continuity, adopted `farm_t19_ad_assist`,
+  and reached steady `RUNNING` at wave 4023 with all five receipts current and
+  no authority hold. The default-off recovery remained disabled; this rollout
+  did not restart BlueStacks or manufacture a battle boundary.
+- The complete Windows package was published from exact `c568111` at 15:21 PDT.
+  Current Control Surface is 72,459,365 bytes with SHA-256
+  `89abf22573f2785f30e9b9673fde42558220277b0ed323c63b75f3c63c88ef82`;
+  current Tunnel Host is 35,172,106 bytes with SHA-256
+  `098798d54ee44062a2c990c53b5483141295473208ca65afb4290463338fd5d8`.
+  Retained slot 1 is the prior `5c1ac19` package: 72,432,042-byte Control
+  Surface `258f136e025d73913c6d7952d8fea31d73fddb0d95ed848c961d716134243c39`
+  and 35,172,100-byte Tunnel Host
+  `2474ffc85f7cc40bb2a8a8aab0b61761ef9e9b0d740e3cc8ef6cb86098f0bc17`.
+  Slot 2 is the prior `054d171` package: 72,430,797-byte Control Surface
+  `ccf582a8db116225ae0354660d8c29daa4fd1a6b5de06b9ab50371e4e0abee93`
+  and 35,172,121-byte Tunnel Host
+  `9592be0ce6563ba4d4c4f3ec19ae59df579e3f293f38f66f92400881e5255e90`.
+  Publication is not Windows execution; the revision-39 identity/mapping and
+  authorized end-to-end recovery smoke remain in the runtime backlog.
+
+### 2026-08-10 initial automatic BlueStacks recovery candidate
+
+- Commit `040ca69` recorded the original default-off revision-35 recovery
+  candidate, now superseded by the revision-39 forward port above, for the
+  operator-observed pattern in which several same-configuration Farm runs lose
+  Coins/hour at near-normal effective speed and performance returns after a
+  BlueStacks restart. The conservative detector requires two degraded runs,
+  sustained exact-run handle growth, stable nonzero BlueStacks processes, and
+  no CPU/memory saturation; one attempt per battle and an eight-hour cooldown
+  bound automatic use. Recovery records never calibrate later decisions.
+- The Linux runtime and Windows client use a durable exact-owner handshake.
+  Linux binds runtime/PID/ADB target/battle scope and installs a no-input hold;
+  Windows resolves the configured ADB listener to one exact
+  `HD-Player.exe` PID/path/start time, revalidates before close/kill, starts the
+  configured instance, and requires a stable replacement listener. Lost
+  responses reconcile idempotently, a pre-acknowledgement request expires after
+  three minutes, and a battle-scope change before host acknowledgement cancels
+  without mutation.
+- Linux reconnects ADB, launches The Tower, handles the distinct Welcome Back
+  modal, and suppresses the five-wave or Intro-Sprint fifty-wave non-earning
+  rollback until the captured wave high-water. Bounded Resume failure selects
+  End run, records the interrupted battle as nonrepresentative, completes the
+  configured Home preflight, starts New Battle, and releases only on fresh
+  `RUNNING` evidence.
+- The final checkpoint passed state-definition validation, Python compilation,
+  `git diff --check`, all 2,183 Python tests in 511.83 seconds, and all 127
+  portable native contract tests. The portable test project compiles the new
+  Windows process controller and coordinator; this Linux SDK lacks the
+  WindowsDesktop targets needed to build the WPF host itself. No live process,
+  BlueStacks, ADB, or game input was used, and the exact Windows shortcut plus
+  first authorized end-to-end recovery remain in the runtime backlog before
+  the opt-in is enabled.
+### 2026-08-12 owned blocking-modal and cross-heartbeat recovery
+
+- Commit `af3d1b0` adds a nonterminal `blocking_primary` state for the retained
+  Free Ticket incident, a fresh-evidence Claim recipe owned only by an exact
+  in-flight battle launch, and a retained launch postcondition through verified
+  ordinary `RUNNING`. Modal clearance permits at most one Battle retry after
+  two stable exact-Home observations; Tournament, changed ownership, Pause,
+  Stop, and uncertain input all fail closed without replay.
+- A generic process-local circuit breaker now retains exhausted Home ad-gem
+  transactions across equivalent heartbeats. Typed dispatch and verification
+  outcomes prevent missing, incomplete, navigated, or uncertain evidence from
+  being misreported as collection or silently rearming input.
+- The isolated feature checkpoint and the exact integrated `develop`
+  checkpoint each passed compilation, state-definition validation, clickmap
+  integrity, and all 2,391 tests. Independent adversarial review found no
+  remaining concrete correctness or safety defect in the final candidate.
+- Production advanced from `5c94827` to `af3d1b0` behind annotated rollback
+  tag `production-before-20260812T192004Z-5c94827`. The explicit managed
+  Stop/Start/Attach handoff replaced PID `884966` with `1565008`, preserved
+  activity scope `232e6953e86b492bb0c6a22845bd596f`, proved an ordinary Tier
+  19 save, adopted `farm_t19_ad_assist` without degradation, and reached steady
+  `RUNNING` at wave 5762. A natural post-deployment Free Ticket recurrence is
+  still required before closing `ISSUE-2026-041`; no battle or modal was
+  manufactured for validation.
+
+### 2026-08-11 native diagnostics layout and disclosure-theme repair
+
+- Operator screenshots showed the expanded Host Health telemetry clipped below
+  a single long runtime dump, the four header health indicators unnecessarily
+  consuming two rows, and the Timed Pause disclosure inheriting near-black text
+  plus platform-default Expander chrome.
+- Commit `8211d0e` makes the clickable header-health group consume the available
+  width in one row, places the complete Host Health card before verbose runtime
+  evidence, and divides that evidence into Service & Configuration and Runtime
+  & Observation columns. Host Health and Previous Game Screen retain their
+  independent persisted visibility controls.
+- The shared dark theme now owns a complete Expander template, including its
+  header, chevron, expanded content, hover/focus states, and disabled colors.
+  This extends the existing full-template contrast contract instead of relying
+  on foreground setters that Windows platform chrome can override. Focused
+  regressions enforce both the theme and layout hierarchy.
+- All 19 focused WPF/static tests, all 143 portable native tests, and the
+  supported checkpoint with all 2,341 Python tests passed. The complete Windows
+  package cross-published successfully, and the exact final XAML completed a
+  zero-error Release WPF build; only the known sandbox read-only NuGet
+  vulnerability-cache warnings remained. Implementation validation changed no
+  live process, device, control, or battle state. The exact integrated
+  candidate repeated the complete checkpoint with all 2,341 tests in 371.73
+  seconds.
+- Production and `develop` advanced from `d5af787` through exact package source
+  `5c1ac19` behind annotated rollback tag
+  `production-before-20260812T004432Z-d5af787`. The WPF-only boundary required
+  no Linux service restart or automation Pause. At 17:46 PDT, fresh host-backed
+  evidence retained PID `148448`, runtime
+  `36e6f4290f6c4eba8b4fe0458b02f1db`, its held `localhost:5555` lock, all five
+  current acknowledgements, and a fresh Running wave-4318 observation; the
+  promotion issued no control or device input.
+- The complete Windows package was published from exact `5c1ac19` at 17:45
+  PDT. Current Control Surface is 72,432,042 bytes with SHA-256
+  `258f136e025d73913c6d7952d8fea31d73fddb0d95ed848c961d716134243c39`;
+  current Tunnel Host is 35,172,100 bytes with SHA-256
+  `2474ffc85f7cc40bb2a8a8aab0b61761ef9e9b0d740e3cc8ef6cb86098f0bc17`.
+  Retained slot 1 contains the prior `054d171` package: 72,430,797-byte Control
+  Surface `ccf582a8db116225ae0354660d8c29daa4fd1a6b5de06b9ab50371e4e0abee93`
+  and 35,172,121-byte Tunnel Host
+  `9592be0ce6563ba4d4c4f3ec19ae59df579e3f293f38f66f92400881e5255e90`.
+  Slot 2 contains the prior `bde889e` package: 72,430,549-byte Control Surface
+  `3c6be626e29600ef24719db127e0c9e04fa6d3249741d0a730a176847a368774`
+  and 35,172,075-byte Tunnel Host
+  `3c331280ea93ec34ceb6a95b7a655e32366e22ac477c2a2e798e39ab8bfafa58`.
+  Publication is not Windows execution; the older GUI must be closed and
+  relaunched before it uses this package. Minimum/default/maximized Windows
+  visual confirmation remains explicitly pending in the native README.
+
+### 2026-08-11 immediate Pause and global input authority hardening
+
+- Commit `9add674` gives every durable Pause, Stop, Take Manual Control,
+  terminal-policy, and input-owner transition the same cross-process boundary
+  as final mutating ADB dispatch. Passive prechecks no longer delay Pause; one
+  atomic command already past its guard may finish, and mandatory lifecycle
+  restoration may complete, but no later compound step can begin after the
+  control write is accepted. Missing or identity-less startup authority now
+  fails closed to Paused.
+- Low-level ADB commands are bounded and return typed attempt/uncertainty
+  outcomes. Forced-save serialization and watchdog recovery defer
+  catastrophic judgment until their required source restoration resolves;
+  recoverable reporting and configuration evidence continue degraded. The
+  selected Strategy still owns attached-battle behavior, mismatched or
+  unprovable Attach remains a degraded observer, and Continue still goes Home
+  first for repairable degradation.
+- Native Automation-authority, manual-control, and terminal-policy writes now
+  cancel stale status reads and transmit immediately. Nonblocking
+  attached-battle advisories require no response, do not open automatically,
+  and remain available through **Review preflight advisory**.
+  Exact final candidate `054d171` passed the supported checkpoint with all
+  2,339 Python tests in 366.13 seconds, all 143 portable native tests, a
+  zero-error Release WPF cross-build, and two independent final safety/policy
+  reviews. The native follow-up orders terminal-policy clicks through the same
+  stale-read cancellation gate and corrects the old blocking-advisory README
+  description.
+- Production and `develop` advanced from `822afaa` through `054d171` behind
+  rollback tags `production-before-20260811T220159Z-822afaa` and
+  `production-before-20260811T221609Z-58f203b`. The operator-owned Pause was
+  preserved with no device input. Runtime PID `148448`, runtime
+  `36e6f4290f6c4eba8b4fe0458b02f1db`, retained the held `localhost:5555`
+  target across the WPF-only follow-up. At 15:18:22 PDT all five control
+  requests remained current, observation was fresh, effective authority was
+  Paused, and no catastrophic hold or Strategy Gate was active. The last
+  `INPUT` record remained the reported 12:08:39 tap.
+- The final complete Windows package was published from exact `054d171` at
+  15:17 PDT. Current Control Surface is 72,430,797 bytes with SHA-256
+  `ccf582a8db116225ae0354660d8c29daa4fd1a6b5de06b9ab50371e4e0abee93`;
+  current Tunnel Host is 35,172,121 bytes with SHA-256
+  `9592be0ce6563ba4d4c4f3ec19ae59df579e3f293f38f66f92400881e5255e90`.
+  Retained slot 1 contains the intermediate `bde889e` package:
+  72,430,549-byte Control Surface
+  `3c6be626e29600ef24719db127e0c9e04fa6d3249741d0a730a176847a368774`
+  and 35,172,075-byte Tunnel Host
+  `3c331280ea93ec34ceb6a95b7a655e32366e22ac477c2a2e798e39ab8bfafa58`.
+  Slot 2 contains the prior `775da5f` package: 72,430,251-byte Control Surface
+  `f1a3fa677c7ead967a512184dc56f28d8b76028d3578dfb9eba1b2cad93f2b28`
+  and 35,172,129-byte Tunnel Host
+  `bacb3c7a062ca431455bcd89bf5caeedf0e8cfb8a1f60493f5900d1b958b794b`.
+  Publication is not Windows execution; an older running GUI must be fully
+  closed and relaunched before it uses this build.
+
+### 2026-08-11 strategy-aware Attach and nonblocking degradation
+
+- Commit `775da5f` freezes the accepted Strategy ID, request ID, and resolved
+  definition fingerprint at the Attach boundary. A proved compatible battle
+  adopts that exact Strategy; an incompatible or unprovable battle continues
+  as a degraded observer with the selected Strategy queued for the next real
+  boundary. No Strategy remains intentional observation rather than false
+  degradation. Attached-battle checks report configuration gaps without
+  repairing the current battle, and recoverable validation or reporting
+  failures release their workflow authority instead of stopping automation.
+- The control-surface contract advances to revision 38 with
+  `strategy_aware_attach_v1`. The native client blocks Attach while its visible
+  Strategy selection is dirty or in flight, displays Linux-authored
+  degradation in Strategy Scope, and prevents **Switch this battle** from
+  bypassing a degraded observation-only attachment. A degraded Continue still
+  follows the global Home-first repair path at the natural terminal boundary;
+  only catastrophic authority or ownership failures may halt automation.
+- Exact integration commit `775da5ffd03f0e582578298f660977e62aa971cb`
+  passed the supported checkpoint: compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,260 tests in 360.82 seconds. All 143 portable native compatibility tests
+  also passed; the only .NET warning was the sandbox's read-only NuGet
+  vulnerability cache.
+- Production and `develop` advanced from `07ff895` behind annotated rollback
+  tag `production-before-20260811T184145Z-07ff895`. Replacement control-surface
+  PID `4034265` served the new capability, and automation PID `4034563` acquired
+  the held `localhost:5555` lock as runtime
+  `90ed36233fbd436b82400bfc3b9c4337`. All control acknowledgements were current
+  for `RUNNING`, `NEXT_BATTLE`, x6.3, the exact ADB target, and
+  `farm_t19_ad_assist`.
+- Attach request `10fecc3ee0b04968bf0253be4b2992bf` used fresh exact-owner
+  evidence and one guarded background/restore serialization. It proved an
+  ordinary Tier 19 battle, adopted the snapshotted `farm_t19_ad_assist`, and
+  completed while reporting `attachment_configuration` and
+  `session_preflight` degradation carrying `perk_bans` and deferred
+  `free_upgrade_locks` evidence. It performed no active-battle repair and
+  automation continued through fresh wave-2531 observation and ordinary ad-gem
+  handling without a Pause, authority hold, Surrender, battle start, terminal
+  action, or manufactured battle boundary.
+- That first live smoke exposed repeated advisory publication rather than an
+  automation halt: the completed-but-degraded session state consumed and
+  recreated the same nonblocking `free_upgrade_locks` decision on every
+  heartbeat. Commit `6ace273` now preserves one pending advisory while the
+  degradation remains and records one recovery when the condition actually
+  clears. Its 33 direct and 68 broader focused tests passed, followed by the
+  complete supported checkpoint with all 2,262 tests in 362.07 seconds.
+  Production advanced from `b37d067` behind rollback tag
+  `production-before-20260811T185644Z-b37d067`. Replacement PID `4053109`,
+  runtime `b7e28ff366194434bf27260be0d50653`, reattached through request
+  `1595513062e84353bb259d6e0a904617`; advisory
+  `0125c7e3be55422a923d2c2eca258fa7` stayed pending with its original
+  11:58:23 timestamp and exactly one transition warning through fresh wave-2746
+  observation at 11:59:22. Automation remained `RUNNING` with current receipts
+  and no repair or manufactured boundary.
+- The complete Windows package was published from exact `775da5f` at 11:43 PDT.
+  Current Control Surface is 72,430,251 bytes with SHA-256
+  `f1a3fa677c7ead967a512184dc56f28d8b76028d3578dfb9eba1b2cad93f2b28`;
+  current Tunnel Host is 35,172,129 bytes with SHA-256
+  `bacb3c7a062ca431455bcd89bf5caeedf0e8cfb8a1f60493f5900d1b958b794b`.
+  Retained slot 1 contains the prior `3460d5c` package: 72,429,586-byte
+  Control Surface
+  `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`
+  and 35,172,117-byte Tunnel Host
+  `cabad7e7fadb26f29c494a54eea8ed0fa717e6035376b6805b25d19457aec828`.
+  Slot 2 contains the prior `d836532` package: 72,427,793-byte Control Surface
+  `beb030f58bca4c960fb2141961034f73591d54fef31daf9ce73b0f9ded695941`
+  and 35,172,115-byte Tunnel Host
+  `383b833a993385de52fee4768bda70c1afb64f6e0940a1f0a815e9e31226c388`.
+  The later `6ace273` hotfix changes only runtime Python and tests, so this
+  package still matches every promoted native input and was not rebuilt.
+  Cross-publication and portable tests do not claim Windows WPF runtime
+  validation; the revision-38 lifecycle checks remain in the existing native
+  client validation backlog.
+
+### 2026-08-11 global nonblocking runtime-failure policy
+
+- Commit `1b16db9` introduces one typed disposition policy for runtime
+  failures. Recoverable configuration, validation, evidence, repair,
+  reporting, and stale-workflow problems either repair at an already-safe
+  boundary or retain exact degraded evidence while automation continues.
+  Automatic Pause is restricted to lost control authority, lost exact-target
+  ownership, unproved source restoration after lifecycle input, or an
+  uncertain dispatched-input result.
+- Return Control applies profile skips before comparing saved configuration.
+  Active/resumable mismatches now complete degraded; Home New attempts bounded
+  repair immediately and still completes degraded if repair or evidence is
+  unavailable. Legacy session blocks/gates and recoverable capture, terminal,
+  and validation-ledger failures are released rather than retaining global
+  authority.
+- Commit `4ac5237` adds the terminal lifecycle counterpart. A strategy battle
+  with carried configuration degradation and already-selected Continue returns
+  Home instead of tapping Retry, preserves that route across navigation retry,
+  applies the next Strategy, runs ordinary bounded profile setup, and only then
+  consumes its exact one-shot continuation. Repair exhaustion launches the
+  next battle degraded, while `WAIT` remains untouched.
+- The affected combined suite passed 470 tests. The supported checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,225 tests in 360.86 seconds.
+  The Home-first follow-up passed 535 affected tests and a second supported
+  checkpoint with all 2,232 tests in 362.15 seconds. Exact candidate
+  `12ad7953225e8c67094a0c4bbbca881a0a8df1e0` then passed a fresh promotion
+  checkpoint with all 2,232 tests in 357.50 seconds. Production and `develop`
+  advanced from `d9305fc` behind annotated rollback tag
+  `production-before-20260811T162652Z-d9305fc`.
+- The shared control surface reloaded at revision 37. Replacement automation
+  PID `3809087`, runtime `c7408508ab0a421a98f724e4474d9ba0`, acquired the
+  held `localhost:5555` lock and observed the existing Tier 19 battle while
+  Paused. Explicit Attach used one guarded forced serialization to prove the
+  same battle, explicit Enable restored action authority, and the separate
+  active-battle Strategy request adopted `farm_t19_ad_assist`. Its session
+  configuration passed and the runtime entered steady state at wave 4332,
+  x6.3, under `NEXT_BATTLE`, with all five control receipts current and no
+  Pause, gate, or authority hold. A recoverable No Strategy inventory
+  navigation mismatch was warned and released without halting the Strategy
+  adoption. No Surrender, battle start, or terminal action was used.
+- The change has no native Windows package inputs or API compatibility change,
+  so no Windows package was rebuilt. The live smoke did not manufacture the
+  original Return Control mismatch or a degraded Game Over boundary; those
+  natural-boundary confirmations remain separately tracked.
+
+### 2026-08-10 durable control acknowledgements and Strategy Scope
+
+- Commit `3460d5c` advances the server/native contract to revision 37 with
+  `runtime_control_acknowledgements_v1`. State, terminal policy, speed, ADB,
+  and Strategy receipts now live in the existing atomically replaced runtime
+  authority snapshot and are accepted only for the active lock's exact runtime
+  ID, PID, target, target generation, request ID, and value. Action logging
+  remains audit evidence and no current authority depends on log retention.
+- WPF now presents the Linux-owned `control_model.strategy_scope` for startup,
+  active-battle, pending-next-boundary, and pending-active-adoption state.
+  Compatibility reconstruction is limited to servers without the Better
+  Control capability, while dirty selection, retry, same-ID publication,
+  stopped-process, and explicit active-adoption behavior remain coordinated by
+  the existing selection owner.
+- The expanded affected Python suite passed 465 tests, the concurrent Game
+  Over/Perk/activity/save boundary suite passed 203, and all 139 portable
+  native tests passed. A Release WPF cross-build completed with zero errors.
+  The supported checkpoint passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,211 tests in 353.14 seconds after rebasing onto `adf2176`.
+- Production and `develop` advanced from `adf2176` to exact `3460d5c` behind
+  rollback tag `production-before-20260811T025615Z-adf2176`. The existing
+  operator-owned Pause/manual-control boundary was preserved: PID `2837669`
+  stopped cleanly without device input, control-surface PID `2864662` served
+  revision 37, and replacement automation PID `2866425` acquired
+  `localhost:5555` as runtime `92ec71023a6f4bf39bfdcc61abe0132e`, target
+  generation 1. Its five exact receipts were `PAUSED` /
+  `22676a4e912b44db8a72474427e3fdae`, `NEXT_BATTLE` /
+  `c0230ac46c044ee89f3a09f7c8b49c95`, `2.0` /
+  `54f95c535899442f9af50b22fd9f6de4`, ADB port `5555` /
+  `0ddfbb6e09a04f46a9f304ea3d54623b`, and
+  `farm_t19_ad_assist` / `460165104dcf474ebf3f10f0e2eedcb8`.
+  Action Authority remained `paused`, terminal policy was acknowledged, and
+  authoritative Strategy Scope contained no false pending state.
+- At 20:02 PDT, a separately issued Start Battle request completed the normal
+  new-run boundary on that same runtime. A 20:05 read-only status showed fresh
+  `RUNNING` observation at wave 70 with replacement state receipt `RUNNING` /
+  `ff267f3e5aa943309d5334c8aba26aa7` and replacement Strategy receipt
+  `farm_t19_ad_assist` / `fe5be90a521b40b5946d6047efb3e0fd`; all five
+  receipts acknowledged their current IDs, Action Authority was `enabled`,
+  and authoritative Strategy Scope still had no pending value. That separate
+  workflow was observed but was not issued as part of this promotion.
+- The complete Windows package was published from exact `3460d5c` at 19:58
+  PDT. Current Control Surface is 72,429,586 bytes with SHA-256
+  `7d759a9256d5056be1854fb1b194d85af55ae5075ff84190fef7cadeb9026262`;
+  current Tunnel Host is 35,172,117 bytes with SHA-256
+  `cabad7e7fadb26f29c494a54eea8ed0fa717e6035376b6805b25d19457aec828`.
+  Retained slot 1 contains the prior `d836532` package: 72,427,793-byte
+  Control Surface
+  `beb030f58bca4c960fb2141961034f73591d54fef31daf9ce73b0f9ded695941`
+  and 35,172,115-byte Tunnel Host
+  `383b833a993385de52fee4768bda70c1afb64f6e0940a1f0a815e9e31226c388`.
+  Slot 2 contains the prior `dbe3d34` package: 72,416,908-byte Control Surface
+  `a1938bb3d94833fcc04b5a85ee50157edb8260a35073e7ee9442bfc6e8a210fb`
+  and 35,172,092-byte Tunnel Host
+  `839c290562afb3ceb9e7a43dbb6c9808f66f7f4922364711f32493bf8a8007c5`.
+  The package was not executed on Windows; revision-37 WPF runtime validation
+  remains tracked by
+  [`ISSUE-2026-038`](../issues/open-2026.md#long-action-log-retention-made-current-controls-appear-pending).
+
+### 2026-08-10 terminal Perk reconciliation
+
+- Commit `47a0508` distinguishes the already-promoted completed-state opener
+  repair from top-bar text recognition. The earlier `41fc1fd` made the
+  `View Perks` control safe to tap by matching its invariant frame; it did not
+  change OCR. On the retained completed-state screenshot, the raw-color OCR
+  path returned `lt` at 47% confidence. The new failure-only Otsu retry reads
+  `View Perks` above 95% while numeric schedule observations retain their
+  existing fast path.
+- Whenever a usable nonfinal saved prefix still requires terminal UI evidence,
+  Game Over now proves the newest/top Perks edge, checks that first viewport,
+  and captures downward only until the first unchanged saved-recency marker or
+  the actual list edge. A marker already present in the top viewport dispatches
+  no downward gesture; missing or conflicted saved evidence still uses the
+  complete UI fallback.
+- Focused Perk tests passed all 100 cases, the wider Perks/Game Over/scrolling
+  slice passed all 147, and the supported checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,162 tests in 488.00 seconds.
+- Production rollout exposed two replacement-runtime control-boundary defects
+  rather than a Perks-capture defect. Commit `909d2d5` permits a replacement to
+  recover only a fresh, exact `GAME_OVER` observation preserved under the
+  explicit `WAIT` policy and initial-intent operator-workflow hold, without
+  attaching stale run state. Commit `5ce801b` keeps active manual-control
+  terminal uncertainty blocking, but stops a terminalized `interrupted` manual
+  record from permanently disabling ordinary Enable.
+- After reconciling the parallel host-attribution promotion at `a37d8bb`, exact
+  candidate `5ce801b` passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,198 tests
+  in 350.13 seconds. Production and `develop` advanced to that exact commit;
+  the immediate rollback point is
+  `production-before-20260811T023406Z-3809122`. Earlier rollout boundaries are
+  retained as `production-before-20260811T013204Z-9ca5fb9` and
+  `production-before-20260811T022304Z-a37d8bb`.
+- Replacement automation PID `2837669` then recovered the preserved Game Over
+  under `WAIT`, proved the Perks top edge with three upward swipes, traversed
+  seven distinct viewports to the actual bottom edge with eight downward
+  swipes, captured 27 ordered Perks, copied 144 exact More Stats rows, and
+  saved `Battle20260810T193611-0700`. The operator-directed `HOME` route
+  returned to verified Home `NEW_BATTLE`; an explicit Start Battle workflow
+  completed normally, adopted `farm_t19_ad_assist`, and reached fresh
+  `RUNNING` observation at wave 20 under `NEXT_BATTLE`.
+
+### 2026-08-10 bounded Windows host process attribution
+
+- Commit `4b314f7` advances the control-surface API and native compatibility
+  contract to revision 36 with
+  `host_performance_process_attribution_v1`. The Windows sampler arms only
+  after 30 seconds at `>=70%` host CPU, `>=95%` memory use, or `<=1 GiB`
+  available memory, reuses the existing ten-second discovery pass, and keeps
+  collecting through a two-minute healthy recovery window.
+- Each active pass retains at most eight non-BlueStacks PID/name entries: the
+  four highest host-normalized CPU consumers and four largest working sets.
+  Ten-second run-correlated aggregates preserve CPU average/maximum, working
+  set, private bytes, inspected-process count, and the added attribution cost.
+  The optional payload field keeps older native publishers valid.
+- The Host Health strip now separates residual Other Windows CPU from measured
+  BlueStacks and Control Surface CPU, groups retained entries by application
+  name for compact top-CPU and top-memory fields, and preserves per-PID detail
+  in the tooltip. Collection remains observational and records no command
+  lines, window titles, automation intent, or device input.
+- On exact commit `4b314f7`, the supported checkpoint passed compilation,
+  state definitions, clickmap integrity with zero errors and the established
+  44 orphan notices, and all 2,194 tests in 352.97 seconds. The focused
+  post-rebase suite passed 22 tests, the portable native suite passed all 135
+  tests, and a real WPF Release build completed with zero errors. Windows
+  target-host cost measurement remains routed through
+  [`ISSUE-2026-003`](../issues/open-2026.md#windows-performance-telemetry-exceeded-its-client-cpu-budget)
+  as a separate client-budget investigation.
+- Integration commit `d836532` preserved the contemporaneous terminal-Perk
+  repair while merging this feature into `develop`. The exact combined
+  candidate passed the supported checkpoint with all 2,195 tests in 370.03
+  seconds, all 135 portable native tests, and a real WPF Release build with
+  zero errors. Production and `develop` advanced from `139d276` to exact
+  `d836532` behind rollback tag
+  `production-before-20260811T020359Z-139d276`. Automation was already stopped
+  with no held runtime lock and remained stopped; only the control-surface API
+  was stopped for the source fast-forward. Replacement PID `2802001` served
+  revision 36 with `host_performance_process_attribution_v1` while preserving
+  the operator's `STOPPED` control state.
+- The complete Windows package was published from exact `d836532` at 19:06
+  PDT. Current Control Surface is 72,427,793 bytes with SHA-256
+  `beb030f58bca4c960fb2141961034f73591d54fef31daf9ce73b0f9ded695941`;
+  current Tunnel Host is 35,172,115 bytes with SHA-256
+  `383b833a993385de52fee4768bda70c1afb64f6e0940a1f0a815e9e31226c388`.
+  Retained slot 1 contains the prior `dbe3d34` package: 72,416,908-byte
+  Control Surface
+  `a1938bb3d94833fcc04b5a85ee50157edb8260a35073e7ee9442bfc6e8a210fb`
+  and 35,172,092-byte Tunnel Host
+  `839c290562afb3ceb9e7a43dbb6c9808f66f7f4922364711f32493bf8a8007c5`.
+  Slot 2 contains the prior `dd9354f` package: 72,390,981-byte Control Surface
+  `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`
+  and 35,172,109-byte Tunnel Host
+  `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
+- By 19:07 PDT, the pre-existing native client continued publishing fresh
+  aggregates through revision 36 without error. Server normalization added an
+  empty optional `process_attribution` array to those stored records; that
+  proves backward compatibility, not that the newly published executable is
+  running or that its dormant attribution path has been measured. A Windows
+  close/relaunch plus bounded lifecycle and target-host cost validation remain
+  pending, with the cost work still routed through `ISSUE-2026-003`.
+
+### 2026-08-10 bounded interactive-development lease extension
+
+- The server-owned request and heartbeat window was increased from 30 to 120
+  seconds. This leaves room for production to quiesce an
+  in-flight background collector, publish the matching acknowledgement, and
+  complete fresh visual guards plus bounded helper input without making lease
+  duration client-controlled or indefinite.
+- Pause/Stop precedence, runtime/PID/target ownership, fresh acknowledgement,
+  suppressive authority, battle-boundary termination, explicit release, and
+  the development input helper's per-command expiry reserve remain unchanged.
+- The expanded lease, control-surface, combined-coordination, and input-helper
+  suites passed 169 tests. The repository checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,167 tests.
+- The lease-only current-`develop` candidate `d77bca3` passed the supported
+  checkpoint with all 2,190 tests. No native Windows package input changed.
+  Production and `develop` advanced from `785d786` to exact `d77bca3` behind
+  rollback tag `production-before-20260810T232148Z-785d786`; automation and
+  the control-surface service stopped cleanly for the source update.
+- The replacement control-surface PID `2610997` served the existing API
+  revision 35. Replacement automation PID `2611481` acquired the exact
+  `localhost:5555` lock, attached to the preserved battle, re-adopted
+  `farm_t19_ad_assist`, completed save-backed session preflight, and returned
+  to steady `RUNNING` with matching acknowledgements and no Strategy Gate.
+  The input-free lease smoke requested at 16:26:12 PDT carried an expiry of
+  16:28:12, became active with the matching suppressive hold, and released
+  normally at 16:26:36 after a fresh same-battle observation. No development
+  input was dispatched.
+
+### 2026-08-10 guarded GUI save-mapping integration
+
+- Commit `5cee9be` adds API revision 35 and
+  `save_mapping_integration_v1`, with the same review-and-prepare workflow in
+  the browser control surface and native Windows client. The server discovers
+  linked `feature/*` worktrees and issues opaque workspace IDs; clients can
+  select a durable receipt and worktree but cannot supply repository paths,
+  branches, target files, operations, or mapping values. Review binds the
+  exact production/develop tips, feature tip, canonical input hashes and
+  modes, rendered output hashes, and proposal fingerprint. Preparation writes
+  only the reviewed clean feature targets and never stages, commits, moves a
+  ref, promotes, or clears the persistent warning.
+- Stale reviews, dirty or non-descended worktrees, symlinked targets, content
+  or mode drift, moved refs, concurrent preparation, ambiguous writes, and
+  interrupted transactions all fail closed. A private durable transaction
+  journal permits one explicit exact-review recovery; neither GUI retries a
+  preparation automatically. Both clients validate the complete prepared
+  response before displaying success and keep uncertain outcomes visible for
+  inspection.
+- Candidate
+  `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`
+  was reviewed through that workflow and prepared as exactly one
+  `infoIndex 10` / `Astral Deliverance` addition in both
+  `data-9-game-1073` authority and the `data-9-game-1101` structural mirror.
+  Commit `dbe3d34` records the canonical mapping and replaces the integration
+  tests' real-candidate assumption with a reserved synthetic fixture so a
+  successful integration cannot invalidate the lifecycle suite.
+- Focused mapping validation passed 102 player-save tests and all 17 guarded
+  integration tests. The final supported checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,190 tests in 357.62 seconds. The portable native
+  suite passed all 132 tests, and a real WPF Release build succeeded with zero
+  errors; only the known read-only NuGet vulnerability-cache warning appeared.
+- Production and `develop` advanced from `b108bac` to exact `dbe3d34` behind
+  rollback tag `production-before-20260810T215539Z-b108bac`. Automation and the
+  control-surface service stopped cleanly for the source update. The complete
+  native package was published from exact `dbe3d34` at 14:57 PDT. Current
+  Control Surface is 72,416,908 bytes with SHA-256
+  `a1938bb3d94833fcc04b5a85ee50157edb8260a35073e7ee9442bfc6e8a210fb`;
+  current Tunnel Host is 35,172,092 bytes with SHA-256
+  `839c290562afb3ceb9e7a43dbb6c9808f66f7f4922364711f32493bf8a8007c5`.
+  Retained slot 1 contains the prior `dd9354f` package: 72,390,981-byte
+  Control Surface
+  `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`
+  and 35,172,109-byte Tunnel Host
+  `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
+  Slot 2 contains the prior `b2d282f` package: 72,385,088-byte Control Surface
+  `3bb666175f7e0b1b5d731f30c92cee8b71581a3979bfc00f49bd018d69e4d0f4`
+  and 35,172,103-byte Tunnel Host
+  `e23aada8aa3992bbc866fcebd3ec2a22d043902e088f2a4cb78abdba0ff63c68`.
+- The promoted API reported revision 35, the new capability, a healthy empty
+  preparation queue, no transaction journal, and the local Astral Deliverance
+  event as `integrated`. Replacement PID `2509189` attached to the preserved
+  battle and returned to steady `RUNNING` at wave 2131 with matching lock,
+  target, acknowledgements, and no Strategy Gate. Its continuity projector
+  rejected battle-history entry 29 at `chainlightningdamage` and safely used
+  Battle History UI, but the independent configuration projection remained
+  authoritative: session preflight used `bound_player_save_preflight` for
+  Modules, Auto Pick, perk order and first choice, loadouts, card modes, and
+  Ultimate Weapons, opened none of those configuration screens, and matched
+  Astral Deliverance with confidence 1.0. The history-value assumption remains
+  queued for diagnosis; Windows-only WPF lifecycle execution remains a
+  separate target-host validation rather than a Linux publication claim.
+
+### 2026-08-10 save-mapping discovery and local confirmation lifecycle
+
+- Commits `eb8a391` and `4cd9f2d` add strict, private, append-only candidate
+  receipts for unmapped Perk, Guardian, Module, Target Priority, orb,
+  terminal-cause, and Tournament-league save values. Existing Home,
+  attachment, and terminal UI fallbacks may pair a discriminator only with
+  complete normalized evidence from the same pre-mutation runtime boundary;
+  collection neither requests another save read nor grants input authority.
+- A deterministic exact-version Module `infoIndex` pairing is durably
+  confirmed for later fresh decodes in an ignored append-only local store.
+  Global ID/name bijection, generation-aware revoke capacity, dependency drift,
+  and an effective-mapping fingerprint keep stale or conflicting local values
+  from entering setup, attachment, History, or terminal provenance. Every
+  other newly observed value remains review evidence until canonical
+  integration.
+- Server revision 34 exposes the combined review state. Browser and native
+  clients keep a nonmodal warning visible for unresolved, locally active,
+  reconfirmation, ambiguity, conflict, and authority/mirror-pending states.
+  Compatible exact-revision proposals cover both canonical owners atomically;
+  runtime never edits those tracked mappings itself.
+- Focused affected Python validation passed 738 tests before the integrated
+  session-gate update and 582 afterward; final hardening passed 137 focused
+  Python tests and all 124 portable native tests. The first exact checkpoint
+  passed all 2,159 tests in 352.93 seconds. Production then exposed two safe
+  compatibility edges: `fb2b166` retires recognizable prior-schema workflow
+  authority at process start, and `f8786cd` permits an already-enabled exact
+  Attach request to enter save validation without waiting for an intermediate
+  heartbeat. The final exact checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,161 tests in 348.99 seconds; the complete control-model and surface
+  slice passed 192 tests.
+- Production advanced from `bee431a` through `dd9354f` and `fb2b166` to exact
+  `f8786cd`, protected respectively by rollback tags
+  `production-before-20260810T104240Z-bee431a`,
+  `production-before-20260810T110009Z-dd9354f`, and
+  `production-before-20260810T111356Z-fb2b166`. The native package was
+  published at 03:45 PDT from exact `dd9354f`; neither later fix changes a
+  native-package input. Current Control Surface is 72,390,981 bytes with
+  SHA-256 `3e086df435869590ebef34de834ceef66e94e877293279ce914d34e54226050b`,
+  and current Tunnel Host is 35,172,109 bytes with SHA-256
+  `afb40d554784a66311eb60bbb1e58706782321981302934cecf19c0117922dbe`.
+  Retained slot 1 (`b2d282f`) contains 72,385,088-byte
+  `3bb666175f7e0b1b5d731f30c92cee8b71581a3979bfc00f49bd018d69e4d0f4`
+  and 35,172,103-byte
+  `e23aada8aa3992bbc866fcebd3ec2a22d043902e088f2a4cb78abdba0ff63c68`;
+  slot 2 (`5f93cba`) contains 72,363,007-byte
+  `c13e709f307d32f979dc9fff300cfcfb467133ac2602fce584582f36ed3abe72`
+  and 35,172,117-byte
+  `387a2d5d620b8ced392b2d00dc2628a5a1e8333af866d074b6b3f5ac8286221d`.
+- The first guarded production Attach correctly returned to acknowledged Pause
+  when launcher restoration had not yet produced a stable source boundary. A
+  fast Attach/Enable retry then exposed the missing transition while the
+  exclusive workflow still blocked every strategy and lifecycle action; no
+  fallback, new battle, or Surrender occurred. After `f8786cd`, replacement
+  PID `1676747` accepted back-to-back Attach and Enable at 04:15:24 PDT,
+  serialized and restored the same Tier 19 battle, wrote an exact
+  `data-9-game-1101` reconciliation receipt, adopted it observation-only, and
+  returned itself to acknowledged Pause before explicit Strategy adoption.
+- The resulting session preflight used bound save evidence for Auto Pick,
+  Perk order and first choice, card recharge modes, Cards, Workshop, Bots,
+  Guardians, and Ultimate Weapons. Only Modules used its unresolved-value UI
+  fallback. That pre-mutation inspection paired `infoIndex 10` with
+  `Astral Deliverance`, wrote candidate
+  `39a0bd3ff80661511fc77089178334488109add25f72ef19f18fc80ebe0056dd`,
+  activated exact-version local event
+  `1ba2e2e9f3bec3282c60d14a8b558c41fe7aa87139fe3c2fad74c7151828a3d1`
+  for later fresh decodes, and left one persistent nonblocking canonical-review
+  warning. Free Upgrade locks remained deferred as immutable `NEW_BATTLE`
+  evidence rather than receiving an in-battle repair. Preflight completed,
+  consumed the obsolete generic gate request, and entered steady `RUNNING`
+  state with no Strategy Gate. Canonical owner/mirror integration plus ordinary
+  Home and terminal receipt validation remain queued.
+
+### 2026-08-09 outcome-aware Mission reward cooldown
+
+- Commit `3046c93` gives a productive Daily/Event/Guild reward sweep a
+  two-minute follow-up instead of the same 30-minute delay used after an empty
+  sweep. Persistent alerts that expose no claimable reward retain the
+  30-minute backoff, failures retain their five-minute retry, and interrupted
+  routes continue to preserve cleanup ownership without starting a cooldown.
+- The restored reward hub is measured once more before cleanup and records its
+  residual Daily, Event, and Guild badge evidence at diagnostic level. This
+  adds no input and leaves every navigation and claim under its existing screen
+  and exact-target guards.
+- Focused Mission reward and action-authority suites passed 45 and 24 tests.
+  The repository checkpoint passed compilation, state-definition validation,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,081 tests in 360.75 seconds.
+- The exact integrated candidate `2303e2d` repeated the complete checkpoint on
+  `develop`, passing all 2,081 tests in 355.46 seconds. Production advanced
+  from `9c1435e` to `2303e2d` behind rollback tag
+  `production-before-20260810T003227Z-9c1435e`.
+- Replacement PID `947995` acquired the exact `localhost:5555` lock, completed
+  save-backed same-battle attachment, adopted `farm_t19_ad_assist`, verified
+  all active session requirements, and entered steady state. Fresh observations
+  advanced from wave 3601 to wave 3623; no Surrender, new battle, dependency
+  change, persistent-state migration, or Windows-package publication occurred.
+- The prior runtime's safe-boundary drain also live-confirmed the open-menu
+  scheduler repair in commit `2b4315d`: from `RUNNING/MENU_OPEN`, it selected
+  Daily and Event badges and claimed nine rewards before releasing its route and
+  closing the menu. `ISSUE-2026-015` is now resolved.
+- A 2026-08-10 13:00 PDT production-log review closed the remaining natural-
+  trigger validation. Nineteen eligible probes from 2026-08-09 17:44 through
+  2026-08-10 09:33 produced exactly 19 terminal results and 19 exclusive-route
+  releases: five productive sweeps, 14 empty sweeps, and no failure or
+  interruption. Each productive sweep became eligible again in 2:02–2:10;
+  consecutive empty sweeps under a continuing alert repeated in 30:00–30:07.
+  Every route remeasured Daily, Event, and Guild residual badges before cleanup,
+  and every observed post-review residual was clear.
+
+### 2026-08-09 scoped session-gate evidence and lifecycle
+
+- Terminal session-preflight decisions now recover recognized failed checks
+  from retained structured evidence, replace generic mismatch text with concise
+  expected-versus-observed detail, and preserve specific repair failures. An
+  internal failure without a recoverable check remains blocking with Retry as
+  its only choice; it cannot create a useless `session_preflight` waiver or
+  offer repair. Persisted generic requests are replaced safely.
+- A later successful complete preflight consumes only the same Strategy's
+  pending or resolved session-preflight request. Other Strategies and phases
+  remain untouched, preventing the native client from auto-opening a stale
+  failure after recovery.
+- The native decision window now distinguishes running-session and Home startup
+  gates and humanizes raw check IDs through a portable presentation helper. The
+  existing protocol already carried the corrected check, reason, expected
+  value, and options, so no server revision or capability changed.
+- Focused and affected Python suites passed 233 tests, with 23 additional
+  action-executor/run-initialization preflight tests passing. The supported
+  checkpoint then passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,089 tests
+  in 355.60 seconds. All 123 portable native tests passed, including the linked
+  presentation helper; this Linux SDK lacks the WindowsDesktop targets required
+  to build the WPF host itself.
+
+### 2026-08-09 save-backed attached-session preflight
+
+- Commit `2a303ba` lets an exact-bound forced attachment save satisfy every
+  supported active-session requirement it can project. UI verification is now
+  a per-fact fallback for missing, incomplete, or unparseable save evidence;
+  round-invariant Workshop, Bot, Guardian, Module, Free Upgrade-lock, Perk Ban,
+  First Perk, and Perk Auto Pick-order mismatches are report-only during a
+  battle, while existing guarded repairs remain available for mutable settings.
+- The candidate was rebased over production commit `3d25fc2`, including the
+  completed-state Perks opener follow-up, with no overlapping or superseding
+  runtime change. The exact candidate passed the supported checkpoint with all
+  2,075 tests. Its first production smoke safely blocked when a profile-waived
+  Perk Bans mismatch was still admitted to attachment reconciliation.
+- Fix `4b9e7b0` applies profile waivers before save reconciliation and
+  defensively excludes them from attachment validity. It also classifies Perk
+  Bans and First Perk Choice as round-invariant. Focused and affected suites
+  passed 62 and 224 tests; the complete checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,076 tests in 336.92 seconds.
+- Production advanced to `4b9e7b0` behind rollback tag
+  `production-before-20260809T223713Z-2a303ba`. Replacement automation PID
+  `804073` acquired the exact `localhost:5555` lock, completed guarded
+  same-battle attachment from mapping `data-9-game-1101`, adopted
+  `farm_t19_ad_assist`, and completed one attached-session preflight before
+  entering steady state with no Strategy Action Gate.
+- The smoke used bound save evidence for Cards, Workshop, Bots, Guardians,
+  Auto Pick, Card Recharge, Perk order, First Perk, and Ultimate Weapons. The
+  profile-waived Perk Bans check was absent from reconciliation. Modules alone
+  used its existing UI fallback because assist-module IDs were not projectable;
+  Free Upgrade locks were explicitly deferred because no authoritative
+  no-battle boundary fact was available. No Surrender, Home exit, Retry, new
+  battle, or Windows-package publication occurred.
+
+### 2026-08-09 weekly-chest scan coverage reuse
+
+- Commits `3747659`, `7707b69`, and `c43293d` remove redundant weekly-track
+  rewinds in three evidence-backed cases: all unlocked checks are visible, an
+  exact OCRed claimed prefix begins at milestone `5`, or the current route has
+  already completed the left-side search. A whole-track miss is also retained
+  in process for later probes at the same unlock level and UTC weekly cycle.
+- A claim target is always checked first. Shifted or gapped check sequences,
+  incomplete or low-confidence OCR, changed progress, a weekly reset, a claim,
+  an unproved left edge, and an incomplete right search all invalidate or bypass
+  reuse and preserve the bounded normalize-and-search fallback.
+- Retained image and mocked state regressions cover the visual cases,
+  post-claim continuation, repeated-probe reuse, progress/reset invalidation,
+  action authority, and the original offscreen discovery path. Focused suites
+  passed 69 and 139 tests; two complete checkpoints at final runtime commit
+  `c43293d` each passed all 2,063 tests, compilation, state definitions, and
+  clickmap integrity with zero errors and the established 44 orphan notices.
+- Production was tagged at `7707b69`, fast-forwarded to `c43293d`, save-attached
+  to the same active battle, and returned to steady state after session
+  preflight. Its first fresh-process mission pass performed the one required
+  conservative traversal of the shifted `35/35` viewport and retained complete
+  coverage through milestone `35`. The next naturally scheduled probe reused
+  that coverage with `weekly_progress_already_reviewed`, zero swipes, and no
+  weekly-track navigation input. Incident history is recorded in
+  [`ISSUE-2026-035`](../issues/resolved-2026.md#weekly-mission-collector-rewound-an-already-claimed-track).
+
+### 2026-08-09 completed-state Perks opener
+
+- Commit `41fc1fd` teaches `navigation.open_perks` to recognize the completed
+  solid `View Perks` state as well as the numeric in-progress state by using the
+  stable outer frame border. This unblocks the Auto Pick Perks check when an
+  attached-session preflight has no reusable current-battle evidence; it does
+  not add periodic mid-battle preflight.
+- The retained completed-state frame scores above `0.999`, and historical
+  numeric-progress positives remain above `0.993`. Home and the pre-battle
+  Perks configuration screen are explicit negative regressions preserving the
+  0.90 safe-tap boundary; retained Daily Missions and Game Over frames also
+  remain below threshold.
+- Focused navigation and tap-safety coverage passed 85 tests, and the complete
+  checkpoint passed all 2,059 tests. Two later post-deployment attachment
+  preflights verified the completed-state opener before guarded input and
+  completed successfully. After merging the later weekly-chest promotions,
+  the combined Perks/preflight/timeline/mission slice passed 288 tests and the
+  exact merged candidate passed all 2,065 tests in 347.55 seconds, compilation,
+  state definitions, and clickmap integrity with zero errors. The defect and
+  follow-up validation are recorded in
+  [`ISSUE-2026-036`](../issues/resolved-2026.md#reattached-battle-stalled-on-the-terminal-view-perks-opener).
+
+### 2026-08-09 restored-source convergence after guarded serialization
+
+- Commit `7cfad7a` treats successful launcher dispatch as distinct from visible
+  source restoration. After the initial half-second settle, the shared guarded
+  serializer retries stable-source verification while a 12-second budget
+  remains, capped at six attempts. This applies consistently to active-battle
+  attachment, Home preflight, and setup capture.
+- Exact target binding, caller context, and action authority are rechecked
+  before and after every attempt and still block immediately on change. A
+  source that merely remains transitional now receives bounded retries and
+  ends with `restored_source_convergence_timeout`; target, context, and control
+  interruptions have distinct diagnostic reasons. Retry observations remain
+  `DEBUG` detail under the existing single `ACTION`/`RESULT` workflow.
+- The attachment regression reproduces the deployment incident's observable
+  sequence—two initial `RUNNING` frames, one post-restore `UNKNOWN` frame, then
+  two `RUNNING` frames—and completes on the second verification attempt.
+  Separate tests prove bounded timeout and immediate control-authority
+  interruption. Screenshot capture and publication behavior are unchanged.
+- The focused serializer, History, and preflight suite passed 101 tests; the
+  adjacent continuity and control suite passed 233. Its pre-integration
+  checkpoint passed all 2,057 tests in 358.55 seconds. After merging current
+  `develop` and preserving its independently deployed Perk reconciliation, the
+  combined focused slice passed 318 tests. The exact integrated checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,060 tests in 392.75 seconds.
+  No production process, device input, battle transition, or live validation
+  was used for this repair.
+- Forward-port candidate `91339d1` merged current `develop` at `f84f4cb`,
+  preserving the later save-mapping, attached-preflight, control-surface, and
+  Mission reward changes. Its focused serializer, History, preflight, setup-
+  capture, continuity, and control-model slice passed all 296 tests. The exact
+  candidate then passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,165 tests
+  in 358.34 seconds. This revalidation used no production process, device
+  input, battle transition, or live validation.
+- Exact integration candidate `90f36bf` repeated the complete checkpoint on
+  `develop`, passing all 2,165 tests in 386.14 seconds plus compilation, state
+  definitions, and clickmap integrity with zero errors and the established 44
+  orphan notices. Production advanced from `f84f4cb` behind rollback tag
+  `production-before-20260810T205406Z-f84f4cb` to that exact candidate; no
+  native-package input, dependency, installed unit, or persistent-state format
+  changed.
+- Replacement PID `2399537` acquired the exact `localhost:5555` lock and
+  observed the preserved Tier 19 battle while Paused. Its guarded attachment
+  reached `source_not_yet_stable` on restoration attempt 1 at 2.24 seconds,
+  verified the same source on attempt 2 at 8.24 seconds, bound the forced save
+  to the same battle, and completed normally. It then explicitly adopted
+  `farm_t19_ad_assist`, verified the active session requirements—including
+  Astral Deliverance in cannon assist—and returned to steady `RUNNING` at wave
+  3485 without Surrender or a deployment-induced battle transition. That
+  battle then reached natural Game Over at wave 3494; the existing
+  `NEXT_BATTLE` policy saved its record, selected Retry, bound the next run
+  normally, and completed the new run's startup gates.
+
+### 2026-08-09 battle-wave-backed Perk top-bar reconciliation
+
+- Commit `105fd78` makes the independent battle-wave observation authoritative
+  for the top bar's current wave. A full OCR next-wave token must remain within
+  the existing 250-wave lead; if separator noise prefixes one or two digits,
+  only the longest minimally trimmed suffix satisfying the same bound is
+  accepted. Split, substituted, trailing, more heavily prefixed, and otherwise
+  implausible values remain read-only retries, and two stable observations are
+  still required.
+- The change repairs the retained `3089)/773124` and `31227/°3124` patterns
+  without changing save-backed Perk identity, ordering, level, or exact saved
+  pick-wave authority. It also rejects a top-bar schedule whose displayed next
+  wave has already been passed by the independent observation.
+- The focused timeline suite passed 43 tests. After merging current `develop`,
+  the combined Perk/save/terminal/run-initialization slice passed 222 tests,
+  and the supported checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan candidates,
+  and all 2,056 tests. The exact integrated candidate `a98ec0f` repeated that
+  checkpoint in 352.31 seconds. Diagnosis used one bounded read-only capture;
+  no production action was taken during diagnosis. The current contract is
+  documented in the
+  [player-save architecture](../architecture/player_save.md#temporal-classes-and-merge-rules),
+  with the incident evidence in
+  [`ISSUE-2026-034`](../issues/resolved-2026.md#perk-top-bar-ocr-ignored-the-independent-battle-wave-observation).
+- Production advanced from `dd51aa2` behind rollback tag
+  `production-before-20260809T171630Z-dd51aa2` to exact candidate `a98ec0f`.
+  The existing automation owner stopped cleanly after an in-flight guarded
+  mission-reward route completed. Replacement PID `376160` acquired the
+  `localhost:5555` lock and completed save-backed same-battle attachment.
+- The replacement explicitly adopted `farm_t19_ad_assist`; its exclusive
+  session preflight verified the active requirements, returned to steady state,
+  and produced a fresh unpaused `RUNNING` heartbeat at wave 3292 with no
+  Strategy Action Gate. No Surrender, Game Over, in-game Home, Retry, or new
+  battle was issued. The five-file source/test/documentation delta contained no
+  Windows package input, so native publication was neither required nor
+  performed.
+
 ### 2026-08-09 same-ID Strategy revision reload
 
 - Commit `e5ef4e6` makes a fresh Strategy request compare the complete latest

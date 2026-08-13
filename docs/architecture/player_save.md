@@ -341,8 +341,15 @@ The shared guarded Android-Home serializer requires the exact runtime session,
 activity scope, lifecycle-owned active-battle state, and target/generation to
 survive two stable pre-background `RUNNING` frames, `KEYCODE_HOME`, two
 byte-identical save reads, launcher restoration, and two stable post-restore
-`RUNNING` frames. The fresh resolved snapshot must contain an active-round
-identity. With no prior identity, its newest completed tail becomes the
+`RUNNING` frames. Launcher-command acceptance is dispatch evidence, not proof
+that the source has rendered. After its initial half-second settle, the shared
+serializer therefore retries stable-source verification while a 12-second
+convergence budget remains, capped at six attempts. Exact target binding,
+caller context, and action authority are rechecked before and after every
+attempt; any loss blocks immediately with a distinct diagnostic reason, while
+an unchanged but still-transitioning source blocks only after convergence
+times out. The fresh resolved snapshot must contain an active-round identity.
+With no prior identity, its newest completed tail becomes the
 baseline. A same-source unchanged tail preserves the scope; a changed tail
 starts a later scope. A UI baseline may migrate only through independently
 normalized Tier/Wave/Battle Date, whose save date must be unambiguous .NET
@@ -564,13 +571,13 @@ their prior authority until version-specific evidence advances the new rows.
 | `V1073-RUNTIME-003` active round identity | `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)` | **Causal.** A known Home boundary preceded the first stable Tier 22 active projection with a new per-tier counter and round seed; subsequent stable revisions retained that exact identity through wave 710. No finer wall-clock latency is claimed. | The guarded replacement-process Current-run comparison requires this identity after forced serialization and stable `RUNNING` restoration; it does not manufacture terminal binding or process-local evidence. `V1073-RUNTIME-013` still uses the tuple only for observation receipts. |
 | `V1073-RUNTIME-004` approximately five-minute save freshness | `saveRevision`, capture time, stable source hash, active identity/wave | **Structural.** Multiple ordinary-foreground stable revisions advanced under the same Tier 22 identity through wave 710, corroborating periodic usable writes without retaining exact timestamps. The whole row is not promoted because UI-to-save lag, jitter, unchanged intervals, write-collision behavior, and a runtime staleness threshold were not measured. | The default-300-second observation-only shared polling cadence is implemented with 30–3600-second bounds independently of audit opt-in. It can retain positive lag-tolerant facts but does not make a freshness claim. Pause/background behavior and tighter characterization may be measured during ordinary future use; no capture time, source hash, receipt timing, or `saveRevision` authorizes navigation or claims an exact write time. |
 | `V1073-RUNTIME-005` in-battle Perk inventory | `perkLevel[50]`, `perksPickedCount`, ordered `PerkPick(wave, perk)` list, versioned Perk IDs | **Shortcut-ready** for a complete exact-version snapshot. The final Tier 22 active projection contained 15 internally exact picks; all mapped picks, levels, and order agreed with the terminal UI's 11 collapsed rows. During the first enabled Tier 19 sequence, seven additional IDs were cross-channel calibrated from stable pick waves/levels and the same-round UI timeline; the repaired decoder then accepted all 56 active picks spanning 27 semantic keys. Synthetic unknown-ID, shape, count, level, and non-monotonic-order inconsistencies still publish no snapshot. | The normal run timeline now consumes the monitor's exact bound prefix: each saved pick retains oldest-first sequence, saved wave, semantic key, ID, and level-after. Stable top-bar transitions request a passive checkpoint but never open the in-battle Perks panel and never force serialization. A later failure retains already-proved positive picks; an identical or strict prefix extension may advance the timeline, while regression, mutation, identity, mapping, scope, or target conflict cannot. Structurally valid unknown IDs remain unavailable in normal runtime rather than reopening Perks for calibration. The privacy-safe static calibration is retained in `test/fixtures/player_save_perk_id_calibration_v1073.json`. |
-| `V1073-RUNTIME-006` post-run Perk clearing and same-round retention | Active Perk snapshots followed by the post-run zero/empty fields | **Causal and implemented.** The last complete Tier 22 active snapshot agreed with the terminal Perks inventory, and the immediate stable post-death save was inactive with cleared Perk fields. The normal monitor now retains a bound monotonic positive prefix and treats a bound natural terminal clear only as window closure. | Game Over omits Perks navigation only with stable exhaustion evidence, a nonempty later active checkpoint whose saved wave includes that boundary, exact round/scope/target binding, and a still-later natural terminal clear. If that finality proof is absent but an exact bound prefix remains, Game Over opens Perks only to prove the newest viewport and reconciles rows before an unchanged saved-recency marker; repeat counts, levels, order, and unseen markers remain explicit uncertainty. A missing/unbound/conflicted prefix retains the complete Perks traversal. Cleared fields never represent final inventory or prove absence. |
+| `V1073-RUNTIME-006` post-run Perk clearing and same-round retention | Active Perk snapshots followed by the post-run zero/empty fields | **Causal and implemented.** The last complete Tier 22 active snapshot agreed with the terminal Perks inventory, and the immediate stable post-death save was inactive with cleared Perk fields. The normal monitor now retains a bound monotonic positive prefix and treats a bound natural terminal clear only as window closure. | Game Over omits Perks navigation only with stable exhaustion evidence, a nonempty later active checkpoint whose saved wave includes that boundary, exact round/scope/target binding, and a still-later natural terminal clear. If that finality proof is absent but an exact bound prefix remains, Game Over proves the newest/top edge and progressively captures rows until it reaches the first unchanged saved-recency marker or the actual list edge; repeat counts, levels, order, and any still-unseen marker remain explicit uncertainty. A missing/unbound/conflicted prefix retains the complete Perks traversal. Cleared fields never represent final inventory or prove absence. |
 | `V1073-RUNTIME-007` structural tail identity and complete `BattleHistory` More Stats projection | Source-ordered capped `battleHistory[<=30]`; exact newest 148-field `BattleHistoryEntry` shape | **Shortcut-ready and implemented** for structural activity continuity and causally bound terminal report construction when the cause is mapped. Retained saves prove mixed UTC/local DateTime kinds and capped rollover. The prior 21 UI-captured battles plus the Tier 22 terminal confirm the complete ordered 144-row projection within UI precision; malformed entries and unknown semantic causes fail closed independently. `adGemsThisRound` supplies Ad Gems. | Source-tagged structural identity supplies Home, direct-Retry, guarded replacement-process `RUNNING` continuity, and same-source terminal tail proof. Trust source order rather than cross-kind ticks; keep raw entries, arbitrary fields, and account data unpublished. Unknown `killedBy` still permits structural continuity but forces More Stats for the report. |
 | `V1073-RUNTIME-008` Game Over history serialization timing | Pre-run history tail, Game Over observation, post-run stable save | **Causal and implemented.** The known pre-battle tail changed in the immediate stable post-death save while the natural Tier 22 terminal was preserved, proving publication at the Game Over boundary without an exact timestamp. The first enabled Tier 19 run independently recorded clearing and tail publication before normal Retry. | One immediate stable read at Game Over or Tournament Results supplies profile progression, available Tournament conditions, and the candidate report. An unchanged or unavailable tail preserves the UI fallback. `b137ea4` separately adds guarded same-session direct-Retry baseline rollover; its next ordinary end-to-end receipt confirmation remains pending. |
 | `V1073-RUNTIME-009` terminal history-tail attachment | Pre-boundary structural tail fingerprint plus newest post-boundary entry tier/time/wave | **Causal and implemented.** The pre-battle baseline changed at capped rollover to a newest Tier 22, wave 751, Boss entry whose complete semantic projection agreed with terminal tier/time/wave evidence. | Normal and Tournament report attachment requires a bound current-process terminal, matching activity-scope ID, compatible player-save baseline, exactly one valid append or capped rollover, inactive save, complete semantic entry, matching terminal kind, and no available compact-identity contradiction. A terminal-only restart, UI-sourced or absent baseline, invalid transition, unknown cause, mismatch, or acquisition failure forces More Stats. The independent collector remains observation-only. |
-| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, `3=Boss`, `6=Vampire`, `8=Scatter`, and `99=Surrender`; Tier 22 reconfirmed `3=Boss`, but the whole enum claim remains incomplete. Surrender identifies only the terminal cause, not its initiator. | Extend the allowlist only from naturally observed values. Any future unknown value preserves structural tail evidence but makes the semantic entry unavailable and requires UI evidence; this fail-closed extension does not block `V1073-RUNTIME-013`, and `Enemy N` is never synthesized. |
+| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, `3=Boss`, `6=Vampire`, `8=Scatter`, and `99=Surrender`; Tier 22 reconfirmed `3=Boss`, but the whole enum claim remains incomplete. Surrender identifies only the terminal cause, not its initiator. | An unknown numeric cause preserves structural tail evidence, keeps the semantic report on UI fallback, and may create a durable review receipt only after the same bound terminal supplies a normalized Game Stats/More Stats value. Reviewed canonical integration extends `runtime_save.battle_history.killed_by_ids`; `Enemy N` is never synthesized. |
 | `V1073-RUNTIME-011` passive base/ad coin split augmentation | Compact Game Stats screenshot/OCR; `battleHistory.coinsEarned` total | **Cross-channel and implemented as optional augmentation.** The Tier 22 compact panel showed `28.56T` base plus `14.28T` ad equaling the `42.84T` total. `battleHistory` still contains only total coins. | Keep one passive compact capture when available. Missing compact OCR never invalidates an otherwise authoritative save report; available wave/tier/cause contradictions force UI fallback. The split remains UI-supplied rather than a save claim. |
-| `V1073-RUNTIME-012` forced terminal UI audit/fallback | Existing Game Stats, Perks, clipboard/OCR More Stats, and verified terminal controls | **Shortcut-ready and preserved.** Compact Game Stats remains first and passive; More Stats retains its conditional clipboard/OCR fallback. Perks has three explicit routes: no navigation for proven save finality, newest-viewport-only reconciliation for a usable nonfinal saved prefix, and complete traversal when no usable prefix exists. | The bounded top-prefix route scrolls only toward the newest edge, never through the complete inventory. It may promote a tail row to an exact pick only when complete passive boundaries and terminal recency have one unique correspondence; otherwise the record keeps exact saved picks plus bounded aggregates and unresolved fields. Force the complete Perks traversal on absent, unbound, malformed, or round-conflicted prefix evidence. Force More Stats on its independent audit/fallback conditions. Wait/Retry/Home and mutation/transition confirmation always remain verified UI actions. |
+| `V1073-RUNTIME-012` forced terminal UI audit/fallback | Existing Game Stats, Perks, clipboard/OCR More Stats, and verified terminal controls | **Shortcut-ready and preserved.** Compact Game Stats remains first and passive; More Stats retains its conditional clipboard/OCR fallback. Perks has three explicit routes: no navigation for proven save finality, saved-recency-bounded reconciliation for a usable nonfinal saved prefix, and complete traversal when no usable prefix exists. | The bounded route always proves the newest/top edge first. Its first frame is tested before any downward gesture; if necessary, it then captures toward older rows until the first unchanged saved-recency marker or the actual list edge. It may promote a tail row to an exact pick only when complete passive boundaries and terminal recency have one unique correspondence; otherwise the record keeps exact saved picks plus bounded aggregates and unresolved fields. Force the complete Perks traversal on absent, unbound, malformed, or round-conflicted prefix evidence. Force More Stats on its independent audit/fallback conditions. Wait/Retry/Home and mutation/transition confirmation always remain verified UI actions. |
 | `V1073-RUNTIME-013` natural-boundary audit collector | Stable privacy-safe runtime projections plus passive boundary observations | **Structural.** The default-disabled collector, append-only schema, exact-target/session guards, core state machine, and privacy/nonblocking regressions are implemented. The first enabled ordinary Tier 19 run recorded exact Home, first active identity, revisions `46418`–`46465`, terminal clearing, and the wave-5182 Tank tail candidate while the complete UI pipeline remained authoritative and unchanged. Its direct Retry exposed fail-closed old-identity retention and seven missing Perk IDs; `b137ea4` repairs both. The deployed fresh session then accepted revision `46521`, counter 232, wave 290, and a complete mapped two-pick checkpoint without inheriting the terminal-only process's unavailable baseline. | In normal App runtime the collector projects the same typed passive, forced-attachment, and natural-terminal bundles used by other consumers; it no longer owns a duplicate cadence/read. It emits audit candidates only: no attachment, record construction, Strategy fact, input, lifecycle/dispatch change, or independent UI suppression. Normal save-backed timeline picks do not become UI calibration batches. The legacy exact-wave UI/save resolver remains fail-closed for an explicitly supplied UI batch; an unknown ID in ordinary passive monitoring publishes no semantic prefix and preserves terminal UI fallback. Target/process changes clear correlation state. No special battle is required; upgrade and survival components remain unavailable. |
 | `V1073-RUNTIME-014` in-battle upgrade levels and gold-box state | `upgradeLevel[20]`, `upgradeDefenseLevel[20]`, `upgradeUtilityLevel[20]` plus the three Workshop-level arrays | **Structural.** Array shapes and current-versus-Workshop deltas are observed, but the complete index, cap, and special-level semantics are not retained validation evidence. | Create a versioned index/cap manifest and validate non-maxed, round-purchased, Workshop-maxed, locked, and special upgrades against canonical UI evidence. Publish current level, baseline, delta, and `maxed` only as one independently failing component. Never infer Max from magnitude alone. |
 | `V1073-RUNTIME-015` survival-ability checkpoint state | Demon Mode, Nuke, and Second Wind `*UsedThisRound`, use-count, cooldown, `*WavesUntilRefresh`, active/effect-timeout, and timer fields | **Structural.** The fields exist in an active round and clear after the round, but boolean polarity, sentinel values, units, exact-wave relationships, and write timing are not calibrated. | At natural activations, retain stable before/during/rearmed/terminal snapshots and matching visual events. Prove each ability independently, including auto versus manual behavior and multiple activations. Publish counts and state first; publish an exact activation wave only where a causal timer formula is proven, otherwise a save-wave interval. |
@@ -624,6 +631,95 @@ reviewed classification and count/hash update before entering that exact
 manifest. Incompatible versions or shapes, unknown IDs or values, ambiguity,
 and conflict continue through the UI. Runtime evidence and receipts never edit
 or promote their own authority manifest.
+
+### Runtime mapping discovery and local confirmation
+
+An exact or `compatible_exact_revision` snapshot may retain only a bounded,
+semantic-neutral discriminator for an otherwise unmapped Perk, Guardian,
+Module, Target Priority, orb-calibration, terminal `killedBy`, or Tournament
+league value. The existing UI fallback remains authoritative. Before its first
+repair input, that fallback may pair the discriminator with complete normalized
+UI evidence from the same process, target generation, activity scope, and
+Home, active-round, or completed-tail boundary. Raw save objects, account data,
+raw OCR text, partial inventories, and evidence observed after mutation are not
+eligible.
+
+Every resulting record is an append-only, mode-0600 candidate receipt under
+`logs/player_save_mapping_candidates/`. A receipt is review evidence only: it
+cannot suppress UI, authorize input or repair, change Strategy/configuration,
+or edit a tracked mapping. Home and attachment observers close their pairing
+window on repair or continuity loss. Game Over and Tournament Results reuse the
+single typed natural-boundary acquisition and its already-proved structural
+tail; candidate collection never requests another save read or blocks terminal
+routing. An unknown Tournament league name remains review-only because the
+condition generator has no general league-name mapping owner.
+
+One narrow case receives local future-decode authority automatically: a
+deterministic pre-mutation `module_info_index` pairing from an exact-version
+boundary. The runtime first durably rereads its candidate receipt, then appends
+an accept event to the ignored
+`config/player_save_versions/local/data_<data>_game_<game>.confirmed.json`
+document. Accept and revoke events are locked, atomic, private, append-only,
+generation-counted, and capacity-reserved so every active acceptance remains
+revokable. The global Module mapping is a bijection: the same exact
+`(infoIndex, name)` pair may appear in more than one slot, while either raw ID
+or name paired differently is rejected.
+
+Local authority applies only during a later fresh decode whose exact identity,
+root class, mapping resolution, authority/structural IDs, validation policy,
+revision-compatibility declaration, and canonical Module dependency still
+match. It never changes the snapshot whose UI produced the receipt. Each
+snapshot publishes the exact canonical authority/structural mapping-set
+fingerprint used by its decoder and an effective-mapping fingerprint after the
+local overlay;
+all carry, setup-capture, attachment, History, and terminal provenance binds to
+that fingerprint. Dependency drift, conflict, malformed local state, or a
+read/write failure leaves canonical values authoritative and the unknown value
+on its existing UI fallback.
+
+The control surface publishes the combined local-confirmation and candidate
+review queue as a persistent nonmodal warning. A `compatible_exact_revision`
+proposal is an atomic review artifact for both the authority owner and the
+exact structural mirror, with a base hash and scoped operation for each. The
+runtime decoder never applies that proposal. Server revision 40 instead offers
+the same narrow operator workflow in both control-surface GUIs. It has no
+feature-worktree selection: the operator reviews one exact candidate and
+proposal while clean `main` and `develop` are at the same tip, then separately
+confirms creation of one verified child commit directly on `develop`. The
+client cannot supply a path, branch, target, operation, value, commit message,
+or Git identity.
+
+Review binds and exposes the immutable equal base commit, every canonical
+base/result hash and file mode, the prospective canonical mapping-set
+fingerprint, and the standardized commit contract. Integration rechecks those
+facts under a process-shared lock, holds one final candidate-receipt snapshot,
+constructs the commit with a private Git index, durably records its exact
+identity, detaches the bound clean checkout at the base, and uses one Git ref
+transaction to verify `main` while compare-and-swapping only the named
+`develop` ref. An explicit Git switch then serializes the checkout refresh.
+Crash recovery accepts only a clean checkout at an exact detached transaction
+endpoint. A plain switch refuses and preserves a newly arriving edit; every
+partial index or worktree state remains unconfirmed. Relevant Git crash lock
+files likewise make recovery unconfirmed and are never removed automatically.
+It never
+writes or moves production `main`, promotes, restarts a service, changes
+runtime authority, or sends device input. Ref, target, mode, journal, or
+unrelated-state ambiguity is preserved for inspection; no automatic reset or
+retry occurs.
+
+The warning remains `promotion_pending` after the commit reaches `develop` and
+`production_validation_pending` after production contains it. A later complete
+stable save acquisition records a privacy-safe receipt only when the running
+decoder's mapping identity and canonical mapping-set fingerprint match the
+deployed commit. The receipt also binds the acquisition start time and the
+production commit captured when that runtime loaded; an acquisition that began
+before the integration became available cannot clear the checkpoint. Receipt
+work is deferred until the outer save-operation and mutation boundaries have
+released, so it cannot delay Android foreground restoration. The observer is
+advisory: its failure cannot invalidate the save or block automation, but it
+leaves the warning visible. Only that matching post-deployment decode durably
+records the receipt and then retires the integration transaction. Candidate
+and local-store failures remain diagnostic and do not become startup gates.
 
 ## Acquisition provenance and temporal authority
 
@@ -690,16 +786,17 @@ unprojectable save is unusable data, not an unsafe UI boundary: after the
 guarded owner proves source restoration, every consumer with an established UI
 equivalent automatically uses that complete UI route. Only source-restoration,
 target, process, scope, owner, or action-authority loss blocks UI input. A
-trusted mapped mismatch remains valid save evidence and retains its explicit
-review semantics.
+trusted mapped mismatch remains valid save evidence, but it is recoverable:
+repair it at an already-safe Home boundary or complete the consumer with exact
+degraded evidence.
 
 | Workflow | Acquisition and binding | Failure/authority result |
 | --- | --- | --- |
-| Active or resumable **Attach to Battle** | After exact intent and explicit Enable where needed, the guarded serializer backgrounds the verified active battle, requests one stable `forced_serialization` bundle for the exact target generation, restores `RUNNING`, and asks Activity Continuity to bind the final persisted scope. | A usable save binds active-round and structural History identity. If the source is restored but the save or mapping is unusable, Activity Continuity opens Battle History and Attach completes observation-only with a bound UI receipt; No Strategy and its supported UI monitors remain Enabled. Before-background loss or any restoration, owner, target, scope, or authority loss blocks input and leaves the workflow Paused. |
-| **Return Control** from active or Home Resume | Return first refreshes passive observation while the acknowledged indefinite Pause remains authoritative. A later explicit Enable grants only the guarded Return hold; Home Resume is restored to the same battle, then the running attachment serializer and exact binding above are attempted. | A usable save reconciles mapped checks, and a trusted mismatch Pauses for review. If the save is unusable after safe restoration, Battle History plus every supported active-Strategy UI verifier becomes the reconciliation source. Another explicit Enable after a trusted mismatch or manual correction requests new evidence rather than replaying an old receipt. |
-| **Return Control** at Home New | The existing Home preflight owner requests a new forced serialization for the same target and activity scope. | A usable save proves no active round and resolves mapped checks. A safely restored unusable save automatically runs every supported Home configuration check and completes with a bound UI receipt. A trusted mismatch remains Paused. Source-restoration, owner, target, scope, or authority loss terminalizes the exact Return once. A bounded UI repair that exhausts publishes `awaiting_manual_correction`; later heartbeats never repeat lifecycle input. |
+| Active or resumable **Attach to Battle** | The request freezes the accepted selected Strategy definition. After exact intent and explicit Enable where needed, the guarded serializer backgrounds the verified active battle, requests one stable `forced_serialization` bundle for the exact target generation, restores `RUNNING`, and asks Activity Continuity to bind the final persisted scope. | A usable save binds active-round and structural History identity. If the source is restored but the save or mapping is unusable, Activity Continuity opens Battle History. No Strategy becomes an intentional observer; a kind/tier-compatible selection becomes active; and an incompatible or unprovable selection becomes a degraded observer pending the next safe boundary. Configuration and reporting failures complete degraded without repair or a global hold. Before-background loss or any restoration, owner, target, scope, authority, or uncertain-input loss is catastrophic and leaves the workflow Paused. |
+| **Return Control** from active or Home Resume | Return first refreshes passive observation while the acknowledged indefinite Pause remains authoritative. A later explicit Enable grants only the guarded Return hold; Home Resume is restored to the same battle, then the running attachment serializer and exact binding above are attempted. | A usable save reconciles mapped checks after profile and one-run skips are removed from the effective requirements. A mismatch completes Return with exact degraded evidence and releases automation; it does not re-Pause or retain capture authority. If the save is unusable after safe restoration, Battle History plus every supported active-Strategy UI verifier becomes the reconciliation source and follows the same nonblocking rule. |
+| **Return Control** at Home New | The existing Home preflight owner requests a new forced serialization for the same target and activity scope. | A usable save proves no active round and resolves mapped checks. A safely restored unusable save automatically runs every supported Home configuration check. Mismatches are repaired immediately at this safe boundary; unavailable or exhausted repair completes Return with the exact degraded failure and releases automation. Only catastrophic loss of control authority or exact-target ownership, unproved source restoration after lifecycle input, or an uncertain input result terminalizes the exact Return Paused. |
 | **Return Control** at Game Over, including manual Surrender | The preferred route consumes the lifecycle-issued current-process `natural_boundary` bundle, binding exact target generation, activity scope, terminal observation, structural History transition, and mapped cause. | If that save evidence is unavailable or unusable at the still-bound Game Over boundary, Return uses the full Game Stats, Perks, and More Stats UI collector and preserves the selected terminal route and action authority. Conflicting owner/target/scope evidence still blocks input. Tournament Results and unknown evidence are not advertised as Return boundaries. |
-| **Capture current setup as…** | One guarded `forced_serialization` at verified Home New, Home Resume, or active battle produces a redacted provenance receipt plus runtime/scope/target-generation/active-round binding. The preview is derived from that in-memory bundle only. Exact and forward-compatible revisions may project only the resolved mapping's explicit validation/compatibility allowlist. An active-battle Return Control that has Paused on a trusted mismatch may pass its still-retained exact typed acquisition to Capture, labelled `retained_return_control_refresh`; that path requests no second serialization and cannot be recovered from the receipt alone. | This authoring preview has no complete supported UI equivalent, so unusable mapping/projection/identity evidence reports `unavailable` and opens no configuration UI. When source restoration is proved it preserves the prior action-authority state, so ordinary UI monitoring is unaffected. A proved opposite round fact reports `failed` under the documented continuity gate or Pause outcome. Exact retained Return evidence remains Paused and unresolved. A failed ready-ledger write retains the exact process-local preview and retries only the atomic receipt; a restarted/orphaned `capturing` ledger fails closed without another serialization. Saving uses the immutable preview fingerprint and performs no device input. |
+| **Capture current setup as…** | One guarded `forced_serialization` at verified Home New, Home Resume, or active battle produces a redacted provenance receipt plus runtime/scope/target-generation/active-round binding. The preview is derived from that in-memory bundle only. Exact and forward-compatible revisions may project only the resolved mapping's explicit validation/compatibility allowlist. | This authoring preview has no complete supported UI equivalent, so unusable mapping/projection/identity evidence reports `unavailable` and opens no configuration UI. When source restoration is proved, unavailable or contradictory evidence reports the result and preserves the prior action-authority state. Failure to restore the source after lifecycle input, loss of owner/target/scope, or an uncertain dispatched input is catastrophic and may Pause. A failed ready-ledger write retains the exact process-local preview and retries only the atomic receipt; a restarted/orphaned `capturing` ledger is terminalized without another serialization. Saving uses the immutable preview fingerprint and performs no device input. |
 | Ordinary continuity/audit/monitor reads | `passive_stable_read` remains explicitly passive and may be shared by multiple projectors as one immutable in-memory bundle. | It may retain permitted positive temporal facts, but cannot satisfy Attach, Return, capture, negative current-configuration, or completeness claims. |
 | Offline import | The command's explicit operator assertion remains outside runtime authority. | It cannot issue a Better Control receipt or become process-local workflow evidence. |
 
@@ -712,6 +809,10 @@ A full UI fallback instead rechecks the live runtime, target generation,
 activity scope, observation, and process-local claim before each continuation.
 If that context or private claim is gone, the workflow stops safely instead of
 opening UI from ledger or cached data.
+A terminal Attach record with `reporting_status: unavailable` is not a replay
+receipt. It records that the exact process-local adoption succeeded while the
+durable receipt could not be written; a restarted process cannot reconstruct
+input authority from that marker.
 
 The terminal History projector now proves the structural append or capped
 rollover once, independently of completed-report semantics. A successful
@@ -742,7 +843,7 @@ same-round projection can still prove the positive prefix already serialized.
 | Temporal class | Current examples | Required interpretation |
 | --- | --- | --- |
 | `current_configuration` | A mapped Home configuration check | Requires `forced_serialization`; it says nothing about a later input. |
-| `round_invariant` | Workshop preset, equipped Guardians, selected Bot preset, and equipped Modules | Once exact mapping and round binding prove the value belonged to the round, it applies to the whole round. Bot progression or medal-funded upgrades are separate point-in-time facts. |
+| `round_invariant` | Workshop preset, Free Upgrade locks, equipped Guardians, selected Bot preset, equipped Modules, First Perk Choice, Perk Bans, and Perk Auto Pick order | Once exact mapping and round binding prove the value belonged to the round, it applies to the whole round. Bot progression or medal-funded upgrades are separate point-in-time facts. |
 | `point_in_time` | Cards preset and Cards at an active attachment | Describes only the acquisition boundary. Different later evidence may represent a legal change rather than a contradiction. |
 | `monotonic_round_prefix` | Ordered saved Perk picks and their saved waves | Every published pick is historical positive evidence. A passive checkpoint cannot prove that no later pick exists. |
 | `terminal_final` | Causally attached Battle History / More Stats fields | Requires a bound natural terminal and a valid append or capped rollover. |
@@ -769,28 +870,47 @@ exact mapping, target-generation fingerprint, scope fingerprint, round
 fingerprint, capture boundary, and temporal class without retaining the raw
 target or scope identifier.
 
-No Strategy treats Workshop preset, equipped Guardians, selected Bot preset,
-and equipped Modules as sticky round-invariant facts. Identical observations
-merge, but a differing complete save value or authoritative complete preset UI
-observation marks that field unavailable for the round; a later value cannot
-restore it. Partial Guardian or Module UI evidence cannot replace a complete
-save claim. Cards retain their point-in-time boundary and may legally differ at
-a later capture. Bot progression is neither projected into nor compared with
-the selected Bot preset. The resulting facts populate the existing
+No Strategy treats Workshop preset, Free Upgrade locks, equipped Guardians,
+selected Bot preset, equipped Modules, First Perk Choice, Perk Bans, and Perk
+Auto Pick order as sticky round-invariant facts. Identical observations merge,
+but a differing complete save value or authoritative complete preset UI
+observation marks that field
+unavailable for the round; a later value cannot restore it. Partial Guardian or
+Module UI evidence cannot replace a complete save claim. Cards retain their
+point-in-time boundary and may legally differ at a later capture. Bot
+progression is neither projected into nor compared with the selected Bot
+preset. The resulting facts populate the existing
 `observed_run_configuration` actual loadout, never configured intent.
 
-The same typed attachment object supplies Tournament's in-battle preflight
-with Workshop, selected Bot preset, equipped Guardians, and equipped Modules.
-Its one-use consumer accepts only round-invariant facts and rechecks process,
-target generation, activity scope, and active-battle ownership at every
-consumption. Exact Workshop, Bot, and Guardian matches omit their redundant UI
-sections. Complete Modules omit UI for an enforced match or an
-observation-only assignment; a mapped observation-only variation remains
-reported rather than becoming repair authority. Missing, mismatched, or
-rebound Bot, Guardian, or enforced Module evidence retains the established UI
-check, while unresolved Workshop preserves the explicit Home-only deferral.
-Cards and current-configuration facts remain ineligible. No path adds a
-game-Home route, another Android lifecycle action, or another save read.
+The same typed attachment object supplies configured in-battle preflight with
+every complete projected fact, including Cards, Workshop, Free Upgrade locks,
+selected Bot preset, equipped Guardians and Modules, Auto Pick, Card Recharge,
+Perk configuration, Target Priority, and the supported Ultimate Weapon
+components. Its one-use consumer rechecks process, target generation, activity
+scope, and active-battle ownership at every consumption. A forced attachment
+save is authoritative current evidence for all of those facts at its exact
+capture boundary; temporal class controls what a mismatch means rather than
+whether the fact may be consumed.
+
+An exact match omits that check's redundant UI. Missing, incomplete,
+unsupported, unparseable, or rebound evidence retains the supported per-field
+UI fallback. A field with no current-battle UI route remains explicitly
+deferred or unavailable, while unresolved Workshop preserves its Home-only
+deferral. A
+complete saved mismatch never opens UI merely to confirm the save. Workshop,
+Free Upgrade locks, selected Bot preset, equipped Guardians, equipped Modules,
+First Perk Choice, Perk Bans, and Perk Auto Pick order retain their
+round-invariant class: a mismatch is
+recorded and reported but is nonblocking because it cannot be repaired for the
+active battle. A fully observed UI fallback mismatch for one of those fields
+has the same result. Point-in-time and current-configuration mismatches are
+also observational during Attach: supported validators measure but do not
+change the current battle. Every profile or run waiver is applied before
+attachment reconciliation, so a waived fact is neither consumed nor reported
+as a mismatch. Every source and disposition remains explicit in session
+evidence. No attachment
+path adds game-Home repair, another Android lifecycle action, another save
+read, or Surrender authority.
 
 The normal Perk monitor consumes the same forced-attachment bundle, scheduled
 `passive_stable_read` bundles, and the lifecycle-issued natural terminal
@@ -804,13 +924,22 @@ collector remains neither an acquisition service nor an authority source.
 The run timeline is now a consumer of that monitor rather than a second Perks
 UI observer. Stable top-bar schedule or `View Perks` transitions request one
 coalesced `passive_stable_read`; they do not require or request forced
-serialization and grant no input authority. The worker retains a detached
-exact prefix under the monitor lock, and App applies it to the persisted
-same-scope timeline on the serialized main thread. Attachment's already-owned
-forced bundle seeds the same path without reacquisition. Every timeline row
-therefore carries the save's exact oldest-first sequence, pick wave, semantic
-ID/key, and level-after. A pending visual boundary means only that no later
-positive prefix has yet serialized; it is never evidence of absence.
+serialization and grant no input authority. Numeric schedule observations use
+the independently detected battle wave as their current-wave anchor. The full
+OCR next-wave token must satisfy the bounded schedule lead; otherwise only the
+longest suffix produced by removing at most two leading separator-artifact
+digits may qualify. Split, substituted, trailing, or still-implausible OCR
+remains an invalid read-only retry. The ordinary top-bar OCR uses its existing
+raw-color fast path; an unreadable, implausible, or low-confidence terminal
+label receives one Otsu-isolated retry so outlined `View Perks` text remains
+detectable. Stable high-confidence observations are still required. The worker
+retains a detached exact prefix
+under the monitor lock, and App applies it to the persisted same-scope timeline
+on the serialized main thread. Attachment's already-owned forced bundle seeds
+the same path without reacquisition. Every timeline row therefore carries the
+save's exact oldest-first sequence, pick wave, semantic ID/key, and level-after.
+A pending visual boundary means only that no later positive prefix has yet
+serialized; it is never evidence of absence.
 
 Each complete active Perk projection is bound to the exact process session,
 activity scope, target generation, mapping, and active-round identity. An
@@ -832,13 +961,15 @@ projection. The clear closes the checkpoint window; it never becomes final
 inventory or proves absence.
 
 When finality is not proved, a still-bound, non-conflicted exact prefix owns a
-bounded terminal repair: open Perks, prove the newest edge, OCR only that
-viewport, and return to Game Stats without scrolling through the complete
-inventory. Rows before an unchanged saved-recency marker are positive tail
-evidence. A complete set of passive selection boundaries may give them one
-unique exact sequence/wave correspondence; repeated leveled families, a
-missing marker, an unchanged recency head despite later boundaries, or an
-incomplete boundary interval remain aggregate or unresolved evidence. A later
+bounded terminal repair: open Perks, always prove the newest/top edge, and test
+that first viewport before dispatching any downward gesture. If the unchanged
+saved-recency marker is not yet visible, capture consecutive older viewports
+until the marker or actual list edge, then return to Game Stats. Rows before
+the marker are positive tail evidence. A complete set of passive selection
+boundaries may give them one unique exact sequence/wave correspondence;
+repeated leveled families, a missing marker, an unchanged recency head despite
+later boundaries, or an incomplete boundary interval remain aggregate or
+unresolved evidence. A later
 passive acquisition failure does not erase the retained exact prefix. Missing,
 malformed, unbound, or round-conflicted prefix evidence uses the complete
 terminal Perks traversal. Optional Perk data failure never changes the selected

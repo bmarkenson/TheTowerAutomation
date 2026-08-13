@@ -7,7 +7,35 @@ using System.Text.Json;
 
 namespace TheTower.ControlSurface;
 
-public sealed class ControlSurfaceApi : IDisposable
+internal interface IHostMaintenanceApi
+{
+    Task<StatusResponse> PostHostMaintenanceAsync(
+        object payload,
+        CancellationToken cancellationToken);
+}
+
+public sealed class ControlSurfaceApiException : InvalidOperationException
+{
+    public ControlSurfaceApiException(
+        string message,
+        int statusCode,
+        string code,
+        JsonElement? details)
+        : base(message)
+    {
+        StatusCode = statusCode;
+        Code = code;
+        Details = details;
+    }
+
+    public int StatusCode { get; }
+
+    public string Code { get; }
+
+    public JsonElement? Details { get; }
+}
+
+public sealed class ControlSurfaceApi : IDisposable, IHostMaintenanceApi
 {
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(120) };
     private readonly object _configurationGate = new();
@@ -39,6 +67,12 @@ public sealed class ControlSurfaceApi : IDisposable
         CancellationToken cancellationToken) =>
         GetAsync<SetupCaptureResponse>(
             "/api/v1/setup-capture",
+            cancellationToken);
+
+    public Task<SaveMappingIntegrationCatalog> GetSaveMappingIntegrationAsync(
+        CancellationToken cancellationToken) =>
+        GetAsync<SaveMappingIntegrationCatalog>(
+            "/api/v1/save-mapping-integration",
             cancellationToken);
 
     public Task<CapturedStrategyDraftResponse> GetCapturedStrategyDraftAsync(
@@ -155,6 +189,22 @@ public sealed class ControlSurfaceApi : IDisposable
             payload,
             cancellationToken);
 
+    public Task<SaveMappingIntegrationReview> ReviewSaveMappingIntegrationAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<SaveMappingIntegrationReview>(
+            "/api/v1/save-mapping-integration",
+            payload,
+            cancellationToken);
+
+    public Task<SaveMappingIntegratedResult> IntegrateSaveMappingAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<SaveMappingIntegratedResult>(
+            "/api/v1/save-mapping-integration",
+            payload,
+            cancellationToken);
+
     public Task<StrategyProfileMutationResponse> PostStrategyProfileAsync(
         object payload,
         CancellationToken cancellationToken) =>
@@ -171,11 +221,19 @@ public sealed class ControlSurfaceApi : IDisposable
             payload,
             cancellationToken);
 
-    public Task<HostPerformancePublishResponse> PostHostPerformanceAsync(
-        HostPerformanceBatch payload,
+    internal Task<HostPerformancePublishResponse> PostHostPerformanceAsync(
+        HostPerformanceUploadPayload payload,
         CancellationToken cancellationToken) =>
-        PostAsync<HostPerformancePublishResponse>(
+        PostSerializedJsonAsync<HostPerformancePublishResponse>(
             "/api/v1/host-performance",
+            payload.Json,
+            cancellationToken);
+
+    public Task<StatusResponse> PostHostMaintenanceAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<StatusResponse>(
+            "/api/v1/host-maintenance",
             payload,
             cancellationToken);
 
@@ -198,6 +256,24 @@ public sealed class ControlSurfaceApi : IDisposable
             JsonSerializer.Serialize(payload, _json),
             Encoding.UTF8,
             "application/json");
+        using var response = await _http.SendAsync(request, cancellationToken);
+        await EnsureSuccess(response, cancellationToken);
+        return await response.Content.ReadFromJsonAsync<T>(_json, cancellationToken)
+            ?? throw new InvalidOperationException("The Linux service returned an empty response.");
+    }
+
+    private async Task<T> PostSerializedJsonAsync<T>(
+        string path,
+        byte[] payload,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(HttpMethod.Post, path);
+        request.Content = new ByteArrayContent(payload);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(
+            "application/json")
+        {
+            CharSet = "utf-8",
+        };
         using var response = await _http.SendAsync(request, cancellationToken);
         await EnsureSuccess(response, cancellationToken);
         return await response.Content.ReadFromJsonAsync<T>(_json, cancellationToken)
@@ -233,6 +309,8 @@ public sealed class ControlSurfaceApi : IDisposable
             return;
         }
         var message = $"Linux service returned {(int)response.StatusCode} {response.ReasonPhrase}.";
+        var code = "";
+        JsonElement? details = null;
         try
         {
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -243,12 +321,24 @@ public sealed class ControlSurfaceApi : IDisposable
             {
                 message = error.GetString() ?? message;
             }
+            if (document.RootElement.TryGetProperty("code", out var errorCode))
+            {
+                code = errorCode.GetString() ?? "";
+            }
+            if (document.RootElement.TryGetProperty("details", out var errorDetails))
+            {
+                details = errorDetails.Clone();
+            }
         }
         catch (JsonException)
         {
             // Keep the HTTP status when the error body is not JSON.
         }
-        throw new InvalidOperationException(AddControlServerRestartHint(message));
+        throw new ControlSurfaceApiException(
+            AddControlServerRestartHint(message),
+            (int)response.StatusCode,
+            code,
+            details);
     }
 
     internal static string AddControlServerRestartHint(string message)

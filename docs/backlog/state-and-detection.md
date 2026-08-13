@@ -28,6 +28,41 @@ Completed and superseded detail remains in the
   - Allow pause, cancellation, and extension through CLI/GUI controls.
   - Do not interrupt an automation action making expected progress.
   - Attempt the least destructive route back to the game first.
+  - Confirm deployed commit `af3d1b0` for `ISSUE-2026-041` at one natural
+    completed-battle Home launch: Free Ticket
+    may be claimed only by the exact retained launch, at most one verified
+    Battle retry may follow two stable fresh Home `NEW_BATTLE` observations,
+    and an
+    exhausted Home ad-gem transaction must remain circuit-broken across
+    equivalent heartbeats without blocking lifecycle progress.
+- [ ] **Deferred:** evaluate a bounded global recovery supervisor before adding
+  more one-off recovery behaviors for sustained unsupported or `UNKNOWN`
+  states.
+  - Write an architecture decision comparing continued state-specific recipes,
+    a shared supervisor, and a hybrid. Evaluate incident frequency, operator
+    burden, false-action risk, testability, and long-term maintenance cost
+    before deciding whether the broader mechanism is worth implementing.
+  - Reconcile with the existing interruptible non-running timer instead of
+    creating a second scheduler or authority owner.
+  - Treat the supervisor, if selected, as an orchestrator of registered typed
+    recovery recipes. `UNKNOWN` alone must never authorize a tap, swipe, Back,
+    app restart, Battle/Retry, Surrender, or terminal action.
+  - Define distinct evidence and postconditions for incomplete capture,
+    transient detection loss, a recognized blocking modal, lost foreground,
+    process/ADB-target change, an expected transition still in flight, and a
+    genuinely unsupported screen.
+  - Preserve exact runtime, PID, ADB target/generation, activity scope, control
+    request, and transition-receipt ownership. Pause, Stop, manual control,
+    changed ownership, or uncertain accepted input must abort or fail closed
+    without replay.
+  - Retain attempt and circuit-breaker state across equivalent heartbeats so
+    time or one detector miss cannot silently replenish input. Decide
+    explicitly which observation-only state may survive process replacement;
+    never replay an unresolved mutation after restart.
+  - Specify a bounded escalation ladder from observation/backoff, through only
+    freshly verified low-risk recipes, to an operator-visible indefinite hold.
+    Validate it first with incident fixtures, transition fault injection, and
+    an observation-only rollout before enabling any recovery input.
 
 ## Detection architecture
 

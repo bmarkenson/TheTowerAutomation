@@ -31,7 +31,8 @@ The authoring model must:
 - keep a published strategy stable when a base is edited later;
 - resolve and validate all inheritance before runtime;
 - preserve protected generated rules and action sequences; and
-- publish independently from activation.
+- keep backend publication independent from runtime control; a client may
+  follow confirmed publication with a separate allowlisted selection request.
 
 The first implementation supports zero or one base per strategy. Arbitrary
 inheritance chains, mixins, and automatic propagation are deliberately out of
@@ -201,8 +202,11 @@ historical embedded Base rather than current Base lookup, computes the semantic
 comparison, and returns a review fingerprint without writing. Confirmation
 rechecks all three fingerprints under optimistic concurrency and publishes the
 historical intent as the next immutable revision with origin
-`restore_as_new`. It never mutates the selected revision, selects or activates
-the Strategy, restarts automation, changes Pause, or changes runtime control.
+`restore_as_new`. The endpoint never mutates the selected revision, restarts
+automation, changes Pause, or changes runtime control. After success, the native
+workflow separately selects the Strategy and queues its new latest definition
+for the next boundary when the process is active, or uses it as the visible
+Start selection when stopped, without switching the current battle.
 Ordinary authoring, older facade publication, adoption, and restore origins are
 assigned only by trusted server paths.
 
@@ -212,15 +216,16 @@ The authoring policies are intentionally limited to three:
 
 | Policy | Contract |
 | --- | --- |
-| `enforce` | Inspect and require the resolved value. Repair only through an explicitly implemented and verified repair contract; otherwise block the applicable strategy gate. |
+| `enforce` | Inspect and require the resolved value. Repair through an implemented verified contract when the current boundary is already safe; otherwise flag the exact mismatch and continue degraded. |
 | `observe` | Inspect when authoritative observation is supported and record the configured reference plus evidence. Do not change the setting or block on a confident difference. |
 | `ignore` | Do not inspect or change the setting. A strategy-level ignore masks an inherited directive. |
 
 There is no separate “require but do not repair” policy. That is already the
-safe behavior of `enforce` for a setting with no verified repair capability.
+safe behavior of `enforce` for a setting with no verified repair capability:
+retain degraded evidence without attempting mutation.
 Whether a repair exists is registry/runtime capability, not a fourth operator
 policy. A later advanced control may narrow permission to use an available
-repair, but absence of that control must remain fail-closed.
+repair, but absence of that control cannot manufacture input authority.
 
 The base editor therefore offers `Not included`, `Included · Enforce`, and
 `Included · Observe`. The strategy editor offers the four source states in the
@@ -294,53 +299,41 @@ cannot publish the new reference until Linux has reviewed the complete
 directives intact; cloning is not required merely to establish its first Base.
 
 Accepting the rebase updates the strategy draft and requires normal validation
-and publication. Canceling it changes nothing. Publication and activation
-remain separate operations, so a newly published revision cannot silently
-replace the active runtime strategy.
+and publication. Canceling it changes nothing. Publication and runtime control
+remain separate operations. The native workflow follows successful Strategy
+publication with a normal next-boundary request when the process is active, or
+a visible Start selection when stopped, so it cannot silently replace the
+Strategy in the current battle.
 
-## Runtime gates and action authority
+Attach is the exception only when the operator explicitly requests it. The
+server snapshots the accepted Strategy ID, request ID, and complete resolved
+definition fingerprint under the control-writer lock. That immutable snapshot
+owns compatibility and adoption for the in-flight Attach; later draft,
+publication, or selection changes apply only at a later safe boundary.
 
-At a Home/new-run boundary, an enforced mismatch blocks the strategy from
-advancing past the applicable configuration gate unless a verified repair
-owns and confirms the transition.
+## Runtime validation and action authority
 
-If an enforced mismatch is discovered in an already running battle, the
-runtime must not express that condition as global Pause. `RuntimeActionAuthority`
-creates a run-scoped Strategy Action Gate and answers every decision through
-four typed classes:
+At an already-safe Home/new-run boundary, an enforced mismatch selects its
+implemented bounded repair. A successful repair records verified evidence; an
+unavailable or exhausted repair records the exact degraded result and releases
+the route so automation can continue. In an already-running battle the runtime
+does not manufacture Home, Surrender, restart, or other mutation authority: it
+completes validation degraded and keeps the battle running.
 
-1. **Observation** has no input authority. Capture, detection, OCR, state and
-   wave updates, activation tracking, passive evidence, and status publication
-   continue under every gate and under global Pause.
-2. **Auxiliary collection** covers only explicitly named independently safe
-   collectors. An active Strategy Gate may allow the in-battle ad gem and its
-   bounded floating-gem scan, Daily Gem Store, Daily and Weekly Mission
-   rewards, Event Mission rewards, and Guild chest rewards. Their schedulers,
-   badge checks, Sunday hold, claim bounds, eligibility, and cooldowns remain
-   authoritative; the gate never makes a reward due.
-3. **Strategy action** covers strategy and mission ticks, overlays,
-   configuration, Perks navigation, game-speed correction, upgrade-detail
-   handling, auto-return, and unknown-state recovery.
-4. **Lifecycle action** covers New Battle, Go Home, Surrender, Exit Battle,
-   restart, and every other transition that can alter the run boundary.
+`RuntimeActionAuthority` still answers every decision through four typed
+classes: observation, auxiliary collection, strategy action, and lifecycle
+action. Observation continues under every state. Normal strategy, handler,
+collector, and lifecycle policy remains eligible after a recoverable validation
+result. Global Pause blocks input only when it is explicit operator intent or
+the runtime reports a catastrophic loss of control authority, exact-target
+ownership, source restoration after lifecycle input, or dispatched-input
+certainty. Exclusive screen owners remain valid only while their currently
+bounded action is in progress; a recoverable result must release them.
 
-Normal running retains its established policy. Global Pause is stronger than
-the Strategy Gate: observation continues, but every input and handler action,
-including auxiliary collection, is blocked. Activity continuity, run
-initialization, session preflight, exclusive validation, and other exclusive
-screen owners are also stronger and block all auxiliary collectors; the
-matching owner alone may execute its already-bounded internal validation or
-transition. Initialization is therefore not reclassified as a terminal
-Strategy Gate.
-
-The gate is bound to the authoritative run identity when one is available and
-survives temporary menus and overlays in that same battle. It changes only for
-successful validation, an accepted retry or run-scoped waiver, an explicit
-active-battle strategy/policy change, a separately authorized repair
-transition, a changed authoritative run identity, or a genuine natural battle
-boundary. An `observe`/notification-only mismatch records evidence without
-activating it. Natural Game Over releases the gate before ordinary terminal
-handling; the gate itself cannot create that boundary.
+Structured Strategy Action Gate state remains available for compatibility with
+older runtimes and clients. Current configuration, validation, evidence,
+repair, and reporting failures do not activate it, and legacy
+session-preflight gates are cleared into completed degraded evidence.
 
 Multi-screen auxiliary collectors claim an exclusive route from freshly
 verified `RUNNING` evidence before their first input. Every swipe or tap
@@ -354,13 +347,10 @@ authority check on every tap without capture/OCR work in its timing-critical
 loop, and its cadence is anchored to elapsed time so guard latency does not
 accumulate.
 
-The gate does not authorize Surrender, Exit Battle, restart, or a manufactured
-run boundary, and it neither writes `PAUSED` nor changes `AUTOMATION.state`.
-The separately guarded repair workflow still requires its profile/operator
-authority. The control surface states the distinction directly: “Strategy
-actions blocked — observation and safe collectors remain active.” The full
-matrix and structured status contract are documented in
-[`runtime.md`](runtime.md#typed-runtime-action-authority).
+Recoverable validation does not authorize Surrender, Exit Battle, restart, or
+a manufactured run boundary, and it writes neither `PAUSED` nor a Strategy
+Gate. The full policy and authority matrix are documented in
+[`runtime.md`](runtime.md#global-runtime-failure-policy).
 
 ## GUI contract
 
@@ -389,8 +379,9 @@ The authoring surface uses one editor framework for bases and strategies:
   Base and must accept the same backend semantic review before publication;
   this does not clone, rename, or activate the strategy.
 - Review & Publish displays source changes, resolved changes, validation
-  results, generated-plan identity, and whether the active strategy will remain
-  unchanged after publication.
+  results, generated-plan identity, and that the current battle remains
+  unchanged while the native workflow queues the publication for the next
+  boundary when the process is active or selects it for Start when stopped.
 
 The API returns the same source, policy, resolution, provenance, capability,
 and validation vocabulary so the WPF client does not duplicate resolver rules.
@@ -563,12 +554,8 @@ carry the typed action-authority outcome and require a separate explicit retry.
 **Capture current setup as…** does not define another loadout format: one
 runtime-owned `forced_serialization` bundle is projected through the existing
 Farm setting registry, setting normalizers, local loadout selectors, and
-Module preset store. Normally Capture requests that serialization itself. If
-an active-battle Return Control has already persisted an exact forced-save
-receipt and Paused on a trusted Strategy mismatch, Capture may instead consume
-that same process-local typed acquisition. The ledger labels this as
-`retained_return_control_refresh`; it performs no new device input, does not
-resolve Return Control, and cannot be reconstructed from the durable receipt.
+Module preset store. Capture requests that serialization under its own explicit
+workflow; Return Control does not retain mismatch-owned capture authority.
 Only complete observations authorized by the resolved mapping's explicit
 validation or compatibility allowlist enter `settings`. Unmapped, incomplete,
 unsupported, or not-yet-authorable values remain explicit `unresolved` rows
@@ -576,16 +563,13 @@ with their source check IDs and safe observed value where available. The
 preview includes redacted acquisition timing and binding fingerprints plus
 process/scope/round workflow binding; cached or passive reads cannot be
 relabelled as a capture.
-It also fingerprints bounded capture-origin metadata: a newly requested
-refresh remains distinguishable from a process-local Return Control reuse after
-the mutable workflow ledger moves on. That origin is review provenance only
-and cannot replay the acquisition or grant action authority.
+It also fingerprints bounded capture-origin metadata. That origin is review
+provenance only and cannot replay the acquisition or grant action authority.
 
 If the guarded refresh restores its source, mapping, projection, acquisition,
 or incomplete identity failures are reported without changing the operator's
 prior action-authority state. A fresh active/resumable battle contradiction
-enters a running-battle Strategy Gate: observation and explicitly safe gem
-collectors may continue, while Strategy and lifecycle input yield. A proved
+fails Capture, releases its owner, and preserves that prior authority. A proved
 Home New contradiction, or an attempted lifecycle transition whose source
 restoration cannot be proved, persists Pause because the input owner is no
 longer safe. Ready or terminal receipt-write failure retains the exact
@@ -663,8 +647,9 @@ into the runtime evaluator:
   richer authoring model.
 
 Atomic publication, optimistic fingerprint checks, immutable bundled sources,
-safe IDs, file-size limits, no symlink following, and separate activation are
-existing security and concurrency properties that the new stores must retain.
+safe IDs, file-size limits, no symlink following, and separation between the
+authoring write and any later runtime-control request are existing security and
+concurrency properties that the new stores must retain.
 
 ## Migration and delivery
 
@@ -694,10 +679,10 @@ Delivery is split into independently reviewable slices:
    Windows runtime smoke checks on 2026-08-02 with no blocking issue reported;
    that report is useful runtime evidence but is not exhaustive Windows
    validation.
-4. Runtime Strategy Action Gate: implement and validate the typed observation,
-   auxiliary-collection, strategy-action, and lifecycle-action matrix, guarded
-   collector routes, structured status, and distinct native presentation before
-   relying on running-battle enforcement from newly editable settings.
+4. Runtime failure policy: retain the typed observation,
+   auxiliary-collection, strategy-action, and lifecycle-action matrix plus
+   structured compatibility status, while ensuring newly editable setting
+   failures repair only at safe boundaries or continue with degraded evidence.
 
 Each slice should be completed and validated in its own development thread.
 The actionable sequence is tracked in the
@@ -719,7 +704,8 @@ registered editor type with server-declared managed controls or an honest fixed
 presentation, retains dormant Ignore values and unknown Ultimate Weapon
 fields, and keeps validation, resolution, publication, and runtime authority
 in Python. The runtime-owned Strategy Gate snapshot and native banner are
-separate from requested and acknowledged Pause.
+retained only for compatibility and remain separate from requested and
+acknowledged Pause.
 
 Custom Strategy display-name changes use ordinary reviewed publication, so the
 stable ID does not change and the next logical version is published under the

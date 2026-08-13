@@ -155,6 +155,29 @@ def test_png_capture_reports_connected_malformed_data():
     )
 
 
+def test_png_capture_preserves_landscape_geometry_as_typed_evidence():
+    source = np.full((1080, 1920, 3), 32, dtype=np.uint8)
+    encoded_ok, encoded = cv2.imencode(".png", source)
+    assert encoded_ok
+
+    with (
+        patch("core.ss_capture.screencap_png", return_value=encoded.tobytes()),
+        patch("core.ss_capture.log") as runtime_log,
+    ):
+        result = capture_adb_screenshot_result()
+
+    assert result.frame is None
+    assert result.failure is ScreenshotFailure.UNSUPPORTED_GEOMETRY
+    assert result.adb_target == "localhost:5555"
+    assert (result.native_width, result.native_height) == (1920, 1080)
+    assert result.captured_at is not None
+    assert result.detail == (
+        "Unsupported emulator resolution 1920x1080; supported resolutions "
+        "are 720x1280, 1080x1920."
+    )
+    runtime_log.assert_not_called()
+
+
 def test_png_capture_can_silence_an_expected_transport_outage():
     with (
         patch("core.ss_capture.screencap_png", return_value=None) as capture,

@@ -83,6 +83,27 @@ integration work. There is no need to fingerprint or attest a worker's
 complete source tree for emulator access. Branch, HEAD, and an ordinary dirty
 summary are sufficient diagnostic context in a handoff or lease log.
 
+The save-mapping control-surface workflow is one narrow operator-maintenance
+exception to the feature-branch route, not general permission for agents or
+application features to write `develop`. It accepts only a durable server-
+generated mapping candidate while the standing `main` and `develop` worktrees
+are clean, at their branch tips, and exactly synchronized. After an exact read-
+only review and a separate operator confirmation, the production server may
+construct one standardized child commit containing only the fixed, tracked
+canonical mapping JSON targets and fast-forward the clean linked `develop`
+checkout to it. The client supplies no path, branch, target, patch, message,
+identity, or arbitrary value.
+
+A private durable transaction binds the reviewed base, target hashes and modes,
+generated commit, and candidate provenance through production promotion and a
+fresh canonical decode. It permits only exact idempotent recovery; it never
+authorizes cleanup, reset, backward ref movement, production promotion, service
+restart, runtime-control change, or emulator input. Any conflict, unsupported
+proposal owner, unequal branch tips, unrelated work, or uncertain state leaves
+the routine lane and returns to an ordinary owned feature outcome. The direct
+commit still receives the complete `develop` checkpoint and normal production
+procedure before deployment.
+
 ### Staging, promotion, and rollback
 
 The project has no standing staging branch. The selected candidate worktree
@@ -316,7 +337,10 @@ minimal record contains:
 control surface binds a request to the fresh runtime-owned session ID, PID, ADB
 target, screen, and battle evidence it has already verified against the held
 runtime lock. A conflicting live request returns `busy`/HTTP 409. The fixed
-30-second heartbeat expiry is server policy rather than client negotiation.
+120-second heartbeat expiry is server policy rather than client negotiation.
+This window includes production quiescence and acknowledgement time, leaving a
+bounded interval for guarded multi-screen development work without relying on
+client timing or an indefinite hold.
 
 There is no source registration, complete worktree fingerprint, secret bearer
 token, client authentication handshake, service epoch, capability negotiation,

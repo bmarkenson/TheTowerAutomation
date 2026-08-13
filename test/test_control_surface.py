@@ -9,7 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -23,6 +23,7 @@ from core.action_authority import (
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
+    INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
     VALID_GAME_SPEED_TARGETS,
 )
 from core.development_adb_input import validate_active_lease_status
@@ -36,6 +37,7 @@ from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
 from core.gate_decisions import build_gate_decision_options
+from core.player_save_mapping_develop_integration import SaveMappingIntegrationError
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
 
 
@@ -143,6 +145,129 @@ def _fresh_runtime_lock(root: Path, *, state: str):
     lock_handle = lock_path.open("r", encoding="utf-8")
     fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     return lock_handle
+
+
+def _fresh_exact_runtime_lock(
+    root: Path,
+    *,
+    runtime_id: str,
+    target_generation: int,
+    target: str = "localhost:5555",
+):
+    lock_path = root / "logs" / "automation-localhost_5555.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "runtime_id": runtime_id,
+                "target": target,
+                "target_generation": target_generation,
+                "state": "held",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    lock_handle = lock_path.open("r", encoding="utf-8")
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return lock_handle
+
+
+def _directive_acknowledgements(
+    control: dict[str, object],
+    *,
+    acknowledged_at: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "state": {
+            "value": control["state"],
+            "request_id": control["state_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "mode": {
+            "value": control["mode"],
+            "request_id": control["mode_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "game_speed_target": {
+            "value": f"x{control['game_speed_target']:.1f}",
+            "request_id": control["game_speed_target_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "adb_target": {
+            "value": f"localhost:{control['adb_port']}",
+            "request_id": control["adb_port_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+        "strategy": {
+            "value": control["strategy"],
+            "request_id": control["strategy_request_id"],
+            "acknowledged_at": acknowledged_at,
+        },
+    }
+
+
+def _publish_runtime_acknowledgements(
+    root: Path,
+    *,
+    now: datetime,
+    owner: dict[str, object],
+    acknowledgements: dict[str, object],
+    runtime_active: bool = True,
+    strategy_scope: dict[str, object] | None = None,
+) -> None:
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope="ack-scope",
+        primary_state="RUNNING",
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        root / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    assert publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        runtime_active=runtime_active,
+        now=now.timestamp(),
+        acknowledgements=acknowledgements,
+        control_model={
+            "schema_version": 1,
+            "observation": {
+                "schema_version": 1,
+                "observation_id": f"{owner['runtime_id']}:1",
+                "observed_at": now.isoformat(timespec="seconds"),
+                "primary_state": "RUNNING",
+                "home_battle_control": "UNKNOWN",
+                "game_state": "active_battle",
+                "active_battle": True,
+                "activity_scope_run_id": "ack-scope",
+                "target_generation": owner.get("target_generation"),
+            },
+            "battle_lifecycle": {"active_battle_adopted": True},
+            "strategy_scope": strategy_scope
+            or {
+                "startup_default": "farm_t18",
+                "active_battle": "farm_t18",
+                "pending_next_boundary": None,
+                "pending_active_battle": None,
+            },
+        },
+    )
+
+
+def _control_with_all_request_identities(root: Path) -> dict[str, object]:
+    store = ControlDirectiveStore(root / "logs" / "automation_ctl.json")
+    store.set_state("RUNNING", source="test")
+    store.set_mode("WAIT", source="test")
+    store.set_game_speed_target(4.5, source="test")
+    store.set_adb_port(5555, source="test")
+    store.set_strategy("farm_t18", source="test")
+    return store.status()
 
 
 def _write_current_run_scope(root: Path, *, run_id: str) -> None:
@@ -302,6 +427,49 @@ def test_control_store_persists_active_battle_strategy_adoption(tmp_path):
     )
 
 
+def test_control_store_defers_only_exact_active_battle_strategy_request(tmp_path):
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    accepted = store.set_strategy(
+        "farm_t18",
+        apply_mode="active_battle",
+        source="test",
+    )
+    request_id = accepted["strategy_request_id"]
+
+    assert store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        "stale-request",
+        source="test-deferral",
+    ) is None
+    assert store.status()["strategy_apply_mode"] == "active_battle"
+
+    deferred = store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        request_id,
+        source="test-deferral",
+    )
+
+    assert deferred is not None
+    assert deferred["strategy_apply_mode"] == "next_boundary"
+    assert deferred["strategy_request_id"] == request_id
+    assert deferred["updated_by"] == "test-deferral"
+
+    replacement = store.set_strategy(
+        "farm_t19",
+        apply_mode="active_battle",
+        source="newer-request",
+    )
+    assert store.defer_strategy_request_to_next_boundary(
+        "farm_t18",
+        request_id,
+    ) is None
+    assert store.status()["strategy_request_id"] == replacement[
+        "strategy_request_id"
+    ]
+    assert store.status()["strategy_apply_mode"] == "active_battle"
+
+
 def test_control_store_rejects_unknown_strategy_apply_mode(tmp_path):
     with pytest.raises(ValueError, match="Strategy apply mode"):
         ControlDirectiveStore(tmp_path / "automation_ctl.json").set_strategy(
@@ -392,12 +560,327 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
         "stale": False,
     }
     assert status["runtime"]["instances"][0]["active"]
-    assert status["acknowledgements"]["state"]["acknowledges_current"]
-    assert status["acknowledgements"]["mode"]["acknowledges_current"]
-    assert status["acknowledgements"]["game_speed_target"]["acknowledges_current"]
-    assert status["acknowledgements"]["adb_target"]["acknowledges_current"]
-    assert status["acknowledgements"]["strategy"]["value"] == "farm_t18"
-    assert status["acknowledgements"]["strategy"]["acknowledges_current"]
+    assert status["acknowledgements"] == {
+        "state": None,
+        "mode": None,
+        "game_speed_target": None,
+        "adb_target": None,
+        "strategy": None,
+    }
+
+
+def test_runtime_acknowledgements_survive_more_than_tail_window_of_log_output(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-long-log",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+    }
+    action_log = tmp_path / "logs" / "actions.log"
+    audit_prefix = "".join(
+        f"[INFO {now:%Y-%m-%d %H:%M:%S}] [CTRL] {field} acknowledged\n"
+        for field in acknowledgements
+        if field != "schema_version"
+    )
+    noisy_line = (
+        f"[DEBUG {now:%Y-%m-%d %H:%M:%S}] " + ("x" * 1024) + "\n"
+    )
+    action_log.write_text(
+        audit_prefix
+        + (noisy_line * 300)
+        + f"[STATUS {now:%Y-%m-%d %H:%M:%S}] "
+        "State=RUNNING | Wave=500 | Coins/min=1.0T\n",
+        encoding="utf-8",
+    )
+    assert action_log.stat().st_size > 262_144
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-long-log",
+        target_generation=7,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    for field in (
+        "state",
+        "mode",
+        "game_speed_target",
+        "adb_target",
+        "strategy",
+    ):
+        assert status["acknowledgements"][field]["acknowledges_current"]
+        assert status["acknowledgements"][field]["request_id"] == (
+            acknowledgements[field]["request_id"]
+        )
+    assert status["control_model"]["action_authority"]["effective"] == (
+        "enabled"
+    )
+    assert status["control_model"]["when_battle_ends"]["acknowledged"]
+    assert status["control_model"]["strategy_scope"] == {
+        "startup_default": "farm_t18",
+        "active_battle": "farm_t18",
+        "pending_next_boundary": None,
+        "pending_active_battle": None,
+        "request_id": control["strategy_request_id"],
+        "observation_only": False,
+        "degradation": None,
+    }
+
+
+def test_runtime_acknowledgements_survive_action_log_rotation(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-rotated-log",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+    }
+    action_log = tmp_path / "logs" / "actions.log"
+    action_log.write_text(
+        f"[INFO {now:%Y-%m-%d %H:%M:%S}] old acknowledgement audit\n",
+        encoding="utf-8",
+    )
+    action_log.replace(action_log.with_suffix(".log.1"))
+    action_log.write_text(
+        f"[STATUS {now:%Y-%m-%d %H:%M:%S}] "
+        "State=RUNNING | Wave=501 | Coins/min=1.1T\n",
+        encoding="utf-8",
+    )
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-rotated-log",
+        target_generation=4,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert all(
+        receipt is not None and receipt["acknowledges_current"]
+        for receipt in status["acknowledgements"].values()
+    )
+    assert status["control_model"]["actions"]["capture_current_setup"][
+        "code"
+    ] == "available"
+
+
+@pytest.mark.parametrize("legacy_strategy_receipt", (None, "farm_t19"))
+def test_authoritative_strategy_scope_wins_over_legacy_acknowledgements(
+    tmp_path,
+    legacy_strategy_receipt,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    if legacy_strategy_receipt is None:
+        acknowledgements["strategy"] = None
+    else:
+        acknowledgements["strategy"] = {
+            "value": legacy_strategy_receipt,
+            "request_id": control["strategy_request_id"],
+            "acknowledged_at": now.isoformat(timespec="seconds"),
+        }
+    owner = {
+        "runtime_id": "runtime-strategy-scope",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 6,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-strategy-scope",
+        target_generation=6,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+        strategy_scope={
+            "startup_default": "farm_t19_ad_assist",
+            "active_battle": "farm_t19_ad_assist",
+            "pending_next_boundary": None,
+            "pending_active_battle": None,
+        },
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert status["acknowledgements"]["strategy"] is None or not status[
+        "acknowledgements"
+    ]["strategy"]["acknowledges_current"]
+    assert status["control_model"]["strategy_scope"] == {
+        "startup_default": "farm_t19_ad_assist",
+        "active_battle": "farm_t19_ad_assist",
+        "pending_next_boundary": None,
+        "pending_active_battle": None,
+        "request_id": control["strategy_request_id"],
+        "observation_only": False,
+        "degradation": None,
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "runtime_id",
+        "pid",
+        "adb_target",
+        "target_generation",
+        "age_seconds",
+    ),
+    (
+        ("prior-runtime", os.getpid(), "localhost:5555", 9, 0),
+        ("current-runtime", os.getpid() + 1000, "localhost:5555", 9, 0),
+        ("current-runtime", os.getpid(), "localhost:5565", 9, 0),
+        ("current-runtime", os.getpid(), "localhost:5555", 8, 0),
+        ("current-runtime", os.getpid(), "localhost:5555", 9, 31),
+    ),
+)
+def test_runtime_acknowledgements_reject_stale_or_wrong_runtime_owner(
+    tmp_path,
+    runtime_id,
+    pid,
+    adb_target,
+    target_generation,
+    age_seconds,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="current-runtime",
+        target_generation=9,
+    )
+    published_at = now - timedelta(seconds=age_seconds)
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=published_at,
+        owner={
+            "runtime_id": runtime_id,
+            "pid": pid,
+            "adb_target": adb_target,
+            "target_generation": target_generation,
+        },
+        acknowledgements=acknowledgements,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert all(
+        receipt is None for receipt in status["acknowledgements"].values()
+    )
+    assert status["control_model"]["action_authority"]["effective"] in {
+        "pending",
+        "unknown",
+    }
+
+
+def test_same_value_request_stays_pending_until_exact_request_id_replaces_ack(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    store = ControlDirectiveStore(tmp_path / "logs" / "automation_ctl.json")
+    first = store.set_state("RUNNING", source="first")
+    store.set_mode("WAIT", source="test")
+    store.set_game_speed_target(4.5, source="test")
+    store.set_adb_port(5555, source="test")
+    store.set_strategy("farm_t18", source="test")
+    first_control = store.status()
+    acknowledgements = _directive_acknowledgements(
+        first_control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-request-replacement",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 12,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-request-replacement",
+        target_generation=12,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+    )
+    second = store.set_state("RUNNING", source="replacement")
+    try:
+        pending = _service(tmp_path).status(now=now.timestamp())
+        assert pending["acknowledgements"]["state"]["request_id"] == (
+            first["state_request_id"]
+        )
+        assert not pending["acknowledgements"]["state"][
+            "acknowledges_current"
+        ]
+        assert pending["control_model"]["action_authority"]["effective"] == (
+            "pending"
+        )
+
+        acknowledgements["state"] = {
+            "value": "RUNNING",
+            "request_id": second["state_request_id"],
+            "acknowledged_at": now.isoformat(timespec="seconds"),
+        }
+        _publish_runtime_acknowledgements(
+            tmp_path,
+            now=now,
+            owner=owner,
+            acknowledgements=acknowledgements,
+        )
+        current = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert current["acknowledgements"]["state"]["request_id"] == (
+        second["state_request_id"]
+    )
+    assert current["acknowledgements"]["state"]["acknowledges_current"]
+    assert current["control_model"]["action_authority"]["effective"] == (
+        "enabled"
+    )
 
 
 def test_status_exposes_scope_bound_current_save_perks(tmp_path):
@@ -423,6 +906,300 @@ def test_status_exposes_scope_bound_current_save_perks(tmp_path):
 
     assert status["current_battle_perks"] == presentation
     assert "current_battle_perks_v1" in status["capabilities"]
+
+
+def test_status_exposes_local_mapping_lifecycle_without_blocking_health(tmp_path):
+    mapping_status = {
+        "schema_version": 1,
+        "available": True,
+        "blocks_startup": False,
+        "items": [
+            {
+                "mapping_id": "data-9-game-1101",
+                "check_id": "modules",
+                "value_kind": "module_info_index",
+                "raw_value": 41,
+                "semantic_value": "Being Annihilator",
+                "scope": {
+                    "slot_key": "cannon_assist",
+                    "family": "cannon",
+                    "role": "assist",
+                },
+                "state": "active_local",
+                "reason": "canonical integration is pending",
+            }
+        ],
+        "counts": {"active_local": 1},
+        "reason": "",
+    }
+    lock_handle = _fresh_runtime_lock(tmp_path, state="HOME_SCREEN")
+    try:
+        service = _service(tmp_path)
+        candidate_status = {
+            "schema_version": 2,
+            "capability": "save_mapping_review_status_v2",
+            "available": True,
+            "items": [],
+            "counts": {},
+            "reason": "",
+        }
+        service.save_mapping_integration_manager.status = Mock(
+            return_value=candidate_status
+        )
+        with patch(
+            "core.control_surface.confirmed_local_mapping_status",
+            return_value=mapping_status,
+        ) as status_projection:
+            status = service.status()
+    finally:
+        lock_handle.close()
+
+        status_projection.assert_called_once_with(
+            store=service.confirmed_local_mapping_store,
+            candidate_store=service.mapping_candidate_store,
+            repository_root=service.repository_root,
+            candidate_status=candidate_status,
+        )
+    assert status["confirmed_local_mappings"] == mapping_status
+    assert status["healthy"]
+    assert not status["confirmed_local_mappings"]["blocks_startup"]
+
+
+def test_save_mapping_integration_catalog_and_review_are_non_mutating(tmp_path):
+    service = _service(tmp_path)
+    catalog = {
+        "schema_version": 2,
+        "capability": "save_mapping_develop_integration_v1",
+        "available": True,
+        "reason": "",
+        "repository": {},
+        "items": [],
+    }
+    review = {
+        "operation": "review",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "proposal": {"schema_version": 2, "targets": []},
+        "integrate": {
+            "available": False,
+            "code": "repository_not_synchronized",
+            "reason": "pending promotion",
+        },
+    }
+    service.save_mapping_integration_manager.catalog = Mock(return_value=catalog)
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+
+    assert service.save_mapping_integration() == catalog
+    assert service.apply_save_mapping_integration(
+        {
+            "operation": "review",
+            "candidate_record_id": "a" * 64,
+        }
+    ) == review
+    service.save_mapping_integration_manager.review.assert_called_once_with(
+        candidate_record_id="a" * 64,
+    )
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_integrate_requires_exact_review_and_logs_one_pair(tmp_path):
+    service = _service(tmp_path)
+    review = {
+        "operation": "review",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "proposal": {
+            "schema_version": 2,
+            "targets": [{"path": "one.json"}, {"path": "two.json"}],
+        },
+        "integrate": {"available": True, "code": "", "reason": ""},
+    }
+    integrated = {
+        "operation": "integrate",
+        "disposition": "committed_to_develop",
+        "integration_commit": "e" * 40,
+        "committed": True,
+        "promoted": False,
+        "mapping_invariants": "passed",
+    }
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+    service.save_mapping_integration_manager.integrate = Mock(
+        return_value=integrated
+    )
+
+    result = service.apply_save_mapping_integration(
+        {
+            "operation": "integrate",
+            "candidate_record_id": "a" * 64,
+            "reviewed_proposal_fingerprint": "b" * 64,
+        }
+    )
+
+    assert result == integrated
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    assert activity.count("[ACTION ") == 1
+    assert activity.count("[RESULT ") == 1
+    operation_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if "[OPERATION] id=" in line
+    ]
+    assert len(set(operation_ids)) == 1
+    assert operation_ids[0].startswith(
+        "save-mapping-aaaaaaaaaaaa-bbbbbbbbbbbb-"
+    )
+    assert len(operation_ids[0].rsplit("-", 1)[1]) == 12
+    assert "committed=true promoted=false mapping_invariants=passed" in activity
+
+
+def test_save_mapping_integrate_attempts_have_unique_audit_identities(tmp_path):
+    service = _service(tmp_path)
+    review = {
+        "reviewed_proposal_fingerprint": "b" * 64,
+        "proposal": {"schema_version": 2, "targets": [{"path": "one.json"}]},
+        "integrate": {"available": True, "code": "", "reason": ""},
+    }
+    service.save_mapping_integration_manager.review = Mock(return_value=review)
+    service.save_mapping_integration_manager.integrate = Mock(
+        side_effect=SaveMappingIntegrationError(
+            "commit_state_uncertain",
+            "Inspect main, develop, and the transaction.",
+        )
+    )
+    request = {
+        "operation": "integrate",
+        "candidate_record_id": "a" * 64,
+        "reviewed_proposal_fingerprint": "b" * 64,
+    }
+
+    for _ in range(2):
+        with pytest.raises(ControlSurfaceRequestError) as failure:
+            service.apply_save_mapping_integration(request)
+        assert failure.value.status == 503
+        assert failure.value.code == "commit_state_uncertain"
+
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    action_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if line.startswith("[ACTION ")
+    ]
+    result_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if line.startswith("[RESULT ")
+    ]
+    assert len(action_ids) == 2
+    assert len(set(action_ids)) == 2
+    assert sorted(action_ids) == sorted(result_ids)
+    assert activity.count("disposition=unconfirmed code=commit_state_uncertain") == 2
+
+
+def test_post_ref_transaction_write_failure_is_audited_as_unconfirmed(tmp_path):
+    service = _service(tmp_path)
+    service.save_mapping_integration_manager.integrate = Mock(
+        side_effect=SaveMappingIntegrationError(
+            "transaction_write_failed",
+            "The durable phase update could not be confirmed.",
+        )
+    )
+
+    with pytest.raises(ControlSurfaceRequestError) as failure:
+        service.apply_save_mapping_integration(
+            {
+                "operation": "integrate",
+                "candidate_record_id": "a" * 64,
+                "reviewed_proposal_fingerprint": "b" * 64,
+            }
+        )
+
+    assert failure.value.status == 503
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    assert "disposition=unconfirmed code=transaction_write_failed" in activity
+
+
+def test_legacy_save_mapping_prepare_operation_is_rejected_without_audit(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ControlSurfaceRequestError, match="review or integrate"):
+        service.apply_save_mapping_integration(
+            {
+                "operation": "prepare",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "c" * 64,
+                "reviewed_proposal_fingerprint": "b" * 64,
+            }
+        )
+
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_integrate_audits_stale_fingerprint_rejection(tmp_path):
+    service = _service(tmp_path)
+    service.save_mapping_integration_manager.integrate = Mock(
+        side_effect=SaveMappingIntegrationError(
+            "reviewed_proposal_stale",
+            "The reviewed proposal changed.",
+        )
+    )
+
+    with pytest.raises(ControlSurfaceRequestError) as failure:
+        service.apply_save_mapping_integration(
+            {
+                "operation": "integrate",
+                "candidate_record_id": "a" * 64,
+                "reviewed_proposal_fingerprint": "d" * 64,
+            }
+        )
+
+    assert failure.value.status == 409
+    assert failure.value.code == "reviewed_proposal_stale"
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    assert activity.count("[ACTION ") == 1
+    assert activity.count("[RESULT ") == 1
+    assert "disposition=failed code=reviewed_proposal_stale" in activity
+
+
+@pytest.mark.parametrize(
+    ("candidate_id", "fingerprint"),
+    [
+        ("a" * 63, "b" * 64),
+        ("A" * 64, "b" * 64),
+        ("a" * 63 + "\n", "b" * 64),
+        ("a" * 64, "b" * 63 + "\n"),
+    ],
+)
+def test_save_mapping_integrate_rejects_malformed_identity_without_audit(
+    tmp_path,
+    candidate_id,
+    fingerprint,
+):
+    service = _service(tmp_path)
+
+    with pytest.raises(ControlSurfaceRequestError):
+        service.apply_save_mapping_integration(
+            {
+                "operation": "integrate",
+                "candidate_record_id": candidate_id,
+                "reviewed_proposal_fingerprint": fingerprint,
+            }
+        )
+
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_integration_requests_are_exact_shape(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ControlSurfaceRequestError, match="accepts exactly"):
+        service.apply_save_mapping_integration(
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+                "workspace_id": "b" * 64,
+                "path": "/client/supplied/path",
+            }
+        )
 
 
 def test_status_never_exposes_perks_from_another_run(tmp_path):
@@ -509,8 +1286,10 @@ def test_status_serializes_fresh_runtime_owned_strategy_gate(tmp_path):
         authority.snapshot(now=now.timestamp()),
         now=now.timestamp(),
     )
+    service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
-        status = _service(tmp_path).status(now=now.timestamp())
+        status = service.status(now=now.timestamp())
     finally:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
         lock_handle.close()
@@ -683,6 +1462,885 @@ def test_strategy_gate_status_never_scrapes_warning_text(tmp_path):
     assert gate["stale"] is True
 
 
+def _host_maintenance_context(
+    root: Path,
+    *,
+    strategy: str = "farm_t18",
+    control_state: str = "RUNNING",
+    runtime_adb_port: int = 5555,
+    windows_adb_port: int = 5555,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    run_id = "run-emulator-recovery"
+    owner = {
+        "runtime_id": "runtime-emulator-recovery",
+        "pid": os.getpid(),
+        "adb_target": f"localhost:{runtime_adb_port}",
+        "target_generation": 11,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        root,
+        runtime_id=owner["runtime_id"],
+        target_generation=owner["target_generation"],
+        target=owner["adb_target"],
+    )
+    _write_current_run_scope(root, run_id=run_id)
+    service = _service(root)
+    service.control_store.set_strategy(
+        "farm_t19" if strategy == "gc_farm_t19_experiment" else strategy,
+        source="test",
+    )
+    control = service.control_store.set_state(control_state, source="test")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=control_state != "RUNNING",
+        active_battle=True,
+        battle_scope=run_id,
+        primary_state="RUNNING",
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        root / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+        control_model={
+            "schema_version": 1,
+            "observation": None,
+            "strategy_scope": {"active_battle": strategy},
+        },
+    )
+    listener = {
+        "host_id": "WINDOWS-HOST",
+        "adb_port": windows_adb_port,
+        "process_id": 90,
+        "process_started_at": "2026-08-10T10:00:00.1234567+00:00",
+        "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+        "instance_name": "Nougat32",
+    }
+    return (
+        now,
+        run_id,
+        owner,
+        lock_handle,
+        service,
+        control,
+        authority,
+        publisher,
+        listener,
+    )
+
+
+def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    run_id = "run-emulator-recovery"
+    owner = {
+        "runtime_id": "runtime-emulator-recovery",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 11,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id=owner["runtime_id"],
+        target_generation=owner["target_generation"],
+    )
+    _write_current_run_scope(tmp_path, run_id=run_id)
+    service = _service(tmp_path)
+    service.control_store.set_strategy("farm_t18", source="test")
+    control = service.control_store.set_state("RUNNING", source="test")
+    bound_runtime = {
+        **owner,
+        "state_request_id": control["state_request_id"],
+    }
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope=run_id,
+        primary_state="RUNNING",
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+        control_model={
+            "schema_version": 1,
+            "observation": None,
+            "strategy_scope": {"active_battle": "farm_t18"},
+        },
+    )
+    listener = {
+        "host_id": "WINDOWS-HOST",
+        "adb_port": 5555,
+        "process_id": 90,
+        "process_started_at": "2026-08-10T10:00:00+00:00",
+        "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+        "instance_name": "Nougat32",
+    }
+    detector_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "current_run_id": run_id,
+        "current_strategy": "farm_t18",
+        "status": "automatic_ready",
+        "automatic_ready": True,
+        "reason": "two slow runs and sustained handle growth",
+        "candidate_battle_ids": ["BattleSlow1", "BattleSlow2"],
+        "baseline_battle_ids": ["BattleBase1", "BattleBase2", "BattleBase3"],
+        "candidate_cph_ratio": 0.88,
+        "individual_cph_ratios": [0.87, 0.89],
+        "effective_game_speed_ratio": 0.99,
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "sample_count": 120,
+            "handle_ratio": 1.9,
+            "handle_delta": 4_500,
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=detector_ready,
+        ) as detector:
+            requested = service.apply_host_maintenance(
+                {"operation": "request", **listener},
+                now=now.timestamp(),
+            )
+        assert detector.call_count == 1
+        assert detector.call_args.kwargs["current_strategy"] == "farm_t18"
+        maintenance = requested["host_maintenance"]["request"]
+        assert maintenance["state"] == "requested"
+        assert maintenance["runtime"] == bound_runtime
+        assert maintenance["battle_scope"] == run_id
+        assert maintenance["initiator"] == "automatic_detector"
+        assert {
+            key: maintenance["host_target"][key] for key in listener
+        } == listener
+        assert maintenance["source"] == "windows-control-surface"
+        assert maintenance["trigger"]["request_kind"] == (
+            "automatic_detector"
+        )
+        request_id = maintenance["request_id"]
+
+        authority.update_context(
+            global_pause=False,
+            active_battle=True,
+            battle_scope=run_id,
+            primary_state="RUNNING",
+            holds=(
+                AuthorityHoldState(
+                    AuthorityHold.EMULATOR_MAINTENANCE,
+                    "BlueStacks maintenance owns host and game recovery",
+                ),
+            ),
+        )
+        runtime_ack = {
+            "schema_version": 1,
+            "request_id": request_id,
+            "state": "host_restart_authorized",
+            "runtime": bound_runtime,
+            "battle_scope": run_id,
+            "high_water_wave": 2_000,
+            "intro_sprint_active": False,
+            "replay_active": False,
+            "exclude_from_degradation": True,
+            "reason": "runtime hold installed",
+            "observed_at": now.isoformat(),
+        }
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 1),
+            now=now.timestamp() + 1,
+            control_model={
+                "schema_version": 1,
+                "emulator_maintenance": runtime_ack,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+            },
+        )
+        authorized = service.status(now=now.timestamp() + 1)[
+            "host_maintenance"
+        ]
+        assert authorized["host_restart_authorized"] is True
+        assert authorized["hold_installed"] is True
+
+        mismatched_scope_ack = {
+            **runtime_ack,
+            "battle_scope": "different-run",
+        }
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 1.25),
+            now=now.timestamp() + 1.25,
+            control_model={
+                "schema_version": 1,
+                "emulator_maintenance": mismatched_scope_ack,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+            },
+        )
+        scope_mismatch = service.status(now=now.timestamp() + 1.25)[
+            "host_maintenance"
+        ]
+        assert scope_mismatch["host_restart_authorized"] is False
+        assert scope_mismatch["owner_matches_request"] is False
+
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 1.5),
+            now=now.timestamp() + 1.5,
+            control_model={
+                "schema_version": 1,
+                "emulator_maintenance": runtime_ack,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+            },
+        )
+
+        ack_payload = {
+            "operation": "acknowledge",
+            "request_id": request_id,
+            "host_id": "WINDOWS-HOST",
+            "adb_port": 5555,
+            "process_id": 90,
+            "process_started_at": "2026-08-10T10:00:00+00:00",
+            "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            "instance_name": "Nougat32",
+        }
+        acknowledged = service.apply_host_maintenance(
+            ack_payload,
+            now=now.timestamp() + 2,
+        )
+        repeated_ack = service.apply_host_maintenance(
+            ack_payload,
+            now=now.timestamp() + 3,
+        )
+        assert acknowledged["host_maintenance"]["request"]["state"] == (
+            "host_acknowledged"
+        )
+        assert repeated_ack["host_maintenance"]["request"]["host_ack"] == (
+            acknowledged["host_maintenance"]["request"]["host_ack"]
+        )
+
+        completion_payload = {
+            "operation": "complete",
+            "request_id": request_id,
+            "host_id": "WINDOWS-HOST",
+            "adb_port": 5555,
+            "process_id": 91,
+            "process_started_at": "2026-08-10T10:04:00+00:00",
+            "previous_process_id": 90,
+            "previous_process_started_at": "2026-08-10T10:00:00+00:00",
+            "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            "instance_name": "Nougat32",
+        }
+        completed = service.apply_host_maintenance(
+            completion_payload,
+            now=now.timestamp() + 4,
+        )
+        repeated_completion = service.apply_host_maintenance(
+            completion_payload,
+            now=now.timestamp() + 5,
+        )
+        assert completed["host_maintenance"]["request"]["state"] == (
+            "host_restarted"
+        )
+        assert repeated_completion["host_maintenance"]["request"] == (
+            completed["host_maintenance"]["request"]
+        )
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_host_maintenance_request_rejects_an_unready_detector(tmp_path):
+    service = _service(tmp_path)
+    with pytest.raises(ControlSurfaceRequestError) as rejected:
+        service.apply_host_maintenance({"operation": "request"})
+
+    assert rejected.value.status == 409
+    assert rejected.value.code == "emulator_degradation_not_ready"
+
+
+def test_automatic_host_maintenance_rejects_live_listener_mismatch(tmp_path):
+    (
+        now,
+        run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    detector_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "current_run_id": run_id,
+        "current_strategy": "farm_t18",
+        "status": "automatic_ready",
+        "automatic_ready": True,
+        "reason": "confirmed",
+        "candidate_battle_ids": ["slow-1", "slow-2"],
+        "baseline_battle_ids": ["base-1", "base-2", "base-3"],
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "sample_count": 120,
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=detector_ready,
+        ):
+            with pytest.raises(ControlSurfaceRequestError) as rejected:
+                service.apply_host_maintenance(
+                    {
+                        "operation": "request",
+                        **{**listener, "process_id": 91},
+                    },
+                    now=now.timestamp(),
+                )
+        assert rejected.value.status == 409
+        assert rejected.value.code == "emulator_host_identity_mismatch"
+        assert service.control_store.status().get("emulator_maintenance") is None
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_automatic_host_maintenance_rejects_seventh_tick_mismatch(tmp_path):
+    (
+        now,
+        run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    detector_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "current_run_id": run_id,
+        "current_strategy": "farm_t18",
+        "status": "automatic_ready",
+        "automatic_ready": True,
+        "reason": "confirmed",
+        "candidate_battle_ids": ["slow-1", "slow-2"],
+        "baseline_battle_ids": ["base-1", "base-2", "base-3"],
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "sample_count": 120,
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=detector_ready,
+        ):
+            with pytest.raises(ControlSurfaceRequestError) as rejected:
+                service.apply_host_maintenance(
+                    {
+                        "operation": "request",
+                        **{
+                            **listener,
+                            "process_started_at": (
+                                "2026-08-10T10:00:00.1234568+00:00"
+                            ),
+                        },
+                    },
+                    now=now.timestamp(),
+                )
+        assert rejected.value.code == "emulator_host_identity_mismatch"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+@pytest.mark.parametrize("operation", ["request", "request_operator"])
+def test_host_maintenance_preserves_split_linux_and_windows_ports(
+    tmp_path,
+    operation,
+):
+    (
+        now,
+        run_id,
+        owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(
+        tmp_path,
+        runtime_adb_port=5556,
+        windows_adb_port=5555,
+    )
+    detector_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "current_run_id": run_id,
+        "current_strategy": "farm_t18",
+        "status": "automatic_ready",
+        "automatic_ready": True,
+        "reason": "confirmed",
+        "candidate_battle_ids": ["slow-1", "slow-2"],
+        "baseline_battle_ids": ["base-1", "base-2", "base-3"],
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "sample_count": 120,
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=detector_ready,
+        ):
+            requested = service.apply_host_maintenance(
+                {"operation": operation, **listener},
+                now=now.timestamp(),
+            )
+        maintenance = requested["host_maintenance"]["request"]
+        assert maintenance["runtime"]["adb_target"] == owner["adb_target"]
+        assert maintenance["host_target"]["adb_port"] == 5555
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_operator_restart_bypasses_detector_but_keeps_runtime_authority(tmp_path):
+    (
+        now,
+        run_id,
+        owner,
+        lock_handle,
+        service,
+        control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    try:
+        requested = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )
+        maintenance = requested["host_maintenance"]["request"]
+        assert maintenance["state"] == "requested"
+        assert maintenance["initiator"] == "operator"
+        assert maintenance["source"] == "windows-control-surface-operator"
+        assert maintenance["battle_scope"] == run_id
+        assert maintenance["runtime"] == {
+            **owner,
+            "state_request_id": control["state_request_id"],
+        }
+        assert maintenance["trigger"]["request_kind"] == "operator"
+        assert {
+            key: maintenance["host_target"][key] for key in listener
+        } == listener
+        assert requested["request"]["disposition"] == "operator_requested"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_operator_restart_bypasses_same_battle_automatic_suppression(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    try:
+        first = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )["host_maintenance"]["request"]
+        service.control_store.finish_emulator_maintenance(
+            first["request_id"],
+            disposition="resumed",
+            reason="test recovery completed",
+            source="test-runtime",
+            now=now.timestamp() + 1,
+        )
+
+        status = service.status(now=now.timestamp() + 2)
+        assert status["emulator_degradation"]["status"] == (
+            "already_recovered_this_battle"
+        )
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {"operation": "request", **listener},
+                now=now.timestamp() + 2,
+            )
+        assert rejected.value.code == "emulator_degradation_not_ready"
+
+        second = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp() + 2,
+        )
+        assert second["host_maintenance"]["request"]["request_id"] != (
+            first["request_id"]
+        )
+        assert second["host_maintenance"]["request"]["initiator"] == (
+            "operator"
+        )
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+@pytest.mark.parametrize(
+    ("strategy", "control_state", "expected_code"),
+    [
+        ("tournament", "RUNNING", "strategy_ineligible"),
+        ("farm_t18", "PAUSED", "control_not_running"),
+    ],
+)
+def test_operator_restart_status_rejects_nonfarm_or_paused_authority(
+    tmp_path,
+    strategy,
+    control_state,
+    expected_code,
+):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(
+        tmp_path,
+        strategy=strategy,
+        control_state=control_state,
+    )
+    try:
+        availability = service.status(now=now.timestamp())["host_maintenance"][
+            "operator_restart"
+        ]
+        assert availability["available"] is False
+        assert availability["code"] == expected_code
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {"operation": "request_operator", **listener},
+                now=now.timestamp(),
+            )
+        assert rejected.value.code == expected_code
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+@pytest.mark.parametrize("condition", ["held", "stale"])
+def test_operator_restart_rejects_held_or_stale_runtime_authority(
+    tmp_path,
+    condition,
+):
+    (
+        now,
+        run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        authority,
+        publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    query_time = now.timestamp()
+    if condition == "held":
+        authority.update_context(
+            global_pause=False,
+            active_battle=True,
+            battle_scope=run_id,
+            primary_state="RUNNING",
+            holds=(
+                AuthorityHoldState(
+                    AuthorityHold.BLOCKING_MODAL_RECOVERY,
+                    "test blocking modal",
+                ),
+            ),
+        )
+        publisher.publish(
+            authority.snapshot(now=query_time),
+            now=query_time,
+            control_model={
+                "schema_version": 1,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+            },
+        )
+    else:
+        query_time += 31
+    try:
+        availability = service.status(now=query_time)["host_maintenance"][
+            "operator_restart"
+        ]
+        assert availability["available"] is False
+        assert availability["code"] == "runtime_not_ready"
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {"operation": "request_operator", **listener},
+                now=query_time,
+            )
+        assert rejected.value.code == "runtime_not_ready"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_operator_restart_rejects_runtime_current_run_scope_mismatch(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    _write_current_run_scope(tmp_path, run_id="different-current-run")
+    try:
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {"operation": "request_operator", **listener},
+                now=now.timestamp(),
+            )
+        assert rejected.value.code == "maintenance_runtime_unavailable"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_operator_restart_accepts_gc_farm_strategy_identity(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(
+        tmp_path,
+        strategy="gc_farm_t19_experiment",
+    )
+    try:
+        availability = service.status(now=now.timestamp())["host_maintenance"][
+            "operator_restart"
+        ]
+        assert availability["available"] is True
+        requested = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )
+        assert requested["host_maintenance"]["request"]["initiator"] == (
+            "operator"
+        )
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_durable_target_rejects_changed_process_before_acknowledgement(tmp_path):
+    (
+        now,
+        run_id,
+        owner,
+        lock_handle,
+        service,
+        control,
+        authority,
+        publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    try:
+        requested = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )
+        maintenance = requested["host_maintenance"]["request"]
+        bound_runtime = {
+            **owner,
+            "state_request_id": control["state_request_id"],
+        }
+        authority.update_context(
+            global_pause=False,
+            active_battle=True,
+            battle_scope=run_id,
+            primary_state="RUNNING",
+            holds=(
+                AuthorityHoldState(
+                    AuthorityHold.EMULATOR_MAINTENANCE,
+                    "BlueStacks maintenance owns host and game recovery",
+                ),
+            ),
+        )
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 1),
+            now=now.timestamp() + 1,
+            control_model={
+                "schema_version": 1,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+                "emulator_maintenance": {
+                    "schema_version": 1,
+                    "request_id": maintenance["request_id"],
+                    "state": "host_restart_authorized",
+                    "runtime": bound_runtime,
+                    "battle_scope": run_id,
+                    "high_water_wave": 2_000,
+                    "intro_sprint_active": False,
+                    "replay_active": False,
+                    "exclude_from_degradation": True,
+                    "reason": "runtime hold installed",
+                    "observed_at": now.isoformat(),
+                },
+            },
+        )
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {
+                    "operation": "acknowledge",
+                    "request_id": maintenance["request_id"],
+                    **{**listener, "process_id": 91},
+                },
+                now=now.timestamp() + 2,
+            )
+        assert rejected.value.code == "maintenance_conflict"
+        assert service.control_store.status()["emulator_maintenance"][
+            "state"
+        ] == "requested"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_pause_before_durable_maintenance_creation_wins(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    original_request = service.control_store.request_emulator_maintenance
+
+    def pause_then_request(**kwargs):
+        service.control_store.set_state("PAUSED", source="test-race")
+        return original_request(**kwargs)
+
+    try:
+        with patch.object(
+            service.control_store,
+            "request_emulator_maintenance",
+            side_effect=pause_then_request,
+        ):
+            with pytest.raises(ControlSurfaceRequestError) as rejected:
+                service.apply_host_maintenance(
+                    {"operation": "request_operator", **listener},
+                    now=now.timestamp(),
+                )
+        assert rejected.value.code == "maintenance_conflict"
+        status = service.control_store.status()
+        assert status["state"] == "PAUSED"
+        assert status.get("emulator_maintenance") is None
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_host_failure_cannot_release_an_acknowledged_restart(tmp_path):
+    service = _service(tmp_path)
+    enabled = service.control_store.set_state("RUNNING", source="test")
+    request = service.control_store.request_emulator_maintenance(
+        reason="confirmed degradation",
+        source="test",
+        runtime={
+            "runtime_id": "runtime-1",
+            "pid": os.getpid(),
+            "adb_target": "localhost:5555",
+            "target_generation": 3,
+            "state_request_id": enabled["state_request_id"],
+        },
+        battle_scope="run-1",
+        host_target={
+            "host_id": "WINDOWS-HOST",
+            "adb_port": 5555,
+            "process_id": 90,
+            "process_started_at": "2026-08-10T10:00:00+00:00",
+            "executable_path": (
+                r"C:\Program Files\BlueStacks_nxt\HD-Player.exe"
+            ),
+            "instance_name": "Nougat32",
+            "observed_at": "2026-08-10T10:00:30+00:00",
+        },
+    )
+    service.control_store.acknowledge_emulator_maintenance_host(
+        request["request_id"],
+        host_ack={
+            "host_id": "WINDOWS-HOST",
+            "adb_port": 5555,
+            "process_id": 90,
+            "process_started_at": "2026-08-10T10:00:00+00:00",
+            "executable_path": (
+                r"C:\Program Files\BlueStacks_nxt\HD-Player.exe"
+            ),
+            "instance_name": "Nougat32",
+            "observed_at": "2026-08-10T10:01:00+00:00",
+        },
+    )
+
+    with pytest.raises(ControlSurfaceRequestError) as rejected:
+        service.apply_host_maintenance(
+            {
+                "operation": "fail",
+                "request_id": request["request_id"],
+                "reason": "Windows result uncertain",
+            }
+        )
+
+    assert rejected.value.status == 409
+    assert rejected.value.code == "maintenance_reconciliation_required"
+    assert service.control_store.status()["emulator_maintenance"]["state"] == (
+        "host_acknowledged"
+    )
+
+
 def test_interactive_development_status_separates_request_and_fresh_ack(
     tmp_path,
 ):
@@ -710,6 +2368,7 @@ def test_interactive_development_status_separates_request_and_fresh_ack(
         now=now.timestamp(),
     )
     service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
         requested = service.apply_interactive_development_lease(
             {
@@ -720,6 +2379,9 @@ def test_interactive_development_status_separates_request_and_fresh_ack(
         )
         lease = requested["interactive_development_lease"]["request"]
         assert lease["runtime"] == owner
+        assert lease["expires_at"] == (
+            now + timedelta(seconds=INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS)
+        ).isoformat(timespec="seconds")
         assert lease["starting_evidence"] == {
             "screen_state": "RUNNING",
             "battle_active": True,
@@ -850,6 +2512,7 @@ def test_interactive_development_heartbeat_rejects_stale_or_wrong_lease(
     )
     publisher.publish(authority.snapshot(), now=now.timestamp())
     service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     try:
         response = service.apply_interactive_development_lease(
             {"operation": "request", "owner_label": "heartbeat test"},
@@ -902,9 +2565,11 @@ def test_http_interactive_development_endpoint_returns_busy_and_id_errors(
         },
     )
     publisher.publish(authority.snapshot(), now=now.timestamp())
+    service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
     server = ControlSurfaceHTTPServer(
         ("127.0.0.1", 0),
-        service=_service(tmp_path),
+        service=service,
         static_dir=STATIC_DIR,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1083,8 +2748,10 @@ def test_runtime_evidence_exposes_clean_release_metadata(tmp_path):
             "pid": None,
             "pid_alive": None,
             "released_at": released_at,
+            "runtime_id": None,
             "started_at": None,
             "target": "localhost:5555",
+            "target_generation": None,
         }
     ]
 
@@ -1467,13 +3134,38 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 32" in native_compatibility
+    assert "MinimumServerRevision = 41" in native_compatibility
+    assert '"bluestacks_maintenance_v1"' not in native_compatibility
+    assert '"bluestacks_maintenance_v2"' in native_compatibility
+    assert '"bluestacks_operator_restart_v1"' in native_compatibility
+    assert (
+        '"bluestacks_listener_lifetime_telemetry_v1"'
+        in native_compatibility
+    )
+    assert '"strategy_aware_attach_v1"' in native_compatibility
+    assert '"confirmed_local_mapping_status_v2"' in native_compatibility
+    assert "confirmed_local_mapping_status_v2" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_review_status_v2"' in native_compatibility
+    assert "save_mapping_review_status_v2" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_develop_integration_v1"' in native_compatibility
+    assert "save_mapping_develop_integration_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert 'id="confirmedLocalMappingAlert"' in html
+    assert 'x:Name="ConfirmedLocalMappingBanner"' in native_xaml
+    assert 'JsonPropertyName("confirmed_local_mappings")' in native_models
+    assert 'x:Name="ReviewSaveMappingsButton"' in native_xaml
+    assert 'Header="Save mapping integration…"' in native_xaml
+    assert "RenderConfirmedLocalMappings(status.ConfirmedLocalMappings)" in native_code
     assert '"better_control_model_v2"' in native_compatibility
+    assert '"runtime_control_acknowledgements_v1"' in native_compatibility
+    assert "ResolveStrategyScope(" in native_compatibility
+    assert (
+        "ControlSurfaceCompatibility.ResolveStrategyScope(" in native_code
+    )
     assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"current_battle_perks_v1"' in native_compatibility
     assert "current_battle_perks_v1" in CONTROL_SURFACE_CAPABILITIES
-    assert '<TabItem Header="Perks">' in native_xaml
+    assert '<TabItem x:Name="PerksTab" Header="Perks" Tag="perks">' in native_xaml
     assert 'x:Name="CurrentPerksGrid"' in native_xaml
     assert 'JsonPropertyName("current_battle_perks")' in native_models
     assert "RenderCurrentBattlePerks(status.CurrentBattlePerks)" in native_code
@@ -1509,7 +3201,289 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
+    assert '"host_performance_process_attribution_v1"' in native_compatibility
+    assert (
+        "host_performance_process_attribution_v1"
+        in CONTROL_SURFACE_CAPABILITIES
+    )
     assert '"automatic_battle_attachment"' not in native_compatibility
+
+
+def test_native_dashboard_uses_stable_full_width_pages_and_bounded_system_views():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    for page in (
+        '<TabItem x:Name="OverviewTab" Header="Overview" Tag="overview">',
+        '<TabItem x:Name="ActivityTab" Header="Activity" Tag="activity">',
+        '<TabItem x:Name="PerksTab" Header="Perks" Tag="perks">',
+        '<TabItem x:Name="SystemTab" Header="System" Tag="system">',
+    ):
+        assert page in native_xaml
+    for system_page in (
+        '<TabItem Header="Services" Tag="services">',
+        '<TabItem Header="Connections" Tag="connections">',
+        '<TabItem Header="Diagnostics" Tag="diagnostics">',
+    ):
+        assert system_page in native_xaml
+
+    assert 'Header="_View"' in native_xaml
+    assert 'Header="_Tools"' in native_xaml
+    assert 'Header="_Preferences"' in native_xaml
+    assert 'x:Name="SidebarColumn"' not in native_xaml
+    assert 'x:Name="ProcessStateText"' in native_xaml
+    assert 'x:Name="DirectiveRequestText"' in native_xaml
+    assert 'x:Name="StrategyScopeText"' in native_xaml
+    assert 'x:Name="TargetSpeedText"' in native_xaml
+    assert 'x:Name="LinuxApiServiceStatusText"' in native_xaml
+    assert 'x:Name="ConnectionText"' in native_xaml
+    assert 'x:Name="ApiTunnelTopStatusText"' in native_xaml
+    assert 'x:Name="AdbTunnelTopStatusText"' in native_xaml
+
+    assert 'private const string OverviewPageId = "overview";' in native_code
+    assert 'private const string SystemPageId = "system";' in native_code
+    assert "layout.SidebarTabIndex switch" in native_code
+    assert "SelectedPageId(SidebarTabs, OverviewPageId)" in native_code
+    assert "ReferenceEquals(SidebarTabs.SelectedItem, ActivityTab)" in native_code
+    assert 'public string DashboardPage { get; set; } = "";' in native_models
+    assert 'public string SystemPage { get; set; } = "";' in native_models
+
+
+def test_native_preferences_are_bounded_and_adb_drafts_survive_status_polling():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    preferences_xaml = (native_root / "PreferencesWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    preferences_code = (native_root / "PreferencesWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Title="Preferences"' in preferences_xaml
+    assert 'Text="CONTROL API"' in preferences_xaml
+    assert 'Text="SSH AND FORWARDING DEFAULTS"' in preferences_xaml
+    assert 'Text="PRESENTATION AND LOCAL SAMPLING"' in preferences_xaml
+    for field in (
+        "BaseUrlBox",
+        "TokenBox",
+        "SshDestinationBox",
+        "LocalTunnelPortBox",
+        "RemoteApiPortBox",
+        "WindowsBlueStacksAdbPortBox",
+        "LinuxAdbForwardPortBox",
+    ):
+        assert f'x:Name="{field}"' in preferences_xaml
+        assert f'x:Name="{field}"' not in native_xaml
+    assert "PreferencesResult" in preferences_code
+    assert "requireDestination: false" in preferences_code
+    assert "public string Token" not in native_models
+    assert 'private string _apiToken = "";' in native_code
+    assert "Command = TunnelHostCommand.Configure" in native_code
+    assert "Preferences changes saved defaults only." in native_xaml
+
+    for target_field in (
+        "ConfiguredAdbTargetText",
+        "RequestedAdbTargetText",
+        "ActiveAdbTargetText",
+        "AdbDraftStateText",
+        "RevertAdbPortButton",
+    ):
+        assert f'x:Name="{target_field}"' in native_xaml
+    assert 'TextChanged="AdbPortBox_TextChanged"' in native_xaml
+    assert 'Click="RevertAdbPortDraft_Click"' in native_xaml
+    assert "_adbPortDraftDirty" in native_code
+    assert "if (!_adbPortDraftDirty && _configuredAdbPort is not null)" in native_code
+    assert "Draft retained locally" in native_code
+    assert "!AdbPortBox.IsKeyboardFocusWithin" not in native_code
+    assert 'new { action = "set_adb_port", adb_port = adbPort }' in native_code
+
+
+def test_native_overview_uses_contextual_exact_action_slots_and_compact_status():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Header="Timed pause…"' in native_xaml
+    assert 'x:Name="ManualSurrenderPanel" Visibility="Collapsed"' in native_xaml
+    assert 'x:Name="StartBattleButton"' in native_xaml
+    assert 'x:Name="AttachBattleButton"' in native_xaml
+    assert "StartBattleButton.Visibility = start.Available" in native_code
+    assert "AttachBattleButton.Visibility = attach.Available" in native_code
+    assert "ManualSurrenderPanel.Visibility = showTakeManualControl" in native_code
+    assert (
+        "var showReturnControl = giveBack.Available || manualOngoing;"
+        in native_code
+    )
+
+    for field in (
+        "CurrentStrategyValueText",
+        "NextStrategyLabelText",
+        "NextStrategyValueText",
+        "SelectedStrategyValueText",
+        "TerminalPolicyText",
+        "LatestBattleCompactText",
+    ):
+        assert f'x:Name="{field}"' in native_xaml
+    assert 'x:Name="StrategyActionHelpText"' in native_xaml
+    assert (
+        "StrategyActionHelpText.Visibility = _strategySelection.Dirty"
+        in native_code
+    )
+    assert (
+        "TournamentValidationText.Visibility = validationRelevant"
+        in native_code
+    )
+    assert (
+        "CaptureSetupText.Visibility = model?.SetupCapture is not null"
+        in native_code
+    )
+    assert "ConfigureRunText.Visibility = configuredSkips.Count > 0" in native_code
+    assert "Saved request:" in native_code
+    assert "awaiting acknowledgement" in native_code
+    assert 'new { action = tag }' in native_code
+
+
+def test_native_strategy_selection_auto_queues_and_retains_failed_intent():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(encoding="utf-8")
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(encoding="utf-8")
+    coordinator = (native_root / "StrategySelectionCoordinator.cs").read_text(
+        encoding="utf-8"
+    )
+    profiles = (native_root / "StrategyProfilesWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    history = (native_root / "StrategyHistoryWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    capture = (native_root / "SetupCaptureWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Content="Use next battle"' not in native_xaml
+    assert 'Content="Save startup default"' in native_xaml
+    assert 'Content="Switch this battle"' in native_xaml
+    assert '"Retry next battle"' in native_code
+    assert "private bool _strategyDegradedObserver;" in native_code
+    assert "&& !_strategyDegradedObserver" in native_code
+    assert "This attached battle must remain a degraded observer" in native_code
+    assert "QueueStrategyButton.Visibility = !_strategyProcessActive" in native_code
+    assert "private async void StrategySelectionBox_SelectionChanged" in native_code
+    assert "if (_updatingStrategySelection)" in native_code
+    assert "_updatingStrategySelection = true" in native_code
+    assert "userDriven: true" in native_code
+    assert "await SubmitStrategyRequestAsync(attempt" in native_code
+    assert "if (!_strategySelection.Dirty)" in native_code
+    assert "if (!userDriven)" in coordinator
+    assert "IsNextBoundaryNoOp" in coordinator
+    assert "_inFlight?.Token == attempt.Token" in coordinator
+    assert "_failedNextBoundaryStrategy = attempt.Strategy" in coordinator
+    assert "StrategyRequestOrigin.PublishedRevision" in coordinator
+    assert "_handledPublications.Add(notice)" in coordinator
+    assert "HasHandledPublication" in coordinator
+    assert "_deferredPublication = notice" in coordinator
+    assert "response.Request is not { Accepted: true } request" in native_code
+    assert "if (!_strategySelection.CompleteFailed(" in native_code
+    assert "if (!_strategySelection.CompleteAccepted(" in native_code
+    assert "RefreshAfterStrategyResponseAsync" in native_code
+    assert 'new { action = "set_strategy", strategy }' in native_code
+    assert "apply_to_active_run = true" in native_code
+    assert "_strategySelection.Dirty && selected is not null" in native_code
+    assert "UsePublishedStrategyAsync" in native_code
+    assert "_publishedStrategyHandler" in profiles
+    assert "_publishedStrategyHandler" in history
+    assert "_publishedStrategyHandler" in capture
+    publication_handler = native_code.split(
+        "private async Task<StrategyPublicationUseResult> UsePublishedStrategyAsync",
+        maxsplit=1,
+    )[1].split("private void SetStrategyRequestFeedback", maxsplit=1)[0]
+    assert publication_handler.index("HasHandledPublication") < (
+        publication_handler.index("EnsureStrategyOption")
+    )
+    start_handler = native_code.split(
+        "private async void Process_Click", maxsplit=1
+    )[1].split("private void AdbPortBox_TextChanged", maxsplit=1)[0]
+    assert 'action = "start"' in start_handler
+    assert "strategy," in start_handler
+
+
+def test_native_status_uses_only_published_dashboard_metrics():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'JsonPropertyName("server_time")' in native_models
+    assert 'JsonPropertyName("current_run")' in native_models
+    assert 'JsonPropertyName("started_at")' in native_models
+    assert 'x:Name="RunElapsedMetricPanel"' in native_xaml
+    assert 'x:Name="RunElapsedText"' in native_xaml
+    assert 'x:Name="WaveMetricPanel" Visibility="Collapsed"' in native_xaml
+    assert (
+        'x:Name="CoinsMinuteMetricPanel" Visibility="Collapsed"'
+        in native_xaml
+    )
+    assert "FormatRunElapsed(" in native_code
+    assert "status.ServerTime" in native_code
+    assert "RunElapsedMetricPanel.Visibility = processActive" in native_code
+    assert 'GameState: "active_battle"' in native_code
+
+    for unsupported_field in (
+        "ExpectedRunDurationText",
+        "PeakCoinsMinuteText",
+        "RecoveryCountdownText",
+        "ReturnNowButton",
+        "ExtendRecoveryButton",
+        "CancelRecoveryButton",
+    ):
+        assert unsupported_field not in native_xaml
+        assert unsupported_field not in native_code
 
 
 def test_better_control_clients_expose_distinct_workflows_and_capture_review():
@@ -1595,9 +3569,12 @@ def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     assert "startup_gate_policy" not in script
     assert "run_state" not in script
     assert "restart_attached" not in script
-    assert 'Content="Use next battle"' in native_xaml
+    assert 'Content="Use next battle"' not in native_xaml
+    assert 'Content="Save startup default"' in native_xaml
+    assert '"Retry next battle"' in native_code
     assert 'Content="Switch this battle"' in native_xaml
-    assert 'Content="Strategy profiles..."' in native_xaml
+    assert 'x:Name="StrategyProfilesButton"' in native_xaml
+    assert 'Header="Strategy profiles…"' in native_xaml
     assert '"strategy_authoring_v1"' in native_compatibility
     assert '"strategy_authoring_profile_lifecycle_v1"' in native_compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in native_compatibility
@@ -1626,7 +3603,10 @@ def test_better_control_clients_expose_distinct_workflows_and_capture_review():
     assert 'operation = "retire_strategy"' in profile_code
     assert 'reviewed_rebase_fingerprint' in profile_code
     assert 'Text="HOST HEALTH"' in native_xaml
-    assert 'Text="BLUESTACKS CPU"' in native_xaml
+    assert 'Text="WINDOWS HOST"' in native_xaml
+    assert 'Text="BLUESTACKS"' in native_xaml
+    assert 'x:Name="BlueStacksCpuText"' in native_xaml
+    assert 'Text="OTHER WINDOWS LOAD"' in native_xaml
     assert 'Text="OBSERVED SPEED"' in native_xaml
 
 
@@ -1659,6 +3639,241 @@ for (const status of ['no_op', 'stale', 'rejected', 'unavailable', 'interrupted'
   assert.strictEqual(model.workflowPresentation(status).terminal, true);
 }}
 assert.strictEqual(model.workflowPresentation('rejected').label, 'Rejected');
+const activeMapping = model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: true,
+  items: [{{
+    state: 'active_local',
+    mapping_id: 'data-9-game-1101',
+    raw_value: 41,
+    semantic_value: 'Being Annihilator',
+    scope: {{slot_key: 'cannon_assist'}},
+    reason: 'canonical integration is pending',
+  }}],
+}});
+assert.strictEqual(activeMapping.visible, true);
+assert.strictEqual(activeMapping.severity, 'warning');
+assert.match(activeMapping.detail, /cannon_assist/);
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: true,
+  items: [{{state: 'integrated'}}],
+}}).visible, false);
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: true,
+  items: [{{state: 'canonical_conflict'}}],
+}}).severity, 'danger');
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: false,
+  items: [],
+  reason: 'malformed local confirmation',
+}}).severity, 'danger');
+const mixedMapping = model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: true,
+  items: [
+    {{state: 'active_local', reason: 'pending'}},
+    {{state: 'canonical_conflict', reason: 'conflicting canonical value'}},
+  ],
+}});
+assert.strictEqual(mixedMapping.severity, 'danger');
+assert.match(mixedMapping.detail, /conflicting canonical value/);
+assert.strictEqual(
+  model.confirmedLocalMappingPresentation(undefined).visible,
+  true,
+);
+assert.strictEqual(model.confirmedLocalMappingPresentation({{
+  schema_version: 1,
+  available: true,
+  items: [],
+}}).severity, 'danger');
+const mappingReview = {{
+  schema_version: 2,
+  capability: 'save_mapping_develop_integration_v1',
+  operation: 'review',
+  candidate_record_id: 'a'.repeat(64),
+  reviewed_proposal_fingerprint: 'c'.repeat(64),
+  reviewed_base_commit: '1'.repeat(40),
+  canonical_mapping_fingerprint: 'f'.repeat(64),
+  repository: {{
+    main_commit: '1'.repeat(40),
+    develop_commit: '1'.repeat(40),
+    synchronized: true,
+    production_clean: true,
+    develop_clean: true,
+    develop_path: '/develop',
+    integration_available: true,
+    code: '',
+  }},
+  proposal: {{
+    schema_version: 2,
+    record_id: 'a'.repeat(64),
+    targets: [{{
+      path: 'config/player_save_versions/data.json',
+      mapping_id: 'data-9-game-1101',
+      expected_sha256: 'd'.repeat(64),
+      operations: [{{op: 'add', path: '/values/-', value: 7}}],
+    }}],
+  }},
+  rendered_targets: [{{
+    path: 'config/player_save_versions/data.json',
+    mapping_id: 'data-9-game-1101',
+    before_sha256: 'd'.repeat(64),
+    after_sha256: 'e'.repeat(64),
+    changed: true,
+    mode: 436,
+  }}],
+  integrate: {{available: true, code: '', reason: ''}},
+}};
+assert.strictEqual(
+  model.saveMappingReviewIsCurrent(
+    mappingReview,
+    'a'.repeat(64),
+  ),
+  true,
+);
+assert.strictEqual(
+  model.saveMappingIntegrateAvailability(
+    mappingReview,
+    'a'.repeat(64),
+  ).available,
+  true,
+);
+const recoveryReview = {{
+  ...mappingReview,
+  recovery_required: true,
+  repository: {{
+    ...mappingReview.repository,
+    main_commit: 'b'.repeat(40),
+    develop_commit: 'b'.repeat(40),
+    synchronized: false,
+    production_clean: false,
+    develop_clean: false,
+    integration_available: false,
+    code: 'transaction_recovery_required',
+  }},
+  proposal: {{
+    ...mappingReview.proposal,
+    targets: mappingReview.proposal.targets.map((target) => ({{
+      ...target,
+      operations: [],
+    }})),
+  }},
+  integrate: {{
+    available: true,
+    code: 'transaction_recovery_required',
+    reason: 'retry exact durable transaction once',
+  }},
+}};
+assert.strictEqual(
+  model.saveMappingIntegrateAvailability(
+    recoveryReview,
+    'a'.repeat(64),
+  ).available,
+  true,
+);
+assert.strictEqual(
+  model.saveMappingIntegrateAvailability(
+    mappingReview,
+    'changed',
+  ).code,
+  'review_stale',
+);
+assert.strictEqual(model.saveMappingIntegrationCompatible({{
+  api_version: 1,
+  server_revision: 40,
+  capabilities: ['save_mapping_develop_integration_v1'],
+}}), true);
+assert.strictEqual(model.saveMappingIntegrationCompatible({{
+  api_version: 1,
+  server_revision: 39,
+  capabilities: ['save_mapping_develop_integration_v1'],
+}}), false);
+const integratedResult = {{
+  schema_version: 2,
+  capability: 'save_mapping_develop_integration_v1',
+  operation: 'integrate',
+  disposition: 'committed_to_develop',
+  idempotent: false,
+  candidate_record_id: 'a'.repeat(64),
+  reviewed_proposal_fingerprint: 'c'.repeat(64),
+  base_commit: '1'.repeat(40),
+  integration_commit: 'b'.repeat(40),
+  develop_commit: 'b'.repeat(40),
+  committed: true,
+  promoted: false,
+  mapping_invariants: 'passed',
+  promotion_validation: 'pending',
+  targets: [{{
+    path: 'config/player_save_versions/data.json',
+    mapping_id: 'data-9-game-1101',
+    before_sha256: 'd'.repeat(64),
+    after_sha256: 'e'.repeat(64),
+    changed: true,
+    mode: 436,
+  }}],
+}};
+assert.strictEqual(model.saveMappingIntegratedResultValidation(
+  integratedResult,
+  mappingReview,
+).valid, true);
+assert.match(
+  model.saveMappingIntegratedPresentation(
+    integratedResult,
+    mappingReview,
+  ).detail,
+  /Mapping invariants passed/,
+);
+assert.strictEqual(model.saveMappingIntegratedResultValidation(
+  {{...integratedResult, promoted: true}},
+  mappingReview,
+).valid, false);
+assert.strictEqual(model.saveMappingIntegratedResultValidation(
+  {{...integratedResult, promoted: true, idempotent: true}},
+  recoveryReview,
+).valid, true);
+for (const invalid of [
+  {{...integratedResult, candidate_record_id: 'f'.repeat(64)}},
+  {{...integratedResult, committed: false}},
+  {{...integratedResult, promotion_validation: 'passed'}},
+  {{...integratedResult, targets: [{{...integratedResult.targets[0], after_sha256: 'bad'}}]}},
+  {{...integratedResult, targets: [integratedResult.targets[0], integratedResult.targets[0]]}},
+]) {{
+  assert.strictEqual(model.saveMappingIntegratedResultValidation(
+    invalid,
+    mappingReview,
+  ).valid, false);
+}}
+assert.strictEqual(model.saveMappingFailurePresentation({{
+  code: 'repository_not_synchronized', message: 'pending promotion',
+}}).uncertain, false);
+assert.strictEqual(model.saveMappingFailurePresentation({{
+  code: 'commit_state_uncertain', message: 'inspect',
+}}).uncertain, true);
+const unchanged = model.saveMappingFailurePresentation({{
+  code: 'develop_fast_forward_failed', message: 'Develop stayed at base.',
+}});
+assert.strictEqual(unchanged.uncertain, false);
+assert.match(unchanged.detail, /retry once only when directed/);
+const promotion = model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: true,
+  items: [{{state: 'promotion_pending', reason: 'awaiting production'}}],
+}});
+assert.strictEqual(promotion.severity, 'info');
+assert.match(promotion.title, /production promotion/);
+const promotionDominatesQueue = model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: true,
+  items: [
+    {{state: 'active_local', reason: 'ordinary local queue'}},
+    {{state: 'promotion_pending', reason: 'awaiting exact production promotion'}},
+  ],
+}});
+assert.match(promotionDominatesQueue.title, /production promotion/);
+assert.match(promotionDominatesQueue.detail, /awaiting exact production promotion/);
 """
     completed = subprocess.run(
         ["node", "-e", script],
@@ -1673,6 +3888,19 @@ assert.strictEqual(model.workflowPresentation('rejected').label, 'Rejected');
     assert 'openAction !== "request"' in browser
     assert "async function retrySetupCapture()" in browser
     assert 'id="retryCaptureButton"' in html
+    assert 'id="reviewSaveMappingsButton"' in html
+    assert 'id="saveMappingIntegrationDialog"' in html
+    assert 'id="saveMappingWorkspaceSelect"' not in html
+    assert "reviewed_proposal_fingerprint" in browser
+    assert "Integrate reviewed mapping into develop" in html
+    assert "fast-forwards clean develop" in browser
+    assert "saveMappingIntegratedResultValidation" in browser
+    assert "saveMappingSelectionStillCurrent" in browser
+    assert "Interrupted integration requires recovery" in browser
+    assert 'byId("saveMappingCandidateSelect").disabled = busy' in browser
+    assert "saveMappingWorkspaceSelect" not in browser
+    assert "state.saveMappingResult != null" in browser
+    assert 'addEventListener("cancel"' in browser
 
 
 def test_native_incompatible_api_has_prominent_start_mitigation():
@@ -1977,6 +4205,7 @@ def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):
     )
     assert defaults["control"]["startup_gate_waivers"] == {}
 
+    service.control_store.set_state("RUNNING", source="test")
     with patch.object(
         service,
         "_runtime_evidence",
@@ -2396,6 +4625,90 @@ def test_http_setup_capture_routes_include_durable_draft_reopen(
         thread.join(timeout=3)
 
 
+def test_http_save_mapping_integration_routes_catalog_review_and_integrate(
+    tmp_path,
+    monkeypatch,
+):
+    service = _service(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        service,
+        "save_mapping_integration",
+        lambda: {
+            "schema_version": 2,
+            "capability": "save_mapping_develop_integration_v1",
+            "available": True,
+            "items": [],
+        },
+    )
+
+    def apply(payload):
+        calls.append(payload)
+        return {"operation": payload["operation"], "accepted": True}
+
+    monkeypatch.setattr(service, "apply_save_mapping_integration", apply)
+    server = ControlSurfaceHTTPServer(
+        ("127.0.0.1", 0),
+        service=service,
+        static_dir=STATIC_DIR,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_port,
+        timeout=3,
+    )
+    try:
+        connection.request("GET", "/api/v1/save-mapping-integration")
+        response = connection.getresponse()
+        catalog = json.loads(response.read())
+        assert response.status == 200
+        assert catalog["capability"] == "save_mapping_develop_integration_v1"
+
+        for payload in (
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+            },
+            {
+                "operation": "integrate",
+                "candidate_record_id": "a" * 64,
+                "reviewed_proposal_fingerprint": "c" * 64,
+            },
+        ):
+            body = json.dumps(payload)
+            connection.request(
+                "POST",
+                "/api/v1/save-mapping-integration",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = connection.getresponse()
+            result = json.loads(response.read())
+            assert response.status == 200
+            assert result == {"operation": payload["operation"], "accepted": True}
+        assert calls == [
+            {
+                "operation": "review",
+                "candidate_record_id": "a" * 64,
+            },
+            {
+                "operation": "integrate",
+                "candidate_record_id": "a" * 64,
+                "reviewed_proposal_fingerprint": "c" * 64,
+            },
+        ]
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
 def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
     _write_battle(tmp_path)
     server = ControlSurfaceHTTPServer(
@@ -2436,6 +4749,40 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         assert response.status == 200
         assert "strategy_action_gate" in status_payload
         assert status_payload["strategy_action_gate"]["active"] is False
+        assert "emulator_degradation" in status_payload
+        assert status_payload["emulator_degradation"]["automatic_ready"] is False
+
+        maintenance_body = json.dumps({"operation": "request"})
+        connection.request(
+            "POST",
+            "/api/v1/host-maintenance",
+            body=maintenance_body,
+            headers={
+                "Authorization": "Bearer test-secret",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(maintenance_body)),
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 409
+        assert payload["code"] == "emulator_degradation_not_ready"
+
+        operator_body = json.dumps({"operation": "request_operator"})
+        connection.request(
+            "POST",
+            "/api/v1/host-maintenance",
+            body=operator_body,
+            headers={
+                "Authorization": "Bearer test-secret",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(operator_body)),
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 409
+        assert payload["code"] == "control_not_running"
 
         connection.request(
             "GET",
