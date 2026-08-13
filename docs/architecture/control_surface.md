@@ -1139,8 +1139,8 @@ request. It bypasses only the performance decision, automatic opt-in, and
 automatic cooldown/once-per-battle creation gates. Linux still requires the
 same fresh, unheld, exact-owner `RUNNING` Farm battle with normal Strategy and
 lifecycle authority. The confirmation names the immutable instance, path,
-port, and current PID and explains the five-wave replay (fifty during Intro
-Sprint), non-earning catch-up, and End run/New Battle fallback. Multiple active
+port, and current PID and explains the possible non-earning replay through the
+old wave high-water and the End run/New Battle fallback. Multiple active
 instances block host-wide automatic evidence but do not make this explicitly
 targeted operator action ambiguous.
 

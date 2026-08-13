@@ -898,6 +898,8 @@ def test_native_host_sampling_control_is_persistent_and_collapsible():
     assert "snapshot.BlueStacksHandleCount" in window_code
     assert "degradation.HostEvidence" in window_code
     assert "RequestOperatorRestartAsync" in window_code
+    assert "independent gem and reward collectors continue" in window_code
+    assert "normally replays 5 waves" not in window_code
     assert "_blueStacksOperatorMessage" in window_code
     assert "SetBlueStacksOperatorMessage" in window_code
     assert "ResolveTelemetryTarget" in window_code

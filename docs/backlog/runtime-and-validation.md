@@ -1111,14 +1111,17 @@ stages:
     `b087989` replaced module enumeration with limited-information native
     path/start-time reads. The repeated operator test then bound and replaced
     the exact listener, reconnected ADB, handled Welcome Back/Resume, held the
-    five-wave replay through the old high-water, and released normally. It also
+    replay through the old high-water, and released normally. It also
     exposed one Linux gap: BlueStacks Home was `1920x1080`, so the portrait
     capture guard prevented the package launcher until the operator opened only
     The Tower. Commit `7ce123c` now routes that typed exact-target landscape
-    boundary solely to the bounded package launch. Repeat one operator restart
-    to confirm the now hands-free launch; GUI-close reconciliation,
-    sampler-baseline/session continuity, one detector decision, and the
-    explicitly authorized fallback branch remain outstanding.
+    boundary solely to the bounded package launch. The next operator restart
+    confirmed hands-free package launch and Welcome Back Resume, then observed
+    a fifty-wave rollback despite Intro Sprint not being confirmed. The runtime
+    now keeps that replay out of progression accounting while allowing its
+    independently guarded in-battle gem, daily-gem, and reward collectors.
+    GUI-close reconciliation, sampler-baseline/session continuity, one detector
+    decision, and the explicitly authorized fallback branch remain outstanding.
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
     second client, as tracked in

@@ -12,7 +12,11 @@ import pytest
 
 from core.control_directives import ControlDirectiveStore
 from core.app import App
-from core.action_authority import AuthorityHold
+from core.action_authority import (
+    AuthorityHold,
+    AuxiliaryCollector,
+    RuntimeActionClass,
+)
 from core.battle_lifecycle import HomeBattleControl
 from core.emulator_degradation import (
     assess_emulator_degradation,
@@ -712,7 +716,9 @@ def _recovery_app() -> App:
         current_exclusive_validation_owner=lambda: dict(RUNTIME),
         control_request_identity={"state_request_id": "state-enable-1"},
     )
+    app._current_run_scope_id = lambda: "run-1"
     app._emulator_maintenance_hold_active = True
+    app._emulator_recovery_request_id = REQUEST_ID
     app._emulator_replay_window = RestartReplayWindow(
         REQUEST_ID,
         100,
@@ -731,6 +737,7 @@ def _recovery_app() -> App:
     app._runtime_action_guard = Mock(return_value=True)
     app._capture_frame = Mock()
     app._set_emulator_recovery_ack = Mock()
+    app._handle_emulator_replay_auxiliary_actions = Mock()
     app._last_wave_value = 100
     app._last_wave_conf = 90.0
     app._last_wave_ts = 0.0
@@ -869,6 +876,15 @@ def test_runtime_suppresses_replay_frames_until_high_water_is_reached():
     ):
         assert app._advance_emulator_recovery({"state": "RUNNING"}, frame)
     app._finish_emulator_recovery.assert_not_called()
+    app._handle_emulator_replay_auxiliary_actions.assert_called_once_with(
+        {"state": "RUNNING"},
+        frame,
+    )
+    assert app._set_emulator_recovery_ack.call_args.kwargs["reason"] == (
+        "The Tower is replaying its non-earning restart rollback while "
+        "independent collectors remain available and run-progression "
+        "observers remain suppressed"
+    )
     assert app._last_wave_value == 100
 
     with patch(
@@ -877,7 +893,46 @@ def test_runtime_suppresses_replay_frames_until_high_water_is_reached():
     ):
         assert not app._advance_emulator_recovery({"state": "RUNNING"}, frame)
     app._finish_emulator_recovery.assert_called_once()
+    assert app._handle_emulator_replay_auxiliary_actions.call_count == 1
     assert app._last_wave_value == 100
+
+
+def test_replay_auxiliary_lane_dispatches_only_from_fresh_running_source():
+    app = _recovery_app()
+    del app._handle_emulator_replay_auxiliary_actions
+    app._emulator_replay_window.mark_resume_dispatched()
+    app._authority_primary_state = "RUNNING"
+    app._authority_battle_active = True
+    app._normalise_detection = Mock(
+        return_value=("RUNNING", "ATTACK_MENU", None, {"AD_GEMS_AVAILABLE"})
+    )
+    app._action_decision = Mock(return_value=SimpleNamespace(allowed=True))
+    app._sync_floating_gem_tapper = Mock()
+    app._handle_strategy_gate_auxiliary_actions = Mock()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    app._handle_emulator_replay_auxiliary_actions(
+        {"state": "RUNNING"},
+        frame,
+    )
+
+    app._action_decision.assert_called_once_with(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.FLOATING_GEM_SCAN,
+    )
+    app._sync_floating_gem_tapper.assert_called_once()
+    app._handle_strategy_gate_auxiliary_actions.assert_called_once_with(
+        "RUNNING",
+        {"AD_GEMS_AVAILABLE"},
+        frame,
+    )
+
+    app._authority_primary_state = "GAME_RESTARTED"
+    app._handle_emulator_replay_auxiliary_actions(
+        {"state": "GAME_RESTARTED"},
+        frame,
+    )
+    assert app._handle_strategy_gate_auxiliary_actions.call_count == 1
 
 
 def test_fallback_recovery_releases_only_after_new_battle_is_running():

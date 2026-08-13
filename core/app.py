@@ -43,6 +43,7 @@ from core.action_authority import (
     RuntimeActionAuthority,
     RuntimeActionAuthorityPublisher,
     RuntimeActionClass,
+    STRATEGY_GATE_AUXILIARY_ALLOWLIST,
     StrategyGateExitEvent,
 )
 from core.action_circuit_breaker import ActionCircuitBreaker
@@ -1729,11 +1730,21 @@ class App:
                 item.hold is AuthorityHold.EMULATOR_MAINTENANCE
                 for item in current_holds
             ):
+                replay_collectors = self._emulator_replay_auxiliary_collectors()
                 current_holds += (
-                AuthorityHoldState(
-                    AuthorityHold.EMULATOR_MAINTENANCE,
-                    "BlueStacks maintenance owns host and game recovery",
-                ),
+                    AuthorityHoldState(
+                        AuthorityHold.EMULATOR_MAINTENANCE,
+                        (
+                            "BlueStacks maintenance owns recovery while "
+                            "independent in-battle collectors remain available"
+                            if replay_collectors
+                            else (
+                                "BlueStacks maintenance owns host and game "
+                                "recovery"
+                            )
+                        ),
+                        allowed_auxiliary_collectors=replay_collectors,
+                    ),
                 )
         supervisor = getattr(self, "_supervisor", None)
         paused = bool(
@@ -1765,6 +1776,39 @@ class App:
             runtime_stopped=runtime_stopped,
             shutting_down=shutting_down,
         )
+
+    def _emulator_replay_auxiliary_collectors(
+        self,
+    ) -> tuple[AuxiliaryCollector, ...]:
+        """Return collectors safe after Resume while replay accounting is held."""
+
+        replay = getattr(self, "_emulator_replay_window", None)
+        supervisor = getattr(self, "_supervisor", None)
+        maintenance = getattr(supervisor, "emulator_maintenance", None)
+        request_id = str(
+            getattr(self, "_emulator_recovery_request_id", None) or ""
+        )
+        if not (
+            bool(getattr(self, "_emulator_maintenance_hold_active", False))
+            and isinstance(replay, RestartReplayWindow)
+            and replay.resume_dispatched
+            and not replay.caught_up
+            and not bool(
+                getattr(self, "_emulator_recovery_force_new_battle", False)
+            )
+            and isinstance(maintenance, Mapping)
+            and maintenance.get("state") == "host_restarted"
+            and str(maintenance.get("request_id") or "") == request_id
+            and replay.request_id == request_id
+            and getattr(self, "_authority_primary_state", "UNKNOWN")
+            == "RUNNING"
+            and bool(getattr(self, "_authority_battle_active", False))
+        ):
+            return ()
+        current_scope = self._current_run_scope_id()
+        if replay.battle_scope and current_scope != replay.battle_scope:
+            return ()
+        return STRATEGY_GATE_AUXILIARY_ALLOWLIST
 
     def _runtime_status_owner(self) -> Dict[str, object]:
         """Return the runtime owner bound to the held target generation."""
@@ -7820,11 +7864,22 @@ class App:
                 state="replaying",
                 reason=(
                     "The Tower is replaying its non-earning restart rollback "
-                    "before normal observers resume"
+                    "while independent collectors remain available and "
+                    "run-progression observers remain suppressed"
                 ),
                 now=now,
             )
+            # Keep replayed wave, Coins/min, perk-timeline, activation, and
+            # strategy observations outside their normal owners.  The typed
+            # independent-collector lane is safe on a fresh resumed RUNNING
+            # frame and still rechecks Pause, battle scope, and route ownership
+            # at every material input boundary.
+            self._update_action_authority(detection=detection)
             self._publish_action_authority()
+            self._handle_emulator_replay_auxiliary_actions(
+                detection,
+                img,
+            )
             return True
 
         if state == "GAME_RESTARTED":
@@ -13865,6 +13920,31 @@ class App:
             stop_blind_gem_tapper()
             self._blind_tapper_suspended = False
             return
+
+    def _handle_emulator_replay_auxiliary_actions(
+        self,
+        detection: Mapping[str, Any],
+        img: Frame,
+    ) -> None:
+        """Run only reviewed independent collectors during restart replay."""
+
+        if not self._emulator_replay_auxiliary_collectors():
+            return
+        state, _, _, overlays = self._normalise_detection(detection)
+        if state != "RUNNING":
+            return
+        self._sync_floating_gem_tapper(
+            state=state,
+            auxiliary_authority=self._action_decision(
+                RuntimeActionClass.AUXILIARY_COLLECTION,
+                collector=AuxiliaryCollector.FLOATING_GEM_SCAN,
+            ),
+        )
+        self._handle_strategy_gate_auxiliary_actions(
+            state,
+            overlays,
+            img,
+        )
 
     def _handle_strategy_gate_auxiliary_actions(
         self,

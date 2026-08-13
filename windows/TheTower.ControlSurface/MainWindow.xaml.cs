@@ -3683,9 +3683,12 @@ public partial class MainWindow : Window
                     + $"Executable: {preview.Target.ExecutablePath}\n\n"
                     + "Automation will hold input, restart this exact process, "
                     + "launch The Tower, and choose Welcome Back → Resume. "
-                    + "The game normally replays 5 waves (50 during Intro "
-                    + "Sprint) without earning coins. If the old battle cannot "
-                    + "be resumed, recovery ends it and starts the configured "
+                    + "The game may replay already completed waves without "
+                    + "earning coins. Once the same battle is running, "
+                    + "independent gem and reward collectors continue while "
+                    + "run-progression accounting waits for the old wave. "
+                    + "If the old battle cannot be resumed, recovery ends it "
+                    + "and starts the configured "
                     + "new Farm battle.",
                 "Restart BlueStacks",
                 MessageBoxButton.OKCancel,

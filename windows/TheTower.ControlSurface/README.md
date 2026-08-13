@@ -956,10 +956,14 @@ ADB listener disables automatic recovery because the host-wide aging signal is
 ambiguous; an operator-confirmed exact target remains available.
 
 Linux reconnects ADB, launches The Tower, and handles the distinct **Welcome
-Back** popup. It tries **Resume**, suppresses the non-earning rollback until the
-old wave high-water, and—if Resume cannot clear the popup—uses **End run** and
-starts a verified configured new battle. Recovery remains held until the old
-battle catches up or the replacement battle is freshly `RUNNING`. Accepted
+Back** popup. It tries **Resume**, keeps the non-earning rollback out of
+run-progression accounting until the old wave high-water, and—if Resume cannot
+clear the popup—uses **End run** and starts a verified configured new battle.
+Once a fresh resumed `RUNNING` frame is established, independently guarded
+in-battle gems, daily gems, and mission/chest reward collectors remain
+available during catch-up; Strategy and lifecycle actions remain held.
+Recovery remains active until the old battle catches up or the replacement
+battle is freshly `RUNNING`. Accepted
 launcher and Home inputs retain bounded postcondition receipts and are never
 blindly repeated on the next refresh; the known Free Ticket blocker has one
 exact-owner Claim and one stable-Home retry boundary. An accepted request is
@@ -968,9 +972,9 @@ Diagnostics** shows detector ratios, request phase, acknowledged instance/port/P
 and outcome independently of ordinary error text. The same area shows current
 handles plus the detector's recent median, low-water, ratio, delta, stable
 window count, exact PID, and contributing GUI-session count separately from
-coordinator progress. The confirmation explains the expected five replayed
-waves (fifty during Intro Sprint), their non-earning catch-up, and the
-End run/New Battle fallback. The thresholds, cooldown,
+coordinator progress. The confirmation explains the possible non-earning
+replay through the old high-water and the End run/New Battle fallback. The
+thresholds, cooldown,
 and exact authority handshake are specified in the
 [control-surface architecture](../../docs/architecture/control_surface.md#automatic-bluestacks-degradation-recovery).
 

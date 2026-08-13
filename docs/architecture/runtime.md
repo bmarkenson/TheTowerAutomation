@@ -1449,13 +1449,18 @@ expires after three minutes and the runtime releases its hold. There is no such
 guess after durable host acknowledgement: a lost Windows result may mean the
 process already stopped, so the hold remains until exact reconciliation.
 
-The hold precedes capture on every later loop and suppresses ordinary Strategy,
-handler, auxiliary, watchdog-foreground, and lifecycle actions. Capture,
-detection, control synchronization, status, and exact ADB reconnection may
-continue. Pause and Stop cannot be bypassed by the hold. Pause before host
-acknowledgement prevents authorization; after an accepted Windows restart it
-blocks Linux game input while the durable host result remains available for
-later reconciliation.
+The hold precedes capture on every later loop and, until the game source is
+restored, suppresses ordinary Strategy, handler, auxiliary,
+watchdog-foreground, and lifecycle actions. Capture, detection, control
+synchronization, status, and exact ADB reconnection may continue. Once fresh
+evidence proves that Resume returned to the same `RUNNING` battle, the hold
+continues to exclude run-progression and lifecycle work but allows the existing
+typed independent-collector lane: in-battle ad gems, floating-gem scans, daily
+gems, and Daily/Weekly/Event/Guild rewards. Every collector retains its normal
+fresh-screen, battle-scope, route-ownership, and final Pause rechecks. Pause and
+Stop cannot be bypassed by the hold. Pause before host acknowledgement prevents
+authorization; after an accepted Windows restart it blocks Linux game input
+while the durable host result remains available for later reconciliation.
 
 After Windows proves a different exact `HD-Player.exe` listener owner, Linux
 waits for the configured ADB target, permits at most three bounded Android
@@ -1483,13 +1488,15 @@ still requires fresh supported portrait UI evidence.
 The official [v28.0.6 patch note](https://www.techtreegames.com/post/v28-0-6-patch-notes)
 documents that process-restart resume returns five waves, or fifty waves while
 Intro Sprint is active. Those counts are retained as diagnostic expected
-floors, not trusted completion boundaries. The runtime instead holds every
-resumed `RUNNING` frame until wave OCR reaches the captured pre-restart
-high-water. During that window, ordinary wave-monotonic state, Coins/min,
-Perk/mission observations, strategy actions, and passive collectors do not see
-the replayed non-earning waves. If no trusted pre-restart wave exists, the
-first fresh numeric `RUNNING` wave is the strongest available completion
-boundary.
+floors, not trusted completion boundaries; production has also observed a
+fifty-wave rollback without confirmed Intro Sprint. The runtime instead keeps
+every resumed `RUNNING` frame out of ordinary run-progression observers until
+wave OCR reaches the captured pre-restart high-water. During that window,
+wave-monotonic state, Coins/min, Perk/mission observations, strategy actions,
+and activation accounting do not see the replayed non-earning waves, while the
+typed independent collectors above may continue operating. If no trusted
+pre-restart wave exists, the first fresh numeric `RUNNING` wave is the strongest
+available completion boundary.
 
 When the old battle is positively non-resumable, **End run** is followed by the
 ordinary full terminal collector with an `interrupted`, nonrepresentative,

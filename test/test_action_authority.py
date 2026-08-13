@@ -15,6 +15,7 @@ from core.action_authority import (
 )
 from core.app import App
 from core.action_executor import execute_actions
+from core.emulator_recovery import RestartReplayWindow
 from core.input import safe_tap
 from core.run_state import AUTOMATION
 from core.runtime_failure_policy import RuntimeFailureKind
@@ -204,6 +205,81 @@ def test_emulator_recovery_supersedes_ordinary_internal_holds_only():
             ),
         )
     )
+    assert not app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=AuthorityHold.EMULATOR_MAINTENANCE,
+    ).allowed
+
+
+def test_emulator_replay_hold_allows_only_independent_collectors():
+    app = App.__new__(App)
+    app._action_authority = RuntimeActionAuthority()
+    app._authority_battle_active = False
+    app._authority_primary_state = "UNKNOWN"
+    app._authority_holds = ()
+    app._external_development_hold_active = False
+    app._emulator_maintenance_hold_active = True
+    app._emulator_recovery_request_id = "maintenance-1"
+    app._emulator_recovery_force_new_battle = False
+    app._emulator_replay_window = RestartReplayWindow(
+        "maintenance-1",
+        100,
+        battle_scope="run-1",
+    )
+    app._emulator_replay_window.mark_resume_dispatched()
+    app._supervisor = SimpleNamespace(
+        is_paused=False,
+        emulator_maintenance={
+            "request_id": "maintenance-1",
+            "state": "host_restarted",
+        },
+    )
+    app._current_run_scope_id = Mock(return_value="run-1")
+
+    app._update_action_authority(
+        detection={"state": "RUNNING"},
+        holds=(),
+    )
+
+    snapshot = app._action_authority.snapshot()
+    assert snapshot.holds == (
+        AuthorityHoldState(
+            AuthorityHold.EMULATOR_MAINTENANCE,
+            (
+                "BlueStacks maintenance owns recovery while independent "
+                "in-battle collectors remain available"
+            ),
+            allowed_auxiliary_collectors=STRATEGY_GATE_AUXILIARY_ALLOWLIST,
+        ),
+    )
+    for collector in STRATEGY_GATE_AUXILIARY_ALLOWLIST:
+        assert app._action_decision(
+            RuntimeActionClass.AUXILIARY_COLLECTION,
+            collector=collector,
+        ).allowed
+    assert not app._action_decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.HOME_AD_GEM,
+    ).allowed
+    assert not app._action_decision(
+        RuntimeActionClass.STRATEGY_ACTION
+    ).allowed
+    assert not app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION
+    ).allowed
+    assert app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=AuthorityHold.EMULATOR_MAINTENANCE,
+    ).allowed
+
+    app._supervisor.is_paused = True
+    app._update_action_authority(detection={"state": "RUNNING"})
+
+    for collector in STRATEGY_GATE_AUXILIARY_ALLOWLIST:
+        assert not app._action_decision(
+            RuntimeActionClass.AUXILIARY_COLLECTION,
+            collector=collector,
+        ).allowed
     assert not app._action_decision(
         RuntimeActionClass.LIFECYCLE_ACTION,
         owner=AuthorityHold.EMULATOR_MAINTENANCE,
