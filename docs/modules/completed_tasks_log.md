@@ -39,6 +39,68 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-12 coordinated BlueStacks restart controls
+
+- Commit `40f414e` adds a confirmed **System > Diagnostics > Restart
+  BlueStacks…** command through the same durable Linux/Windows recovery
+  handshake as the default-off detector. Operator creation bypasses only the
+  performance decision, opt-in, cooldown, and once-per-battle gates; it still
+  requires fresh unheld exact-owner `RUNNING` Farm authority. Both initiators
+  bind the exact Windows path, instance, listener port, host, PID, and process
+  start time before Linux installs its no-input hold. A changed process before
+  acknowledgement fails without host mutation, while a resumability failure
+  uses the established End run/New Battle fallback.
+- The Windows sampler now carries exact listener identity across GUI sampling
+  sessions, while resetting on a listener or configured-target change. The
+  detector requires 16 sampled minutes, stable process coverage, and sustained
+  handle growth from that exact lifetime. Diagnostics shows current summed
+  BlueStacks handles/threads plus detector recent/low-water/ratio/delta/window,
+  exact PID, and GUI-session evidence separately from coordinator progress.
+  Linux and Windows ADB ports remain independently correlated and need not be
+  numerically equal.
+- Request submission, close, tunnel-port reconciliation, replacement startup,
+  and lost-response recovery were hardened around immutable targets. A request
+  with an unknown POST outcome retains its local target lock until compatible
+  status proves active, terminal, or idle; close reconciles without creating a
+  new automatic request. Post-ack recovery verifies or kills only the exact old
+  PID/start/path and never accepts a replacement listener until the configured
+  instance maps to the durable port.
+- The exact candidate passed compilation, state-definition validation,
+  clickmap integrity with zero errors, and all 2,512 Python tests in 394.33
+  seconds. All 204 focused Python/API/native-source contracts and 188 portable
+  Control Surface tests passed. The Release WPF cross-build and guarded
+  complete-package publisher completed successfully; the only output was the
+  known read-only NuGet vulnerability-cache warning.
+- Production and `develop` advanced from `82f1496` to `40f414e` behind
+  annotated rollback tag
+  `production-before-20260813T035629Z-82f1496`. The supported process endpoint
+  stopped automation PID `2175232` cleanly before the control surface stopped.
+  Revision-41 control-surface PID `2629646` then served the new capability
+  contract. Replacement automation PID `2630070` / runtime
+  `7b06b00056dd4334996dd2c1b01d7601` acquired exact target
+  `localhost:5555`, started Paused, and attached to the preserved Tier-19
+  battle through request `daf9fa5268394319af00b7d82c5e14d5`. It proved
+  save-backed same-battle continuity, adopted `farm_t19_ad_assist` without
+  repair, and reached steady `RUNNING` with normal Strategy/lifecycle authority
+  and server-authorized operator restart.
+- The complete Windows package was published from exact `40f414e` at 21:01
+  PDT. Current Control Surface is 72,474,917 bytes with SHA-256
+  `3002d9d4b6aa53b1e998af78698708444d589bf0afb5dac3c8c5606904f7cab1`;
+  current Tunnel Host is 35,172,119 bytes with SHA-256
+  `ebe1073a86d4731e64995b53816553ca45b9cca47430684f79615bf0fd817c19`.
+  Retained slot 1 is the prior `95aa11d` package: 72,464,645-byte Control
+  Surface `4568363f37b4fe2ac33b76fa20334de5084d169ab0db6906322fffbb57a2c4c9`
+  and 35,172,119-byte Tunnel Host
+  `0bf8a68ab735993c193c68da51befcaadc72266f8819c9a2b18137d762cb3821`.
+  Slot 2 is the prior `e46aee8` package: 72,462,225-byte Control Surface
+  `77c9fdb448fda65e1fdc334cdc9720a08b685a3dc42e64d93b52370dadd98e64`
+  and 35,172,106-byte Tunnel Host
+  `d0203bf09c47561c95d32e076dce0aa8b357f8a09ae0f3637076046798e8b27e`.
+  Publication and Linux-side success do not establish WPF runtime behavior;
+  the revision-41 handles display, GUI-session continuity, confirmation, exact
+  process restart, Welcome Back/Resume, and fallback remain the bounded Windows
+  production smoke.
+
 ### 2026-08-12 host telemetry schema-rejection recovery
 
 - Commit `95aa11d` closes the remaining FIFO poison-record failure exposed by
