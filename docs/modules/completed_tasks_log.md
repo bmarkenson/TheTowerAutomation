@@ -39,6 +39,30 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 workflow-guidance simplification audit
+
+- Commit `1dc4bfd` reduces universal startup guidance to routing and safeguards,
+  removes startup boilerplate from the handoff, makes clean integrated
+  branch/worktree retirement the default closure duty of every promotion
+  owner, and keeps documentation-only status as standing promotion authority
+  rather than a special cleanup rule.
+- A later follow-up is not a retention reason because its integrated commit is
+  reconstructible from `main`. Explicit retention, unique changes or ignored
+  evidence, active or unclear ownership, ambiguous ancestry, and non-force
+  cleanup refusal still retain the exact pair; superseded or abandoned work
+  remains a separate operator-approved disposition.
+- Mandatory `AGENTS.md` plus `docs/new_thread.md` reading fell from 1,494 to
+  1,115 words, and the conditional handoff template fell from 263 to 161. The
+  runtime backlog fell from 12,432 to 4,460 words by removing 72 completed
+  checkbox subtrees and redundant checkpoint chronology while preserving or
+  consolidating every open task. The active routed set, including the
+  conditional open-issue dossier, fell from 25,095 to 17,123 words.
+- All 331 tracked local Markdown targets and anchors across 51 files resolve.
+  The final candidate also passed `git diff --check`, zero-completed-checkbox
+  checks across current active backlogs, and searches for stale
+  documentation-only retirement exceptions. No project Python, service,
+  device, or live validation was required for this guidance-only change.
+
 ### 2026-08-13 development-process deduplication audit
 
 - Commits `ec9b70b` and `f12743a` remove duplicate environment and interpreter
