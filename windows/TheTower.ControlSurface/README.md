@@ -882,11 +882,22 @@ Raw samples remain in a two-minute memory ring. Approximately ten-second
 aggregates are queued in
 `%LOCALAPPDATA%\TheTower\host-performance-pending.jsonl` before upload, so an
 API or tunnel outage does not discard recent telemetry. The bounded queue keeps
-the newest nominal 24 hours and reconnects automatically. Uploads select the
+the newest nominal 24 hours and reconnects automatically. A sleep, scheduler,
+or wall-clock gap over five seconds closes the current partial aggregate before
+sampling resumes, rather than creating one invalid window across the gap.
+Uploads select the
 largest ordered aggregate prefix whose serialized UTF-8 request fits below the
 Linux endpoint's `512 KiB` limit; enriched process-attribution records therefore
 split into smaller batches instead of repeatedly receiving HTTP `413` while the
-queue fills. Linux stores
+queue fills. If Linux rejects one aggregate on schema validation, its structured
+response names only that batch index. The client preserves the exact aggregate
+and reason in
+`%LOCALAPPDATA%\TheTower\host-performance-rejected.jsonl`, atomically removes
+only that record from the pending spool, and retries its valid neighbors. The
+queue display counts these rejected diagnostic records separately from records
+dropped at the 24-hour capacity boundary; the rejected spool retains the newest
+1,024 unique records. A request-level rejection or a local
+preservation/checkpoint failure leaves the pending record untouched. Linux stores
 idempotent aggregates in `logs/host_performance.sqlite3` with sample-time host,
 ADB-port, UTC, and fresh current-run correlation. Base and GPU publication
 require server revision 13 and capabilities `host_performance_telemetry_v1`

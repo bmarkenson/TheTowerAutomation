@@ -8,6 +8,8 @@ internal sealed record HostPerformanceUploadPayload(
 
 internal static class HostPerformanceUploadBatch
 {
+    public const string InvalidAggregateErrorCode =
+        "invalid_host_performance_aggregate";
     public const int MaximumAggregateCount = 120;
 
     // Linux accepts at most 512 KiB for this endpoint. Retain a small margin
@@ -63,4 +65,28 @@ internal static class HostPerformanceUploadBatch
             {
                 Aggregates = aggregates.ToList(),
             });
+
+    internal static bool TryGetRejectedAggregateIndex(
+        ControlSurfaceApiException exception,
+        int aggregateCount,
+        out int aggregateIndex)
+    {
+        aggregateIndex = -1;
+        if (exception.StatusCode != 400
+            || !string.Equals(
+                exception.Code,
+                InvalidAggregateErrorCode,
+                StringComparison.Ordinal)
+            || exception.Details is not { } details
+            || details.ValueKind != JsonValueKind.Object
+            || !details.TryGetProperty("aggregate_index", out var indexValue)
+            || !indexValue.TryGetInt32(out aggregateIndex)
+            || aggregateIndex < 0
+            || aggregateIndex >= aggregateCount)
+        {
+            aggregateIndex = -1;
+            return false;
+        }
+        return true;
+    }
 }

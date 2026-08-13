@@ -411,10 +411,32 @@ def test_host_performance_rejects_invalid_aggregate(mutation, message):
 
 
 def test_control_surface_translates_host_performance_payload_error(tmp_path):
-    with pytest.raises(ControlSurfaceRequestError, match="schema_version"):
+    with pytest.raises(
+        ControlSurfaceRequestError,
+        match="schema_version",
+    ) as failure:
         ControlSurfaceService(
             repository_root=tmp_path
         ).publish_host_performance({"schema_version": 2, "aggregates": []})
+    assert failure.value.code == "invalid_host_performance_request"
+    assert failure.value.details == {}
+
+
+def test_host_performance_rejection_identifies_only_invalid_aggregate(tmp_path):
+    invalid = _aggregate(
+        aggregate_id="120f6782-cbb5-4656-aac4-1ca12a9a62f5",
+        sequence=5,
+        metrics={"unsupported_metric": 1.0},
+    )
+
+    with pytest.raises(ControlSurfaceRequestError) as failure:
+        ControlSurfaceService(repository_root=tmp_path).publish_host_performance(
+            _request(_aggregate(), invalid)
+        )
+
+    assert failure.value.code == "invalid_host_performance_aggregate"
+    assert failure.value.details == {"aggregate_index": 1}
+    assert "unsupported_metric" in str(failure.value)
 
 
 def test_http_host_performance_endpoint_requires_token_and_accepts_batch(tmp_path):
@@ -458,6 +480,25 @@ def test_http_host_performance_endpoint_requires_token_and_accepts_batch(tmp_pat
         assert response.status == 200
         assert payload["accepted"] == 1
         assert payload["duplicates"] == 0
+
+        invalid_body = json.dumps(
+            _request(_aggregate(metrics={"unsupported_metric": 1.0}))
+        )
+        connection.request(
+            "POST",
+            "/api/v1/host-performance",
+            body=invalid_body,
+            headers={
+                **headers,
+                "Content-Length": str(len(invalid_body)),
+                "Authorization": "Bearer test-secret",
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 400
+        assert payload["code"] == "invalid_host_performance_aggregate"
+        assert payload["details"] == {"aggregate_index": 0}
     finally:
         connection.close()
         server.shutdown()

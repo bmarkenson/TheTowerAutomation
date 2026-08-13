@@ -23,6 +23,10 @@
              Link="BlueStacksMaintenanceCoordinator.cs" />
     <Compile Include="..\TheTower.ControlSurface\HostPerformanceModels.cs"
              Link="HostPerformanceModels.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostPerformanceAggregateWindow.cs"
+             Link="HostPerformanceAggregateWindow.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostPerformanceSpool.cs"
+             Link="HostPerformanceSpool.cs" />
     <Compile Include="..\TheTower.ControlSurface\HostPerformanceUploadBatch.cs"
              Link="HostPerformanceUploadBatch.cs" />
     <Compile Include="..\TheTower.ControlSurface\Models.cs" Link="Models.cs" />

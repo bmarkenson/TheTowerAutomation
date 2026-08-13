@@ -135,6 +135,21 @@ public sealed class HostPerformancePublishResponse
     public string? ServerRunId { get; set; }
 }
 
+internal sealed class HostPerformanceRejectedAggregate
+{
+    [JsonPropertyName("aggregate_id")]
+    public string AggregateId { get; set; } = "";
+
+    [JsonPropertyName("rejected_at_utc")]
+    public string RejectedAtUtc { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("aggregate")]
+    public HostPerformanceAggregate Aggregate { get; set; } = new();
+}
+
 internal sealed record HostPerformanceContext(
     int? AdbPort,
     string? RunId,
@@ -250,6 +265,8 @@ public sealed record HostPerformanceSnapshot
     public double? SampleDurationMilliseconds { get; init; }
     public int PendingAggregateCount { get; init; }
     public long DroppedAggregateCount { get; init; }
+    public int RejectedAggregateCount { get; init; }
+    public string? LastRejectedAggregateReason { get; init; }
     public bool UploadEnabled { get; init; }
     public DateTimeOffset? LastUploadedAtUtc { get; init; }
     public string? UploadError { get; init; }

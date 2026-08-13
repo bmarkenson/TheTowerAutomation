@@ -1017,7 +1017,11 @@ tooltip preserves each PID separately.
 
 The client retains 120 raw samples in memory and reduces each ten-sample window
 to averages and extrema. An ADB-port or run-identity transition closes the
-current window early rather than mixing correlations. Each aggregate carries a
+current window early rather than mixing correlations. A scheduler, sleep, or
+wall-clock discontinuity greater than five seconds also closes the partial
+window before the next sample, keeping the downtime explicit and preventing a
+single aggregate from spanning the server's five-minute validation ceiling.
+Each aggregate carries a
 stable locally generated host ID, Windows host name, client session/sequence,
 UTC window, logical-processor count, ADB port, and the run ID observed through
 the status API. A run ID expires from new samples when status has not refreshed
@@ -1036,7 +1040,15 @@ Aggregates first enter
 `%LOCALAPPDATA%\TheTower\host-performance-pending.jsonl`. The bounded spool
 keeps the newest 24 hours at the nominal ten-second cadence and reports any
 drops in the GUI. Upload resumes in bounded batches after an API or tunnel
-outage. Aggregate UUIDs are primary keys in
+outage. A schema rejection identifies the exact aggregate index. The client
+first appends that aggregate and the server reason to the durable
+`host-performance-rejected.jsonl` diagnostic spool, then atomically removes
+only that UUID from the pending spool so valid neighbors can retry. A failure
+to preserve or checkpoint the rejected aggregate leaves it pending; an
+unindexed request rejection never authorizes removal. The GUI reports rejected
+aggregates separately from capacity drops. The diagnostic spool retains the
+newest 1,024 unique rejected aggregates so a systematic producer fault cannot
+grow local storage without bound. Aggregate UUIDs are primary keys in
 `logs/host_performance.sqlite3`, so retrying after a lost response is safe. The
 Linux store also records the server's current run at ingest as separate
 diagnostic context, keeps the sample-time run authoritative, and prunes records

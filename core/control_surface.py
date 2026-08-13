@@ -2096,7 +2096,20 @@ class ControlSurfaceService:
                 ),
             )
         except HostPerformancePayloadError as exc:
-            raise ControlSurfaceRequestError(str(exc)) from exc
+            aggregate_index = exc.aggregate_index
+            raise ControlSurfaceRequestError(
+                str(exc),
+                code=(
+                    "invalid_host_performance_aggregate"
+                    if aggregate_index is not None
+                    else "invalid_host_performance_request"
+                ),
+                details=(
+                    {"aggregate_index": aggregate_index}
+                    if aggregate_index is not None
+                    else None
+                ),
+            ) from exc
         except HostPerformanceStorageError as exc:
             raise ControlSurfaceRequestError(
                 f"Unable to persist host-performance telemetry: {exc}",

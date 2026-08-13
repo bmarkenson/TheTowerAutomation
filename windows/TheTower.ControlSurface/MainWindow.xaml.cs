@@ -3869,6 +3869,11 @@ public partial class MainWindow : Window
             HostTelemetryQueueText.Text +=
                 $" · {snapshot.DroppedAggregateCount} dropped";
         }
+        if (snapshot.RejectedAggregateCount > 0)
+        {
+            HostTelemetryQueueText.Text +=
+                $" · {snapshot.RejectedAggregateCount} rejected";
+        }
 
         var details = new List<string>
         {
@@ -3940,6 +3945,18 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(snapshot.UploadError))
         {
             details.Add($"Upload: {snapshot.UploadError}");
+        }
+        if (snapshot.RejectedAggregateCount > 0)
+        {
+            details.Add(
+                $"Rejected telemetry: {snapshot.RejectedAggregateCount} "
+                + "schema-rejected aggregate(s) preserved in "
+                + "host-performance-rejected.jsonl."
+                + (string.IsNullOrWhiteSpace(
+                        snapshot.LastRejectedAggregateReason)
+                    ? ""
+                    : $" Latest reason: "
+                        + snapshot.LastRejectedAggregateReason));
         }
         HostPerformancePanel.ToolTip = string.Join(
             Environment.NewLine,

@@ -84,6 +84,15 @@ _METRIC_LIMITS: dict[str, tuple[float, float]] = {
 class HostPerformancePayloadError(ValueError):
     """A rejected host-performance payload."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        aggregate_index: Optional[int] = None,
+    ) -> None:
+        super().__init__(message)
+        self.aggregate_index = aggregate_index
+
 
 class HostPerformanceStorageError(RuntimeError):
     """Host-performance telemetry could not be persisted."""
@@ -375,10 +384,16 @@ def validate_host_performance_request(
         raise HostPerformancePayloadError(
             f"aggregates must contain 1 to {MAX_HOST_PERFORMANCE_BATCH} items"
         )
-    return [
-        _validate_aggregate(aggregate, index=index)
-        for index, aggregate in enumerate(aggregates)
-    ]
+    validated: list[dict[str, Any]] = []
+    for index, aggregate in enumerate(aggregates):
+        try:
+            validated.append(_validate_aggregate(aggregate, index=index))
+        except HostPerformancePayloadError as exc:
+            raise HostPerformancePayloadError(
+                str(exc),
+                aggregate_index=index,
+            ) from exc
+    return validated
 
 
 def _validate_aggregate(

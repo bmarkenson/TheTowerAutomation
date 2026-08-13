@@ -175,9 +175,12 @@ public sealed class HostPerformanceTracker : IDisposable
                     }
 
                     if (aggregateWindow.Count > 0
-                        && !SameCorrelation(
-                            aggregateWindow[0].Context,
-                            sample.Context))
+                        && (HostPerformanceAggregateWindow.HasDiscontinuity(
+                                aggregateWindow[^1].TimestampUtc,
+                                sample.TimestampUtc)
+                            || !SameCorrelation(
+                                aggregateWindow[0].Context,
+                                sample.Context)))
                     {
                         EnqueueAggregate(aggregateWindow);
                         aggregateWindow.Clear();
@@ -545,9 +548,10 @@ public sealed class HostPerformanceTracker : IDisposable
 
             var candidates = _spool.Peek(
                 HostPerformanceUploadBatch.MaximumAggregateCount);
+            HostPerformanceUploadPayload? upload = null;
             try
             {
-                var upload = HostPerformanceUploadBatch.Prepare(candidates);
+                upload = HostPerformanceUploadBatch.Prepare(candidates);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(12));
@@ -584,6 +588,51 @@ public sealed class HostPerformanceTracker : IDisposable
                         + "in the local spool.";
                 }
                 PublishSnapshot();
+                if (!await DelayForRetry(retryDelay, cancellationToken))
+                {
+                    return;
+                }
+                retryDelay = NextRetryDelay(retryDelay);
+            }
+            catch (ControlSurfaceApiException exception) when (
+                upload is not null
+                && HostPerformanceUploadBatch.TryGetRejectedAggregateIndex(
+                    exception,
+                    upload.Aggregates.Count,
+                    out _))
+            {
+                HostPerformanceUploadBatch.TryGetRejectedAggregateIndex(
+                    exception,
+                    upload.Aggregates.Count,
+                    out var rejectedIndex);
+                var rejected = upload.Aggregates[rejectedIndex];
+                var quarantined = _spool.Reject(
+                    rejected.AggregateId,
+                    exception.Message);
+                lock (_stateGate)
+                {
+                    _uploadError = quarantined
+                        ? "Linux rejected one host-performance aggregate on "
+                            + "schema validation. "
+                            + "It was preserved locally and later "
+                            + "telemetry will continue uploading."
+                        : exception.Message
+                            + " The rejected aggregate could not be preserved "
+                            + "separately, so telemetry remains in the local "
+                            + "spool.";
+                }
+                PublishSnapshot();
+                if (quarantined)
+                {
+                    retryDelay = TimeSpan.FromSeconds(1);
+                    if (!await DelayForRetry(
+                        TimeSpan.FromSeconds(1),
+                        cancellationToken))
+                    {
+                        return;
+                    }
+                    continue;
+                }
                 if (!await DelayForRetry(retryDelay, cancellationToken))
                 {
                     return;
@@ -755,6 +804,8 @@ public sealed class HostPerformanceTracker : IDisposable
             SampleDurationMilliseconds = sampleDuration,
             PendingAggregateCount = _spool.PendingCount,
             DroppedAggregateCount = _spool.DroppedCount,
+            RejectedAggregateCount = _spool.RejectedCount,
+            LastRejectedAggregateReason = _spool.LastRejectionReason,
             UploadEnabled = uploadEnabled,
             LastUploadedAtUtc = lastUploadedAtUtc,
             UploadError = uploadError,

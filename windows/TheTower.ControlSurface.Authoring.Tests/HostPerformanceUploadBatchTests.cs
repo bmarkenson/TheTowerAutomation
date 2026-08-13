@@ -47,6 +47,52 @@ public sealed class HostPerformanceUploadBatchTests
             StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void StructuredValidationErrorSelectsOnlyRejectedAggregate()
+    {
+        using var document = JsonDocument.Parse(
+            """{"aggregate_index":2}""");
+        var exception = new ControlSurfaceApiException(
+            "aggregate is invalid",
+            400,
+            HostPerformanceUploadBatch.InvalidAggregateErrorCode,
+            document.RootElement.Clone());
+
+        var selected = HostPerformanceUploadBatch.TryGetRejectedAggregateIndex(
+            exception,
+            aggregateCount: 4,
+            out var aggregateIndex);
+
+        Assert.True(selected);
+        Assert.Equal(2, aggregateIndex);
+    }
+
+    [Theory]
+    [InlineData(409, "invalid_host_performance_aggregate", 1)]
+    [InlineData(400, "invalid_host_performance_request", 1)]
+    [InlineData(400, "invalid_host_performance_aggregate", 4)]
+    public void UntrustedValidationErrorDoesNotSelectAggregate(
+        int statusCode,
+        string code,
+        int suppliedIndex)
+    {
+        using var document = JsonDocument.Parse(
+            $$"""{"aggregate_index":{{suppliedIndex}}}""");
+        var exception = new ControlSurfaceApiException(
+            "request failed",
+            statusCode,
+            code,
+            document.RootElement.Clone());
+
+        var selected = HostPerformanceUploadBatch.TryGetRejectedAggregateIndex(
+            exception,
+            aggregateCount: 4,
+            out var aggregateIndex);
+
+        Assert.False(selected);
+        Assert.Equal(-1, aggregateIndex);
+    }
+
     private static HostPerformanceAggregate CreateEnrichedAggregate(int index)
     {
         var processName = $"diagnostic-process-{index}-" + new string('x', 160);
