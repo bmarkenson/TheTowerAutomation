@@ -4,6 +4,10 @@ internal sealed record BlueStacksPendingCompletion(
     BlueStacksRestartResult Result,
     BlueStacksRecoveryTarget Target);
 
+internal sealed record BlueStacksOperatorRestartPreview(
+    BlueStacksRecoveryTarget Target,
+    BlueStacksProcessIdentity Identity);
+
 internal sealed class BlueStacksMaintenanceCoordinator
 {
     private readonly IHostMaintenanceApi _api;
@@ -16,6 +20,7 @@ internal sealed class BlueStacksMaintenanceCoordinator
     private string? _lastRequestedAssessmentAt;
     private string? _activeRequestId;
     private bool _operationActive;
+    private bool _requestOutcomeUnknown;
 
     public BlueStacksMaintenanceCoordinator(
         IHostMaintenanceApi api,
@@ -36,7 +41,9 @@ internal sealed class BlueStacksMaintenanceCoordinator
         {
             lock (_stateGate)
             {
-                return _operationActive || !string.IsNullOrWhiteSpace(_activeRequestId);
+                return _operationActive
+                    || _requestOutcomeUnknown
+                    || !string.IsNullOrWhiteSpace(_activeRequestId);
             }
         }
     }
@@ -52,20 +59,163 @@ internal sealed class BlueStacksMaintenanceCoordinator
         }
     }
 
-    public async Task ObserveStatusAsync(
+    internal bool RequestOutcomeUnknown
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _requestOutcomeUnknown;
+            }
+        }
+    }
+
+    public BlueStacksOperatorRestartPreview PrepareOperatorRestart()
+    {
+        if (TargetEditsLocked)
+        {
+            throw new InvalidOperationException(
+                "BlueStacks maintenance is already active.");
+        }
+        var target = BlueStacksRecoveryTarget.Capture(_settings());
+        var identity = _controller.Inspect(
+            target,
+            requireSingleActiveInstance: false);
+        return new BlueStacksOperatorRestartPreview(target, identity);
+    }
+
+    internal static BlueStacksRecoveryTarget? ResolveTelemetryTarget(
         StatusResponse status,
+        ClientSettings settings)
+    {
+        var request = status.HostMaintenance.Request;
+        try
+        {
+            if (request is not null && request.State != "terminal")
+            {
+                var durable = request.HostCompletion
+                    ?? request.HostAcknowledgement
+                    ?? request.HostTarget;
+                return durable is null
+                    ? null
+                    : BlueStacksRecoveryTarget.FromAcknowledgement(durable);
+            }
+            return BlueStacksRecoveryTarget.Capture(settings);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    internal static bool CanAdoptTunnelHostPort(
+        StatusResponse status,
+        bool targetEditsLocked) =>
+        !targetEditsLocked
+        && status.HostMaintenance.Request is not
+            { State: not "terminal" };
+
+    public async Task RequestOperatorRestartAsync(
+        BlueStacksOperatorRestartPreview preview,
         CancellationToken cancellationToken)
     {
-        if (status.ServerRevision < ControlSurfaceCompatibility.MinimumServerRevision
-            || !status.Capabilities.Contains(
-                "bluestacks_maintenance_v1",
-                StringComparer.Ordinal))
+        if (!await _gate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "BlueStacks maintenance is already active.");
+        }
+        SetOperationActive(true);
+        try
+        {
+            if (RequestOutcomeUnknown
+                || !string.IsNullOrWhiteSpace(ActiveRequestId))
+            {
+                throw new InvalidOperationException(
+                    "BlueStacks maintenance is already active.");
+            }
+            var current = _controller.Inspect(
+                preview.Target,
+                requireSingleActiveInstance: false);
+            if (!ExactHostIdentity(current, preview.Identity, preview.Target))
+            {
+                throw new InvalidOperationException(
+                    "The exact BlueStacks listener changed after confirmation; "
+                        + "no restart was requested.");
+            }
+            StateChanged?.Invoke(
+                this,
+                $"Requesting operator restart · {preview.Target.InstanceName} "
+                    + $"on {preview.Target.AdbPort} · PID {current.ProcessId}");
+            StatusResponse response;
+            try
+            {
+                response = await _api.PostHostMaintenanceAsync(
+                    new
+                    {
+                        operation = "request_operator",
+                        host_id = current.HostId,
+                        adb_port = preview.Target.AdbPort,
+                        process_id = current.ProcessId,
+                        process_started_at = current.ProcessStartedAtText,
+                        executable_path = preview.Target.ExecutablePath,
+                        instance_name = preview.Target.InstanceName,
+                    },
+                    cancellationToken);
+            }
+            catch (Exception exception)
+                when (!IsDefinitePrecommitRejection(exception))
+            {
+                SetRequestOutcomeUnknown(true);
+                StateChanged?.Invoke(
+                    this,
+                    "Operator restart request result is unknown; target edits "
+                        + "stay locked until Linux status reconciles");
+                throw;
+            }
+            var request = response.HostMaintenance.Request;
+            try
+            {
+                if (request is null
+                    || string.IsNullOrWhiteSpace(request.RequestId))
+                {
+                    throw new InvalidOperationException(
+                        "Linux accepted no durable BlueStacks maintenance request.");
+                }
+                RequireRequestedTarget(request, current, preview.Target);
+            }
+            catch
+            {
+                SetRequestOutcomeUnknown(true);
+                throw;
+            }
+            _requestTargets[request.RequestId] = preview.Target;
+            SetRequestOutcomeUnknown(false);
+            SetActiveRequest(request.RequestId);
+            StateChanged?.Invoke(
+                this,
+                $"Operator restart requested · {request.RequestId} · "
+                    + "waiting for runtime quiescence");
+        }
+        finally
+        {
+            SetOperationActive(false);
+            _gate.Release();
+        }
+    }
+
+    public async Task ObserveStatusAsync(
+        StatusResponse status,
+        CancellationToken cancellationToken,
+        bool allowRequestCreation = true)
+    {
+        if (!HasMaintenanceReconciliationContract(status))
         {
             StateChanged?.Invoke(
                 this,
                 "BlueStacks recovery unavailable · Linux revision "
                     + $"{ControlSurfaceCompatibility.MinimumServerRevision} with "
-                    + "bluestacks_maintenance_v1 is required");
+                    + "the exact-listener BlueStacks maintenance capabilities "
+                    + "are required");
             return;
         }
 
@@ -73,11 +223,15 @@ internal sealed class BlueStacksMaintenanceCoordinator
         var request = maintenance.Request;
         if (request is null)
         {
+            SetRequestOutcomeUnknown(false);
             SetActiveRequest(null);
-            await RequestIfReadyAsync(
-                status.EmulatorDegradation,
-                _settings(),
-                cancellationToken);
+            if (allowRequestCreation)
+            {
+                await RequestIfReadyAsync(
+                    status.EmulatorDegradation,
+                    _settings(),
+                    cancellationToken);
+            }
             return;
         }
         if (string.IsNullOrWhiteSpace(request.RequestId))
@@ -88,16 +242,31 @@ internal sealed class BlueStacksMaintenanceCoordinator
         {
             _pendingReports.Remove(request.RequestId);
             _requestTargets.Remove(request.RequestId);
+            SetRequestOutcomeUnknown(false);
             SetActiveRequest(null);
+            var terminalDisposition = string.IsNullOrWhiteSpace(
+                request.TerminalDisposition)
+                    ? "terminal"
+                    : request.TerminalDisposition;
+            var terminalReason = request.TerminalReason
+                ?? maintenance.Reason;
             StateChanged?.Invoke(
                 this,
-                $"BlueStacks recovery terminal · {request.Reason}");
+                $"BlueStacks recovery {terminalDisposition} · {terminalReason}");
+            if (allowRequestCreation)
+            {
+                await RequestIfReadyAsync(
+                    status.EmulatorDegradation,
+                    _settings(),
+                    cancellationToken);
+            }
             return;
         }
 
         // The preference gates request creation only.  A durable request must
         // reconcile after restart or preference changes until Linux records a
         // terminal source-restoration outcome.
+        SetRequestOutcomeUnknown(false);
         SetActiveRequest(request.RequestId);
         if (!await _gate.WaitAsync(0, cancellationToken))
         {
@@ -139,21 +308,52 @@ internal sealed class BlueStacksMaintenanceCoordinator
         {
             var target = BlueStacksRecoveryTarget.Capture(settings);
             var identity = _controller.Inspect(target);
+            RequireDetectorIdentity(degradation, identity, target);
             StateChanged?.Invoke(
                 this,
                 $"BlueStacks degradation confirmed · target "
                     + $"{target.InstanceName} on {target.AdbPort}, PID "
                     + $"{identity.ProcessId}");
-            var response = await _api.PostHostMaintenanceAsync(
-                new { operation = "request" },
-                cancellationToken);
-            var request = response.HostMaintenance.Request;
-            if (request is null || string.IsNullOrWhiteSpace(request.RequestId))
+            StatusResponse response;
+            try
             {
-                throw new InvalidOperationException(
-                    "Linux accepted no durable BlueStacks maintenance request.");
+                response = await _api.PostHostMaintenanceAsync(
+                    new
+                    {
+                        operation = "request",
+                        host_id = identity.HostId,
+                        adb_port = target.AdbPort,
+                        process_id = identity.ProcessId,
+                        process_started_at = identity.ProcessStartedAtText,
+                        executable_path = target.ExecutablePath,
+                        instance_name = target.InstanceName,
+                    },
+                    cancellationToken);
+            }
+            catch (Exception exception)
+                when (!IsDefinitePrecommitRejection(exception))
+            {
+                SetRequestOutcomeUnknown(true);
+                throw;
+            }
+            var request = response.HostMaintenance.Request;
+            try
+            {
+                if (request is null
+                    || string.IsNullOrWhiteSpace(request.RequestId))
+                {
+                    throw new InvalidOperationException(
+                        "Linux accepted no durable BlueStacks maintenance request.");
+                }
+                RequireRequestedTarget(request, identity, target);
+            }
+            catch
+            {
+                SetRequestOutcomeUnknown(true);
+                throw;
             }
             _requestTargets[request.RequestId] = target;
+            SetRequestOutcomeUnknown(false);
             SetActiveRequest(request.RequestId);
             _lastRequestedAssessmentAt = degradation.AssessedAt;
             StateChanged?.Invoke(
@@ -207,12 +407,23 @@ internal sealed class BlueStacksMaintenanceCoordinator
                             + $"waiting for runtime hold · {maintenance.Reason}");
                     return;
                 }
-                if (!_requestTargets.TryGetValue(request.RequestId, out target))
+                if (request.HostTarget is not { } requestedTarget)
                 {
-                    target = BlueStacksRecoveryTarget.Capture(_settings());
-                    _requestTargets[request.RequestId] = target;
+                    throw new InvalidOperationException(
+                        "The durable request has no exact BlueStacks target; "
+                            + "host mutation is not authorized.");
                 }
-                previous = _controller.Inspect(target);
+                (target, var expected) = StoredTarget(requestedTarget);
+                _requestTargets[request.RequestId] = target;
+                previous = _controller.Inspect(
+                    target,
+                    requireSingleActiveInstance: false);
+                if (!ExactHostIdentity(previous, expected, target))
+                {
+                    throw new InvalidOperationException(
+                        "The exact BlueStacks listener changed before host "
+                            + "acknowledgement; no process was stopped.");
+                }
                 StateChanged?.Invoke(
                     this,
                     $"BlueStacks quiesced · {target.InstanceName} · PID "
@@ -272,7 +483,7 @@ internal sealed class BlueStacksMaintenanceCoordinator
             {
                 return;
             }
-            (target, previous) = AcknowledgedTarget(acknowledged);
+            (target, previous) = StoredTarget(acknowledged);
             _requestTargets[request.RequestId] = target;
             StateChanged?.Invoke(
                 this,
@@ -281,19 +492,28 @@ internal sealed class BlueStacksMaintenanceCoordinator
             BlueStacksRestartResult result;
             try
             {
-                var current = _controller.Inspect(target);
-                result = ExactIdentity(current, previous)
-                    ? await _controller.RestartAcknowledgedAsync(
-                        previous,
-                        target,
-                        CancellationToken.None)
-                    : await _controller.ConfirmReplacementAsync(
+                var current = _controller.Inspect(
+                    target,
+                    requireSingleActiveInstance: false);
+                if (ExactIdentity(current, previous))
+                {
+                    RestartBoundaryCrossed?.Invoke(this, EventArgs.Empty);
+                    result = await _controller.RestartAcknowledgedAsync(
                         previous,
                         target,
                         CancellationToken.None);
+                }
+                else
+                {
+                    result = await _controller.ConfirmReplacementAsync(
+                        previous,
+                        target,
+                        CancellationToken.None);
+                }
             }
             catch (BlueStacksListenerUnavailableException)
             {
+                RestartBoundaryCrossed?.Invoke(this, EventArgs.Empty);
                 result = await _controller.StartAfterAcknowledgedStopAsync(
                     previous,
                     target,
@@ -371,8 +591,67 @@ internal sealed class BlueStacksMaintenanceCoordinator
         }
     }
 
+    private static void RequireRequestedTarget(
+        HostMaintenanceRequest request,
+        BlueStacksProcessIdentity identity,
+        BlueStacksRecoveryTarget target)
+    {
+        if (request.HostTarget is not { } stored)
+        {
+            throw new InvalidOperationException(
+                "Linux did not durably bind the exact BlueStacks target.");
+        }
+        var (storedTarget, storedIdentity) = StoredTarget(stored);
+        if (!Equals(storedTarget, target)
+            || !ExactHostIdentity(identity, storedIdentity, target))
+        {
+            throw new InvalidOperationException(
+                "Linux returned a different durable BlueStacks target; host "
+                    + "mutation was not started.");
+        }
+    }
+
+    private static void RequireDetectorIdentity(
+        EmulatorDegradationStatus degradation,
+        BlueStacksProcessIdentity identity,
+        BlueStacksRecoveryTarget target)
+    {
+        var evidence = degradation.HostEvidence;
+        var listener = evidence?.ListenerIdentity;
+        if (!string.Equals(
+                evidence?.IdentityScope,
+                "exact_listener_lifetime",
+                StringComparison.Ordinal)
+            || listener is null
+            || !DateTimeOffset.TryParse(
+                listener.ProcessStartedAt,
+                out var processStartedAt))
+        {
+            throw new InvalidOperationException(
+                "Automatic recovery has no exact BlueStacks listener-lifetime "
+                    + "evidence.");
+        }
+        var expectedTarget = BlueStacksRecoveryTarget.Create(
+            listener.ExecutablePath,
+            listener.InstanceName,
+            listener.AdbPort);
+        var expected = new BlueStacksProcessIdentity(
+            listener.HostId,
+            listener.AdbPort,
+            listener.ProcessId,
+            processStartedAt.ToUniversalTime(),
+            listener.ExecutablePath);
+        if (!Equals(expectedTarget, target)
+            || !ExactHostIdentity(identity, expected, target))
+        {
+            throw new InvalidOperationException(
+                "The live BlueStacks listener does not match the exact process "
+                    + "lifetime that authorized automatic recovery.");
+        }
+    }
+
     private static (BlueStacksRecoveryTarget Target, BlueStacksProcessIdentity Previous)
-        AcknowledgedTarget(BlueStacksHostProcessIdentity acknowledged)
+        StoredTarget(BlueStacksHostProcessIdentity acknowledged)
     {
         if (!string.Equals(
                 acknowledged.HostId,
@@ -383,7 +662,7 @@ internal sealed class BlueStacksMaintenanceCoordinator
                 out var processStartedAt))
         {
             throw new InvalidOperationException(
-                "The durable BlueStacks acknowledgement does not match this "
+                "The durable BlueStacks process identity does not match this "
                     + "Windows host.");
         }
         var target = BlueStacksRecoveryTarget.FromAcknowledgement(acknowledged);
@@ -403,7 +682,11 @@ internal sealed class BlueStacksMaintenanceCoordinator
     {
         try
         {
-            return ExactIdentity(_controller.Inspect(target), previous);
+            return ExactIdentity(
+                _controller.Inspect(
+                    target,
+                    requireSingleActiveInstance: false),
+                previous);
         }
         catch
         {
@@ -416,6 +699,43 @@ internal sealed class BlueStacksMaintenanceCoordinator
         BlueStacksProcessIdentity right) =>
         left.ProcessId == right.ProcessId
         && left.ProcessStartedAtUtc == right.ProcessStartedAtUtc;
+
+    private static bool ExactHostIdentity(
+        BlueStacksProcessIdentity left,
+        BlueStacksProcessIdentity right,
+        BlueStacksRecoveryTarget target) =>
+        ExactIdentity(left, right)
+        && left.AdbPort == target.AdbPort
+        && right.AdbPort == target.AdbPort
+        && string.Equals(
+            left.HostId,
+            right.HostId,
+            StringComparison.OrdinalIgnoreCase)
+        && string.Equals(
+            left.ExecutablePath,
+            target.ExecutablePath,
+            StringComparison.OrdinalIgnoreCase)
+        && string.Equals(
+            right.ExecutablePath,
+            target.ExecutablePath,
+            StringComparison.OrdinalIgnoreCase);
+
+    internal static bool HasCapability(StatusResponse status, string value) =>
+        status.Capabilities.Contains(value, StringComparer.Ordinal);
+
+    internal static bool HasOperatorRestartContract(StatusResponse status) =>
+        HasMaintenanceReconciliationContract(status)
+        && HasCapability(status, "bluestacks_operator_restart_v1");
+
+    internal static bool HasMaintenanceReconciliationContract(
+        StatusResponse status) =>
+        status.ApiVersion == ControlSurfaceCompatibility.RequiredApiVersion
+        && status.ServerRevision
+            >= ControlSurfaceCompatibility.MinimumServerRevision
+        && HasCapability(status, "bluestacks_maintenance_v2")
+        && HasCapability(
+            status,
+            "bluestacks_listener_lifetime_telemetry_v1");
 
     private async Task ReportCompletionOrRetainAsync(
         string requestId,
@@ -509,4 +829,18 @@ internal sealed class BlueStacksMaintenanceCoordinator
             _operationActive = active;
         }
     }
+
+    private void SetRequestOutcomeUnknown(bool value)
+    {
+        lock (_stateGate)
+        {
+            _requestOutcomeUnknown = value;
+        }
+    }
+
+    private static bool IsDefinitePrecommitRejection(Exception exception) =>
+        exception is ControlSurfaceApiException
+        {
+            StatusCode: >= 400 and < 500,
+        };
 }

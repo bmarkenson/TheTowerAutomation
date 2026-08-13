@@ -84,6 +84,9 @@ public sealed class HostMaintenanceStatus
     [JsonPropertyName("exclude_from_degradation")]
     public bool ExcludeFromDegradation { get; set; }
 
+    [JsonPropertyName("operator_restart")]
+    public BetterControlActionAvailability OperatorRestart { get; set; } = new();
+
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
 }
@@ -116,6 +119,48 @@ public sealed class EmulatorDegradationStatus
 
     [JsonPropertyName("effective_game_speed_ratio")]
     public double? EffectiveGameSpeedRatio { get; set; }
+
+    [JsonPropertyName("host_evidence")]
+    public EmulatorHostEvidenceStatus? HostEvidence { get; set; }
+}
+
+public sealed class EmulatorHostEvidenceStatus
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("identity_scope")]
+    public string IdentityScope { get; set; } = "";
+
+    [JsonPropertyName("sample_count")]
+    public int SampleCount { get; set; }
+
+    [JsonPropertyName("span_seconds")]
+    public int? SpanSeconds { get; set; }
+
+    [JsonPropertyName("stable_process_windows")]
+    public int? StableProcessWindows { get; set; }
+
+    [JsonPropertyName("sampler_session_count")]
+    public int SamplerSessionCount { get; set; }
+
+    [JsonPropertyName("handle_low_water")]
+    public double? HandleLowWater { get; set; }
+
+    [JsonPropertyName("handle_recent_median")]
+    public double? HandleRecentMedian { get; set; }
+
+    [JsonPropertyName("handle_ratio")]
+    public double? HandleRatio { get; set; }
+
+    [JsonPropertyName("handle_delta")]
+    public double? HandleDelta { get; set; }
+
+    [JsonPropertyName("listener_identity")]
+    public HostPerformanceBlueStacksListener? ListenerIdentity { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
 }
 
 public sealed class HostMaintenanceRequest
@@ -129,11 +174,23 @@ public sealed class HostMaintenanceRequest
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
 
+    [JsonPropertyName("initiator")]
+    public string Initiator { get; set; } = "automatic_detector";
+
+    [JsonPropertyName("host_target")]
+    public BlueStacksHostProcessIdentity? HostTarget { get; set; }
+
     [JsonPropertyName("host_ack")]
     public BlueStacksHostProcessIdentity? HostAcknowledgement { get; set; }
 
     [JsonPropertyName("host_completion")]
     public BlueStacksHostProcessIdentity? HostCompletion { get; set; }
+
+    [JsonPropertyName("terminal_disposition")]
+    public string? TerminalDisposition { get; set; }
+
+    [JsonPropertyName("terminal_reason")]
+    public string? TerminalReason { get; set; }
 }
 
 public sealed class HostMaintenanceRuntimeAcknowledgement

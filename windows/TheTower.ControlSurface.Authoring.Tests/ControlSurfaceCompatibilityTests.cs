@@ -345,11 +345,14 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                40,
+                41,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
                 "bluestacks_maintenance_v1",
+                "bluestacks_maintenance_v2",
+                "bluestacks_operator_restart_v1",
+                "bluestacks_listener_lifetime_telemetry_v1",
                 "completed_battle_discard",
                 "confirmed_local_mapping_status_v2",
                 "current_battle_perks_v1",
@@ -580,15 +583,52 @@ public sealed class ControlSurfaceCompatibilityTests
                 "reason": "degraded",
                 "candidate_battle_ids": ["Battle1", "Battle2"],
                 "candidate_cph_ratio": 0.88,
-                "effective_game_speed_ratio": 0.99
+                "effective_game_speed_ratio": 0.99,
+                "host_evidence": {
+                  "status": "confirmed_growth",
+                  "identity_scope": "exact_listener_lifetime",
+                  "sample_count": 120,
+                  "span_seconds": 1190,
+                  "stable_process_windows": 120,
+                  "sampler_session_count": 3,
+                  "handle_low_water": 3884,
+                  "handle_recent_median": 25297,
+                  "handle_ratio": 6.51,
+                  "handle_delta": 21413,
+                  "listener_identity": {
+                    "host_id": "ALIEN",
+                    "adb_port": 5555,
+                    "process_id": 90,
+                    "process_started_at": "2026-08-10T10:00:00.1234567+00:00",
+                    "executable_path": "C:\\\\Program Files\\\\BlueStacks_nxt\\\\HD-Player.exe",
+                    "instance_name": "Nougat32"
+                  },
+                  "reason": "sustained handle growth confirmed"
+                }
               },
               "host_maintenance": {
                 "schema_version": 1,
                 "host_restart_authorized": true,
+                "operator_restart": {
+                  "available": true,
+                  "code": "available",
+                  "reason": "fresh RUNNING Farm battle authority is available"
+                },
                 "request": {
                   "request_id": "0123456789abcdef0123456789abcdef",
                   "state": "requested",
-                  "reason": "degraded"
+                  "reason": "degraded",
+                  "initiator": "operator",
+                  "terminal_disposition": "fallback_new_battle",
+                  "terminal_reason": "resume unavailable; new Farm battle started",
+                  "host_target": {
+                    "host_id": "ALIEN",
+                    "adb_port": 5555,
+                    "process_id": 90,
+                    "process_started_at": "2026-08-10T10:00:00.1234567+00:00",
+                    "executable_path": "C:\\\\Program Files\\\\BlueStacks_nxt\\\\HD-Player.exe",
+                    "instance_name": "Nougat32"
+                  }
                 }
               }
             }
@@ -597,8 +637,29 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.NotNull(response);
         Assert.True(response!.EmulatorDegradation.AutomaticReady);
         Assert.Equal(0.88, response.EmulatorDegradation.CandidateCphRatio);
+        Assert.Equal(
+            "exact_listener_lifetime",
+            response.EmulatorDegradation.HostEvidence!.IdentityScope);
+        Assert.Equal(25297, response.EmulatorDegradation.HostEvidence.HandleRecentMedian);
+        Assert.Equal(3, response.EmulatorDegradation.HostEvidence.SamplerSessionCount);
+        Assert.Equal(
+            "2026-08-10T10:00:00.1234567+00:00",
+            response.EmulatorDegradation.HostEvidence.ListenerIdentity!
+                .ProcessStartedAt);
         Assert.True(response.HostMaintenance.HostRestartAuthorized);
+        Assert.True(response.HostMaintenance.OperatorRestart.Available);
         Assert.Equal("requested", response.HostMaintenance.Request!.State);
+        Assert.Equal("operator", response.HostMaintenance.Request.Initiator);
+        Assert.Equal(90, response.HostMaintenance.Request.HostTarget!.ProcessId);
+        Assert.Equal(
+            "2026-08-10T10:00:00.1234567+00:00",
+            response.HostMaintenance.Request.HostTarget.ProcessStartedAt);
+        Assert.Equal(
+            "fallback_new_battle",
+            response.HostMaintenance.Request.TerminalDisposition);
+        Assert.Equal(
+            "resume unavailable; new Farm battle started",
+            response.HostMaintenance.Request.TerminalReason);
     }
 
     [Theory]
@@ -646,15 +707,59 @@ public sealed class ControlSurfaceCompatibilityTests
             target,
             0,
             allowStoppedPort: true);
+        Assert.True(
+            BlueStacksInstanceController.ReplacementMappingReady(target, 5555));
+        Assert.False(
+            BlueStacksInstanceController.ReplacementMappingReady(target, 0));
         Assert.Throws<BlueStacksTargetBindingException>(() =>
             BlueStacksInstanceController.ValidateConfiguredPortBinding(
                 target,
                 5565,
                 allowStoppedPort: true));
         Assert.Throws<BlueStacksTargetBindingException>(() =>
+            BlueStacksInstanceController.ReplacementMappingReady(target, 5565));
+        Assert.Throws<BlueStacksTargetBindingException>(() =>
             BlueStacksInstanceController.ValidateConfiguredPortBinding(
                 target,
                 0,
                 allowStoppedPort: false));
+    }
+
+    [Fact]
+    public void BlueStacksConfiguredPortMustIdentifyOneInstance()
+    {
+        var target = new BlueStacksRecoveryTarget(
+            @"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            "Nougat32",
+            5555);
+
+        BlueStacksInstanceController.ValidateUniqueConfiguredPortBinding(
+            target,
+            new Dictionary<string, int>
+            {
+                ["Nougat32"] = 5555,
+                ["Pie64"] = 5565,
+            },
+            5555);
+        Assert.Throws<BlueStacksTargetBindingException>(() =>
+            BlueStacksInstanceController.ValidateUniqueConfiguredPortBinding(
+                target,
+                new Dictionary<string, int>
+                {
+                    ["Nougat32"] = 5555,
+                    ["Pie64"] = 5555,
+                },
+                5555));
+
+        // Multiple stopped instances commonly use zero and do not make a
+        // previously acknowledged exact process ambiguous.
+        BlueStacksInstanceController.ValidateUniqueConfiguredPortBinding(
+            target,
+            new Dictionary<string, int>
+            {
+                ["Nougat32"] = 0,
+                ["Pie64"] = 0,
+            },
+            0);
     }
 }

@@ -221,6 +221,9 @@ Server revision 39 retains the revision-30 `better_control_model_v1` and
 `better_control_model_v2`, `save_backed_setup_capture_v2`, and
 `runtime_control_acknowledgements_v1`. Revision 38 additionally advertises
 `strategy_aware_attach_v1`; revision 39 adds `bluestacks_maintenance_v1`.
+Revision 41 adds `bluestacks_maintenance_v2`,
+`bluestacks_operator_restart_v1`, and
+`bluestacks_listener_lifetime_telemetry_v1`.
 The additive `control_model` status object keeps
 five dimensions independent:
 
@@ -501,7 +504,7 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, current save-backed Perks, persistent save-mapping review status, latest observation, structured Strategy Action Gate, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/interactive-development-lease` | Request, heartbeat, or release the one cooperative development lease; never dispatch device input |
-| `POST` | `/api/v1/host-maintenance` | Create or advance the typed BlueStacks restart handshake; creation requires fresh server-side degradation and runtime authority, while acknowledgement/completion carry exact Windows process identity evidence |
+| `POST` | `/api/v1/host-maintenance` | Create or advance the typed BlueStacks restart handshake; automatic creation requires exact detector lifetime evidence, operator creation bypasses only that decision, both require fresh runtime authority and a durable exact Windows target, and acknowledgement/completion prove the old and replacement identities |
 | `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit independently of battle intent, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
@@ -1016,12 +1019,16 @@ CPU and memory fields group retained PID entries by process name, while the
 tooltip preserves each PID separately.
 
 The client retains 120 raw samples in memory and reduces each ten-sample window
-to averages and extrema. An ADB-port or run-identity transition closes the
-current window early rather than mixing correlations. A scheduler, sleep, or
-wall-clock discontinuity greater than five seconds also closes the partial
-window before the next sample, keeping the downtime explicit and preventing a
-single aggregate from spanning the server's five-minute validation ceiling.
-Each aggregate carries a
+to averages and extrema. On the existing ten-sample process-discovery pass it
+also resolves the configured BlueStacks ADB listener to an exact host name,
+port, `HD-Player.exe` path, instance, PID, and process start time. An ADB-port,
+run-identity, configured-target, or exact-listener transition closes the current
+window early rather than mixing correlations. A scheduler, sleep, or wall-clock
+discontinuity greater than five seconds also closes the partial window before
+the next sample, keeping the downtime explicit and preventing a single
+aggregate from spanning the server's five-minute validation ceiling. Failure
+or multi-instance ambiguity leaves this optional listener identity explicitly
+unbound while ordinary host metrics continue. Each aggregate carries a
 stable locally generated host ID, Windows host name, client session/sequence,
 UTC window, logical-processor count, ADB port, and the run ID observed through
 the status API. A run ID expires from new samples when status has not refreshed
@@ -1058,6 +1065,15 @@ after 30 days by default. Server revision 12 advertises capability
 `process_attribution` aggregate field and capability
 `host_performance_process_attribution_v1`. Older native clients remain valid
 publishers because the new field is optional.
+Server revision 41 adds `bluestacks_listener_lifetime_telemetry_v1`. Linux
+selects history from the newest current-run row and admits earlier aggregates
+across GUI sampler sessions only when the stable local host ID, Linux ADB
+target, and every exact listener-identity field remain equal. A missing legacy
+or currently unbound listener is insufficient evidence; it never permits
+cross-session stitching. This keeps a GUI close/reopen from erasing the aging
+trend while a BlueStacks process remains alive, but resets the trend on any
+listener replacement, PID reuse with a new start time, target edit, or active
+multi-instance ambiguity.
 
 The no-frame-telemetry target is below 0.5% average host CPU. Aggregate fields
 include control-surface CPU and sampling duration so the Windows deployment can
@@ -1073,11 +1089,17 @@ frame spool, or dashboard surface.
 
 ### Automatic BlueStacks degradation recovery
 
-Server revision 39 adds capability `bluestacks_maintenance_v1`. The feature is
-disabled by default in the native client's local Preferences. Before enabling
-it, the operator must verify the absolute `HD-Player.exe` path, the Windows ADB
-listener port, and the instance name against a shortcut created by the installed
-BlueStacks version. The client launches only
+Server revision 39 adds capability `bluestacks_maintenance_v1`; revision 41
+adds the exact-target `bluestacks_maintenance_v2`, operator command
+`bluestacks_operator_restart_v1`, and listener-lifetime telemetry capability.
+Revision 41 supersedes and no longer advertises the v1 request contract, so a
+server-first rollout makes an older native client fail its compatibility check
+instead of submitting an unbound recovery request.
+Automatic creation remains disabled by default in the native client's local
+Preferences. Before enabling it—or using the operator restart—the operator
+must verify the absolute `HD-Player.exe` path, the Windows ADB listener port,
+and the instance name against a shortcut created by the installed BlueStacks
+version. The client launches only
 `HD-Player.exe --instance INSTANCE`; that argument form is deliberately
 configurable because BlueStacks documents per-instance shortcuts but does not
 publish a stable raw command-line contract.
@@ -1087,14 +1109,16 @@ compares the newest two representative completed Farm runs with the preceding
 three to five runs having the same Strategy and exact run-configuration
 fingerprint. Both candidates must be at or below 93% of the baseline median,
 their median must be at or below 90%, and their effective-game-speed median
-must remain at least 97% of baseline. A same-host, same-ADB-port telemetry
-window from the current Windows sampler session must also cover at least 16
-minutes with a stable nonzero BlueStacks process set, recent median handle
+must remain at least 97% of baseline. A stable Windows host plus Linux runtime
+ADB target and exact Windows BlueStacks listener lifetime must also cover at
+least 16 minutes with a stable nonzero BlueStacks process set, recent median handle
 count at least 1.8 times and 4,000 handles above its cross-run low-water mark,
 and no host CPU or memory maximum at or above 95%. This preserves aging
-evidence across battle boundaries without mixing another PC, port, or restarted
-client session. Missing host corroboration produces a recommendation only;
-host saturation defers recovery.
+evidence across battle boundaries and Windows GUI sessions without mixing
+another PC, runtime target, listener port, instance, or BlueStacks process.
+The Linux runtime port and Windows listener port are correlated independently
+and need not be numerically equal. Missing exact-lifetime host
+corroboration produces a recommendation only; host saturation defers recovery.
 Any battle that already contains emulator-recovery provenance is excluded from
 future calibration. The service caches this read-only assessment for one minute
 and retains the completed-run cohort until the battle directory changes, so
@@ -1102,21 +1126,38 @@ five-second status polling does not repeatedly parse completed reports and
 thousands of retained host windows.
 
 When the detector reports `automatic_ready`, an opted-in Windows client may
-request one restart. Request creation still requires a fresh owner-matched
+request one restart. The client first proves that its freshly inspected
+listener is the same exact process lifetime named by the detector. Request
+creation still requires a fresh owner-matched
 `RUNNING` Farm battle, exact active Strategy and activity scope, Enabled
 automation, no other hold, and both normal Strategy and lifecycle authority.
 Only one automatic attempt is allowed per battle, and a terminal request starts
 an eight-hour cooldown.
 
+**System > Diagnostics > Restart BlueStacks…** is a separate confirmed operator
+request. It bypasses only the performance decision, automatic opt-in, and
+automatic cooldown/once-per-battle creation gates. Linux still requires the
+same fresh, unheld, exact-owner `RUNNING` Farm battle with normal Strategy and
+lifecycle authority. The confirmation names the immutable instance, path,
+port, and current PID and explains the five-wave replay (fifty during Intro
+Sprint), non-earning catch-up, and End run/New Battle fallback. Multiple active
+instances block host-wide automatic evidence but do not make this explicitly
+targeted operator action ambiguous.
+
 The durable request separates the two mutation owners:
 
-1. Linux binds the request to runtime ID, PID, ADB target, positive target
-   generation, authorizing state-request ID, and battle scope. The runtime
+1. Before Linux installs a hold, Windows submits and Linux durably binds the
+   immutable executable, instance, port, host, listener PID, and listener start
+   time together with the request initiator. Automatic creation additionally
+   compares that identity with the detector's exact listener lifetime. Linux
+   also binds runtime ID, PID, ADB target, positive target generation,
+   authorizing state-request ID, and battle scope. Request creation atomically
+   rechecks that the same state request is still `RUNNING`. The runtime
    captures the current wave, installs the suppressive `emulator_maintenance`
    hold, and publishes a separate fresh authorization. Host acknowledgement
    atomically rechecks that exact state request is still `RUNNING`.
-2. Windows snapshots an immutable executable path, instance name, and ADB port,
-   maps `bst.instance.INSTANCE.status.adb_port` from `bluestacks.conf`, resolves
+2. Windows reuses only that durable target, maps
+   `bst.instance.INSTANCE.status.adb_port` from `bluestacks.conf`, resolves
    that loopback/any-address listener through the native TCP owner table, and
    requires exactly one process whose executable path is the configured
    `HD-Player.exe`. It posts the target plus host name, PID, and start time
@@ -1147,6 +1188,13 @@ request is active. Closing the native client waits for its current coordinator
 operation to reach a reconciled boundary, so the API client is not disposed
 between durable acknowledgement and replacement reporting. The host sampler
 also resets process/rate baselines at that restart boundary.
+
+The Diagnostics **BlueStacks** card shows the current host-wide Windows handle
+and thread counts, refreshed with process discovery. A separate detector line
+shows the exact-lifetime recent median, low-water, ratio, delta, stable window
+count, PID, and number of contributing GUI sessions. Coordinator progress is a
+separate field so restart messages and status polling do not erase the detector
+evidence.
 
 Control request examples:
 
@@ -1191,11 +1239,13 @@ Process request examples:
   SSH signals and routes routine navigation through **View**, **Tools**, and
   **Preferences** menus.
 - Preferences also contains the default-off BlueStacks recovery opt-in and its
-  exact executable/instance settings. Enabling it permits request creation only
-  when Linux reports the revision-39 degradation decision; an accepted request
-  is reconciled independently of later Preference changes. Recovery progress
-  is presented as host-maintenance state rather than as an Automation Pause or
-  a claim that the game is already running.
+  exact executable/instance settings. Enabling it permits automatic request
+  creation only when Linux reports the revision-41 exact-lifetime degradation
+  decision; **System > Diagnostics** separately offers a confirmed operator
+  restart under fresh server-owned Farm authority. An accepted request is
+  reconciled independently of later Preference changes. Recovery progress is
+  presented as host-maintenance state rather than as an Automation Pause or a
+  claim that the game is already running.
 - Overview uses one server-authoritative battle-action slot and one contextual
   manual-authority slot: only the matching **Start Battle**/**Attach to
   Battle** and **Take Manual Control**/**Return Control** action is shown. The
@@ -1221,8 +1271,10 @@ Process request examples:
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  40 plus `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
-  `strategy_aware_attach_v1`, and `bluestacks_maintenance_v1`;
+  41 plus `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
+  `strategy_aware_attach_v1`,
+  `bluestacks_maintenance_v2`, `bluestacks_operator_restart_v1`, and
+  `bluestacks_listener_lifetime_telemetry_v1`;
   save-backed capture additionally requires `save_backed_setup_capture_v2`.
 - A read-only full-width **Perks** page showing the current run's
   monitor-validated saved inventory, level, and last selection wave in

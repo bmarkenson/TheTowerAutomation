@@ -92,7 +92,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 40
+CONTROL_SURFACE_REVISION = 41
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -108,7 +108,9 @@ CONTROL_SURFACE_CAPABILITIES = (
     "host_performance_gpu_v1",
     "host_performance_process_attribution_v1",
     "host_performance_telemetry_v1",
-    "bluestacks_maintenance_v1",
+    "bluestacks_maintenance_v2",
+    "bluestacks_operator_restart_v1",
+    "bluestacks_listener_lifetime_telemetry_v1",
     "interactive_development_lease_v1",
     "managed_custom_module_presets_v1",
     "observed_game_speed",
@@ -282,7 +284,7 @@ class ControlSurfaceService:
         self._battle_mutation_lock = threading.RLock()
         self._emulator_degradation_cache_lock = threading.Lock()
         self._emulator_degradation_cache: Optional[
-            tuple[float, tuple[str, str], dict[str, Any]]
+            tuple[float, tuple[object, ...], dict[str, Any]]
         ] = None
         self._emulator_battle_history_cache: Optional[
             tuple[tuple[int, int], list[dict[str, Any]]]
@@ -1454,7 +1456,86 @@ class ControlSurfaceService:
                 acknowledgement is not None
                 and acknowledgement.get("exclude_from_degradation") is True
             ),
+            "operator_restart": self._operator_restart_availability(
+                control=control,
+                runtime_authority=runtime_authority,
+                request=request,
+            ),
             "reason": reason,
+        }
+
+    @staticmethod
+    def _operator_restart_availability(
+        *,
+        control: Mapping[str, Any],
+        runtime_authority: Mapping[str, Any],
+        request: Optional[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        if control.get("emulator_maintenance_error"):
+            return {
+                "available": False,
+                "code": "maintenance_state_invalid",
+                "reason": str(control.get("emulator_maintenance_error")),
+            }
+        if request is not None and request.get("state") != "terminal":
+            return {
+                "available": False,
+                "code": "maintenance_active",
+                "reason": "a BlueStacks maintenance request is already active",
+            }
+        if str(control.get("state") or "").upper() != "RUNNING":
+            return {
+                "available": False,
+                "code": "control_not_running",
+                "reason": "Automation must be Enabled before restart",
+            }
+        control_model = runtime_authority.get("control_model")
+        strategy_scope = (
+            control_model.get("strategy_scope")
+            if isinstance(control_model, Mapping)
+            else None
+        )
+        active_strategy = (
+            str(strategy_scope.get("active_battle") or "").strip().lower()
+            if isinstance(strategy_scope, Mapping)
+            else ""
+        )
+        if not active_strategy or active_strategy in {"none", "tournament"}:
+            return {
+                "available": False,
+                "code": "strategy_ineligible",
+                "reason": "operator restart is limited to an active Farm battle",
+            }
+        holds = runtime_authority.get("holds")
+        strategy_authority = runtime_authority.get("strategy_action_authority")
+        lifecycle_authority = runtime_authority.get(
+            "lifecycle_action_authority"
+        )
+        ready = bool(
+            runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_exact_runtime") is True
+            and runtime_authority.get("active_battle") is True
+            and str(runtime_authority.get("runtime_battle_scope") or "")
+            and str(runtime_authority.get("primary_state") or "").upper()
+            == "RUNNING"
+            and isinstance(runtime_authority.get("owner"), Mapping)
+            and not (holds if isinstance(holds, list) else [])
+            and isinstance(strategy_authority, Mapping)
+            and strategy_authority.get("allowed") is True
+            and isinstance(lifecycle_authority, Mapping)
+            and lifecycle_authority.get("allowed") is True
+        )
+        if not ready:
+            return {
+                "available": False,
+                "code": "runtime_not_ready",
+                "reason": "fresh unheld RUNNING battle authority is required",
+            }
+        return {
+            "available": True,
+            "code": "available",
+            "reason": "fresh RUNNING Farm battle authority is available",
         }
 
     def _emulator_degradation_status(
@@ -1497,7 +1578,25 @@ class ControlSurfaceService:
                 "candidate_battle_ids": [],
                 "baseline_battle_ids": [],
             }
-        cache_key = (run_id, current_strategy)
+        try:
+            listener_marker = (
+                self.host_performance_store.current_bluestacks_lifetime_marker(
+                    current_run_id=run_id,
+                )
+            )
+        except (OSError, HostPerformanceStorageError) as exc:
+            return {
+                "schema_version": 1,
+                "assessed_at": assessed_at.isoformat(timespec="seconds"),
+                "status": "telemetry_unavailable",
+                "automatic_ready": False,
+                "reason": f"degradation evidence is unavailable: {exc}",
+                "current_run_id": run_id,
+                "current_strategy": current_strategy or None,
+                "candidate_battle_ids": [],
+                "baseline_battle_ids": [],
+            }
+        cache_key = (run_id, current_strategy, listener_marker)
         with self._emulator_degradation_cache_lock:
             cached = self._emulator_degradation_cache
             if (
@@ -1529,7 +1628,7 @@ class ControlSurfaceService:
                             list(battles),
                         )
                     aggregates = (
-                        self.host_performance_store.recent_session_aggregates(
+                        self.host_performance_store.recent_bluestacks_lifetime_aggregates(
                             current_run_id=run_id,
                             since=assessed_at - timedelta(hours=12),
                         )
@@ -1663,12 +1762,29 @@ class ControlSurfaceService:
             raise ControlSurfaceRequestError("Request body must be a JSON object")
         operation = str(request.get("operation") or "").strip().lower()
         request_id = str(request.get("request_id") or "").strip().lower()
-        if operation not in {"request", "acknowledge", "complete", "fail"}:
+        if operation not in {
+            "request",
+            "request_operator",
+            "acknowledge",
+            "complete",
+            "fail",
+        }:
             raise ControlSurfaceRequestError(
-                "operation must be request, acknowledge, complete, or fail"
+                "operation must be request, request_operator, acknowledge, "
+                "complete, or fail"
             )
         if operation == "request":
-            return self._request_emulator_maintenance(now=now)
+            return self._request_emulator_maintenance(
+                request,
+                initiator="automatic_detector",
+                now=now,
+            )
+        if operation == "request_operator":
+            return self._request_emulator_maintenance(
+                request,
+                initiator="operator",
+                now=now,
+            )
         if not request_id:
             raise ControlSurfaceRequestError("request_id is required")
         current = self.status(now=now)
@@ -1788,14 +1904,19 @@ class ControlSurfaceService:
 
     def _request_emulator_maintenance(
         self,
+        request: Mapping[str, Any],
         *,
+        initiator: str,
         now: Optional[float],
     ) -> dict[str, Any]:
-        """Create one detector-authorized request bound to the live runtime."""
+        """Create one detector or operator request bound before the hold."""
 
         current = self.status(now=now)
         assessment = current.get("emulator_degradation") or {}
-        if assessment.get("automatic_ready") is not True:
+        maintenance = current.get("host_maintenance") or {}
+        if initiator == "automatic_detector" and (
+            assessment.get("automatic_ready") is not True
+        ):
             raise ControlSurfaceRequestError(
                 str(
                     assessment.get("reason")
@@ -1804,6 +1925,20 @@ class ControlSurfaceService:
                 status=409,
                 code="emulator_degradation_not_ready",
             )
+        if initiator == "operator":
+            availability = maintenance.get("operator_restart") or {}
+            if availability.get("available") is not True:
+                raise ControlSurfaceRequestError(
+                    str(
+                        availability.get("reason")
+                        or "operator BlueStacks restart is unavailable"
+                    ),
+                    status=409,
+                    code=str(
+                        availability.get("code")
+                        or "operator_restart_unavailable"
+                    ),
+                )
         authority = current.get("strategy_action_gate") or {}
         owner = authority.get("owner")
         current_run = current.get("current_run")
@@ -1815,8 +1950,53 @@ class ControlSurfaceService:
                 status=409,
                 code="maintenance_runtime_unavailable",
             )
+        battle_scope = str(current_run.get("run_id") or "")
+        if (
+            not battle_scope
+            or str(authority.get("runtime_battle_scope") or "")
+            != battle_scope
+        ):
+            raise ControlSurfaceRequestError(
+                "the runtime battle scope changed before maintenance creation",
+                status=409,
+                code="maintenance_runtime_unavailable",
+            )
+        observed_at = datetime.fromtimestamp(
+            datetime.now().timestamp() if now is None else float(now)
+        ).astimezone().isoformat(timespec="seconds")
+        host_target = {
+            "host_id": request.get("host_id"),
+            "adb_port": request.get("adb_port"),
+            "process_id": request.get("process_id"),
+            "process_started_at": request.get("process_started_at"),
+            "executable_path": request.get("executable_path"),
+            "instance_name": request.get("instance_name"),
+            "observed_at": observed_at,
+        }
         host = assessment.get("host_evidence")
+        if initiator == "automatic_detector":
+            listener = (
+                host.get("listener_identity")
+                if isinstance(host, Mapping)
+                else None
+            )
+            if (
+                not isinstance(host, Mapping)
+                or host.get("identity_scope")
+                != "exact_listener_lifetime"
+                or not isinstance(listener, Mapping)
+                or not _same_bluestacks_listener_identity(
+                    listener,
+                    host_target,
+                )
+            ):
+                raise ControlSurfaceRequestError(
+                    "the live BlueStacks listener does not match detector evidence",
+                    status=409,
+                    code="emulator_host_identity_mismatch",
+                )
         trigger = {
+            "request_kind": initiator,
             "schema_version": assessment.get("schema_version"),
             "assessed_at": assessment.get("assessed_at"),
             "candidate_battle_ids": assessment.get("candidate_battle_ids", []),
@@ -1849,10 +2029,22 @@ class ControlSurfaceService:
         }
         try:
             saved = self.control_store.request_emulator_maintenance(
-                reason=str(assessment.get("reason") or "degradation detected"),
-                source="windows-control-surface",
+                reason=(
+                    "operator requested a coordinated BlueStacks restart"
+                    if initiator == "operator"
+                    else str(
+                        assessment.get("reason") or "degradation detected"
+                    )
+                ),
+                source=(
+                    "windows-control-surface-operator"
+                    if initiator == "operator"
+                    else "windows-control-surface"
+                ),
                 runtime=runtime,
-                battle_scope=str(current_run.get("run_id") or ""),
+                battle_scope=battle_scope,
+                initiator=initiator,
+                host_target=host_target,
                 trigger=trigger,
                 now=now,
             )
@@ -1866,7 +2058,11 @@ class ControlSurfaceService:
         response["request"] = {
             "accepted": True,
             "action": "host_maintenance",
-            "disposition": "requested",
+            "disposition": (
+                "operator_requested"
+                if initiator == "operator"
+                else "automatic_requested"
+            ),
             "request_id": saved["request_id"],
         }
         response["host_maintenance"]["request"] = saved
@@ -5576,10 +5772,70 @@ def _same_host_transition(
 ) -> bool:
     if not isinstance(stored, Mapping):
         return False
-    keys = ["host_id", "adb_port", "process_id", "process_started_at"]
+    keys = [
+        "host_id",
+        "adb_port",
+        "process_id",
+        "process_started_at",
+        "executable_path",
+        "instance_name",
+    ]
     if include_previous:
         keys.extend(["previous_process_id", "previous_process_started_at"])
     return all(stored.get(key) == candidate.get(key) for key in keys)
+
+
+def _same_bluestacks_listener_identity(
+    stored: object,
+    candidate: Mapping[str, object],
+) -> bool:
+    if not isinstance(stored, Mapping):
+        return False
+    try:
+        stored_port = int(stored.get("adb_port"))
+        candidate_port = int(candidate.get("adb_port"))
+        stored_pid = int(stored.get("process_id"))
+        candidate_pid = int(candidate.get("process_id"))
+        stored_started_text = str(
+            stored.get("process_started_at") or ""
+        ).strip()
+        candidate_started_text = str(
+            candidate.get("process_started_at") or ""
+        ).strip()
+        if (
+            not stored_started_text
+            or len(stored_started_text) > 64
+            or not candidate_started_text
+            or len(candidate_started_text) > 64
+        ):
+            return False
+        stored_started = datetime.fromisoformat(
+            stored_started_text.replace("Z", "+00:00")
+        )
+        candidate_started = datetime.fromisoformat(
+            candidate_started_text.replace("Z", "+00:00")
+        )
+    except (TypeError, ValueError):
+        return False
+    if stored_started.tzinfo is None or candidate_started.tzinfo is None:
+        return False
+    normalized_stored_path = str(
+        stored.get("executable_path") or ""
+    ).replace("\\", "/").casefold()
+    normalized_candidate_path = str(
+        candidate.get("executable_path") or ""
+    ).replace("\\", "/").casefold()
+    return bool(
+        str(stored.get("host_id") or "").casefold()
+        == str(candidate.get("host_id") or "").casefold()
+        and stored_port == candidate_port
+        and stored_pid == candidate_pid
+        and stored_started_text == candidate_started_text
+        and normalized_stored_path
+        and normalized_stored_path == normalized_candidate_path
+        and str(stored.get("instance_name") or "").casefold()
+        == str(candidate.get("instance_name") or "").casefold()
+    )
 
 
 def _utc_datetime(value: Optional[datetime]) -> datetime:

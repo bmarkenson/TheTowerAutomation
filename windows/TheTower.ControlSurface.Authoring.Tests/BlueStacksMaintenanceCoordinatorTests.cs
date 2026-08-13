@@ -10,7 +10,8 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
     private readonly string _playerPath;
     private readonly string _otherPlayerPath;
     private readonly DateTimeOffset _startedAt =
-        new(2026, 8, 12, 12, 0, 0, TimeSpan.Zero);
+        new DateTimeOffset(2026, 8, 12, 12, 0, 0, TimeSpan.Zero)
+            .AddTicks(1_234_567);
 
     public BlueStacksMaintenanceCoordinatorTests()
     {
@@ -61,6 +62,8 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
                 new BlueStacksRestartResult(previous, replacement),
         };
         var coordinator = Coordinator(api, controller, settings);
+        var resetEvents = 0;
+        coordinator.RestartBoundaryCrossed += (_, _) => resetEvents++;
 
         await coordinator.ObserveStatusAsync(
             Status(degradationReady: true),
@@ -81,6 +84,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
             controller.InspectedTargets,
             inspected => Assert.Equal(target, inspected));
         Assert.Equal(target, Assert.Single(controller.RestartedTargets));
+        Assert.True(controller.InspectSingleInstanceRequirements[0]);
         var acknowledgement = api.Payloads[1];
         Assert.Equal(target.ExecutablePath, acknowledgement.GetProperty(
             "executable_path").GetString());
@@ -88,6 +92,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
             "instance_name").GetString());
         Assert.Equal(target.AdbPort, acknowledgement.GetProperty(
             "adb_port").GetInt32());
+        Assert.Equal(1, resetEvents);
     }
 
     [Fact]
@@ -110,6 +115,8 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
                 new BlueStacksRestartResult(previous, replacement),
         };
         var coordinator = Coordinator(api, controller, changed);
+        var resetEvents = 0;
+        coordinator.RestartBoundaryCrossed += (_, _) => resetEvents++;
 
         await coordinator.ObserveStatusAsync(
             AcknowledgedStatus(target, previous),
@@ -119,6 +126,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
         Assert.Equal(target, Assert.Single(controller.RestartedTargets));
         Assert.Equal("complete", api.Payloads[0].GetProperty(
             "operation").GetString());
+        Assert.Equal(1, resetEvents);
     }
 
     [Fact]
@@ -134,6 +142,8 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
             InspectHandler = _ => previous,
         };
         var coordinator = Coordinator(api, controller, settings);
+        var resetEvents = 0;
+        coordinator.RestartBoundaryCrossed += (_, _) => resetEvents++;
 
         await coordinator.ObserveStatusAsync(
             Status(
@@ -145,6 +155,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
         Assert.Equal("acknowledge", api.Payloads[0].GetProperty(
             "operation").GetString());
         Assert.True(coordinator.TargetEditsLocked);
+        Assert.Equal(0, resetEvents);
     }
 
     [Fact]
@@ -215,6 +226,8 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
             RestartException = new IOException("stop outcome unknown"),
         };
         var coordinator = Coordinator(api, controller, settings);
+        var resetEvents = 0;
+        coordinator.RestartBoundaryCrossed += (_, _) => resetEvents++;
 
         await coordinator.ObserveStatusAsync(
             AcknowledgedStatus(target, previous),
@@ -223,6 +236,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
         Assert.Empty(api.Payloads);
         Assert.True(coordinator.TargetEditsLocked);
         Assert.Equal(RequestId, coordinator.ActiveRequestId);
+        Assert.Equal(1, resetEvents);
     }
 
     [Fact]
@@ -241,6 +255,8 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
                 new BlueStacksRestartResult(previous, replacement),
         };
         var coordinator = Coordinator(api, controller, settings);
+        var resetEvents = 0;
+        coordinator.RestartBoundaryCrossed += (_, _) => resetEvents++;
 
         await coordinator.ObserveStatusAsync(
             AcknowledgedStatus(target, previous),
@@ -251,6 +267,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
         Assert.Equal(target, Assert.Single(controller.ConfirmedTargets));
         Assert.Equal("complete", api.Payloads[0].GetProperty(
             "operation").GetString());
+        Assert.Equal(0, resetEvents);
     }
 
     [Fact]
@@ -270,6 +287,8 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
                 new BlueStacksRestartResult(previous, replacement),
         };
         var coordinator = Coordinator(api, controller, settings);
+        var resetEvents = 0;
+        coordinator.RestartBoundaryCrossed += (_, _) => resetEvents++;
 
         await coordinator.ObserveStatusAsync(
             AcknowledgedStatus(target, previous),
@@ -280,6 +299,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
         Assert.Equal(target, Assert.Single(controller.StartedTargets));
         Assert.Equal("complete", api.Payloads[0].GetProperty(
             "operation").GetString());
+        Assert.Equal(1, resetEvents);
     }
 
     [Fact]
@@ -296,6 +316,337 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
 
         Assert.Empty(api.Payloads);
         Assert.Empty(controller.InspectedTargets);
+    }
+
+    [Theory]
+    [InlineData(2, 41, "")]
+    [InlineData(1, 40, "")]
+    [InlineData(1, 41, "bluestacks_maintenance_v2")]
+    [InlineData(1, 41, "bluestacks_operator_restart_v1")]
+    [InlineData(1, 41, "bluestacks_listener_lifetime_telemetry_v1")]
+    public void OperatorContractRequiresExactApiRevisionAndCapabilities(
+        int apiVersion,
+        int serverRevision,
+        string missingCapability)
+    {
+        var status = Status();
+        status.ApiVersion = apiVersion;
+        status.ServerRevision = serverRevision;
+        if (!string.IsNullOrEmpty(missingCapability))
+        {
+            status.Capabilities.Remove(missingCapability);
+        }
+
+        Assert.False(
+            BlueStacksMaintenanceCoordinator.HasOperatorRestartContract(status));
+    }
+
+    [Fact]
+    public void OperatorContractAcceptsCurrentServerContract()
+    {
+        Assert.True(
+            BlueStacksMaintenanceCoordinator.HasOperatorRestartContract(
+                Status()));
+    }
+
+    [Fact]
+    public void ReconciliationContractDoesNotRequireOperatorCapability()
+    {
+        var status = Status();
+        status.Capabilities.Remove("bluestacks_operator_restart_v1");
+
+        Assert.True(
+            BlueStacksMaintenanceCoordinator
+                .HasMaintenanceReconciliationContract(status));
+        Assert.False(
+            BlueStacksMaintenanceCoordinator.HasOperatorRestartContract(status));
+    }
+
+    [Fact]
+    public async Task OperatorRequestWorksWithAutomaticRecoveryDisabled()
+    {
+        var settings = Settings(enabled: false);
+        var target = BlueStacksRecoveryTarget.Capture(settings);
+        var identity = Identity(target, 90, _startedAt);
+        var accepted = Request("requested", target, identity);
+        accepted.Initiator = "operator";
+        var api = new FakeHostMaintenanceApi();
+        api.Enqueue(Status(request: accepted));
+        var controller = new FakeBlueStacksController
+        {
+            InspectHandler = _ => identity,
+        };
+        var coordinator = Coordinator(api, controller, settings);
+
+        var preview = coordinator.PrepareOperatorRestart();
+        await coordinator.RequestOperatorRestartAsync(
+            preview,
+            CancellationToken.None);
+
+        Assert.Equal(RequestId, coordinator.ActiveRequestId);
+        Assert.True(coordinator.TargetEditsLocked);
+        Assert.Equal(
+            "request_operator",
+            api.Payloads[0].GetProperty("operation").GetString());
+        Assert.Equal(
+            identity.ProcessId,
+            api.Payloads[0].GetProperty("process_id").GetInt32());
+        Assert.Equal(
+            [false, false],
+            controller.InspectSingleInstanceRequirements);
+    }
+
+    [Fact]
+    public async Task LostOperatorRequestResponseKeepsTargetLockedUntilActiveStatus()
+    {
+        var settings = Settings(enabled: false);
+        var target = BlueStacksRecoveryTarget.Capture(settings);
+        var identity = Identity(target, 90, _startedAt);
+        var api = new FakeHostMaintenanceApi();
+        api.EnqueueException(new IOException("response lost"));
+        var controller = new FakeBlueStacksController
+        {
+            InspectHandler = _ => identity,
+        };
+        var coordinator = Coordinator(api, controller, settings);
+        var preview = coordinator.PrepareOperatorRestart();
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            coordinator.RequestOperatorRestartAsync(
+                preview,
+                CancellationToken.None));
+
+        Assert.True(coordinator.RequestOutcomeUnknown);
+        Assert.True(coordinator.TargetEditsLocked);
+        Assert.Throws<InvalidOperationException>(() =>
+            coordinator.PrepareOperatorRestart());
+
+        await coordinator.ObserveStatusAsync(
+            Status(request: Request("requested", target, identity)),
+            CancellationToken.None);
+
+        Assert.False(coordinator.RequestOutcomeUnknown);
+        Assert.Equal(RequestId, coordinator.ActiveRequestId);
+        Assert.True(coordinator.TargetEditsLocked);
+    }
+
+    [Fact]
+    public async Task ServerFailureLeavesOperatorRequestOutcomeUnknown()
+    {
+        var settings = Settings(enabled: false);
+        var target = BlueStacksRecoveryTarget.Capture(settings);
+        var identity = Identity(target, 90, _startedAt);
+        var api = new FakeHostMaintenanceApi();
+        api.EnqueueException(new ControlSurfaceApiException(
+            "service unavailable",
+            503,
+            "upstream_unavailable",
+            null));
+        var controller = new FakeBlueStacksController
+        {
+            InspectHandler = _ => identity,
+        };
+        var coordinator = Coordinator(api, controller, settings);
+        var preview = coordinator.PrepareOperatorRestart();
+
+        await Assert.ThrowsAsync<ControlSurfaceApiException>(() =>
+            coordinator.RequestOperatorRestartAsync(
+                preview,
+                CancellationToken.None));
+
+        Assert.True(coordinator.RequestOutcomeUnknown);
+        Assert.True(coordinator.TargetEditsLocked);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            coordinator.RequestOperatorRestartAsync(
+                preview,
+                CancellationToken.None));
+        Assert.Single(api.Payloads);
+    }
+
+    [Fact]
+    public async Task DefiniteOperatorRejectionDoesNotCreateUnknownLock()
+    {
+        var settings = Settings(enabled: false);
+        var target = BlueStacksRecoveryTarget.Capture(settings);
+        var identity = Identity(target, 90, _startedAt);
+        var api = new FakeHostMaintenanceApi();
+        api.EnqueueException(new ControlSurfaceApiException(
+            "runtime changed",
+            409,
+            "maintenance_conflict",
+            null));
+        var controller = new FakeBlueStacksController
+        {
+            InspectHandler = _ => identity,
+        };
+        var coordinator = Coordinator(api, controller, settings);
+
+        await Assert.ThrowsAsync<ControlSurfaceApiException>(() =>
+            coordinator.RequestOperatorRestartAsync(
+                coordinator.PrepareOperatorRestart(),
+                CancellationToken.None));
+
+        Assert.False(coordinator.RequestOutcomeUnknown);
+        Assert.False(coordinator.TargetEditsLocked);
+    }
+
+    [Fact]
+    public async Task IdleStatusClearsUnknownAutomaticRequestOutcome()
+    {
+        var settings = Settings(enabled: true);
+        var target = BlueStacksRecoveryTarget.Capture(settings);
+        var identity = Identity(target, 90, _startedAt);
+        var api = new FakeHostMaintenanceApi();
+        api.EnqueueException(new IOException("response lost"));
+        var controller = new FakeBlueStacksController
+        {
+            InspectHandler = _ => identity,
+        };
+        var coordinator = Coordinator(api, controller, settings);
+
+        await coordinator.ObserveStatusAsync(
+            Status(degradationReady: true),
+            CancellationToken.None);
+
+        Assert.True(coordinator.RequestOutcomeUnknown);
+        settings.BlueStacksAutomaticRecoveryEnabled = false;
+        await coordinator.ObserveStatusAsync(Status(), CancellationToken.None);
+
+        Assert.False(coordinator.RequestOutcomeUnknown);
+        Assert.False(coordinator.TargetEditsLocked);
+    }
+
+    [Fact]
+    public async Task ServerFailureLeavesAutomaticRequestOutcomeUnknown()
+    {
+        var settings = Settings(enabled: true);
+        var target = BlueStacksRecoveryTarget.Capture(settings);
+        var identity = Identity(target, 90, _startedAt);
+        var api = new FakeHostMaintenanceApi();
+        api.EnqueueException(new ControlSurfaceApiException(
+            "service unavailable",
+            503,
+            "upstream_unavailable",
+            null));
+        var controller = new FakeBlueStacksController
+        {
+            InspectHandler = _ => identity,
+        };
+        var coordinator = Coordinator(api, controller, settings);
+
+        await coordinator.ObserveStatusAsync(
+            Status(degradationReady: true),
+            CancellationToken.None);
+
+        Assert.True(coordinator.RequestOutcomeUnknown);
+        Assert.True(coordinator.TargetEditsLocked);
+        Assert.Single(api.Payloads);
+    }
+
+    [Fact]
+    public async Task ReconciliationOnlyIdleStatusNeverCreatesClosingRequest()
+    {
+        var settings = Settings(enabled: true);
+        var target = BlueStacksRecoveryTarget.Capture(settings);
+        var identity = Identity(target, 90, _startedAt);
+        var api = new FakeHostMaintenanceApi();
+        api.EnqueueException(new IOException("response lost"));
+        var controller = new FakeBlueStacksController
+        {
+            InspectHandler = _ => identity,
+        };
+        var coordinator = Coordinator(api, controller, settings);
+
+        await coordinator.ObserveStatusAsync(
+            Status(degradationReady: true),
+            CancellationToken.None);
+        Assert.Single(api.Payloads);
+
+        await coordinator.ObserveStatusAsync(
+            Status(degradationReady: true),
+            CancellationToken.None,
+            allowRequestCreation: false);
+
+        Assert.Single(api.Payloads);
+        Assert.False(coordinator.RequestOutcomeUnknown);
+        Assert.False(coordinator.TargetEditsLocked);
+    }
+
+    [Fact]
+    public void TelemetryTargetUsesActiveDurableRequestAndFailsClosed()
+    {
+        var settings = Settings(enabled: false);
+        settings.BlueStacksPlayerExecutablePath = _otherPlayerPath;
+        settings.BlueStacksInstanceName = "Pie64_Changed";
+        settings.WindowsBlueStacksAdbPort = 5565;
+        var durableSettings = Settings(enabled: true);
+        var target = BlueStacksRecoveryTarget.Capture(durableSettings);
+        var identity = Identity(target, 90, _startedAt);
+        var active = Status(request: Request("requested", target, identity));
+
+        Assert.Equal(
+            target,
+            BlueStacksMaintenanceCoordinator.ResolveTelemetryTarget(
+                active,
+                settings));
+
+        active.HostMaintenance.Request!.HostTarget!.ExecutablePath =
+            "relative.exe";
+        Assert.Null(
+            BlueStacksMaintenanceCoordinator.ResolveTelemetryTarget(
+                active,
+                settings));
+
+        active.HostMaintenance.Request.State = "terminal";
+        Assert.Equal(
+            BlueStacksRecoveryTarget.Capture(settings),
+            BlueStacksMaintenanceCoordinator.ResolveTelemetryTarget(
+                active,
+                settings));
+    }
+
+    [Fact]
+    public void TunnelPortAdoptionRequiresReconciledIdleStatus()
+    {
+        var idle = Status();
+        Assert.True(
+            BlueStacksMaintenanceCoordinator.CanAdoptTunnelHostPort(
+                idle,
+                targetEditsLocked: false));
+        Assert.False(
+            BlueStacksMaintenanceCoordinator.CanAdoptTunnelHostPort(
+                idle,
+                targetEditsLocked: true));
+        Assert.False(
+            BlueStacksMaintenanceCoordinator.CanAdoptTunnelHostPort(
+                Status(request: Request("requested")),
+                targetEditsLocked: false));
+    }
+
+    [Fact]
+    public async Task OperatorConfirmationCannotRetargetChangedProcess()
+    {
+        var settings = Settings(enabled: false);
+        var target = BlueStacksRecoveryTarget.Capture(settings);
+        var previous = Identity(target, 90, _startedAt);
+        var replacement = Identity(target, 91, _startedAt.AddMinutes(1));
+        var inspection = 0;
+        var api = new FakeHostMaintenanceApi();
+        var controller = new FakeBlueStacksController
+        {
+            InspectHandler = _ => inspection++ == 0 ? previous : replacement,
+        };
+        var coordinator = Coordinator(api, controller, settings);
+
+        var preview = coordinator.PrepareOperatorRestart();
+        var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            coordinator.RequestOperatorRestartAsync(
+                preview,
+                CancellationToken.None));
+
+        Assert.Contains("changed after confirmation", rejected.Message);
+        Assert.Empty(api.Payloads);
+        Assert.False(coordinator.TargetEditsLocked);
     }
 
     private BlueStacksMaintenanceCoordinator Coordinator(
@@ -324,22 +675,36 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
             startedAt,
             target.ExecutablePath);
 
-    private static HostMaintenanceRequest Request(string state) =>
-        new()
+    private HostMaintenanceRequest Request(
+        string state,
+        BlueStacksRecoveryTarget? target = null,
+        BlueStacksProcessIdentity? identity = null)
+    {
+        target ??= BlueStacksRecoveryTarget.Capture(Settings(enabled: true));
+        identity ??= Identity(target, 90, _startedAt);
+        return new()
         {
             RequestId = RequestId,
             State = state,
             Reason = state == "terminal" ? "finished" : "degraded",
+            HostTarget = HostIdentity(target, identity),
         };
+    }
 
-    private static StatusResponse Status(
+    private StatusResponse Status(
         HostMaintenanceRequest? request = null,
         bool hostRestartAuthorized = false,
         bool degradationReady = false) =>
         new()
         {
+            ApiVersion = ControlSurfaceCompatibility.RequiredApiVersion,
             ServerRevision = ControlSurfaceCompatibility.MinimumServerRevision,
-            Capabilities = ["bluestacks_maintenance_v1"],
+            Capabilities =
+            [
+                "bluestacks_maintenance_v2",
+                "bluestacks_operator_restart_v1",
+                "bluestacks_listener_lifetime_telemetry_v1",
+            ],
             HostMaintenance = new HostMaintenanceStatus
             {
                 Request = request,
@@ -354,25 +719,55 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
                 AssessedAt = "2026-08-12T12:00:00+00:00",
                 Status = degradationReady ? "automatic_ready" : "healthy",
                 AutomaticReady = degradationReady,
+                HostEvidence = new EmulatorHostEvidenceStatus
+                {
+                    Status = degradationReady ? "confirmed_growth" : "stable",
+                    IdentityScope = "exact_listener_lifetime",
+                    ListenerIdentity = ListenerIdentity(
+                        BlueStacksRecoveryTarget.Capture(Settings(enabled: true)),
+                        Identity(
+                            BlueStacksRecoveryTarget.Capture(Settings(enabled: true)),
+                            90,
+                            _startedAt)),
+                },
             },
         };
 
-    private static StatusResponse AcknowledgedStatus(
+    private StatusResponse AcknowledgedStatus(
         BlueStacksRecoveryTarget target,
         BlueStacksProcessIdentity previous)
     {
         var request = Request("host_acknowledged");
-        request.HostAcknowledgement = new BlueStacksHostProcessIdentity
+        request.HostTarget = HostIdentity(target, previous);
+        request.HostAcknowledgement = HostIdentity(target, previous);
+        return Status(request: request);
+    }
+
+    private static BlueStacksHostProcessIdentity HostIdentity(
+        BlueStacksRecoveryTarget target,
+        BlueStacksProcessIdentity identity) =>
+        new()
         {
-            HostId = previous.HostId,
+            HostId = identity.HostId,
             AdbPort = target.AdbPort,
-            ProcessId = previous.ProcessId,
-            ProcessStartedAt = previous.ProcessStartedAtText,
+            ProcessId = identity.ProcessId,
+            ProcessStartedAt = identity.ProcessStartedAtText,
             ExecutablePath = target.ExecutablePath,
             InstanceName = target.InstanceName,
         };
-        return Status(request: request);
-    }
+
+    private static HostPerformanceBlueStacksListener ListenerIdentity(
+        BlueStacksRecoveryTarget target,
+        BlueStacksProcessIdentity identity) =>
+        new()
+        {
+            HostId = identity.HostId,
+            AdbPort = target.AdbPort,
+            ProcessId = identity.ProcessId,
+            ProcessStartedAt = identity.ProcessStartedAtText,
+            ExecutablePath = target.ExecutablePath,
+            InstanceName = target.InstanceName,
+        };
 
     public void Dispose()
     {
@@ -416,13 +811,17 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
             BlueStacksRestartResult>? ConfirmHandler { get; init; }
         public Exception? RestartException { get; init; }
         public List<BlueStacksRecoveryTarget> InspectedTargets { get; } = [];
+        public List<bool> InspectSingleInstanceRequirements { get; } = [];
         public List<BlueStacksRecoveryTarget> RestartedTargets { get; } = [];
         public List<BlueStacksRecoveryTarget> StartedTargets { get; } = [];
         public List<BlueStacksRecoveryTarget> ConfirmedTargets { get; } = [];
 
-        public BlueStacksProcessIdentity Inspect(BlueStacksRecoveryTarget target)
+        public BlueStacksProcessIdentity Inspect(
+            BlueStacksRecoveryTarget target,
+            bool requireSingleActiveInstance = true)
         {
             InspectedTargets.Add(target);
+            InspectSingleInstanceRequirements.Add(requireSingleActiveInstance);
             return InspectHandler?.Invoke(target)
                 ?? throw new InvalidOperationException("Inspect was not expected.");
         }

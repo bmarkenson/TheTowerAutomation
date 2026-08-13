@@ -41,6 +41,15 @@ RUNTIME = {
     "target_generation": 7,
     "state_request_id": "state-enable-1",
 }
+HOST_TARGET = {
+    "host_id": "WINDOWS-HOST",
+    "adb_port": 5555,
+    "process_id": 90,
+    "process_started_at": "2026-08-10T10:00:00+00:00",
+    "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+    "instance_name": "Nougat32",
+    "observed_at": "2026-08-10T10:00:30+00:00",
+}
 
 
 def test_restart_replay_window_holds_until_the_actual_high_water():
@@ -63,6 +72,7 @@ def test_restart_replay_window_holds_until_the_actual_high_water():
     assert caught_up.active is False
     assert replay.as_dict() == {
         "request_id": REQUEST_ID,
+        "request_initiator": "automatic_detector",
         "battle_scope": "run-1",
         "high_water_wave": 100,
         "intro_sprint_active": False,
@@ -74,6 +84,17 @@ def test_restart_replay_window_holds_until_the_actual_high_water():
         "lowest_observed_wave": 95,
         "exclude_from_degradation": True,
     }
+
+
+def test_restart_replay_window_retains_operator_initiator():
+    replay = RestartReplayWindow(
+        REQUEST_ID,
+        100,
+        request_initiator="operator",
+        battle_scope="run-operator",
+    )
+
+    assert replay.as_dict()["request_initiator"] == "operator"
 
 
 def test_restart_replay_window_uses_intro_sprint_only_as_expected_floor():
@@ -117,12 +138,12 @@ def test_emulator_maintenance_directive_lifecycle_is_idempotent(tmp_path):
         source="test",
         runtime=runtime,
         battle_scope="run-1",
+        host_target=HOST_TARGET,
         trigger={"candidate_cph_ratio": 0.88},
         now=1_000.0,
     )
     assert request["state"] == "requested"
     assert normalize_emulator_maintenance(request) == request
-
     host_ack = {
         "host_id": "WINDOWS-HOST",
         "adb_port": 5555,
@@ -202,6 +223,28 @@ def test_emulator_maintenance_directive_lifecycle_is_idempotent(tmp_path):
     ) == terminal
 
 
+def test_present_malformed_or_operator_unbound_host_target_is_invalid():
+    base = {
+        "schema_version": 1,
+        "request_id": REQUEST_ID,
+        "action": "restart_bluestacks",
+        "state": "requested",
+        "reason": "operator requested restart",
+        "source": "test",
+        "initiator": "operator",
+        "requested_at": "2026-08-10T10:00:00+00:00",
+        "updated_at": "2026-08-10T10:00:00+00:00",
+        "runtime": RUNTIME,
+        "battle_scope": "run-1",
+        "trigger": {"request_kind": "operator"},
+    }
+
+    assert normalize_emulator_maintenance(base) is None
+    assert normalize_emulator_maintenance(
+        {**base, "host_target": {"process_id": 90}}
+    ) is None
+
+
 def test_pause_wins_before_host_ack_but_ack_before_pause_is_durable(tmp_path):
     store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
     enabled = store.set_state("RUNNING", source="test")
@@ -214,6 +257,7 @@ def test_pause_wins_before_host_ack_but_ack_before_pause_is_durable(tmp_path):
         source="test",
         runtime=runtime,
         battle_scope="run-1",
+        host_target=HOST_TARGET,
     )
     host_ack = {
         "host_id": "WINDOWS-HOST",
@@ -248,6 +292,7 @@ def test_pause_wins_before_host_ack_but_ack_before_pause_is_durable(tmp_path):
             "state_request_id": enabled["state_request_id"],
         },
         battle_scope="run-2",
+        host_target=HOST_TARGET,
     )
     acknowledged = store.acknowledge_emulator_maintenance_host(
         request["request_id"],
@@ -368,6 +413,19 @@ def _host_aggregates(
         handles = 1_000 if index == 0 else 6_000
         aggregates.append(
             {
+                "session_id": "sampler-a" if index < 60 else "sampler-b",
+                "sample_count": 10,
+                "sample_interval_ms": 1_000,
+                "bluestacks_listener": {
+                    "host_id": "ALIEN",
+                    "adb_port": 5555,
+                    "process_id": 90,
+                    "process_started_at": "2026-08-10T10:00:00+00:00",
+                    "executable_path": (
+                        "C:\\Program Files\\BlueStacks_nxt\\HD-Player.exe"
+                    ),
+                    "instance_name": "Nougat32",
+                },
                 "window_end_utc": (
                     now - timedelta(seconds=(120 - index) * 10)
                 ).isoformat(),
@@ -410,6 +468,11 @@ def test_degradation_requires_two_slow_runs_normal_speed_and_host_growth():
         "candidate-2",
     ]
     assert assessment["host_evidence"]["handle_delta"] == 5000.0
+    assert assessment["host_evidence"]["identity_scope"] == (
+        "exact_listener_lifetime"
+    )
+    assert assessment["host_evidence"]["sampler_session_count"] == 2
+    assert assessment["host_evidence"]["stable_process_windows"] == 121
 
     saturated = assess_emulator_degradation(
         battles,
@@ -434,6 +497,19 @@ def test_degradation_requires_two_slow_runs_normal_speed_and_host_growth():
     assert incomplete["status"] == "recommend"
     assert incomplete["automatic_ready"] is False
 
+    legacy_evidence = _host_aggregates(now)
+    for aggregate in legacy_evidence:
+        aggregate.pop("bluestacks_listener")
+    unbound = assess_emulator_degradation(
+        battles,
+        legacy_evidence,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        assessed_at=now,
+    )
+    assert unbound["status"] == "recommend"
+    assert unbound["host_evidence"]["status"] == "unavailable"
+
     healthy = assess_emulator_degradation(
         [_battle("candidate-1", "98"), *battles[1:]],
         _host_aggregates(now),
@@ -442,6 +518,32 @@ def test_degradation_requires_two_slow_runs_normal_speed_and_host_growth():
         assessed_at=now,
     )
     assert healthy["status"] == "healthy"
+
+
+def test_degradation_requires_sampled_coverage_not_partial_window_count():
+    now = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
+    battles = [
+        _battle("candidate-1", "80"),
+        _battle("candidate-2", "82"),
+        _battle("baseline-1", "100"),
+        _battle("baseline-2", "101"),
+        _battle("baseline-3", "99"),
+    ]
+    partials = _host_aggregates(now)
+    for aggregate in partials:
+        aggregate["sample_count"] = 1
+
+    assessment = assess_emulator_degradation(
+        battles,
+        partials,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        assessed_at=now,
+    )
+
+    assert assessment["status"] == "recommend"
+    assert assessment["host_evidence"]["status"] == "insufficient"
+    assert assessment["host_evidence"]["sampled_coverage_seconds"] == 121.0
 
 
 def test_completed_recovery_runs_do_not_calibrate_degradation(tmp_path):

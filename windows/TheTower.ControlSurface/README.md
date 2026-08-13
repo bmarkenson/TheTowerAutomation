@@ -839,8 +839,11 @@ when the SSH tunnel is down. Its stable header keeps overall health, telemetry
 queue state, and the sampling control together. The metrics below are grouped
 as **Windows Host**, **BlueStacks**, and **Other Windows Load** so host capacity,
 emulator consumption, and competing-process evidence remain visually distinct
-at every supported window width. Hover over the panel for BlueStacks I/O,
-sampler cost, last Linux acknowledgement, and errors. Sampling uses native
+at every supported window width. The BlueStacks group includes the current
+host-wide Windows object-handle and thread counts, refreshed on the existing
+ten-second process-discovery pass. Hover over the panel for BlueStacks I/O,
+the exact configured listener PID/instance, sampler cost, last Linux
+acknowledgement, and errors. Sampling uses native
 counters on a below-normal-priority worker; it does not capture the screen or
 start PowerShell, WMI, `nvidia-smi`, or another per-sample process.
 
@@ -904,10 +907,20 @@ require server revision 13 and capabilities `host_performance_telemetry_v1`
 and `host_performance_gpu_v1`. Process attribution requires revision 36 and
 `host_performance_process_attribution_v1`; older queued aggregates remain
 valid because the added field is optional.
+Revision 41 adds exact BlueStacks listener-lifetime correlation. Each enriched
+aggregate carries the configured listener host/port/path/instance/PID/start
+identity. Linux may join multiple GUI sampling sessions only while that entire
+identity, the stable local host ID, and the runtime ADB target remain equal.
+Closing and reopening the GUI therefore preserves handle aging for the same
+BlueStacks process; restarting or retargeting BlueStacks resets it. Unbound,
+legacy, or multi-instance-ambiguous telemetry remains visible but cannot
+authorize automatic recovery.
 
 **Preferences > BlueStacks Recovery** is a default-off opt-in for automatic
-restart after Linux confirms a sustained emulator-degradation signature. Before
-enabling it:
+restart after Linux confirms a sustained emulator-degradation signature.
+**System > Diagnostics > Restart BlueStacks…** is the confirmed on-demand path
+through the same recovery coordinator and does not require the detector or
+automatic opt-in. Before using either path:
 
 1. Use a shortcut created for the intended BlueStacks instance and verify its
    instance name. BlueStacks documents creating per-instance shortcuts in its
@@ -923,10 +936,16 @@ enabling it:
    The implementation starts `HD-Player.exe --instance INSTANCE`; a different
    shortcut argument form requires a code/configuration update before enabling.
 
-An eligible request first makes the Linux runtime install a no-input maintenance
-hold on fresh `RUNNING` evidence. Windows then resolves the configured listener
-to exactly one `HD-Player.exe` PID/start time, durably acknowledges that exact
-identity together with the immutable executable/instance/port target,
+An eligible request first resolves the configured listener and durably binds
+its exact host/path/instance/port/PID/start identity before Linux installs a
+no-input maintenance hold on fresh `RUNNING` evidence. Automatic creation also
+requires that live identity to equal the detector's exact listener lifetime.
+Revision 41 supersedes the earlier unbound v1 request contract; an older client
+therefore reports a compatibility mismatch until this Windows build is installed.
+The operator button bypasses only the performance decision, automatic opt-in,
+cooldown, and once-per-battle creation gates; Linux still requires an unheld,
+fresh exact-owner `RUNNING` Farm battle with normal Strategy and lifecycle
+authority. Windows then durably acknowledges the unchanged exact target,
 revalidates it before close or force-kill through the same process handle,
 starts only the configured instance, and requires a different exact listener
 owner on two consecutive polls. A lost response is reconciled instead of
@@ -934,7 +953,7 @@ replaying the mutation. Target fields are locked while a request remains
 active, and closing the client waits for an in-flight coordinator step before
 disposing its API connection. More than one configured instance with an active
 ADB listener disables automatic recovery because the host-wide aging signal is
-ambiguous.
+ambiguous; an operator-confirmed exact target remains available.
 
 Linux reconnects ADB, launches The Tower, and handles the distinct **Welcome
 Back** popup. It tries **Resume**, suppresses the non-earning rollback until the
@@ -944,9 +963,14 @@ battle catches up or the replacement battle is freshly `RUNNING`. Accepted
 launcher and Home inputs retain bounded postcondition receipts and are never
 blindly repeated on the next refresh; the known Free Ticket blocker has one
 exact-owner Claim and one stable-Home retry boundary. An accepted request is
-reconciled even if the Preference is disabled afterward. **System > Host
-Health** shows detector ratios, request phase, acknowledged instance/port/PID,
-and outcome independently of ordinary error text. The thresholds, cooldown,
+reconciled even if the Preference is disabled afterward. **System >
+Diagnostics** shows detector ratios, request phase, acknowledged instance/port/PID,
+and outcome independently of ordinary error text. The same area shows current
+handles plus the detector's recent median, low-water, ratio, delta, stable
+window count, exact PID, and contributing GUI-session count separately from
+coordinator progress. The confirmation explains the expected five replayed
+waves (fifty during Intro Sprint), their non-earning catch-up, and the
+End run/New Battle fallback. The thresholds, cooldown,
 and exact authority handshake are specified in the
 [control-surface architecture](../../docs/architecture/control_surface.md#automatic-bluestacks-degradation-recovery).
 
@@ -993,14 +1017,15 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 40, `current_battle_perks_v1`,
+current Windows build requires revision 41, `current_battle_perks_v1`,
 `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,
 `save_backed_setup_capture_v2`, `save_mapping_develop_integration_v1`,
 `save_mapping_review_status_v2`, `confirmed_local_mapping_status_v2`,
 `host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,
-`bluestacks_maintenance_v1`,
+`bluestacks_maintenance_v2`, `bluestacks_operator_restart_v1`,
+`bluestacks_listener_lifetime_telemetry_v1`,
 `managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`,
 `strategy_authoring_preset_local_copy_v1`, and
@@ -1089,24 +1114,28 @@ already configured:
     clipped. Exercise Timed Pause collapsed and expanded, then inspect a
     disabled state; its label and chevron must remain light on dark chrome with
     no platform-default white disc or near-black text.
-12. For revision 39, keep BlueStacks recovery disabled while confirming the
-    executable path, instance shortcut, listener port, and exact
-    `bluestacks.conf` instance mapping. Confirm target fields become read-only
-    during a durable request and that a close requested after host
-    acknowledgement waits for replacement reconciliation. In a disposable or
-    operator-approved active battle, enable it and exercise one
-    detector-authorized request: verify the acknowledged old
-    PID/path/instance/port/start time, replacement listener, sampler-baseline
-    reset, ADB reconnection, The Tower launch, distinct Welcome Back Resume,
-    held rollback, and release at the old wave high-water. Separately validate
-    the bounded **End run** -> full interrupted report -> configured **New
-    Battle** fallback only on a battle the operator has explicitly authorized
-    for that boundary.
+12. For revision 41, confirm the BlueStacks card shows the live summed OS
+    handles/threads and the detector line separately shows exact-PID lifetime
+    low-water/recent/ratio/delta/window evidence. Close and reopen only the GUI,
+    leave BlueStacks running, and verify the lifetime trend continues across
+    GUI sessions. Confirm the executable path, instance shortcut, listener
+    port, and exact `bluestacks.conf` mapping. In an operator-approved active
+    Farm battle, use **Restart BlueStacks…** with automatic recovery still
+    disabled. Verify the confirmation's exact PID/path/instance/port, durable
+    target lock, old-process acknowledgement, replacement listener,
+    sampler-baseline reset, ADB reconnection, The Tower launch, distinct
+    Welcome Back Resume, held non-earning rollback, and release at the old wave
+    high-water. Confirm a close during any coordinator step waits for its safe
+    boundary. Separately validate the bounded **End run** -> full interrupted
+    report -> configured **New Battle** fallback only on a battle explicitly
+    authorized for that boundary. Finally enable the default-off detector and
+    confirm the same path is requested only when exact-lifetime evidence and
+    the completed-run cohort are both ready.
 
 Revision-40 items 9 and 10 and the visual layout/theme checks in item 11 remain
 pending until they are actually exercised in a Windows WPF session. Linux
 cross-builds and portable compatibility tests do not count as that runtime
-validation. Revision-39 item 12 also remains pending; no live control or device
+validation. Revision-41 item 12 also remains pending; no live control or device
 request is needed merely to refresh these displays.
 
 The Linux API and fixed systemd user units must be installed first; see

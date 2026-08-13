@@ -23,6 +23,7 @@ PAIR_CPH_RATIO = Decimal("0.90")
 MINIMUM_SPEED_RATIO = Decimal("0.97")
 MINIMUM_HOST_WINDOWS = 96
 MINIMUM_HOST_SPAN = timedelta(minutes=16)
+MINIMUM_HOST_COVERAGE_SECONDS = Decimal("960")
 RECENT_HOST_WINDOW = timedelta(minutes=20)
 MINIMUM_HANDLE_RATIO = Decimal("1.8")
 MINIMUM_HANDLE_DELTA = Decimal("4000")
@@ -91,9 +92,10 @@ def assess_emulator_degradation(
     current_run_id: Optional[str],
     assessed_at: Optional[datetime] = None,
 ) -> dict[str, Any]:
-    """Assess two comparable runs plus same-session sustained handle growth."""
+    """Assess two comparable runs plus exact-listener handle growth."""
 
     when = (assessed_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    host = _host_evidence(host_aggregates, when=when)
     base = {
         "schema_version": DEGRADATION_SCHEMA_VERSION,
         "assessed_at": when.isoformat(timespec="seconds"),
@@ -102,6 +104,7 @@ def assess_emulator_degradation(
         "automatic_ready": False,
         "candidate_battle_ids": [],
         "baseline_battle_ids": [],
+        "host_evidence": host,
     }
     strategy = str(current_strategy or "").strip().lower()
     if not strategy or strategy in {"none", "tournament"}:
@@ -192,8 +195,6 @@ def assess_emulator_degradation(
             "reason": "completed comparable runs do not meet degradation thresholds",
         }
 
-    host = _host_evidence(host_aggregates, when=when)
-    evidence["host_evidence"] = host
     if host["status"] == "saturated":
         return {
             **evidence,
@@ -205,8 +206,8 @@ def assess_emulator_degradation(
             **evidence,
             "status": "recommend",
             "reason": (
-                "two comparable Farm runs are degraded, but sustained same-session "
-                "host corroboration is incomplete"
+                "two comparable Farm runs are degraded, but sustained exact-"
+                "listener host corroboration is incomplete"
             ),
         }
     return {
@@ -225,8 +226,68 @@ def _host_evidence(
     *,
     when: datetime,
 ) -> dict[str, Any]:
+    listener_identities = [
+        _listener_identity(aggregate) for aggregate in aggregates
+    ]
+    if not aggregates or any(
+        identity is None for identity in listener_identities
+    ):
+        return {
+            "status": "unavailable",
+            "identity_scope": "unavailable",
+            "sample_count": 0,
+            "sampler_session_count": 0,
+            "reason": (
+                "exact BlueStacks listener identity is unavailable; trend "
+                "continuity cannot cross this GUI sampling boundary"
+            ),
+        }
+    identities = {
+        tuple(identity.items())
+        for identity in listener_identities
+        if identity is not None
+    }
+    if len(identities) != 1:
+        return {
+            "status": "identity_changed",
+            "identity_scope": "exact_listener_lifetime",
+            "sample_count": 0,
+            "sampler_session_count": len(
+                {
+                    str(aggregate.get("session_id") or "")
+                    for aggregate in aggregates
+                    if aggregate.get("session_id")
+                }
+            ),
+            "reason": (
+                "the BlueStacks listener identity changed inside the "
+                "assessment window"
+            ),
+        }
+    listener_identity = next(
+        identity for identity in listener_identities if identity is not None
+    )
+    common = {
+        "identity_scope": "exact_listener_lifetime",
+        "listener_identity": listener_identity,
+        "sampler_session_count": len(
+            {
+                str(aggregate.get("session_id") or "")
+                for aggregate in aggregates
+                if aggregate.get("session_id")
+            }
+        ),
+    }
     samples: list[
-        tuple[datetime, Decimal, Decimal, Decimal, Decimal, Decimal]
+        tuple[
+            datetime,
+            Decimal,
+            Decimal,
+            Decimal,
+            Decimal,
+            Decimal,
+            Decimal,
+        ]
     ] = []
     for aggregate in aggregates:
         metrics = aggregate.get("metrics")
@@ -241,12 +302,16 @@ def _host_evidence(
         process_max = _decimal(metrics.get("bluestacks_process_count_max"))
         host_cpu = _decimal(metrics.get("host_cpu_percent_max"))
         host_memory = _decimal(metrics.get("host_memory_used_percent_max"))
+        aggregate_sample_count = _decimal(aggregate.get("sample_count"))
+        sample_interval_ms = _decimal(aggregate.get("sample_interval_ms"))
         if None in {
             handles,
             process_min,
             process_max,
             host_cpu,
             host_memory,
+            aggregate_sample_count,
+            sample_interval_ms,
         }:
             continue
         assert handles is not None
@@ -254,7 +319,14 @@ def _host_evidence(
         assert process_max is not None
         assert host_cpu is not None
         assert host_memory is not None
+        assert aggregate_sample_count is not None
+        assert sample_interval_ms is not None
         if process_min <= 0 or process_max <= 0:
+            continue
+        sampled_seconds = (
+            aggregate_sample_count * sample_interval_ms / Decimal(1000)
+        )
+        if sampled_seconds <= 0:
             continue
         samples.append(
             (
@@ -264,10 +336,12 @@ def _host_evidence(
                 process_max,
                 host_cpu,
                 host_memory,
+                sampled_seconds,
             )
         )
     if len(samples) < MINIMUM_HOST_WINDOWS:
         return {
+            **common,
             "status": "insufficient",
             "sample_count": len(samples),
             "reason": "fewer than 16 minutes of stable host windows are available",
@@ -276,10 +350,21 @@ def _host_evidence(
     span = samples[-1][0] - samples[0][0]
     if span < MINIMUM_HOST_SPAN:
         return {
+            **common,
             "status": "insufficient",
             "sample_count": len(samples),
             "span_seconds": int(span.total_seconds()),
             "reason": "stable host coverage is too short",
+        }
+    sampled_coverage = sum((sample[6] for sample in samples), Decimal(0))
+    if sampled_coverage < MINIMUM_HOST_COVERAGE_SECONDS:
+        return {
+            **common,
+            "status": "insufficient",
+            "sample_count": len(samples),
+            "span_seconds": int(span.total_seconds()),
+            "sampled_coverage_seconds": float(sampled_coverage),
+            "reason": "fewer than 16 sampled host minutes are available",
         }
     recent = [
         sample
@@ -288,22 +373,39 @@ def _host_evidence(
     ]
     if len(recent) < MINIMUM_HOST_WINDOWS:
         return {
+            **common,
             "status": "insufficient",
             "sample_count": len(recent),
             "reason": "the recent sustained host window is incomplete",
         }
+    recent_coverage = sum((sample[6] for sample in recent), Decimal(0))
+    if recent_coverage < MINIMUM_HOST_COVERAGE_SECONDS:
+        return {
+            **common,
+            "status": "insufficient",
+            "sample_count": len(recent),
+            "sampled_coverage_seconds": float(recent_coverage),
+            "reason": "the recent sampled host coverage is incomplete",
+        }
     if any(sample[4] >= 95 or sample[5] >= 95 for sample in recent):
         return {
+            **common,
             "status": "saturated",
             "sample_count": len(recent),
             "reason": "recent host CPU or memory reached 95 percent",
         }
     stable_windows = sum(sample[2] == sample[3] for sample in recent)
-    if stable_windows < int(len(recent) * 0.9):
+    stable_coverage = sum(
+        (sample[6] for sample in recent if sample[2] == sample[3]),
+        Decimal(0),
+    )
+    if stable_coverage < recent_coverage * Decimal("0.9"):
         return {
+            **common,
             "status": "unstable_process_set",
             "sample_count": len(recent),
             "stable_process_windows": stable_windows,
+            "sampled_coverage_seconds": float(recent_coverage),
             "reason": "the recent BlueStacks process set was not stable",
         }
     low_water = min(sample[1] for sample in samples)
@@ -313,9 +415,12 @@ def _host_evidence(
     delta = current - low_water
     confirmed = ratio >= MINIMUM_HANDLE_RATIO and delta >= MINIMUM_HANDLE_DELTA
     return {
+        **common,
         "status": "confirmed_growth" if confirmed else "stable",
         "sample_count": len(recent),
         "span_seconds": int(span.total_seconds()),
+        "stable_process_windows": stable_windows,
+        "sampled_coverage_seconds": float(recent_coverage),
         "handle_low_water": float(low_water),
         "handle_recent_median": float(current),
         "handle_ratio": float(ratio),
@@ -326,6 +431,25 @@ def _host_evidence(
             else "BlueStacks handle growth remains below the restart threshold"
         ),
     }
+
+
+def _listener_identity(
+    aggregate: Mapping[str, Any],
+) -> Optional[dict[str, object]]:
+    listener = aggregate.get("bluestacks_listener")
+    if not isinstance(listener, Mapping):
+        return None
+    keys = (
+        "host_id",
+        "adb_port",
+        "process_id",
+        "process_started_at",
+        "executable_path",
+        "instance_name",
+    )
+    if any(listener.get(key) in {None, ""} for key in keys):
+        return None
+    return {key: listener.get(key) for key in keys}
 
 
 def _report_decimal(record: Mapping[str, Any], key: str) -> Optional[Decimal]:

@@ -58,7 +58,9 @@ internal sealed record BlueStacksRestartResult(
 
 internal interface IBlueStacksInstanceController
 {
-    BlueStacksProcessIdentity Inspect(BlueStacksRecoveryTarget target);
+    BlueStacksProcessIdentity Inspect(
+        BlueStacksRecoveryTarget target,
+        bool requireSingleActiveInstance = true);
 
     Task<BlueStacksRestartResult> RestartAcknowledgedAsync(
         BlueStacksProcessIdentity previous,
@@ -111,9 +113,14 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
             "bluestacks.conf");
     }
 
-    public BlueStacksProcessIdentity Inspect(BlueStacksRecoveryTarget target)
+    public BlueStacksProcessIdentity Inspect(
+        BlueStacksRecoveryTarget target,
+        bool requireSingleActiveInstance = true)
     {
-        ValidateConfiguredInstanceBinding(target, requireExactPort: true);
+        ValidateConfiguredInstanceBinding(
+            target,
+            requireExactPort: true,
+            requireSingleActiveInstance: requireSingleActiveInstance);
         return InspectListener(target);
     }
 
@@ -123,7 +130,10 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
         CancellationToken cancellationToken)
     {
         ValidateAcknowledgedTarget(previous, target);
-        ValidateConfiguredInstanceBinding(target, requireExactPort: true);
+        ValidateConfiguredInstanceBinding(
+            target,
+            requireExactPort: true,
+            requireSingleActiveInstance: false);
         await StopExactProcessAsync(previous, cancellationToken);
         return await StartReplacementAsync(
             previous,
@@ -131,13 +141,16 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
             cancellationToken);
     }
 
-    public Task<BlueStacksRestartResult> StartAfterAcknowledgedStopAsync(
+    public async Task<BlueStacksRestartResult> StartAfterAcknowledgedStopAsync(
         BlueStacksProcessIdentity previous,
         BlueStacksRecoveryTarget target,
         CancellationToken cancellationToken)
     {
         ValidateAcknowledgedTarget(previous, target);
-        ValidateConfiguredInstanceBinding(target, requireExactPort: false);
+        ValidateConfiguredInstanceBinding(
+            target,
+            requireExactPort: false,
+            requireSingleActiveInstance: false);
         try
         {
             _ = InspectListener(target);
@@ -146,7 +159,14 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
         }
         catch (BlueStacksListenerUnavailableException)
         {
-            return StartReplacementAsync(previous, target, cancellationToken);
+            await StopAcknowledgedProcessIfStillAliveAsync(
+                previous,
+                target,
+                cancellationToken);
+            return await StartReplacementAsync(
+                previous,
+                target,
+                cancellationToken);
         }
     }
 
@@ -217,7 +237,25 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
             try
             {
-                var candidate = Inspect(target);
+                var configuredPort = ValidateConfiguredInstanceBinding(
+                    target,
+                    requireExactPort: false,
+                    requireSingleActiveInstance: false);
+                if (!ReplacementMappingReady(target, configuredPort))
+                {
+                    stablePolls = 0;
+                    last = null;
+                    continue;
+                }
+                var candidate = InspectListener(target);
+                // A listener alone does not prove the configured instance owns
+                // it while BlueStacks still reports the target instance at 0.
+                // Count stability only after the mapping reaches the exact
+                // durable port; a wrong nonzero mapping fails immediately.
+                ValidateConfiguredInstanceBinding(
+                    target,
+                    requireExactPort: true,
+                    requireSingleActiveInstance: false);
                 if ((candidate.ProcessId == previous.ProcessId
                         && candidate.ProcessStartedAtUtc
                         == previous.ProcessStartedAtUtc)
@@ -383,7 +421,7 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
         current = IdentityFromVerifiedHandle(
             process,
             target,
-            requireListener: true);
+            requireListener: false);
         if (current.ProcessStartedAtUtc != expected.ProcessStartedAtUtc)
         {
             throw new InvalidOperationException(
@@ -400,9 +438,72 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
         }
     }
 
-    private void ValidateConfiguredInstanceBinding(
+    private static async Task StopAcknowledgedProcessIfStillAliveAsync(
+        BlueStacksProcessIdentity expected,
         BlueStacksRecoveryTarget target,
-        bool requireExactPort)
+        CancellationToken cancellationToken)
+    {
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(expected.ProcessId);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+        using (process)
+        {
+            process.Refresh();
+            if (process.HasExited)
+            {
+                return;
+            }
+            DateTimeOffset startedAt;
+            try
+            {
+                startedAt = new DateTimeOffset(
+                    process.StartTime.ToUniversalTime(),
+                    TimeSpan.Zero);
+            }
+            catch (InvalidOperationException)
+            {
+                return;
+            }
+            if (startedAt != expected.ProcessStartedAtUtc)
+            {
+                // The acknowledged process is gone and Windows reused its PID.
+                return;
+            }
+            var actualPath = process.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(actualPath)
+                || !string.Equals(
+                    Path.GetFullPath(actualPath),
+                    target.ExecutablePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "The acknowledged BlueStacks PID still exists with an "
+                        + "unexpected executable path; replacement start is "
+                        + "deferred.");
+            }
+            process.Kill(entireProcessTree: true);
+            if (!await WaitForExitAsync(
+                process,
+                TimeSpan.FromSeconds(30),
+                cancellationToken))
+            {
+                throw new TimeoutException(
+                    "The acknowledged BlueStacks process did not stop within "
+                        + "30 seconds.");
+            }
+        }
+    }
+
+    private int ValidateConfiguredInstanceBinding(
+        BlueStacksRecoveryTarget target,
+        bool requireExactPort,
+        bool requireSingleActiveInstance)
     {
         Dictionary<string, int> mappings;
         try
@@ -430,6 +531,11 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
             target,
             configuredPort,
             allowStoppedPort: !requireExactPort);
+        ValidateUniqueConfiguredPortBinding(target, mappings, configuredPort);
+        if (!requireSingleActiveInstance)
+        {
+            return configuredPort;
+        }
         var activeInstances = mappings
             .Where(item => item.Value is >= 1 and <= 65535)
             .Where(item => ListenerRows(item.Value).Any(row =>
@@ -445,6 +551,7 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
                     + "instances have active ADB listeners because host-wide "
                     + "aging evidence is ambiguous.");
         }
+        return configuredPort;
     }
 
     internal static void ValidateConfiguredPortBinding(
@@ -458,6 +565,42 @@ internal sealed class BlueStacksInstanceController : IBlueStacksInstanceControll
             throw new BlueStacksTargetBindingException(
                 $"BlueStacks instance {target.InstanceName} maps to ADB port "
                     + $"{configuredPort}, not configured port {target.AdbPort}.");
+        }
+    }
+
+    internal static bool ReplacementMappingReady(
+        BlueStacksRecoveryTarget target,
+        int configuredPort)
+    {
+        ValidateConfiguredPortBinding(
+            target,
+            configuredPort,
+            allowStoppedPort: true);
+        return configuredPort == target.AdbPort;
+    }
+
+    internal static void ValidateUniqueConfiguredPortBinding(
+        BlueStacksRecoveryTarget target,
+        IReadOnlyDictionary<string, int> mappings,
+        int configuredPort)
+    {
+        if (configuredPort == 0)
+        {
+            return;
+        }
+        var conflictingInstance = mappings
+            .Where(item => !string.Equals(
+                item.Key,
+                target.InstanceName,
+                StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault(item => item.Value == configuredPort)
+            .Key;
+        if (!string.IsNullOrWhiteSpace(conflictingInstance))
+        {
+            throw new BlueStacksTargetBindingException(
+                $"BlueStacks ADB port {configuredPort} is mapped to both "
+                    + $"{target.InstanceName} and {conflictingInstance}; exact "
+                    + "instance ownership is ambiguous.");
         }
     }
 

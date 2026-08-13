@@ -7487,6 +7487,9 @@ class App:
             self._emulator_replay_window = RestartReplayWindow(
                 request_id=request_id,
                 high_water_wave=self._last_wave_value,
+                request_initiator=str(
+                    maintenance.get("initiator") or "automatic_detector"
+                ),
                 battle_scope=str(maintenance.get("battle_scope") or "") or None,
                 intro_sprint_active=(
                     self._activation_tracker().intro_sprint_active
@@ -7595,10 +7598,18 @@ class App:
                 return True
             if not self._emulator_recovery_action_logged:
                 log_action_intent(
-                    "Restarting the degraded BlueStacks instance",
-                    reason=str(maintenance.get("reason") or "degradation detected"),
+                    "Restarting the coordinated BlueStacks instance",
+                    reason=str(
+                        maintenance.get("reason")
+                        or (
+                            "operator requested BlueStacks restart"
+                            if maintenance.get("initiator") == "operator"
+                            else "degradation detected"
+                        )
+                    ),
                     detail=(
                         f"[EMULATOR_RECOVERY] request_id={request_id} "
+                        f"initiator={maintenance.get('initiator') or 'automatic_detector'} "
                         f"battle_scope={self._current_run_scope_id() or 'unknown'} "
                         f"high_water_wave={self._last_wave_value}"
                     ),
@@ -7645,6 +7656,9 @@ class App:
             replay = RestartReplayWindow(
                 request_id,
                 self._last_wave_value,
+                request_initiator=str(
+                    maintenance.get("initiator") or "automatic_detector"
+                ),
                 battle_scope=str(maintenance.get("battle_scope") or "") or None,
             )
             self._emulator_replay_window = replay
@@ -15508,7 +15522,16 @@ class App:
                 {
                     "schema_version": 1,
                     "outcome": "interrupted",
-                    "initiator": "automatic_emulator_recovery",
+                    "initiator": (
+                        "operator_emulator_recovery"
+                        if isinstance(
+                            self._emulator_replay_window,
+                            RestartReplayWindow,
+                        )
+                        and self._emulator_replay_window.request_initiator
+                        == "operator"
+                        else "automatic_emulator_recovery"
+                    ),
                     "collection": "full_terminal_ui",
                     "representative": False,
                     "analytics": "excluded",

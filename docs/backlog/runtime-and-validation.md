@@ -1091,13 +1091,17 @@ stages:
   - [ ] Validate and calibrate the default-off BlueStacks degradation recovery
     on Windows. Verify the installed `HD-Player.exe`, instance name from a
     BlueStacks-created shortcut, exact `bluestacks.conf` instance/port mapping,
-    and listener owner before enabling it. Confirm target edits lock during a
-    durable request, client close waits across an acknowledged host mutation,
-    and sampler baselines reset at replacement. Retain one detector decision
-    and authorized end-to-end restart through Welcome Back catch-up. Exercise
-    the End run/New Battle branch only at an explicitly authorized boundary.
+    and listener owner before using it. Confirm revision-41 Diagnostics shows
+    current handles/threads and exact-PID low-water/recent/ratio/delta/window
+    evidence, and that the same BlueStacks lifetime continues across a GUI-only
+    restart. First exercise the confirmed **Restart BlueStacks…** command with
+    automatic recovery disabled; then retain one detector decision. For both,
+    confirm the durable pre-hold target, target-edit lock, client-close
+    reconciliation, sampler-baseline reset, and end-to-end Welcome Back
+    catch-up. Exercise the End run/New Battle branch only at an explicitly
+    authorized boundary.
     Compare false-positive/false-negative behavior with exact run/configuration
-    and same-session cross-run host telemetry before changing the trigger
+    and exact-listener-lifetime cross-run host telemetry before changing the trigger
     thresholds. This completes mitigation validation but does not by itself
     resolve the cause tracked in
     [`ISSUE-2026-002`](../issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).

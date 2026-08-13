@@ -1356,6 +1356,8 @@ class ControlDirectiveStore:
         source: str,
         runtime: Mapping[str, object],
         battle_scope: Optional[str],
+        host_target: Mapping[str, object],
+        initiator: str = "automatic_detector",
         trigger: Optional[Mapping[str, object]] = None,
         now: Optional[float] = None,
     ) -> dict[str, Any]:
@@ -1369,17 +1371,19 @@ class ControlDirectiveStore:
             "state": "requested",
             "reason": " ".join(str(reason or "").split())[:256],
             "source": " ".join(str(source or "").split())[:64],
+            "initiator": " ".join(str(initiator or "").split())[:32].lower(),
             "requested_at": timestamp,
             "updated_at": timestamp,
             "runtime": dict(runtime),
             "battle_scope": str(battle_scope or "").strip() or None,
+            "host_target": dict(host_target),
             "trigger": dict(trigger or {}),
         }
         normalized = normalize_emulator_maintenance(candidate)
-        if normalized is None:
+        if normalized is None or "host_target" not in normalized:
             raise ValueError(
                 "Emulator maintenance requires a reason, source, exact runtime, "
-                "ADB target, and bounded battle scope"
+                "ADB target, bounded battle scope, and exact Windows target"
             )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
@@ -1392,6 +1396,19 @@ class ControlDirectiveStore:
                 )
             if current is not None and current["state"] != "terminal":
                 raise ValueError("An emulator maintenance request is busy")
+            if str(data.get("state") or "").strip().upper() != "RUNNING":
+                raise ValueError(
+                    "Emulator maintenance request requires the same Enabled "
+                    "control boundary"
+                )
+            bound_state_request_id = str(
+                normalized.get("runtime", {}).get("state_request_id") or ""
+            )
+            if str(data.get("state_request_id") or "") != bound_state_request_id:
+                raise ValueError(
+                    "Emulator maintenance control authority changed before "
+                    "request creation"
+                )
             data["emulator_maintenance"] = normalized
             data["updated_at"] = timestamp
             data["updated_by"] = str(source or "emulator-maintenance")[:64]
@@ -1441,6 +1458,16 @@ class ControlDirectiveStore:
                 raise ValueError(
                     "Emulator maintenance control authority changed before "
                     "host acknowledgement"
+                )
+            host_target = current.get("host_target")
+            if host_target is not None and not _same_emulator_host_identity(
+                host_target,
+                host_ack,
+                include_previous=False,
+            ):
+                raise ValueError(
+                    "Emulator maintenance host acknowledgement does not match "
+                    "the requested exact process identity"
                 )
             candidate = {
                 **current,

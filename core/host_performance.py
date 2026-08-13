@@ -247,7 +247,7 @@ class HostPerformanceStore:
         since: datetime,
         limit: int = 8192,
     ) -> list[dict[str, Any]]:
-        """Return cross-run history for the current host sampling session.
+        """Return legacy cross-run history for one Windows sampler session.
 
         The newest aggregate attached to ``current_run_id`` selects one exact
         Windows sampler session, host, and ADB port.  Earlier runs from only
@@ -310,6 +310,149 @@ class HostPerformanceStore:
                 result.append(payload)
         return result
 
+    def current_bluestacks_lifetime_marker(
+        self,
+        *,
+        current_run_id: str,
+    ) -> Optional[tuple[object, ...]]:
+        """Return the exact listener lifetime in the newest current-run row."""
+
+        normalized_run_id = _optional_run_id(
+            current_run_id,
+            field="current_run_id",
+        )
+        if normalized_run_id is None or not self.path.exists():
+            return None
+        try:
+            with self._write_lock:
+                with sqlite3.connect(self.path, timeout=5.0) as connection:
+                    selected = self._current_run_listener_row(
+                        connection,
+                        normalized_run_id,
+                    )
+        except sqlite3.Error as exc:
+            raise HostPerformanceStorageError(str(exc)) from exc
+        if selected is None:
+            return None
+        host_id, adb_port, raw = selected
+        runtime_adb_port = _valid_adb_port(adb_port)
+        if runtime_adb_port is None:
+            return None
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(payload, Mapping):
+            return None
+        listener = payload.get("bluestacks_listener")
+        if not isinstance(listener, Mapping):
+            return None
+        return (
+            host_id,
+            runtime_adb_port,
+            listener.get("host_id"),
+            listener.get("adb_port"),
+            listener.get("process_id"),
+            listener.get("process_started_at"),
+            listener.get("executable_path"),
+            listener.get("instance_name"),
+        )
+
+    def recent_bluestacks_lifetime_aggregates(
+        self,
+        *,
+        current_run_id: str,
+        since: datetime,
+        limit: int = 8192,
+    ) -> list[dict[str, Any]]:
+        """Return history for the current exact BlueStacks listener lifetime.
+
+        The outer durable host and runtime ADB target must match, while Windows
+        sampler sessions may change.  A missing exact listener identity fails
+        closed instead of stitching unrelated process lifetimes together.
+        """
+
+        normalized_run_id = _optional_run_id(
+            current_run_id,
+            field="current_run_id",
+        )
+        if normalized_run_id is None or not self.path.exists():
+            return []
+        bounded_limit = max(1, min(int(limit), 8192))
+        cutoff = _utc_datetime(since).isoformat(timespec="milliseconds")
+        try:
+            with self._write_lock:
+                with sqlite3.connect(self.path, timeout=5.0) as connection:
+                    selected = self._current_run_listener_row(
+                        connection,
+                        normalized_run_id,
+                    )
+                    if selected is None:
+                        return []
+                    host_id, adb_port, selected_raw = selected
+                    runtime_adb_port = _valid_adb_port(adb_port)
+                    if runtime_adb_port is None:
+                        return []
+                    try:
+                        selected_payload = json.loads(selected_raw)
+                    except (TypeError, ValueError):
+                        return []
+                    if not isinstance(selected_payload, Mapping):
+                        return []
+                    selected_listener = selected_payload.get(
+                        "bluestacks_listener"
+                    )
+                    if not isinstance(selected_listener, Mapping):
+                        return []
+                    listener = dict(selected_listener)
+                    rows = connection.execute(
+                        """
+                        SELECT payload_json
+                        FROM host_performance_aggregates
+                        WHERE window_end_utc >= ?
+                          AND host_id = ?
+                          AND adb_port IS ?
+                        ORDER BY window_end_utc ASC
+                        LIMIT ?
+                        """,
+                        (
+                            cutoff,
+                            host_id,
+                            runtime_adb_port,
+                            bounded_limit,
+                        ),
+                    ).fetchall()
+        except sqlite3.Error as exc:
+            raise HostPerformanceStorageError(str(exc)) from exc
+        result: list[dict[str, Any]] = []
+        for (raw,) in rows:
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(payload, dict)
+                and payload.get("bluestacks_listener") == listener
+            ):
+                result.append(payload)
+        return result
+
+    @staticmethod
+    def _current_run_listener_row(
+        connection: sqlite3.Connection,
+        current_run_id: str,
+    ) -> Optional[tuple[object, object, object]]:
+        return connection.execute(
+            """
+            SELECT host_id, adb_port, payload_json
+            FROM host_performance_aggregates
+            WHERE run_id = ?
+            ORDER BY window_end_utc DESC, ingested_at_utc DESC, rowid DESC
+            LIMIT 1
+            """,
+            (current_run_id,),
+        ).fetchone()
+
     @staticmethod
     def _prepare(connection: sqlite3.Connection) -> None:
         connection.execute(
@@ -359,6 +502,14 @@ class HostPerformanceStore:
             ON host_performance_aggregates (window_end_utc)
             """
         )
+
+
+def _valid_adb_port(value: object) -> Optional[int]:
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return None
+    return port if 1 <= port <= 65_535 else None
 
 
 def validate_host_performance_request(
@@ -422,7 +573,11 @@ def _validate_aggregate(
         "context_observed_at_utc",
         "metrics",
     }
-    optional = {"gpu_competitors", "process_attribution"}
+    optional = {
+        "bluestacks_listener",
+        "gpu_competitors",
+        "process_attribution",
+    }
     provided = set(aggregate)
     if not required.issubset(provided) or provided - required - optional:
         missing = sorted(required - provided)
@@ -550,6 +705,10 @@ def _validate_aggregate(
             maximum=maximum,
         )
     normalized["metrics"] = normalized_metrics
+    normalized["bluestacks_listener"] = _validate_bluestacks_listener(
+        aggregate.get("bluestacks_listener"),
+        field=f"aggregates[{index}].bluestacks_listener",
+    )
     normalized["gpu_competitors"] = _validate_gpu_competitors(
         aggregate.get("gpu_competitors", []),
         field=f"aggregates[{index}].gpu_competitors",
@@ -561,6 +720,61 @@ def _validate_aggregate(
         maximum_samples=normalized["sample_count"],
     )
     return normalized
+
+
+def _validate_bluestacks_listener(
+    value: object,
+    *,
+    field: str,
+) -> Optional[dict[str, Any]]:
+    if value is None:
+        return None
+    required = {
+        "host_id",
+        "adb_port",
+        "process_id",
+        "process_started_at",
+        "executable_path",
+        "instance_name",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise HostPerformancePayloadError(
+            f"{field} must be null or define exactly "
+            + ", ".join(sorted(required))
+        )
+    return {
+        "host_id": _bounded_text(
+            value.get("host_id"),
+            field=f"{field}.host_id",
+            maximum=128,
+        ),
+        "adb_port": _bounded_integer(
+            value.get("adb_port"),
+            field=f"{field}.adb_port",
+            minimum=1,
+            maximum=65_535,
+        ),
+        "process_id": _bounded_integer(
+            value.get("process_id"),
+            field=f"{field}.process_id",
+            minimum=1,
+            maximum=2**31 - 1,
+        ),
+        "process_started_at": _validated_timestamp_text(
+            value.get("process_started_at"),
+            field=f"{field}.process_started_at",
+        ),
+        "executable_path": _bounded_text(
+            value.get("executable_path"),
+            field=f"{field}.executable_path",
+            maximum=512,
+        ),
+        "instance_name": _bounded_text(
+            value.get("instance_name"),
+            field=f"{field}.instance_name",
+            maximum=64,
+        ),
+    }
 
 
 def _validate_gpu_competitors(
@@ -875,6 +1089,17 @@ def _utc_timestamp(value: object, *, field: str) -> datetime:
     if parsed.tzinfo is None:
         raise HostPerformancePayloadError(f"{field} must include a timezone")
     return _utc_datetime(parsed)
+
+
+def _validated_timestamp_text(value: object, *, field: str) -> str:
+    """Validate a zoned timestamp without discarding Windows tick precision."""
+
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 64:
+        raise HostPerformancePayloadError(
+            f"{field} must be a nonempty timestamp of at most 64 characters"
+        )
+    _utc_timestamp(value, field=field)
+    return value.strip()
 
 
 def _utc_datetime(value: datetime) -> datetime:

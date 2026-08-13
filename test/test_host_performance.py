@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sqlite3
 import threading
+from unittest.mock import patch
 
 import pytest
 
@@ -59,6 +60,21 @@ def _request(*aggregates):
         "schema_version": 1,
         "aggregates": list(aggregates or (_aggregate(),)),
     }
+
+
+def _listener(**overrides):
+    payload = {
+        "host_id": "ALIEN",
+        "adb_port": 5555,
+        "process_id": 4242,
+        "process_started_at": "2026-07-30T10:00:00.1234567+00:00",
+        "executable_path": (
+            "C:\\Program Files\\BlueStacks_nxt\\HD-Player.exe"
+        ),
+        "instance_name": "Nougat32",
+    }
+    payload.update(overrides)
+    return payload
 
 
 def _gpu_competitor(**overrides):
@@ -138,6 +154,7 @@ def test_host_performance_publish_is_idempotent_and_keeps_sample_run(tmp_path):
     assert stored["adb_port"] == 5555
     assert stored["host_name"] == "MAIN-PC"
     assert stored["metrics"]["bluestacks_cpu_percent_avg"] == 18.75
+    assert stored["bluestacks_listener"] is None
     assert stored["gpu_competitors"] == []
     assert stored["process_attribution"] == []
 
@@ -227,6 +244,278 @@ def test_current_sampler_session_history_crosses_runs_but_not_target(tmp_path):
         "11111111-1111-4111-8111-111111111111",
         "44444444-4444-4444-8444-444444444444",
     ]
+
+
+def test_exact_listener_lifetime_crosses_windows_gui_sessions(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    listener = _listener()
+    prior = _aggregate(
+        aggregate_id="51111111-1111-4111-8111-111111111111",
+        session_id="11111111-1111-4111-8111-111111111111",
+        sequence=90,
+        run_id="prior-run",
+        window_start_utc="2026-07-30T14:59:00+00:00",
+        window_end_utc="2026-07-30T14:59:09+00:00",
+        bluestacks_listener=listener,
+    )
+    current = _aggregate(
+        aggregate_id="54444444-4444-4444-8444-444444444444",
+        session_id="44444444-4444-4444-8444-444444444444",
+        sequence=1,
+        run_id="current-run",
+        window_start_utc="2026-07-30T15:00:00+00:00",
+        window_end_utc="2026-07-30T15:00:09+00:00",
+        bluestacks_listener=listener,
+    )
+    service.publish_host_performance(_request(prior, current))
+
+    history = (
+        service.host_performance_store.recent_bluestacks_lifetime_aggregates(
+            current_run_id="current-run",
+            since=datetime(2026, 7, 30, 14, 58, tzinfo=timezone.utc),
+        )
+    )
+
+    assert [item["aggregate_id"] for item in history] == [
+        "51111111-1111-4111-8111-111111111111",
+        "54444444-4444-4444-8444-444444444444",
+    ]
+    marker = service.host_performance_store.current_bluestacks_lifetime_marker(
+        current_run_id="current-run"
+    )
+    assert marker is not None
+    assert marker[-4:] == (
+        4242,
+        "2026-07-30T10:00:00.1234567+00:00",
+        "C:\\Program Files\\BlueStacks_nxt\\HD-Player.exe",
+        "Nougat32",
+    )
+
+
+@pytest.mark.parametrize(
+    ("location", "field", "value"),
+    [
+        ("listener", "process_id", 4343),
+        (
+            "listener",
+            "process_started_at",
+            "2026-07-30T11:00:00+00:00",
+        ),
+        (
+            "listener",
+            "executable_path",
+            "C:\\Other\\HD-Player.exe",
+        ),
+        ("listener", "instance_name", "Pie64"),
+        ("listener", "adb_port", 5565),
+        ("listener", "host_id", "OTHER-PC"),
+        (
+            "aggregate",
+            "host_id",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        ),
+        ("aggregate", "adb_port", 5565),
+    ],
+)
+def test_exact_listener_lifetime_excludes_every_identity_boundary(
+    tmp_path,
+    location,
+    field,
+    value,
+):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    prior_listener = _listener()
+    prior_overrides = {}
+    if location == "listener":
+        prior_listener[field] = value
+    else:
+        prior_overrides[field] = value
+    prior = _aggregate(
+        aggregate_id="61111111-1111-4111-8111-111111111111",
+        session_id="11111111-1111-4111-8111-111111111111",
+        sequence=1,
+        run_id="prior-run",
+        window_start_utc="2026-07-30T14:59:00+00:00",
+        window_end_utc="2026-07-30T14:59:09+00:00",
+        bluestacks_listener=prior_listener,
+        **prior_overrides,
+    )
+    current = _aggregate(
+        aggregate_id="64444444-4444-4444-8444-444444444444",
+        session_id="44444444-4444-4444-8444-444444444444",
+        sequence=1,
+        run_id="current-run",
+        window_start_utc="2026-07-30T15:00:00+00:00",
+        window_end_utc="2026-07-30T15:00:09+00:00",
+        bluestacks_listener=_listener(),
+    )
+    service.publish_host_performance(_request(prior, current))
+
+    history = (
+        service.host_performance_store.recent_bluestacks_lifetime_aggregates(
+            current_run_id="current-run",
+            since=datetime(2026, 7, 30, 14, 58, tzinfo=timezone.utc),
+        )
+    )
+
+    assert [item["aggregate_id"] for item in history] == [
+        "64444444-4444-4444-8444-444444444444"
+    ]
+
+
+def test_unbound_current_listener_does_not_stitch_legacy_history(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    prior = _aggregate(
+        aggregate_id="71111111-1111-4111-8111-111111111111",
+        sequence=1,
+        run_id="prior-run",
+        window_start_utc="2026-07-30T14:59:00+00:00",
+        window_end_utc="2026-07-30T14:59:09+00:00",
+        bluestacks_listener=_listener(),
+    )
+    current = _aggregate(
+        aggregate_id="74444444-4444-4444-8444-444444444444",
+        sequence=2,
+        run_id="current-run",
+        window_start_utc="2026-07-30T15:00:00+00:00",
+        window_end_utc="2026-07-30T15:00:09+00:00",
+    )
+    service.publish_host_performance(_request(prior, current))
+
+    assert (
+        service.host_performance_store.current_bluestacks_lifetime_marker(
+            current_run_id="current-run"
+        )
+        is None
+    )
+    assert (
+        service.host_performance_store.recent_bluestacks_lifetime_aggregates(
+            current_run_id="current-run",
+            since=datetime(2026, 7, 30, 14, 58, tzinfo=timezone.utc),
+        )
+        == []
+    )
+
+
+def test_listener_lifetime_preserves_distinct_runtime_and_windows_ports(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    current = _aggregate(
+        run_id="current-run",
+        adb_port=5556,
+        bluestacks_listener=_listener(adb_port=5555),
+    )
+    service.publish_host_performance(_request(current))
+
+    marker = service.host_performance_store.current_bluestacks_lifetime_marker(
+        current_run_id="current-run"
+    )
+    assert marker is not None
+    assert marker[1] == 5556
+    assert marker[3] == 5555
+    history = service.host_performance_store.recent_bluestacks_lifetime_aggregates(
+        current_run_id="current-run",
+        since=datetime(2026, 7, 30, 14, 58, tzinfo=timezone.utc),
+    )
+    assert len(history) == 1
+    assert history[0]["aggregate_id"] == current["aggregate_id"]
+    assert history[0]["adb_port"] == 5556
+    assert history[0]["bluestacks_listener"]["adb_port"] == 5555
+
+
+def test_listener_lifetime_requires_a_valid_runtime_target_port(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    current = _aggregate(
+        run_id="current-run",
+        adb_port=None,
+        bluestacks_listener=_listener(adb_port=5555),
+    )
+    service.publish_host_performance(_request(current))
+
+    assert service.host_performance_store.current_bluestacks_lifetime_marker(
+        current_run_id="current-run"
+    ) is None
+    assert service.host_performance_store.recent_bluestacks_lifetime_aggregates(
+        current_run_id="current-run",
+        since=datetime(2026, 7, 30, 14, 58, tzinfo=timezone.utc),
+    ) == []
+
+
+def test_nonobject_retained_listener_payload_fails_closed(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    aggregate = _aggregate(
+        run_id="current-run",
+        bluestacks_listener=_listener(),
+    )
+    service.publish_host_performance(_request(aggregate))
+    with sqlite3.connect(
+        tmp_path / "logs" / "host_performance.sqlite3"
+    ) as database:
+        database.execute(
+            """
+            UPDATE host_performance_aggregates
+            SET payload_json = '[]'
+            WHERE aggregate_id = ?
+            """,
+            (aggregate["aggregate_id"],),
+        )
+
+    assert (
+        service.host_performance_store.current_bluestacks_lifetime_marker(
+            current_run_id="current-run"
+        )
+        is None
+    )
+    assert (
+        service.host_performance_store.recent_bluestacks_lifetime_aggregates(
+            current_run_id="current-run",
+            since=datetime(2026, 7, 30, 14, 58, tzinfo=timezone.utc),
+        )
+        == []
+    )
+
+
+def test_degradation_cache_invalidates_when_listener_lifetime_changes(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    assessment = {
+        "schema_version": 1,
+        "assessed_at": "2026-07-30T15:00:00+00:00",
+        "status": "healthy",
+        "automatic_ready": False,
+        "reason": "healthy",
+        "candidate_battle_ids": [],
+        "baseline_battle_ids": [],
+    }
+    authority = {
+        "control_model": {
+            "strategy_scope": {"active_battle": "farm_t19"},
+        }
+    }
+    with (
+        patch.object(
+            service.host_performance_store,
+            "current_bluestacks_lifetime_marker",
+            side_effect=[("old-listener",), ("new-listener",)],
+        ),
+        patch.object(
+            service.host_performance_store,
+            "recent_bluestacks_lifetime_aggregates",
+            return_value=[],
+        ),
+        patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=assessment,
+        ) as assess,
+    ):
+        for now in (1_000.0, 1_001.0):
+            service._emulator_degradation_status(
+                control={"state": "RUNNING"},
+                runtime_authority=authority,
+                current_run={"run_id": "current-run"},
+                host_maintenance={"request": None},
+                now=now,
+            )
+
+    assert assess.call_count == 2
 
 
 def test_host_performance_stores_gpu_metrics_and_bounded_competitors(tmp_path):
@@ -339,6 +628,24 @@ def test_host_performance_retention_prunes_old_aggregates(tmp_path):
         (
             lambda aggregate: aggregate.update(run_id="../../escape"),
             "bounded run identifier",
+        ),
+        (
+            lambda aggregate: aggregate.update(
+                bluestacks_listener=_listener(process_id=0)
+            ),
+            "must be between 1 and 2147483647",
+        ),
+        (
+            lambda aggregate: aggregate.update(
+                bluestacks_listener=_listener(
+                    process_started_at=(
+                        "2026-07-30T10:00:00."
+                        + "1" * 50
+                        + "+00:00"
+                    )
+                )
+            ),
+            "at most 64 characters",
         ),
         (
             lambda aggregate: aggregate.update(
@@ -528,6 +835,9 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     assert "_samplingStateChanged" in tracker
     assert "FlushAggregateWindow(aggregateWindow)" in tracker
     assert "ProcessDiscoveryIntervalSamples = 10" in sampler
+    assert "BlueStacksHandleCount" in sampler
+    assert "RefreshBlueStacksListener" in sampler
+    assert "BlueStacksListener = first.BlueStacksListener" in tracker
     assert "GetSystemTimes" in sampler
     assert "GlobalMemoryStatusEx" in sampler
     assert "GetProcessIoCounters" in sampler
@@ -574,6 +884,10 @@ def test_native_host_sampling_control_is_persistent_and_collapsible():
     assert 'x:Name="HostSamplingToggleButton"' in window
     assert 'x:Name="HostGpuText"' in window
     assert 'x:Name="BlueStacksGpuText"' in window
+    assert 'x:Name="BlueStacksHandlesText"' in window
+    assert 'x:Name="BlueStacksHostEvidenceText"' in window
+    assert 'x:Name="BlueStacksRestartButton"' in window
+    assert 'Click="BlueStacksRestart_Click"' in window
     assert 'x:Name="GpuCompetitorText"' in window
     assert 'x:Name="OtherWindowsCpuText"' in window
     assert 'x:Name="TopCpuProcessText"' in window
@@ -581,6 +895,26 @@ def test_native_host_sampling_control_is_persistent_and_collapsible():
     assert 'x:Name="ProcessAttributionStateText"' in window
     assert "snapshot.ProcessAttribution" in window_code
     assert "snapshot.OtherWindowsCpuPercent" in window_code
+    assert "snapshot.BlueStacksHandleCount" in window_code
+    assert "degradation.HostEvidence" in window_code
+    assert "RequestOperatorRestartAsync" in window_code
+    assert "ResolveTelemetryTarget" in window_code
+    assert "ReconcileTunnelHostBlueStacksPort" in window_code
+    refresh_status = window_code.split(
+        "private async Task RefreshStatusAsync", 1
+    )[1].split("private async Task ObserveBlueStacksMaintenanceAsync", 1)[0]
+    assert refresh_status.index("ReconcileTunnelHostBlueStacksPort(status)") < (
+        refresh_status.index("RenderStatus(status)")
+    ) < refresh_status.index("QueueBlueStacksMaintenance(status)")
+    assert "RequestOutcomeUnknown" in window_code
+    assert "allowRequestCreation: false" in window_code
+    assert "_shutdownStarted = false;" in window_code
+    assert "terminal_disposition" in models
+    assert "terminal_reason" in models
+    assert "request.TerminalDisposition" in window_code
+    assert "request.TerminalReason" in window_code
+    assert "evidenceParts.AddRange(identityParts)" in window_code
+    assert "if (_shutdownStarted)" in window_code
     assert 'Click="HostSamplingToggle_Click"' in window
     assert "TextTrimming=\"CharacterEllipsis\"" in window
     assert 'x:Name="HostHealthToggleButton"' in window

@@ -48,6 +48,12 @@ public sealed class HostPerformanceSpoolTests
             Assert.Equal(
                 [before.AggregateId, after.AggregateId],
                 reloaded.Peek(10).Select(item => item.AggregateId));
+            Assert.Equal(
+                before.BlueStacksListener,
+                reloaded.Peek(10)[0].BlueStacksListener);
+            Assert.Equal(
+                "2026-08-13T00:00:00.1234567+00:00",
+                reloaded.Peek(10)[0].BlueStacksListener!.ProcessStartedAt);
             Assert.Equal(1, reloaded.RejectedCount);
             Assert.Equal(
                 "metrics field is invalid",
@@ -174,6 +180,15 @@ public sealed class HostPerformanceSpoolTests
         Metrics = new Dictionary<string, double>
         {
             ["host_cpu_percent_avg"] = 25.0,
+        },
+        BlueStacksListener = new HostPerformanceBlueStacksListener
+        {
+            HostId = "TEST-HOST",
+            AdbPort = 5555,
+            ProcessId = 90,
+            ProcessStartedAt = "2026-08-13T00:00:00.1234567+00:00",
+            ExecutablePath = @"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            InstanceName = "Nougat32",
         },
     };
 }

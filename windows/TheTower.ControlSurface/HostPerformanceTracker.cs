@@ -13,7 +13,7 @@ public sealed class HostPerformanceTracker : IDisposable
     private readonly object _stateGate = new();
     private readonly ControlSurfaceApi _api;
     private readonly HostPerformanceSpool _spool = new();
-    private readonly WindowsHostPerformanceSampler _sampler = new();
+    private readonly WindowsHostPerformanceSampler _sampler;
     private readonly Queue<HostPerformanceSample> _rawSamples = new();
     private readonly ManualResetEvent _stopEvent = new(false);
     private readonly AutoResetEvent _samplingStateChanged = new(false);
@@ -23,7 +23,8 @@ public sealed class HostPerformanceTracker : IDisposable
     private HostPerformanceContext _context = new(
         null,
         null,
-        DateTimeOffset.MinValue);
+        DateTimeOffset.MinValue,
+        null);
     private Thread? _sampleThread;
     private Task? _uploadTask;
     private long _sequence;
@@ -36,9 +37,18 @@ public sealed class HostPerformanceTracker : IDisposable
     private bool _disposed;
     private int _resetRateBaselinesRequested;
 
-    public HostPerformanceTracker(ControlSurfaceApi api)
+    public HostPerformanceTracker(ControlSurfaceApi api) : this(
+        api,
+        new BlueStacksInstanceController())
+    {
+    }
+
+    internal HostPerformanceTracker(
+        ControlSurfaceApi api,
+        IBlueStacksInstanceController blueStacksController)
     {
         _api = api;
+        _sampler = new WindowsHostPerformanceSampler(blueStacksController);
         _sequence = _spool.NextSequence;
     }
 
@@ -105,13 +115,21 @@ public sealed class HostPerformanceTracker : IDisposable
         int? adbPort,
         string? runId,
         bool uploadEnabled)
+        => UpdateServerContext(adbPort, runId, null, uploadEnabled);
+
+    internal void UpdateServerContext(
+        int? adbPort,
+        string? runId,
+        BlueStacksRecoveryTarget? blueStacksTarget,
+        bool uploadEnabled)
     {
         lock (_stateGate)
         {
             _context = new HostPerformanceContext(
                 adbPort,
                 string.IsNullOrWhiteSpace(runId) ? null : runId.Trim(),
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                blueStacksTarget);
             _uploadEnabled = uploadEnabled;
         }
         if (uploadEnabled)
@@ -180,7 +198,10 @@ public sealed class HostPerformanceTracker : IDisposable
                                 sample.TimestampUtc)
                             || !SameCorrelation(
                                 aggregateWindow[0].Context,
-                                sample.Context)))
+                                sample.Context)
+                            || HostPerformanceAggregateWindow.HasListenerDiscontinuity(
+                                aggregateWindow[^1].BlueStacksListener,
+                                sample.BlueStacksListener)))
                     {
                         EnqueueAggregate(aggregateWindow);
                         aggregateWindow.Clear();
@@ -248,7 +269,8 @@ public sealed class HostPerformanceTracker : IDisposable
         HostPerformanceContext left,
         HostPerformanceContext right) =>
         left.AdbPort == right.AdbPort
-        && string.Equals(left.RunId, right.RunId, StringComparison.Ordinal);
+        && string.Equals(left.RunId, right.RunId, StringComparison.Ordinal)
+        && Equals(left.BlueStacksTarget, right.BlueStacksTarget);
 
     private void EnqueueAggregate(IReadOnlyList<HostPerformanceSample> samples)
     {
@@ -417,6 +439,7 @@ public sealed class HostPerformanceTracker : IDisposable
                     == DateTimeOffset.MinValue
                 ? null
                 : FormatTimestamp(last.Context.ObservedAtUtc),
+            BlueStacksListener = first.BlueStacksListener,
             Metrics = metrics,
             GpuCompetitors = BuildGpuCompetitors(samples),
             ProcessAttribution = BuildProcessAttribution(samples),
@@ -765,6 +788,14 @@ public sealed class HostPerformanceTracker : IDisposable
             BlueStacksCpuPercent = blueStacksCpu,
             BlueStacksCpuCorePercent = blueStacksCoreCpu,
             BlueStacksWorkingSetBytes = last?.BlueStacksWorkingSetBytes,
+            BlueStacksThreadCount = last is { BlueStacksProcessCount: > 0 }
+                ? last.BlueStacksThreadCount
+                : null,
+            BlueStacksHandleCount = last is { BlueStacksProcessCount: > 0 }
+                ? last.BlueStacksHandleCount
+                : null,
+            BlueStacksListener = last?.BlueStacksListener,
+            BlueStacksListenerError = last?.BlueStacksListenerError,
             BlueStacksIoReadBytesPerSecond = Average(
                 recent.Select(sample =>
                     sample.BlueStacksIoReadBytesPerSecond)),

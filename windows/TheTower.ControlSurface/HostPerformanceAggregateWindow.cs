@@ -15,4 +15,9 @@ internal static class HostPerformanceAggregateWindow
         var gap = currentSampleAtUtc - previousSampleAtUtc;
         return gap <= TimeSpan.Zero || gap > MaximumContinuousSampleGap;
     }
+
+    internal static bool HasListenerDiscontinuity(
+        HostPerformanceBlueStacksListener? previous,
+        HostPerformanceBlueStacksListener? current) =>
+        !Equals(previous, current);
 }

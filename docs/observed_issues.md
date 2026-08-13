@@ -78,8 +78,9 @@ current runtime state.
   BlueStacks restart, supporting but not proving emulator aging.
 - Load the [dossier](issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed)
   for a throughput recurrence, T19 causal analysis, or host-correlation work.
-  Revision 39 adds a conservative default-off exact-instance mitigation with
-  same-session cross-run aging evidence. Next: verify its configured Windows
+  Revision 41 adds a confirmed operator path, visible handle evidence, and a
+  conservative default-off exact-instance mitigation with exact-listener
+  aging continuity across GUI sessions. Next: verify its configured Windows
   identity/mapping and one authorized end-to-end recovery, while pairing any
   recurrence with exact loadout/locks and host counters; see the
   [runtime backlog](backlog/runtime-and-validation.md#runtime-control).

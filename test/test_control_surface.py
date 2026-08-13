@@ -1462,6 +1462,77 @@ def test_strategy_gate_status_never_scrapes_warning_text(tmp_path):
     assert gate["stale"] is True
 
 
+def _host_maintenance_context(
+    root: Path,
+    *,
+    strategy: str = "farm_t18",
+    control_state: str = "RUNNING",
+    runtime_adb_port: int = 5555,
+    windows_adb_port: int = 5555,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    run_id = "run-emulator-recovery"
+    owner = {
+        "runtime_id": "runtime-emulator-recovery",
+        "pid": os.getpid(),
+        "adb_target": f"localhost:{runtime_adb_port}",
+        "target_generation": 11,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        root,
+        runtime_id=owner["runtime_id"],
+        target_generation=owner["target_generation"],
+        target=owner["adb_target"],
+    )
+    _write_current_run_scope(root, run_id=run_id)
+    service = _service(root)
+    service.control_store.set_strategy(
+        "farm_t19" if strategy == "gc_farm_t19_experiment" else strategy,
+        source="test",
+    )
+    control = service.control_store.set_state(control_state, source="test")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=control_state != "RUNNING",
+        active_battle=True,
+        battle_scope=run_id,
+        primary_state="RUNNING",
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        root / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+        control_model={
+            "schema_version": 1,
+            "observation": None,
+            "strategy_scope": {"active_battle": strategy},
+        },
+    )
+    listener = {
+        "host_id": "WINDOWS-HOST",
+        "adb_port": windows_adb_port,
+        "process_id": 90,
+        "process_started_at": "2026-08-10T10:00:00.1234567+00:00",
+        "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+        "instance_name": "Nougat32",
+    }
+    return (
+        now,
+        run_id,
+        owner,
+        lock_handle,
+        service,
+        control,
+        authority,
+        publisher,
+        listener,
+    )
+
+
 def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
     now = datetime.now().astimezone().replace(microsecond=0)
     run_id = "run-emulator-recovery"
@@ -1505,6 +1576,14 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
             "strategy_scope": {"active_battle": "farm_t18"},
         },
     )
+    listener = {
+        "host_id": "WINDOWS-HOST",
+        "adb_port": 5555,
+        "process_id": 90,
+        "process_started_at": "2026-08-10T10:00:00+00:00",
+        "executable_path": r"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+        "instance_name": "Nougat32",
+    }
     detector_ready = {
         "schema_version": 1,
         "assessed_at": now.isoformat(),
@@ -1519,6 +1598,9 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
         "individual_cph_ratios": [0.87, 0.89],
         "effective_game_speed_ratio": 0.99,
         "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
             "sample_count": 120,
             "handle_ratio": 1.9,
             "handle_delta": 4_500,
@@ -1530,7 +1612,7 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
             return_value=detector_ready,
         ) as detector:
             requested = service.apply_host_maintenance(
-                {"operation": "request"},
+                {"operation": "request", **listener},
                 now=now.timestamp(),
             )
         assert detector.call_count == 1
@@ -1539,6 +1621,14 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
         assert maintenance["state"] == "requested"
         assert maintenance["runtime"] == bound_runtime
         assert maintenance["battle_scope"] == run_id
+        assert maintenance["initiator"] == "automatic_detector"
+        assert {
+            key: maintenance["host_target"][key] for key in listener
+        } == listener
+        assert maintenance["source"] == "windows-control-surface"
+        assert maintenance["trigger"]["request_kind"] == (
+            "automatic_detector"
+        )
         request_id = maintenance["request_id"]
 
         authority.update_context(
@@ -1678,6 +1768,522 @@ def test_host_maintenance_request_rejects_an_unready_detector(tmp_path):
     assert rejected.value.code == "emulator_degradation_not_ready"
 
 
+def test_automatic_host_maintenance_rejects_live_listener_mismatch(tmp_path):
+    (
+        now,
+        run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    detector_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "current_run_id": run_id,
+        "current_strategy": "farm_t18",
+        "status": "automatic_ready",
+        "automatic_ready": True,
+        "reason": "confirmed",
+        "candidate_battle_ids": ["slow-1", "slow-2"],
+        "baseline_battle_ids": ["base-1", "base-2", "base-3"],
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "sample_count": 120,
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=detector_ready,
+        ):
+            with pytest.raises(ControlSurfaceRequestError) as rejected:
+                service.apply_host_maintenance(
+                    {
+                        "operation": "request",
+                        **{**listener, "process_id": 91},
+                    },
+                    now=now.timestamp(),
+                )
+        assert rejected.value.status == 409
+        assert rejected.value.code == "emulator_host_identity_mismatch"
+        assert service.control_store.status().get("emulator_maintenance") is None
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_automatic_host_maintenance_rejects_seventh_tick_mismatch(tmp_path):
+    (
+        now,
+        run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    detector_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "current_run_id": run_id,
+        "current_strategy": "farm_t18",
+        "status": "automatic_ready",
+        "automatic_ready": True,
+        "reason": "confirmed",
+        "candidate_battle_ids": ["slow-1", "slow-2"],
+        "baseline_battle_ids": ["base-1", "base-2", "base-3"],
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "sample_count": 120,
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=detector_ready,
+        ):
+            with pytest.raises(ControlSurfaceRequestError) as rejected:
+                service.apply_host_maintenance(
+                    {
+                        "operation": "request",
+                        **{
+                            **listener,
+                            "process_started_at": (
+                                "2026-08-10T10:00:00.1234568+00:00"
+                            ),
+                        },
+                    },
+                    now=now.timestamp(),
+                )
+        assert rejected.value.code == "emulator_host_identity_mismatch"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+@pytest.mark.parametrize("operation", ["request", "request_operator"])
+def test_host_maintenance_preserves_split_linux_and_windows_ports(
+    tmp_path,
+    operation,
+):
+    (
+        now,
+        run_id,
+        owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(
+        tmp_path,
+        runtime_adb_port=5556,
+        windows_adb_port=5555,
+    )
+    detector_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "current_run_id": run_id,
+        "current_strategy": "farm_t18",
+        "status": "automatic_ready",
+        "automatic_ready": True,
+        "reason": "confirmed",
+        "candidate_battle_ids": ["slow-1", "slow-2"],
+        "baseline_battle_ids": ["base-1", "base-2", "base-3"],
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "sample_count": 120,
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=detector_ready,
+        ):
+            requested = service.apply_host_maintenance(
+                {"operation": operation, **listener},
+                now=now.timestamp(),
+            )
+        maintenance = requested["host_maintenance"]["request"]
+        assert maintenance["runtime"]["adb_target"] == owner["adb_target"]
+        assert maintenance["host_target"]["adb_port"] == 5555
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_operator_restart_bypasses_detector_but_keeps_runtime_authority(tmp_path):
+    (
+        now,
+        run_id,
+        owner,
+        lock_handle,
+        service,
+        control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    try:
+        requested = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )
+        maintenance = requested["host_maintenance"]["request"]
+        assert maintenance["state"] == "requested"
+        assert maintenance["initiator"] == "operator"
+        assert maintenance["source"] == "windows-control-surface-operator"
+        assert maintenance["battle_scope"] == run_id
+        assert maintenance["runtime"] == {
+            **owner,
+            "state_request_id": control["state_request_id"],
+        }
+        assert maintenance["trigger"]["request_kind"] == "operator"
+        assert {
+            key: maintenance["host_target"][key] for key in listener
+        } == listener
+        assert requested["request"]["disposition"] == "operator_requested"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_operator_restart_bypasses_same_battle_automatic_suppression(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    try:
+        first = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )["host_maintenance"]["request"]
+        service.control_store.finish_emulator_maintenance(
+            first["request_id"],
+            disposition="resumed",
+            reason="test recovery completed",
+            source="test-runtime",
+            now=now.timestamp() + 1,
+        )
+
+        status = service.status(now=now.timestamp() + 2)
+        assert status["emulator_degradation"]["status"] == (
+            "already_recovered_this_battle"
+        )
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {"operation": "request", **listener},
+                now=now.timestamp() + 2,
+            )
+        assert rejected.value.code == "emulator_degradation_not_ready"
+
+        second = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp() + 2,
+        )
+        assert second["host_maintenance"]["request"]["request_id"] != (
+            first["request_id"]
+        )
+        assert second["host_maintenance"]["request"]["initiator"] == (
+            "operator"
+        )
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+@pytest.mark.parametrize(
+    ("strategy", "control_state", "expected_code"),
+    [
+        ("tournament", "RUNNING", "strategy_ineligible"),
+        ("farm_t18", "PAUSED", "control_not_running"),
+    ],
+)
+def test_operator_restart_status_rejects_nonfarm_or_paused_authority(
+    tmp_path,
+    strategy,
+    control_state,
+    expected_code,
+):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(
+        tmp_path,
+        strategy=strategy,
+        control_state=control_state,
+    )
+    try:
+        availability = service.status(now=now.timestamp())["host_maintenance"][
+            "operator_restart"
+        ]
+        assert availability["available"] is False
+        assert availability["code"] == expected_code
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {"operation": "request_operator", **listener},
+                now=now.timestamp(),
+            )
+        assert rejected.value.code == expected_code
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+@pytest.mark.parametrize("condition", ["held", "stale"])
+def test_operator_restart_rejects_held_or_stale_runtime_authority(
+    tmp_path,
+    condition,
+):
+    (
+        now,
+        run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        authority,
+        publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    query_time = now.timestamp()
+    if condition == "held":
+        authority.update_context(
+            global_pause=False,
+            active_battle=True,
+            battle_scope=run_id,
+            primary_state="RUNNING",
+            holds=(
+                AuthorityHoldState(
+                    AuthorityHold.BLOCKING_MODAL_RECOVERY,
+                    "test blocking modal",
+                ),
+            ),
+        )
+        publisher.publish(
+            authority.snapshot(now=query_time),
+            now=query_time,
+            control_model={
+                "schema_version": 1,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+            },
+        )
+    else:
+        query_time += 31
+    try:
+        availability = service.status(now=query_time)["host_maintenance"][
+            "operator_restart"
+        ]
+        assert availability["available"] is False
+        assert availability["code"] == "runtime_not_ready"
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {"operation": "request_operator", **listener},
+                now=query_time,
+            )
+        assert rejected.value.code == "runtime_not_ready"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_operator_restart_rejects_runtime_current_run_scope_mismatch(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    _write_current_run_scope(tmp_path, run_id="different-current-run")
+    try:
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {"operation": "request_operator", **listener},
+                now=now.timestamp(),
+            )
+        assert rejected.value.code == "maintenance_runtime_unavailable"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_operator_restart_accepts_gc_farm_strategy_identity(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(
+        tmp_path,
+        strategy="gc_farm_t19_experiment",
+    )
+    try:
+        availability = service.status(now=now.timestamp())["host_maintenance"][
+            "operator_restart"
+        ]
+        assert availability["available"] is True
+        requested = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )
+        assert requested["host_maintenance"]["request"]["initiator"] == (
+            "operator"
+        )
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_durable_target_rejects_changed_process_before_acknowledgement(tmp_path):
+    (
+        now,
+        run_id,
+        owner,
+        lock_handle,
+        service,
+        control,
+        authority,
+        publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    try:
+        requested = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )
+        maintenance = requested["host_maintenance"]["request"]
+        bound_runtime = {
+            **owner,
+            "state_request_id": control["state_request_id"],
+        }
+        authority.update_context(
+            global_pause=False,
+            active_battle=True,
+            battle_scope=run_id,
+            primary_state="RUNNING",
+            holds=(
+                AuthorityHoldState(
+                    AuthorityHold.EMULATOR_MAINTENANCE,
+                    "BlueStacks maintenance owns host and game recovery",
+                ),
+            ),
+        )
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 1),
+            now=now.timestamp() + 1,
+            control_model={
+                "schema_version": 1,
+                "observation": None,
+                "strategy_scope": {"active_battle": "farm_t18"},
+                "emulator_maintenance": {
+                    "schema_version": 1,
+                    "request_id": maintenance["request_id"],
+                    "state": "host_restart_authorized",
+                    "runtime": bound_runtime,
+                    "battle_scope": run_id,
+                    "high_water_wave": 2_000,
+                    "intro_sprint_active": False,
+                    "replay_active": False,
+                    "exclude_from_degradation": True,
+                    "reason": "runtime hold installed",
+                    "observed_at": now.isoformat(),
+                },
+            },
+        )
+        with pytest.raises(ControlSurfaceRequestError) as rejected:
+            service.apply_host_maintenance(
+                {
+                    "operation": "acknowledge",
+                    "request_id": maintenance["request_id"],
+                    **{**listener, "process_id": 91},
+                },
+                now=now.timestamp() + 2,
+            )
+        assert rejected.value.code == "maintenance_conflict"
+        assert service.control_store.status()["emulator_maintenance"][
+            "state"
+        ] == "requested"
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_pause_before_durable_maintenance_creation_wins(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    original_request = service.control_store.request_emulator_maintenance
+
+    def pause_then_request(**kwargs):
+        service.control_store.set_state("PAUSED", source="test-race")
+        return original_request(**kwargs)
+
+    try:
+        with patch.object(
+            service.control_store,
+            "request_emulator_maintenance",
+            side_effect=pause_then_request,
+        ):
+            with pytest.raises(ControlSurfaceRequestError) as rejected:
+                service.apply_host_maintenance(
+                    {"operation": "request_operator", **listener},
+                    now=now.timestamp(),
+                )
+        assert rejected.value.code == "maintenance_conflict"
+        status = service.control_store.status()
+        assert status["state"] == "PAUSED"
+        assert status.get("emulator_maintenance") is None
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
 def test_host_failure_cannot_release_an_acknowledged_restart(tmp_path):
     service = _service(tmp_path)
     enabled = service.control_store.set_state("RUNNING", source="test")
@@ -1692,6 +2298,17 @@ def test_host_failure_cannot_release_an_acknowledged_restart(tmp_path):
             "state_request_id": enabled["state_request_id"],
         },
         battle_scope="run-1",
+        host_target={
+            "host_id": "WINDOWS-HOST",
+            "adb_port": 5555,
+            "process_id": 90,
+            "process_started_at": "2026-08-10T10:00:00+00:00",
+            "executable_path": (
+                r"C:\Program Files\BlueStacks_nxt\HD-Player.exe"
+            ),
+            "instance_name": "Nougat32",
+            "observed_at": "2026-08-10T10:00:30+00:00",
+        },
     )
     service.control_store.acknowledge_emulator_maintenance_host(
         request["request_id"],
@@ -2517,8 +3134,14 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 40" in native_compatibility
-    assert '"bluestacks_maintenance_v1"' in native_compatibility
+    assert "MinimumServerRevision = 41" in native_compatibility
+    assert '"bluestacks_maintenance_v1"' not in native_compatibility
+    assert '"bluestacks_maintenance_v2"' in native_compatibility
+    assert '"bluestacks_operator_restart_v1"' in native_compatibility
+    assert (
+        '"bluestacks_listener_lifetime_telemetry_v1"'
+        in native_compatibility
+    )
     assert '"strategy_aware_attach_v1"' in native_compatibility
     assert '"confirmed_local_mapping_status_v2"' in native_compatibility
     assert "confirmed_local_mapping_status_v2" in CONTROL_SURFACE_CAPABILITIES
@@ -4144,6 +4767,22 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         payload = json.loads(response.read())
         assert response.status == 409
         assert payload["code"] == "emulator_degradation_not_ready"
+
+        operator_body = json.dumps({"operation": "request_operator"})
+        connection.request(
+            "POST",
+            "/api/v1/host-maintenance",
+            body=operator_body,
+            headers={
+                "Authorization": "Bearer test-secret",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(operator_body)),
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 409
+        assert payload["code"] == "control_not_running"
 
         connection.request(
             "GET",

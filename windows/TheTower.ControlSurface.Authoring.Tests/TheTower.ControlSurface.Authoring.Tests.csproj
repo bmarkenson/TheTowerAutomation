@@ -25,6 +25,12 @@
              Link="HostPerformanceModels.cs" />
     <Compile Include="..\TheTower.ControlSurface\HostPerformanceAggregateWindow.cs"
              Link="HostPerformanceAggregateWindow.cs" />
+    <Compile Include="..\TheTower.ControlSurface\HostPerformanceTracker.cs"
+             Link="HostPerformanceTracker.cs" />
+    <Compile Include="..\TheTower.ControlSurface\WindowsHostPerformanceSampler.cs"
+             Link="WindowsHostPerformanceSampler.cs" />
+    <Compile Include="..\TheTower.ControlSurface\WindowsGpuPerformanceSampler.cs"
+             Link="WindowsGpuPerformanceSampler.cs" />
     <Compile Include="..\TheTower.ControlSurface\HostPerformanceSpool.cs"
              Link="HostPerformanceSpool.cs" />
     <Compile Include="..\TheTower.ControlSurface\HostPerformanceUploadBatch.cs"

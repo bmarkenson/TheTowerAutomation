@@ -37,14 +37,14 @@ public partial class PreferencesWindow : Window
         BlueStacksInstanceNameBox.Text = settings.BlueStacksInstanceName;
         if (blueStacksRecoveryTargetLocked)
         {
-            BlueStacksAutomaticRecoveryBox.IsEnabled = false;
             BlueStacksPlayerPathBox.IsEnabled = false;
             BlueStacksInstanceNameBox.IsEnabled = false;
             WindowsBlueStacksAdbPortBox.IsEnabled = false;
             BlueStacksRecoveryLockText.Text =
-                "A durable recovery request is active. Its enabled setting, "
-                + "executable, instance, and Windows ADB port remain locked "
-                + "until Linux records a terminal outcome.";
+                "A durable recovery request is active. Its executable, "
+                + "instance, and Windows ADB port remain locked until Linux "
+                + "records a terminal outcome. Automatic recovery can be "
+                + "disabled to prevent later requests.";
             BlueStacksRecoveryLockText.Visibility = Visibility.Visible;
         }
     }

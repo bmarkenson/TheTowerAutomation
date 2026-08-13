@@ -1425,11 +1425,15 @@ warning text in `actions.log`.
 ### Emulator maintenance and restart replay
 
 One schema-1 `emulator_maintenance` directive represents a BlueStacks restart
-requested by the Windows control surface's conservative, default-off
-[degradation detector](control_surface.md#automatic-bluestacks-degradation-recovery).
-The request is bound to the exact runtime ID, PID, ADB target, positive target
-generation, authorizing state-request ID, and current battle scope. It is not
-host authority. At the next fresh `RUNNING` boundary, the matching runtime
+requested either by the Windows control surface's conservative, default-off
+[degradation detector](control_surface.md#automatic-bluestacks-degradation-recovery)
+or its confirmed operator command. The initiator is durable provenance; it
+does not change recovery input semantics. Before the hold is installed, the
+request is bound to the exact Windows executable, instance, listener port,
+host, PID, and process start time plus the exact runtime ID, PID, ADB target,
+positive target generation, authorizing state-request ID, and current battle
+scope. Request creation atomically rechecks that Enabled control identity. It
+is not host authority. At the next fresh `RUNNING` boundary, the matching runtime
 installs the exclusive `emulator_maintenance` hold, stops background input,
 captures its last trusted wave and confirmed Intro Sprint state, and publishes
 a separate runtime acknowledgement. Windows may mutate the host only while
@@ -1492,7 +1496,7 @@ retry only the bounded app launcher; they never infer a Surrender, Resume, or
 Battle target from absence.
 
 A resumed record carries the request ID, battle scope, high-water, expected
-floor, lowest observed wave, and catch-up disposition under
+floor, lowest observed wave, request initiator, and catch-up disposition under
 `runtime.emulator_recovery`. The interrupted old record receives the same
 provenance, while its replacement battle does not. Any record with that
 provenance is excluded from later degradation calibration so restart downtime

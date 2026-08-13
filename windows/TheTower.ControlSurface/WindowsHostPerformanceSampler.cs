@@ -12,6 +12,7 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         1,
         Environment.ProcessorCount);
     private readonly Process _controlSurfaceProcess = Process.GetCurrentProcess();
+    private readonly IBlueStacksInstanceController _blueStacksController;
     private readonly WindowsGpuPerformanceSampler _gpuSampler = new();
     private readonly HostProcessAttributionGate _processAttributionGate = new();
     private readonly Dictionary<int, ProcessTotals> _previousProcessTotals = [];
@@ -25,9 +26,18 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
     private DateTimeOffset? _previousSampleAtUtc;
     private DateTimeOffset? _previousProcessAttributionAtUtc;
     private int _samplesUntilDiscovery;
+    private BlueStacksRecoveryTarget? _listenerTarget;
+    private HostPerformanceBlueStacksListener? _blueStacksListener;
+    private string? _blueStacksListenerError;
     private double? _cpuFrequencyMhz;
     private double? _cpuFrequencyRatio;
     private bool _disposed;
+
+    public WindowsHostPerformanceSampler(
+        IBlueStacksInstanceController blueStacksController)
+    {
+        _blueStacksController = blueStacksController;
+    }
 
     public HostPerformanceSample Sample(HostPerformanceContext context)
     {
@@ -48,13 +58,17 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
             memoryUsedPercent,
             availableMemoryBytes);
         var processRefresh = ProcessRefreshResult.Empty;
-        if (_samplesUntilDiscovery <= 0)
+        var listenerTargetChanged = !Equals(
+            _listenerTarget,
+            context.BlueStacksTarget);
+        if (_samplesUntilDiscovery <= 0 || listenerTargetChanged)
         {
             processRefresh = RefreshProcesses(
                 sampledAtUtc,
                 processAttributionState is HostProcessAttributionState.Active
                     or HostProcessAttributionState.Recovering);
             RefreshCpuFrequency();
+            RefreshBlueStacksListener(context.BlueStacksTarget);
             _samplesUntilDiscovery = ProcessDiscoveryIntervalSamples;
         }
         _samplesUntilDiscovery--;
@@ -88,6 +102,8 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
                 processMetrics.IoWriteBytesPerSecond,
             BlueStacksThreadCount = processMetrics.ThreadCount,
             BlueStacksHandleCount = processMetrics.HandleCount,
+            BlueStacksListener = _blueStacksListener,
+            BlueStacksListenerError = _blueStacksListenerError,
             GpuCountersAvailable = gpuMetrics.Available,
             HostGpuPercent = gpuMetrics.HostGpuPercent,
             HostGpuDedicatedMemoryBytes =
@@ -111,6 +127,41 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
             ControlSurfaceCpuPercent = controlSurfaceCpuPercent,
             SampleDurationMilliseconds = sampleTimer.Elapsed.TotalMilliseconds,
         };
+    }
+
+    private void RefreshBlueStacksListener(BlueStacksRecoveryTarget? target)
+    {
+        _listenerTarget = target;
+        _blueStacksListener = null;
+        _blueStacksListenerError = null;
+        if (target is null)
+        {
+            _blueStacksListenerError =
+                "BlueStacks listener target is not configured.";
+            return;
+        }
+        try
+        {
+            var identity = _blueStacksController.Inspect(
+                target,
+                requireSingleActiveInstance: true);
+            _blueStacksListener = new HostPerformanceBlueStacksListener
+            {
+                HostId = identity.HostId,
+                AdbPort = identity.AdbPort,
+                ProcessId = identity.ProcessId,
+                ProcessStartedAt = identity.ProcessStartedAtText,
+                ExecutablePath = identity.ExecutablePath,
+                InstanceName = target.InstanceName,
+            };
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or ArgumentException
+                or System.ComponentModel.Win32Exception)
+        {
+            _blueStacksListenerError = exception.Message;
+        }
     }
 
     private ProcessRefreshResult RefreshProcesses(
@@ -499,6 +550,7 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         _previousProcessTotals.Clear();
         _previousProcessAttributionTotals.Clear();
         _previousProcessAttributionAtUtc = null;
+        _samplesUntilDiscovery = 0;
         _processAttributionGate.Reset();
         _gpuSampler.ResetRateBaseline();
     }

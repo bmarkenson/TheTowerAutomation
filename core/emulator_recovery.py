@@ -19,6 +19,9 @@ EMULATOR_HOME_POSTCONDITION_TIMEOUT_SECONDS = 15
 EMULATOR_MAINTENANCE_STATES = frozenset(
     {"requested", "host_acknowledged", "host_restarted", "terminal"}
 )
+EMULATOR_MAINTENANCE_INITIATORS = frozenset(
+    {"automatic_detector", "operator"}
+)
 EMULATOR_RECOVERY_ACK_STATES = frozenset(
     {
         "pending",
@@ -95,6 +98,7 @@ class RestartReplayWindow:
 
     request_id: str
     high_water_wave: Optional[int]
+    request_initiator: str = "automatic_detector"
     battle_scope: Optional[str] = None
     intro_sprint_active: bool = False
     resume_dispatched: bool = False
@@ -153,6 +157,7 @@ class RestartReplayWindow:
     def as_dict(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
+            "request_initiator": self.request_initiator,
             "battle_scope": self.battle_scope,
             "high_water_wave": self.high_water_wave,
             "intro_sprint_active": self.intro_sprint_active,
@@ -178,6 +183,9 @@ def normalize_emulator_maintenance(value: object) -> Optional[dict[str, Any]]:
     action = str(value.get("action") or "").strip().lower()
     reason = " ".join(str(value.get("reason") or "").split())[:256]
     source = " ".join(str(value.get("source") or "").split())[:64]
+    initiator = " ".join(
+        str(value.get("initiator") or "automatic_detector").split()
+    )[:32].lower()
     runtime = _runtime_binding(value.get("runtime"))
     requested_at = _bounded_text(value.get("requested_at"), 64)
     updated_at = _bounded_text(value.get("updated_at"), 64)
@@ -188,6 +196,7 @@ def normalize_emulator_maintenance(value: object) -> Optional[dict[str, Any]]:
         or state not in EMULATOR_MAINTENANCE_STATES
         or not reason
         or not source
+        or initiator not in EMULATOR_MAINTENANCE_INITIATORS
         or runtime is None
         or not requested_at
         or not updated_at
@@ -203,6 +212,7 @@ def normalize_emulator_maintenance(value: object) -> Optional[dict[str, Any]]:
         "state": state,
         "reason": reason,
         "source": source,
+        "initiator": initiator,
         "requested_at": requested_at,
         "updated_at": updated_at,
         "runtime": runtime,
@@ -211,6 +221,22 @@ def normalize_emulator_maintenance(value: object) -> Optional[dict[str, Any]]:
     trigger = value.get("trigger")
     if isinstance(trigger, Mapping):
         result["trigger"] = _bounded_mapping(trigger)
+    host_target = _host_identity(value.get("host_target"), include_new=False)
+    if "host_target" in value and host_target is None:
+        return None
+    request_kind = (
+        str(trigger.get("request_kind") or "").strip().lower()
+        if isinstance(trigger, Mapping)
+        else ""
+    )
+    if initiator == "operator" or request_kind in {
+        "operator",
+        "automatic_detector",
+    }:
+        if host_target is None:
+            return None
+    if host_target is not None:
+        result["host_target"] = host_target
     host_ack = _host_identity(value.get("host_ack"), include_new=False)
     if state in {"host_acknowledged", "host_restarted"}:
         if host_ack is None:
@@ -398,6 +424,7 @@ def _optional_nonnegative_int(value: object) -> Optional[int]:
 __all__ = [
     "EMULATOR_MAINTENANCE_ACTION",
     "EMULATOR_HOST_ACK_TIMEOUT_SECONDS",
+    "EMULATOR_MAINTENANCE_INITIATORS",
     "EMULATOR_MAINTENANCE_SCHEMA_VERSION",
     "EMULATOR_MAINTENANCE_STATES",
     "EMULATOR_RECOVERY_ACK_STATES",
