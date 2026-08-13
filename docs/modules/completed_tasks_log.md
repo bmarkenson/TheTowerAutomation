@@ -39,6 +39,31 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 automatic production-main publication
+
+- Commit `6602562` makes publication of the exact successful production
+  `main` tip to `origin/main` part of promotion ownership by default, including
+  standing documentation-only closure. An explicit no-publication instruction
+  remains available when a deliberately local result is intended.
+- The procedure reads the live remote tip before local promotion when
+  publication is expected, repeats that check after the successful smoke, uses
+  only the explicit `refs/heads/main:refs/heads/main` fast-forward, and verifies
+  the live remote at the exact candidate. It does not publish rollback/archive
+  tags, temporary branches, or bundles with `main`.
+- A known nonpublishable candidate stops before local promotion. An unexpected
+  remote non-fast-forward or network/authentication failure leaves any already
+  completed local promotion intact, is reported exactly, and never authorizes
+  a force-push, rewritten history, or alternate destination. That remote
+  condition alone does not retain a clean integrated documentation pair.
+- The similarly named pre-existing
+  `feature/production-promotion-closure-guidance` worktree was clean and had no
+  commits or tracked diff unique from `main`, so it contributed nothing to
+  integrate and remained untouched under its separate ownership.
+- The policy passed `git diff --check`, all changed local-link target and anchor
+  checks, and current-canonical searches for the superseded rule that treated
+  remote publication as separate. No project Python, service, device, or live
+  validation was required for this guidance-only change.
+
 ### 2026-08-13 automatic documentation promotion and cleanup
 
 - Commit `a34b995` gives each documentation-only coordinator standing
