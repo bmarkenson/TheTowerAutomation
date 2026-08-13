@@ -39,6 +39,51 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 replay-safe collectors during BlueStacks recovery
+
+- A second operator restart (`b753da46e13d4a4a8a196d661fd7af93`)
+  completed hands-free. Windows durably acknowledged listener PID 137952,
+  waited through BlueStacks' promotional graceful-close dialog, and verified
+  replacement PID 122132 at 02:14:41 PDT. Linux recovered ADB, launched The
+  Tower at 02:14:55, tapped the distinct Welcome Back Resume at 02:15:34, and
+  retained the same battle scope.
+- The resumed battle fell from captured high-water wave 4092 to wave 4042—a
+  fifty-wave rollback despite Intro Sprint not being confirmed—then reached
+  4092 and completed with disposition `resumed` at 02:18:59. Completion remains
+  bound to the captured high-water rather than a presumed rollback count.
+- Commit `d6aee01` keeps replayed waves out of wave-monotonic, Coins/min, Perk,
+  activation, Strategy, and lifecycle owners while reopening the existing
+  independently guarded collector lane after fresh same-battle `RUNNING`
+  evidence. In-battle ad gems, floating-gem scans, daily gems, and
+  Daily/Weekly/Event/Guild rewards retain their normal exact-screen,
+  battle-scope, route-ownership, and final Pause checks. Welcome Back,
+  source-restoration, fallback, and pre-restart phases remain exclusive.
+- Focused replay/authority/control-surface coverage passed 227 tests. The
+  feature checkpoint passed all 2,519 tests in 394.73 seconds, and the exact
+  `develop` candidate passed all 2,519 again in 389.49 seconds.
+- Production `main` and `develop` advanced to `d6aee01` behind rollback tag
+  `production-before-20260813T095051Z-ed7ba20`. Replacement automation PID
+  3048462 acquired exact target `localhost:5555`; explicit Attach request
+  `6c98cddf7dce436a8a75d502e61bf476` proved same-battle continuity, adopted
+  `farm_t19_ad_assist` without repair, and returned to acknowledged `RUNNING`.
+- The complete native package was published at 02:53 PDT. Current executable
+  SHA-256 values are `a51381325dd9fdf3a029dc04d6fd4871a1a7e60ff51381f075fa344f6917c871`
+  for the 72,477,518-byte Control Surface and
+  `1c1de580b47e3fb04ab7dd31a2c4aa3d762e06e5e825715f1457c4064e245c2e`
+  for the 35,172,113-byte Tunnel Host. Retained slot 1 is the prior `b087989`
+  package: its 72,477,552-byte Control Surface is
+  `4b57f0abc55b75188c3e3bae162559cb04ba7f90d7b808d7c878d336d0b185f1`
+  and its 35,172,104-byte Tunnel Host is
+  `4f6d8e7dfff6607ba0c07a2bdfa9923c932196b8f82a72825b0c04ecde12db2b`.
+  Retained slot 2 is the prior `40f414e` package: its 72,474,917-byte Control
+  Surface is
+  `3002d9d4b6aa53b1e998af78698708444d589bf0afb5dac3c8c5606904f7cab1`
+  and its 35,172,119-byte Tunnel Host is
+  `ebe1073a86d4731e64995b53816553ca45b9cca47430684f79615bf0fd817c19`.
+  A later operator restart still needs to confirm collector activity
+  specifically inside the replay window; no extra restart was manufactured
+  for validation.
+
 ### 2026-08-13 first coordinated BlueStacks restart and launcher repair
 
 - The revision-41 Windows client completed the exact host mutation for operator
