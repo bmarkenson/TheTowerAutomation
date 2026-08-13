@@ -41,13 +41,16 @@ resolved dossier instead of copying its detail.
 
 ### 2026-08-13 development-process deduplication audit
 
-- Commit `ec9b70b` removes duplicate environment and interpreter checks and
-  consolidates promotion, native-package, issue, and completion ownership.
-  Follow-up guidance keeps validation reuse limited to one completion-record
-  commit, removes redundant startup and handoff instructions, and routes
-  process replacement through the supported explicit Stop/Start workflow.
-- The implementation boundary passed the complete checkpoint (2,486 tests),
-  and the focused development-environment and coordination set passed 32 tests.
+- Commits `ec9b70b` and `f12743a` remove duplicate environment and interpreter
+  checks, consolidate canonical owners, limit validation reuse to one
+  completion-record commit, remove redundant startup and handoff instructions,
+  and route process replacement through explicit Stop/Start.
+- Exact commit `f12743a`, using environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`,
+  passed the complete checkpoint: compilation, state definitions, clickmap
+  integrity with zero errors, and all 2,486 tests in 375.62 seconds. The focused
+  development-environment and coordination set passed all 32 tests; the final
+  completion-record delta passed diff, local-link/anchor, and stale-rule checks.
 
 ### 2026-08-13 documentation candidate-validation reuse
 
