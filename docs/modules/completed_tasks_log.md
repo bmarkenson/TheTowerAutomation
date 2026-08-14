@@ -90,6 +90,28 @@ resolved dossier instead of copying its detail.
   documentation-lifecycle, local-link/anchor, and whitespace checks. This
   current-main gate supersedes the earlier candidate runs; historical results
   from `dfd1bdf` were not reused.
+- Production advanced from `aca3357` to source/validation receipt `5d83b79`
+  behind rollback tag `production-before-20260814T191329Z-aca3357`. Updated
+  control-surface PID 1276030 and automation PID 1276909 served a healthy,
+  acknowledged `HOME_SCREEN/PAUSED` observation on exact target
+  `localhost:5555`; the rollout performed no device input or battle action.
+  No naturally occurring active-to-terminal boundary was available, so live
+  active-metric reconciliation remains explicitly pending.
+- The complete native package was published from `5d83b79` at 12:16 PDT.
+  Current Control Surface is 72,481,183 bytes with SHA-256
+  `6564152e1e065f37ca7255a2a0c1c84d06723d1387b2a3c6e34fc91facf9497d`;
+  current Tunnel Host is 35,172,099 bytes with SHA-256
+  `9985212d9285da747063a267bbf0c55842cb59295e62dbad739b3115fbe5059b`.
+  Retained slot 1 is the prior `823ab8a` package: 72,477,605-byte Control
+  Surface `af821cc6cb2c6706012d5d93fad1f269446b98aeff6e723f8159e8328eb5cb61`
+  and 35,172,132-byte Tunnel Host
+  `96e27dc3a73c77a9be6777533b2273720d041a581847a757d521103580bcbae5`.
+  Retained slot 2 is the prior `c737897` package: 72,477,518-byte Control
+  Surface `a51381325dd9fdf3a029dc04d6fd4871a1a7e60ff51381f075fa344f6917c871`
+  and 35,172,113-byte Tunnel Host
+  `1c1de580b47e3fb04ab7dd31a2c4aa3d762e06e5e825715f1457c4064e245c2e`.
+  Linux publication does not establish Windows WPF runtime behavior; that
+  lifecycle validation remains pending on Windows.
 
 ### 2026-08-14 proportional post-contention validation
 
