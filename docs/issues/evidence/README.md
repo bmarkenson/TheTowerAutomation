@@ -27,6 +27,52 @@ privacy-safe Module check used to close `ISSUE-2026-028` and
 from the still-open paused-manual-start confirmation and the newly exposed
 unsupported primary Module index.
 
+## 2026-08-10/11 Death Stranding x2 correlation
+
+[`host-performance-2026-08-10-11-aggregates.csv`](host-performance-2026-08-10-11-aggregates.csv)
+preserves the 1,851 unique aggregate rows used to correlate the operator's x2
+report with retained host telemetry. The overlapping
+`death_stranding_observed_span` and `contended_x2_full` windows are stored once;
+`evidence_windows` records both memberships.
+[`host-performance-2026-08-10-11-windows.csv`](host-performance-2026-08-10-11-windows.csv)
+contains one sample-weighted summary per query window.
+
+The source was the production-generated
+`/home/brianm/dev/python/TheTower/logs/host_performance.sqlite3` database,
+table `host_performance_aggregates`. It was opened on 2026-08-14 through
+Python's `sqlite3` URI with `mode=ro`, followed by `PRAGMA query_only = ON`.
+Battle-record PDT boundaries were converted to UTC before applying the same
+bounded query documented for the older extract below. The tracked
+[`export_host_performance_2026_08_10_11.py`](export_host_performance_2026_08_10_11.py)
+defines the boundaries and expected row counts and fails if any expected row
+has expired. All four expectations passed at extraction:
+
+| Evidence window | Query start UTC | Query end UTC | Rows | Samples | Purpose |
+| --- | --- | --- | ---: | ---: | --- |
+| `pre_x6_3_final_15m` | `2026-08-11T02:21:11+00:00` | `2026-08-11T02:36:11+00:00` | 89 | 890 | Final 15 minutes of the preceding complete x6.3 battle |
+| `death_stranding_observed_span` | `2026-08-11T03:18:31.570+00:00` | `2026-08-11T07:57:56.554+00:00` | 1,673 | 16,692 | Complete retained interval whose every aggregate contained the `ds` process |
+| `contended_x2_full` | `2026-08-11T03:38:04+00:00` | `2026-08-11T07:53:44+00:00` | 1,528 | 15,258 | Six complete same-configuration x2 battles and their short gaps |
+| `post_x6_3_first_15m` | `2026-08-11T09:02:39+00:00` | `2026-08-11T09:17:39+00:00` | 89 | 890 | First 15 minutes of the first later full-length x6.3 battle |
+
+The complete x2 window was wholly inside the observed `ds` interval. Every
+one of its 1,528 aggregates and 15,258 source samples contained that process.
+The boundary interval contains 16,680 `ds`-present samples out of 16,692 total
+because first and last detection aggregates were partial. The comparison
+summaries are:
+
+| Window | Host CPU | Host memory | Host GPU | BlueStacks CPU | BlueStacks core CPU | `ds` GPU | Collection duration |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pre x6.3 final 15m | 39.07% | 85.84% | 40.63% | 9.59% | 153.42% | — | 69.67 ms |
+| Contended x2 full | 82.05% | 94.93% | 76.19% | 8.63% | 138.15% | 68.58% | 193.15 ms |
+| Post x6.3 first 15m | 49.10% | 81.12% | 45.48% | 13.50% | 216.07% | — | 70.85 ms |
+
+Percentages and collection-duration fields use the units defined below.
+Window averages recombine aggregate averages by `sample_count`; `ds` GPU is
+weighted by `ds_sample_count`. The extract establishes process overlap and a
+large host-load contrast, not causation. There is no uncontended x2 control,
+and aggregate process telemetry cannot observe the game's internal update
+scheduler.
+
 ## 2026-07-30/31 host-performance windows
 
 [`host-performance-2026-07-30-31-aggregates.csv`](host-performance-2026-07-30-31-aggregates.csv)
