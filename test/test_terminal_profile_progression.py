@@ -104,6 +104,7 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     app._adb_target_session = _StableSession(target, target)
     app._player_save_runtime_session_id = "runtime-1"
     app._perk_save_monitor = Mock()
+    app._active_run_metric_monitor = Mock()
     app._player_save_audit_collector = Mock()
     monitor_context = object()
     app._current_perk_save_monitor_context = Mock(
@@ -174,6 +175,9 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     monitor_call = app._perk_save_monitor.observe_bundle.call_args
     assert monitor_call.args[0] is call.args[0]
     assert monitor_call.kwargs == {"context": monitor_context}
+    metric_call = app._active_run_metric_monitor.observe_bundle.call_args
+    assert metric_call.args[0] is call.args[0]
+    assert metric_call.kwargs == {"context": monitor_context}
     audit_call = app._player_save_audit_collector.observe_acquisition.call_args
     assert audit_call.args == (call.args[0],)
     assert audit_call.kwargs == {"reason_code": "game_over"}
@@ -186,6 +190,12 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
     app._player_save_runtime_session_id = "runtime-1"
     app._activity_continuity = SimpleNamespace(
         publish_terminal_history_handoff=Mock()
+    )
+    app._perk_save_monitor = Mock()
+    app._active_run_metric_monitor = Mock()
+    monitor_context = object()
+    app._current_perk_save_monitor_context = Mock(
+        return_value=monitor_context
     )
     decoded = SimpleNamespace(
         profile_progression=_normalized_progression(),
@@ -251,6 +261,11 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
     assert report_bundle is conditions_bundle
     assert report_bundle.snapshot is decoded
     assert result["battle_conditions"] == conditions
+    app._perk_save_monitor.observe_bundle.assert_not_called()
+    app._active_run_metric_monitor.observe_bundle.assert_called_once_with(
+        report_bundle,
+        context=monitor_context,
+    )
     app._activity_continuity.publish_terminal_history_handoff.assert_called_once_with(
         transition
     )

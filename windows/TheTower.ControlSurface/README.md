@@ -218,9 +218,12 @@ using strategy plus terminal-screen evidence. It filters by type, Tier, wave
 range, strategy, and capture quality. The report banner includes Coins/hour and
 Cells/hour, followed by a collapsible per-section tree containing complete
 Stats rows, Game Stats-only and derived values, Coins/min progression, and
-approximate Second Wind/Demon Mode/Nuke activation waves. Second Wind rows also
-show the approximate 400-wave re-arm estimate recorded from each observed
-activation. Expanded sections use high-contrast, table-style Stat/Value rows.
+exact-1101 save-backed whole-run/interval economy and per-source rates, plus
+approximate Second Wind/Demon Mode/Nuke activation waves. The save-backed
+section explicitly keeps realized CPH separate from OCR Coins/min and presents
+the final checkpoint-to-terminal reconciliation. Second Wind rows also show
+the approximate 400-wave re-arm estimate recorded from each observed activation.
+Expanded sections use high-contrast, table-style Stat/Value rows.
 Separate tabs retain the captured perk order, resolved run settings, and
 observed runtime/preflight evidence.
 The battle list can export the currently filtered rows as an Excel-compatible

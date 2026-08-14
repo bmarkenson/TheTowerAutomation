@@ -20,6 +20,7 @@ from core.battle_stats import (
     parse_duration_seconds,
     parse_tower_number,
     persist_battle_record,
+    render_active_run_metrics_markdown,
     render_battle_markdown,
     render_perk_selection_timeline_markdown,
     render_survival_ability_activations_markdown,
@@ -528,6 +529,134 @@ def test_survival_activation_markdown_distinguishes_legacy_and_observed_none():
 
     assert not any("Second Wind" in line for line in legacy)
     assert "- Second Wind activations: none observed" in observed_none
+
+
+def test_active_run_metric_markdown_distinguishes_average_and_interval_cph():
+    lines = render_active_run_metrics_markdown(
+        {
+            "status": "complete",
+            "mapping_id": "data-9-game-1101",
+            "audit_id": "V1101-RUNTIME-017",
+            "components": {
+                "economy": {
+                    "samples": [
+                        {
+                            "captured_at": "2026-08-12T17:05:00-07:00",
+                            "saved_wave": 5560,
+                            "derived": {
+                                "average_coins_per_hour": "1632147558481008000",
+                            },
+                            "whole_run": {
+                                "coins_per_hour": "1632147558481008000",
+                                "cells_per_hour": "590000",
+                                "cash_per_hour": "2500000000000",
+                                "waves_per_hour": "1250",
+                                "effective_game_speed": "4.984",
+                            },
+                            "interval": {
+                                "coins_per_hour": "1447000000000000000",
+                                "cells_per_hour": "609000",
+                                "cash_per_hour": "2400000000000",
+                                "waves_per_hour": "1300",
+                                "effective_game_speed": "5.016",
+                            },
+                        }
+                    ],
+                },
+                "coin_sources": {
+                    "metric_definitions": {
+                        "coins_from_black_hole": {"unit": "coins"},
+                    },
+                    "samples": [
+                        {
+                            "metrics": {
+                                "coins_from_black_hole": "412120000000000000",
+                            },
+                            "whole_run": {
+                                "per_hour": {
+                                    "coins_from_black_hole": "92000000000000000",
+                                }
+                            },
+                            "interval": {
+                                "per_hour": {
+                                    "coins_from_black_hole": "89000000000000000",
+                                }
+                            },
+                        }
+                    ],
+                },
+            },
+            "terminal": {
+                "status": "reconciled",
+                "reason": "",
+                "components": {
+                    "economy": {
+                        "whole_run": {
+                            "coins_per_hour": "1631600000000000000",
+                            "cells_per_hour": "529000",
+                            "cash_per_hour": "669000000000",
+                            "waves_per_hour": "1251",
+                            "effective_game_speed": "4.984",
+                        },
+                        "tail_interval": {
+                            "coins_per_hour": "1510000000000000000",
+                            "cells_per_hour": "538000",
+                            "cash_per_hour": "450000",
+                            "waves_per_hour": "1015",
+                            "effective_game_speed": "4.98",
+                        }
+                    },
+                    "coin_sources": {
+                        "status": "reconciled",
+                        "matched": {
+                            "coins_from_black_hole": "414600000000000000",
+                        },
+                        "whole_run": {
+                            "per_hour": {
+                                "coins_from_black_hole": "93000000000000000",
+                            }
+                        },
+                        "tail_interval": {
+                            "per_hour": {
+                                "coins_from_black_hole": "105000000000000000",
+                            }
+                        },
+                    }
+                },
+            },
+        }
+    )
+    markdown = "\n".join(lines)
+
+    assert "## Save-backed run metrics" in markdown
+    assert (
+        "| 2026-08-12T17:05:00-07:00 | 5560 | Whole run | "
+        "1.63Q | 590K | 2.5T | 1.25K | x4.984 |"
+    ) in markdown
+    assert (
+        "| 2026-08-12T17:05:00-07:00 | 5560 | Since prior checkpoint | "
+        "1.45Q | 609K | 2.4T | 1.3K | x5.016 |"
+    ) in markdown
+    assert (
+        "| Coin Sources | Coins From Black Hole | 412.12q | 92q | 89q |"
+        in markdown
+    )
+    assert "Terminal reconciliation: reconciled" in markdown
+    assert (
+        "Terminal whole-run realized rates: 1.63Q CPH; 529K cells/hour; "
+        "669B cash/hour; 1.25K waves/hour; x4.984 speed."
+    ) in markdown
+    assert (
+        "1.51Q CPH; 538K cells/hour; 450K cash/hour; 1.02K waves/hour; "
+        "x4.980 speed"
+    ) in markdown
+    assert "not multiplied by 60 or relabeled" in markdown
+    assert "do not sum source rates as an attribution total" in markdown
+    assert "### Terminal cumulative reconciliation" in markdown
+    assert (
+        "| Coin Sources | Coins From Black Hole | 414.6q | 93q | 105q |"
+        in markdown
+    )
 
 
 def test_render_perk_selection_timeline_preserves_atomic_batches():

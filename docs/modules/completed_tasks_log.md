@@ -39,6 +39,45 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 exact-version active-run save metrics port
+
+- The unmerged `dfd1bdf` behavior was ported from its pre-current-main base
+  onto a fresh feature candidate based on `e3c0491`. The port preserves the
+  newer compatible-mapping gate and campaign-only `V1073-RUNTIME-013` audit
+  semantics instead of replacing current player-save, App, test, or canonical
+  documentation owners.
+- Exact game version 1101 now publishes only the 29 previously validated
+  cumulative fields: 14 coin-source, eight economy/time, and seven progress
+  counters. Exact 1073 keeps active tallies unavailable, unknown forward
+  versions do not inherit the extension, and damage, resources, upgrades,
+  survival, and every other unvalidated candidate remain unpublished.
+- The existing passive scheduler fans its single typed acquisition to a new
+  process/activity/target-generation/round-bound `ActiveRunMetricMonitor`.
+  Economy, progress, and coin-source timelines fail independently, enforce
+  monotonic checkpoints, retain valid components across malformed peers, and
+  grant no input, lifecycle, navigation, or Strategy authority.
+- Whole-run and interval CPH, cells/hour, cash/hour, waves/hour, effective
+  speed, and per-source rates are calculated directly from cumulative save
+  evidence. They remain distinct from OCR `coin_rate_samples`; Coins/min is
+  never multiplied by 60 and relabeled as realized CPH. The same causally bound
+  natural-terminal bundle supplies final whole-run values and the last
+  checkpoint-to-terminal interval. Normal and Tournament JSON, Markdown, and
+  native Battle History retain and present `active_run_metrics`.
+- The earlier normalized active/terminal evidence remains the semantic basis;
+  this port performed no new live capture and created, accelerated, or
+  surrendered no battle. Current live validation therefore remains pending a
+  naturally occurring boundary after promotion and deployment.
+- Focused validation passed 169 tests. The complete isolated repository
+  checkpoint passed compile and state validation, clickmap integrity with zero
+  errors and 44 informational orphans, and all 2,504 Python tests in 384.67
+  seconds. Both documentation-lifecycle tests and all 332 tracked local
+  Markdown targets/anchors passed; `git diff --check` passed. The portable
+  Control Surface and Tunnel Host suites passed 189 and 18 tests respectively,
+  and the Release WPF cross-build completed with zero errors. Its only warnings
+  were the known read-only NuGet vulnerability-cache `NU1900` warnings. The
+  candidate has not been promoted, deployed, restarted, or published to
+  Windows.
+
 ### 2026-08-14 Strategy Authoring operator acceptance
 
 - After sustained use of the native Windows GUI, including Module editing, the

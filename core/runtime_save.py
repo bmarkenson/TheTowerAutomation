@@ -19,7 +19,8 @@ import re
 from typing import Any, Optional
 
 
-RUNTIME_SAVE_SCHEMA_VERSION = 2
+RUNTIME_SAVE_SCHEMA_VERSION = 3
+ACTIVE_RUN_TALLIES_SCHEMA_VERSION = 1
 HISTORY_ENTRY_SCHEMA_VERSION = 1
 HISTORY_TAIL_IDENTITY_SCHEMA_VERSION = 1
 DOTNET_TICKS_MASK = 0x3FFFFFFFFFFFFFFF
@@ -136,6 +137,82 @@ class RuntimePerkCalibration:
     picks: tuple[RuntimePerkCalibrationPick, ...]
     known_ids: tuple[tuple[int, str], ...]
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class RuntimeTallyMetric:
+    """One allowlisted cumulative or derived active-round metric."""
+
+    value_type: str
+    value: Any
+    value_decimal: str
+    unit: str
+    source_fields: tuple[str, ...]
+    derivation: str
+    terminal_source: Optional[str] = None
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = {
+            "value_type": self.value_type,
+            "value": self.value,
+            "value_decimal": self.value_decimal,
+            "unit": self.unit,
+            "source_fields": list(self.source_fields),
+            "derivation": self.derivation,
+        }
+        if self.terminal_source is not None:
+            payload["terminal_source"] = self.terminal_source
+        return payload
+
+
+@dataclass(frozen=True)
+class RuntimeTallyComponent:
+    """One independently normalized active-tally component."""
+
+    name: str
+    status: str
+    reason: str
+    metrics: tuple[tuple[str, RuntimeTallyMetric], ...] = ()
+    derived: tuple[tuple[str, RuntimeTallyMetric], ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "metrics": {
+                key: metric.as_dict() for key, metric in self.metrics
+            },
+            "derived": {
+                key: metric.as_dict() for key, metric in self.derived
+            },
+        }
+
+
+@dataclass(frozen=True)
+class ActiveRunTalliesSnapshot:
+    """Versioned active-round counters with component-level availability."""
+
+    status: str
+    reason: str
+    state: str
+    audit_id: str
+    evidence_level: str
+    components: tuple[RuntimeTallyComponent, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": ACTIVE_RUN_TALLIES_SCHEMA_VERSION,
+            "status": self.status,
+            "reason": self.reason,
+            "state": self.state,
+            "audit_id": self.audit_id,
+            "evidence_level": self.evidence_level,
+            "components": {
+                component.name: component.as_dict()
+                for component in self.components
+            },
+            "ui_action_authority": False,
+        }
 
 
 @dataclass(frozen=True)
@@ -342,6 +419,9 @@ class NormalizedRuntimeSave:
         default=None,
         repr=False,
     )
+    active_tallies_status: str = "unavailable"
+    active_tallies_reason: str = "mapping_unavailable"
+    active_tallies: Optional[ActiveRunTalliesSnapshot] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -363,6 +443,20 @@ class NormalizedRuntimeSave:
                 "fallback": "existing_ui_perks_evidence",
                 "snapshot": self.perks.as_dict() if self.perks is not None else None,
             },
+            "active_tallies": (
+                self.active_tallies.as_dict()
+                if self.active_tallies is not None
+                else {
+                    "schema_version": ACTIVE_RUN_TALLIES_SCHEMA_VERSION,
+                    "status": self.active_tallies_status,
+                    "reason": self.active_tallies_reason,
+                    "state": (
+                        "active_round" if self.round_active else "inactive_round"
+                    ),
+                    "components": {},
+                    "ui_action_authority": False,
+                }
+            ),
             "battle_history_tail": self.battle_history_tail.as_dict(),
             "ui_action_authority": False,
         }
@@ -486,6 +580,21 @@ def normalize_runtime_save(
             entry=None,
         )
 
+    try:
+        active_tallies = _normalize_active_run_tallies(
+            decoded,
+            runtime_spec,
+            round_active=round_active,
+            game_version=game_version,
+        )
+    except _ComponentUnavailable as exc:
+        active_tallies = None
+        active_tallies_status = "unavailable"
+        active_tallies_reason = str(exc)
+    else:
+        active_tallies_status = active_tallies.status
+        active_tallies_reason = active_tallies.reason
+
     return NormalizedRuntimeSave(
         mapping_id=str(mapping.get("mapping_id") or ""),
         audit_matrix_id=audit_matrix_id,
@@ -499,7 +608,226 @@ def normalize_runtime_save(
         perks=perks,
         battle_history_tail=history_tail,
         perk_calibration=perk_calibration,
+        active_tallies_status=active_tallies_status,
+        active_tallies_reason=active_tallies_reason,
+        active_tallies=active_tallies,
     )
+
+
+def _normalize_active_run_tallies(
+    decoded: Mapping[str, Any],
+    runtime_spec: Mapping[str, Any],
+    *,
+    round_active: bool,
+    game_version: int,
+) -> ActiveRunTalliesSnapshot:
+    tally_spec = runtime_spec.get("active_tallies")
+    if not isinstance(tally_spec, Mapping):
+        raise _ComponentUnavailable("active_tally_mapping_unavailable")
+    if tally_spec.get("schema_version") != ACTIVE_RUN_TALLIES_SCHEMA_VERSION:
+        raise _ComponentUnavailable("active_tally_mapping_schema_changed")
+    audit_id = str(tally_spec.get("audit_id") or "")
+    evidence_level = str(tally_spec.get("evidence_level") or "")
+    if (
+        not audit_id
+        or evidence_level != "cross_channel"
+        or tally_spec.get("supported_game_versions") != [game_version]
+    ):
+        raise _ComponentUnavailable("active_tally_mapping_authority_changed")
+    component_specs = tally_spec.get("components")
+    if not isinstance(component_specs, Mapping) or not component_specs:
+        raise _ComponentUnavailable("active_tally_components_unavailable")
+
+    if not round_active:
+        components = tuple(
+            RuntimeTallyComponent(
+                name=str(component_name),
+                status="not_applicable",
+                reason="round_inactive",
+            )
+            for component_name in component_specs
+        )
+        return ActiveRunTalliesSnapshot(
+            status="not_applicable",
+            reason="round_inactive",
+            state="inactive_round",
+            audit_id=audit_id,
+            evidence_level=evidence_level,
+            components=components,
+        )
+
+    components: list[RuntimeTallyComponent] = []
+    for component_name, component_spec in component_specs.items():
+        try:
+            component = _normalize_active_tally_component(
+                decoded,
+                name=str(component_name),
+                spec=component_spec,
+            )
+        except _ComponentUnavailable as exc:
+            component = RuntimeTallyComponent(
+                name=str(component_name),
+                status="unavailable",
+                reason=str(exc),
+            )
+        components.append(component)
+    observed_count = sum(
+        component.status == "observed" for component in components
+    )
+    if observed_count == len(components):
+        status = "observed"
+        reason = ""
+    elif observed_count:
+        status = "partial"
+        reason = "one_or_more_active_tally_components_unavailable"
+    else:
+        status = "unavailable"
+        reason = "all_active_tally_components_unavailable"
+    return ActiveRunTalliesSnapshot(
+        status=status,
+        reason=reason,
+        state="active_round",
+        audit_id=audit_id,
+        evidence_level=evidence_level,
+        components=tuple(components),
+    )
+
+
+def _normalize_active_tally_component(
+    decoded: Mapping[str, Any],
+    *,
+    name: str,
+    spec: Any,
+) -> RuntimeTallyComponent:
+    if not isinstance(spec, Mapping):
+        raise _ComponentUnavailable(f"active_tally_component_changed:{name}")
+    field_specs = spec.get("fields")
+    derived_specs = spec.get("derived")
+    if not isinstance(field_specs, Mapping) or not isinstance(
+        derived_specs, Mapping
+    ):
+        raise _ComponentUnavailable(f"active_tally_component_changed:{name}")
+
+    metrics: list[tuple[str, RuntimeTallyMetric]] = []
+    decimals: dict[str, Decimal] = {}
+    source_names: dict[str, str] = {}
+    for output_name, field_spec in field_specs.items():
+        if not isinstance(field_spec, Mapping):
+            raise _ComponentUnavailable(
+                f"active_tally_field_changed:{name}:{output_name}"
+            )
+        source = str(field_spec.get("source") or "")
+        kind = str(field_spec.get("kind") or "")
+        unit = str(field_spec.get("unit") or "")
+        value = decoded.get(source)
+        decimal_value = _active_tally_decimal(
+            value,
+            kind=kind,
+            label=f"{name}:{output_name}",
+        )
+        normalized_value: Any
+        if kind == "nonnegative_integer":
+            normalized_value = int(value)
+            value_type = "integer"
+        else:
+            normalized_value = value
+            value_type = "number"
+        metric = RuntimeTallyMetric(
+            value_type=value_type,
+            value=normalized_value,
+            value_decimal=_decimal_text(decimal_value),
+            unit=unit,
+            source_fields=(source,),
+            derivation="direct",
+            terminal_source=(
+                str(field_spec["terminal_source"])
+                if field_spec.get("terminal_source") is not None
+                else None
+            ),
+        )
+        key = str(output_name)
+        metrics.append((key, metric))
+        decimals[key] = decimal_value
+        source_names[key] = source
+
+    derived: list[tuple[str, RuntimeTallyMetric]] = []
+    for output_name, derived_spec in derived_specs.items():
+        if not isinstance(derived_spec, Mapping):
+            raise _ComponentUnavailable(
+                f"active_tally_derivation_changed:{name}:{output_name}"
+            )
+        numerator_key = str(derived_spec.get("numerator") or "")
+        denominator_key = str(derived_spec.get("denominator") or "")
+        numerator = decimals.get(numerator_key)
+        denominator = decimals.get(denominator_key)
+        if numerator is None or denominator is None or denominator <= 0:
+            raise _ComponentUnavailable(
+                f"active_tally_derivation_unavailable:{name}:{output_name}"
+            )
+        derive = str(derived_spec.get("derive") or "")
+        factor = (
+            Decimal(3600)
+            if derive == "per_real_hour"
+            else Decimal(60)
+            if derive == "per_real_minute"
+            else Decimal(1)
+            if derive == "ratio"
+            else None
+        )
+        if factor is None:
+            raise _ComponentUnavailable(
+                f"active_tally_derivation_changed:{name}:{output_name}"
+            )
+        with localcontext() as context:
+            context.prec = 50
+            result = numerator * factor / denominator
+        derived.append(
+            (
+                str(output_name),
+                RuntimeTallyMetric(
+                    value_type="decimal",
+                    value=float(result),
+                    value_decimal=_decimal_text(result),
+                    unit=str(derived_spec.get("unit") or ""),
+                    source_fields=(
+                        source_names[numerator_key],
+                        source_names[denominator_key],
+                    ),
+                    derivation=derive,
+                ),
+            )
+        )
+    return RuntimeTallyComponent(
+        name=name,
+        status="observed",
+        reason="",
+        metrics=tuple(metrics),
+        derived=tuple(derived),
+    )
+
+
+def _active_tally_decimal(value: Any, *, kind: str, label: str) -> Decimal:
+    if kind == "nonnegative_integer":
+        if type(value) is not int or value < 0:
+            raise _ComponentUnavailable(
+                f"active_tally_integer_invalid:{label}"
+            )
+    elif kind == "nonnegative_number":
+        if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+            raise _ComponentUnavailable(
+                f"active_tally_number_invalid:{label}"
+            )
+    else:
+        raise _ComponentUnavailable(f"active_tally_kind_changed:{label}")
+    try:
+        decimal_value = Decimal(str(value))
+    except (ValueError, ArithmeticError) as exc:
+        raise _ComponentUnavailable(
+            f"active_tally_number_invalid:{label}"
+        ) from exc
+    if not decimal_value.is_finite() or decimal_value < 0:
+        raise _ComponentUnavailable(f"active_tally_number_invalid:{label}")
+    return decimal_value
 
 
 def _normalize_perk_calibration(
@@ -1259,6 +1587,7 @@ def _is_sequence(value: Any) -> bool:
 
 
 __all__ = [
+    "ActiveRunTalliesSnapshot",
     "ActiveRoundIdentity",
     "BattleHistoryTail",
     "BattleHistoryTailIdentity",
@@ -1269,6 +1598,8 @@ __all__ = [
     "RuntimePerkPick",
     "RuntimePerkSnapshot",
     "RuntimeSaveNormalizationError",
+    "RuntimeTallyComponent",
+    "RuntimeTallyMetric",
     "normalize_runtime_save",
     "runtime_with_perk_id_overrides",
 ]

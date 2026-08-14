@@ -1557,6 +1557,11 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
         )
     )
     lines.extend(
+        render_active_run_metrics_markdown(
+            record.get("runtime", {}).get("active_run_metrics")
+        )
+    )
+    lines.extend(
         render_survival_ability_activations_markdown(
             record.get("runtime", {}).get("survival_ability_activations", {})
         )
@@ -1657,6 +1662,311 @@ def render_coin_rate_samples_markdown(samples: Any) -> list[str]:
             f"{rate} | {confidence_text} |"
         )
     return lines
+
+
+def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
+    """Render save-backed cumulative and interval run checkpoints."""
+
+    if not isinstance(evidence, Mapping):
+        return []
+    components = evidence.get("components")
+    if not isinstance(components, Mapping):
+        return []
+    sample_count = sum(
+        len(component.get("samples") or ())
+        for component in components.values()
+        if isinstance(component, Mapping)
+    )
+    if sample_count == 0:
+        return []
+
+    lines = [
+        "",
+        "## Save-backed run metrics",
+        "",
+        "Whole-run rates divide cumulative save tallies by cumulative real time; "
+        "interval rates use only the change since the preceding save checkpoint. "
+        "The separate OCR Coins/min samples are not multiplied by 60 or relabeled "
+        "as realized Coins/hour.",
+        "",
+        f"Status: {evidence.get('status', 'unknown')}; mapping "
+        f"`{evidence.get('mapping_id', 'unknown')}`; audit "
+        f"`{evidence.get('audit_id', 'unknown')}`.",
+        "",
+        "Coin-source counters can overlap. Compare the same source across runs; "
+        "do not sum source rates as an attribution total.",
+    ]
+    economy = components.get("economy")
+    economy_samples = (
+        economy.get("samples")
+        if isinstance(economy, Mapping)
+        else None
+    )
+    if isinstance(economy_samples, Sequence) and not isinstance(
+        economy_samples, (str, bytes)
+    ):
+        rows = [sample for sample in economy_samples if isinstance(sample, Mapping)]
+        if rows:
+            lines.extend(
+                [
+                    "",
+                    "| Captured | Wave | Window | CPH | Cells/hour | "
+                    "Cash/hour | Waves/hour | Effective speed |",
+                    "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+                ]
+            )
+            for sample in rows:
+                whole_run = sample.get("whole_run") or {}
+                interval = sample.get("interval") or {}
+                if isinstance(whole_run, Mapping) and whole_run:
+                    lines.append(
+                        _active_run_rate_markdown_row(
+                            sample,
+                            "Whole run",
+                            whole_run,
+                        )
+                    )
+                if isinstance(interval, Mapping) and interval:
+                    lines.append(
+                        _active_run_rate_markdown_row(
+                            sample,
+                            "Since prior checkpoint",
+                            interval,
+                        )
+                    )
+
+    latest_rows: list[tuple[str, str, str, str, str]] = []
+    for component_name, component in components.items():
+        if component_name == "economy" or not isinstance(component, Mapping):
+            continue
+        samples = component.get("samples")
+        definitions = component.get("metric_definitions")
+        if (
+            not isinstance(samples, Sequence)
+            or isinstance(samples, (str, bytes))
+            or not samples
+            or not isinstance(samples[-1], Mapping)
+            or not isinstance(definitions, Mapping)
+        ):
+            continue
+        latest_sample = samples[-1]
+        metrics = latest_sample.get("metrics")
+        whole_run = latest_sample.get("whole_run")
+        whole_per_hour = (
+            whole_run.get("per_hour")
+            if isinstance(whole_run, Mapping)
+            else None
+        )
+        interval = latest_sample.get("interval")
+        per_hour = (
+            interval.get("per_hour")
+            if isinstance(interval, Mapping)
+            else None
+        )
+        if not isinstance(metrics, Mapping):
+            continue
+        for metric_name, decimal_value in metrics.items():
+            definition = definitions.get(metric_name)
+            unit = (
+                str(definition.get("unit") or "")
+                if isinstance(definition, Mapping)
+                else ""
+            )
+            latest_rows.append(
+                (
+                    str(component_name).replace("_", " ").title(),
+                    str(metric_name).replace("_", " ").title(),
+                    _format_metric_decimal(decimal_value, unit=unit),
+                    _format_metric_decimal(
+                        whole_per_hour.get(metric_name)
+                        if isinstance(whole_per_hour, Mapping)
+                        else None
+                    ),
+                    _format_metric_decimal(
+                        per_hour.get(metric_name)
+                        if isinstance(per_hour, Mapping)
+                        else None
+                    ),
+                )
+            )
+    if latest_rows:
+        lines.extend(
+            [
+                "",
+                "### Latest cumulative checkpoint",
+                "",
+                "| Component | Metric | Value | Whole-run/hour | Interval/hour |",
+                "| --- | --- | ---: | ---: | ---: |",
+            ]
+        )
+        lines.extend(
+            f"| {component} | {metric} | {value} | {whole_rate} | "
+            f"{interval_rate} |"
+            for component, metric, value, whole_rate, interval_rate in latest_rows
+        )
+
+    terminal = evidence.get("terminal")
+    if isinstance(terminal, Mapping):
+        lines.extend(
+            [
+                "",
+                "Terminal reconciliation: "
+                f"{terminal.get('status', 'unknown')}"
+                + (
+                    f" ({terminal.get('reason')})"
+                    if terminal.get("reason")
+                    else ""
+                ),
+            ]
+        )
+        terminal_components = terminal.get("components")
+        terminal_economy = (
+            terminal_components.get("economy")
+            if isinstance(terminal_components, Mapping)
+            else None
+        )
+        tail = (
+            terminal_economy.get("tail_interval")
+            if isinstance(terminal_economy, Mapping)
+            else None
+        )
+        terminal_whole_run = (
+            terminal_economy.get("whole_run")
+            if isinstance(terminal_economy, Mapping)
+            else None
+        )
+        if isinstance(terminal_whole_run, Mapping):
+            lines.append(
+                "Terminal whole-run realized rates: "
+                + _active_run_rate_summary(terminal_whole_run)
+                + "."
+            )
+        if isinstance(tail, Mapping):
+            lines.append(
+                "Final checkpoint → terminal interval: "
+                + _active_run_rate_summary(tail)
+                + "."
+            )
+        terminal_rows: list[tuple[str, str, str, str, str]] = []
+        if isinstance(terminal_components, Mapping):
+            for component_name, reconciliation in terminal_components.items():
+                if component_name == "economy" or not isinstance(
+                    reconciliation, Mapping
+                ):
+                    continue
+                active_component = components.get(component_name)
+                definitions = (
+                    active_component.get("metric_definitions")
+                    if isinstance(active_component, Mapping)
+                    else None
+                )
+                matched = reconciliation.get("matched")
+                whole_run = reconciliation.get("whole_run")
+                whole_per_hour = (
+                    whole_run.get("per_hour")
+                    if isinstance(whole_run, Mapping)
+                    else None
+                )
+                tail_interval = reconciliation.get("tail_interval")
+                tail_per_hour = (
+                    tail_interval.get("per_hour")
+                    if isinstance(tail_interval, Mapping)
+                    else None
+                )
+                if not isinstance(matched, Mapping):
+                    continue
+                for metric_name, decimal_value in matched.items():
+                    definition = (
+                        definitions.get(metric_name)
+                        if isinstance(definitions, Mapping)
+                        else None
+                    )
+                    unit = (
+                        str(definition.get("unit") or "")
+                        if isinstance(definition, Mapping)
+                        else ""
+                    )
+                    terminal_rows.append(
+                        (
+                            str(component_name).replace("_", " ").title(),
+                            str(metric_name).replace("_", " ").title(),
+                            _format_metric_decimal(decimal_value, unit=unit),
+                            _format_metric_decimal(
+                                whole_per_hour.get(metric_name)
+                                if isinstance(whole_per_hour, Mapping)
+                                else None
+                            ),
+                            _format_metric_decimal(
+                                tail_per_hour.get(metric_name)
+                                if isinstance(tail_per_hour, Mapping)
+                                else None
+                            ),
+                        )
+                    )
+        if terminal_rows:
+            lines.extend(
+                [
+                    "",
+                    "### Terminal cumulative reconciliation",
+                    "",
+                    "| Component | Metric | Terminal value | Whole-run/hour | "
+                    "Final interval/hour |",
+                    "| --- | --- | ---: | ---: | ---: |",
+                ]
+            )
+            lines.extend(
+                f"| {component} | {metric} | {value} | {whole_rate} | "
+                f"{interval_rate} |"
+                for component, metric, value, whole_rate, interval_rate in terminal_rows
+            )
+    return lines
+
+
+def _active_run_rate_markdown_row(
+    sample: Mapping[str, Any],
+    window: str,
+    rates: Mapping[str, Any],
+) -> str:
+    return (
+        f"| {sample.get('captured_at', '')} | {sample.get('saved_wave', '')} | "
+        f"{window} | {_format_metric_decimal(rates.get('coins_per_hour'))} | "
+        f"{_format_metric_decimal(rates.get('cells_per_hour'))} | "
+        f"{_format_metric_decimal(rates.get('cash_per_hour'))} | "
+        f"{_format_metric_decimal(rates.get('waves_per_hour'))} | "
+        f"{_format_metric_multiplier(rates.get('effective_game_speed'))} |"
+    )
+
+
+def _active_run_rate_summary(rates: Mapping[str, Any]) -> str:
+    return (
+        f"{_format_metric_decimal(rates.get('coins_per_hour'))} CPH; "
+        f"{_format_metric_decimal(rates.get('cells_per_hour'))} cells/hour; "
+        f"{_format_metric_decimal(rates.get('cash_per_hour'))} cash/hour; "
+        f"{_format_metric_decimal(rates.get('waves_per_hour'))} waves/hour; "
+        f"{_format_metric_multiplier(rates.get('effective_game_speed'))} speed"
+    )
+
+
+def _format_metric_decimal(value: Any, *, unit: str = "") -> str:
+    if value in (None, ""):
+        return "—"
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    if unit == "seconds":
+        return f"{decimal_value.normalize()}s"
+    return format_tower_number(decimal_value)
+
+
+def _format_metric_multiplier(value: Any) -> str:
+    if value in (None, ""):
+        return "—"
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    return f"x{decimal_value:.3f}"
 
 
 def render_survival_ability_activations_markdown(
@@ -2913,6 +3223,7 @@ __all__ = [
     "parse_tower_number",
     "persist_battle_record",
     "render_battle_markdown",
+    "render_active_run_metrics_markdown",
     "render_coin_rate_samples_markdown",
     "render_perk_selection_timeline_markdown",
     "render_save_backed_perks_markdown",

@@ -319,10 +319,10 @@ forced Home boundary.
 No consumer reacquires data already represented by the bundle. In particular,
 the Tournament Results handler receives either complete or explicitly
 unavailable conditions from the terminal projection instead of performing a
-second save read. The Perk monitor consumes ordinary passive, already-forced
-attachment, and natural terminal bundles. The optional audit collector also
-projects those shared objects and is neither an acquisition service nor an
-authority source.
+second save read. The Perk and active-run metric monitors consume ordinary
+passive, already-forced attachment, and natural terminal bundles. The optional
+audit collector also projects those shared objects and is neither an
+acquisition service nor an authority source.
 
 `ActivityContinuityCoordinator` owns handoff publication and validation;
 `utils.logger` owns only bounded JSON detachment and exact-run atomic mutation.
@@ -334,13 +334,14 @@ the existing forced-save, passive Retry poll, or guarded UI fallback unchanged.
 
 #### Save-first active-round and terminal evidence
 
-The normalized runtime-save model is a bounded normalized-evidence boundary inside the
-exact-version decoder. Snapshot schema 2 exposes only the fields allowlisted by
-`data-9-game-1073-runtime-audit-v2`; it never publishes the decoded root or an
-arbitrary `BattleHistoryEntry`. A root-level version or structural failure
-publishes no runtime model. Perks and the history tail fail independently so an
-unknown Perk ID cannot publish a partial inventory, while an unknown `killedBy`
-ID blocks only the semantic completed entry and preserves structural
+The normalized runtime-save model is a bounded normalized-evidence boundary
+inside the exact-version decoder. Runtime projection schema 3 exposes only the
+fields allowlisted by `data-9-game-1073-runtime-audit-v2` and an applicable
+exact-version extension; it never publishes the decoded root or an arbitrary
+`BattleHistoryEntry`. A root-level version or structural failure publishes no
+runtime model. Perks, active tallies, and the history tail fail independently,
+so an unknown Perk ID cannot publish a partial inventory, while an unknown
+`killedBy` ID blocks only the semantic completed entry and preserves structural
 tail-change evidence. The same authoritative Home snapshot now also supplies
 the initial activity-continuity baseline before the UI route is eligible; it
 is not acquired a second time.
@@ -391,14 +392,46 @@ ambiguous levels, repeat counts, order, or a missing saved-recency marker remain
 explicitly unresolved. Only absent, unbound, malformed, or round-conflicted
 prefix evidence takes the complete terminal Perks traversal.
 
-The same bounded-evidence boundary will expose additional active-round components only
-through exact-version manifests. In-battle Attack, Defense, and Utility levels
-are stored separately from their Workshop baselines. The save does not carry a
-literal gold-box flag; a normalized `maxed` claim therefore requires a
-versioned index and maximum-level table and publishes the current level,
-Workshop baseline, and round delta with that claim. An unknown index, special
-level rule, or cap makes the complete upgrade component unavailable rather
-than guessing from a large value.
+The same bounded-evidence boundary exposes additional active-round components
+only through exact-version manifests. Exact version 1101 publishes 29
+cross-channel-validated cumulative counters as three independently failing
+economy, progress, and coin-source components. Exact 1073 and unknown forward
+versions do not inherit that extension. An inactive save publishes only the
+inactive disposition, never stale or cleared tally values. The exact allowlist
+and retained evidence are in
+[`player_save.md`](player_save.md#2026-08-12-version-1101-active-tally-audit).
+
+`ActiveRunMetricMonitor` consumes the same typed stable bundle already acquired
+for the Perk monitor and optional campaign auditor; it never requests a save
+read or sends input. It binds each accepted component to process, activity
+scope, ADB target generation, active-round identity, mapping, and audit ID.
+`saveRevision` remains diagnostic only. Capture order, source identity, wave,
+and nondecreasing cumulative values own monotonic acceptance, and a regression
+conflicts only the affected component. Per-component bounded timelines mean a
+malformed coin-source component cannot erase valid economy or progress samples.
+
+Every economy checkpoint records whole-run CPH, cells/hour, cash/hour,
+waves/hour, and effective speed from the cumulative tallies and real/game time.
+A later same-round checkpoint also records those rates over the exact interval;
+coin-source checkpoints likewise record distinct whole-run and interval rates
+for every published source. These realized save rates are separate from OCR
+`coin_rate_samples`: the displayed Coins/min value is never multiplied by 60
+and relabeled as realized CPH.
+
+The causally bound natural terminal reuses the existing terminal bundle,
+verifies every mapped completed-history value is at least the last active
+value, and records both the whole-run terminal rates and the final
+checkpoint-to-terminal interval. The resulting `active_run_metrics` object is
+stored in normal and Tournament completed JSON and rendered in Markdown and the
+Windows Battle History detail view. All of it is observation-only and grants
+no lifecycle, navigation, Strategy, or action authority.
+
+In-battle Attack, Defense, and Utility levels are stored separately from their
+Workshop baselines. The save does not carry a literal gold-box flag; a
+normalized `maxed` claim therefore requires a versioned index and maximum-level
+table and publishes the current level, Workshop baseline, and round delta with
+that claim. An unknown index, special level rule, or cap makes the complete
+upgrade component unavailable rather than guessing from a large value.
 
 Survival abilities are checkpoint state, not an event log. Demon Mode, Nuke,
 and Second Wind each expose round counts plus candidate active, cooldown,
@@ -452,12 +485,14 @@ rules:
    completeness. The saved `PerkPick` wave remains the exact event wave even
    when the stable revision is observed later. `saveRevision` is diagnostic,
    not temporal authority.
-4. Upgrade and survival components advance independently. A malformed or
-   unvalidated ability timer cannot erase valid Perks or upgrade evidence, and
-   none of these components grants UI action authority.
-5. The implemented Perk monitor retains the newest complete same-round prefix
-   across post-run clearing. Future upgrade, survival, and allowlisted tally
-   owners must establish their own independent retention rules.
+4. Upgrade, survival, and active-tally components advance independently. A
+   malformed or unvalidated ability timer cannot erase valid Perks, upgrade
+   evidence, or a valid tally component, and none grants UI action authority.
+5. The Perk monitor retains the newest complete same-round prefix across
+   post-run clearing. The active-run metric monitor rejects inactive values,
+   retains bounded active component timelines, and reconciles the last values
+   only against a bound natural terminal. Future upgrade and survival owners
+   must establish their own independent retention rules.
 6. Stable save checkpoints and passive visual events merge monotonically. A
    count increase establishes that one or more activations occurred in the
    half-open interval `(prior saved wave, current saved wave]`. It produces an
@@ -510,12 +545,13 @@ identifies the completed round only through its own guarded evidence; it cannot
 manufacture active-process continuity.
 
 The runtime/history normalization foundation itself does not poll, cache, or
-bind a process. The terminal attachment below is a separate guarded consumer;
-it reuses one stable terminal read for global profile progression and, only
-after same-run tail proof, Battle History record construction. The implemented
-audit sidecar remains observation-only and is not an authority source. Any
-additional normal-runtime runtime/history consumer remains a later slice gated
-by the versioned audit matrix in
+bind a process. Guarded consumers own those responsibilities: the Perk and
+active-run metric monitors share normal passive acquisitions, while the
+terminal attachment below reuses one stable terminal read for global profile
+progression and, only after same-run tail proof, Battle History record
+construction. The implemented audit sidecar remains campaign-only,
+observation-only, and not an authority source. Every additional normal-runtime
+runtime/history claim remains gated by the versioned audit matrix in
 [`player_save.md`](player_save.md#versioned-audit-matrix-data-9-game-1073--revision-4).
 
 ##### Implemented terminal save attachment

@@ -18,6 +18,7 @@ import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
+import re
 import time
 from typing import Any, Optional
 
@@ -64,11 +65,13 @@ MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
 SNAPSHOT_SCHEMA_VERSION = 6
 RAW_FIELD_MANIFEST_SCHEMA_VERSION = 1
 REVISION_COMPATIBILITY_SCHEMA_VERSION = 1
+RUNTIME_SAVE_EXTENSION_SCHEMA_VERSION = 1
 RAW_FIELD_DISPOSITION_NAMES = frozenset(
     {
         "structural",
         "automation_gating",
         "profile_observation",
+        "runtime_observation",
         "private",
         "ignored_with_reason",
         "unknown",
@@ -822,6 +825,7 @@ def _load_mappings() -> tuple[dict[str, Any], ...]:
         if payload.get("schema_version") != 1:
             raise PlayerSaveError(f"unsupported mapping schema in {path}")
         _validate_raw_field_manifest(payload, source=path)
+        _validate_runtime_save_extensions(payload, source=path)
         mapping_id = str(payload.get("mapping_id") or "").strip()
         if not mapping_id:
             raise PlayerSaveError(f"mapping_id is missing in {path}")
@@ -1037,6 +1041,25 @@ def _compatible_mapping(
     )
     if compatibility.get("runtime_save") is not True:
         effective.pop("runtime_save", None)
+    elif retain_exact_profile_progression and isinstance(
+        structural.get("runtime_save_extensions"), Mapping
+    ):
+        runtime_save = effective.get("runtime_save")
+        if not isinstance(runtime_save, Mapping):
+            raise PlayerSaveError(
+                "runtime-save extension has no compatible authority"
+            )
+        merged_runtime = deepcopy(dict(runtime_save))
+        for component_name, component in structural[
+            "runtime_save_extensions"
+        ].items():
+            if component_name in merged_runtime:
+                raise PlayerSaveError(
+                    "runtime-save extension overrides authority component "
+                    f"{component_name!r}"
+                )
+            merged_runtime[component_name] = deepcopy(component)
+        effective["runtime_save"] = merged_runtime
     if retain_exact_profile_progression and isinstance(
         structural.get("profile_progression"), Mapping
     ):
@@ -1081,6 +1104,7 @@ def _mapping_semantic_fingerprint(
             ),
             "structural_revision_compatibility": structural_compatibility,
             "module_loadout": mapping.get("module_loadout"),
+            "runtime_save": mapping.get("runtime_save"),
         }
     )
 
@@ -1679,6 +1703,39 @@ def _validate_revision_compatibility(
         raise PlayerSaveError(
             f"revision compatibility runtime authority is missing in {source}"
         )
+    extensions = mapping.get("runtime_save_extensions")
+    if isinstance(extensions, Mapping):
+        history_spec = (
+            (authority.get("runtime_save") or {}).get("battle_history")
+            if isinstance(authority.get("runtime_save"), Mapping)
+            else None
+        )
+        direct_history_sources: set[str] = set()
+        if isinstance(history_spec, Mapping):
+            for section in history_spec.get("more_stats_sections") or ():
+                for raw_row in (section or {}).get("rows") or ():
+                    row_spec = raw_row[1]
+                    if isinstance(row_spec, str):
+                        direct_history_sources.add(row_spec)
+                    elif isinstance(row_spec, Mapping) and isinstance(
+                        row_spec.get("source"), str
+                    ):
+                        direct_history_sources.add(row_spec["source"])
+        terminal_sources = {
+            str(field_spec["terminal_source"])
+            for component in (
+                (extensions.get("active_tallies") or {}).get("components")
+                or {}
+            ).values()
+            for field_spec in ((component or {}).get("fields") or {}).values()
+            if isinstance(field_spec, Mapping)
+            and field_spec.get("terminal_source") is not None
+        }
+        if not terminal_sources <= direct_history_sources:
+            raise PlayerSaveError(
+                "active-tally terminal sources are absent from runtime "
+                f"authority in {source}"
+            )
 
 
 def _validate_shape(
@@ -1780,6 +1837,7 @@ def _validate_raw_field_manifest(
         "structural",
         "automation_gating",
         "profile_observation",
+        "runtime_observation",
         "private",
         "unknown",
     ):
@@ -1872,6 +1930,146 @@ def _validate_raw_field_manifest(
                 )
 
 
+def _validate_runtime_save_extensions(
+    mapping: Mapping[str, Any],
+    *,
+    source: Path | str,
+) -> None:
+    """Validate exact-version runtime additions against their raw allowlist."""
+
+    extensions = mapping.get("runtime_save_extensions")
+    if extensions is None:
+        return
+    if not isinstance(extensions, Mapping) or set(extensions) != {
+        "active_tallies"
+    }:
+        raise PlayerSaveError(
+            f"runtime-save extensions are malformed in {source}"
+        )
+    active = extensions.get("active_tallies")
+    expected_keys = {
+        "schema_version",
+        "audit_id",
+        "evidence_level",
+        "supported_game_versions",
+        "components",
+    }
+    if not isinstance(active, Mapping) or set(active) != expected_keys:
+        raise PlayerSaveError(
+            f"active-tally runtime extension is malformed in {source}"
+        )
+    identity = mapping.get("identity") or {}
+    game_version = identity.get("game_version")
+    if (
+        active.get("schema_version") != RUNTIME_SAVE_EXTENSION_SCHEMA_VERSION
+        or not str(active.get("audit_id") or "").strip()
+        or active.get("evidence_level") != "cross_channel"
+        or active.get("supported_game_versions") != [game_version]
+    ):
+        raise PlayerSaveError(
+            f"active-tally runtime authority is invalid in {source}"
+        )
+
+    dispositions = (
+        (mapping.get("raw_field_manifest") or {}).get("dispositions") or {}
+    )
+    allowlisted = set(dispositions.get("runtime_observation") or ())
+    components = active.get("components")
+    if not isinstance(components, Mapping) or not components:
+        raise PlayerSaveError(
+            f"active-tally components are unavailable in {source}"
+        )
+    used_sources: set[str] = set()
+    safe_name = re.compile(r"[a-z][a-z0-9_]{0,95}")
+    safe_source_name = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,127}")
+    for component_name, component in components.items():
+        if safe_name.fullmatch(str(component_name)) is None:
+            raise PlayerSaveError(
+                f"active-tally component name is invalid in {source}"
+            )
+        if not isinstance(component, Mapping) or set(component) != {
+            "fields",
+            "derived",
+        }:
+            raise PlayerSaveError(
+                f"active-tally component {component_name!r} is malformed "
+                f"in {source}"
+            )
+        fields = component.get("fields")
+        if not isinstance(fields, Mapping) or not fields:
+            raise PlayerSaveError(
+                f"active-tally component {component_name!r} has no fields "
+                f"in {source}"
+            )
+        for output_name, field_spec in fields.items():
+            if safe_name.fullmatch(str(output_name)) is None:
+                raise PlayerSaveError(
+                    f"active-tally output name is invalid in {source}"
+                )
+            if not isinstance(field_spec, Mapping):
+                raise PlayerSaveError(
+                    f"active-tally field {component_name}.{output_name} is "
+                    f"malformed in {source}"
+                )
+            required = {"source", "kind", "unit", "monotonic"}
+            optional = {"terminal_source"}
+            if not required <= set(field_spec) or not set(field_spec) <= (
+                required | optional
+            ):
+                raise PlayerSaveError(
+                    f"active-tally field {component_name}.{output_name} is "
+                    f"malformed in {source}"
+                )
+            source_field = str(field_spec.get("source") or "")
+            terminal_source = field_spec.get("terminal_source")
+            if (
+                source_field not in allowlisted
+                or source_field in used_sources
+                or field_spec.get("kind")
+                not in {"nonnegative_integer", "nonnegative_number"}
+                or safe_name.fullmatch(str(field_spec.get("unit") or ""))
+                is None
+                or field_spec.get("monotonic") is not True
+                or (
+                    terminal_source is not None
+                    and safe_source_name.fullmatch(str(terminal_source)) is None
+                )
+            ):
+                raise PlayerSaveError(
+                    f"active-tally field {component_name}.{output_name} has "
+                    f"invalid authority in {source}"
+                )
+            used_sources.add(source_field)
+
+        derived = component.get("derived")
+        if not isinstance(derived, Mapping):
+            raise PlayerSaveError(
+                f"active-tally derived values changed shape in {source}"
+            )
+        for output_name, derived_spec in derived.items():
+            if (
+                safe_name.fullmatch(str(output_name)) is None
+                or not isinstance(derived_spec, Mapping)
+                or set(derived_spec)
+                != {"derive", "numerator", "denominator", "unit"}
+                or derived_spec.get("derive")
+                not in {"per_real_hour", "per_real_minute", "ratio"}
+                or derived_spec.get("numerator") not in fields
+                or derived_spec.get("denominator") not in fields
+                or safe_name.fullmatch(str(derived_spec.get("unit") or ""))
+                is None
+            ):
+                raise PlayerSaveError(
+                    f"active-tally derivation {component_name}.{output_name} "
+                    f"is invalid in {source}"
+                )
+    if used_sources != allowlisted:
+        raise PlayerSaveError(
+            "runtime-observation fields must be published exactly once by "
+            f"the active-tally extension in {source}"
+        )
+
+
 def _validate_sorted_field_names(
     fields: Any,
     *,
@@ -1913,6 +2111,7 @@ def _raw_field_manifest_names(mapping: Mapping[str, Any]) -> tuple[str, ...]:
         "structural",
         "automation_gating",
         "profile_observation",
+        "runtime_observation",
         "private",
         "unknown",
     ):

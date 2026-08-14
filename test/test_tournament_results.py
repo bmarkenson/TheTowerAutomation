@@ -153,6 +153,28 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
                     "confidence": 97.0,
                 }
             ],
+            "active_run_metrics": {
+                "status": "complete",
+                "mapping_id": "data-9-game-1101",
+                "audit_id": "V1101-RUNTIME-017",
+                "components": {
+                    "economy": {
+                        "samples": [
+                            {
+                                "captured_at": "2026-07-18T05:10:00-07:00",
+                                "saved_wave": 1600,
+                                "whole_run": {
+                                    "coins_per_hour": "1300000000000",
+                                    "cells_per_hour": "45000",
+                                    "cash_per_hour": "900000000",
+                                    "waves_per_hour": "800",
+                                    "effective_game_speed": "4.8",
+                                },
+                            }
+                        ]
+                    }
+                },
+            },
             "survival_ability_activations": {
                 "schema_version": 4,
                 "source": "visual_transition_detection",
@@ -226,6 +248,11 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
     assert "| Wave | 2558 |" in markdown
     assert "## Coins/min progression" in markdown
     assert "| 2026-07-18T05:00:00-07:00 | 1500 | 2.50T | 97.0% |" in markdown
+    assert "## Save-backed run metrics" in markdown
+    assert (
+        "| 2026-07-18T05:10:00-07:00 | 1600 | Whole run | 1.3T | "
+        "45K | 900M | 800 | x4.800 |"
+    ) in markdown
     assert "## Survival ability activations" in markdown
     assert "| 1 | 2100 | 2500 | 2026-07-18T05:30:00-07:00 |" in markdown
     assert "Demon Mode first activation: approximately wave 2120" in markdown

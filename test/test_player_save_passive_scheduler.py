@@ -186,3 +186,36 @@ def test_app_discards_worker_checkpoint_after_activity_scope_changes():
     assert app._sync_perk_timeline_save_checkpoint() is None
     observer.observe_saved_checkpoint.assert_not_called()
     assert app._pending_perk_timeline_save_checkpoint is None
+
+
+def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
+    app = App.__new__(App)
+    context = _context()
+    acquisition = Mock()
+    app._perk_save_monitor = Mock()
+    app._perk_save_monitor.bound_checkpoint_evidence.return_value = None
+    app._active_run_metric_monitor = Mock()
+    app._active_run_metric_monitor.observe_bundle.return_value = (
+        "accepted_checkpoint"
+    )
+    app._active_run_metric_monitor.latest_summary.return_value = None
+    app._player_save_audit_collector = Mock()
+
+    app._consume_passive_player_save_bundle(
+        acquisition,
+        context,
+        "scheduled_interval",
+    )
+
+    app._perk_save_monitor.observe_bundle.assert_called_once_with(
+        acquisition,
+        context=context,
+    )
+    app._active_run_metric_monitor.observe_bundle.assert_called_once_with(
+        acquisition,
+        context=context,
+    )
+    app._player_save_audit_collector.observe_acquisition.assert_called_once_with(
+        acquisition,
+        reason_code="scheduled_interval",
+    )

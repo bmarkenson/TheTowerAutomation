@@ -72,12 +72,17 @@ as checked checkpoint narrative here.
     whether the unconfirmed direct-Retry rollover or `V1073-RUNTIME-015`/`016`
     warrants a bounded campaign.
   - [ ] Extend the exact-version runtime projection with independently failing
-    active-upgrade, survival-ability, and allowlisted live-tally components.
-    For upgrades, map all three current-level arrays to their Workshop
-    baselines and versioned caps so a gold-box claim is explicit rather than
-    inferred from magnitude. For live tallies, prioritize values that replace
-    an existing OCR/navigation route or reconcile a terminal record; keep the
-    arbitrary decoded root private.
+    active-upgrade, survival-ability, and remaining allowlisted live-tally
+    components. Exact version 1101 already publishes the 29 validated economy,
+    progress, and coin-source counters documented in the
+    [versioned audit matrix](../architecture/player_save.md#versioned-audit-addition-data-9-game-1101);
+    exact 1073 and unknown forward versions do not inherit them. For upgrades,
+    map all three current-level arrays to their Workshop baselines and versioned
+    caps so a gold-box claim is explicit rather than inferred from magnitude.
+    Damage, resource, upgrade, survival, and other unvalidated candidates remain
+    unavailable. Prioritize only values that replace an existing
+    OCR/navigation route or reconcile a terminal record, and keep the arbitrary
+    decoded root private.
   - [ ] Causally calibrate Demon Mode, Nuke, and Second Wind active-round
     fields across natural activation, recharge, repeated activation, Game
     Over, and clearing. Establish use-count polarity, sentinel values, timer

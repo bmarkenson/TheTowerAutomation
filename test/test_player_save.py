@@ -22,6 +22,7 @@ from core.player_save import (
     _raw_field_name_sha256,
     _validate_raw_field_manifest,
     _validate_revision_compatibility,
+    _validate_runtime_save_extensions,
     decode_player_save_bytes,
     pull_player_save_bytes,
     reconcile_requirements,
@@ -131,6 +132,14 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
         "enemiesKilledThisWave",
         "enemiesSpawnedThisWave",
     } <= set(manifest["dispositions"]["unknown"])
+    assert len(manifest["dispositions"]["runtime_observation"]) == 29
+    _validate_runtime_save_extensions(
+        VERSION_1101_MAPPING,
+        source="v1101 test mapping",
+    )
+    assert VERSION_1101_MAPPING["runtime_save_extensions"][
+        "active_tallies"
+    ]["audit_id"] == "V1101-RUNTIME-017"
 
     unchanged_semantic_sections = {
         "auto_pick_order",
@@ -205,6 +214,23 @@ def test_revision_compatibility_rejects_changed_authority_array():
         PlayerSaveError,
         match="changed an authority array length",
     ):
+        _validate_revision_compatibility(
+            mapping,
+            mappings_by_id={
+                VERSION_MAPPING["mapping_id"]: VERSION_MAPPING,
+                mapping["mapping_id"]: mapping,
+            },
+            source="test mapping",
+        )
+
+
+def test_revision_compatibility_rejects_unknown_tally_terminal_source():
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    mapping["runtime_save_extensions"]["active_tallies"]["components"][
+        "economy"
+    ]["fields"]["coins_earned"]["terminal_source"] = "notAHistoryField"
+
+    with pytest.raises(PlayerSaveError, match="terminal sources are absent"):
         _validate_revision_compatibility(
             mapping,
             mappings_by_id={
@@ -445,6 +471,35 @@ def _decoded_save_v1101() -> dict:
             "versionNumber": 1101,
             "enemiesKilledThisWave": 17,
             "enemiesSpawnedThisWave": 19,
+            "blackHoleCoinsThisRound": 410_000_000_000_000_000.0,
+            "cashEarnedThisRound": 2_900_000_000_000.0,
+            "cellsEarnedThisRound": 2_340_000.0,
+            "coinsBonusTotalCoinsThisRound": 2_980_000_000_000_000_000.0,
+            "coinsBonusUpgradeCoinsThisRound": 450_000_000_000_000_000.0,
+            "coinsEarnedCPWThisRound": 140_000_000_000.0,
+            "coinsEarnedFromAdBonusThisRound": 2_410_000_000_000_000_000.0,
+            "coinsEarnedThisRound": 7_240_000_000_000_000_000.0,
+            "coinsEarnedThisRoundWithoutFetch": 7_234_000_000_000_000_000.0,
+            "coinsEarnedWaveSkipThisRound": 2_530_000_000_000_000_000.0,
+            "critCoinCoinsThisRound": 12_900_000_000_000_000.0,
+            "deathWaveCoinsThisRound": 243_000_000_000_000_000.0,
+            "enemyAttackLevelSkips": 2915,
+            "enemyHealthLevelSkips": 3194,
+            "freeAttackUpgradesThisRound": 598,
+            "freeDefenseUpgradesThisRound": 500,
+            "freeUtilityUpgradesThisRound": 11,
+            "gameplayTimeThisRound": 79_689.46875,
+            "goldenTowerCoinsThisRound": 440_000_000_000_000_000.0,
+            "goldenTowerPlusCoinsThisRound": 4_250_000_000_000_000_000.0,
+            "highestCPMThisRound": 43_535_364_765_253_630.0,
+            "orbCoinsThisRound": 106_000_000_000_000_000.0,
+            "realTimeThisRound": 15_988.3486328125,
+            "spotlightCoinsThisRound": 297_000_000_000_000_000.0,
+            "totalCoinsByBotThisRound": 401_000_000_000_000_000.0,
+            "totalCoinsFetchedByGuardianThisRound": 6_000_000_000_000_000.0,
+            "totalCoinsStolenByGuardianThisRound": 0.0,
+            "totalEnemiesDestroyedThisRound": 709_856.0,
+            "wavesSkippedThisRound": 2911,
         }
     )
     return payload
@@ -590,6 +645,20 @@ def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     )
     assert snapshot.runtime_save.active_round_identity is not None
     assert snapshot.runtime_save.active_round_identity.game_version == 1101
+    tallies = snapshot.runtime_save.active_tallies
+    assert tallies is not None
+    assert tallies.status == "observed"
+    assert tallies.audit_id == "V1101-RUNTIME-017"
+    economy = tallies.as_dict()["components"]["economy"]
+    assert economy["metrics"]["coins_earned"]["value_decimal"] == (
+        "7240000000000000000"
+    )
+    assert economy["derived"]["average_coins_per_hour"][
+        "value_decimal"
+    ].startswith("1630")
+    assert economy["derived"]["effective_game_speed"][
+        "value_decimal"
+    ].startswith("4.98")
     assert snapshot.profile_progression["status"] == "complete"
     assert snapshot.profile_progression["identity"] == {
         "data_version": 9,
@@ -626,6 +695,50 @@ def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     assert "must-not-publish-v1101-wave-counter" not in json.dumps(
         redacted.as_dict()
     )
+
+
+def test_v1101_active_tally_failure_isolated_to_one_component(monkeypatch):
+    decoded = _decoded_save_v1101()
+    decoded["cellsEarnedThisRound"] = "changed-shape"
+
+    runtime = _snapshot_v1101(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.active_tallies is not None
+    payload = runtime.active_tallies.as_dict()
+    assert payload["status"] == "partial"
+    assert payload["components"]["economy"]["status"] == "unavailable"
+    assert payload["components"]["coin_sources"]["status"] == "observed"
+    assert payload["components"]["progress"]["status"] == "observed"
+    assert "changed-shape" not in json.dumps(payload)
+
+
+def test_v1101_inactive_round_does_not_publish_cleared_tallies(monkeypatch):
+    decoded = _decoded_save_v1101()
+    decoded["roundActiveBool"] = False
+    decoded["roundSeed"] = 0
+
+    runtime = _snapshot_v1101(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.active_tallies is not None
+    payload = runtime.active_tallies.as_dict()
+    assert payload["status"] == "not_applicable"
+    assert payload["state"] == "inactive_round"
+    assert all(
+        component["metrics"] == {}
+        for component in payload["components"].values()
+    )
+
+
+def test_runtime_extension_requires_exact_runtime_observation_allowlist():
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    mapping["runtime_save_extensions"]["active_tallies"]["components"][
+        "economy"
+    ]["fields"]["coins_earned"]["source"] = "coins"
+
+    with pytest.raises(PlayerSaveError, match="invalid authority"):
+        _validate_runtime_save_extensions(mapping, source="test mapping")
 
 
 def test_v1101_compatible_snapshot_projects_setup_capture_allowlist(monkeypatch):
@@ -709,6 +822,10 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
     assert snapshot.runtime_save.mapping_id == snapshot.mapping_id
     assert snapshot.runtime_save.active_round_identity is not None
     assert snapshot.runtime_save.active_round_identity.game_version == 1102
+    assert snapshot.runtime_save.active_tallies is None
+    assert snapshot.runtime_save.active_tallies_reason == (
+        "active_tally_mapping_unavailable"
+    )
     assert snapshot.profile_progression["status"] == "unavailable"
     assert snapshot.profile_progression["reason"] == (
         "exact_version_progression_mapping_unavailable"
@@ -889,6 +1006,8 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert runtime.current_wave == 450
     assert runtime.active_round_identity is not None
     assert runtime.active_round_identity.as_tuple() == (1073, 19, 12, 123456789)
+    assert runtime.active_tallies is None
+    assert runtime.active_tallies_reason == "active_tally_mapping_unavailable"
     assert runtime.perks_status == "observed"
     assert runtime.perks is not None
     assert runtime.perks.picked_count == 4
@@ -1026,7 +1145,7 @@ def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
     assert runtime is not None
 
     payload = runtime.as_dict()
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["capture"] == {
         "captured_at": CAPTURED_AT.isoformat(),
         "source_name": "playerInfo.dat",

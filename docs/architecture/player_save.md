@@ -18,7 +18,7 @@ validated Legend Tournament condition generator.
 
 Game `28.3.2` introduced exact save identity `dataVersion: 9` and
 `versionNumber: 1101`. The separate `data-9-game-1101` mapping is an
-a structural candidate with a declared revision-compatibility authority of
+structural candidate with a declared revision-compatibility authority of
 `data-9-game-1073`. A stable two-read inspection found the same
 `SaveLoad+PlayerData` root, all 739 prior fields, unchanged required array
 lengths, and exactly two additional integer fields:
@@ -31,6 +31,18 @@ version-derived Tournament-condition generator is deliberately excluded and
 continues through UI because its algorithm remains exact to version 1073. The
 12 exact-1101 profile-progression components passed their structural contracts
 and remain observation-only.
+
+Exact version 1101 also owns a version-local `runtime_save_extensions`
+allowlist for 29 cumulative active-round counters: 14 coin-source fields,
+eight economy/time fields, and seven progress fields. The three groups
+normalize and fail independently. A bound monitor derives whole-run and
+checkpoint-interval CPH, cells/hour, cash/hour, waves/hour, effective speed,
+and whole-run/interval rates for each coin source. These save-realized rates
+remain distinct from the existing OCR `coin_rate_samples`; a displayed
+Coins/min value is never multiplied by 60 and relabeled as realized CPH. The
+extension applies only to an exact 1101 resolution. Exact 1073 and unknown
+forward versions retain the shared runtime foundation without inheriting the
+1101 tallies.
 
 `saveRevision` is the per-write counter and may advance many times within one
 game version; it does not select or invalidate a mapping. Mapping resolution is
@@ -391,11 +403,12 @@ other selector/type value remain outside runtime authority until a separate
 mapping implementation and review promotes them; no semantics are inferred
 for the other values.
 
-Snapshot schema 2 contains the repository-local save-first runtime foundation;
-its runtime projection is schema 2. For the exact version-1073 mapping it
+Snapshot schema 6 contains the repository-local save-first runtime foundation;
+its runtime projection is schema 3. For the exact version-1073 mapping it
 publishes capture metadata, `saveRevision`, `roundActiveBool`, `currentWave`,
 the active identity tuple, and independent normalized Perk and Battle History
-tail components. Perk ID `0` is `max_health` (Max Health). Perks are emitted
+tail components; its active-tally component remains unavailable. Perk ID `0`
+is `max_health` (Max Health). Perks are emitted
 only when every ordered pick, count, and level agrees. The 50-entry level
 array defines numeric storage capacity; it does not prove that all 50 indices
 are live Perk identities. Version 1073 currently has 34 cross-channel-mapped
@@ -408,8 +421,9 @@ and Workshop-level arrays for Attack, Defense, and Utility; round-scoped
 survival-ability counts and recharge/active fields; and broad `ThisRound`
 tallies. It also contains candidate values for current game speed, Damage
 Slider, Orb Distance, buy quantities, Card activity, and subsystem cooldowns.
-These observations broaden the validation plan but do not publish those raw
-fields or promote their semantics. In particular, the save has no literal
+Except for the exact-1101 29-field slice, these observations broaden the
+validation plan but do not publish those raw fields or promote their semantics.
+In particular, the save has no literal
 gold-box flag and one snapshot is not a complete survival-activation history.
 
 The source-ordered `battleHistory` list may contain at most 30 entries. Only
@@ -431,6 +445,9 @@ activity scope, compatible save-sourced pre-terminal baseline, exact append or
 capacity rollover, inactive save, semantic entry, and terminal-kind proof. A
 failure publishes an explicit UI fallback without exposing a partial completed
 entry. The configuration coordinator remains a separate exact-Home consumer.
+The normal active-run metric monitor is another guarded consumer of the shared
+typed passive and natural-terminal bundles; it does not acquire a duplicate
+save or use the campaign auditor's cache.
 Only during an explicitly enabled campaign, the V1073-RUNTIME-013 auditor may
 project the same shared bundle into its session-local audit state. A
 malformed newest entry publishes neither structural nor semantic tail evidence.
@@ -468,6 +485,47 @@ exact timer formulas; those remain `V1073-RUNTIME-015` and
 `V1073-RUNTIME-016` extensions. No retained intermediate raw save, exact
 timestamp, source hash, timer semantics, or special replacement battle is
 required for the completed core audit.
+
+### 2026-08-12 version-1101 active-tally audit
+
+Two passive stable reads of an already-running Tier 19 battle were reduced in
+memory to selected allowlisted values at saved waves 5,480/revision 49,556 and
+5,560/revision 49,557. No raw save or decoded root was retained. The natural
+Game Over path then captured revision 49,558 and causally attached the exact
+version-1101 Battle History entry at wave 5,584. This boundary was not created,
+accelerated, delayed, or surrendered for the audit.
+
+The second active checkpoint advanced to the following terminal values:
+
+| Component | Active wave 5,560 | Terminal wave 5,584 |
+| --- | ---: | ---: |
+| Real / game seconds | 15,988.3486 / 79,689.4688 | 16,073.4854 / 80,114.8672 |
+| Coins / cells / cash | 7.24871Q / 2,347,729 / 2.988823T | 7.28465Q / 2,362,087 / 2.988834T |
+| Highest coins/minute save tally | 43.5354q | 43.5354q |
+| Attack / health level skips | 2,915 / 3,194 | 2,928 / 3,208 |
+| Free Attack / Defense / Utility upgrades | 598 / 500 / 11 | 598 / 500 / 11 |
+| Enemies destroyed / waves skipped | 709,856 / 2,911 | 713,416 / 2,920 |
+
+All 14 allowlisted coin-source counters were nondecreasing into their mapped
+terminal rows. Rounded active-to-terminal pairs were: Golden Tower Plus
+4.2553Q→4.2729Q, Wave Skip 2.5338Q→2.5493Q, total coin bonuses
+2.9872Q→3.0055Q, Coin/Kill 450.48q→453.19q, Golden Tower
+440.55q→443.21q, Black Hole 412.12q→414.60q, Golden Bot
+401.97q→404.41q, Spotlight 297.04q→298.83q, Death Wave
+243.69q→245.14q, Orbs 106.56q→107.25q, Critical Coin
+13.000q→13.058q, Coins/Wave 140.88B→141.73B, Guardian Fetch
+6.173q→6.256q, and Guardian Stolen 0→0. At the active checkpoint,
+`coinsEarnedThisRoundWithoutFetch + totalCoinsFetchedByGuardianThisRound`
+equaled `coinsEarnedThisRound`; the terminal compact Game Stats ad total also
+advanced beyond the active ad-bonus counter.
+
+The cumulative checkpoint CPH was 1.6321Q/hour and the terminal CPH was
+1.6316Q/hour. The two active reads independently yielded a 1.447Q/hour
+interval; the contemporaneous UI displayed 24.0–24.6q Coins/min. That separate
+OCR scale corroborates the interval without becoming the realized-rate
+calculation. This evidence promotes only the 29 named fields in
+`V1101-RUNTIME-017`. Damage, survival, `*ThisWave`, reroll, gem, Guardian
+resource, shard, Module, and other unvalidated counters remain unavailable.
 
 ### 2026-08-13 ordinary-runtime boundary confirmation
 
@@ -512,6 +570,7 @@ raw field name without retaining its value as one of:
 - structural identity or shape;
 - automation-gating configuration;
 - profile observation;
+- versioned runtime observation;
 - `private` (the retained disposition name for excluded, unpublished data);
 - deliberately ignored with a reason; or
 - unknown and therefore unpublished.
@@ -617,10 +676,16 @@ their prior authority until version-specific evidence advances the new rows.
 | `V1073-RUNTIME-014` in-battle upgrade levels and gold-box state | `upgradeLevel[20]`, `upgradeDefenseLevel[20]`, `upgradeUtilityLevel[20]` plus the three Workshop-level arrays | **Structural.** Array shapes and current-versus-Workshop deltas are observed, but the complete index, cap, and special-level semantics are not retained validation evidence. | Create a versioned index/cap manifest and validate non-maxed, round-purchased, Workshop-maxed, locked, and special upgrades against canonical UI evidence. Publish current level, baseline, delta, and `maxed` only as one independently failing component. Never infer Max from magnitude alone. |
 | `V1073-RUNTIME-015` survival-ability checkpoint state | Demon Mode, Nuke, and Second Wind `*UsedThisRound`, use-count, cooldown, `*WavesUntilRefresh`, active/effect-timeout, and timer fields | **Structural.** The fields exist in an active round and clear after the round, but boolean polarity, sentinel values, units, exact-wave relationships, and write timing are not calibrated. | At natural activations, retain stable before/during/rearmed/terminal snapshots and matching visual events. Prove each ability independently, including auto versus manual behavior and multiple activations. Publish counts and state first; publish an exact activation wave only where a causal timer formula is proven, otherwise a save-wave interval. |
 | `V1073-RUNTIME-016` save-checkpoint and visual-tail event merge | Same-round stable revisions, normalized survival checkpoints, passive visual activation events, and terminal Battle History counts | **Structural.** Source precedence and fail-closed merge policy are specified; no cache or merger exists. | Merge monotonically by guarded round identity. Count deltas define event intervals; matching visual transitions may refine them. Retain confirmed visual events after the last stable active save through Game Over and reconcile against terminal counts. Never double count, discard an unexplained count, or synthesize an exact wave. Conflict or missing binding forces the full UI audit. |
-| `V1073-RUNTIME-017` active-round battle tallies | Version-allowlisted `*ThisRound`/`*ThisWave` counters and current round totals | **Structural.** The root contains broad live damage, enemy, currency, skip, free-upgrade, survival, and subsystem tallies; only their completed-history counterparts are semantically normalized today. | Prioritize fields that replace current OCR/navigation or strengthen terminal reconciliation. Validate monotonicity, units, reset/clear timing, exceptional decreases, and correspondence to completed-history rows. Publish separate components and provenance; stale tallies remain observational and cannot authorize an input. |
+| `V1073-RUNTIME-017` active-round battle tallies | Version-allowlisted `*ThisRound`/`*ThisWave` counters and current round totals | **Structural for version 1073.** The root contains broad live damage, enemy, currency, skip, free-upgrade, survival, and subsystem tallies; version 1073 publishes only their completed-history counterparts. | Prioritize fields that replace current OCR/navigation or strengthen terminal reconciliation. Validate monotonicity, units, reset/clear timing, exceptional decreases, and correspondence to completed-history rows. Publish separate components and provenance; stale tallies remain observational and cannot authorize an input. The independently promoted exact-1101 slice below does not back-propagate authority. |
 | `V1073-RUNTIME-018` transient control and cooldown candidates | `gameSpeedMemory`, buy multipliers, candidate Damage Slider/Orb Distance fields, Card activity, and UW/Bot/Guardian cooldown arrays | **Structural.** Plausible fields exist but are deliberately unpublished and may lag the visible game by a complete save interval. | Rank by current observation cost, then calibrate each claim separately across changed/restored values and stable writes. Current-state enforcement and post-action verification remain visual unless the use case explicitly tolerates checkpoint staleness. |
 | `V1073-RUNTIME-019` completed-run profile progression attachment and delta | Same-target-generation terminal stable save; versioned `profile_progression`; newest earlier normal battle snapshot | **Structural and implemented.** Exact-version synthetic coverage validates malformed-field isolation, private-field exclusion, source-index diffs, first-run baselines, prior-record selection, Markdown rendering, and target-generation discard. One bounded read-only live save normalized all 12 current components without retaining the raw save. | The same terminal read now also feeds report attachment, but profile progression stays global and nonblocking while the report independently requires current-process binding and tail causality. A terminal-only process may attach global profile state but cannot inherit Strategy, a save-derived report, or process-local trackers. |
 | `V1073-TOURNEY-001` Tournament condition profile/history coverage | Exact-version generator, event identity fields, and Heat/Overheat UI | **Shortcut-ready** for Legend condition identity only. | Complete UI inventory, effective descriptions, lower leagues, and unknown-condition preservation in the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence). |
+
+### Versioned audit addition: `data-9-game-1101`
+
+| Audit ID and normalized claim | Version-1101 source | Evidence level and retained evidence | Current runtime disposition |
+| --- | --- | --- | --- |
+| `V1101-RUNTIME-017` active economy, progress, and coin-source tallies | Exact allowlist of 29 cumulative root counters; inherited completed-history projection; compact terminal Game Stats for ad coins | **Cross-channel and implemented.** Two same-identity active checkpoints were monotonic, their interval CPH agreed with the contemporaneous UI scale, the Guardian Fetch algebra reconciled, and every mapped terminal counter was nondecreasing at the causally attached natural boundary. Only normalized allowlisted evidence is retained above. | Exact-1101 runtime schema 3 publishes independent components. The shared passive scheduler owns acquisition; `ActiveRunMetricMonitor` owns bound, bounded per-run retention, whole-run and interval rates, component-local conflicts, and terminal reconciliation including the final interval. Completed JSON, Markdown, and native Battle History retain `active_run_metrics`. No tally grants input, lifecycle, navigation, or Strategy authority. Inactive saves publish no cleared values, and exact 1073 or forward versions do not inherit the extension. |
 
 The complete currently eligible configuration set is adopted atomically by
 `V1073-RUNTIME-001`/`002`; this is not a promotion of unrelated profile or
@@ -633,7 +698,7 @@ the structural tail for initial Home, runtime-owned direct Retry, and a guarded
 replacement-process Current-run comparison already at `RUNNING`. The separate
 terminal consumer constructs a report only after current-process binding and
 same-source tail advancement. Foreground freshness extensions, active upgrades,
-survival timing and repeated-event merging, live tallies, and future unknown
+survival timing and repeated-event merging, remaining live tallies, and future unknown
 `killedBy` values remain independently fail-closed work rather than blockers
 for configuration preflight.
 
