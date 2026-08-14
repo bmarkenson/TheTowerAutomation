@@ -37,13 +37,20 @@ turning branch cleanup into a release.
 3. Record the candidate branch or private ref, worktree when one exists, and
    exact tip `D`. Freeze that candidate while its applicable gate and promotion
    are in progress. Changed candidate content or a changed tip requires a new
-   exact `D`, renewed review, and its applicable gate. If production `main`
-   advances while `D` stays exact, discard the recorded `M` and repeat the
-   ancestry and aggregate `M..D` review. Rerun a check only when it used the old
-   production baseline, except that the post-contention path below deliberately
-   repeats the complete applicable gate before trying to acquire ownership
-   again. If the new `main` is not an ancestor of `D`, reconcile in the
+   exact `D` and renewed review; a new object ID alone does not invalidate every
+   completed check. If production `main` advances while `D` stays exact,
+   discard the recorded `M` and repeat the ancestry and aggregate `M..D`
+   review. If the new `main` is not an ancestor of `D`, reconcile in the
    candidate worktree; that reconciliation creates a new `D`.
+
+   A check completed at prior exact candidate `V` may carry to refreshed `D`
+   only when review of `V..D` proves that reconciliation changed none of the
+   source, tests, configuration, generated or runtime-read inputs,
+   dependencies, units, or other inputs that check exercises, and that its
+   result did not depend on the old production baseline. Record `V`, `D`, the
+   reviewed delta, and the retained result. Rerun every affected check and use
+   the strongest applicable candidate gate whenever input equivalence or
+   baseline independence is uncertain.
 
 Unrelated branches and worktrees may remain dirty or continue independently;
 they block promotion only if their work is included in, overlaps, or obscures
@@ -122,8 +129,11 @@ separately guards publishers from another clone.
       `main`, and cleanliness; and the live remote `main` tip.
    b. Reconcile current production `main` into the candidate when necessary,
       record the resulting exact `D`, and review the new aggregate `M..D`.
-   c. Rerun the complete applicable candidate gate on exact `D`, even if the
-      candidate survived unchanged.
+   c. Apply the validation-reuse rule above to the prior exact candidate and
+      refreshed `D`. Rerun checks invalidated by changed inputs or the old
+      production baseline; do not repeat a complete checkpoint solely because
+      contention occurred or reconciliation changed only the candidate object
+      ID. Uncertain equivalence still selects the strongest applicable gate.
    d. Recheck the owner ref and return to step 2. If another transaction wins,
       repeat this wait, refresh, and gate loop; do not abandon the outcome.
 
