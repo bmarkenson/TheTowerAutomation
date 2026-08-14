@@ -10,7 +10,7 @@ and actionable work lives in
 
 ### Global Module save identities were incomplete and conflated with slot authority
 
-**Stable ID:** `ISSUE-2026-043` · **Lifecycle:** `resolved`
+**Stable ID:** `ISSUE-2026-044` · **Lifecycle:** `resolved`
 
 - **Observed:** By 2026-08-14, save-backed Module decoding knew only identities
   already accepted in particular Primary or Assist slots. The remaining twelve
@@ -81,6 +81,62 @@ and actionable work lives in
   exact candidate, then observe an ordinary Home boundary. No additional
   calibration campaign or special battle is required.
 - **Fixed by:** `888f101`.
+
+### Unbound manual terminal handoff permanently disabled Automation at Home
+
+**Stable ID:** `ISSUE-2026-043` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-14, Take Manual Control was acknowledged on Game
+  Over without a bound terminal run. After the operator navigated to Home New
+  Battle and requested Return Control, the native Automation control remained
+  disabled.
+- **Symptom:** The server reported the manual workflow as `awaiting_enable`,
+  but its Enable action was unavailable with code
+  `manual_terminal_evidence_unavailable` and reason
+  `terminal_run_unbound`. The workflow therefore required Enable to continue
+  while the Enable gate categorically rejected the same workflow.
+- **Evidence:** The durable control ledger and `actions.log` place Take Manual
+  Control at 12:58 PDT on Game Over, Return Control at 13:00, and a fresh Home
+  New Battle observation at 13:07. The status model still exposed
+  `available=false` after the exact Home boundary and indefinite Pause were
+  acknowledged. Static tracing confirmed that the runtime advanced an
+  unavailable-terminal workflow after any non-Game-Over observation, while
+  the control surface rejected unavailable terminal evidence in every state.
+- **Safety response:** Diagnosis was read-only. The repair does not authorize
+  terminal UI input, infer a terminal run, seed terminal completion, treat
+  unavailable terminal evidence as terminal authority, or accept Home Resume,
+  active-battle, unknown, stale, or unacknowledged return evidence. Deployment
+  preserved Pause and started no battle.
+- **Cause:** The manual-return state transition and Enable-availability model
+  applied incompatible predicates. One treated every non-Game-Over state as a
+  sufficient boundary for save-first return, while the other treated the
+  missing terminal binding as an unconditional block, producing a reachable
+  state with no legal outgoing action.
+- **Resolution:** Commit `dd57c32` limits an unbound terminal handoff to a fresh
+  exact Home New Battle boundary. Only an `awaiting_enable` workflow with the
+  acknowledged indefinite Pause, exact return binding, matching fresh Home
+  evidence, and recorded `battle_scope_preserved=true` may make Enable
+  available for save-first Home reconciliation. Other states remain
+  `return_requested`; terminal UI remains unauthorized.
+- **Regression:** `test/test_better_control_model.py` proves that the exact
+  unbound Game Over → Home New handoff exposes and accepts Enable, while Home
+  Resume, active battle, and unknown evidence do not advance the workflow.
+- **Validation:** The focused Better Control model passed 172 tests, the
+  combined Better Control/control-surface/automation-control slice passed 346
+  tests, and exact merged code candidate `a82fb6e` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,581 tests in 382.25 seconds in development
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Deployment:** Production advanced from `4655aa8` to `a82fb6e` behind local
+  rollback tag `production-before-20260814T223859Z-4655aa8`. Both managed
+  services stopped cleanly; replacement control-surface PID `1553758` and
+  automation PID `1555340` reported a healthy exact-target smoke with the
+  runtime lock held, `localhost:5555` connected, all acknowledgements current,
+  and fresh Home New Battle evidence under `PAUSED`. Enable was available and
+  the rollout sent no device input or battle action. No Windows package input
+  changed.
+- **Fixed by:** `dd57c32`, `a82fb6e`.
 
 ### Tier-specific Strategy launched on Home's previously selected tier
 

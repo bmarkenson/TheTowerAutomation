@@ -3771,12 +3771,21 @@ class App:
                 if current is None:
                     return
                 terminal_evidence = manual.get("terminal_evidence")
+                terminal_evidence_unavailable = bool(
+                    isinstance(terminal_evidence, Mapping)
+                    and terminal_evidence.get("status") == "unavailable"
+                )
                 if (
                     current.get("game_state") == "game_over"
                     and (
                         not isinstance(terminal_evidence, Mapping)
-                        or terminal_evidence.get("status") == "unavailable"
+                        or terminal_evidence_unavailable
                     )
+                ):
+                    return
+                if (
+                    terminal_evidence_unavailable
+                    and current.get("game_state") != "home_new_battle"
                 ):
                     return
                 configuration = {

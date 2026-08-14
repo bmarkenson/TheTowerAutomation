@@ -70,6 +70,21 @@ resolved dossier instead of copying its detail.
   `production-before-20260814T222225Z-81914dd`; the replacement runtime smoke
   remained Paused at Home/Tier 19 and issued no device input.
 
+### 2026-08-14 unbound manual-terminal Home return
+
+- Resolved
+  [`ISSUE-2026-043`](../issues/resolved-2026.md#unbound-manual-terminal-handoff-permanently-disabled-automation-at-home):
+  an unbound terminal handoff can now expose Enable only from an exact,
+  acknowledged Home New Battle return boundary. Home Resume, active, unknown,
+  stale, or incompletely bound evidence remains fail-closed, and no terminal UI
+  input is authorized.
+- Exact merged code candidate `a82fb6e` passed the 346-test affected slice and
+  the complete 2,581-test checkpoint. It was deployed behind rollback tag
+  `production-before-20260814T223859Z-4655aa8`; the healthy replacement smoke
+  remained Paused at fresh Home New Battle with all receipts current and sent
+  no device input. The immediately following completion-record-only commit
+  changes no validation input and passed its documentation checks.
+
 ### 2026-08-14 semantic player-save API and active-run metrics
 
 - The unmerged `dfd1bdf` behavior was initially ported from its pre-current-main
