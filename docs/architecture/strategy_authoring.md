@@ -7,9 +7,8 @@ implemented. Profile-local Module, Target Priority, and Orb definitions now
 have additive API discovery, managed native editors, and an explicit
 catalog-bound **Edit a copy...** transition from shared preset to local intent.
 Module presets also have one immutable installation-local custom catalog plus
-authoritative native eight-slot previews and save-as-new creation; the expanded
-disposable Windows runtime smoke remains. The original Farm profile format
-remains supported as a compatibility facade.
+authoritative native eight-slot previews and save-as-new creation. The original
+Farm profile format remains supported as a compatibility facade.
 
 The runtime architecture remains authoritative for action ownership and
 execution. This authoring layer resolves reusable, operator-friendly source
@@ -722,5 +721,4 @@ as the next version and refreshes history/latest catalogs without selecting or
 activating it. The retirement archive remains evidence rather than a competing
 editable rollback model.
 The profile-local backend contract, custom Module catalog, captured-draft
-reopen path, and additive API/WPF editing above are implemented. The expanded
-disposable-catalog Windows runtime smoke remains the separate follow-up slice.
+reopen path, and additive API/WPF editing above are implemented.

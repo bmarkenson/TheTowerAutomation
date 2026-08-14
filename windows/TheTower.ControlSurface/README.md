@@ -651,18 +651,17 @@ the `retired` archive is evidence rather than a competing rollback interface.
 
 ### Manual Windows Strategy Authoring smoke
 
-The Linux build cannot detect all WPF runtime binding failures. Run this check
-on Windows against a disposable repository/profile catalog, never the
-operator's real `config/strategies/custom` directory:
+The Linux build cannot detect all WPF runtime binding failures. On 2026-08-14,
+the operator accepted Strategy Authoring after sustained native-GUI use,
+including Module editing, without a persistent issue. The 2026-08-03
+profile-local Module rendering regression was fixed by `7e4c7a2`; exhaustive
+execution of every permutation below is no longer an open release gate. Reopen
+a concrete recurrence as a bug.
 
-Operator report, 2026-08-02: the available phase-three Windows runtime smoke
-checks were completed with no blocking issue reported. This was not exhaustive
-Windows validation and predates the profile-local loadout editors. The bounded
-disposable-catalog checks below, including the new preset/local cases, remain
-the next unchecked worker and canonical coverage when the relevant environment
-is available. A 2026-08-03 attempt exposed a profile-local Module rendering
-regression and stopped before validation or publication; the repaired package
-still requires the complete visible smoke below.
+Retain this procedure for future regression diagnosis or material authoring
+changes. When needed, run it on Windows against a disposable
+repository/profile catalog, never the operator's real
+`config/strategies/custom` directory:
 
 1. Copy the repository to a temporary test root, empty only that copy's custom
    profile/Base and custom Module preset catalogs, and start the control-surface

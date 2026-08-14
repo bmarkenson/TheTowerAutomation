@@ -39,6 +39,26 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 Strategy Authoring operator acceptance
+
+- After sustained use of the native Windows GUI, including Module editing, the
+  operator reported no persistent issue and accepted Strategy Authoring as
+  complete. Future concrete symptoms reopen as bugs rather than keeping every
+  disposable-catalog permutation as an active release gate.
+- The accepted implementation includes the schema-3 profile-local backend,
+  native Module/Target Priority/Orb editors, immutable custom Module presets,
+  and catalog-bound **Edit a copy...** workflow integrated through `4d480bf`.
+  One Strategy owns one Orb relationship (`range_basis`, `extra`, and
+  `workshop`); a possible future catalog of multiple named editable Orb presets
+  is not current work.
+- The Windows guide retains the exhaustive disposable-catalog procedure for
+  future diagnosis or material authoring changes, and the earlier Module
+  selection regression remains covered by `7e4c7a2` and its portable native
+  regression.
+- The documentation-lifecycle suite passed both tests, `git diff --check`
+  passed, and the closure changes no Markdown link target. No service, device,
+  or additional live validation was required.
+
 ### 2026-08-14 default-disabled player-save temporal auditor
 
 - Fresh diagnosis found that `V1073-RUNTIME-013` rejected decoder-approved game

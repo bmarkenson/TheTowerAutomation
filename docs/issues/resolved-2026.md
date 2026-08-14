@@ -1308,6 +1308,11 @@ and actionable work lives in
   warnings while checking vulnerability data. `git diff --check` passed.
   Windows visual revalidation was not performed and remains required with the
   repaired package.
+- **Later operator acceptance:** On 2026-08-14, after sustained use of the
+  native GUI including Module editing, the operator reported no persistent
+  issue and accepted Strategy Authoring as complete. A concrete recurrence
+  will reopen as a bug rather than retaining exhaustive visual permutations as
+  an active release gate.
 - **Fixed by:** `7e4c7a2`.
 
 ### Repeated systemd environment properties produced a false missing-config error
