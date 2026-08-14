@@ -87,9 +87,15 @@ resolved dossier instead of copying its detail.
   validated state definitions and clickmap integrity with zero errors, and
   passed all 2,561 tests in the fingerprinted environment
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
-  Its immediately following completion-record-only commit passed the
-  documentation-lifecycle, local-link/anchor, and whitespace checks.
-  Historical results from `dfd1bdf` were not reused.
+  Refreshed candidate `0ee0941` then merged current main `1fe1228`; review of
+  `77daaa9..0ee0941` found changes only to the development-isolation and
+  production-promotion guidance and this completion record. Those changes did
+  not affect Python compilation, state/clickmap inputs, runtime or test source,
+  configuration, dependencies, units, or native-package inputs, so those
+  baseline-independent results carried forward under the proportional
+  validation rule. The affected documentation-lifecycle, local-link/anchor,
+  and whitespace checks reran on the final receipt. Historical results from
+  `dfd1bdf` were not reused.
 
 ### 2026-08-14 proportional post-contention validation
 
