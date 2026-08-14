@@ -112,10 +112,13 @@ def _candidate_claim_identity(
         "check_id": candidate["check_id"],
         "value_kind": candidate["value_kind"],
         "raw_discriminator": candidate["raw_discriminator"],
-        "scope": candidate["scope"],
     }
+    if candidate["value_kind"] != "module_info_index":
+        identity["scope"] = candidate["scope"]
     if include_semantic:
         identity["semantic_value"] = candidate["semantic_value"]
+        if candidate["value_kind"] == "module_info_index":
+            identity["family"] = candidate["scope"].get("family", "")
     return identity
 
 
@@ -2294,13 +2297,30 @@ class SaveMappingIntegrationManager:
             if observed_identity == identity:
                 matches.append(observed_candidate)
         semantics = {
-            str(item.get("semantic_value"))
+            (
+                str(item.get("semantic_value")),
+                (
+                    str((item.get("scope") or {}).get("family") or "")
+                    if item.get("value_kind") == "module_info_index"
+                    else ""
+                ),
+            )
             for item in matches
             if item.get("semantic_value") is not None
         }
+        expected_semantics = {
+            (
+                str(candidate["semantic_value"]),
+                (
+                    str((candidate.get("scope") or {}).get("family") or "")
+                    if candidate.get("value_kind") == "module_info_index"
+                    else ""
+                ),
+            )
+        }
         if (
             len(semantics) != 1
-            or semantics != {str(candidate["semantic_value"])}
+            or semantics != expected_semantics
             or any(item.get("status") != "ready_for_review" for item in matches)
         ):
             raise PlayerSaveMappingCandidateError(

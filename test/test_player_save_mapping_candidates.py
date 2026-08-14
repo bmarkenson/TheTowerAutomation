@@ -142,35 +142,38 @@ def _module_info_record(
     raw_value: int,
     semantic: str,
     known_raw_semantic_value: str | None = None,
+    slot_key: str = "core_primary",
 ) -> dict:
     slots = {
         "cannon_primary": "Amplifying Strike",
         "armor_primary": "Orbital Augment",
         "generator_primary": "Project Funding",
-        "core_primary": semantic,
+        "core_primary": "Dimension Core",
         "cannon_assist": "Being Annihilator",
         "armor_assist": "Space Displacer",
         "generator_assist": "Singularity Harness",
         "core_assist": "Harmony Conductor",
     }
+    slots[slot_key] = semantic
     peers = {
         locator: value
         for locator, value in slots.items()
-        if locator != "core_primary"
+        if locator != slot_key
     }
+    family, role = slot_key.rsplit("_", 1)
     pending = pending_mapping_candidate(
         value_kind="module_info_index",
         raw_value=raw_value,
         pairing_method="exact_locator",
-        locator="core_primary",
+        locator=slot_key,
         expected_observation_count=8,
         known_semantic_values=(),
         known_raw_semantic_value=known_raw_semantic_value,
         peer_locator_values=peers,
         scope={
-            "slot_key": "core_primary",
-            "family": "core",
-            "role": "primary",
+            "slot_key": slot_key,
+            "family": family,
+            "role": role,
         },
     )
     ui = {
@@ -853,25 +856,31 @@ def test_module_assist_pairing_persists_family_scope_and_proposes_replace():
     ]
 
 
-def test_module_proposal_allows_an_identical_global_pair_in_a_new_scope():
+def test_module_proposal_does_not_expand_scope_for_known_global_pair():
     record = _module_info_record(
         raw_value=39,
         semantic="Harmony Conductor",
         known_raw_semantic_value="Harmony Conductor",
     )
-    proposal = proposed_mapping_patch(
-        record,
-        repository_root=ROOT,
+    with pytest.raises(
+        PlayerSaveMappingCandidateError,
+        match="already_integrated",
+    ):
+        proposed_mapping_patch(record, repository_root=ROOT)
+
+
+def test_unknown_module_proposal_adds_global_identity_only():
+    record = _module_info_record(
+        raw_value=777,
+        semantic="Future Module",
     )
+    proposal = proposed_mapping_patch(record, repository_root=ROOT)
 
     assert proposal["operations"] == [
         {
             "op": "add",
-            "path": "/module_loadout/primary/3/values/-",
-            "value": {
-                "info_index": 39,
-                "name": "Harmony Conductor",
-            },
+            "path": "/module_info_indices/777",
+            "value": {"name": "Future Module", "family": "core"},
         }
     ]
 
@@ -880,19 +889,13 @@ def test_module_proposal_allows_an_identical_global_pair_in_a_new_scope():
             encoding="utf-8"
         )
     )
-    mapping["module_loadout"]["primary"][3]["values"].append(
-        {"info_index": 39, "name": "Harmony Conductor"}
-    )
+    before_slots = deepcopy(mapping["module_loadout"])
+    mapping["module_info_indices"]["777"] = {
+        "name": "Future Module",
+        "family": "core",
+    }
     validate_mapping_candidate_result(record, mapping)
-
-    mapping["module_loadout"]["assist"][0]["values"].append(
-        {"info_index": 39, "name": "Conflicting Module"}
-    )
-    with pytest.raises(
-        PlayerSaveMappingCandidateError,
-        match="proposal_result_conflict",
-    ):
-        validate_mapping_candidate_result(record, mapping)
+    assert mapping["module_loadout"] == before_slots
 
 
 @pytest.mark.parametrize(
@@ -948,6 +951,152 @@ def test_same_save_discriminator_with_different_ui_semantics_is_ambiguous():
     assert all(
         item["candidate"]["semantic_value"] is None for item in reconciled
     )
+
+
+def test_module_discriminator_with_same_name_but_different_family_is_ambiguous():
+    def resolved(slot_key: str) -> dict:
+        family, role = slot_key.rsplit("_", 1)
+        scope = {"slot_key": slot_key, "family": family, "role": role}
+        pending = pending_mapping_candidate(
+            value_kind="module_info_index",
+            raw_value=777,
+            pairing_method="exact_locator",
+            locator=slot_key,
+            expected_observation_count=1,
+            scope=scope,
+        )
+        evidence = {
+            **_ui("Future Module", locator=slot_key),
+            "locator_scopes": {slot_key: scope},
+        }
+        return resolve_mapping_candidates("modules", [pending], evidence)[0]
+
+    core = resolved("core_primary")
+    cannon = resolved("cannon_assist")
+
+    reconciled = reconcile_mapping_candidate_resolutions(
+        [
+            {"check_id": "modules", "candidate": core},
+            {"check_id": "modules", "candidate": cannon},
+        ]
+    )
+
+    assert {item["candidate"]["status"] for item in reconciled} == {
+        "ambiguous"
+    }
+    assert all(
+        item["candidate"]["semantic_value"] is None for item in reconciled
+    )
+
+
+@pytest.mark.parametrize(
+    ("locator", "scope"),
+    (
+        (
+            "core_primary",
+            {"slot_key": "core_primary", "family": "future", "role": "primary"},
+        ),
+        (
+            "core_primary",
+            {"slot_key": "cannon_primary", "family": "core", "role": "primary"},
+        ),
+        (
+            "core_assist",
+            {"slot_key": "core_primary", "family": "core", "role": "primary"},
+        ),
+    ),
+)
+def test_module_identity_candidate_requires_exact_canonical_scope(
+    locator,
+    scope,
+):
+    pending = pending_mapping_candidate(
+        value_kind="module_info_index",
+        raw_value=777,
+        pairing_method="exact_locator",
+        locator=locator,
+        expected_observation_count=8,
+        scope=scope,
+    )
+    with pytest.raises(
+        PlayerSaveMappingCandidateError,
+        match="mapping_candidate_module_scope_invalid",
+    ):
+        build_mapping_candidate_context(
+            mapping_id="data-9-game-1073",
+            data_version=9,
+            game_version=1073,
+            mapping_resolution="exact",
+            authority_mapping_id="data-9-game-1073",
+            structural_mapping_id="data-9-game-1073",
+            snapshot_fingerprint=SNAPSHOT_FINGERPRINT,
+            candidates={"modules": [pending]},
+        )
+
+
+def test_module_identity_case_alias_conflicts_with_known_global_name():
+    slots = {
+        "cannon_primary": "Amplifying Strike",
+        "armor_primary": "Orbital Augment",
+        "generator_primary": "Project Funding",
+        "core_primary": "amplifying strike",
+        "cannon_assist": "Being Annihilator",
+        "armor_assist": "Space Displacer",
+        "generator_assist": "Singularity Harness",
+        "core_assist": "Harmony Conductor",
+    }
+    pending = pending_mapping_candidate(
+        value_kind="module_info_index",
+        raw_value=777,
+        pairing_method="exact_locator",
+        locator="core_primary",
+        expected_observation_count=8,
+        known_semantic_values=("Amplifying Strike",),
+        peer_locator_values={
+            locator: value
+            for locator, value in slots.items()
+            if locator != "core_primary"
+        },
+        scope={
+            "slot_key": "core_primary",
+            "family": "core",
+            "role": "primary",
+        },
+    )
+    resolved = resolve_mapping_candidates(
+        "modules",
+        [pending],
+        {
+            **_ui("amplifying strike", locator="core_primary"),
+            "canonical_values": list(slots.values()),
+            "locator_values": slots,
+            "locator_scopes": {
+                locator: {
+                    "slot_key": locator,
+                    "family": locator.rsplit("_", 1)[0],
+                    "role": locator.rsplit("_", 1)[1],
+                }
+                for locator in slots
+            },
+        },
+    )[0]
+
+    assert resolved["status"] == "conflicts_existing_mapping"
+    assert resolved["evidence_strength"] == "conflicting"
+
+
+def test_module_proposal_rejects_case_alias_of_global_name():
+    with pytest.raises(
+        PlayerSaveMappingCandidateError,
+        match="conflicts_current_file",
+    ):
+        proposed_mapping_patch(
+            _module_info_record(
+                raw_value=777,
+                semantic="amplifying strike",
+            ),
+            repository_root=ROOT,
+        )
 
 
 def test_recomputed_compatible_ready_receipt_is_rejected():

@@ -627,6 +627,21 @@ def test_inventory_candidates_require_authoritative_target_identity():
     assert margin >= catalog.inventory_minimum_margin
 
 
+def test_inventory_candidates_follow_variable_scroll_row_alignment():
+    frame = _load("gc_modules_overview.png")
+    shifted = np.zeros_like(frame)
+    shifted[70:] = frame[:-70]
+    catalog = load_module_icon_catalog()
+
+    funding = _inventory_candidates(shifted, "Project Funding", catalog)
+
+    assert funding
+    score, margin, center = funding[0]
+    assert center == (741, 1160)
+    assert score >= catalog.inventory_minimum_confidence
+    assert margin >= catalog.inventory_minimum_margin
+
+
 def test_inventory_candidate_waits_for_fresh_detail_before_ocr():
     frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
     events = []

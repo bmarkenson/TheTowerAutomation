@@ -75,10 +75,11 @@ retains complete UI behavior; `comparison_audit` compares while UI stays
 authoritative.
 
 The persistent save-mapping review banner is not a startup gate. It reports a
-durable unmapped-value receipt or local exact-version Module confirmation that
-still needs canonical review. Leave the banner visible until the mapping is
-integrated; do not use a startup-gate bypass to dismiss it. Candidate status
-does not change the current check's UI fallback or authorize repair.
+durable unmapped-value receipt or local exact-version Module identity
+confirmation that still needs canonical review. Leave the banner visible until
+the identity is integrated; do not use a startup-gate bypass to dismiss it.
+Candidate or local-identity status does not change the current check's slot
+allowlist, UI fallback, or repair authority.
 
 An active-session Home-only mismatch cannot create Surrender or restart
 authority. It remains degraded until an ordinary safe Home boundary can run the

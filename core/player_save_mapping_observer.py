@@ -185,7 +185,8 @@ class BoundPlayerSaveMappingObserver:
             log(
                 "[PLAYER_SAVE_MAPPING] Bound exact-version local "
                 f"confirmation {'accepted' if accepted['changed'] else 'already active'}; "
-                "it is eligible only on a later fresh decode",
+                "a later fresh decode may use the identity for diagnostics "
+                "but slot-scoped UI fallback is unchanged",
                 "WARN",
                 console=True,
             )

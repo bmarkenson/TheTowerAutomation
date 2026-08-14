@@ -1080,6 +1080,7 @@ def _mapping_semantic_fingerprint(
                 str(value) for value in mapping.get("validated_checks") or ()
             ),
             "structural_revision_compatibility": structural_compatibility,
+            "module_info_indices": mapping.get("module_info_indices"),
             "module_loadout": mapping.get("module_loadout"),
         }
     )
@@ -1120,6 +1121,9 @@ def _effective_mapping_fingerprint(
             "mapping_resolution": str(mapping_resolution or ""),
             "authority_mapping_id": str(authority_mapping_id or ""),
             "structural_mapping_id": str(structural_mapping_id or ""),
+            "module_info_indices": deepcopy(
+                mapping.get("module_info_indices")
+            ),
             "module_loadout": deepcopy(mapping.get("module_loadout")),
             "confirmed_local": {
                 "available": confirmed_local.get("available") is True,
@@ -1236,31 +1240,34 @@ def _apply_confirmed_local_mappings(
         if lifecycle == "reconfirmation_required":
             items.append(item)
             continue
-        slot = _module_slot_spec(mapping, event["scope"])
-        if slot is None:
+        identities = mapping.get("module_info_indices")
+        if not isinstance(identities, dict):
             item["state"] = "reconfirmation_required"
-            item["reason"] = "canonical module slot is unavailable"
+            item["reason"] = "canonical module identity owner is unavailable"
             items.append(item)
             continue
-        options = slot.get("values")
-        if not isinstance(options, list):
-            item["state"] = "reconfirmation_required"
-            item["reason"] = "canonical module values are unavailable"
+        raw_key = str(event["raw_value"])
+        existing = identities.get(raw_key)
+        expected = {
+            "name": event["semantic_value"],
+            "family": event["scope"]["family"],
+        }
+        if existing is not None and existing != expected:
+            item["state"] = "canonical_conflict"
+            item["reason"] = "canonical module identity conflicts with local evidence"
             items.append(item)
             continue
-        options.append(
-            {
-                "info_index": event["raw_value"],
-                "name": event["semantic_value"],
-            }
-        )
+        identities[raw_key] = expected
         applied.append(event["event_id"])
         item["state"] = (
             "authority_pending"
             if lifecycle == "authority_pending"
             else "active_local"
         )
-        item["reason"] = "local exact-version confirmation is active"
+        item["reason"] = (
+            "local exact-version Module identity confirmation is active; "
+            "slot-scoped save authority is unchanged"
+        )
         items.append(item)
     projection.update(
         applied_event_ids=applied,
@@ -1270,9 +1277,10 @@ def _apply_confirmed_local_mappings(
     warnings: tuple[str, ...] = ()
     if applied:
         warnings = (
-            "A locally confirmed exact-version Module mapping was applied "
-            "to this fresh save decode; canonical repository integration is "
-            "still pending.",
+            "A locally confirmed exact-version Module identity was applied "
+            "to this fresh save decode for mapping diagnostics only; "
+            "slot-scoped save authority and canonical repository integration "
+            "remain unchanged.",
         )
     if any(
         item.get("state")
@@ -1280,30 +1288,11 @@ def _apply_confirmed_local_mappings(
         for item in items
     ):
         warnings += (
-            "A confirmed-local Module mapping conflicted with or outlived its "
+            "A confirmed-local Module identity conflicted with or outlived its "
             "canonical dependency; the local event was ignored and canonical "
             "values remain authoritative.",
         )
     return mapping, projection, warnings
-
-
-def _module_slot_spec(
-    mapping: Mapping[str, Any],
-    scope: Mapping[str, Any],
-) -> Optional[dict[str, Any]]:
-    role = str(scope.get("role") or "")
-    slots = (mapping.get("module_loadout") or {}).get(role)
-    if role not in {"primary", "assist"} or not isinstance(slots, list):
-        return None
-    matches = [
-        slot
-        for slot in slots
-        if isinstance(slot, dict)
-        and slot.get("slot_key") == scope.get("slot_key")
-        and slot.get("family") == scope.get("family")
-        and slot.get("role") == role
-    ]
-    return matches[0] if len(matches) == 1 else None
 
 
 def _canonical_module_event_lifecycle(event: Mapping[str, Any]) -> str:
@@ -1390,7 +1379,9 @@ def _canonical_module_event_state(
     mapping: Mapping[str, Any],
     event: Mapping[str, Any],
 ) -> str:
-    module_loadout = mapping.get("module_loadout") or {}
+    module_loadout = mapping.get("module_loadout")
+    if not isinstance(module_loadout, Mapping):
+        return "unavailable"
     specs = [
         *(
             module_loadout.get("primary")
@@ -1403,35 +1394,29 @@ def _canonical_module_event_state(
             else []
         ),
     ]
-    known_values = _known_module_values(specs)
-    if known_values is None:
+    identities = _module_identity_options(mapping, specs)
+    if identities is None:
         return "unavailable"
     raw_value = event["raw_value"]
     semantic = event["semantic_value"]
-    known_semantic = known_values.get(raw_value)
-    if known_semantic is not None and known_semantic != semantic:
-        return "conflict"
-    semantic_raw = next(
+    family = str((event.get("scope") or {}).get("family") or "")
+    known_identity = identities.get(raw_value)
+    if known_identity is not None:
+        return (
+            "match"
+            if known_identity == (semantic, family)
+            else "conflict"
+        )
+    semantic_identity = next(
         (
-            info_index
-            for info_index, name in known_values.items()
-            if name == semantic
+            (info_index, mapped_family)
+            for info_index, (name, mapped_family) in identities.items()
+            if name.casefold() == semantic.casefold()
         ),
         None,
     )
-    if semantic_raw is not None and semantic_raw != raw_value:
+    if semantic_identity is not None:
         return "conflict"
-    slot = _module_slot_spec(mapping, event["scope"])
-    if slot is None:
-        return "unavailable"
-    options = _module_value_options(slot)
-    if options is None:
-        return "unavailable"
-    for info_index, name in options:
-        if info_index == raw_value:
-            return "match" if name == semantic else "conflict"
-        if name == semantic:
-            return "conflict"
     return "absent"
 
 
@@ -1441,12 +1426,24 @@ def _confirmed_local_item(
     lifecycle: str,
 ) -> dict[str, Any]:
     reasons = {
-        "active_local": "canonical integration is pending",
-        "authority_pending": "canonical authority integration is pending",
-        "mirror_pending": "exact-version mirror integration is pending",
-        "integrated": "canonical owner and exact-version mirror agree",
-        "canonical_conflict": "canonical mapping conflicts with local evidence",
-        "reconfirmation_required": "canonical mapping dependency is unavailable",
+        "active_local": (
+            "canonical Module identity integration is pending; slot-scoped "
+            "save authority is unchanged"
+        ),
+        "authority_pending": (
+            "canonical Module identity owner integration is pending; "
+            "slot-scoped save authority is unchanged"
+        ),
+        "mirror_pending": (
+            "exact-version Module identity mirror integration is pending"
+        ),
+        "integrated": "canonical Module identity owner and mirror agree",
+        "canonical_conflict": (
+            "canonical Module identity conflicts with local evidence"
+        ),
+        "reconfirmation_required": (
+            "canonical Module identity dependency is unavailable"
+        ),
     }
     return {
         "event_id": event["event_id"],
@@ -1472,7 +1469,7 @@ def confirmed_local_mapping_status(
     repository_root: Path | str = ROOT,
     candidate_status: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Project durable local authority and review receipts for status UIs."""
+    """Project durable local identity evidence and receipts for status UIs."""
 
     owner = store or ConfirmedLocalMappingStore()
     if candidate_status is None:
@@ -2848,8 +2845,11 @@ def _module_loadout_evidence(
     supported_names: dict[str, list[str]] = {}
     slot_diagnostics: list[dict[str, str]] = []
     mapping_candidates: list[dict[str, Any]] = []
-    known_module_values = _known_module_values((*primary_specs, *assist_specs))
-    if known_module_values is None:
+    module_identities = _module_identity_options(
+        mapping,
+        (*primary_specs, *assist_specs),
+    )
+    if module_identities is None:
         return _unmapped_module_evidence(
             source_fields,
             "module infoIndex mapping changed",
@@ -2877,12 +2877,16 @@ def _module_loadout_evidence(
             supported_names,
             slot_diagnostics,
             mapping_candidates,
-            known_module_values,
+            module_identities,
             raw_spec,
             item,
         )
         if failure:
-            return _unmapped_module_evidence(source_fields, failure)
+            return _unmapped_module_evidence(
+                source_fields,
+                failure,
+                diagnostics={"slots": slot_diagnostics},
+            )
 
     assist_by_type: dict[int, Mapping[str, Any]] = {}
     assist_slot_class = str(spec.get("assist_slot_class") or "").strip()
@@ -2996,12 +3000,16 @@ def _module_loadout_evidence(
             supported_names,
             slot_diagnostics,
             mapping_candidates,
-            known_module_values,
+            module_identities,
             raw_spec,
             item,
         )
         if failure:
-            return _unmapped_module_evidence(source_fields, failure)
+            return _unmapped_module_evidence(
+                source_fields,
+                failure,
+                diagnostics={"slots": slot_diagnostics},
+            )
 
     if mapping_candidates:
         for candidate in mapping_candidates:
@@ -3028,9 +3036,24 @@ def _module_loadout_evidence(
             },
         )
     if len(assignments) != 8:
+        unsupported_roles = {
+            item.get("role")
+            for item in slot_diagnostics
+            if item.get("mapping_status")
+            == "mapped_identity_unsupported_scope"
+        }
+        if unsupported_roles == {"primary"}:
+            partial_reason = "unsupported primary module value for exact slot"
+        elif unsupported_roles == {"assist"}:
+            partial_reason = "unsupported assist module value for exact slot"
+        elif unsupported_roles:
+            partial_reason = "unsupported module values for exact slots"
+        else:
+            partial_reason = "module loadout is partial"
         return _unmapped_module_evidence(
             source_fields,
-            "module loadout is partial",
+            partial_reason,
+            diagnostics={"slots": slot_diagnostics},
         )
     return SaveCheckEvidence(
         check_id="modules",
@@ -3095,7 +3118,7 @@ def _record_mapped_module_assignment(
     supported_names: dict[str, list[str]],
     diagnostics: list[dict[str, str]],
     mapping_candidates: list[dict[str, Any]],
-    known_module_values: Mapping[int, str],
+    module_identities: Mapping[int, tuple[str, str]],
     spec: Mapping[str, Any],
     item: Mapping[str, Any],
 ) -> str:
@@ -3122,16 +3145,35 @@ def _record_mapped_module_assignment(
         None,
     )
     if selected is None:
+        known_identity = module_identities.get(observed_info_index)
+        if known_identity is not None:
+            name, mapped_family = known_identity
+            if mapped_family != family:
+                return f"{role.title()} module family mapping changed"
+            diagnostics.append(
+                {
+                    "slot_key": slot_key,
+                    "family": family,
+                    "role": role,
+                    "name": name,
+                    "mapping_status": "mapped_identity_unsupported_scope",
+                }
+            )
+            # Global identity knowledge is diagnostic only.  Keep walking all
+            # eight slots so a later genuinely unknown identity in this same
+            # snapshot can still produce a review candidate, while the
+            # incomplete slot-scoped assignment remains fail-closed below.
+            return ""
         candidate = _pending_mapping_candidate(
             value_kind="module_info_index",
             raw_value=observed_info_index,
             pairing_method="exact_locator",
             locator=slot_key,
             expected_observation_count=8,
-            known_semantic_values=tuple(known_module_values.values()),
-            known_raw_semantic_value=known_module_values.get(
-                observed_info_index
+            known_semantic_values=tuple(
+                name for name, _family in module_identities.values()
             ),
+            known_raw_semantic_value=None,
             scope={
                 "slot_key": slot_key,
                 "family": family,
@@ -3151,6 +3193,8 @@ def _record_mapped_module_assignment(
         )
         return ""
     _info_index, name = selected
+    if module_identities.get(observed_info_index) != (name, family):
+        return f"{role.title()} module identity mapping changed"
     assignments[slot_key] = name
     supported_names[slot_key] = [option_name for _index, option_name in options]
     diagnostics.append(
@@ -3164,24 +3208,56 @@ def _record_mapped_module_assignment(
     return ""
 
 
-def _known_module_values(
+def _module_identity_options(
+    mapping: Mapping[str, Any],
     specs: Sequence[Any],
-) -> Optional[dict[int, str]]:
-    values: dict[int, str] = {}
+) -> Optional[dict[int, tuple[str, str]]]:
+    raw_identities = mapping.get("module_info_indices")
+    if not isinstance(raw_identities, Mapping) or not raw_identities:
+        return None
+    identities: dict[int, tuple[str, str]] = {}
+    seen_names: set[str] = set()
+    for raw_info_index, raw_identity in raw_identities.items():
+        if not isinstance(raw_identity, Mapping):
+            return None
+        info_index = _exact_int_string_key(raw_info_index)
+        raw_name = raw_identity.get("name")
+        raw_family = raw_identity.get("family")
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        family = raw_family.strip() if isinstance(raw_family, str) else ""
+        normalized_name = _normal_scalar(name)
+        if (
+            set(raw_identity) != {"name", "family"}
+            or info_index is None
+            or info_index < 0
+            or not name
+            or raw_name != name
+            or raw_family != family
+            or family not in {"cannon", "armor", "generator", "core"}
+            or normalized_name in seen_names
+        ):
+            return None
+        identities[info_index] = (name, family)
+        seen_names.add(normalized_name)
+
     for raw_spec in specs:
         if not isinstance(raw_spec, Mapping):
             return None
+        family = str(raw_spec.get("family") or "").strip()
         options = _module_value_options(raw_spec)
         if options is None:
             return None
         for info_index, name in options:
-            prior = values.get(info_index)
-            if prior is not None and prior != name:
+            if identities.get(info_index) != (name, family):
                 return None
-            values[info_index] = name
-    if len(values) != len(set(values.values())):
+    return identities
+
+
+def _exact_int_string_key(value: Any) -> Optional[int]:
+    if not isinstance(value, str) or not value or not value.isdigit():
         return None
-    return values
+    parsed = int(value)
+    return parsed if str(parsed) == value else None
 
 
 def _module_value_options(

@@ -519,12 +519,20 @@ def reconcile_mapping_candidate_resolutions(
         )
         by_discriminator.setdefault(identity, []).append(index)
     for indexes in by_discriminator.values():
-        semantics = {
-            normalized[index]["candidate"]["semantic_value"]
+        claims_for_discriminator = {
+            (
+                candidate["semantic_value"],
+                (
+                    candidate["scope"].get("family", "")
+                    if candidate["value_kind"] == "module_info_index"
+                    else ""
+                ),
+            )
             for index in indexes
-            if normalized[index]["candidate"]["semantic_value"] is not None
+            for candidate in (normalized[index]["candidate"],)
+            if candidate["semantic_value"] is not None
         }
-        if len(semantics) <= 1:
+        if len(claims_for_discriminator) <= 1:
             continue
         for index in indexes:
             candidate = normalized[index]["candidate"]
@@ -965,50 +973,19 @@ def _candidate_state_in_mapping(
             return "match" if mapped == semantic else "conflict"
         return "conflict" if semantic in owner.values() else "absent"
     if kind == "module_info_index":
-        loadout = mapping.get("module_loadout") or {}
-        role = candidate["scope"].get("role")
-        slots = loadout.get(role) if isinstance(loadout, Mapping) else None
-        if not isinstance(slots, list):
+        identities = _module_identity_pairs(mapping)
+        if identities is None:
             return "missing"
-        all_values = [
-            value
-            for candidate_role in ("primary", "assist")
-            for slot in loadout.get(candidate_role, ())
-            if isinstance(slot, Mapping)
-            for value in slot.get("values", ())
-            if isinstance(value, Mapping)
-        ]
+        family = str(candidate["scope"].get("family") or "")
+        known = identities.get(raw_value)
+        if known is not None:
+            return "match" if known == (semantic, family) else "conflict"
         if any(
-            value.get("info_index") == raw_value
-            and value.get("name") != semantic
-            for value in all_values
-        ) or any(
-            value.get("name") == semantic
-            and value.get("info_index") != raw_value
-            for value in all_values
+            name.casefold() == semantic.casefold()
+            for name, _family in identities.values()
         ):
             return "conflict"
-        target = next(
-            (
-                slot
-                for slot in slots
-                if isinstance(slot, Mapping)
-                and slot.get("slot_key") == candidate["scope"].get("slot_key")
-            ),
-            None,
-        )
-        if not isinstance(target, Mapping):
-            return "missing"
-        return (
-            "match"
-            if any(
-                isinstance(value, Mapping)
-                and value.get("info_index") == raw_value
-                and value.get("name") == semantic
-                for value in target.get("values", ())
-            )
-            else "absent"
-        )
+        return "absent"
     if kind == "module_assist_type":
         assist = (mapping.get("module_loadout") or {}).get("assist")
         if not isinstance(assist, list):
@@ -1034,6 +1011,72 @@ def _candidate_state_in_mapping(
             return "conflict"
         return "absent"
     return "unsupported"
+
+
+def _module_identity_pairs(
+    mapping: Mapping[str, Any],
+) -> Optional[dict[int, tuple[str, str]]]:
+    raw = mapping.get("module_info_indices")
+    if not isinstance(raw, Mapping) or not raw:
+        return None
+    pairs: dict[int, tuple[str, str]] = {}
+    seen_names: set[str] = set()
+    for raw_key, raw_identity in raw.items():
+        if (
+            not isinstance(raw_key, str)
+            or not raw_key.isdigit()
+            or str(int(raw_key)) != raw_key
+            or not isinstance(raw_identity, Mapping)
+            or set(raw_identity) != {"name", "family"}
+        ):
+            return None
+        raw_name = raw_identity.get("name")
+        raw_family = raw_identity.get("family")
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        family = raw_family.strip() if isinstance(raw_family, str) else ""
+        normalized = name.casefold()
+        if (
+            not name
+            or raw_name != name
+            or raw_family != family
+            or family not in {"cannon", "armor", "generator", "core"}
+            or normalized in seen_names
+        ):
+            return None
+        pairs[int(raw_key)] = (name, family)
+        seen_names.add(normalized)
+    return pairs
+
+
+def _module_slot_values_match_identities(
+    mapping: Mapping[str, Any],
+    identities: Mapping[int, tuple[str, str]],
+) -> bool:
+    loadout = mapping.get("module_loadout")
+    if not isinstance(loadout, Mapping):
+        return False
+    for role in ("primary", "assist"):
+        slots = loadout.get(role)
+        if not isinstance(slots, list):
+            return False
+        for slot in slots:
+            if not isinstance(slot, Mapping):
+                return False
+            family = str(slot.get("family") or "")
+            values = slot.get("values")
+            if not isinstance(values, list):
+                return False
+            for value in values:
+                if (
+                    not isinstance(value, Mapping)
+                    or isinstance(value.get("info_index"), bool)
+                    or not isinstance(value.get("info_index"), int)
+                    or not isinstance(value.get("name"), str)
+                    or identities.get(value["info_index"])
+                    != (value["name"], family)
+                ):
+                    return False
+    return True
 
 
 # Compatibility with the reference branch's public writer name.
@@ -1148,56 +1191,14 @@ def validate_mapping_candidate_result(
                 "mapping_candidate_proposal_result_mismatch"
             )
         return
-    loadout = mapping.get("module_loadout")
-    if not isinstance(loadout, Mapping):
+    identities = _module_identity_pairs(mapping)
+    if (
+        identities is None
+        or not _module_slot_values_match_identities(mapping, identities)
+    ):
         raise PlayerSaveMappingCandidateError(
             "mapping_candidate_proposal_result_invalid"
         )
-    raw_to_name: dict[int, str] = {}
-    name_to_raw: dict[str, int] = {}
-    for role in ("primary", "assist"):
-        slots = loadout.get(role)
-        if not isinstance(slots, list):
-            raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_proposal_result_invalid"
-            )
-        for slot in slots:
-            if not isinstance(slot, Mapping):
-                raise PlayerSaveMappingCandidateError(
-                    "mapping_candidate_proposal_result_invalid"
-                )
-            values = slot.get("values")
-            if not isinstance(values, list):
-                raise PlayerSaveMappingCandidateError(
-                    "mapping_candidate_proposal_result_invalid"
-                )
-            for value in values:
-                if (
-                    not isinstance(value, Mapping)
-                    or isinstance(value.get("info_index"), bool)
-                    or not isinstance(value.get("info_index"), int)
-                    or not isinstance(value.get("name"), str)
-                    or not value["name"].strip()
-                ):
-                    raise PlayerSaveMappingCandidateError(
-                        "mapping_candidate_proposal_result_invalid"
-                    )
-                raw_value = value["info_index"]
-                semantic_value = value["name"]
-                prior_name = raw_to_name.get(raw_value)
-                prior_raw = name_to_raw.get(semantic_value)
-                if (
-                    prior_name is not None
-                    and prior_name != semantic_value
-                ) or (
-                    prior_raw is not None
-                    and prior_raw != raw_value
-                ):
-                    raise PlayerSaveMappingCandidateError(
-                        "mapping_candidate_proposal_result_conflict"
-                    )
-                raw_to_name[raw_value] = semantic_value
-                name_to_raw[semantic_value] = raw_value
     if _candidate_state_in_mapping(candidate, mapping) != "match":
         raise PlayerSaveMappingCandidateError(
             "mapping_candidate_proposal_result_mismatch"
@@ -1504,11 +1505,10 @@ def _require_pending_pairing_invariants(
             "mapping_candidate_count_policy_invalid"
         )
     if check_id == "modules" and kind == "module_info_index":
-        if set(scope) != {"slot_key", "family", "role"}:
-            raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_module_scope_invalid"
-            )
-        if scope["role"] not in {"primary", "assist"}:
+        if (
+            not _module_scope_is_canonical(scope)
+            or candidate["locator"] != scope["slot_key"]
+        ):
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_scope_invalid"
             )
@@ -1556,9 +1556,13 @@ def _require_persisted_pairing_invariants(
             "mapping_candidate_pairing_kind_mismatch"
         )
     if check_id == "modules":
+        if not _module_scope_is_canonical(scope):
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_module_scope_invalid"
+            )
         if (
-            set(scope) != {"slot_key", "family", "role"}
-            or scope["role"] not in {"primary", "assist"}
+            kind == "module_info_index"
+            and candidate["locator"] != scope["slot_key"]
         ):
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_scope_invalid"
@@ -1637,7 +1641,13 @@ def _resolved_disposition(
             "deterministic",
             "existing global discriminator pair was observed in a new exact module scope",
         )
-    if semantic in set(item["known_semantic_values"]):
+    known_semantics = set(item["known_semantic_values"])
+    semantic_is_known = (
+        any(value.casefold() == semantic.casefold() for value in known_semantics)
+        if item["value_kind"] == "module_info_index"
+        else semantic in known_semantics
+    )
+    if semantic_is_known:
         return (
             "conflicts_existing_mapping",
             "conflicting",
@@ -1987,66 +1997,26 @@ def _proposal_operation(
         }
     if kind == "module_info_index":
         scope = candidate["scope"]
-        role = scope.get("role")
-        module_loadout = mapping.get("module_loadout") or {}
-        slots = module_loadout.get(role)
-        if role not in {"primary", "assist"} or not isinstance(slots, list):
+        identities = _module_identity_pairs(mapping)
+        owner = mapping.get("module_info_indices")
+        if identities is None or not isinstance(owner, Mapping):
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_owner_missing"
             )
-        slot_index = next(
-            (
-                index
-                for index, item in enumerate(slots)
-                if isinstance(item, Mapping)
-                and item.get("slot_key") == scope.get("slot_key")
-            ),
-            None,
-        )
-        if slot_index is None:
-            raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_module_slot_missing"
-            )
-        all_values = [
-            value
-            for slot_role in ("primary", "assist")
-            for slot in module_loadout.get(slot_role, ())
-            if isinstance(slot, Mapping)
-            for value in slot.get("values", ())
-            if isinstance(value, Mapping)
-        ]
-        raw_conflict = any(
-            value.get("info_index") == raw_value
-            and value.get("name") != semantic
-            for value in all_values
-        )
-        semantic_conflict = any(
-            value.get("name") == semantic
-            and value.get("info_index") != raw_value
-            for value in all_values
-        )
-        if raw_conflict or semantic_conflict:
+        family = str(scope.get("family") or "")
+        state = _candidate_state_in_mapping(candidate, mapping)
+        if state == "conflict":
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_proposal_conflicts_current_file"
             )
-        target_values = slots[slot_index].get("values")
-        if not isinstance(target_values, list):
-            raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_module_owner_missing"
-            )
-        if any(
-            isinstance(value, Mapping)
-            and value.get("info_index") == raw_value
-            and value.get("name") == semantic
-            for value in target_values
-        ):
+        if state == "match":
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_proposal_already_integrated"
             )
         return {
             "op": "add",
-            "path": f"/module_loadout/{role}/{slot_index}/values/-",
-            "value": {"info_index": raw_value, "name": semantic},
+            "path": f"/module_info_indices/{raw_value}",
+            "value": {"name": semantic, "family": family},
         }
     if kind == "module_assist_type":
         module_loadout = mapping.get("module_loadout") or {}
@@ -2220,6 +2190,18 @@ def _scope(raw: object) -> dict[str, str]:
         _safe_code(key, "scope_key"): _safe_id(value, f"scope_{key}")
         for key, value in sorted(raw.items())
     }
+
+
+def _module_scope_is_canonical(scope: Mapping[str, str]) -> bool:
+    if set(scope) != {"slot_key", "family", "role"}:
+        return False
+    family = scope["family"]
+    role = scope["role"]
+    return bool(
+        family in {"cannon", "armor", "generator", "core"}
+        and role in {"primary", "assist"}
+        and scope["slot_key"] == f"{family}_{role}"
+    )
 
 
 def _locator_values(raw: object, label: str) -> dict[str, str]:

@@ -7,6 +7,7 @@ import pytest
 
 from core.player_save import (
     _apply_confirmed_local_mappings,
+    _canonical_module_event_state,
     _mapping_by_id,
     _mapping_semantic_fingerprint,
     confirmed_local_mapping_status,
@@ -33,7 +34,7 @@ MODULES = {
     "cannon_assist": "Being Annihilator",
     "armor_assist": "Space Displacer",
     "generator_assist": "Singularity Harness",
-    "core_assist": "Future Module",
+    "core_assist": "Harmony Conductor",
 }
 
 
@@ -208,6 +209,29 @@ def test_identical_global_module_pair_can_be_confirmed_in_another_scope(tmp_path
     }
 
 
+def test_different_module_identities_can_be_learned_through_one_slot(tmp_path):
+    store = ConfirmedLocalMappingStore(tmp_path / "local")
+
+    first = store.accept_candidate(_record())
+    second = store.accept_candidate(
+        _record(
+            semantic="Another Future Module",
+            raw_value=778,
+            snapshot_fingerprint="a" * 64,
+        )
+    )
+
+    assert first["changed"] is True
+    assert second["changed"] is True
+    assert {
+        (event["scope"]["slot_key"], event["raw_value"], event["semantic_value"])
+        for event in active_confirmations(store.load(9, 1073))
+    } == {
+        ("core_assist", 777, "Future Module"),
+        ("core_assist", 778, "Another Future Module"),
+    }
+
+
 def test_global_module_name_cannot_be_confirmed_with_a_different_raw_value(
     tmp_path,
 ):
@@ -230,6 +254,54 @@ def test_global_module_name_cannot_be_confirmed_with_a_different_raw_value(
         )
 
     assert path.read_bytes() == before
+
+
+def test_global_module_identity_cannot_change_family_across_scopes(tmp_path):
+    store = ConfirmedLocalMappingStore(tmp_path / "local")
+    store.accept_candidate(_record())
+    path = store.path_for(9, 1073)
+    before = path.read_bytes()
+
+    with pytest.raises(
+        ConfirmedLocalMappingError,
+        match="active_raw_conflict",
+    ):
+        store.accept_candidate(
+            _record(
+                slot_key="cannon_primary",
+                known_raw_semantic_value="Future Module",
+                snapshot_fingerprint="a" * 64,
+            )
+        )
+
+    assert path.read_bytes() == before
+
+
+def test_canonical_identity_case_alias_is_a_global_conflict():
+    mapping = deepcopy(_mapping_by_id("data-9-game-1073"))
+
+    assert _canonical_module_event_state(
+        mapping,
+        {
+            "raw_value": 777,
+            "semantic_value": "amplifying strike",
+            "scope": {"family": "cannon"},
+        },
+    ) == "conflict"
+
+
+def test_canonical_identity_state_fails_closed_for_malformed_loadout_owner():
+    mapping = deepcopy(_mapping_by_id("data-9-game-1073"))
+    mapping["module_loadout"] = []
+
+    assert _canonical_module_event_state(
+        mapping,
+        {
+            "raw_value": 777,
+            "semantic_value": "Future Module",
+            "scope": {"family": "core"},
+        },
+    ) == "unavailable"
 
 
 def test_malformed_document_is_not_replaced(tmp_path):
@@ -286,7 +358,11 @@ def test_fresh_decode_projection_applies_gap_but_dependency_drift_blocks(tmp_pat
         for slot in projected["module_loadout"]["assist"]
         if slot["slot_key"] == "core_assist"
     )
-    assert {"info_index": 777, "name": "Future Module"} in (
+    assert projected["module_info_indices"]["777"] == {
+        "name": "Future Module",
+        "family": "core",
+    }
+    assert {"info_index": 777, "name": "Future Module"} not in (
         core_assist["values"]
     )
     assert provenance["applied_event_ids"] == [accepted["event_id"]]

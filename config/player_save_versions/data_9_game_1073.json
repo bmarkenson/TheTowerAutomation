@@ -942,6 +942,104 @@
     "8": "Elites",
     "9": "Fleets"
   },
+  "module_info_indices": {
+    "7": {
+      "name": "Havoc Bringer",
+      "family": "cannon"
+    },
+    "8": {
+      "name": "Death Penalty",
+      "family": "cannon"
+    },
+    "9": {
+      "name": "Being Annihilator",
+      "family": "cannon"
+    },
+    "10": {
+      "name": "Astral Deliverance",
+      "family": "cannon"
+    },
+    "17": {
+      "name": "Wormhole Redirector",
+      "family": "armor"
+    },
+    "18": {
+      "name": "Negative Mass Projector",
+      "family": "armor"
+    },
+    "19": {
+      "name": "Space Displacer",
+      "family": "armor"
+    },
+    "20": {
+      "name": "Anti-Cube Portal",
+      "family": "armor"
+    },
+    "27": {
+      "name": "Black Hole Digestor",
+      "family": "generator"
+    },
+    "28": {
+      "name": "Pulsar Harvester",
+      "family": "generator"
+    },
+    "29": {
+      "name": "Galaxy Compressor",
+      "family": "generator"
+    },
+    "30": {
+      "name": "Singularity Harness",
+      "family": "generator"
+    },
+    "37": {
+      "name": "Multiverse Nexus",
+      "family": "core"
+    },
+    "38": {
+      "name": "Dimension Core",
+      "family": "core"
+    },
+    "39": {
+      "name": "Harmony Conductor",
+      "family": "core"
+    },
+    "40": {
+      "name": "Om Chip",
+      "family": "core"
+    },
+    "41": {
+      "name": "Shrink Ray",
+      "family": "cannon"
+    },
+    "42": {
+      "name": "Sharp Fortitude",
+      "family": "armor"
+    },
+    "43": {
+      "name": "Project Funding",
+      "family": "generator"
+    },
+    "44": {
+      "name": "Magnetic Hook",
+      "family": "core"
+    },
+    "45": {
+      "name": "Amplifying Strike",
+      "family": "cannon"
+    },
+    "46": {
+      "name": "Orbital Augment",
+      "family": "armor"
+    },
+    "47": {
+      "name": "Restorative Bonus",
+      "family": "generator"
+    },
+    "48": {
+      "name": "Primordial Collapse",
+      "family": "core"
+    }
+  },
   "module_loadout": {
     "assist_slot_class": "AssistModuleSlot",
     "primary": [

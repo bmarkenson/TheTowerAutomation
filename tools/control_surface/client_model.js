@@ -204,12 +204,12 @@
       : winningState === "production_validation_pending"
         ? "Deployed save mapping awaiting fresh validation"
       : winningState === "authority_pending"
-        ? "Canonical save-mapping authority is still pending"
+        ? "Canonical Module identity owner is still pending"
         : winningState === "active_local"
-          ? "A locally confirmed save mapping needs integration"
+          ? "A locally confirmed Module identity needs integration"
           : ["review_required", "more_evidence_required"].includes(winningState)
             ? "A save mapping observation needs review"
-          : "Exact-version save-mapping mirror is pending";
+          : "Exact-version Module identity mirror is pending";
     const scope = first?.scope?.slot_key ? ` ${first.scope.slot_key}` : "";
     const mapping = first?.mapping_id ? ` for ${first.mapping_id}` : "";
     const value = first?.raw_value == null

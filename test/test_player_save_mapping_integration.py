@@ -47,29 +47,32 @@ def _record(
     module_name: str = FIXTURE_MODULE_NAME,
     source_fingerprint: str = "1" * 64,
     recorded_at: str = "2026-08-10T12:00:01+00:00",
+    slot_key: str = "cannon_assist",
 ) -> dict:
     slots = {
         "cannon_primary": "Amplifying Strike",
         "armor_primary": "Orbital Augment",
         "generator_primary": "Project Funding",
         "core_primary": "Dimension Core",
-        "cannon_assist": module_name,
+        "cannon_assist": "Being Annihilator",
         "armor_assist": "Space Displacer",
         "generator_assist": "Singularity Harness",
         "core_assist": "Harmony Conductor",
     }
+    slots[slot_key] = module_name
+    family, role = slot_key.rsplit("_", 1)
     pending = pending_mapping_candidate(
         value_kind="module_info_index",
         raw_value=FIXTURE_INFO_INDEX,
         pairing_method="exact_locator",
-        locator="cannon_assist",
+        locator=slot_key,
         expected_observation_count=8,
         peer_locator_values={
             locator: value
             for locator, value in slots.items()
-            if locator != "cannon_assist"
+            if locator != slot_key
         },
-        scope={"slot_key": "cannon_assist", "family": "cannon", "role": "assist"},
+        scope={"slot_key": slot_key, "family": family, "role": role},
     )
     resolved = resolve_mapping_candidates(
         "modules",
@@ -278,6 +281,10 @@ def test_stage_creates_one_private_candidate_and_leaves_main_index_and_tree_unto
         path.name: path.read_bytes()
         for path in (production / "config/player_save_versions").glob("*.json")
     }
+    before_mappings = {
+        name: json.loads(contents)
+        for name, contents in tree.items()
+    }
 
     result = _stage(manager, record, review)
 
@@ -313,6 +320,19 @@ def test_stage_creates_one_private_candidate_and_leaves_main_index_and_tree_unto
         path.name: path.read_bytes()
         for path in (production / "config/player_save_versions").glob("*.json")
     } == tree
+    for name, before in before_mappings.items():
+        staged = json.loads(
+            _git(
+                production,
+                "show",
+                f"{commit}:config/player_save_versions/{name}",
+            )
+        )
+        assert staged["module_loadout"] == before["module_loadout"]
+        assert staged["module_info_indices"][str(FIXTURE_INFO_INDEX)] == {
+            "name": FIXTURE_MODULE_NAME,
+            "family": "cannon",
+        }
 
 
 def test_unrelated_main_advance_does_not_invalidate_review(
@@ -410,6 +430,27 @@ def test_contradictory_semantics_leave_the_routine_lane(integration_repository):
     store.append_once(
         _record(
             module_name="Contradictory Fixture Cannon Assist",
+            source_fingerprint="2" * 64,
+            recorded_at="2026-08-10T12:01:01+00:00",
+        )
+    )
+
+    catalog = manager.catalog()
+
+    assert len(catalog["items"]) == 2
+    assert all(item["review_available"] is False for item in catalog["items"])
+    with pytest.raises(SaveMappingIntegrationError) as failure:
+        _review(manager, record)
+    assert failure.value.code == "mapping_candidate_requires_ordinary_development"
+
+
+def test_contradictory_module_family_across_scopes_leaves_routine_lane(
+    integration_repository,
+):
+    _production, store, record, manager = integration_repository
+    store.append_once(
+        _record(
+            slot_key="core_primary",
             source_fingerprint="2" * 64,
             recorded_at="2026-08-10T12:01:01+00:00",
         )

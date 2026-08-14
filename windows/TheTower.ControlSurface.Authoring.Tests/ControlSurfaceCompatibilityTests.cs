@@ -430,6 +430,7 @@ public sealed class ControlSurfaceCompatibilityTests
 
         Assert.True(presentation.Visible);
         Assert.Equal("warning", presentation.Severity);
+        Assert.Contains("Module identity", presentation.Title);
         Assert.Contains("cannon_assist", presentation.Detail);
         Assert.False(active.BlocksStartup);
 

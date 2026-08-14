@@ -33,7 +33,7 @@ as checked checkpoint narrative here.
     isolation have focused regression coverage. No additional battle is needed
     to diagnose the observed rejection.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
-    confirmed Module value. Acquire Pause or otherwise stop new-battle input,
+    confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
     observation windows, invalidate only affected Module evidence, force a
     fresh decode, and resume only after the new effective mapping fingerprint
@@ -108,11 +108,13 @@ as checked checkpoint narrative here.
   - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
     for future bounded normalized candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.
-    - [ ] Extend exact-slot Module values only through future natural paired
-      evidence. Magnetic Hook remains unmapped after the operator withdrew its
-      identification; an unknown ID, unsupported requested name, or partial
-      structure must retain the complete Modules UI route. Do not infer rarity,
-      levels, stars, effects, substats, GUIDs, or inventory semantics.
+    - [ ] Extend exact-slot Module allowlists only through future natural paired
+      placement evidence. All 24 current ID/name/family identities are globally
+      mapped, including Magnetic Hook, but identity knowledge does not support
+      a new Primary/Assist placement. A future unknown ID, globally known but
+      slot-unsupported value, unsupported requested name, or partial structure
+      must retain the complete Modules UI route. Do not infer rarity, levels,
+      stars, effects, substats, GUIDs, or inventory semantics.
     - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
       weapon index's off/on polarity at a time with normalized
       before/change/restore evidence. Validate Spotlight Missiles off through

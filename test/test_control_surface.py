@@ -3653,6 +3653,7 @@ const activeMapping = model.confirmedLocalMappingPresentation({{
 }});
 assert.strictEqual(activeMapping.visible, true);
 assert.strictEqual(activeMapping.severity, 'warning');
+assert.match(activeMapping.title, /Module identity/);
 assert.match(activeMapping.detail, /cannon_assist/);
 assert.strictEqual(model.confirmedLocalMappingPresentation({{
   schema_version: 2,

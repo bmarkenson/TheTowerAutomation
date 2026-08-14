@@ -1177,9 +1177,9 @@ class PlayerSavePreflightCoordinator:
                 "[PLAYER_SAVE_MAPPING] Exact-version local confirmation "
                 f"{'accepted' if accepted['changed'] else 'already active'}: "
                 f"event_id={accepted['event_id']} generation="
-                f"{accepted['generation']}; it becomes eligible only on a "
-                "later fresh save decode and canonical integration remains "
-                "pending",
+                f"{accepted['generation']}; a later fresh save decode may "
+                "use the identity for diagnostics, slot-scoped UI fallback "
+                "is unchanged, and canonical integration remains pending",
                 "WARN",
                 console=True,
             )

@@ -74,9 +74,37 @@ armor Primary Anti-Cube Portal (`20`), generator Primary Project Funding
 (`9`), armor Assist Space Displacer (`19`), generator Assist Singularity
 Harness (`30`), and core Assist Harmony Conductor (`39`). Combined with the
 prior Farm evidence, every value in `tournament_standard` is now decodable.
-These are slot-scoped equipped-value facts, not a generic Module ID or inventory
-map. The currently observed armor variation is evidence only; it does not
-replace the Tournament reference.
+The top-level `module_info_indices` table owns each observed global
+`infoIndex`/name/family identity. The separate `module_loadout.*.values` tables
+remain exact slot/role allowlists: identity knowledge alone cannot suppress the
+Modules UI route or authorize a loadout change. Neither table is a Module
+inventory map. The currently observed armor variation is evidence only; it
+does not replace the Tournament reference.
+
+On 2026-08-14 an operator-authorized no-battle campaign completed the global
+identity catalog on the compatible version-1101 structure. Three exact
+four-Primary UI loadouts were paired with fresh stable saves, then the original
+eight-slot loadout was restored, reserialized, and returned to verified Home
+`NEW_BATTLE`. Existing Farm/Tournament identities were reused; the campaign
+calibrated only the twelve gaps. A first Havoc Bringer search failed because an
+inertial inventory scroll settled between fixed row centers, recovered the
+baseline without accepting evidence, and led to a variable-row guarded search
+regression. The successful pass required exact Ancestral detail OCR before
+equipping Havoc Bringer. The collector was neither enabled nor consulted.
+
+The current global catalog contains all 24 Modules, six in each family:
+
+| Family | Exact `infoIndex` identities |
+| --- | --- |
+| cannon | `7` Havoc Bringer; `8` Death Penalty; `9` Being Annihilator; `10` Astral Deliverance; `41` Shrink Ray; `45` Amplifying Strike |
+| armor | `17` Wormhole Redirector; `18` Negative Mass Projector; `19` Space Displacer; `20` Anti-Cube Portal; `42` Sharp Fortitude; `46` Orbital Augment |
+| generator | `27` Black Hole Digestor; `28` Pulsar Harvester; `29` Galaxy Compressor; `30` Singularity Harness; `43` Project Funding; `47` Restorative Bonus |
+| core | `37` Multiverse Nexus; `38` Dimension Core; `39` Harmony Conductor; `40` Om Chip; `44` Magnetic Hook; `48` Primordial Collapse |
+
+The version-1073 authority and version-1101 exact structural mirror carry the
+same catalog. This completes identity decoding only. No newly observed name was
+added to a slot allowlist, so unsupported Primary/Assist placements still run
+the complete Modules UI path.
 
 Bounded mutation testing then established direct causality and the save-write
 boundary. Changing the visible Cards preset from slot 2 to slot 1 and back
@@ -591,7 +619,7 @@ their prior authority until version-specific evidence advances the new rows.
 | `V1073-CFG-012B` all nine Ultimate Weapon primaries on | Exact nine-element `ultimateWeaponUnlocked` and `ultimateWeaponOn` arrays | **Shortcut-ready, value-scoped** only when all nine exact booleans are unlocked and on. | Any subset, mixed/off request, false value, non-boolean, name/length change, or locked weapon restores UI. Validate each individual off/on index before supporting future mixed requirements. |
 | `V1073-CFG-012C` Spotlight Missiles on | `spotlightSmartMissilesOff` plus exact unlocked Spotlight structure | **Shortcut-ready, value-scoped** only for raw exact `false` / required on. | Off, raw true, malformed, missing, locked, or changed structure remains UI-required until one reversible off transition and restoration are reviewed. |
 | `V1073-CFG-013` Legend Tournament conditions | Tournament identity fields plus exact-version generator | **Shortcut-ready.** Seventeen consecutive event sets agreed with historical/live UI evidence. | Retain Heat/Overheat audits; validate every additional league and new exact game version independently. |
-| `V1073-CFG-014` Modules | Four `moduleEquipped` `ModuleItem` entries plus four typed `assistModuleSlots` | **Shortcut-ready, exact-slot/value-scoped.** Farm maps cannon Primary Amplifying Strike (`45`), armor Primary Orbital Augment (`46`), generator Primary Black Hole Digestor (`27`), core Primary Multiverse Nexus (`37`); cannon Assist Being Annihilator (`9`), armor Assist Anti-Cube Portal (`20`), generator Assist Singularity Harness (`30`), and core Assist Dimension Core (`38`). Tournament evidence adds generator Primary Project Funding (`43`), core Primary Dimension Core (`38`), core Assist Harmony Conductor (`39`), plus observed alternatives armor Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`). | Require exact slot/family/role/mapped name, four unlocked exact-boolean Assist slots, and complete structure. `enforce` requires equality; `observe` reports any complete mapped assignment without repair. Unknown IDs, nil/missing/locked/partial entries, Magnetic Hook or another unsupported request retain the full UI path. No generic Module-ID, rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
+| `V1073-CFG-014` Modules | Four `moduleEquipped` `ModuleItem` entries plus four typed `assistModuleSlots` | **Shortcut-ready, exact-slot/value-scoped.** The global `module_info_indices` catalog contains all 24 currently defined ID/name/family identities. Farm's slot allowlists map cannon Primary Amplifying Strike (`45`), armor Primary Orbital Augment (`46`), generator Primary Black Hole Digestor (`27`), core Primary Multiverse Nexus (`37`); cannon Assist Being Annihilator (`9`), armor Assist Anti-Cube Portal (`20`), generator Assist Singularity Harness (`30`), and core Assist Dimension Core (`38`). Tournament evidence adds generator Primary Project Funding (`43`), core Primary Dimension Core (`38`), core Assist Harmony Conductor (`39`), plus observed alternatives armor Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`). | Require exact slot/family/role/allowlisted name, four unlocked exact-boolean Assist slots, and complete structure. `enforce` requires equality; `observe` reports any complete slot-supported assignment without repair. A globally identified but slot-unsupported value is diagnostic only and retains the full UI path without generating a duplicate identity candidate. A future unknown ID generates global identity-review evidence and retains UI. Nil/missing/locked/partial entries or unsupported requests also retain UI. No rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
 | `V1073-CFG-015` Damage Slider | No accepted field | **Structural.** The absence of an accepted normalized source is explicit. | In an explicitly authorized test battle, correlate at least two values and restoration, percentage encoding, and save timing; UI remains required. |
 | `V1073-CFG-016` Orb Distance | Candidate distance/preset fields not accepted | **Structural.** Candidate fields are deliberately unpublished. | In an explicitly authorized battle, cycle known Extra/Workshop presets, prove units and selected-preset semantics, and restore the original pair; UI remains required. |
 | `V1073-PROFILE-001` card ownership, levels, mastery unlocks, and five 28-slot decks | `cardUnlocked`, `cardLevel`, `cardMasteryUnlocked`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | **Structural and implemented for completed-run comparison.** Exact vectors, source fields, and changed indices are retained; base/effective width remains distinct. | Build the complete card-ID and mastery-effect map before assigning names or effects to indices. The snapshot never suppresses Cards UI. |
@@ -689,24 +717,28 @@ tail; candidate collection never requests another save read or blocks terminal
 routing. An unknown Tournament league name remains review-only because the
 condition generator has no general league-name mapping owner.
 
-One narrow case receives local future-decode authority automatically: a
-deterministic pre-mutation `module_info_index` pairing from an exact-version
-boundary. The runtime first durably rereads its candidate receipt, then appends
-an accept event to the ignored
+One narrow case receives local future-decode **identity evidence**
+automatically: a deterministic pre-mutation `module_info_index` pairing from
+an exact-version boundary. The runtime first durably rereads its candidate
+receipt, then appends an accept event to the ignored
 `config/player_save_versions/local/data_<data>_game_<game>.confirmed.json`
 document. Accept and revoke events are locked, atomic, private, append-only,
 generation-counted, and capacity-reserved so every active acceptance remains
-revokable. The global Module mapping is a bijection: the same exact
-`(infoIndex, name)` pair may appear in more than one slot, while either raw ID
-or name paired differently is rejected.
+revokable. The global Module identity mapping is a bijection of
+`infoIndex -> (name, family)` within one version. The slot recorded on an event
+is pairing provenance, not an enforcement target; several different identities
+may therefore be learned through the same slot over time. A conflicting raw
+ID, name, or family is rejected.
 
-Local authority applies only during a later fresh decode whose exact identity,
-root class, mapping resolution, authority/structural IDs, validation policy,
-revision-compatibility declaration, and canonical Module dependency still
-match. It never changes the snapshot whose UI produced the receipt. Each
-snapshot publishes the exact canonical authority/structural mapping-set
-fingerprint used by its decoder and an effective-mapping fingerprint after the
-local overlay;
+Local identity evidence applies only during a later fresh decode whose exact
+identity, root class, mapping resolution, authority/structural IDs, validation
+policy, revision-compatibility declaration, and canonical Module dependency
+still match. It never changes the snapshot whose UI produced the receipt, and
+it adds only the global identity for diagnostics. It never appends a
+`module_loadout` value, makes Modules observed, suppresses UI, or authorizes an
+equip/repair. Each snapshot publishes the exact canonical authority/structural
+mapping-set fingerprint used by its decoder and an effective-mapping
+fingerprint after the local identity overlay;
 all carry, setup-capture, attachment, History, and terminal provenance binds to
 that fingerprint. Dependency drift, conflict, malformed local state, or a
 read/write failure leaves canonical values authoritative and the unknown value

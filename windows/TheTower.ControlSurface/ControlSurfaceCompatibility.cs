@@ -296,13 +296,13 @@ internal static class ControlSurfaceCompatibility
             : winningState == "production_validation_pending"
                 ? "Deployed save mapping awaiting fresh validation"
             : winningState == "authority_pending"
-                ? "Canonical save-mapping authority is still pending"
+                ? "Canonical Module identity owner is still pending"
                 : winningState == "active_local"
-                    ? "A locally confirmed save mapping needs integration"
+                    ? "A locally confirmed Module identity needs integration"
                     : winningState == "review_required"
                         || winningState == "more_evidence_required"
                         ? "A save mapping observation needs review"
-                    : "Exact-version save-mapping mirror is pending";
+                    : "Exact-version Module identity mirror is pending";
         var first = visibleItems[0];
         var slot = first.Scope is not null
             && first.Scope.TryGetValue("slot_key", out var slotKey)

@@ -18,6 +18,7 @@ from core.player_save import (
     PLAYER_SAVE_DEVICE_PATH,
     PlayerSaveError,
     PlayerSavePullError,
+    _module_loadout_evidence,
     _raw_field_manifest_names,
     _raw_field_name_sha256,
     _validate_raw_field_manifest,
@@ -139,6 +140,7 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
         "free_upgrade_lock_fields",
         "guardian_chip_ids",
         "guardian_chips",
+        "module_info_indices",
         "module_loadout",
         "perk_bans",
         "perk_ids",
@@ -1847,6 +1849,33 @@ CURRENT_TOURNAMENT_MODULES = {
     "armor_assist": "Space Displacer",
 }
 
+MODULE_INFO_INDICES = {
+    "7": {"name": "Havoc Bringer", "family": "cannon"},
+    "8": {"name": "Death Penalty", "family": "cannon"},
+    "9": {"name": "Being Annihilator", "family": "cannon"},
+    "10": {"name": "Astral Deliverance", "family": "cannon"},
+    "17": {"name": "Wormhole Redirector", "family": "armor"},
+    "18": {"name": "Negative Mass Projector", "family": "armor"},
+    "19": {"name": "Space Displacer", "family": "armor"},
+    "20": {"name": "Anti-Cube Portal", "family": "armor"},
+    "27": {"name": "Black Hole Digestor", "family": "generator"},
+    "28": {"name": "Pulsar Harvester", "family": "generator"},
+    "29": {"name": "Galaxy Compressor", "family": "generator"},
+    "30": {"name": "Singularity Harness", "family": "generator"},
+    "37": {"name": "Multiverse Nexus", "family": "core"},
+    "38": {"name": "Dimension Core", "family": "core"},
+    "39": {"name": "Harmony Conductor", "family": "core"},
+    "40": {"name": "Om Chip", "family": "core"},
+    "41": {"name": "Shrink Ray", "family": "cannon"},
+    "42": {"name": "Sharp Fortitude", "family": "armor"},
+    "43": {"name": "Project Funding", "family": "generator"},
+    "44": {"name": "Magnetic Hook", "family": "core"},
+    "45": {"name": "Amplifying Strike", "family": "cannon"},
+    "46": {"name": "Orbital Augment", "family": "armor"},
+    "47": {"name": "Restorative Bonus", "family": "generator"},
+    "48": {"name": "Primordial Collapse", "family": "core"},
+}
+
 
 def _set_module_loadout(
     decoded: dict,
@@ -1883,6 +1912,58 @@ def test_exact_farm_module_loadout_matches_from_one_redacted_snapshot(
         '"level": 201',
     ):
         assert private_marker not in rendered
+
+
+@pytest.mark.parametrize("mapping", (VERSION_MAPPING, VERSION_1101_MAPPING))
+def test_all_current_module_info_indices_are_globally_mapped(mapping):
+    assert mapping["module_info_indices"] == MODULE_INFO_INDICES
+    assert len({item["name"] for item in MODULE_INFO_INDICES.values()}) == 24
+    assert {
+        family: sum(
+            item["family"] == family for item in MODULE_INFO_INDICES.values()
+        )
+        for family in ("cannon", "armor", "generator", "core")
+    } == {"cannon": 6, "armor": 6, "generator": 6, "core": 6}
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda mapping: mapping.__setitem__("module_info_indices", []),
+        lambda mapping: mapping.__setitem__("module_info_indices", {}),
+        lambda mapping: mapping["module_info_indices"].__setitem__(
+            "045",
+            mapping["module_info_indices"].pop("45"),
+        ),
+        lambda mapping: mapping["module_info_indices"].__setitem__(
+            "45",
+            {"name": " Amplifying Strike", "family": "cannon"},
+        ),
+        lambda mapping: mapping["module_info_indices"].__setitem__(
+            "45",
+            {"name": "Amplifying Strike", "family": "unknown"},
+        ),
+        lambda mapping: mapping["module_info_indices"].__setitem__(
+            "46",
+            {"name": "Amplifying Strike", "family": "armor"},
+        ),
+        lambda mapping: mapping["module_info_indices"].__setitem__(
+            "45",
+            {"name": "Amplifying Strike", "family": "armor"},
+        ),
+    ),
+)
+def test_malformed_or_conflicting_global_module_identity_map_fails_closed(
+    mutate,
+):
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    mutate(mapping)
+
+    evidence = _module_loadout_evidence(_decoded_save(), mapping)
+
+    assert evidence.status == "unmapped"
+    assert evidence.value is None
+    assert evidence.reason == "module infoIndex mapping changed"
 
 
 def test_exact_tournament_reference_is_a_save_backed_observation(monkeypatch):
@@ -2154,48 +2235,90 @@ def test_fresh_decode_effective_fingerprint_tracks_local_mapping_generation(
     assert after.confirmed_local_mappings["applied_event_ids"] == [
         accepted["event_id"]
     ]
-    assert after.checks["modules"].status == "observed"
-    assert after.checks["modules"].value["core_assist"] == "Future Module"
+    evidence = after.checks["modules"]
+    assert evidence.status == "unmapped"
+    assert evidence.value is None
+    assert "unsupported assist module value" in evidence.reason
+    assert evidence.diagnostics == {
+        "slots": [
+            *before.checks["modules"].diagnostics["slots"][:-1],
+            {
+                "slot_key": "core_assist",
+                "family": "core",
+                "role": "assist",
+                "name": "Future Module",
+                "mapping_status": "mapped_identity_unsupported_scope",
+            },
+        ]
+    }
     assert before.as_dict() == before_projection
 
 
-def test_known_global_module_pair_in_a_new_scope_remains_discoverable(
+def test_known_global_module_pair_in_a_new_scope_is_diagnostic_only(
     monkeypatch,
 ):
-    clean = _snapshot(monkeypatch, _decoded_save())
     decoded = _decoded_save()
     decoded["moduleEquipped"][3]["infoIndex"] = 39
 
     snapshot = _snapshot(monkeypatch, decoded)
     evidence = snapshot.checks["modules"]
-    candidate = evidence.diagnostics["mapping_candidates"][0]
-    locator_values = dict(clean.checks["modules"].value)
-    locator_values["core_primary"] = "Harmony Conductor"
-    locator_scopes = {
-        f"{family}_{role}": {
-            "slot_key": f"{family}_{role}",
-            "family": family,
-            "role": role,
-        }
-        for family in ("cannon", "armor", "generator", "core")
-        for role in ("primary", "assist")
+
+    assert evidence.status == "unmapped"
+    assert "unsupported primary module value" in evidence.reason
+    assert "mapping_candidates" not in evidence.diagnostics
+    assert evidence.diagnostics["slots"][3] == {
+        "slot_key": "core_primary",
+        "family": "core",
+        "role": "primary",
+        "name": "Harmony Conductor",
+        "mapping_status": "mapped_identity_unsupported_scope",
     }
+
+
+def test_known_unsupported_module_does_not_hide_later_unknown_candidate(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded["moduleEquipped"][3]["infoIndex"] = 39
+    decoded["assistModuleSlots"][3]["module"]["infoIndex"] = 777
+
+    evidence = _snapshot(monkeypatch, decoded).checks["modules"]
+
+    assert evidence.status == "unmapped"
+    candidates = evidence.diagnostics["mapping_candidates"]
+    assert [
+        candidate["raw_discriminator"]["value"] for candidate in candidates
+    ] == [777]
+    statuses = {
+        item["slot_key"]: item.get("mapping_status")
+        for item in evidence.diagnostics["slots"]
+    }
+    assert statuses["core_primary"] == "mapped_identity_unsupported_scope"
+    assert statuses["core_assist"] == "unmapped"
+
+    ui_values = dict(FARM_MODULES)
+    ui_values["core_primary"] = "Harmony Conductor"
+    ui_values["core_assist"] = "Future Module"
     ui = build_mapping_candidate_ui_evidence(
         "modules",
-        canonical_values=list(locator_values.values()),
-        locator_values=locator_values,
-        locator_scopes=locator_scopes,
+        canonical_values=list(ui_values.values()),
+        locator_values=ui_values,
+        locator_scopes={
+            slot_key: {
+                "slot_key": slot_key,
+                "family": slot_key.rsplit("_", 1)[0],
+                "role": slot_key.rsplit("_", 1)[1],
+            }
+            for slot_key in ui_values
+        },
         observed_at=CAPTURED_AT,
     )
 
-    resolved = resolve_mapping_candidates("modules", [candidate], ui)[0]
+    resolved = resolve_mapping_candidates("modules", candidates, ui)
 
-    assert evidence.status == "unmapped"
-    assert candidate["raw_discriminator"]["value"] == 39
-    assert candidate["known_raw_semantic_value"] == "Harmony Conductor"
-    assert candidate["scope"]["slot_key"] == "core_primary"
-    assert resolved["status"] == "ready_for_review"
-    assert resolved["semantic_value"] == "Harmony Conductor"
+    assert len(resolved) == 1
+    assert resolved[0]["status"] == "ready_for_review"
+    assert resolved[0]["semantic_value"] == "Future Module"
 
 
 def test_ultimate_weapon_components_have_independent_value_scope(monkeypatch):

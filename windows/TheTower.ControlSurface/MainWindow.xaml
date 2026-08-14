@@ -159,7 +159,7 @@
                          FontSize="9"
                          FontWeight="Bold" />
               <TextBlock x:Name="ConfirmedLocalMappingTitleText"
-                         Text="A locally confirmed save mapping needs integration"
+                         Text="A locally confirmed Module identity needs integration"
                          Foreground="#FFD37A"
                          FontWeight="Bold"
                          TextWrapping="Wrap"
