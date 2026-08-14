@@ -60,49 +60,78 @@ The repository uses linked Git worktrees, not separate repositories:
 /home/brianm/dev/python/TheTower
     main                      production checkout and systemd working path
 
-/home/brianm/dev/python/TheTower-worktrees/dev
-    develop                   integration checkout
-
 /home/brianm/dev/python/TheTower-worktrees/workers/<task>
     feature/<task>            one bounded worker checkout per task
+
+/home/brianm/dev/python/TheTower-worktrees/integration/<outcome>
+    integration/<outcome>     temporary combined candidate, only when needed
 ```
 
-`main` is production, `develop` is integration, and feature branches are
-temporary. Workers commit only their owned feature changes. The explicitly
-assigned integration owner for a coherent outcome reviews and integrates them
-into `develop`, runs the combined gate there, and promotes an exact validated
-`develop` commit to `main` only by fast-forward.
+`main` is production. Feature branches are temporary, and workers commit only
+their owned feature changes. A clean feature tip is the normal candidate for
+one coherent outcome. Only when two or more reviewed feature tips intentionally
+ship together does the explicitly assigned outcome coordinator create a
+temporary integration branch, resolve their combined state, and use its tip as
+the candidate. A documentation-only coordinator has standing promotion
+ownership; every other promotion needs operator or explicitly assigned
+ownership. In all cases, the promotion owner advances `main` only to exact
+validated commit `D` by fast-forward, publishes that exact tip by default, and
+retires the outcome's clean integrated temporary work unless a retention guard
+applies. Candidate development and validation remain concurrent, while one
+atomically acquired private Git ref serializes the mutable production window
+from final rereads through deployment, publication, and cleanup. Remote
+fast-forward rules remain the guard against a publisher from another clone. A
+contender waits without shared mutation, then refreshes against current
+production, reruns its complete applicable candidate gate, and retries atomic
+acquisition until the outcome promotes or reaches a reported recovery guard.
+The ref is a mutex rather than a persistent FIFO queue; losing another race
+repeats the same loop instead of abandoning the outcome.
 
-Production is never switched to `develop` or a feature branch. Existing
-operator or parallel changes are preserved. A non-clean production checkout
-blocks promotion but does not block unrelated feature or integration work.
-There is no need to fingerprint or attest a worker's complete source tree for
-emulator access. Branch, HEAD, and an ordinary dirty summary are sufficient
-diagnostic context in a handoff or lease log.
+Production is never switched to a feature or integration branch. Existing
+operator or parallel changes are preserved. A non-clean production checkout or
+candidate blocks that promotion but does not block unrelated feature or
+integration work. There is no need to fingerprint or attest a worker's
+complete source tree for emulator access. Branch, HEAD, and an ordinary dirty
+summary are sufficient diagnostic context in a handoff or lease log.
 
-The save-mapping control-surface workflow is one narrow preparation route into
-this same topology. The production server may enumerate Git-linked
-`feature/*` worktrees inside the configured development root and prepare one
-exact, operator-reviewed canonical mapping proposal in a selected clean
-feature. Clients receive and return only an opaque snapshot ID; the server
-binds the current `main`, `develop`, and feature tips and the target file
-hashes and modes. A private durable journal makes an interrupted multi-target
-replacement explicitly recoverable from that same reviewed selection; it does
-not authorize the server to clean or overwrite unrelated work. It cannot
-target `main` or `develop`, create a worktree, stage, commit, merge, promote,
-restart a service, or use the emulator. The resulting dirty feature remains
-ordinary owned development work and follows the normal checkpoint and
-promotion path.
+The save-mapping control-surface workflow is one narrow operator-maintenance
+exception to the feature-branch route. It accepts only a durable server-
+generated mapping candidate while the production `main` worktree is clean, at
+its branch tip, and the private `refs/thetower/save-mapping-candidate` ref is
+empty. The read-only review binds the proposal, canonical target before/after
+hashes and modes, and mapping-set invariants—not unrelated content elsewhere in
+`main`. After separate operator confirmation, the server re-renders those
+inputs against current `main`; if they are still exact, it uses a private Git
+index to construct one standardized child of that current tip and atomically
+creates the private staging ref while verifying that `main` did not move. The
+production branch, index, and worktree remain unchanged. The client supplies no
+path, ref, target, patch, message, identity, or arbitrary value.
+
+A private durable transaction binds the actual parent, target hashes and modes,
+generated commit, fixed staging ref, and candidate provenance through production
+promotion and a fresh canonical decode. It permits only exact idempotent
+recovery and exact retirement after validation; it never authorizes reset,
+backward branch movement, production promotion, service restart,
+runtime-control change, or emulator input. Target drift, an occupied or moved
+staging ref, unsupported proposal ownership, or uncertain state leaves the
+routine lane. Unrelated `main` changes before confirmation do not invalidate the
+review when the mapping inputs remain exact; an advance after staging makes the
+old commit non-promotable and requires restaging on current `main`. The staged
+commit receives the mapping-only candidate gate and normal production procedure
+before deployment.
 
 ### Staging, promotion, and rollback
 
-`develop` is the project's only standing staging layer. It provides a clean
-integration point, its own Python environment, the complete non-live
-checkpoint, retained-frame testing, and a place to identify one exact release
-candidate. A permanent `staging` branch, another long-lived checkout, or a
-second staging runtime would not provide meaningful live isolation: there is
-only one emulator, so a second runtime would still have to displace production
-to test it. A temporary clean checkout may be created for a specific
+The project has no standing staging branch. The selected candidate
+worktree provides its own Python environment, proportionate pre-candidate
+testing, and one exact release-candidate commit. A feature worktree supplies
+that boundary directly for a single-feature outcome; a temporary integration
+worktree supplies it only for an intentionally combined outcome. The private
+save-mapping ref holds one exact Git object without a checkout and is not a
+general staging branch. A permanent `develop` or `staging` branch, long-lived
+checkout, or staging runtime would not provide meaningful live isolation:
+there is only one emulator, so a second runtime would still have to displace
+production to test it. A temporary clean checkout may be created for a specific
 reproducibility test, but it is not another promotion stage and receives no
 special emulator authority.
 
@@ -111,35 +140,21 @@ Feature and integration work never modify the production checkout, production
 stop and restart the currently deployed `main` revision throughout ordinary
 development.
 
-The normal release path is deliberately direct:
+The release path remains direct: one exact clean candidate, one guarded
+fast-forward of production `main`, and no standing staging branch or runtime.
+Production-state rereads, rollback preparation, post-deployment smoke, exact
+remote publication, and guarded cleanup remain explicit mutable boundaries.
 
-1. integrate reviewed feature commits into `develop` and run the combined
-   non-live gate there;
-2. record the exact current production commit `M` and candidate commit `D`,
-   require `M` to be an ancestor of `D`, and require the production checkout to
-   have no unresolved local work;
-3. create a uniquely named pre-deployment tag at `M` so the prior source is
-   easy to identify;
-4. stop each affected long-lived service before changing any file it may import
-   or read, then fast-forward the production checkout—while it remains on
-   `main`—to exact commit `D`;
-5. update production dependencies only when their tracked inputs changed,
-   restart each affected service, and perform a bounded production smoke test;
-   and
-6. if the smoke test fails, stop the affected service, create a normal rollback
-   commit that reverses the reviewed `M..D` range, restore any separately
-   changed environment or installed unit, restart, and bring the rollback back
-   into `develop` before another promotion.
-
-Documentation-only promotion does not require a runtime stop. Dependency,
-persistent-state format, and installed-systemd-unit changes require an explicit
-rollback plan for those non-Git effects; ordinary code changes do not acquire
-extra ceremony merely because they will be tested in production. Rewriting
-`main` backward is not the normal rollback mechanism, because a revert preserves
-what was deployed and why.
-
-The executable checklist is in
+The executable candidate, validation, promotion, rollback, publication, and
+retirement checklist is owned only by
 [the production procedure](../operations/production_promotion.md).
+[Documentation maintenance](../documentation_maintenance.md#automatic-documentation-closure)
+owns the standing documentation-only authority, while the procedure applies
+it. Dependency, persistent-state format, and installed-systemd-unit changes
+still require an explicit rollback plan for their non-Git effects. Rewriting
+`main` backward is not the normal rollback mechanism, because a revert
+preserves what was deployed and why.
+
 Add a separate release/staging layer only after repeated direct-promotion
 failures demonstrate a concrete capability it would provide.
 
@@ -151,7 +166,8 @@ units never use a development environment.
 
 ### Retained Phase-0 results
 
-The Phase-0 prototype on `develop` established several worthwhile contracts:
+The earlier Phase-0 integration prototype established several worthwhile
+contracts:
 
 - exact interpreter and direct dependency declarations are tracked;
 - runtime and development dependency closures are pinned;
@@ -191,12 +207,14 @@ relocate a completed virtual environment. Ad-hoc `pip install` remains
 unsupported because it causes accidental dependency drift, not because the
 environment is a security asset.
 
-The checkpoint isolates ordinary generated test output and runs the full
-repository-local suite. Installed host tools such as Tesseract may run in
-non-live tests. ADB-facing tests use fakes or mocks unless a thread has
-completed the live-runtime startup path and deliberately requested live
-validation. The supported entrypoint and operator workflow are documented in
-`docs/new_thread.md`.
+The complete checkpoint isolates ordinary generated test output and runs the
+full repository-local suite. It is one available candidate gate, not a required
+step after every edit or ref movement; the production procedure selects it only
+for candidate classes whose uncertainty spans the shared runtime. Installed
+host tools such as Tesseract may run in non-live tests. ADB-facing tests use
+fakes or mocks unless a thread has completed the live-runtime startup path and
+deliberately requested live validation. The supported entrypoint and operator
+workflow are documented in `docs/new_thread.md`.
 
 ## Screenshots, fixtures, and read-only ADB
 
@@ -467,7 +485,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | `main`, `develop`, feature worktrees, assigned integration ownership, and fast-forward promotion | No independent repository per worker; no source attestation |
+| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion ownership, assigned ownership for other outcomes, one private ref serializing production mutation, exact fast-forward promotion, default main-only remote publication, and default retirement of clean integrated temporary work | No standing `develop`/staging branch, concurrent production mutations, speculative retention of integrated worktrees, independent repository per worker, or source attestation |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |
@@ -549,8 +567,11 @@ The useful regression seams are correspondingly small:
   unacknowledged leases and logs every attempted input;
 - uncertain input is not automatically repeated;
 - release requires a fresh observation before production removes its hold; and
-- the assigned integration owner integrates worker commits into `develop` and
-  promotes only an exact clean validated fast-forward candidate.
+- a single feature tip is the normal candidate, an assigned coordinator uses a
+  temporary integration branch only for a combined outcome, every promotion
+  uses an exact clean validated fast-forward candidate, publishes only that
+  successful `main` tip to `origin/main` by default, and retires the outcome's
+  clean integrated temporary branch/worktree pairs by default.
 
 These tests protect the project from realistic accidents without turning a
 hobby automation repository into a same-user security system.

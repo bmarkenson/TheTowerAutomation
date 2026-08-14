@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 import time
 from typing import Any, Callable, Dict, Literal, Optional, Tuple, Sequence, Union
 
 from utils.logger import log, log_input
-from core.adb_utils import input_swipe, input_tap
+from core.adb_utils import AdbShellDispatchOutcome, input_swipe, input_tap
 from core.tap_dispatcher import tap as enqueue_tap
 from core.clickmap_access import get_click, get_explicit_tap, get_swipe, resolve_dot_path
 from core.label_tapper import get_label_match
@@ -17,6 +18,54 @@ DispatchMode = Literal["now", "queue"]
 Coord = Union[Sequence[int], Sequence[float]]
 Region = Tuple[int, int, int, int]
 ActionGuard = Optional[Callable[[], bool]]
+
+
+class TapDispatchStatus(str, Enum):
+    """Typed result at the final host/device mutation boundary."""
+
+    NOT_DISPATCHED = "not_dispatched"
+    DISPATCHED = "dispatched"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True)
+class TapDispatchOutcome:
+    """Distinguish a proven miss from an input with an unknown outcome."""
+
+    status: TapDispatchStatus
+
+    @property
+    def dispatched(self) -> bool:
+        return self.status is TapDispatchStatus.DISPATCHED
+
+    @property
+    def uncertain(self) -> bool:
+        return self.status is TapDispatchStatus.UNCERTAIN
+
+    @property
+    def attempted(self) -> bool:
+        return self.status is not TapDispatchStatus.NOT_DISPATCHED
+
+    def __bool__(self) -> bool:
+        return self.dispatched
+
+
+def _tap_dispatch_outcome(value: object) -> TapDispatchOutcome:
+    """Normalize legacy/mocked booleans and typed ADB dispatch metadata."""
+
+    if isinstance(value, TapDispatchOutcome):
+        return value
+    if isinstance(value, AdbShellDispatchOutcome):
+        if value.uncertain:
+            return TapDispatchOutcome(TapDispatchStatus.UNCERTAIN)
+        if value.accepted:
+            return TapDispatchOutcome(TapDispatchStatus.DISPATCHED)
+        return TapDispatchOutcome(TapDispatchStatus.NOT_DISPATCHED)
+    return TapDispatchOutcome(
+        TapDispatchStatus.NOT_DISPATCHED
+        if value is False or value is None
+        else TapDispatchStatus.DISPATCHED
+    )
 
 
 @dataclass(frozen=True)
@@ -76,15 +125,65 @@ def _compute_offset(entry: Dict[str, Any]) -> Optional[Tuple[int, int]]:
     return None
 
 
-def _dispatch_tap(x: int, y: int, *, label: Optional[str], dispatch: DispatchMode) -> None:
+def _dispatch_tap(
+    x: int,
+    y: int,
+    *,
+    label: Optional[str],
+    dispatch: DispatchMode,
+    action_guard_fn: ActionGuard = None,
+    return_dispatch_outcome: bool = False,
+) -> bool | TapDispatchOutcome:
     if dispatch == "queue":
-        enqueue_tap(x, y, label=label, log_it=False)
-    else:
-        input_tap(x, y, check=False)
+        if action_guard_fn is None:
+            enqueue_tap(x, y, label=label, log_it=False)
+        else:
+            enqueue_tap(
+                x,
+                y,
+                label=label,
+                log_it=False,
+                action_guard_fn=action_guard_fn,
+            )
+        outcome = TapDispatchOutcome(TapDispatchStatus.DISPATCHED)
+        return outcome if return_dispatch_outcome else True
+    guard_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
+    raw = input_tap(
+        x,
+        y,
+        check=False,
+        return_dispatch_outcome=True,
+        **guard_kwargs,
+    )
+    outcome = _tap_dispatch_outcome(raw)
+    return outcome if return_dispatch_outcome else outcome.dispatched
 
 
-def _dispatch_swipe(x1: int, y1: int, x2: int, y2: int, duration_ms: int) -> None:
-    input_swipe(x1, y1, x2, y2, duration_ms, check=False)
+def _dispatch_swipe(
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    duration_ms: int,
+    action_guard_fn: ActionGuard = None,
+) -> bool:
+    if action_guard_fn is None:
+        return input_swipe(
+            x1, y1, x2, y2, duration_ms, check=False
+        ) is not None
+    return input_swipe(
+        x1,
+        y1,
+        x2,
+        y2,
+        duration_ms,
+        check=False,
+        action_guard_fn=action_guard_fn,
+    ) is not None
 
 
 def _operator_label(label: str) -> str:
@@ -139,7 +238,8 @@ def safe_tap(
     verification: Optional[TapVerification] = None,
     failure_log_level: Literal["DEBUG", "WARN"] = "WARN",
     action_guard_fn: ActionGuard = None,
-) -> bool:
+    return_dispatch_outcome: bool = False,
+) -> bool | TapDispatchOutcome:
     """Tap only a freshly matched or explicitly reverified target.
 
     Template-backed names are always matched immediately before dispatch.
@@ -153,6 +253,9 @@ def safe_tap(
     When ``action_guard_fn`` is supplied, it is evaluated after the final
     template/target verification and immediately before INPUT logging and
     dispatch. A false or failing guard sends no input.
+
+    When ``return_dispatch_outcome`` is true, callers receive a typed result
+    that preserves host/device dispatch uncertainty instead of a legacy bool.
     """
 
     if dispatch not in ("now", "queue"):
@@ -178,7 +281,10 @@ def safe_tap(
                     action_guard_fn,
                     label=str(label) if label is not None else None,
                 ):
-                    return False
+                    outcome = TapDispatchOutcome(
+                        TapDispatchStatus.NOT_DISPATCHED
+                    )
+                    return outcome if return_dispatch_outcome else False
                 log_input(
                     _tap_summary(str(label), dispatch),
                     detail=(
@@ -187,8 +293,26 @@ def safe_tap(
                         f"attempt={attempt+1}/{attempts}"
                     ),
                 )
-                _dispatch_tap(tap_x, tap_y, label=str(label), dispatch=dispatch)
-                return True
+                dispatch_kwargs = (
+                    {"action_guard_fn": action_guard_fn}
+                    if action_guard_fn is not None
+                    else {}
+                )
+                typed_kwargs = (
+                    {"return_dispatch_outcome": True}
+                    if return_dispatch_outcome
+                    else {}
+                )
+                dispatched = _dispatch_tap(
+                    tap_x,
+                    tap_y,
+                    label=str(label),
+                    dispatch=dispatch,
+                    **dispatch_kwargs,
+                    **typed_kwargs,
+                )
+                outcome = _tap_dispatch_outcome(dispatched)
+                return outcome if return_dispatch_outcome else outcome.dispatched
             except Exception as exc:
                 last_err = exc
                 if attempt < attempts - 1:
@@ -198,7 +322,8 @@ def safe_tap(
                 f"[SKIP] TAP_SAFE failed for {label}: {last_err}",
                 failure_log_level,
             )
-        return False
+        outcome = TapDispatchOutcome(TapDispatchStatus.NOT_DISPATCHED)
+        return outcome if return_dispatch_outcome else False
 
     if isinstance(name, (tuple, list)):
         try:
@@ -206,7 +331,8 @@ def safe_tap(
             tap_y = int(name[1])
         except (IndexError, TypeError, ValueError):
             log(f"[SKIP] TAP_SAFE invalid coordinate target: {name!r}", "WARN")
-            return False
+            outcome = TapDispatchOutcome(TapDispatchStatus.NOT_DISPATCHED)
+            return outcome if return_dispatch_outcome else False
         label = log_label or f"tap@{tap_x},{tap_y}"
         summary_label = log_label or "screen target"
     else:
@@ -216,7 +342,8 @@ def safe_tap(
                 f"[SKIP] TAP_SAFE static path has no explicit coords for {label}",
                 "WARN",
             )
-            return False
+            outcome = TapDispatchOutcome(TapDispatchStatus.NOT_DISPATCHED)
+            return outcome if return_dispatch_outcome else False
         tap_x, tap_y = coords
         summary_label = str(label)
 
@@ -226,7 +353,8 @@ def safe_tap(
             f"at ({tap_x},{tap_y})",
             "WARN",
         )
-        return False
+        outcome = TapDispatchOutcome(TapDispatchStatus.NOT_DISPATCHED)
+        return outcome if return_dispatch_outcome else False
     try:
         authorized = verification.authorizes((tap_x, tap_y))
     except Exception as exc:
@@ -234,20 +362,23 @@ def safe_tap(
             f"[SKIP] TAP_SAFE verification failed for {label}: {exc}",
             "WARN",
         )
-        return False
+        outcome = TapDispatchOutcome(TapDispatchStatus.NOT_DISPATCHED)
+        return outcome if return_dispatch_outcome else False
     if not authorized:
         log(
             f"[SKIP] TAP_SAFE target check rejected {label}: "
             f"{verification.description}",
             "WARN",
         )
-        return False
+        outcome = TapDispatchOutcome(TapDispatchStatus.NOT_DISPATCHED)
+        return outcome if return_dispatch_outcome else False
 
     if not _input_authority_available(
         action_guard_fn,
         label=str(label) if label is not None else None,
     ):
-        return False
+        outcome = TapDispatchOutcome(TapDispatchStatus.NOT_DISPATCHED)
+        return outcome if return_dispatch_outcome else False
 
     log_input(
         _tap_summary(str(summary_label), dispatch),
@@ -256,8 +387,26 @@ def safe_tap(
             f"at ({tap_x},{tap_y}) verified={verification.description}"
         ),
     )
-    _dispatch_tap(tap_x, tap_y, label=str(label), dispatch=dispatch)
-    return True
+    dispatch_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
+    typed_kwargs = (
+        {"return_dispatch_outcome": True}
+        if return_dispatch_outcome
+        else {}
+    )
+    dispatched = _dispatch_tap(
+        tap_x,
+        tap_y,
+        label=str(label),
+        dispatch=dispatch,
+        **dispatch_kwargs,
+        **typed_kwargs,
+    )
+    outcome = _tap_dispatch_outcome(dispatched)
+    return outcome if return_dispatch_outcome else outcome.dispatched
 
 
 def tap_if_visible(
@@ -269,7 +418,8 @@ def tap_if_visible(
     screenshot=None,
     failure_log_level: Literal["DEBUG", "WARN"] = "WARN",
     action_guard_fn: ActionGuard = None,
-) -> bool:
+    return_dispatch_outcome: bool = False,
+) -> bool | TapDispatchOutcome:
     return safe_tap(
         name,
         retries=retries,
@@ -278,6 +428,7 @@ def tap_if_visible(
         screenshot=screenshot,
         failure_log_level=failure_log_level,
         action_guard_fn=action_guard_fn,
+        return_dispatch_outcome=return_dispatch_outcome,
     )
 
 
@@ -289,6 +440,7 @@ def safe_long_press(
     retry_delay: float = 0.5,
     screenshot=None,
     log_label: Optional[str] = None,
+    action_guard_fn: ActionGuard = None,
 ) -> bool:
     """Long-press a freshly template-matched target.
 
@@ -329,6 +481,11 @@ def safe_long_press(
             offset = _compute_offset(entry)
             press_x = x + (offset[0] if offset else width // 2)
             press_y = y + (offset[1] if offset else height // 2)
+            if not _input_authority_available(
+                action_guard_fn,
+                label=str(label),
+            ):
+                return False
             log_input(
                 f"Long press requested: {_operator_label(str(label))}",
                 detail=(
@@ -337,14 +494,20 @@ def safe_long_press(
                     f"attempt={attempt+1}/{attempts}"
                 ),
             )
-            _dispatch_swipe(
+            dispatch_kwargs = (
+                {"action_guard_fn": action_guard_fn}
+                if action_guard_fn is not None
+                else {}
+            )
+            dispatched = _dispatch_swipe(
                 press_x,
                 press_y,
                 press_x,
                 press_y,
                 duration,
+                **dispatch_kwargs,
             )
-            return True
+            return dispatched is not False
         except Exception as exc:
             last_err = exc
             if attempt < attempts - 1:
@@ -368,11 +531,16 @@ def tap_unchecked_for_tooling(name: str, *, reason: str) -> bool:
         f"Unchecked tooling tap requested: {_operator_label(name)}",
         detail=f"TAP_TOOLING: {name} at {coords} reason={reason}",
     )
-    _dispatch_tap(coords[0], coords[1], label=name, dispatch="now")
-    return True
+    dispatched = _dispatch_tap(
+        coords[0],
+        coords[1],
+        label=name,
+        dispatch="now",
+    )
+    return dispatched is not False
 
 
-def swipe_now(name: str) -> bool:
+def swipe_now(name: str, *, action_guard_fn: ActionGuard = None) -> bool:
     swipe = get_swipe(name)
     if not swipe:
         log(f"[INPUT] swipe_now: missing swipe data for '{name}'", "ERROR")
@@ -388,8 +556,22 @@ def swipe_now(name: str) -> bool:
         f"Swipe requested: {_operator_label(name)}",
         detail=f"SWIPE_NOW: {name} ({x1},{y1})→({x2},{y2}) in {duration}ms",
     )
-    _dispatch_swipe(x1, y1, x2, y2, duration)
-    return True
+    if not _input_authority_available(action_guard_fn, label=name):
+        return False
+    dispatch_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
+    dispatched = _dispatch_swipe(
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        **dispatch_kwargs,
+    )
+    return dispatched is not False
 
 
 __all__ = [

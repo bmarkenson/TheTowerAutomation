@@ -56,8 +56,11 @@ public sealed class GateDecisionPresentationTests
                 CheckId = "ultimate_weapons",
             });
 
-        Assert.Equal("Preflight warning needs direction", presentation.Title);
-        Assert.Equal("A read-only preflight found a mismatch", presentation.Heading);
-        Assert.Contains("Tournament observation continues", presentation.Disposition);
+        Assert.Equal("Preflight advisory", presentation.Title);
+        Assert.Equal(
+            "A nonblocking preflight advisory is available",
+            presentation.Heading);
+        Assert.Contains("No decision is required", presentation.Disposition);
+        Assert.Contains("automation continues", presentation.Disposition);
     }
 }

@@ -105,6 +105,8 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
         "orb_distance_observation": {},
         "gc_session_preflight_completed": False,
         "gc_session_preflight_attempted": False,
+        "gc_session_preflight_degraded": False,
+        "gc_session_preflight_disposition": "",
         "gc_session_preflight_blocked": False,
         "gc_session_preflight_repair_required": False,
         "gc_session_preflight_repair_in_progress": False,

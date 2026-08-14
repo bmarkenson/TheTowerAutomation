@@ -74,12 +74,16 @@ battle and runs a read-only strategy validation:
 .venv/bin/python main.py --adb-port 5555 --strategy farm_t18 --startup-gates auto_validate
 ```
 
-Validation never repairs or restarts the attached battle on its own. A
-Home-repairable mismatch publishes an operator decision that can authorize the
-existing guarded restart/repair path. When the Current-run ledger contains a
-matching completed-check receipt and Battle History proves that attachment
-returned to that same battle, automation reuses the receipt instead of
-repeating its session configuration checks. A missing or configuration-
+Validation never repairs, restarts, or Surrenders the attached battle on its
+own. A mismatch is logged as degraded evidence and the battle continues. If
+**Continue automatically** is already selected when that degraded battle ends,
+terminal handling returns Home instead of tapping Retry, runs the next
+profile's normal bounded setup, and then continues. Exhausted Home repair is
+flagged and the next battle still starts degraded; it never becomes a global
+Pause. When the Current-run ledger
+contains a matching completed-check receipt and Battle History proves that
+attachment returned to that same battle, automation reuses the receipt instead
+of repeating its session configuration checks. A missing or configuration-
 mismatched receipt still runs validation. To attach and skip all strategy
 setup checks for only that current battle, use `--startup-gates auto`. Game
 Over, Tournament Results, or verified Home `NEW_BATTLE` evidence clears either
@@ -141,8 +145,9 @@ Every Farm profile inherits the same `Farm` Cards, Workshop, and Bots presets;
 Shockwave Size, Bounce Shot Targets, and Bounce Shot Range Free Upgrade locks;
 Fetch/Summon/Scout Guardian chips; Auto Pick Perks; and Ultimate Weapon
 requirements. At a genuine `NEW_BATTLE` Home boundary, an authoritatively
-unchecked Free Upgrade lock blocks Battle until the Home route corrects and
-reverifies it; ambiguous lock evidence blocks without Surrendering. Poison
+unchecked Free Upgrade lock is corrected and reverified when possible;
+ambiguous or exhausted repair is flagged and releases Battle launch in
+degraded mode without Surrendering. Poison
 Swamp Stun is also verified and, when necessary, switched off from Workshop
 Ultimate Upgrades before Battle. The in-battle detail route remains a
 compatibility fallback only when a run lacks fresh Home-boundary proof.
@@ -154,14 +159,15 @@ retains screen-derived configuration evidence for session preflight, which
 consumes that boundary proof instead of starting the battle and returning Home
 to repeat those checks. Damage Slider, Orb Distance, Target Priority, Auto Pick
 Perks, Ultimate Weapon primary toggles, and game speed remain battle-only.
-Unknown no-battle layouts fail closed.
+Unknown no-battle layouts skip unsupported correction, retain diagnostic
+evidence, and continue degraded.
 
 Modules, Damage Slider, Orb Distance, and Target Priority are the only per-Tier
 or experimental loadout fields. Each compact profile declares `enforce`,
-`observe`, or `preserve` for all four. `enforce` blocks on mismatch and may use
-an explicit safe repair path; `observe` requires authoritative evidence but
-accepts confident differences without blocking or changing the setting;
-`preserve` neither inspects nor changes it. Modules, Orb Distance,
+`observe`, or `preserve` for all four. `enforce` repairs at an already-safe
+boundary or records a degraded mismatch; `observe` requires authoritative
+evidence but accepts confident differences without blocking or changing the
+setting; `preserve` neither inspects nor changes it. Modules, Orb Distance,
 and Target Priority resolve named presets at build time. Orb Distance presets
 bind an Extra/Workshop pair to an expected Attack Range; automation refuses to
 apply the pair unless fresh Range OCR matches that basis. Tier 18 and the

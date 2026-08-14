@@ -5,12 +5,15 @@ import hashlib
 import json
 import os
 import re
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from automation.missions.manager import MissionManager
+from automation.strategies import get_strategy
 from core.action_authority import (
     AuthorityHold,
     AuthorityHoldState,
@@ -23,6 +26,7 @@ from core.app import App
 from core.automation_supervisor import AutomationSupervisor
 from core.battle_lifecycle import HomeBattleControl
 from core.control_directives import ControlDirectiveStore
+from core.dispatch_control_boundary import dispatch_control_boundary
 from core.control_model import (
     build_home_ui_reconciliation_receipt,
     build_running_ui_reconciliation_receipt,
@@ -39,6 +43,7 @@ from core.gc_no_battle_setup import (
     GcNoBattleSetupResult,
     GcNoBattleSetupStatus,
 )
+from core.no_strategy_observer import NoStrategyRunObserver
 from core.player_save import PlayerSaveSnapshot, SaveCheckEvidence
 from core.player_save_preflight import CarriedEvidenceState
 from core.player_save_acquisition import (
@@ -115,10 +120,15 @@ def _evidence(
 
 
 @pytest.mark.parametrize("request_change", ("policy_cycle", "authority_cycle"))
+@pytest.mark.parametrize(
+    "continuation_source",
+    ("no_strategy_post_run", "degraded_battle_repair"),
+)
 def test_terminal_home_continuation_requires_unchanged_exact_requests(
     tmp_path,
     monkeypatch,
     request_change,
+    continuation_source,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
     path = tmp_path / "automation_ctl.json"
@@ -143,7 +153,7 @@ def test_terminal_home_continuation_requires_unchanged_exact_requests(
     }
 
     claim = app._build_terminal_home_continuation_claim(
-        source="no_strategy_post_run"
+        source=continuation_source
     )
 
     assert claim is not None
@@ -228,6 +238,392 @@ def test_terminal_home_continuation_never_authorizes_resume_battle():
     assert ready is False
     assert app._terminal_home_continuation is None
     app._current_control_workflow_evidence.assert_not_called()
+
+
+def test_terminal_home_continuation_retains_dispatch_until_running_and_retries_once():
+    binding = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 7,
+        "activity_scope_run_id": "scope-terminal",
+    }
+    current = {
+        **binding,
+        "activity_scope_run_id": "scope-launch",
+        "observation_id": "runtime-1:home",
+        "game_state": "home_new_battle",
+    }
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_state="RUNNING",
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+        battle_workflow=None,
+        manual_control=None,
+        manual_control_error=False,
+        interactive_development_lease_error=False,
+        battle_workflow_error=False,
+        setup_capture_error=False,
+        setup_capture=None,
+    )
+    app._mission_mgr = MagicMock()
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    app._current_run_scope_id = MagicMock(return_value="scope-launch")
+    app._terminal_home_continuation = {
+        "schema_version": 2,
+        "source": "no_strategy_post_run",
+        "phase": "armed",
+        "operation_id": "terminal-1",
+        "terminal_observation_id": "runtime-1:terminal",
+        "state_request_id": "state-1",
+        "mode_request_id": "mode-1",
+        "binding": binding,
+        "dispatch_count": 0,
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+
+    try:
+        assert app._mark_terminal_home_continuation_dispatched() is True
+        assert app._terminal_home_continuation["phase"] == "action_dispatched"
+        assert app._terminal_home_continuation["dispatch_count"] == 1
+        assert app._terminal_home_continuation_ready(
+            home_control=HomeBattleControl.NEW_BATTLE
+        ) is False
+        hold = app._operator_workflow_authority_hold()
+        assert hold is not None
+        assert hold.hold is AuthorityHold.OPERATOR_WORKFLOW
+        assert hold.allowed_auxiliary_collectors == ()
+
+        assert app._mark_terminal_home_continuation_modal_cleared() is True
+        app._reconcile_terminal_home_continuation({"state": "HOME_SCREEN"})
+        assert app._terminal_home_continuation["phase"] == "action_dispatched"
+        current["observation_id"] = "runtime-1:home-confirmed"
+        app._reconcile_terminal_home_continuation({"state": "HOME_SCREEN"})
+        assert app._terminal_home_continuation["phase"] == "retry_ready"
+        assert app._terminal_home_continuation_ready(
+            home_control=HomeBattleControl.NEW_BATTLE
+        ) is True
+
+        assert app._mark_terminal_home_continuation_dispatched() is True
+        assert app._terminal_home_continuation["dispatch_count"] == 2
+        assert app._complete_terminal_home_continuation(True) is True
+        assert app._terminal_home_continuation is None
+    finally:
+        AUTOMATION.mode = original_mode
+
+
+def test_terminal_dispatched_continuation_clears_after_control_request_change():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_state="RUNNING",
+        control_request_identity={
+            "state_request_id": "state-new",
+            "mode_request_id": "mode-1",
+        },
+        battle_workflow=None,
+        manual_control=None,
+    )
+    app._current_control_workflow_evidence = MagicMock(
+        return_value={
+            "runtime_id": "runtime-1",
+            "pid": 123,
+            "adb_target": "localhost:5555",
+            "target_generation": 7,
+            "activity_scope_run_id": "scope-launch",
+            "game_state": "unknown",
+        }
+    )
+    app._current_run_scope_id = MagicMock(return_value="scope-launch")
+    app._terminal_home_continuation = {
+        "schema_version": 2,
+        "phase": "action_dispatched",
+        "operation_id": "terminal-1",
+        "terminal_observation_id": "runtime-1:terminal",
+        "state_request_id": "state-old",
+        "mode_request_id": "mode-1",
+        "dispatch_count": 1,
+        "launch_binding": {
+            "runtime_id": "runtime-1",
+            "pid": 123,
+            "adb_target": "localhost:5555",
+            "target_generation": 7,
+            "activity_scope_run_id": "scope-launch",
+        },
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        app._reconcile_terminal_home_continuation({"state": "UNKNOWN"})
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert app._terminal_home_continuation is None
+
+
+def test_terminal_ordinary_launch_yields_instead_of_adopting_tournament():
+    current = _evidence(
+        game_state="active_battle",
+        observation_id="runtime-1:tournament",
+        scope="scope-launch",
+    )
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_state="RUNNING",
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+        battle_workflow=None,
+        manual_control=None,
+        yield_to_unexpected_manual_activity=MagicMock(
+            return_value={"manual_control_id": "manual-1"}
+        ),
+        unexpected_manual_yield_emergency=False,
+    )
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    app._current_run_scope_id = MagicMock(return_value="scope-launch")
+    app._update_action_authority = MagicMock()
+    app._publish_action_authority = MagicMock()
+    app._terminal_home_continuation = {
+        "schema_version": 2,
+        "phase": "action_dispatched",
+        "operation_id": "terminal-1",
+        "terminal_observation_id": "runtime-1:terminal",
+        "state_request_id": "state-1",
+        "mode_request_id": "mode-1",
+        "dispatch_count": 1,
+        "launch_binding": {
+            key: current[key]
+            for key in (
+                "runtime_id",
+                "pid",
+                "adb_target",
+                "target_generation",
+                "activity_scope_run_id",
+            )
+        },
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        interrupted = app._reconcile_terminal_home_continuation(
+            {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]}
+        )
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert interrupted is True
+    assert app._terminal_home_continuation is None
+    app._supervisor.yield_to_unexpected_manual_activity.assert_called_once_with(
+        current
+    )
+    assert app._complete_terminal_home_continuation(
+        True,
+        {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]},
+    ) is False
+
+
+def test_dispatch_receipt_requires_complete_exact_owner_scope_and_requests():
+    requested = _evidence(scope="scope-request")
+    current = _evidence(
+        observation_id="runtime-1:dispatch",
+        scope="scope-launch",
+    )
+    receipt = {
+        **current,
+        "state_request_id": "state-1",
+        "mode_request_id": "mode-1",
+    }
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "action_dispatched",
+        "evidence": requested,
+        "acknowledgement": receipt,
+    }
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        }
+    )
+
+    assert app._workflow_dispatch_receipt_mismatch(workflow, current) is None
+
+    empty = {**workflow, "acknowledgement": {}}
+    assert "missing or malformed" in str(
+        app._workflow_dispatch_receipt_mismatch(empty, current)
+    )
+    missing_generation = {
+        **workflow,
+        "acknowledgement": {**receipt, "target_generation": None},
+    }
+    assert app._workflow_dispatch_receipt_mismatch(
+        missing_generation,
+        current,
+    ) is not None
+    changed_scope = {**current, "activity_scope_run_id": "scope-other"}
+    assert app._workflow_dispatch_receipt_mismatch(
+        workflow,
+        changed_scope,
+    ) == "battle activity scope changed"
+    app._supervisor.control_request_identity = {
+        "state_request_id": "state-2",
+        "mode_request_id": "mode-1",
+    }
+    assert "state_request_id" in str(
+        app._workflow_dispatch_receipt_mismatch(workflow, current)
+    )
+
+
+def test_modal_retry_preserves_same_owner_dispatched_player_save_carry():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(battle_workflow=None)
+    app._terminal_home_continuation = {
+        "phase": "action_dispatched",
+        "modal_recovery_completed": True,
+    }
+    app._terminal_home_continuation_owner_current = MagicMock(
+        return_value=True
+    )
+
+    assert app._same_owner_free_ticket_retry_ready(
+        source=None,
+        request_id="",
+    ) is True
+
+    app._terminal_home_continuation = None
+    current = _evidence(scope="scope-launch")
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "action_dispatched",
+        "evidence": _evidence(scope="scope-request"),
+        "acknowledgement": {
+            **current,
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+    }
+    app._supervisor = SimpleNamespace(
+        battle_workflow=workflow,
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+    )
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    app._free_ticket_recovery_cleared = {"battle:start-1"}
+
+    assert app._same_owner_free_ticket_retry_ready(
+        source=None,
+        request_id="",
+    ) is True
+
+    app._current_control_workflow_evidence.return_value = {
+        **current,
+        "activity_scope_run_id": "scope-other",
+    }
+    assert app._same_owner_free_ticket_retry_ready(
+        source=None,
+        request_id="",
+    ) is False
+
+
+def test_uncertain_home_action_tombstone_denies_replay_if_reporting_fails():
+    current = _evidence(scope="scope-launch")
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "acknowledged",
+        "evidence": _evidence(scope="scope-request"),
+    }
+    supervisor = SimpleNamespace(
+        battle_workflow=workflow,
+        manual_control=None,
+        transition_battle_workflow=MagicMock(return_value=None),
+    )
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._runtime_uncertain_mutation_result = MagicMock()
+    app._runtime_action_guard = MagicMock(return_value=True)
+
+    app._terminalize_uncertain_battle_workflow(
+        workflow,
+        current,
+        reason="device dispatch result was uncertain",
+    )
+
+    assert "start-1" in app._uncertain_lifecycle_actions
+    supervisor.transition_battle_workflow.assert_called_once()
+    assert app._home_launch_authority_matches(
+        source="start_battle",
+        request_id="start-1",
+        home_control=HomeBattleControl.NEW_BATTLE,
+    ) is False
+
+
+def test_explicit_start_interrupts_and_yields_on_tournament_running():
+    requested = _evidence(scope="scope-request")
+    current = _evidence(
+        game_state="active_battle",
+        observation_id="runtime-1:tournament",
+        scope="scope-launch",
+    )
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "action_dispatched",
+        "evidence": requested,
+        "acknowledgement": {
+            **_evidence(
+                observation_id="runtime-1:dispatch",
+                scope="scope-launch",
+            ),
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+    }
+    supervisor = SimpleNamespace(
+        control_request_identity={
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+        },
+        transition_battle_workflow=MagicMock(return_value={"status": "interrupted"}),
+        yield_to_unexpected_manual_activity=MagicMock(
+            return_value={"manual_control_id": "manual-1"}
+        ),
+        unexpected_manual_yield_emergency=False,
+    )
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._update_action_authority = MagicMock()
+    app._publish_action_authority = MagicMock()
+
+    app._reconcile_dispatched_battle_workflow(
+        workflow,
+        current,
+        detection={"state": "RUNNING", "secondary_states": ["TOURNAMENT"]},
+    )
+
+    app._mission_mgr.revoke_initial_battle_intent.assert_called_once_with(
+        "start_battle",
+        request_id="start-1",
+    )
+    assert supervisor.transition_battle_workflow.call_args.args == (
+        "start-1",
+        "interrupted",
+    )
+    supervisor.yield_to_unexpected_manual_activity.assert_called_once_with(
+        current
+    )
 
 
 @pytest.mark.parametrize(
@@ -713,6 +1109,7 @@ def _publish_runtime_observation(
     explicit_home_intent_required: bool = False,
     terminal_home_continuation: dict[str, object] | None = None,
     acknowledgements: dict[str, object] | None = None,
+    catastrophic_pause_hold: bool = False,
 ) -> None:
     owner = {
         "runtime_id": evidence["runtime_id"],
@@ -738,6 +1135,14 @@ def _publish_runtime_observation(
         acknowledgements=acknowledgements,
         control_model={
             "schema_version": 1,
+            "catastrophic_pause_hold": {
+                "active": catastrophic_pause_hold,
+                "reason": (
+                    "test catastrophic hold"
+                    if catastrophic_pause_hold
+                    else None
+                ),
+            },
             "observation": {
                 key: value
                 for key, value in evidence.items()
@@ -991,6 +1396,126 @@ def test_directive_store_rejects_mismatched_intent_and_serializes_workflows(
     ) is None
     with pytest.raises(ValueError, match="cannot transition"):
         store.transition_battle_workflow(first["request_id"], "completed")
+
+
+@pytest.mark.parametrize("request_kind", ("battle", "setup_capture"))
+def test_input_owner_request_waits_for_current_dispatch(tmp_path, request_kind):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    evidence = _evidence()
+    request_started = threading.Event()
+    request_completed = threading.Event()
+    failures = []
+
+    def request_owner():
+        request_started.set()
+        try:
+            if request_kind == "battle":
+                store.request_battle_workflow(
+                    "start_battle",
+                    evidence=evidence,
+                    source="test",
+                )
+            else:
+                store.request_setup_capture(
+                    evidence=evidence,
+                    source="test",
+                )
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+        finally:
+            request_completed.set()
+
+    request_thread = threading.Thread(target=request_owner)
+    with dispatch_control_boundary(store.dispatch_lock_path):
+        request_thread.start()
+        assert request_started.wait(timeout=2)
+        assert not request_completed.wait(timeout=0.05)
+
+    request_thread.join(timeout=2)
+    assert not request_thread.is_alive()
+    assert request_completed.is_set()
+    assert failures == []
+
+
+def test_terminal_policy_change_waits_for_current_dispatch(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    store.set_mode("NEXT_BATTLE", source="test")
+    request_started = threading.Event()
+    request_completed = threading.Event()
+    failures = []
+
+    def select_wait():
+        request_started.set()
+        try:
+            store.set_mode("WAIT", source="test")
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+        finally:
+            request_completed.set()
+
+    request_thread = threading.Thread(target=select_wait)
+    # This boundary represents a terminal input that has passed its last
+    # policy check and is being dispatched.  The policy write may complete
+    # before or after that atomic input, but never in the middle of it.
+    with dispatch_control_boundary(store.dispatch_lock_path):
+        request_thread.start()
+        assert request_started.wait(timeout=2)
+        assert not request_completed.wait(timeout=0.05)
+
+    request_thread.join(timeout=2)
+    assert not request_thread.is_alive()
+    assert request_completed.is_set()
+    assert failures == []
+    assert store.status()["mode"] == "WAIT"
+
+
+def test_direct_manual_request_cannot_weaken_stopped_authority(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    store.set_state("STOPPED", source="test")
+
+    with pytest.raises(ValueError, match="Start Automation"):
+        store.request_manual_control(
+            evidence=_evidence(game_state="active_battle"),
+            source="test",
+        )
+
+    assert store.status()["state"] == "STOPPED"
+
+
+def test_attach_atomically_snapshots_accepted_strategy_selection(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    selected = store.set_strategy("farm_t19", source="test")
+    evidence = _evidence(game_state="active_battle")
+
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+        strategy="farm_t18",
+        source="test",
+    )
+
+    assert workflow["strategy"] == "farm_t19"
+    assert workflow["strategy_request_id"] == selected["strategy_request_id"]
+    assert len(workflow["strategy_definition_fingerprint"]) == 64
+
+    store.set_strategy("farm_t18", source="later-selection")
+    retained = store.status()["battle_workflow"]
+    assert retained["strategy"] == "farm_t19"
+    assert retained["strategy_request_id"] == selected["strategy_request_id"]
+
+
+def test_attach_without_a_strategy_snapshot_remains_valid_for_safe_legacy_fallback(
+    tmp_path,
+):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=_evidence(game_state="active_battle"),
+    )
+
+    assert workflow["status"] == "requested"
+    assert "strategy" not in workflow
 
 
 def test_take_manual_control_atomically_requests_indefinite_pause(tmp_path):
@@ -1426,13 +1951,16 @@ def test_start_dispatch_survives_preflight_scope_change_and_completes(
     ) is False
     assert app._mark_operator_battle_action_dispatched(True) is True
     assert supervisor.battle_workflow["status"] == "action_dispatched"
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
     assert app._operator_workflow_authority_hold() is not None
 
     running = _evidence(
         game_state="active_battle",
         observation_id="runtime-1:3",
         runtime_id=str(owner["runtime_id"]),
-        scope="scope-preflight",
+        scope=str(launch_scope),
     )
     running["pid"] = owner["pid"]
     app._control_observation = {
@@ -1628,6 +2156,9 @@ def test_dispatched_start_interrupts_on_a_definitive_wrong_boundary(
     }
     app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
     assert app._mark_operator_battle_action_dispatched(True) is True
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
 
     changed = _evidence(
         game_state=changed_state,
@@ -1675,11 +2206,15 @@ def test_dispatched_start_fails_closed_after_bounded_home_timeout(
     }
     app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
     assert app._mark_operator_battle_action_dispatched(True) is True
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
     dispatched_at = datetime.fromisoformat(
         str(supervisor.battle_workflow["updated_at"])
     )
     app._control_observation = {
         **app._control_observation,
+        "activity_scope_run_id": launch_scope,
         "observation_id": "runtime-1:timeout",
         "observed_at": (
             dispatched_at + timedelta(seconds=21)
@@ -1690,6 +2225,72 @@ def test_dispatched_start_fails_closed_after_bounded_home_timeout(
 
     assert supervisor.battle_workflow["status"] == "failed"
     assert "within 20 seconds" in supervisor.battle_workflow["reason"]
+    assert supervisor.control_state == "PAUSED"
+    assert str(supervisor.battle_workflow["request_id"]) in (
+        app._uncertain_lifecycle_actions
+    )
+
+
+def test_dispatched_start_suspends_timeout_for_known_modal_then_retries_once(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(runtime_id=str(owner["runtime_id"]))
+    evidence["pid"] = owner["pid"]
+    store.request_battle_workflow("start_battle", evidence=evidence)
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+    assert app._mark_operator_battle_action_dispatched(True) is True
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
+    dispatched_at = datetime.fromisoformat(
+        str(supervisor.battle_workflow["updated_at"])
+    )
+    app._control_observation = {
+        **app._control_observation,
+        "activity_scope_run_id": launch_scope,
+        "observation_id": "runtime-1:modal-timeout",
+        "observed_at": (
+            dispatched_at + timedelta(seconds=60)
+        ).isoformat(timespec="seconds"),
+    }
+
+    app._sync_operator_control_workflows({"state": "FREE_TICKET"})
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
+
+    recovery_key = app._battle_workflow_recovery_key(
+        supervisor.battle_workflow
+    )
+    app._free_ticket_recovery_cleared_set().add(recovery_key)
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
+    app._control_observation = {
+        **app._control_observation,
+        "observation_id": "runtime-1:modal-home-confirmed",
+    }
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+
+    assert supervisor.battle_workflow["status"] == "ready"
+    assert app._mark_operator_battle_action_dispatched(True) is True
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
 
 
 def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
@@ -1765,6 +2366,110 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
     assert supervisor.battle_workflow["status"] == "completed"
 
 
+def test_attach_completion_report_failure_never_reclaims_terminal_hold(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+    )
+    for status in ("acknowledged", "validating_save"):
+        store.transition_battle_workflow(
+            workflow["request_id"],
+            status,
+            acknowledgement=evidence,
+        )
+    claim = _running_save_claim(workflow["request_id"], evidence)
+    store.transition_battle_workflow(
+        workflow["request_id"],
+        "ready",
+        acknowledgement=evidence,
+        save_receipt=claim[0],
+    )
+    later_strategy = store.set_strategy(
+        "farm_t18",
+        apply_mode="active_battle",
+        source="request-after-attach",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    _retain_running_save_claim(
+        app,
+        workflow["request_id"],
+        evidence,
+        claim,
+    )
+    app._pending_strategy_request = supervisor.strategy_request
+
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+    manager.maybe_run_start({"state": "RUNNING"})
+    with patch.object(
+        supervisor,
+        "transition_battle_workflow",
+        return_value=None,
+    ):
+        assert app._complete_ready_attachment_after_adoption() is True
+
+    retained = app._running_reconciliation_claims()[workflow["request_id"]]
+    assert retained["semantic_completion_applied"] is True
+    assert app._pending_strategy_request == (
+        "farm_t18",
+        later_strategy["strategy_request_id"],
+        "next_boundary",
+    )
+    assert store.status()["strategy_request_id"] == later_strategy[
+        "strategy_request_id"
+    ]
+    assert store.status()["strategy_apply_mode"] == "next_boundary"
+    assert app._operator_workflow_authority_hold() is None
+    degradation = manager.running_configuration_degradation()
+    assert degradation is not None
+    assert "attachment_reporting" in degradation["sources"]
+    assert "workflow_reporting" in degradation["failed_checks"]
+
+    terminal_evidence = _evidence(
+        game_state="game_over",
+        observation_id="runtime-1:terminal",
+    )
+    app._control_observation = {
+        key: value
+        for key, value in terminal_evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._sync_operator_control_workflows({"state": "GAME_OVER"})
+    assert supervisor.battle_workflow["status"] == "completed"
+    manager.maybe_run_start({"state": "GAME_OVER"})
+    assert manager.active_battle_observed() is False
+    assert app._operator_workflow_authority_hold() is None
+    repaired_degradation = manager.running_configuration_degradation()
+    assert repaired_degradation is not None
+    assert "attachment_reporting" not in repaired_degradation["sources"]
+    assert "attachment_applicability" in repaired_degradation["sources"]
+    assert "workflow_reporting" not in repaired_degradation["failed_checks"]
+
+
 def test_unusable_attach_save_releases_enabled_ui_monitoring(
     tmp_path,
     monkeypatch,
@@ -1829,6 +2534,103 @@ def test_unusable_attach_save_releases_enabled_ui_monitoring(
     assert supervisor.is_paused is False
 
 
+def test_attach_reporting_failure_adopts_degraded_observer_and_completes(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    store.set_strategy("none", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=evidence,
+        source="test",
+    )
+    for status in ("acknowledged", "validating_save"):
+        store.transition_battle_workflow(
+            workflow["request_id"],
+            status,
+            acknowledgement=evidence,
+        )
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._no_strategy_observer = NoStrategyRunObserver()
+    app._no_strategy_observation_active = False
+    app._no_strategy_attachment_boundary_id = None
+    app._no_strategy_inventory_complete = False
+    app._no_strategy_inventory_retry_at = 0.0
+    app._pending_no_strategy_record = None
+
+    with patch(
+        "core.app.build_running_ui_reconciliation_receipt",
+        side_effect=ValueError("report serializer unavailable"),
+    ):
+        handled = app._complete_ui_backed_operator_reconciliation(
+            SimpleNamespace(
+                ui_fallback_complete=True,
+                ui_fallback_reason="unsupported_save_version",
+                confirmed_same_battle_scope_id="scope-1",
+                confirmed_later_battle_scope_id=None,
+            )
+        )
+
+    assert handled is True
+    assert manager.awaiting_initial_battle_intent() is False
+    degradation = manager.running_configuration_degradation()
+    assert degradation is not None
+    assert "attachment_reporting" in degradation["sources"]
+    assert degradation["failed_checks"] == ["workflow_reporting"]
+
+    assert manager.maybe_run_start({"state": "RUNNING"}) is False
+    assert manager.active_battle_observed() is True
+    assert app._operator_workflow_authority_hold() is None
+    assert app._complete_ready_attachment_after_adoption() is True
+    assert supervisor.battle_workflow["status"] == "completed"
+    assert supervisor.battle_workflow["configuration"]["reporting_status"] == (
+        "unavailable"
+    )
+    completed_degradation = manager.running_configuration_degradation()
+    assert completed_degradation is not None
+    assert completed_degradation["sources"] == ["attachment_reporting"]
+    assert completed_degradation["failed_checks"] == ["workflow_reporting"]
+    assert App._degradation_requires_home_repair(completed_degradation) is False
+    assert supervisor.is_paused is False
+
+
+def test_reporting_only_degradation_does_not_manufacture_home_repair():
+    assert App._degradation_requires_home_repair(
+        {
+            "sources": ["attachment_reporting"],
+            "failed_checks": ["workflow_reporting"],
+        }
+    ) is False
+    assert App._degradation_requires_home_repair(
+        {
+            "sources": ["attachment_reporting", "attachment_configuration"],
+            "failed_checks": ["workflow_reporting", "modules"],
+        }
+    ) is True
+
+
 def test_return_control_stays_input_blocked_during_reconciliation(
     tmp_path,
     monkeypatch,
@@ -1883,25 +2685,33 @@ def test_return_control_stays_input_blocked_during_reconciliation(
 
 
 @pytest.mark.parametrize(
-    ("status", "reason", "background_dispatched", "expected_status"),
     (
-        ("blocked", "action_not_authorized", False, "failed"),
+        "status",
+        "reason",
+        "background_dispatched",
+        "expected_status",
+        "paused",
+    ),
+    (
+        ("blocked", "action_not_authorized", False, "failed", False),
         (
             "blocked",
             "restored_target_or_new_battle_boundary_unverified",
             True,
             "interrupted",
+            True,
         ),
-        ("ready", "stable_save_unavailable", True, "failed"),
+        ("ready", "stable_save_unavailable", True, "failed", False),
     ),
 )
-def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
+def test_home_return_refresh_failure_uses_global_failure_policy(
     tmp_path,
     monkeypatch,
     status,
     reason,
     background_dispatched,
     expected_status,
+    paused,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
     path = tmp_path / "automation_ctl.json"
@@ -1957,6 +2767,8 @@ def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
                 else "not_attempted"
             ),
             "background_dispatched": background_dispatched,
+            "lifecycle_input_attempted": background_dispatched,
+            "source_restored": status == "ready",
         },
         acquisition=None,
         context=None,
@@ -1974,8 +2786,17 @@ def test_home_return_refresh_failure_pauses_terminally_without_repeating_input(
 
     terminal = supervisor.manual_control
     assert terminal["status"] == expected_status
-    assert "Automation remains Paused" in terminal["detail"]
-    assert supervisor.is_paused is True
+    assert (
+        "Automation remains Paused"
+        if paused
+        else "Automation continues in degraded mode"
+    ) in terminal["detail"]
+    assert supervisor.is_paused is paused
+    assert terminal["refresh_status"] == (
+        "home_save_restoration_interrupted"
+        if paused
+        else "home_save_refresh_failed_continued"
+    )
     assert acquisitions == [result]
 
 
@@ -2070,6 +2891,111 @@ def test_home_return_uses_ui_when_restored_save_is_unavailable(
     app._run_home_setup_attempts.assert_called_once()
 
 
+def test_home_return_report_failure_releases_hold_and_retries_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="home_new_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=evidence, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = SimpleNamespace(
+        session_preflight_requirements=lambda: {}
+    )
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    context = object()
+    app._current_player_save_preflight_context = lambda: context
+    captured = datetime.now(timezone.utc)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="captured",
+        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        acquisition_started_at=captured - timedelta(milliseconds=1),
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=SimpleNamespace(),
+    )
+    result = SimpleNamespace(
+        ready=True,
+        acquisition=acquisition,
+        context=context,
+        decisions={},
+        as_dict=lambda: {"ready": True},
+    )
+    app._flag_recoverable_runtime_failure = MagicMock()
+    original_transition = supervisor.transition_manual_control
+
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        return_value=None,
+    ):
+        assert app._complete_home_return_reconciliation(
+            result,
+            screenshot=object(),
+        ) is True
+
+    current_manual = supervisor.manual_control
+    claim = app._pending_return_reconciliation_claims()[
+        current_manual["manual_control_id"]
+    ]
+    assert current_manual["status"] == "reconciling"
+    assert claim["semantic_completion_applied"] is True
+    assert claim["completion_kind"] == "home"
+    assert app._operator_workflow_authority_hold() is None
+    app._mission_mgr.finish_manual_return_reconciliation.assert_called_once_with()
+
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        wraps=original_transition,
+    ):
+        assert app._retry_pending_return_completion_report(
+            current_manual,
+            claim,
+        ) is True
+
+    assert supervisor.manual_control["status"] == "completed"
+    assert app._pending_return_reconciliation_claims() == {}
+
+
 def test_home_return_reports_nonretryable_setup_for_manual_correction(
     tmp_path,
     monkeypatch,
@@ -2095,6 +3021,10 @@ def test_home_return_reports_nonretryable_setup_for_manual_correction(
     store.request_return_control(
         manual["manual_control_id"],
         evidence=evidence,
+        source="test",
+    )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
         source="test",
     )
     store.transition_manual_control(
@@ -2140,6 +3070,7 @@ def test_home_return_reports_nonretryable_setup_for_manual_correction(
                 "reason": "current order needs UI validation",
             }
         },
+        as_dict=lambda: {"ready": True},
     )
     setup = GcNoBattleSetupResult(
         GcNoBattleSetupStatus.FAILED,
@@ -2154,18 +3085,20 @@ def test_home_return_reports_nonretryable_setup_for_manual_correction(
         screenshot=object(),
     ) is True
 
-    blocked = supervisor.manual_control
-    assert blocked["status"] == "awaiting_manual_correction"
-    assert blocked["refresh_status"] == "manual_correction_required"
-    assert blocked["configuration"]["failed_check"] == (
+    completed = supervisor.manual_control
+    assert completed["status"] == "completed"
+    assert completed["refresh_status"] == (
+        "home_reconciliation_complete_degraded"
+    )
+    assert completed["configuration"]["failed_check"] == (
         "perk_auto_pick_order"
     )
-    assert blocked["configuration"]["retryable_from_home"] is False
-    assert "made no stable progress" in blocked["detail"]
-    assert blocked["save_receipt"]["acquisition"]["type"] == (
+    assert completed["configuration"]["retryable_from_home"] is False
+    assert "made no stable progress" in completed["detail"]
+    assert completed["save_receipt"]["acquisition"]["type"] == (
         "forced_serialization"
     )
-    assert supervisor.is_paused is True
+    assert supervisor.is_paused is False
     app._run_home_setup_attempts.assert_called_once()
     assert app._complete_home_return_reconciliation(
         result,
@@ -2222,7 +3155,8 @@ def test_post_serialization_interruption_terminates_attach_and_pauses(
         SimpleNamespace(
             operator_workflow_interruption_reason=(
                 "active_attachment_restored_source_convergence_timeout"
-            )
+            ),
+            operator_workflow_source_restored=False,
         )
     )
 
@@ -2262,6 +3196,10 @@ def test_identity_projection_failure_terminates_return_and_discards_claim(
         evidence=evidence,
         source="test",
     )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
     store.transition_manual_control(
         manual["manual_control_id"],
         "reconciling",
@@ -2282,19 +3220,20 @@ def test_identity_projection_failure_terminates_return_and_discards_claim(
         SimpleNamespace(
             operator_workflow_interruption_reason=(
                 "active_attachment_temporal_projection_unavailable"
-            )
+            ),
+            operator_workflow_source_restored=True,
         )
     )
 
-    assert supervisor.is_paused is True
+    assert supervisor.is_paused is False
     assert supervisor.manual_control["status"] == "failed"
     assert supervisor.manual_control["refresh_status"] == (
-        "save_restoration_interrupted"
+        "save_evidence_rejected_continued"
     )
     assert app._manual_return_reconciliation_claims == {}
 
 
-def test_running_return_trusted_save_mismatch_pauses_without_ui_fallback(
+def test_running_return_trusted_save_mismatch_completes_degraded(
     tmp_path,
     monkeypatch,
 ):
@@ -2327,14 +3266,81 @@ def test_running_return_trusted_save_mismatch_pauses_without_ui_fallback(
 
     assert completed is True
     manual = supervisor.manual_control
-    assert manual["status"] == "awaiting_configuration"
-    assert manual["refresh_status"] == "trusted_mismatch_paused"
+    assert manual["status"] == "completed"
+    assert manual["refresh_status"] == "reconciliation_complete_degraded"
     assert manual["configuration"]["trusted_mismatch_check_ids"] == [
         "workshop_preset"
     ]
     assert manual["configuration"]["ui_required_check_ids"] == []
-    assert supervisor.is_paused is True
+    assert supervisor.is_paused is False
     manager.begin_manual_return_reconciliation.assert_not_called()
+    manager.mark_running_configuration_degraded.assert_called_once_with(
+        source="return_control",
+        reason="Return Control found: workshop_preset",
+        failed_checks=("workshop_preset",),
+    )
+
+
+def test_running_return_report_failure_releases_hold_and_retries_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    (
+        app,
+        supervisor,
+        manager,
+        _evidence_value,
+        acquisition,
+        temporal,
+        observations,
+        context,
+    ) = _running_return_fixture(
+        tmp_path,
+        snapshot=_player_save_snapshot("workshop_preset", "Farm"),
+        observed_value="Farm",
+    )
+    app._flag_recoverable_runtime_failure = MagicMock()
+    original_transition = supervisor.transition_manual_control
+
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        return_value=None,
+    ):
+        assert app._complete_save_backed_operator_reconciliation(
+            outcome=SimpleNamespace(
+                confirmed_same_battle_scope_id="scope-1",
+                confirmed_later_battle_scope_id=None,
+            ),
+            acquisition=acquisition,
+            temporal_binding=temporal,
+            observations=observations,
+            context=context,
+        ) is True
+
+    manual = supervisor.manual_control
+    claim = app._pending_return_reconciliation_claims()[
+        manual["manual_control_id"]
+    ]
+    assert manual["status"] == "reconciling"
+    assert claim["semantic_completion_applied"] is True
+    assert app._operator_workflow_authority_hold() is None
+    manager.finish_manual_return_reconciliation.assert_called_once_with()
+    app._flag_recoverable_runtime_failure.assert_called_once()
+
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        wraps=original_transition,
+    ):
+        assert app._retry_pending_return_completion_report(
+            manual,
+            claim,
+        ) is True
+
+    assert supervisor.manual_control["status"] == "completed"
+    assert app._pending_return_reconciliation_claims() == {}
 
 
 def test_unusable_running_return_save_starts_supported_ui_reconciliation(
@@ -2379,15 +3385,11 @@ def test_unusable_running_return_save_starts_supported_ui_reconciliation(
     manager.begin_manual_return_reconciliation.assert_called_once_with()
 
 
-def test_capture_reviews_manual_changes_from_exact_retained_return_save(
+def test_completed_return_mismatch_does_not_retain_capture_authority(
     tmp_path,
     monkeypatch,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
-    runtime_save = SimpleNamespace(
-        round_active=True,
-        active_round_identity=SimpleNamespace(fingerprint="a" * 64),
-    )
     (
         app,
         supervisor,
@@ -2402,7 +3404,6 @@ def test_capture_reviews_manual_changes_from_exact_retained_return_save(
         snapshot=_player_save_snapshot(
             "workshop_preset",
             "Tourney",
-            runtime_save=runtime_save,
         ),
         observed_value="Tourney",
     )
@@ -2417,69 +3418,35 @@ def test_capture_reviews_manual_changes_from_exact_retained_return_save(
         context=context,
     ) is True
     manual = supervisor.manual_control
-    assert manual["status"] == "awaiting_configuration"
-    assert supervisor.is_paused is True
+    assert manual["status"] == "completed"
+    assert supervisor.is_paused is False
+    assert app._pending_return_reconciliation_claims() == {}
 
     service = ControlSurfaceService(
         repository_root=tmp_path,
         control_file=supervisor.control_file,
     )
+    control = service.control_store.status()
     _publish_runtime_observation(
         service,
         evidence,
-        paused=True,
+        paused=False,
         active_battle_adopted=True,
         active_strategy="active-farm",
+        acknowledgements=_runtime_acknowledgements(
+            state=("RUNNING", control["state_request_id"]),
+        ),
     )
     availability = service.status()["control_model"]["actions"][
         "capture_current_setup"
     ]
-    assert availability["available"] is True
-    assert availability["code"] == "available_from_return_control"
+    assert availability["available"] is True, availability
+    assert availability["code"] == "available"
 
     requested = service.apply_setup_capture({"operation": "request"})
     capture = requested["capture"]
-    assert capture["acquisition_source"] == (
-        "retained_return_control_refresh"
-    )
-    assert capture["source_manual_control_id"] == manual[
-        "manual_control_id"
-    ]
-    supervisor.apply_control()
-
-    monkeypatch.setattr(
-        "core.app.GuardedPlayerSaveSerializer",
-        lambda **_kwargs: pytest.fail(
-            "retained Return Control evidence must not request another refresh"
-        ),
-    )
-    monkeypatch.setattr(
-        "core.app.project_forced_save_setup",
-        lambda bundle: (
-            _capture_preview(evidence=evidence, acquisition=bundle)
-            if bundle is acquisition
-            else pytest.fail("capture used a different acquisition")
-        ),
-    )
-    app._setup_capture_source_refreshed = False
-    app._log_operator_workflow_result = lambda *_args, **_kwargs: None
-
-    app._sync_operator_control_workflows({"state": "RUNNING"})
-
-    ready = supervisor.setup_capture
-    assert ready["status"] == "ready"
-    assert "without new device input" in ready["reason"]
-    assert ready["preview"]["capture_origin"]["acquisition_source"] == (
-        "retained_return_control_refresh"
-    )
-    assert len(
-        ready["preview"]["capture_origin"][
-            "source_manual_control_fingerprint"
-        ]
-    ) == 64
-    assert app._setup_capture_source_refreshed is False
-    assert supervisor.manual_control["status"] == "awaiting_configuration"
-    assert supervisor.is_paused is True
+    assert capture["acquisition_source"] == "new_setup_capture_refresh"
+    assert "source_manual_control_id" not in capture
 
 
 @pytest.mark.parametrize(
@@ -2706,6 +3673,29 @@ def test_running_return_save_match_completes_without_using_queued_strategy(
     assert supervisor.manual_control["configuration"]["status"] == "complete"
     assert supervisor.is_paused is False
     manager.begin_manual_return_reconciliation.assert_not_called()
+
+
+def test_return_control_excludes_profile_skipped_requirements():
+    strategy = SimpleNamespace(
+        session_preflight_requirements=lambda: {
+            "workshop_preset": "Farm",
+            "perk_bans": ["interest"],
+            "profile_skips": ["perk_bans"],
+        }
+    )
+    app = App.__new__(App)
+    app._mission_mgr = SimpleNamespace(
+        strategy=strategy,
+        session_preflight_waivers=lambda: {},
+    )
+
+    requirements = app._active_strategy_session_requirements()
+
+    assert requirements["workshop_preset"] == "Farm"
+    assert "perk_bans" not in requirements
+    assert requirements["_gate_waivers"]["perk_bans"]["source"] == (
+        "strategy_profile"
+    )
 
 
 def test_running_return_persists_forced_save_before_ui_fallback_is_armed(
@@ -2935,6 +3925,96 @@ def test_terminal_ui_fallback_completion_retry_preserves_enabled_authority(
         "terminal_stats_ui"
     )
     assert supervisor.is_paused is False
+    assert app._manual_terminal_claims() == {}
+
+
+def test_terminal_completion_report_failure_does_not_retain_manual_hold(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    starting = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    starting["pid"] = owner["pid"]
+    evidence = _evidence(
+        game_state="game_over",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=starting, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=starting,
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "awaiting_enable",
+    )
+    store.enable_after_return_control(
+        manual["manual_control_id"],
+        source="test",
+    )
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "reconciling",
+    )
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._manual_return_reconciliation_claims = {}
+    receipt = build_terminal_ui_reconciliation_receipt(
+        workflow_id=manual["manual_control_id"],
+        observation_id=str(evidence["observation_id"]),
+        evidence=evidence,
+        killed_by="Boss",
+        reason="terminal_save_report_unavailable",
+    )
+    app._manual_terminal_save_claims = {
+        manual["manual_control_id"]: {
+            "semantic_completion_applied": True,
+            "pending_completion": {
+                "detail": "terminal route complete",
+                "refresh_status": "terminal_reconciliation_complete",
+                "save_receipt": receipt,
+            },
+        }
+    }
+    app._flag_recoverable_runtime_failure = MagicMock()
+    current_manual = supervisor.manual_control
+
+    assert app._operator_workflow_authority_hold() is None
+    with patch.object(
+        supervisor,
+        "transition_manual_control",
+        return_value=None,
+    ):
+        assert app._retry_pending_manual_terminal_completion(
+            current_manual,
+            None,
+        ) is None
+
+    assert app._operator_workflow_authority_hold() is None
+    assert app._flag_recoverable_runtime_failure.call_count == 1
+    completed = app._retry_pending_manual_terminal_completion(
+        current_manual,
+        None,
+    )
+    assert completed is not None
+    assert completed["status"] == "completed"
     assert app._manual_terminal_claims() == {}
 
 
@@ -3191,6 +4271,185 @@ def test_attach_stays_pending_before_battle_adoption(tmp_path, monkeypatch):
     assert hold is not None
     assert hold.hold.value == "operator_workflow"
     assert hold.allowed_auxiliary_collectors == ()
+
+
+def test_attach_strategy_decision_uses_exact_tier_and_fresh_battle_kind():
+    app = App.__new__(App)
+    app._strategy_session_requirements = lambda _strategy: {}
+    evidence = _evidence(game_state="active_battle")
+    acquisition, _temporal, _context = _running_reconciliation_objects(
+        evidence,
+        snapshot=SimpleNamespace(
+            runtime_save=SimpleNamespace(
+                active_round_identity=SimpleNamespace(current_tier=19)
+            )
+        ),
+    )
+
+    farm_t19 = get_strategy("farm_t19")
+    assert farm_t19 is not None
+    matching = app._attachment_strategy_decision(
+        {
+            "strategy": "farm_t19",
+            "strategy_request_id": "strategy-1",
+            "strategy_definition_fingerprint": (
+                farm_t19.definition_fingerprint()
+            ),
+        },
+        acquisition=acquisition,
+    )
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    compatible = app._resolve_ready_attachment_strategy(
+        matching,
+        {"state": "RUNNING", "secondary_states": []},
+        frame,
+    )
+    unverified = app._resolve_ready_attachment_strategy(
+        matching,
+        {"state": "RUNNING", "secondary_states": []},
+        None,
+    )
+    wrong_kind = app._resolve_ready_attachment_strategy(
+        matching,
+        {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]},
+        None,
+    )
+    covered_hud = app._resolve_ready_attachment_strategy(
+        matching,
+        {"state": "CARDS", "secondary_states": []},
+        frame,
+    )
+    wrong_tier = app._attachment_strategy_decision(
+        {
+            "strategy": "farm_t18",
+            "strategy_request_id": "strategy-2",
+            "strategy_definition_fingerprint": (
+                get_strategy("farm_t18").definition_fingerprint()
+            ),
+        },
+        acquisition=acquisition,
+    )
+    changed_definition = app._attachment_strategy_decision(
+        {
+            "strategy": "farm_t19",
+            "strategy_request_id": "strategy-1",
+            "strategy_definition_fingerprint": "0" * 64,
+        },
+        acquisition=acquisition,
+    )
+
+    assert compatible["attachment_mode"] == "strategy"
+    assert compatible["applicability"] == "compatible"
+    assert compatible["observed_kind"] == "ordinary"
+    assert unverified["attachment_mode"] == "observation_only"
+    assert unverified["applicability"] == "unverifiable"
+    assert unverified["failed_checks"] == ["battle_kind"]
+    assert wrong_kind["attachment_mode"] == "observation_only"
+    assert wrong_kind["applicability"] == "incompatible"
+    assert wrong_kind["failed_checks"] == ["battle_kind"]
+    assert covered_hud["attachment_mode"] == "observation_only"
+    assert covered_hud["applicability"] == "unverifiable"
+    assert covered_hud["failed_checks"] == ["battle_kind"]
+    assert wrong_tier["attachment_mode"] == "observation_only"
+    assert wrong_tier["applicability"] == "incompatible"
+    assert wrong_tier["failed_checks"] == ["battle_tier"]
+    assert changed_definition["attachment_mode"] == "observation_only"
+    assert changed_definition["applicability"] == "unverifiable"
+    assert "changed after Attach" in changed_definition["reason"]
+
+
+def test_attach_strategy_decision_excludes_profile_skipped_configuration():
+    app = App.__new__(App)
+    app._strategy_session_requirements = lambda _strategy: {
+        "perk_bans": [],
+        "profile_skips": ["perk_bans"],
+    }
+    evidence = _evidence(game_state="active_battle")
+    acquisition, temporal, _context = _running_reconciliation_objects(
+        evidence,
+        snapshot=SimpleNamespace(
+            runtime_save=SimpleNamespace(
+                active_round_identity=SimpleNamespace(current_tier=19)
+            )
+        ),
+    )
+    strategy = get_strategy("farm_t19")
+    assert strategy is not None
+    observations = RunningAttachmentSaveObservations(
+        binding=temporal,
+        facts=(
+            RunningAttachmentSaveFact(
+                check_id="perk_bans",
+                temporal_class=PlayerSaveTemporalClass.ROUND_INVARIANT,
+                value=["interest"],
+                source_fields=("field",),
+            ),
+        ),
+    )
+
+    with patch(
+        "core.app.reconcile_acquired_requirements",
+        return_value={
+            "checks": {
+                "perk_bans": {
+                    "disposition": "save_mismatch",
+                    "expected": [],
+                    "observed": ["interest"],
+                }
+            }
+        },
+    ):
+        decision = app._attachment_strategy_decision(
+            {
+                "strategy": "farm_t19",
+                "strategy_request_id": "strategy-1",
+                "strategy_definition_fingerprint": (
+                    strategy.definition_fingerprint()
+                ),
+            },
+            acquisition=acquisition,
+            observations=observations,
+        )
+
+    assert decision["attachment_mode"] == "strategy"
+    assert decision["degraded"] is False
+    assert decision["failed_checks"] == []
+    assert "perk_bans" not in decision["_requirements"]
+    assert decision["_requirements"]["_gate_waivers"]["perk_bans"][
+        "source"
+    ] == "strategy_profile"
+
+
+def test_attach_strategy_decision_distinguishes_none_and_unverifiable():
+    app = App.__new__(App)
+    app._strategy_session_requirements = lambda _strategy: {}
+
+    no_strategy = app._attachment_strategy_decision({"strategy": "none"})
+    legacy = app._attachment_strategy_decision({})
+    tournament_strategy = get_strategy("tournament")
+    assert tournament_strategy is not None
+    tournament = app._attachment_strategy_decision(
+        {
+            "strategy": "tournament",
+            "strategy_request_id": "strategy-1",
+            "strategy_definition_fingerprint": (
+                tournament_strategy.definition_fingerprint()
+            ),
+        },
+        ui_fallback_reason="unsupported_save_version",
+    )
+    compatible_tournament = app._resolve_ready_attachment_strategy(
+        tournament,
+        {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]},
+        None,
+    )
+
+    assert no_strategy["applicability"] == "intentional_observation"
+    assert no_strategy["degraded"] is False
+    assert legacy["applicability"] == "unverifiable"
+    assert legacy["degraded"] is True
+    assert compatible_tournament["attachment_mode"] == "strategy"
+    assert compatible_tournament["applicability"] == "compatible"
 
 
 def test_enabled_attach_begins_validation_on_first_runtime_sync(
@@ -3587,6 +4846,31 @@ def test_battle_intent_authorization_can_change_after_a_natural_boundary(
     assert manager.maybe_run_start({"state": "RUNNING"}) is True
 
 
+def test_attach_authorization_adopts_only_the_resolved_snapshot_strategy():
+    selected = get_strategy("farm_t19")
+    assert selected is not None
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+
+    assert manager.authorize_initial_battle_intent(
+        "attach_battle",
+        request_id="attach-1",
+        strategy=selected,
+    )
+    assert manager.strategy is selected
+
+    manager.revoke_initial_battle_intent(
+        "attach_battle",
+        request_id="attach-1",
+    )
+    assert manager.authorize_initial_battle_intent(
+        "attach_battle",
+        request_id="attach-2",
+        observation_only=True,
+    )
+    assert manager.strategy is None
+
+
 def test_operator_workflow_is_interrupted_when_boundary_changes_before_enable(
     tmp_path,
     monkeypatch,
@@ -3704,6 +4988,9 @@ def test_malformed_manual_control_fails_closed_without_overwrite(
         with pytest.raises(ControlSurfaceRequestError) as invalid:
             service.apply_control({"action": action})
         assert invalid.value.code == "manual_control_invalid"
+    assert model["actions"]["pause"]["available"] is True
+    paused = service.apply_control({"action": "pause"})
+    assert paused["control"]["state"] == "PAUSED"
     assert service.control_store.read()["manual_control"] == raw_manual
 
     supervisor = AutomationSupervisor(
@@ -3816,7 +5103,7 @@ def test_manual_handoff_hold_survives_concurrent_running_directive(
     assert hold.hold.value == "manual_control_return"
 
 
-def test_repeated_return_enable_is_pending_and_keeps_request_identity(
+def test_repeated_return_enable_refreshes_unacknowledged_request_identity(
     tmp_path,
 ):
     service = ControlSurfaceService(repository_root=tmp_path)
@@ -3843,9 +5130,80 @@ def test_repeated_return_enable_is_pending_and_keeps_request_identity(
     second = service.apply_control({"action": "enable"})
 
     assert first["request"]["disposition"] == "requested"
-    assert second["request"]["disposition"] == "pending"
-    assert second["control"]["state_request_id"] == request_id
+    assert second["request"]["disposition"] == "requested"
+    assert second["control"]["state_request_id"] != request_id
     assert second["control_model"]["manual_control"]["updated_at"] == updated_at
+
+
+def test_return_reconciliation_can_be_paused_and_reenabled(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(service, evidence, paused=False)
+    manual = service.control_store.request_manual_control(
+        evidence=evidence,
+        source="test",
+    )
+    manual_id = manual["manual_control_id"]
+    service.control_store.transition_manual_control(
+        manual_id,
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    service.control_store.request_return_control(
+        manual_id,
+        evidence=evidence,
+        source="test",
+    )
+    service.control_store.enable_after_return_control(
+        manual_id,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual_id,
+        "reconciling",
+    )
+
+    assert service.status()["control_model"]["actions"]["pause"]["available"]
+    paused = service.apply_control({"action": "pause"})
+    pause_request_id = paused["control"]["state_request_id"]
+    assert paused["control_model"]["manual_control"]["status"] == "reconciling"
+
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=True,
+        acknowledgements=_runtime_acknowledgements(
+            state=(pause_request_id, "PAUSED")
+        ),
+    )
+    enabled = service.apply_control({"action": "enable"})
+
+    assert enabled["control"]["state"] == "RUNNING"
+    assert enabled["control"]["state_request_id"] != pause_request_id
+    assert enabled["control_model"]["manual_control"]["status"] == "reconciling"
+
+
+def test_pause_does_not_wait_for_process_lifecycle_lock(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    _publish_runtime_observation(service, _evidence(), paused=False)
+    completed = threading.Event()
+    response = []
+
+    service._process_action_lock.acquire()
+    try:
+        worker = threading.Thread(
+            target=lambda: (
+                response.append(service.apply_control({"action": "pause"})),
+                completed.set(),
+            )
+        )
+        worker.start()
+        assert completed.wait(timeout=1)
+    finally:
+        service._process_action_lock.release()
+        worker.join(timeout=2)
+
+    assert response[0]["control"]["state"] == "PAUSED"
 
 
 def test_runtime_awaiting_enable_while_paused_starts_enable_request(tmp_path):
@@ -3881,6 +5239,103 @@ def test_runtime_awaiting_enable_while_paused_starts_enable_request(tmp_path):
     resumed = response["control_model"]["manual_control"]
     assert resumed["status"] == "awaiting_enable"
     assert resumed["refresh_status"] == "save_refresh_pending_after_enable"
+
+
+def test_enable_replaces_running_request_when_runtime_is_effectively_paused(
+    tmp_path,
+):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    running = service.control_store.set_state("RUNNING", source="test")
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=True,
+        acknowledgements=_runtime_acknowledgements(
+            state=("RUNNING", running["state_request_id"]),
+        ),
+    )
+
+    before = service.status()
+    response = service.apply_control({"action": "enable"})
+
+    assert (
+        before["control_model"]["action_authority"]["effective"]
+        == "paused"
+    )
+    assert before["acknowledgements"]["state"]["acknowledges_current"] is True
+    assert response["request"]["disposition"] == "requested"
+    assert response["control"]["state"] == "RUNNING"
+    assert response["control"]["state_request_id"] != running["state_request_id"]
+
+
+def test_catastrophic_hold_without_ack_can_be_released_by_enable(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    running = service.control_store.set_state("RUNNING", source="old-running")
+    supervisor = AutomationSupervisor(
+        control_file=str(service.control_path),
+        auto_return_enabled=False,
+    )
+    supervisor.apply_control()
+    supervisor._latch_catastrophic_pause("test authority loss")
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=True,
+        acknowledgements=None,
+        catastrophic_pause_hold=True,
+    )
+
+    response = service.apply_control({"action": "enable"})
+    supervisor.apply_control()
+
+    assert response["request"]["disposition"] == "requested"
+    assert response["control"]["state_request_id"] != running["state_request_id"]
+    assert not supervisor.is_paused
+    assert supervisor.catastrophic_pause_hold["active"] is False
+
+
+def test_catastrophic_hold_refreshes_running_enable_during_return_control(
+    tmp_path,
+):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    evidence = _evidence(game_state="active_battle")
+    manual = service.control_store.request_manual_control(
+        evidence=evidence,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=evidence,
+    )
+    service.control_store.request_return_control(
+        manual["manual_control_id"],
+        evidence=evidence,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "awaiting_enable",
+        refresh_status="save_validation_pending",
+    )
+    running = service.control_store.set_state("RUNNING", source="old-running")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        paused=True,
+        acknowledgements=None,
+        catastrophic_pause_hold=True,
+    )
+
+    response = service.apply_control({"action": "enable"})
+
+    assert response["request"]["disposition"] == "requested"
+    assert response["control"]["state_request_id"] != running["state_request_id"]
+    assert response["control_model"]["manual_control"]["status"] == (
+        "awaiting_enable"
+    )
 
 
 def test_same_value_state_ack_requires_the_exact_request_identity(tmp_path):
@@ -5019,7 +6474,7 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime",
             "failed",
             "round identity contradicts",
-            "continuity_gated",
+            "preserved",
             False,
         ),
         (
@@ -5030,8 +6485,8 @@ def test_runtime_setup_capture_ready_write_retry_never_serializes_twice(
             "runtime",
             "failed",
             "round identity contradicts",
-            "paused_for_safety",
-            True,
+            "preserved",
+            False,
         ),
         (
             "active_battle",
@@ -5216,8 +6671,6 @@ def test_runtime_setup_capture_evidence_failure_preserves_enabled_after_restorat
     assert supervisor.is_paused is paused
     if expected_authority == "preserved":
         assert "did not change automation authority" in result["reason"]
-    elif expected_authority == "continuity_gated":
-        assert app._get_action_authority().strategy_gate is not None
     assert serializer_calls == ["serialize"]
     project.assert_not_called()
 

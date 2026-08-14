@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import hashlib
+import threading
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Optional
 
 from core.adb_target_session import ADB_TARGET_OPERATION_LOCK, AdbTargetSnapshot
@@ -229,6 +230,10 @@ class StablePlayerSaveAcquirer:
         decode_fn: Optional[Callable[..., "PlayerSaveSnapshot"]] = None,
         now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         pull_options: Optional[Mapping[str, Any]] = None,
+        completion_observer: Optional[
+            Callable[[PlayerSaveAcquisitionBundle, object], None]
+        ] = None,
+        acquisition_start_observer: Optional[Callable[[datetime], object]] = None,
     ) -> None:
         if (target_snapshot_fn is None) == (fixed_target is None):
             raise ValueError(
@@ -252,13 +257,60 @@ class StablePlayerSaveAcquirer:
         self._decode_fn = decode_fn or decode_player_save_bytes
         self._now_fn = now_fn
         self._pull_options = dict(pull_options or {})
+        self._completion_observer = completion_observer
+        self._acquisition_start_observer = acquisition_start_observer
+        self._observer_local = threading.local()
 
     @contextmanager
     def locked_operation(self) -> Iterator["StablePlayerSaveAcquirer"]:
         """Keep target handoff excluded across a caller-owned lifecycle."""
 
+        pending: tuple[tuple[PlayerSaveAcquisitionBundle, object], ...] = ()
         with ADB_TARGET_OPERATION_LOCK:
+            depth = int(getattr(self._observer_local, "lock_depth", 0))
+            self._observer_local.lock_depth = depth + 1
+            try:
+                yield self
+            finally:
+                self._observer_local.lock_depth = depth
+                if depth == 0:
+                    if int(
+                        getattr(self._observer_local, "observer_defer_depth", 0)
+                    ) == 0:
+                        pending = tuple(
+                            getattr(
+                                self._observer_local,
+                                "pending_observations",
+                                (),
+                            )
+                        )
+                        self._observer_local.pending_observations = []
+        # Callbacks may inspect Git and fsync a durable receipt.  They must run
+        # after the outermost caller-owned target/mutation lifecycle releases
+        # the ADB lock (and, for forced serialization, after restoration).
+        for bundle, start_evidence in pending:
+            self._notify_completion(bundle, start_evidence)
+
+    @contextmanager
+    def deferred_completion_observers(
+        self,
+    ) -> Iterator["StablePlayerSaveAcquirer"]:
+        """Defer advisory callbacks past a caller's wider mutation lifecycle."""
+
+        depth = int(getattr(self._observer_local, "observer_defer_depth", 0))
+        self._observer_local.observer_defer_depth = depth + 1
+        pending: tuple[tuple[PlayerSaveAcquisitionBundle, object], ...] = ()
+        try:
             yield self
+        finally:
+            self._observer_local.observer_defer_depth = depth
+            if depth == 0:
+                pending = tuple(
+                    getattr(self._observer_local, "pending_observations", ())
+                )
+                self._observer_local.pending_observations = []
+        for bundle, start_evidence in pending:
+            self._notify_completion(bundle, start_evidence)
 
     def current_binding(self) -> Optional[PlayerSaveTargetBinding]:
         with ADB_TARGET_OPERATION_LOCK:
@@ -280,13 +332,48 @@ class StablePlayerSaveAcquirer:
         if not isinstance(acquisition_type, PlayerSaveAcquisitionType):
             raise TypeError("acquisition type must be typed")
         started_at = self._now()
+        start_evidence: object = None
+        if self._acquisition_start_observer is not None:
+            try:
+                start_evidence = self._acquisition_start_observer(started_at)
+            except Exception:
+                start_evidence = None
         with ADB_TARGET_OPERATION_LOCK:
-            return self._acquire_locked(
+            bundle = self._acquire_locked(
                 acquisition_type,
                 expected_binding=expected_binding,
                 boundary=boundary,
                 started_at=started_at,
             )
+        if bundle.complete and self._completion_observer is not None:
+            if (
+                int(getattr(self._observer_local, "lock_depth", 0)) > 0
+                or int(
+                    getattr(self._observer_local, "observer_defer_depth", 0)
+                )
+                > 0
+            ):
+                pending = list(
+                    getattr(self._observer_local, "pending_observations", ())
+                )
+                pending.append((bundle, start_evidence))
+                self._observer_local.pending_observations = pending
+            else:
+                self._notify_completion(bundle, start_evidence)
+        return bundle
+
+    def _notify_completion(
+        self,
+        bundle: PlayerSaveAcquisitionBundle,
+        start_evidence: object,
+    ) -> None:
+        try:
+            assert self._completion_observer is not None
+            self._completion_observer(bundle, start_evidence)
+        except Exception:
+            # Runtime observation is advisory. A receipt failure must never
+            # turn a valid stable save into an acquisition failure.
+            pass
 
     def _acquire_locked(
         self,
@@ -391,7 +478,7 @@ class StablePlayerSaveAcquirer:
                 boundary=boundary,
             )
 
-        return PlayerSaveAcquisitionBundle(
+        bundle = PlayerSaveAcquisitionBundle(
             acquisition_type=acquisition_type,
             status=PlayerSaveAcquisitionStatus.COMPLETE,
             reason="save_acquired",
@@ -407,6 +494,7 @@ class StablePlayerSaveAcquirer:
             snapshot=snapshot,
             boundary=boundary,
         )
+        return bundle
 
     def _current_binding_locked(self) -> Optional[PlayerSaveTargetBinding]:
         try:

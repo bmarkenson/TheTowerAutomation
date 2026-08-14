@@ -257,9 +257,13 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         vars_block["orb_distance_observation"] = {}
     vars_block.update(
         gc_no_battle_setup_completed=False,
+        gc_no_battle_setup_degraded=False,
+        gc_no_battle_setup_failure={},
         gc_no_battle_setup_evidence={},
         gc_session_preflight_completed=False,
         gc_session_preflight_attempted=False,
+        gc_session_preflight_degraded=False,
+        gc_session_preflight_disposition="",
         gc_session_preflight_blocked=False,
         gc_session_preflight_repair_required=False,
         gc_session_preflight_repair_in_progress=False,

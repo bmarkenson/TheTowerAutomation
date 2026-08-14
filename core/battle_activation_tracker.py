@@ -164,6 +164,12 @@ class BattleActivationTracker:
         self._pending_evidence_captures = []
         self._reported_match_errors.clear()
 
+    @property
+    def intro_sprint_active(self) -> bool:
+        """Return confirmed active Intro Sprint evidence for recovery sizing."""
+
+        return self._intro_sprint.blocks_demon_mode_activation
+
     def observe(
         self,
         frame: Frame,

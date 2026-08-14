@@ -10,7 +10,10 @@ public partial class PreferencesWindow : Window
     public PreferencesResult? Result { get; private set; }
     public bool ResetLayoutRequested { get; private set; }
 
-    public PreferencesWindow(ClientSettings settings, string inMemoryToken)
+    public PreferencesWindow(
+        ClientSettings settings,
+        string inMemoryToken,
+        bool blueStacksRecoveryTargetLocked = false)
     {
         InitializeComponent();
         BaseUrlBox.Text = settings.BaseUrl;
@@ -28,6 +31,22 @@ public partial class PreferencesWindow : Window
                 CultureInfo.InvariantCulture);
         HostPerformanceSamplingBox.IsChecked =
             settings.HostPerformanceSamplingEnabled;
+        BlueStacksAutomaticRecoveryBox.IsChecked =
+            settings.BlueStacksAutomaticRecoveryEnabled;
+        BlueStacksPlayerPathBox.Text = settings.BlueStacksPlayerExecutablePath;
+        BlueStacksInstanceNameBox.Text = settings.BlueStacksInstanceName;
+        if (blueStacksRecoveryTargetLocked)
+        {
+            BlueStacksPlayerPathBox.IsEnabled = false;
+            BlueStacksInstanceNameBox.IsEnabled = false;
+            WindowsBlueStacksAdbPortBox.IsEnabled = false;
+            BlueStacksRecoveryLockText.Text =
+                "A durable recovery request is active. Its executable, "
+                + "instance, and Windows ADB port remain locked until Linux "
+                + "records a terminal outcome. Automatic recovery can be "
+                + "disabled to prevent later requests.";
+            BlueStacksRecoveryLockText.Visibility = Visibility.Visible;
+        }
     }
 
     private void ResetLayout_Click(object sender, RoutedEventArgs e)
@@ -69,11 +88,22 @@ public partial class PreferencesWindow : Window
                         "Linux ADB forward port"),
                 },
                 requireDestination: false);
+            var recoveryEnabled = BlueStacksAutomaticRecoveryBox.IsChecked == true;
+            var playerPath = BlueStacksPlayerPathBox.Text.Trim();
+            if (recoveryEnabled)
+            {
+                playerPath = BlueStacksInstanceController.ValidateExecutablePath(
+                    playerPath);
+            }
             Result = new PreferencesResult(
                 baseUrl,
                 TokenBox.Password.Trim(),
                 configuration,
-                HostPerformanceSamplingBox.IsChecked == true);
+                HostPerformanceSamplingBox.IsChecked == true,
+                recoveryEnabled,
+                playerPath,
+                BlueStacksInstanceController.ValidateInstanceName(
+                    BlueStacksInstanceNameBox.Text));
             DialogResult = true;
         }
         catch (ArgumentException exc)
@@ -114,10 +144,14 @@ public partial class PreferencesWindow : Window
         }
         return port;
     }
+
 }
 
 public sealed record PreferencesResult(
     string BaseUrl,
     string InMemoryToken,
     TunnelHostConfiguration TunnelConfiguration,
-    bool HostPerformanceSamplingEnabled);
+    bool HostPerformanceSamplingEnabled,
+    bool BlueStacksAutomaticRecoveryEnabled,
+    string BlueStacksPlayerExecutablePath,
+    string BlueStacksInstanceName);

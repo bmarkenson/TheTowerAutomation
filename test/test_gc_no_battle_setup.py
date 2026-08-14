@@ -32,6 +32,7 @@ from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.poison_swamp_stun import PoisonSwampStunState
 from core.player_save_preflight import CarriedEvidenceState
 from core.run_state import AUTOMATION, ExecMode
+from core.runtime_failure_policy import RuntimeFailureKind
 from core.target_priority import TARGETS
 from core.workshop_preset import (
     BOTS_AMPLIFY_PRESET_SLOT,
@@ -1953,8 +1954,67 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
             "new-run gates"
         ),
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
     manager.on_home.assert_called_once_with()
+
+
+def test_degraded_terminal_continuation_repairs_before_next_battle_launch():
+    frame = object()
+    manager = Mock()
+    manager.strategy = None
+    manager.awaiting_initial_battle_intent.return_value = False
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    app = App.__new__(App)
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = Mock()
+    app._supervisor.battle_workflow = None
+    app._supervisor.manual_control = None
+    app._terminal_home_continuation = {
+        "source": "degraded_battle_repair"
+    }
+    app._terminal_home_continuation_ready = Mock(return_value=True)
+    app._mark_terminal_home_continuation_dispatched = Mock(return_value=True)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._report_home_policy = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "repaired",
+        {"modules": {"valid": True}},
+    )
+    events = []
+
+    def run_setup(*_args, **_kwargs):
+        events.append("repair")
+        return setup
+
+    def launch(**_kwargs):
+        events.append("launch")
+        return True
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup", side_effect=run_setup),
+        patch("core.app.handle_home_screen", side_effect=launch) as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    assert events == ["repair", "launch"]
+    manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
+    assert handle_home.call_args.kwargs["restart_enabled"] is True
+    assert handle_home.call_args.kwargs["require_new_battle"] is True
+    app._mark_terminal_home_continuation_dispatched.assert_called_once_with()
 
 
 def test_home_setup_does_not_transfer_launch_to_a_replacement_start_request():
@@ -2416,6 +2476,7 @@ def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
         restart_enabled=True,
         require_new_battle=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
     coordinator.mark_runtime_launch.assert_called_once_with(
         control=HomeBattleControl.NEW_BATTLE,
@@ -2495,7 +2556,7 @@ def test_baseline_only_preflight_context_does_not_require_a_strategy():
     assert context.activity_scope_id == "scope-1"
 
 
-def test_app_does_not_repeat_save_or_navigate_when_history_scope_is_blocked():
+def test_app_skips_repeated_save_and_continues_when_history_scope_is_blocked():
     frame = object()
     manager = Mock()
     manager.no_battle_setup_requirements.return_value = REQUIREMENTS
@@ -2513,9 +2574,15 @@ def test_app_does_not_repeat_save_or_navigate_when_history_scope_is_blocked():
     app._handle_daily_gem_if_due = Mock(return_value=False)
     app._handle_mission_rewards_if_due = Mock(return_value=False)
     app._player_save_preflight_activity_scope_id = "scope-1"
+    app._runtime_action_guard = Mock(return_value=True)
     app._player_save_history_baseline_outcome = SimpleNamespace(blocked=True)
     coordinator = Mock()
     app._player_save_preflight_coordinator = coordinator
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "verified through supported UI",
+        {"cards_deck": "Farm"},
+    )
 
     with (
         patch("core.app.get_activity_scope", return_value={"run_id": "scope-1"}),
@@ -2527,14 +2594,25 @@ def test_app_does_not_repeat_save_or_navigate_when_history_scope_is_blocked():
                 100.0,
             ),
         ),
-        patch("core.app.run_gc_no_battle_setup") as run_setup,
+        patch(
+            "core.app.run_gc_no_battle_setup",
+            return_value=setup,
+        ) as run_setup,
         patch("core.app.handle_home_screen") as handle_home,
     ):
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
     coordinator.acquire.assert_not_called()
-    run_setup.assert_not_called()
-    handle_home.assert_not_called()
+    run_setup.assert_called_once()
+    manager.mark_no_battle_setup_complete.assert_called_once_with(
+        setup.evidence
+    )
+    handle_home.assert_called_once_with(
+        restart_enabled=True,
+        action_guard_fn=ANY,
+        return_dispatch_outcome=True,
+    )
+    manager.on_home.assert_called_once_with()
 
 
 def test_save_first_home_without_requirements_forces_one_baseline_bundle():
@@ -2752,7 +2830,7 @@ def test_normal_home_policy_reports_disposition_changes_without_heartbeat():
         AUTOMATION.mode = original_mode
 
 
-def test_app_blocks_battle_start_when_no_battle_setup_fails():
+def test_app_flags_failed_no_battle_setup_and_continues():
     frame = object()
     manager = Mock()
     manager.no_battle_setup_requirements.return_value = REQUIREMENTS
@@ -2790,8 +2868,18 @@ def test_app_blocks_battle_start_when_no_battle_setup_fails():
     assert run_setup.call_count == HOME_SETUP_MAX_ATTEMPTS
     assert app._capture_frame.call_count == HOME_SETUP_MAX_ATTEMPTS - 1
     manager.mark_no_battle_setup_complete.assert_not_called()
-    handle_home.assert_not_called()
-    manager.on_home.assert_not_called()
+    manager.mark_no_battle_setup_degraded.assert_called_once_with(
+        {},
+        failed_check="startup_setup",
+        reason="mismatch",
+        waivers={},
+    )
+    handle_home.assert_called_once_with(
+        restart_enabled=True,
+        action_guard_fn=ANY,
+        return_dispatch_outcome=True,
+    )
+    manager.on_home.assert_called_once_with()
 
 
 def test_start_workflow_does_not_retry_or_recover_exhausted_home_repair():
@@ -2892,6 +2980,7 @@ def test_app_retries_transient_home_setup_failure_before_starting_battle():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
 
 
@@ -3085,7 +3174,13 @@ def test_failed_enabled_home_recovery_pauses_and_terminalizes_once():
         assert app._advance_pending_home_setup_recovery(object()) is True
 
     recover_home.assert_called_once()
-    supervisor.persist_state.assert_called_once_with("PAUSED")
+    supervisor.pause_for_catastrophic_failure.assert_called_once_with(
+        RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+        reason=(
+            "verified Home recovery failed after the same workflow was "
+            "explicitly Enabled; no further cleanup input is authorized"
+        ),
+    )
     supervisor.transition_battle_workflow.assert_called_once()
     assert app._pending_home_setup_recovery is None
 
@@ -3222,6 +3317,7 @@ def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
     manager.on_home.assert_called_once_with()
 
@@ -3298,6 +3394,7 @@ def test_app_claims_optional_configured_skip_before_home_setup():
     handle_home.assert_called_once_with(
         restart_enabled=True,
         action_guard_fn=ANY,
+        return_dispatch_outcome=True,
     )
 
 
@@ -3356,7 +3453,7 @@ def test_terminal_session_bypass_rearms_only_the_failed_auto_pick_check():
         "strategy": "farm_t18",
         "phase": "session_preflight",
         "check_id": "auto_pick_perks",
-        "reason": "configuration mismatch",
+        "reason": "Modules",
         "expected": "True",
         "options": options,
     }
@@ -3399,7 +3496,6 @@ def test_terminal_session_gate_recovers_scoped_check_and_evidence_summary():
         },
     )
     manager.session_preflight_failure_checks.return_value = []
-    manager.session_preflight_restart_available.return_value = False
     manager.gate_fallbacks.return_value = []
     manager.ctx.data = {
         "mission_vars": {
@@ -3536,76 +3632,103 @@ def test_unscoped_session_failure_replaces_unsafe_bypass_with_retry_only():
     manager.waive_session_preflight_check.assert_not_called()
 
 
-def test_attached_session_mismatch_restarts_only_after_operator_authorization():
-    repair_authority = {
-        "game_state": "active_battle",
-        "runtime_id": "runtime-1",
-        "pid": 1234,
-        "adb_target": "localhost:5555",
-        "target_generation": 1,
-        "activity_scope_run_id": "run-1",
-    }
+def test_attached_session_mismatch_advisory_never_offers_restart():
     manager = Mock()
     manager.strategy = SimpleNamespace(
         name="farm_t18",
         session_preflight_requirements=lambda: {"modules": {"cannon": "Farm"}},
     )
     manager.session_preflight_failure_checks.return_value = ["modules"]
-    manager.session_preflight_restart_available.return_value = True
-    manager.authorize_session_preflight_restart.return_value = True
-    manager.active_battle_observed.return_value = True
     manager.gate_fallbacks.return_value = []
     manager.ctx.data = {
         "mission_vars": {
             "gc_session_preflight_last_reason": "configuration mismatch",
         }
     }
-    options = build_gate_decision_options(
-        "modules",
-        allow_repair_restart=True,
+    supervisor = Mock()
+    supervisor.gate_decision = None
+
+    def publish(**payload):
+        return {
+            "request_id": "gate-attached-modules",
+            "status": "pending",
+            **payload,
+        }
+
+    supervisor.publish_gate_decision.side_effect = publish
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._gate_decision_prompt = lambda _decision: None
+    app._gate_prompted_request_id = None
+
+    app._handle_terminal_session_gate_decision()
+
+    published = supervisor.publish_gate_decision.call_args.kwargs
+    assert published["blocking"] is False
+    assert published["repair_authority"] is None
+    assert {option["action"] for option in published["options"]} == {
+        "retry",
+        "waive",
+    }
+    assert all(
+        option["action"] not in {"pause", "repair_restart"}
+        for option in published["options"]
     )
-    pending = {
-        "request_id": "gate-attached-modules",
+    manager.authorize_session_preflight_restart.assert_not_called()
+
+
+def test_legacy_blocking_session_gate_is_republished_as_advisory():
+    manager = Mock()
+    manager.strategy = SimpleNamespace(
+        name="farm_t18",
+        session_preflight_requirements=lambda: {"modules": {"cannon": "Farm"}},
+    )
+    manager.session_preflight_failure_checks.return_value = ["modules"]
+    manager.gate_fallbacks.return_value = []
+    manager.ctx.data = {
+        "mission_vars": {
+            "gc_session_preflight_last_reason": "configuration mismatch",
+        }
+    }
+    legacy = {
+        "request_id": "legacy-blocking-session-gate",
         "status": "pending",
         "strategy": "farm_t18",
         "phase": "session_preflight",
         "check_id": "modules",
         "reason": "configuration mismatch",
-        "expected": {"cannon": "Farm"},
-        "options": options,
-        "repair_authority": repair_authority,
-    }
-    resolved = {
-        **pending,
-        "status": "resolved",
-        "decision_id": "restart_and_repair",
-        "selected_option": next(
-            option for option in options
-            if option["id"] == "restart_and_repair"
-        ),
+        "blocking": True,
+        "options": build_gate_decision_options("modules"),
     }
     supervisor = Mock()
-    supervisor.gate_decision = None
-    supervisor.publish_gate_decision.return_value = pending
-    supervisor.resolve_gate_decision.return_value = resolved
+    supervisor.gate_decision = legacy
+    supervisor.consume_gate_decision.return_value = {
+        **legacy,
+        "status": "consumed",
+    }
+
+    def publish(**payload):
+        return {
+            "request_id": "replacement-session-advisory",
+            "status": "pending",
+            **payload,
+        }
+
+    supervisor.publish_gate_decision.side_effect = publish
     app = App.__new__(App)
     app._mission_mgr = manager
     app._supervisor = supervisor
-    app._gate_decision_prompt = lambda _decision: "restart_and_repair"
+    app._gate_decision_prompt = lambda _decision: None
     app._gate_prompted_request_id = None
-    app._current_control_workflow_evidence = lambda: repair_authority
 
     app._handle_terminal_session_gate_decision()
 
-    manager.authorize_session_preflight_restart.assert_called_once_with(
-        repair_authority,
-        request_id="gate-attached-modules",
-        check_id="modules",
-        reason="configuration mismatch",
-    )
     supervisor.consume_gate_decision.assert_called_once_with(
-        "gate-attached-modules",
-        completion_reason=(
-            "authorized guarded battle restart to repair modules"
-        ),
+        "legacy-blocking-session-gate",
+        completion_reason="superseded by refreshed session preflight evidence",
     )
+    published = supervisor.publish_gate_decision.call_args.kwargs
+    assert published["blocking"] is False
+    assert published["check_id"] == "modules"
+    assert published["reason"] == "Modules"

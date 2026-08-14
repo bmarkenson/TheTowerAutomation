@@ -27,6 +27,8 @@ a feature worktree:
 ```bash
 git -C /home/brianm/dev/python/TheTower status --short
 git -C /home/brianm/dev/python/TheTower log -6 --oneline
+git -C /home/brianm/dev/python/TheTower for-each-ref \
+  --format='%(objectname) %(refname)' refs/thetower/promotion-owner
 sed -n '1,160p' /home/brianm/dev/python/TheTower/logs/automation_ctl.json
 for lock in /home/brianm/dev/python/TheTower/logs/automation-*.lock; do
   [ -e "$lock" ] || continue
@@ -37,6 +39,12 @@ curl --fail --silent --show-error http://127.0.0.1:8787/api/v1/status \
   | jq '{runtime, process_service, adb_connection, observation, acknowledgements, interactive_development_lease}'
 tail -120 /home/brianm/dev/python/TheTower/logs/actions.log
 ```
+
+An existing `refs/thetower/promotion-owner` identifies an exclusive mutable
+promotion transaction. Unless this thread owns that exact transaction, do not
+change the production checkout or services, published artifacts, `origin/main`,
+or promotion cleanup topology. Read-only inspection and feature work may
+continue.
 
 The control file is persistent intent, not liveness. Lock text is owner
 metadata, not proof that the kernel lock remains held. Prefer the host-backed

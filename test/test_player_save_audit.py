@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
@@ -65,10 +64,16 @@ def _sha(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()
 
 
-def _identity(*, tier: int = 22, counter: int = 4, seed: int = 12345):
+def _identity(
+    *,
+    tier: int = 22,
+    counter: int = 4,
+    seed: int = 12345,
+    game_version: int = 1073,
+):
     return {
-        "fingerprint": _sha(f"identity:{tier}:{counter}:{seed}"),
-        "game_version": 1073,
+        "fingerprint": _sha(f"identity:{game_version}:{tier}:{counter}:{seed}"),
+        "game_version": game_version,
         "tier": tier,
         "per_tier_counter": counter,
         "seed": seed,
@@ -180,12 +185,15 @@ def _observation(
     source_label: str | None = None,
     target_label: str = "localhost:5555",
     captured_at: datetime | None = None,
+    mapping_id: str = "data-9-game-1073",
+    audit_matrix_id: str = "data-9-game-1073-runtime-audit-v2",
+    game_version: int = 1073,
 ):
     captured = captured_at or START + timedelta(seconds=revision)
     return AuditSaveObservation(
-        mapping_id="data-9-game-1073",
-        audit_matrix_id="data-9-game-1073-runtime-audit-v2",
-        game_version=1073,
+        mapping_id=mapping_id,
+        audit_matrix_id=audit_matrix_id,
+        game_version=game_version,
         captured_at=captured,
         source_fingerprint=_sha(source_label or f"source:{revision}"),
         save_revision=revision,
@@ -238,9 +246,14 @@ def _records(receipts, record_type):
     return [record for record in receipts if record["record_type"] == record_type]
 
 
-def _unmapped_runtime(revision: int) -> NormalizedRuntimeSave:
+def _unmapped_runtime(
+    revision: int,
+    *,
+    mapping_id: str = "data-9-game-1073",
+    game_version: int = 1073,
+) -> NormalizedRuntimeSave:
     return NormalizedRuntimeSave(
-        mapping_id="data-9-game-1073",
+        mapping_id=mapping_id,
         audit_matrix_id="data-9-game-1073-runtime-audit-v2",
         capture={
             "captured_at": (START + timedelta(seconds=revision)).isoformat(),
@@ -250,7 +263,7 @@ def _unmapped_runtime(revision: int) -> NormalizedRuntimeSave:
         round_active=True,
         current_wave=250 + revision,
         active_round_identity=ActiveRoundIdentity(
-            game_version=1073,
+            game_version=game_version,
             current_tier=19,
             rounds_started_this_tier=232,
             round_seed=123456,
@@ -667,21 +680,22 @@ def test_target_generation_change_discards_learned_perk_mapping(tmp_path):
     ]
 
 
-def test_mapping_receipt_requires_exact_manifest_context(tmp_path):
+def test_compatible_core_mapping_does_not_broaden_exact_perk_calibration(tmp_path):
     receipt = tmp_path / "receipts.jsonl"
     revision = {"value": 0}
 
     def decode(_payload, **_kwargs):
         revision["value"] += 1
-        runtime = replace(
-            _unmapped_runtime(revision["value"]),
-            mapping_id="different-exact-version",
+        runtime = _unmapped_runtime(
+            revision["value"],
+            mapping_id="data-9-game-1101",
+            game_version=1101,
         )
         return SimpleNamespace(
             runtime_save=runtime,
             mapping_supported=True,
             shape_valid=True,
-            game_version=1073,
+            game_version=1101,
         )
 
     collector = PlayerSaveAuditCollector(
@@ -705,7 +719,14 @@ def test_mapping_receipt_requires_exact_manifest_context(tmp_path):
 
     records = [json.loads(line) for line in receipt.read_text().splitlines()]
     assert not _records(records, "normalized_component")
-    assert any(
+    saves = _records(records, "save_observation")
+    assert len(saves) == 2
+    assert all(
+        save["mapping"]["mapping_id"] == "data-9-game-1101" for save in saves
+    )
+    assert all(save["mapping"]["game_version"] == 1101 for save in saves)
+    assert all(save["perks"]["status"] == "unavailable" for save in saves)
+    assert not any(
         record.get("outcome", {}).get("code") == "malformed_normalized_evidence"
         for record in records
     )
@@ -739,6 +760,127 @@ def test_collector_rejects_unallowlisted_perk_mapping_before_queue(tmp_path):
         "perk_id_mapping_evidence_rejected"
     )
     assert "must not queue" not in json.dumps(records)
+
+
+def test_audit_matrix_capability_accepts_compatible_version_and_provenance():
+    receipts: list[dict] = []
+    machine = _machine(receipts)
+
+    assert machine.observe_save(
+        _observation(
+            1,
+            active=False,
+            wave=0,
+            mapping_id="data-9-game-1101",
+            game_version=1101,
+        ),
+        _request("HOME_NEW_BATTLE"),
+    )
+    assert machine.observe_save(
+        _observation(
+            2,
+            active=True,
+            wave=5,
+            identity=_identity(game_version=1101),
+            mapping_id="data-9-game-1101",
+            game_version=1101,
+        ),
+        _request("RUNNING", offset=1),
+    )
+
+    session = _records(receipts, "collector_session")[0]
+    assert session["manifest"]["mapping_id"] == "data-9-game-1073"
+    assert session["manifest"]["game_version"] == 1073
+    saves = _records(receipts, "save_observation")
+    assert [save["mapping"]["mapping_id"] for save in saves] == [
+        "data-9-game-1101",
+        "data-9-game-1101",
+    ]
+    assert [save["mapping"]["game_version"] for save in saves] == [1101, 1101]
+    assert all(
+        save["mapping"]["audit_matrix_id"]
+        == "data-9-game-1073-runtime-audit-v2"
+        for save in saves
+    )
+
+
+def test_incompatible_audit_matrix_and_identity_version_fail_closed():
+    receipts: list[dict] = []
+    machine = _machine(receipts)
+
+    assert not machine.observe_save(
+        _observation(
+            1,
+            active=False,
+            wave=0,
+            mapping_id="data-9-game-1101",
+            audit_matrix_id="data-9-game-1101-incompatible-runtime-audit-v1",
+            game_version=1101,
+        ),
+        _request("HOME_NEW_BATTLE"),
+    )
+    assert not machine.observe_save(
+        _observation(
+            2,
+            active=True,
+            wave=5,
+            identity=_identity(game_version=1073),
+            mapping_id="data-9-game-1101",
+            game_version=1101,
+        ),
+        _request("RUNNING", offset=1),
+    )
+
+    assert not _records(receipts, "save_observation")
+    assert [
+        record["outcome"]["code"] for record in _records(receipts, "audit_outcome")
+    ] == ["malformed_normalized_evidence", "malformed_normalized_evidence"]
+
+
+def test_mapping_context_change_mid_session_is_rejected_without_merging():
+    receipts: list[dict] = []
+    machine = _machine(receipts)
+
+    assert machine.observe_save(
+        _observation(1, active=False, wave=0),
+        _request("HOME_NEW_BATTLE"),
+    )
+    changed_context = _observation(
+        2,
+        active=True,
+        wave=5,
+        identity=_identity(game_version=1101),
+        mapping_id="data-9-game-1101",
+        game_version=1101,
+    )
+    assert not machine.observe_save(
+        changed_context,
+        _request("RUNNING", offset=1),
+    )
+    assert not machine.observe_save(
+        changed_context,
+        _request(None, offset=2),
+    )
+    assert machine.observe_save(
+        _observation(
+            3,
+            active=True,
+            wave=10,
+            identity=_identity(),
+        ),
+        _request("RUNNING", offset=3),
+    )
+
+    saves = _records(receipts, "save_observation")
+    assert len(saves) == 2
+    assert saves[-1]["mapping"]["mapping_id"] == "data-9-game-1073"
+    assert saves[-1]["round"]["identity_status"] == (
+        "first_naturally_serialized_identity"
+    )
+    outcomes = _records(receipts, "audit_outcome")
+    assert [record["outcome"]["code"] for record in outcomes] == [
+        "mapping_context_discontinuity"
+    ]
 
 
 def test_natural_boundary_state_machine_retains_perk_deltas_clear_and_tail_candidate():

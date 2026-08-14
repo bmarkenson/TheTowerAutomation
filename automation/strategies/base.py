@@ -74,6 +74,28 @@ class BaseStrategy:
             return ""
         return hashlib.sha256(encoded).hexdigest()
 
+    def definition_fingerprint(self) -> str:
+        """Identify the complete immutable behavior loaded for this instance."""
+
+        try:
+            encoded = json.dumps(
+                self._definition_fingerprint_payload(),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return ""
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _definition_fingerprint_payload(self) -> Mapping[str, Any]:
+        return {
+            "strategy": self.name,
+            "class": type(self).__qualname__,
+            "session_preflight": self._session_preflight_fingerprint_payload(),
+            "run_configuration": self.run_configuration(),
+            "runtime_policy": self.runtime_policy(),
+        }
+
     def _session_preflight_fingerprint_payload(self) -> Mapping[str, Any]:
         """Return the stable settings represented by a completion receipt."""
 

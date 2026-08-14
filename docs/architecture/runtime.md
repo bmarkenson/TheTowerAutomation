@@ -72,7 +72,7 @@ assigns one of these policies:
 
 | Policy | Runtime contract |
 | --- | --- |
-| `enforce` | Inspect and require the resolved value; a mismatch blocks unless an explicit safe repair contract owns the transition. |
+| `enforce` | Inspect and require the resolved value. Repair a mismatch immediately when the current boundary already makes that safe; otherwise flag the exact difference and continue degraded. |
 | `observe` | Require authoritative observation and record the resolved reference and evidence; confident differences do not block or change the setting. |
 | `preserve` | Do not inspect or change the setting. |
 
@@ -99,7 +99,8 @@ are checked after the new run reaches `RUNNING`. Each generated Orb Distance
 action carries the complete configured preset set. The authoritative observed
 Attack Range selects its matching Extra/Workshop pair; a readable Range
 outside that set is preserved as an operator experiment without opening
-Distance Adjuster. Unreadable Range evidence still blocks. Tier 18 Farm binds
+Distance Adjuster. Unreadable Range evidence skips that adjustment and is
+retained as degraded validation evidence. Tier 18 Farm binds
 Range `30.00m` to Extra `30.00m` and Workshop `39.00m`; Tier 18 and Tier 19
 Farm both enforce the observed configured Range pair. If a
 freshly matched arrow is unavailable or one verified tap leaves its value
@@ -142,7 +143,7 @@ The implemented Home-preflight decision is per check:
 
 ```text
 verified NEW_BATTLE -> proven app-pause flush -> stable exact-version pull
-    global trust failure                 -> invalidate the snapshot; UI or block by failure class
+    global trust failure                 -> invalidate the snapshot; use UI or continue degraded
     complete + allowlisted + exact match -> accept the saved state; skip that UI route
     complete + allowlisted + mismatch    -> queue only that check's existing UI path
                                                |-- UI also mismatches: guarded repair + UI verify
@@ -298,7 +299,7 @@ independent projections:
 | Boundary | Acquisition or reuse | Consumers | Failure policy |
 | --- | --- | --- | --- |
 | Home `NEW_BATTLE` under `save_first` | Consume a valid one-use terminal History handoff when present. If current configuration is requested, or an authoritative History baseline has no handoff, perform one guarded `forced_serialization` even when the configuration requirement set is empty. | Configuration reconciliation, structural History baseline, and every eligible Home projection. | A safely restored acquisition failure may use the existing guarded UI fallback. Restoration, ownership, context, or control ambiguity blocks later input. |
-| Replacement process attached at `RUNNING` | Prefer one guarded `forced_serialization`; when its source is safely restored but its data or mapping is unusable, bind the established Battle History/UI route instead. | Save-backed active identity, structural History continuity, temporally classified actual-loadout observations, Perk prefix, and optional audit projection; otherwise UI continuity plus supported UI monitoring. | Data, revision, mapping, or projection failure automatically selects UI and completes observation-only attachment. Source-restoration, owner, target, scope, or control ambiguity blocks input. |
+| Replacement process attached at `RUNNING` | Freeze the accepted selected Strategy definition, then prefer one guarded `forced_serialization`; when its source is safely restored but its data or mapping is unusable, bind the established Battle History/UI route instead. | Save-backed active identity, structural History continuity, temporally classified actual-loadout observations, Perk prefix, and optional audit projection; otherwise UI continuity plus supported UI monitoring. The final attachment is intentional No Strategy observation, an exact compatible Strategy, or incompatible/unprovable degraded observation. | Data, revision, mapping, projection, validation, or reporting failure completes degraded and releases automation. Source-restoration, owner, target, scope, control, or uncertain-input ambiguity is catastrophic and may Pause. |
 | `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, optional audit projection, and Tournament conditions. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
 | Ordinary monitoring | Scheduled `passive_stable_read`, independent of audit opt-in. | The Perk monitor and, when enabled, audit receipts consume the same immutable bundle; other consumers require their own lag-tolerant temporal class. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
@@ -338,12 +339,12 @@ the existing forced-save, passive Retry poll, or guarded UI fallback unchanged.
 
 #### Save-first active-round and terminal evidence
 
-The normalized runtime-save model is a second privacy boundary inside the
+The normalized runtime-save model is a bounded normalized-evidence boundary inside the
 exact-version decoder. Snapshot schema 2 exposes only the fields allowlisted by
 `data-9-game-1073-runtime-audit-v2`; it never publishes the decoded root or an
 arbitrary `BattleHistoryEntry`. A root-level version or structural failure
 publishes no runtime model. Perks and the history tail fail independently so an
-unknown Perk ID cannot leak a partial inventory, while an unknown `killedBy`
+unknown Perk ID cannot publish a partial inventory, while an unknown `killedBy`
 ID blocks only the semantic completed entry and preserves structural
 tail-change evidence. The same authoritative Home snapshot now also supplies
 the initial activity-continuity baseline before the UI route is eligible; it
@@ -374,7 +375,7 @@ possible Perk; the exact-version table currently maps all 34 defined semantic
 IDs, including ID `11` as `unlock_random_ultimate_weapon`.
 Changed entry shape/class, non-monotonic waves, or any count/list/level
 inconsistency publishes no Perk snapshot. A structurally consistent unknown ID
-retains a private numeric calibration projection for the audit sidecar, but it
+retains an unpublished numeric calibration projection for the audit sidecar, but it
 does not appear in the public runtime dictionary and does not create a partial
 semantic snapshot. An inactive zero/empty projection is explicitly `cleared`;
 the normal monitor retains the newest complete same-round positive prefix and
@@ -395,7 +396,7 @@ ambiguous levels, repeat counts, order, or a missing saved-recency marker remain
 explicitly unresolved. Only absent, unbound, malformed, or round-conflicted
 prefix evidence takes the complete terminal Perks traversal.
 
-The same privacy boundary will expose additional active-round components only
+The same bounded-evidence boundary will expose additional active-round components only
 through exact-version manifests. In-battle Attack, Defense, and Utility levels
 are stored separately from their Workshop baselines. The save does not carry a
 literal gold-box flag; a normalized `maxed` claim therefore requires a
@@ -417,7 +418,7 @@ The history component accepts the game's source-ordered list of at most 30
 entries and exact-shape-validates only its newest 148-field entry. UTC and local
 .NET DateTime ticks use different clock bases, so they are normalized
 individually and never compared across kinds; source order owns the tail. A
-privacy-safe structural identity/fingerprint uses battle date kind/ticks,
+bounded structural identity/fingerprint uses battle date kind/ticks,
 tier, wave, game/real time, numeric `killedBy`, and Tournament identity. It is
 independent from the canonical 16-section, 144-row More Stats projection and
 its semantic fingerprint. The two hourly rows and effect-active percentages
@@ -564,21 +565,41 @@ evidence and stores an exact-path `profile_progression_delta`; the first such
 record declares a missing baseline. Tournament records retain the snapshot but
 do not alter normal-battle baseline selection.
 
-##### Implemented natural-boundary audit collector
+##### Implemented, campaign-only natural-boundary temporal auditor
 
-`V1073-RUNTIME-013` is implemented as an explicitly enabled,
-observation-only sidecar, not a normal-runtime evidence consumer. It consumes
-stable exact-version reads and passive boundary observations without pausing or
-backgrounding the game, navigating, tapping, dispatching a handler, changing a
-lifecycle decision, or suppressing UI. Its one daemon worker allows at most one
-bounded stable-read acquisition at a time, so a slow or failed read never
-delays the App heartbeat. It reads only the exact target owned by the current
-`AdbTargetSession`; a handoff/release generation change discards the result.
-Capture and detection continue to feed it while global Pause blocks actions.
+`V1073-RUNTIME-013` is a default-disabled, observation-only temporal auditor
+for short, named diagnostic campaigns. It can answer questions such as whether
+an already-understood normalized Perk prefix advanced monotonically and cleared
+at the next natural terminal boundary, or whether a structural history tail
+changed after a known Home baseline. No subsystem reads its receipts, and the
+runtime does not use them to make a decision. A human inspects them after the
+campaign. It is not a save-acquisition service, an unknown-field discovery
+system, or a normal-runtime evidence consumer.
+
+When a campaign is enabled, the normal App supplies the same typed stable-save
+bundles already acquired for passive monitoring and natural boundaries. The
+legacy standalone path still bounds its own work to one daemon acquisition at a
+time. In either mode, a slow or failed read cannot delay the App heartbeat. The
+auditor never pauses or backgrounds the game, navigates, taps, dispatches a
+handler, changes a lifecycle decision, or suppresses UI. It reads only the
+exact target owned by the current `AdbTargetSession`; a handoff or release
+generation change discards the result. Capture and detection continue to feed
+it while global Pause blocks actions.
+
+Compatibility is granted by the decoder, not by matching the manifest's game
+version literally. The decoder must resolve a supported, shape-valid exact or
+explicitly compatible mapping and emit a normalized runtime projection with
+the manifest's audit-matrix capability. A root that is merely parseable is
+rejected. The manifest mapping and game version identify the evidence authority
+from which that capability originated; every receipt records the actual
+mapping and game version observed. The first accepted
+`(mapping, audit matrix, game version)` tuple is pinned for the collector
+session. A later tuple change fails closed instead of merging evidence across a
+decoder or game-version handoff.
 
 Each collector start creates new runtime and collector session identities and
 appends canonical JSONL records without reading or rewriting an earlier
-session. Its exact-version manifest and receipt schema retain only:
+session. Its bounded normalized-evidence schema retains only:
 
 - audit/mapping/schema/session IDs, safe reason codes, timestamps, revision,
   and source fingerprint;
@@ -602,21 +623,20 @@ disabled or rejected optional component cannot erase a valid core receipt.
 Visual waves are explicitly approximate observations, never exact activation
 waves.
 
-The legacy UI Perk timeline may feed a stripped calibration batch only after an
-explicit UI owner has independently accepted a complete exact selection
-boundary. Display text, OCR output, colors, pixels, restored checkpoints, and
-the normal save-backed timeline never cross this queue. When a stable save is
-structurally complete but contains an unmapped numeric ID, the pure resolver
-can group an explicitly supplied UI batch with save picks by exact wave, cancel
-already mapped semantics, and apply singleton constraint propagation. It
-restores the semantic projection only if every needed assignment is unique,
-uses an already allowlisted Perk family at at least 80% confidence, and
-successfully appends the calibration receipt. Ordinary passive monitoring does
-not open Perks to create such evidence; an unknown ID therefore remains
-unavailable and preserves terminal fallback. Multi-wave aggregates, visibility
-gaps, count differences, duplicate semantics, conflicting later evidence, and
-ambiguous assignments stay unavailable. The static exact-version manifest is
-never rewritten.
+Unknown-field discovery remains a separate, targeted mapping-calibration
+workflow that gathers purpose-specific evidence. The auditor is not a raw
+dataset for that work. Its legacy UI Perk resolver is narrower: an explicit UI
+owner may supply a stripped calibration batch only after independently
+accepting a complete exact selection boundary. Display text, OCR output,
+colors, pixels, restored checkpoints, and the normal save-backed timeline never
+cross this queue. The resolver restores a semantic projection only when exact
+wave correspondence and singleton constraint propagation make every needed
+assignment unique, each semantic family is already allowlisted at at least 80%
+confidence, and the bounded calibration receipt is successfully appended.
+Ordinary passive monitoring does not open Perks to create such evidence; an
+unknown ID therefore remains unavailable and preserves terminal fallback.
+Ambiguous or conflicting evidence stays unavailable, and the static mapping
+manifest is never rewritten.
 
 The collector begins with a pre-round structural-tail baseline, records the
 first naturally serialized active identity, samples only stable revision
@@ -626,8 +646,10 @@ and any structural tail change—including 30-entry rollover—as candidates. It
 may calculate candidate tier/wave/time agreement, but it cannot call that entry
 attached, update a battle record, decide whether to open Perks, or suppress any
 UI route. Raw saves, decoded roots, account identifiers, arbitrary history
-fields, screenshot pixels, and OCR text are outside its retained schema. The
-existing visual activation tracker continues to retain only its confirmed
+fields, screenshot pixels, and OCR text are outside its retained schema. Those
+limits keep the diagnostic log compact, reviewable, and decoupled from decoder
+internals; they are not an authentication or adversarial-security boundary.
+The existing visual activation tracker continues to retain only its confirmed
 first-transition evidence frames under the ordinary evidence policy; the audit
 receipt stores event metadata and an optional evidence reference, not the
 image. The passive compact Game Stats capture remains a separate optional
@@ -646,24 +668,19 @@ survive UI correlation-window resets and ordinary direct Retries on the same
 owned target generation, while per-round UI batches do not. A target handoff,
 generation change, collector restart, or exact conflict discards the overlay.
 
-The authorized Tier 22 boundary supplies the collector's core natural-round
-evidence: new identity, ordinary-foreground revision progress, final
-Perk/clearing behavior, and Game Over tail serialization. The first explicitly
-enabled ordinary Tier 19 run subsequently validated exact Home through stable
-active revisions and natural terminal clearing/tail publication without
-changing the UI path. Its first direct Retry exposed fail-closed old-identity
-retention and seven missing exact-version Perk IDs; `b137ea4` repairs both and
-is deployed. Its fresh-session revision-46521 checkpoint accepted the new
-counter-232 identity and complete mapped Perk progression while correctly
-reporting that a terminal-only restart supplied no pre-round baseline. The next
-ordinary same-process Retry remains the passive rollover confirmation. No
-replacement purpose-built battle is required. Upgrade, survival-ability, and
-other candidate components remain independently unavailable until their own
-matrix rows are promoted, but they do not gate the core collector. The
-collector remains observation-only. The separate terminal consumer now makes a
-causally bound exact-version report primary while Game Stats and Perks remain
-passive evidence, More Stats remains the guarded fallback, and continuity,
-terminal binding, and lifecycle authority remain unchanged.
+Past Tier 22 and Tier 19 campaigns established the core natural-round behavior
+and exposed direct-Retry identity retention plus missing Perk IDs; the reviewed
+repair remains in normal code. That history does not justify ambient
+collection. The auditor stays off until a future investigation names a
+specific question and finish condition. Upgrade, survival-ability, and other
+candidate components remain independently unavailable until their own matrix
+rows are promoted, and they do not gate valid core receipts. The separate
+terminal consumer makes a causally bound report primary while Game Stats and
+Perks remain passive evidence, More Stats remains the guarded fallback, and
+continuity, terminal binding, Strategy, attachment, record construction,
+Perks-navigation decisions, UI suppression, and lifecycle authority remain
+unchanged. A terminal-only process remains unbound and cannot inherit Strategy
+or process-local evidence.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through
@@ -836,19 +853,22 @@ First Perk Choice, Perk Bans, and Perk Auto Pick order are immutable for the
 active battle, so their mismatch is
 logged as nonblocking session evidence and the pass continues. The same rule
 applies when a fallback UI produces a fully observed mismatch for one of those
-immutable fields. A mutable mismatch follows its existing guarded in-battle
-repair when one exists, such as Auto Pick, or the strategy's mismatch decision
-without a redundant confirmation traversal. Profile and run waivers are
-applied before attachment reconciliation; a waived fact is not consumed,
-warned, or made blocking. Ultimate Weapon component
+immutable fields. A mutable mismatch is also observational at this attachment
+boundary. Auto Pick, Poison Swamp Stun, Damage Slider, Orb Distance, and every
+other configuration action are downshifted to measurement; an unavailable
+result, validator exception, or mismatch records degraded evidence and
+completes the one-shot check. Profile and run waivers are applied before
+attachment reconciliation; a waived fact is not consumed, warned, or made
+blocking. Ultimate Weapon component
 evidence records its save/UI source explicitly.
 
 Every process attachment stays in the current battle. It gains no game-Home
 route, Android lifecycle action, second save read, Home-repair request, or
 Surrender authority. Once that selective inventory pass reaches a conclusive
 result, the explicitly
-`run_when_attached` battle-only rules enforce Damage Slider `100%` and the
-configured Orb Distance for an authoritative configured Attack Range; a
+`run_when_attached` battle-only rules observe Damage Slider and the configured
+Orb Distance pair for an authoritative configured Attack Range; they do not
+change either value. A
 readable unconfigured Range is preserved without opening Distance Adjuster.
 The attachment path never selects a Home preset or equips a loadout. The
 separate guarded process-reload
@@ -980,11 +1000,12 @@ for continued battle retry.
 ## State and battle lifecycle
 
 - The persistent post-run dispositions are `NEXT_BATTLE`, `WAIT`, and `HOME`.
-  `NEXT_BATTLE` takes the next authorized direct Retry, Battle, or Resume Battle
-  route; `WAIT` holds the current terminal/Home boundary; `HOME` returns Home
-  after Game Over and never authorizes automatic Battle or Resume Battle input.
-  Legacy `RETRY` control values normalize to `NEXT_BATTLE` at the persistence
-  boundary.
+  `NEXT_BATTLE` normally takes the next authorized direct Retry, Battle, or
+  Resume Battle route; repairable configuration degradation first inserts the
+  global Home-setup boundary described below. `WAIT` holds the current
+  terminal/Home boundary; `HOME` returns Home after Game Over and never
+  authorizes automatic Battle or Resume Battle input. Legacy `RETRY` control
+  values normalize to `NEXT_BATTLE` at the persistence boundary.
 - Visible navigation and battle lifecycle are separate. Home
   `RESUME_BATTLE` preserves the current battle identity; `GAME_OVER`,
   `TOURNAMENT_RESULTS`, or a verified Home `NEW_BATTLE` ends it.
@@ -1051,6 +1072,71 @@ for continued battle retry.
 
 ## Matching and action authority
 
+### Global runtime failure policy
+
+Recoverable runtime problems never own a global Pause, Stop, Strategy Gate, or
+indefinite authority hold. This includes configuration mismatch, unavailable
+validation or evidence, exhausted bounded repair, reporting failure, and stale
+workflow evidence. At a boundary where correction is already safe, the runtime
+tries the bounded repair immediately. Otherwise it skips only the unsafe or
+unsupported action, records the exact problem as degraded evidence, and keeps
+unrelated strategy, handler, collector, and lifecycle automation eligible.
+An Attach request follows that policy after it has safely restored and adopted
+the exact battle: attachment-validation or receipt-reporting failure cannot
+retain the global workflow hold. The exact process-local claim remains
+authoritative while status reporting retries.
+
+Configuration degradation carried by a running battle has one global terminal
+rule. When `NEXT_BATTLE` is already in force as its Game Over is handled,
+the runtime snapshots the current mismatch/unavailable-validation/Home-setup
+failure, returns Home instead of tapping Retry, applies any pending Strategy
+boundary change, and rearms that next profile's complete no-battle setup. A
+terminal-navigation failure retains both the Home route and the degradation for
+a fresh-evidence retry. Verified Home then runs the ordinary bounded repair
+before consuming the exact terminal-bound one-shot continuation. Successful
+setup clears the carried degradation and requires fresh in-battle validation;
+exhausted setup records its new exact failure and still releases the next
+battle degraded. `WAIT` is not overridden, `HOME` grants no automatic launch,
+and reporting-only or other non-configuration warnings do not manufacture Home
+repair work.
+
+Only four catastrophic classes may automatically persist `PAUSED`:
+
+- control authority is lost or corrupt;
+- ownership of the exact ADB target is lost;
+- a lifecycle input was attempted and the original source cannot be proved
+  restored; or
+- an input was dispatched but its result cannot be determined safely.
+
+Explicit operator Pause, Stop, and Take Manual Control remain separate intent,
+not failure handling. A bounded exclusive owner may still hold input while its
+currently executing action is being repaired or reconciled, but a recoverable
+result must release that owner. Legacy session-preflight blocks and gates are
+migrated to completed degraded evidence when encountered.
+
+Durable control changes and Android mutation dispatch use one companion
+cross-process boundary beside the control file. A mutation refreshes the exact
+control request while holding that boundary immediately before its first
+input. Pause, Stop, Take Manual Control, terminal-policy changes, and requests
+that acquire input ownership take the same boundary for their atomic write.
+Consequently, a control write and an input have a single order: an input that
+already crossed its final guard may finish, but after the control write is
+accepted no later input or compound-action step can begin. Passive save,
+capture, and watchdog prechecks do not hold this boundary, so Pause can persist
+while they run. Once a lifecycle transaction has sent input, it retains the
+boundary only through mandatory source restoration; this prevents Pause from
+stranding the game backgrounded or on Android Home.
+
+All low-level ADB subprocesses used by runtime observation or mutation are
+bounded. Mutations return typed `attempted` and `uncertain` outcomes. A plain
+mutation timeout is an uncertain-input catastrophe; a transaction owner that
+can still prove its required final restoration defers that judgment until the
+transaction completes. Forced-save serialization and watchdog restart use
+that rule, retry their bounded restoration/launch where defined, and report a
+catastrophic hold only when the final game source remains unproved. Diagnostic
+logging for an already-classified recoverable failure is best effort and
+cannot itself terminate the main loop.
+
 ### Typed runtime action authority
 
 `core/action_authority.py` is the central runtime owner for action decisions.
@@ -1064,7 +1150,7 @@ routed through an input guard.
 | Normal | Always continues | Existing screen, handler, and scheduler policy | Existing strategy policy | Existing lifecycle policy |
 | Global Pause or Stop | Continues | Blocked | Blocked | Blocked |
 | Enabled initial Start/Attach wait at fresh Home | Continues | Only the visible `home_ad_gem` claim | Blocked | Blocked |
-| Running-battle Strategy Gate | Continues | Only the explicit safe allowlist | Blocked | Blocked |
+| Legacy running-battle Strategy Gate | Continues | Only the explicit safe allowlist | Released after migration to degraded evidence | Released after migration to degraded evidence |
 | Continuity, initialization, validation, or exclusive screen hold | Continues | Blocked | Matching bounded owner only | Matching bounded owner only |
 | `external_development` hold | Continues | Blocked | Blocked for every owner | Blocked for every owner |
 
@@ -1089,18 +1175,12 @@ installation. An already-authorized recovery retains that guard through its
 last mutation; production cannot install the hold or acknowledge quiescence
 until it finishes.
 
-An active Strategy Gate is distinct from Pause and never mutates the control
-file or `AUTOMATION.state`. It is scoped to the current activity/run identity
-when available and persists while the same battle visits Store, Mission,
-Event, Guild, reward-reveal, side-menu, and other temporary screens. Entry and
-changed evidence are logged once per transition rather than once per frame.
-The gate is released only by successful validation, accepted retry, a
-run-scoped waiver, an explicit active-battle strategy change, an explicitly
-authorized repair transition, changed authoritative run identity, or a natural
-battle boundary. Notification-only/`observe` mismatches retain evidence without
-activating the blocking gate. Natural Game Over releases it before normal
-terminal handling, but the gate can neither authorize nor dispatch Surrender,
-Exit Battle, Go Home, restart, or New Battle.
+Structured Strategy Gate state remains readable for compatibility with older
+receipts and clients, but current configuration, validation, evidence, repair,
+and reporting failures do not activate it. If the runtime encounters a legacy
+session-preflight gate, it clears that gate and converts the retained failure
+to completed degraded evidence. The gate never authorizes Surrender, Exit
+Battle, Go Home, restart, or New Battle.
 
 The gate's auxiliary allowlist is explicit: in-battle ad-gem collection and its
 bounded floating-gem scan, Daily Gem Store, Daily and Weekly Mission rewards,
@@ -1111,16 +1191,14 @@ collector cannot navigate to Home or cross a battle boundary merely to collect.
 Home ad gems retain ordinary Home handling outside this running-battle gate.
 
 Minimum continuity is deliberate. Recoverable setup-capture, data-collection,
-configuration-validation, and repair-record failures do not manufacture a
-global Pause. A running-battle contradiction or mismatch uses the Strategy
-Gate so safe gem collection continues, and natural Game Over releases that
-gate before terminal handling. Game Over statistics collection is best effort;
+configuration-validation, repair, and receipt failures are flagged without
+changing global authority. Game Over statistics collection is best effort;
 the selected Retry/Home route is still attempted and a failed terminal tap is
 retried from fresh terminal evidence with action authority unchanged.
 Tournament Results dismissal follows the same retry rule. Explicit Pause,
-Take Manual Control, Stop, changed workflow ownership, and inability to prove
-restoration after an attempted lifecycle transition remain fail-closed
-boundaries.
+Take Manual Control, and Stop remain operator boundaries. Changed workflow or
+target ownership, unproved restoration after lifecycle input, and uncertain
+input results are catastrophic safety boundaries and may Pause automatically.
 
 Daily Gem and mission collectors claim an exclusive auxiliary-route lease from
 a freshly detected same-battle `RUNNING` frame before their first input. While
@@ -1205,16 +1283,16 @@ warning text in `actions.log`.
   authoritative for the computed batch. The runtime then reacquires settled
   OCR evidence, recomputes any remaining gap, requires strict progress and a
   verified final value, and returns to `RUNNING/ATTACK_MENU`. Unknown sequences
-  fall back to single-step feedback; unknown or incomplete evidence remains
-  blocked.
+  fall back to single-step feedback; unknown or incomplete evidence skips that
+  correction and completes the check degraded.
 - Orb Distance enforcement first locates the Attack Range tile and requires
   authoritative OCR, with one adaptive-threshold retry for the dim value on a
   Maxed tile. The observed Range selects a matching entry from the complete
   generated preset set. A readable unconfigured Range records
   `unconfigured_range_preserved` and completes without Distance Adjuster input;
-  unreadable evidence remains blocked. For a configured Range, the runtime
-  opens the freshly matched in-run Distance Adjuster, OCRs both values, and
-  matches each direction arrow immediately before one tap. Every step
+  unreadable evidence is flagged and skips Distance Adjuster. For a configured
+  Range, the runtime opens the freshly matched in-run Distance Adjuster, OCRs
+  both values, and matches each direction arrow immediately before one tap. Every step
   reacquires the panel, requires the selected row to move strictly closer to
   its target, and stops on unknown, unchanged, cycling, or non-progressing
   evidence. An unavailable arrow or unchanged value closes the automatically
@@ -1267,9 +1345,10 @@ warning text in `actions.log`.
   resynchronization path, which restarts planning at rank one. Cached frames
   never authorize an input. Final authoritative Ban and Auto Pick readbacks
   remain mandatory and are reused by their callers. An unavailable perk,
-  unresolved ambiguity, or non-progress blocks New Battle. A locally exhausted
-  Perk repair returns to Home once and is marked non-retryable there; other
-  recoverable Home setup failures retain the complete fresh-Home retry policy.
+  unresolved ambiguity, or non-progress ends only that bounded repair, records
+  the exact failure, and releases the Home route to continue degraded. Other
+  recoverable Home setup failures retain the complete fresh-Home retry policy
+  before receiving the same degraded result.
   Persistent control is synchronized before every Home setup tap or swipe.
   The first denied input boundary yields the synchronous setup immediately so
   Pause, Stop, Take Manual Control, capture/detection, and acknowledgements do
@@ -1277,10 +1356,9 @@ warning text in `actions.log`.
   later explicit Enable may restore verified Home and start a fresh setup pass
   only when the same runtime, target, activity scope, and original workflow
   owner still match; Stop or a manual-control handoff discards that recovery.
-  A Return-Control setup that exhausts its bounded repair publishes
-  `awaiting_manual_correction` with the exact failed check and reason while
-  retaining its forced-save receipt and Pause. Only another explicit Enable
-  after the manual correction requests a new save. The setup retains exact
+  A Return-Control setup that exhausts its bounded repair completes Return in
+  degraded mode with the exact failed check and reason; it does not restore the
+  manual Pause or wait for another Enable. The setup retains exact
   UI- or save-derived configuration evidence for session preflight.
   Save-derived sections, including the exact current eight-slot Farm Module
   assignment, are accepted there only after their typed carry binds to the
@@ -1295,35 +1373,28 @@ warning text in `actions.log`.
   Home repair, or Surrender request; Poison Swamp Stun falls back to its guarded
   in-battle detail check; Home `RESUME_BATTLE` preserves the attachment, and
   the Home-owned gates rearm at the next genuine `NEW_BATTLE` boundary.
-- A confident Home-only mismatch does not immediately authorize repair. The
-  generated Farm plan declares a three-attempt threshold; the read-only
-  session preflight retries after its existing cooldown while the failed-check
-  identity is unchanged. Success clears the series, and changed failure
-  identity restarts it. Only an exhausted series may request one app-owned
-  stop/repair/restart sequence. Ambiguous or unknown module identity and other
-  non-Home repair classes remain blocked. The matcher reports evidence but
-  never directly authorizes an equipment action.
-- A terminal running-session decision is scoped to the first recognized failed
-  requirement retained in structured session-preflight evidence, falling back
-  to the manager's retained failed-check list only when needed. A generic
-  validator reason is replaced with the evidence summary, including normalized
-  expected and observed save-backed values when available; a specific repair or
-  transition failure remains authoritative. If neither source identifies a
-  recognized requirement, the blocking diagnostic decision offers Retry only:
-  it cannot write a synthetic `session_preflight` waiver or authorize repair.
-  Persisted generic or unscoped decisions are consumed before a corrected
-  request replaces them. Once the same Strategy subsequently records a
-  successful complete session preflight, its pending or resolved
-  `session_preflight` decision is consumed; decisions for another Strategy or
-  phase remain untouched.
-- A guarded configuration repair must reach verified Home `NEW_BATTLE`, use
-  fresh detail/name and action guards for module changes, reapply the complete
-  profile-owned no-battle setup, start the next battle, and require fresh
-  session preflight evidence before normal handlers regain authority.
+- A confident mismatch is repaired only at an already-safe boundary such as
+  verified Home `NEW_BATTLE`. An active-battle or otherwise unsafe mismatch is
+  recorded once as completed degraded validation; it cannot request Surrender,
+  stop/repair/restart, a Strategy Gate, or an operator decision. The matcher
+  reports evidence but never directly authorizes an equipment action.
+- Running-session validation stores normalized expected/observed evidence and
+  the failed requirement IDs. A conclusive mismatch or unavailable validator
+  completes the one-shot pass in degraded mode so it cannot repeat every
+  heartbeat. Later successful validation clears the degraded state. Legacy
+  blocking decisions are consumed rather than re-published.
+- A guarded Home repair uses fresh detail/name and action guards and reapplies
+  the complete profile-owned no-battle setup. Success records verified
+  evidence. Exhaustion records the exact failure and continues; it does not
+  retain global action authority merely because configuration is imperfect.
 
 ## Process and control ownership
 
 - The persistent control file is authoritative operator intent.
+- A missing control file materializes as `PAUSED`. A legacy `RUNNING` record
+  without a valid state request ID is also converted to a fresh `PAUSED`
+  request. Malformed present identities remain visible as invalid evidence;
+  they are never repaired into implicit input authority.
 - A non-blocking OS lock keyed by ADB target prevents competing runtimes from
   acting on the same device. Its metadata is `held` with an owner PID while
   acquired and is rewritten to `released` with no PID on a clean release. A
@@ -1371,6 +1442,110 @@ warning text in `actions.log`.
   Offline and unauthorized rows are outages. Runtime recovery is complete only
   after a supported fresh frame succeeds, and malformed captures while the
   transport remains connected retain their normal diagnostics.
+
+### Emulator maintenance and restart replay
+
+One schema-1 `emulator_maintenance` directive represents a BlueStacks restart
+requested either by the Windows control surface's conservative, default-off
+[degradation detector](control_surface.md#automatic-bluestacks-degradation-recovery)
+or its confirmed operator command. The initiator is durable provenance; it
+does not change recovery input semantics. Before the hold is installed, the
+request is bound to the exact Windows executable, instance, listener port,
+host, PID, and process start time plus the exact runtime ID, PID, ADB target,
+positive target generation, authorizing state-request ID, and current battle
+scope. Request creation atomically rechecks that Enabled control identity. It
+is not host authority. At the next fresh `RUNNING` boundary, the matching runtime
+installs the exclusive `emulator_maintenance` hold, stops background input,
+captures its last trusted wave and confirmed Intro Sprint state, and publishes
+a separate runtime acknowledgement. Windows may mutate the host only while
+that acknowledgement is fresh, exact-owner-matched, battle-scope-matched, and
+explicitly `host_restart_authorized`. The atomic host acknowledgement rechecks
+that the same state request is still `RUNNING`; a Pause that commits first
+therefore prevents host mutation.
+An activity-scope change before that host acknowledgement terminates the
+request without mutation; a request for one battle can never transfer to its
+successor.
+If Windows never acknowledges an old process identity, the pre-mutation request
+expires after three minutes and the runtime releases its hold. There is no such
+guess after durable host acknowledgement: a lost Windows result may mean the
+process already stopped, so the hold remains until exact reconciliation.
+
+The hold precedes capture on every later loop and, until the game source is
+restored, suppresses ordinary Strategy, handler, auxiliary,
+watchdog-foreground, and lifecycle actions. Capture, detection, control
+synchronization, status, and exact ADB reconnection may continue. Once fresh
+evidence proves that Resume returned to the same `RUNNING` battle, the hold
+continues to exclude run-progression and lifecycle work but allows the existing
+typed independent-collector lane: in-battle ad gems, floating-gem scans, daily
+gems, and Daily/Weekly/Event/Guild rewards. Every collector retains its normal
+fresh-screen, battle-scope, route-ownership, and final Pause rechecks. Pause and
+Stop cannot be bypassed by the hold. Pause before host acknowledgement prevents
+authorization; after an accepted Windows restart it blocks Linux game input
+while the durable host result remains available for later reconciliation.
+
+After Windows proves a different exact `HD-Player.exe` listener owner, Linux
+waits for the configured ADB target, permits at most three bounded Android
+launcher attempts for `com.TechTreeGames.TheTower`, and requires fresh UI
+evidence. An uncertain launcher dispatch is never replayed; an accepted launch
+retains a 45-second source-restoration receipt. The distinct post-process
+**Welcome Back** modal is the blocking-primary `GAME_RESTARTED` state, not Home
+`RESUME_BATTLE`. From freshly rematched complete frames, recovery runs one
+bounded **Resume** transaction. If fresh post-input evidence proves that the
+modal remains, it runs a separate bounded **End run** transaction and continues
+through natural Game Over/Home handling; it does not stop at a notification
+while leaving a known non-resumable run in place. Missing post-input evidence
+is an uncertain result that Pauses without replaying the input.
+
+BlueStacks Home may expose the configured framebuffer as the exact landscape
+transpose of a supported game resolution (`1920x1080` or `1280x720`). That
+frame is retained as typed native-geometry evidence but is never normalized,
+published as a canonical screenshot, classified as game UI, or used for mapped
+coordinates. Only while an exact-target maintenance hold is active in durable
+`host_restarted` may a fresh transpose from that request's ADB target enter the
+existing bounded package-launch transaction. It authorizes no tap or Home
+control; every later Welcome Back, Resume, fallback, and completion decision
+still requires fresh supported portrait UI evidence.
+
+The official [v28.0.6 patch note](https://www.techtreegames.com/post/v28-0-6-patch-notes)
+documents that process-restart resume returns five waves, or fifty waves while
+Intro Sprint is active. Those counts are retained as diagnostic expected
+floors, not trusted completion boundaries; production has also observed a
+fifty-wave rollback without confirmed Intro Sprint. The runtime instead keeps
+every resumed `RUNNING` frame out of ordinary run-progression observers until
+wave OCR reaches the captured pre-restart high-water. During that window,
+wave-monotonic state, Coins/min, Perk/mission observations, strategy actions,
+and activation accounting do not see the replayed non-earning waves, while the
+typed independent collectors above may continue operating. If no trusted
+pre-restart wave exists, the first fresh numeric `RUNNING` wave is the strongest
+available completion boundary.
+
+When the old battle is positively non-resumable, **End run** is followed by the
+ordinary full terminal collector with an `interrupted`, nonrepresentative,
+analytics-excluded disposition. Recovery then permits only verified Home
+`NEW_BATTLE`, runs the configured new-battle preflight and action guards, and
+keeps its hold after the Battle tap until a fresh replacement `RUNNING` frame.
+An accepted Home control has a process-local postcondition receipt and is not
+repeated on the next heartbeat. If New Battle exposes the known Free Ticket
+blocker, its exact receipt owns one bounded Claim transaction; after two stable
+Home observations, at most one final verified Battle retry is allowed. Home
+`RESUME_BATTLE` remains an allowed alternative only while fallback has not
+committed to a new battle. Unknown or transient screens retain the hold and
+retry only the bounded app launcher; they never infer a Surrender, Resume, or
+Battle target from absence.
+
+A resumed record carries the request ID, battle scope, high-water, expected
+floor, lowest observed wave, request initiator, and catch-up disposition under
+`runtime.emulator_recovery`. The interrupted old record receives the same
+provenance, while its replacement battle does not. Any record with that
+provenance is excluded from later degradation calibration so restart downtime
+and non-earning replay cannot train the trigger. The complete workflow emits
+one `ACTION`/`RESULT` pair plus an `INPUT` entry for each Android launch or
+verified UI action. Once fresh evidence proves the old battle caught up or the
+replacement battle is running, semantic recovery releases the local input hold
+before persisting the terminal receipt. A receipt-write failure is reporting
+degradation only: later heartbeats retry that receipt without reacquiring the
+hold or replaying input.
+
 - The native Windows control surface owns API local forwarding and ADB reverse
   forwarding as separate OpenSSH processes. The ADB process requests only
   `127.0.0.1:<linux-port>` and targets the independently configured Windows
@@ -1394,8 +1569,8 @@ warning text in `actions.log`.
   `next_run` adopts the first active/resumable battle and structurally
   suppresses plan rules tagged `run_initialization` or `session_preflight`,
   except explicitly declared `run_when_attached` checks. Tournament stages its
-  read-only inventory check first, then permits its guarded battle-only Damage
-  Slider and Orb Distance rules.
+  read-only inventory check first, then measures its battle-only Damage Slider
+  and Orb Distance rules without changing the attached battle.
   It does not seed their completion variables. Game Over, Tournament Results,
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
@@ -1412,9 +1587,12 @@ warning text in `actions.log`.
   reads with an exact active-round identity. If source restoration succeeds but
   the save is absent, unsupported, structurally incompatible, or otherwise
   unprojectable, the owner immediately opens the guarded Battle History route
-  and completes observation-only attachment with a target/scope-bound UI
-  receipt. A save baseline uses its source-specific fingerprint and
-  append/rollover evidence. A UI baseline bridges only through normalized
+  and completes continuity with a target/scope-bound UI receipt. The frozen
+  selected Strategy is then classified independently: No Strategy observes
+  intentionally, a proven compatible selection becomes active, and an
+  incompatible or unprovable selection observes degraded while remaining
+  pending for the next safe boundary. A save baseline uses its source-specific
+  fingerprint and append/rollover evidence. A UI baseline bridges only through normalized
   Tier/Wave/Battle Date; agreement migrates it, explicit mismatch proves a
   later scope, and ambiguous or insufficient evidence starts an unverified
   conservative scope. Source fingerprints are never compared across mappings.
@@ -1465,13 +1643,19 @@ warning text in `actions.log`.
   restoration, attachment fails toward a conservative new scope; if
   restoration itself is unverified, the route retries without releasing other
   inputs.
-- Explicit mid-run strategy adoption uses the same attachment boundary. Fresh
-  `RUNNING` or Home `RESUME_BATTLE` evidence may replace normal strategy
-  behavior and report identity without a restart, but run initialization,
-  session preflight, and Home-only checks stay deferred, except for an
-  explicitly declared `run_when_attached` check. A request encountered at Home
-  `NEW_BATTLE` follows normal boundary replacement instead and runs the
-  complete startup-gate sequence.
+- Attach owns an immutable Strategy request snapshot through terminalization.
+  A later Strategy selection cannot overwrite it; the later request remains a
+  next-safe-boundary change. After Attach completes, an incompatible or
+  unprovable degraded observer cannot be converted by an active-battle request;
+  the exact durable request is downshifted to the next boundary. A separate
+  explicit mid-run adoption for an intentional observer or an already
+  Strategy-run battle may replace normal strategy behavior and report identity
+  without a restart, but run initialization, session preflight, and Home-only
+  checks stay deferred. Any current-battle degradation remains attached to the
+  run. Its explicitly declared
+  `run_when_attached` configuration checks are observational. A request
+  encountered at Home `NEW_BATTLE` follows normal boundary replacement instead
+  and runs the complete startup-gate sequence.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.

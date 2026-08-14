@@ -64,7 +64,9 @@ def _runtime_app(
     )
     control_path = tmp_path / "logs" / "automation_ctl.json"
     store = ControlDirectiveStore(control_path)
-    store.replace({"state": "RUNNING", "mode": "WAIT", "custom": "keep"})
+    store.replace({"custom": "keep"})
+    store.set_state("RUNNING", source="test-harness")
+    store.set_mode("WAIT", source="test-harness")
     supervisor = AutomationSupervisor(
         control_file=str(control_path),
         auto_return_enabled=False,

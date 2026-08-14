@@ -10,6 +10,8 @@ a proposed repository patch.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -17,7 +19,7 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -699,6 +701,25 @@ class AppendOnlyMappingCandidateStore:
     def append(self, record: Mapping[str, Any]) -> None:
         self.append_once(record)
 
+    @contextmanager
+    def locked_records(self) -> Iterator[list[dict[str, Any]]]:
+        """Yield one immutable queue view while blocking concurrent appends."""
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            self.path,
+            os.O_RDWR | os.O_CREAT,
+            0o600,
+        )
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            os.fchmod(descriptor, 0o600)
+            _recover_partial_tail(descriptor)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            yield _read_locked_records(descriptor)
+        finally:
+            os.close(descriptor)
+
     def list_records(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
@@ -784,6 +805,18 @@ def mapping_candidate_review_status(
     }
 
 
+def mapping_candidate_record_status(
+    record: Mapping[str, Any],
+    *,
+    repository_root: Path | str = ROOT,
+) -> dict[str, Any]:
+    """Project one exact durable record without latest-claim deduplication."""
+
+    normalized = validate_mapping_candidate_record(record)
+    mappings = _repository_mappings_by_id(Path(repository_root))
+    return _mapping_candidate_status_item(normalized, mappings)
+
+
 def _repository_mappings_by_id(
     repository_root: Path,
 ) -> dict[str, dict[str, Any]]:
@@ -803,6 +836,34 @@ def _repository_mappings_by_id(
             )
         mappings[mapping_id] = payload
     return mappings
+
+
+def canonical_mapping_set_fingerprint(
+    mappings: Mapping[str, Mapping[str, Any]],
+    *,
+    authority_mapping_id: object,
+    structural_mapping_id: object,
+) -> str:
+    """Fingerprint the exact canonical mapping documents used by one decode."""
+
+    authority_id = _safe_id(authority_mapping_id, "authority_mapping_id")
+    structural_id = _safe_id(structural_mapping_id, "structural_mapping_id")
+    selected: list[dict[str, Any]] = []
+    for mapping_id in sorted({authority_id, structural_id}):
+        mapping = mappings.get(mapping_id)
+        if not isinstance(mapping, Mapping):
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_target_mapping_missing"
+            )
+        selected.append(deepcopy(dict(mapping)))
+    return fingerprint_json(
+        {
+            "schema_version": 1,
+            "authority_mapping_id": authority_id,
+            "structural_mapping_id": structural_id,
+            "mappings": selected,
+        }
+    )
 
 
 def _mapping_candidate_status_item(
@@ -2286,7 +2347,9 @@ __all__ = [
     "PlayerSaveMappingCandidateError",
     "build_mapping_candidate_context",
     "build_mapping_candidate_record",
+    "canonical_mapping_set_fingerprint",
     "fingerprint_json",
+    "mapping_candidate_record_status",
     "mapping_candidate_review_status",
     "pending_mapping_candidate",
     "proposed_mapping_patch",

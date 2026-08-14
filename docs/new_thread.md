@@ -21,61 +21,43 @@ adding another only if scope expands.
 
 ## Outcome coordination
 
-Use one outcome coordinator per feature, fix, or milestone, then archive it at
-completion. Keep tightly coupled work in the coordinator. When at least two
-substantial independent subtasks can run in parallel, spawn one batch of at
-most three direct subagents; descendants require operator authorization. Wait
-for the batch and synthesize it without repeated steering or serial fan-out.
+Use one disposable coordinator per coherent outcome. Delegate only when at
+least two substantial independent tasks can proceed in parallel, to at most
+three direct subagents; descendants need operator authorization. One writer
+owns a checkout, and parallel writers need separate feature worktrees.
 
-Use separate top-level chats only for genuinely independent writing outcomes.
-
-In a shared checkout, subagents explore, analyze, validate, or review; the
-coordinator alone writes. Independent writers need separate feature branches
-and worktrees with non-overlapping ownership. Ask workers for concise findings,
-exact file/symbol references, validation, risks, blockers, and recommendations
-rather than raw logs.
-
-`PENDING_DEVELOPMENT.md`, domain backlogs, canonical guidance, commits, and
-validation evidence—not chat history—carry durable state. Before compaction or
-coordinator replacement could jeopardize continuity, checkpoint once in the
-owning artifact; use a handoff only when another top-level chat must continue.
-On completion, validate, commit, update the owning documentation, close
-subagents, and report that the coordinator is ready to archive.
+Repository artifacts—not chat—carry durable state. Checkpoint there before a
+handoff or coordinator replacement, and use a handoff only when another
+top-level chat continues the work. Read-only work ends with its evidence.
+Repository-changing work ends with a validated commit and updated owner.
+Promotion owners also publish and retire clean integrated temporary work under
+the [production procedure](operations/production_promotion.md).
 
 ## Repository-change preflight
 
-1. Verify the checkout, branch, working tree, and recent commits. Implementation
-   belongs in an assigned feature worktree, not production `main`.
-2. Inspect staged and unstaged changes for every target. Preserve unrelated
-   work and recheck each target immediately before editing, staging, and
-   committing.
-3. Read the directly relevant source, configuration, callers, tests, and
-   canonical documentation. Search for existing ownership before creating a
-   parallel capability.
-4. Make one coherent change; review and stage only owned files or hunks,
-   validate, and commit before beginning another result.
-5. If a guard or assumption blocks the outcome, stop state-changing work,
-   preserve evidence, and present repair, redesign, defer, and workaround
-   options. Do not weaken the guard or substitute blind action to finish.
+1. Confirm the assigned feature worktree, branch, and target diffs.
+2. Read the relevant owner, source, callers, and tests; extend an existing
+   capability when its boundary fits.
+3. Make one coherent change, stage only owned hunks, validate, and commit it.
+4. If a guard blocks the outcome, follow its documented wait or recovery path;
+   never weaken it or claim completion.
 
 ## Development Python environment
 
 Never run a development bootstrap in
 `/home/brianm/dev/python/TheTower` or use its production-owned `.venv` from
-another worktree. In a feature or integration worktree, bootstrap a missing or
-mismatched environment only with:
+another worktree. In a feature or integration worktree, run bootstrap once; it
+creates or selects the fingerprinted environment:
 
 ```bash
 /usr/bin/python3.12 tools/development.py bootstrap
 ```
 
-After `.venv` exists, run every project command through it:
-
-```bash
-.venv/bin/python tools/development.py status
-.venv/bin/python tools/development.py bootstrap
-.venv/bin/python tools/development.py checkpoint
-```
+Run project Python through `.venv/bin/python`. `status` diagnoses a selection;
+it does not bracket successful commands. Use focused tests while work can
+change, and run `.venv/bin/python tools/development.py checkpoint` only when the
+[production procedure](operations/production_promotion.md#choose-the-candidate-gate)
+requires the complete gate.
 
 Do not install packages ad hoc. The bootstrap's fingerprint, lock, completion,
 and isolation contract is in
@@ -94,29 +76,18 @@ applicable fresh inspection and test.
 
 Load only the matching owner:
 
-- [`PENDING_DEVELOPMENT.md`](../PENDING_DEVELOPMENT.md): selecting or
-  reprioritizing work; use a supplied domain backlog directly when already
-  known.
-- [`runtime_operations.md`](runtime_operations.md): select one named operator
-  procedure; never load every operation merely because work is live.
-- [`sandbox_boundaries.md`](sandbox_boundaries.md): the relevant section for
-  host-process, lock, systemd, ADB, socket, or long-lived-process evidence.
-- [`architecture/runtime.md`](architecture/runtime.md): the relevant runtime
-  component or authority boundary.
-- [`architecture/player_save.md`](architecture/player_save.md): player-save
-  mapping, evidence, privacy, or fallback behavior.
-- [`reference/ui_detection_schema.md`](reference/ui_detection_schema.md) and
-  [`tooling/template_workflow.md`](tooling/template_workflow.md): clickmap,
-  state-definition, or template work; load the workflow only for assets.
-- [`reference/yaml_strategy.md`](reference/yaml_strategy.md): strategy source,
-  generated plan, conditions, or gate fields.
-- [`observed_issues.md`](observed_issues.md): global hazards before live work,
-  then only a task-matching active entry and its conditionally linked dossier.
-- [`game_strategy.md`](game_strategy.md): Farm/Tournament strategy assumptions,
-  Tier tradeoffs, perks, Damage Slider, Target Priority, or Heat analysis.
-- [`ui_state_traversal_2026-07-14.md`](ui_state_traversal_2026-07-14.md): UI
-  state coverage or traversal.
-- [`../windows/TheTower.ControlSurface/README.md`](../windows/TheTower.ControlSurface/README.md):
-  native client publishing, operation, or Windows-only validation.
+| Task | Owner |
+| --- | --- |
+| Select or reprioritize work | [`PENDING_DEVELOPMENT.md`](../PENDING_DEVELOPMENT.md), or the already-supplied domain backlog |
+| Select one live operation | [`runtime_operations.md`](runtime_operations.md) |
+| Interpret host process, lock, systemd, ADB, socket, or wrapper evidence | Relevant [`sandbox boundary`](sandbox_boundaries.md) |
+| Runtime contract or authority | Relevant [`runtime architecture`](architecture/runtime.md) section |
+| Player-save mapping, evidence, privacy, or fallback | [`player-save architecture`](architecture/player_save.md) |
+| Clickmap, state definition, or template asset | [`UI schema`](reference/ui_detection_schema.md), plus the [`template workflow`](tooling/template_workflow.md) only for assets |
+| YAML strategy source or plan | [`YAML strategy reference`](reference/yaml_strategy.md) |
+| Active issue or live hazard | [`observed issue router`](observed_issues.md), then only a matching dossier |
+| Farm/Tournament assumptions and tradeoffs | [`game strategy`](game_strategy.md) |
+| UI state coverage | [`UI traversal`](ui_state_traversal_2026-07-14.md) |
+| Native client operation or publication | [`Windows client guide`](../windows/TheTower.ControlSurface/README.md) |
 
 When a task expands, stop before the new class of action and complete its path.

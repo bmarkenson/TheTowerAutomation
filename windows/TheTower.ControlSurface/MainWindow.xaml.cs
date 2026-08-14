@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -22,6 +23,7 @@ public partial class MainWindow : Window
     private const string DiagnosticsSystemPageId = "diagnostics";
     private readonly ControlSurfaceApi _api = new();
     private readonly HostPerformanceTracker _hostPerformance;
+    private readonly BlueStacksMaintenanceCoordinator _blueStacksMaintenance;
     private readonly TunnelHostConnection _tunnelHost = new();
     private readonly ClientSettings _settings;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(5) };
@@ -31,6 +33,7 @@ public partial class MainWindow : Window
         Interval = TimeSpan.FromSeconds(15),
     };
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly SemaphoreSlim _controlMutationGate = new(1, 1);
     private readonly SemaphoreSlim _battleRefreshGate = new(1, 1);
     private readonly SemaphoreSlim _activityRefreshGate = new(1, 1);
     private readonly SemaphoreSlim _serviceStatusGate = new(1, 1);
@@ -38,6 +41,11 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<ActivityEntry> _activity = [];
     private readonly ObservableCollection<CurrentBattlePerkItem> _currentBattlePerks = [];
     private readonly StrategySelectionCoordinator _strategySelection = new();
+    private BetterControlActionAvailability _attachBattleAvailability = new()
+    {
+        Available = false,
+        Reason = "Better Control Model status is unavailable.",
+    };
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
     private CancellationTokenSource? _refreshCancellation;
@@ -53,6 +61,7 @@ public partial class MainWindow : Window
     private bool _updatingStrategySelection;
     private bool _strategyLifecycleAvailable;
     private bool _strategyProcessActive;
+    private bool _strategyDegradedObserver;
     private string? _configuredStrategy;
     private string? _currentStrategy;
     private string? _requestedStrategy;
@@ -65,6 +74,8 @@ public partial class MainWindow : Window
     private LinuxApiServiceSnapshot? _controlSurfaceServiceState;
     private TunnelHostSnapshot? _tunnelHostSnapshot;
     private TunnelHostProtocolMismatchException? _tunnelHostProtocolMismatch;
+    private int? _observedTunnelHostBlueStacksAdbPort;
+    private bool _tunnelPortMaintenanceStatusReconciled;
     private bool _controlSurfaceServiceActionInFlight;
     private bool _controlSurfaceRestartInFlight;
     private bool _apiTunnelActionInFlight;
@@ -90,6 +101,16 @@ public partial class MainWindow : Window
     private string? _autoPromptedTournamentLaunchRequestId;
     private bool _tournamentLaunchDialogOpen;
     private bool _tournamentLaunchCanStart;
+    private Task _blueStacksMaintenanceTask = Task.CompletedTask;
+    private BetterControlActionAvailability _blueStacksOperatorAvailability = new()
+    {
+        Available = false,
+        Reason = "BlueStacks restart status is unavailable.",
+    };
+    private bool _blueStacksMaintenanceCompatible;
+    private string? _blueStacksOperatorMessage;
+    private bool _shutdownStarted;
+    private bool _coordinatedClosePending;
     public MainWindow()
     {
         InitializeComponent();
@@ -101,7 +122,24 @@ public partial class MainWindow : Window
         WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
         RestoreMainWindowLayout();
         _api.Configure(_settings.BaseUrl, _apiToken);
-        _hostPerformance = new HostPerformanceTracker(_api);
+        var blueStacksController = new BlueStacksInstanceController();
+        _blueStacksMaintenance = new BlueStacksMaintenanceCoordinator(
+            _api,
+            blueStacksController,
+            () => _settings);
+        _blueStacksMaintenance.StateChanged += (_, message) =>
+        {
+            if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+            {
+                _ = Dispatcher.BeginInvoke(
+                    () => BlueStacksRecoveryProgressText.Text = message);
+            }
+        };
+        _hostPerformance = new HostPerformanceTracker(
+            _api,
+            blueStacksController);
+        _blueStacksMaintenance.RestartBoundaryCrossed += (_, _) =>
+            _hostPerformance.ResetSamplerRateBaselines();
         _hostPerformance.SetSamplingEnabled(
             _settings.HostPerformanceSamplingEnabled);
         _hostPerformance.SnapshotUpdated += HostPerformance_SnapshotUpdated;
@@ -132,12 +170,7 @@ public partial class MainWindow : Window
                 RefreshActivityAsync(),
                 RefreshControlSurfaceServiceStatusAsync(force: true));
         };
-        Closing += (_, _) =>
-        {
-            CaptureWindowPlacement();
-            CaptureMainWindowLayout();
-            SaveSettingsBestEffort();
-        };
+        Closing += MainWindow_Closing;
         Closed += async (_, _) =>
         {
             _timer.Stop();
@@ -175,7 +208,10 @@ public partial class MainWindow : Window
 
     private async void ShowPreferences_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new PreferencesWindow(_settings, _apiToken)
+        var dialog = new PreferencesWindow(
+            _settings,
+            _apiToken,
+            _blueStacksMaintenance.TargetEditsLocked)
         {
             Owner = this,
         };
@@ -193,6 +229,20 @@ public partial class MainWindow : Window
         PreferencesResult preferences,
         bool resetLayout)
     {
+        var recoveryTargetLocked = _blueStacksMaintenance.TargetEditsLocked;
+        var recoveryTargetChanged =
+            _settings.WindowsBlueStacksAdbPort
+                != preferences.TunnelConfiguration.WindowsBlueStacksAdbPort
+            || !string.Equals(
+                _settings.BlueStacksPlayerExecutablePath,
+                preferences.BlueStacksPlayerExecutablePath,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                _settings.BlueStacksInstanceName,
+                preferences.BlueStacksInstanceName,
+                StringComparison.Ordinal);
+        var attemptedRecoveryTargetChange = recoveryTargetLocked
+            && recoveryTargetChanged;
         var apiChanged = !string.Equals(
                 _settings.BaseUrl,
                 preferences.BaseUrl,
@@ -214,12 +264,28 @@ public partial class MainWindow : Window
             preferences.TunnelConfiguration.LocalApiPort;
         _settings.RemoteApiPort =
             preferences.TunnelConfiguration.RemoteApiPort;
-        _settings.WindowsBlueStacksAdbPort =
-            preferences.TunnelConfiguration.WindowsBlueStacksAdbPort;
+        if (!recoveryTargetLocked)
+        {
+            _settings.WindowsBlueStacksAdbPort =
+                preferences.TunnelConfiguration.WindowsBlueStacksAdbPort;
+        }
         _settings.LinuxAdbForwardPort =
             preferences.TunnelConfiguration.LinuxAdbPort;
         _settings.HostPerformanceSamplingEnabled =
             preferences.HostPerformanceSamplingEnabled;
+        _settings.BlueStacksAutomaticRecoveryEnabled =
+            preferences.BlueStacksAutomaticRecoveryEnabled;
+        if (!recoveryTargetLocked)
+        {
+            _settings.BlueStacksPlayerExecutablePath =
+                preferences.BlueStacksPlayerExecutablePath;
+            _settings.BlueStacksInstanceName =
+                preferences.BlueStacksInstanceName;
+            if (recoveryTargetChanged)
+            {
+                _blueStacksOperatorMessage = null;
+            }
+        }
         _api.Configure(_settings.BaseUrl, _apiToken);
         _hostPerformance.SetSamplingEnabled(
             _settings.HostPerformanceSamplingEnabled);
@@ -231,6 +297,18 @@ public partial class MainWindow : Window
         SaveSettingsBestEffort();
         RenderConnectionPreferences();
         RefreshWindowsAdbListenerStatus();
+
+        if (attemptedRecoveryTargetChange)
+        {
+            MessageBox.Show(
+                this,
+                "BlueStacks recovery target settings were kept unchanged "
+                    + "because a durable recovery request is active. Other "
+                    + "preferences were saved.",
+                "BlueStacks recovery target locked",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
 
         if (apiChanged)
         {
@@ -537,11 +615,11 @@ public partial class MainWindow : Window
     private void ApplyTunnelHostConfiguration(
         TunnelHostConfiguration configuration)
     {
+        ObserveTunnelHostBlueStacksPort(
+            configuration.WindowsBlueStacksAdbPort);
         _settings.SshDestination = configuration.SshDestination;
         _settings.LocalTunnelPort = configuration.LocalApiPort;
         _settings.RemoteApiPort = configuration.RemoteApiPort;
-        _settings.WindowsBlueStacksAdbPort =
-            configuration.WindowsBlueStacksAdbPort;
         _settings.LinuxAdbForwardPort = configuration.LinuxAdbPort;
         _settings.BaseUrl = $"http://127.0.0.1:{configuration.LocalApiPort}";
         _api.Configure(_settings.BaseUrl, _apiToken);
@@ -561,13 +639,58 @@ public partial class MainWindow : Window
         ConfiguredApiForwardText.Text =
             $"127.0.0.1:{_settings.LocalTunnelPort} → Linux "
             + $"127.0.0.1:{_settings.RemoteApiPort}";
+        var tunnelWindowsPort = _observedTunnelHostBlueStacksAdbPort
+            ?? _settings.WindowsBlueStacksAdbPort;
         ConfiguredAdbForwardText.Text =
             $"Linux 127.0.0.1:{_settings.LinuxAdbForwardPort} → Windows "
-            + $"127.0.0.1:{_settings.WindowsBlueStacksAdbPort}";
+            + $"127.0.0.1:{tunnelWindowsPort}"
+            + (tunnelWindowsPort == _settings.WindowsBlueStacksAdbPort
+                ? ""
+                : $" · recovery target {_settings.WindowsBlueStacksAdbPort}");
+        ConfiguredAdbForwardText.ToolTip =
+            !_tunnelPortMaintenanceStatusReconciled
+                ? "The tunnel host port is shown, but recovery-target adoption "
+                    + "waits for a successful Linux maintenance-status check."
+                : tunnelWindowsPort != _settings.WindowsBlueStacksAdbPort
+                    ? "A durable or outcome-unknown BlueStacks maintenance "
+                        + "request keeps the recovery target locked while the "
+                        + "tunnel host reports a different Windows port."
+                    : "The tunnel host and BlueStacks recovery target agree.";
+    }
+
+    private void ObserveTunnelHostBlueStacksPort(int port)
+    {
+        if (_observedTunnelHostBlueStacksAdbPort != port)
+        {
+            _observedTunnelHostBlueStacksAdbPort = port;
+            _tunnelPortMaintenanceStatusReconciled = false;
+        }
+    }
+
+    private void ReconcileTunnelHostBlueStacksPort(StatusResponse status)
+    {
+        _tunnelPortMaintenanceStatusReconciled = true;
+        if (_observedTunnelHostBlueStacksAdbPort is not int observed
+            || !BlueStacksMaintenanceCoordinator.CanAdoptTunnelHostPort(
+                status,
+                _blueStacksMaintenance.TargetEditsLocked))
+        {
+            RenderConnectionPreferences();
+            return;
+        }
+        if (_settings.WindowsBlueStacksAdbPort != observed)
+        {
+            _settings.WindowsBlueStacksAdbPort = observed;
+            SaveSettingsBestEffort();
+            RefreshWindowsAdbListenerStatus();
+        }
+        RenderConnectionPreferences();
     }
 
     private void RenderTunnelHostSnapshot(TunnelHostSnapshot snapshot)
     {
+        ObserveTunnelHostBlueStacksPort(
+            snapshot.Configuration.WindowsBlueStacksAdbPort);
         _tunnelHostSnapshot = snapshot;
         _tunnelHostProtocolMismatch = null;
         TunnelHostStatusText.Text =
@@ -602,6 +725,7 @@ public partial class MainWindow : Window
         }
         UpdateControlSurfaceServiceControls();
         UpdateRestartSshControls();
+        RenderConnectionPreferences();
     }
 
     private void RenderTunnelHostProtocolMismatch(
@@ -685,6 +809,7 @@ public partial class MainWindow : Window
                 cancellation.Token);
             ApplyTunnelHostConfiguration(snapshot.Configuration);
             RenderTunnelHostSnapshot(snapshot);
+            await RefreshStatusAsync(force: true);
             SetHttpConnectionStatus(
                 "Unavailable — tunnel host restarted",
                 new SolidColorBrush(Color.FromRgb(241, 191, 91)));
@@ -1535,8 +1660,20 @@ public partial class MainWindow : Window
         {
             return;
         }
+        var enteredControlGate = false;
+        var enteredRefreshGate = false;
+        var reconcileAfterFailure = false;
+        Exception? requestFailure = null;
+        var requestSucceeded = false;
         try
         {
+            // Control POSTs are serialized independently from status GETs.
+            // Cancel an older GET and transmit the mutation immediately; only
+            // response rendering waits for that GET to drain, so stale status
+            // cannot overwrite the authoritative POST response.
+            await _controlMutationGate.WaitAsync();
+            enteredControlGate = true;
+            _refreshCancellation?.Cancel();
             StatusResponse response;
             if (tag.StartsWith("pause:", StringComparison.Ordinal))
             {
@@ -1565,12 +1702,42 @@ public partial class MainWindow : Window
                         new { action = tag },
                         CancellationToken.None);
             }
+            await _refreshGate.WaitAsync();
+            enteredRefreshGate = true;
             RenderStatus(response);
-            await RefreshActivityAsync(force: true);
+            requestSucceeded = true;
         }
         catch (Exception exc)
         {
-            ShowError(exc);
+            // The server may have durably committed the request even when its
+            // response was lost.  Reconcile immediately instead of leaving a
+            // modal error as the only visible outcome until the next poll.
+            requestFailure = exc;
+            reconcileAfterFailure = true;
+        }
+        finally
+        {
+            if (enteredRefreshGate)
+            {
+                _refreshGate.Release();
+            }
+        }
+        if (reconcileAfterFailure)
+        {
+            await RefreshStatusAsync(force: true);
+        }
+        if (enteredControlGate)
+        {
+            _controlMutationGate.Release();
+        }
+        if (requestFailure is not null)
+        {
+            ShowError(requestFailure);
+            return;
+        }
+        if (requestSucceeded)
+        {
+            await RefreshActivityAsync(force: true);
         }
     }
 
@@ -1580,17 +1747,50 @@ public partial class MainWindow : Window
         {
             return;
         }
+        var enteredControlGate = false;
+        var enteredRefreshGate = false;
+        Exception? requestFailure = null;
+        var requestSucceeded = false;
         try
         {
+            await _controlMutationGate.WaitAsync();
+            enteredControlGate = true;
+            _refreshCancellation?.Cancel();
             var response = await _api.PostControlAsync(
                 new { action = "terminal_policy", policy = mode },
                 CancellationToken.None);
+            await _refreshGate.WaitAsync();
+            enteredRefreshGate = true;
             RenderStatus(response);
-            await RefreshActivityAsync(force: true);
+            requestSucceeded = true;
         }
         catch (Exception exc)
         {
-            ShowError(exc);
+            requestFailure = exc;
+        }
+        finally
+        {
+            if (enteredRefreshGate)
+            {
+                _refreshGate.Release();
+            }
+        }
+        if (requestFailure is not null)
+        {
+            await RefreshStatusAsync(force: true);
+        }
+        if (enteredControlGate)
+        {
+            _controlMutationGate.Release();
+        }
+        if (requestFailure is not null)
+        {
+            ShowError(requestFailure);
+            return;
+        }
+        if (requestSucceeded)
+        {
+            await RefreshActivityAsync(force: true);
         }
     }
 
@@ -1693,7 +1893,7 @@ public partial class MainWindow : Window
             _serverCompatibility))
         {
             ShowError(new InvalidOperationException(
-                "Linux API revision 35 with save_mapping_integration_v1 is required."));
+                "Linux API revision 42 with save_mapping_staged_candidate_v1 is required."));
             return;
         }
         try
@@ -2297,7 +2497,14 @@ public partial class MainWindow : Window
         var cancellationToken = _refreshCancellation.Token;
         try
         {
-            RenderStatus(await _api.GetStatusAsync(cancellationToken));
+            var status = await _api.GetStatusAsync(cancellationToken);
+            ReconcileTunnelHostBlueStacksPort(status);
+            RenderStatus(status);
+            if (BlueStacksMaintenanceCoordinator
+                .HasMaintenanceReconciliationContract(status))
+            {
+                QueueBlueStacksMaintenance(status);
+            }
             SetHttpConnectionStatus(
                 "Connected",
                 new SolidColorBrush(Color.FromRgb(73, 214, 157)));
@@ -2330,6 +2537,99 @@ public partial class MainWindow : Window
         {
             _refreshGate.Release();
         }
+    }
+
+    private async Task ObserveBlueStacksMaintenanceAsync(StatusResponse status)
+    {
+        try
+        {
+            await _blueStacksMaintenance.ObserveStatusAsync(
+                status,
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+            {
+                await Dispatcher.InvokeAsync(
+                    () => BlueStacksRecoveryProgressText.Text = exception.Message);
+            }
+        }
+    }
+
+    private void QueueBlueStacksMaintenance(StatusResponse status)
+    {
+        if (_shutdownStarted || !_blueStacksMaintenanceTask.IsCompleted)
+        {
+            return;
+        }
+        _blueStacksMaintenanceTask = ObserveBlueStacksMaintenanceAsync(status);
+        UpdateBlueStacksRestartAvailability();
+    }
+
+    private async void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        _shutdownStarted = true;
+        if (_coordinatedClosePending)
+        {
+            e.Cancel = true;
+            return;
+        }
+        var maintenanceTask = _blueStacksMaintenanceTask;
+        if (!maintenanceTask.IsCompleted
+            || _blueStacksMaintenance.RequestOutcomeUnknown)
+        {
+            e.Cancel = true;
+            _coordinatedClosePending = true;
+            BlueStacksRecoveryProgressText.Text =
+                "Closing after the current BlueStacks maintenance step "
+                + "reaches a reconciled boundary…";
+            try
+            {
+                await maintenanceTask;
+                if (_blueStacksMaintenance.RequestOutcomeUnknown)
+                {
+                    using var reconciliation = new CancellationTokenSource(
+                        TimeSpan.FromSeconds(14));
+                    var status = await _api.GetStatusAsync(
+                        reconciliation.Token);
+                    if (!BlueStacksMaintenanceCoordinator
+                        .HasMaintenanceReconciliationContract(status))
+                    {
+                        throw new InvalidOperationException(
+                            "Linux maintenance status is not compatible.");
+                    }
+                    await _blueStacksMaintenance.ObserveStatusAsync(
+                        status,
+                        CancellationToken.None,
+                        allowRequestCreation: false);
+                    if (_blueStacksMaintenance.RequestOutcomeUnknown)
+                    {
+                        throw new InvalidOperationException(
+                            "Linux did not resolve the submitted restart request.");
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                BlueStacksRecoveryProgressText.Text =
+                    "Close deferred until BlueStacks maintenance can be "
+                        + "reconciled · " + exception.Message;
+                _coordinatedClosePending = false;
+                _shutdownStarted = false;
+                UpdateBlueStacksRestartAvailability();
+                return;
+            }
+            finally
+            {
+                _coordinatedClosePending = false;
+            }
+            Close();
+            return;
+        }
+        CaptureWindowPlacement();
+        CaptureMainWindowLayout();
+        SaveSettingsBestEffort();
     }
 
     private async Task RefreshBattlesAsync(bool force = false)
@@ -2671,6 +2971,7 @@ public partial class MainWindow : Window
     {
         _serverCompatibility = ControlSurfaceCompatibility.Evaluate(status);
         UpdateControlSurfaceCompatibility();
+        RenderBlueStacksRecovery(status);
         DirectiveText.Text = FormatActionAuthority(
             status.ControlModel,
             status.Control);
@@ -2767,9 +3068,14 @@ public partial class MainWindow : Window
             status.ControlModel?.StrategyScope.ActiveBattle,
             status.ControlModel?.StrategyScope.PendingNextBoundary,
             status.ControlModel?.StrategyScope.PendingActiveBattle);
+        var blueStacksTarget =
+            BlueStacksMaintenanceCoordinator.ResolveTelemetryTarget(
+                status,
+                _settings);
         _hostPerformance.UpdateServerContext(
             status.Control.AdbPort ?? service?.AdbPort,
             status.CurrentRun?.RunId,
+            blueStacksTarget,
             status.Capabilities.Contains(
                 "host_performance_telemetry_v1",
                 StringComparer.Ordinal)
@@ -2778,6 +3084,9 @@ public partial class MainWindow : Window
                 StringComparer.Ordinal)
             && status.Capabilities.Contains(
                 "host_performance_process_attribution_v1",
+                StringComparer.Ordinal)
+            && status.Capabilities.Contains(
+                "bluestacks_listener_lifetime_telemetry_v1",
                 StringComparer.Ordinal));
         ServiceText.Text = service is null
             ? "API restart needed"
@@ -2893,13 +3202,16 @@ public partial class MainWindow : Window
                 $"{decision.CheckId}: {decision.DecisionId}; waiting for runtime.",
             _ => "No preflight decision is waiting for direction.",
         };
-        if (pendingGate is not null
+        if (pendingGate is { Blocking: true }
             && pendingGate.RequestId != _autoPromptedGateRequestId)
         {
             _autoPromptedGateRequestId = pendingGate.RequestId;
             Dispatcher.BeginInvoke(new Action(async () =>
                 await ShowGateDecisionAsync(pendingGate)));
         }
+        GateDecisionButton.Content = pendingGate is { Blocking: false }
+            ? "Review preflight advisory"
+            : "Review preflight decision";
         var adbTargetPending = processActive
             && status.Control.AdbPort is not null
             && status.Acknowledgements.AdbTarget is not
@@ -3001,6 +3313,11 @@ public partial class MainWindow : Window
         _requestedStrategy = requestedStrategy;
         _pendingStrategy = pendingStrategy;
         _strategyApplyMode = status.Control.StrategyApplyMode;
+        _strategyDegradedObserver = strategyScope.Degraded
+            && string.Equals(
+                currentStrategy,
+                "none",
+                StringComparison.OrdinalIgnoreCase);
         if (!_strategySelection.Dirty)
         {
             SelectStrategy(
@@ -3026,6 +3343,10 @@ public partial class MainWindow : Window
                         : "Pending next: ")
                     + StrategyDisplayName(pendingStrategy)
                 : $"Current: {currentStrategyLabel}";
+        if (strategyScope.Degraded)
+        {
+            StrategyScopeText.Text += " · Degraded";
+        }
         CurrentStrategyValueText.Text = processActive
             ? currentStrategyLabel
             : "No active process";
@@ -3118,7 +3439,7 @@ public partial class MainWindow : Window
                 ? "match"
                 : "MISMATCH"
             : "not comparable";
-        RuntimeDetailText.Text = string.Join(
+        RuntimeServiceDetailText.Text = string.Join(
             Environment.NewLine,
             new[]
             {
@@ -3133,17 +3454,22 @@ public partial class MainWindow : Window
                 $"ADB target file: {service?.AdbEnvironmentFile ?? "-"}",
                 $"Installed unit reads target file: {YesNo(service?.AutomationEnvironmentFileLoaded)}",
                 $"Systemd EnvironmentFiles: {service?.ServiceEnvironmentFiles ?? "-"}",
+                $"Configured next-start strategy: {configuredStrategy ?? "-"}",
+                $"Strategy source: {service?.StrategySource ?? "-"}",
+                $"Strategy file: {service?.StrategyEnvironmentFile ?? "-"}",
+                $"Next-start gate policy: {service?.StartupGatePolicy ?? "-"}",
+                $"Gate policy source: {service?.StartupGatePolicySource ?? "-"}",
+            });
+        RuntimeDetailText.Text = string.Join(
+            Environment.NewLine,
+            new[]
+            {
                 $"Current runtime strategy: {currentStrategy ?? "-"}",
                 $"Strategy Action Gate: {FormatStrategyActionGate(strategyGate)}",
                 $"Strategy Gate failed checks: {Join(strategyGate?.FailedCheckIds)}",
                 $"Strategy Gate allowed collectors: {Join(strategyGate?.AllowedAuxiliaryCollectors)}",
                 $"{pendingStrategyLabel}: {pendingStrategy ?? "-"}",
                 $"Strategy request mode: {status.Control.StrategyApplyMode}",
-                $"Configured next-start strategy: {configuredStrategy ?? "-"}",
-                $"Strategy source: {service?.StrategySource ?? "-"}",
-                $"Strategy file: {service?.StrategyEnvironmentFile ?? "-"}",
-                $"Next-start gate policy: {service?.StartupGatePolicy ?? "-"}",
-                $"Gate policy source: {service?.StartupGatePolicySource ?? "-"}",
                 $"Runtime lock: {runtime?.File ?? "-"}",
                 $"Runtime lock PID: {runtime?.Pid?.ToString() ?? "-"}",
                 $"Lock held / PID alive: {YesNo(runtime?.LockHeld)} / {YesNo(runtime?.PidAlive)}",
@@ -3163,6 +3489,251 @@ public partial class MainWindow : Window
             ?? "";
     }
 
+    private void RenderBlueStacksRecovery(StatusResponse status)
+    {
+        var degradation = status.EmulatorDegradation;
+        var maintenance = status.HostMaintenance;
+        var request = maintenance.Request;
+        var boundTarget = request?.HostCompletion
+            ?? request?.HostAcknowledgement
+            ?? request?.HostTarget;
+        var ratio = degradation.CandidateCphRatio is double cphRatio
+            ? $" · CPH ratio {cphRatio:P0}"
+            : "";
+        var speed = degradation.EffectiveGameSpeedRatio is double speedRatio
+            ? $" · speed ratio {speedRatio:P0}"
+            : "";
+        var target = boundTarget is null
+            ? ""
+            : $" · {boundTarget.InstanceName} on {boundTarget.AdbPort}"
+                + (
+                    request?.HostCompletion?.PreviousProcessId is int previousPid
+                        ? $" · PID {previousPid} → {boundTarget.ProcessId}"
+                        : $" · PID {boundTarget.ProcessId}"
+                );
+        var phase = request is null
+            ? "idle"
+            : FormatStatusToken(request.State);
+        BlueStacksRecoveryStateText.Text =
+            $"BlueStacks recovery: {phase} · detector "
+            + $"{FormatStatusToken(degradation.Status)}{ratio}{speed}{target}"
+            + (string.IsNullOrWhiteSpace(maintenance.Reason)
+                ? ""
+                : $" — {maintenance.Reason}");
+        BlueStacksRecoveryStateText.Foreground = new SolidColorBrush(
+            maintenance.Active
+                ? Color.FromRgb(98, 213, 255)
+                : degradation.AutomaticReady
+                    ? Color.FromRgb(241, 191, 91)
+                    : request?.State == "terminal"
+                        ? Color.FromRgb(101, 230, 166)
+                        : Color.FromRgb(139, 153, 176));
+
+        var evidence = degradation.HostEvidence;
+        var identityParts = new List<string>();
+        if (evidence?.ListenerIdentity is { } listener)
+        {
+            identityParts.Add($"exact PID {listener.ProcessId}");
+        }
+        if (evidence?.SamplerSessionCount > 1)
+        {
+            identityParts.Add(
+                $"across {evidence.SamplerSessionCount:N0} GUI sessions");
+        }
+        if (evidence is not null
+            && evidence.HandleRecentMedian is double recentHandles
+            && evidence.HandleLowWater is double lowHandles)
+        {
+            var evidenceParts = new List<string>
+            {
+                $"Handle trend: {recentHandles:N0} recent / {lowHandles:N0} low",
+            };
+            if (evidence.HandleRatio is double handleRatio)
+            {
+                evidenceParts.Add($"{handleRatio:F2}×");
+            }
+            if (evidence.HandleDelta is double handleDelta)
+            {
+                evidenceParts.Add($"{handleDelta:+#,##0;-#,##0;0}");
+            }
+            var stableWindowCount = evidence.StableProcessWindows
+                ?? evidence.SampleCount;
+            evidenceParts.Add($"{stableWindowCount:N0} stable windows");
+            evidenceParts.AddRange(identityParts);
+            BlueStacksHostEvidenceText.Text = string.Join(" · ", evidenceParts);
+        }
+        else
+        {
+            var evidenceParts = new List<string>
+            {
+                "Handle trend: "
+                    + (string.IsNullOrWhiteSpace(evidence?.Reason)
+                        ? "waiting for exact-listener telemetry"
+                        : evidence.Reason),
+            };
+            evidenceParts.AddRange(identityParts);
+            BlueStacksHostEvidenceText.Text = string.Join(" · ", evidenceParts);
+        }
+        BlueStacksHostEvidenceText.Foreground = new SolidColorBrush(
+            evidence?.Status == "confirmed_growth"
+                ? Color.FromRgb(241, 191, 91)
+                : Color.FromRgb(139, 153, 176));
+
+        _blueStacksMaintenanceCompatible =
+            BlueStacksMaintenanceCoordinator.HasOperatorRestartContract(status);
+        _blueStacksOperatorAvailability = maintenance.OperatorRestart;
+        UpdateBlueStacksRestartAvailability();
+        if (_blueStacksMaintenanceTask.IsCompleted)
+        {
+            if (maintenance.Active)
+            {
+                _blueStacksOperatorMessage = null;
+            }
+            BlueStacksRecoveryProgressText.Text = maintenance.Active
+                ? $"Maintenance progress: {FormatStatusToken(request?.State)} · "
+                    + maintenance.Reason
+                : _blueStacksOperatorMessage is not null
+                    ? _blueStacksOperatorMessage
+                    : request?.State == "terminal"
+                    ? "Last maintenance: "
+                        + (string.IsNullOrWhiteSpace(
+                            request.TerminalDisposition)
+                                ? "Completed"
+                                : FormatStatusToken(
+                                    request.TerminalDisposition))
+                        + " · "
+                        + (request.TerminalReason ?? maintenance.Reason)
+                    : "No BlueStacks maintenance is active.";
+        }
+    }
+
+    private void UpdateBlueStacksRestartAvailability()
+    {
+        var available = _blueStacksMaintenanceCompatible
+            && _blueStacksOperatorAvailability.Available
+            && !_blueStacksMaintenance.TargetEditsLocked
+            && _blueStacksMaintenanceTask.IsCompleted
+            && !_shutdownStarted;
+        BlueStacksRestartButton.IsEnabled = available;
+        BlueStacksRestartButton.ToolTip = !_blueStacksMaintenanceCompatible
+            ? $"Linux API revision {ControlSurfaceCompatibility.MinimumServerRevision} "
+                + "with exact-listener operator restart support is required."
+            : _blueStacksMaintenance.TargetEditsLocked
+                || !_blueStacksMaintenanceTask.IsCompleted
+                ? "BlueStacks maintenance is already active."
+                : _blueStacksOperatorAvailability.Reason;
+    }
+
+    private async void BlueStacksRestart_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (!_blueStacksMaintenanceTask.IsCompleted)
+        {
+            return;
+        }
+        SetBlueStacksOperatorMessage(
+            "Validating the exact BlueStacks listener before requesting maintenance…");
+        _blueStacksMaintenanceTask = RequestOperatorBlueStacksRestartAsync();
+        UpdateBlueStacksRestartAvailability();
+        await _blueStacksMaintenanceTask;
+        await RefreshStatusAsync(force: true);
+        UpdateBlueStacksRestartAvailability();
+    }
+
+    private async Task RequestOperatorBlueStacksRestartAsync()
+    {
+        try
+        {
+            using var freshness = new CancellationTokenSource(
+                TimeSpan.FromSeconds(14));
+            var status = await _api.GetStatusAsync(freshness.Token);
+            if (_shutdownStarted)
+            {
+                SetBlueStacksOperatorMessage(
+                    "Operator BlueStacks restart canceled during close.");
+                return;
+            }
+            RenderStatus(status);
+            if (!BlueStacksMaintenanceCoordinator.HasOperatorRestartContract(
+                    status))
+            {
+                throw new InvalidOperationException(
+                    "The Linux service does not have the compatible exact-"
+                        + "listener BlueStacks restart contract.");
+            }
+            if (status.HostMaintenance.OperatorRestart.Available is not true)
+            {
+                throw new InvalidOperationException(
+                    status.HostMaintenance.OperatorRestart.Reason);
+            }
+            if (!BlueStacksMaintenanceCoordinator.HasCapability(
+                    status,
+                    "bluestacks_operator_restart_v1"))
+            {
+                throw new InvalidOperationException(
+                    "The Linux service does not support operator BlueStacks restart.");
+            }
+            var preview = _blueStacksMaintenance.PrepareOperatorRestart();
+            var confirmation = MessageBox.Show(
+                this,
+                $"Restart BlueStacks instance {preview.Target.InstanceName} "
+                    + $"on ADB port {preview.Target.AdbPort}?\n\n"
+                    + $"Exact process: PID {preview.Identity.ProcessId}\n"
+                    + $"Executable: {preview.Target.ExecutablePath}\n\n"
+                    + "Automation will hold input, restart this exact process, "
+                    + "launch The Tower, and choose Welcome Back → Resume. "
+                    + "The game may replay already completed waves without "
+                    + "earning coins. Once the same battle is running, "
+                    + "independent gem and reward collectors continue while "
+                    + "run-progression accounting waits for the old wave. "
+                    + "If the old battle cannot be resumed, recovery ends it "
+                    + "and starts the configured "
+                    + "new Farm battle.",
+                "Restart BlueStacks",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning,
+                MessageBoxResult.Cancel);
+            if (confirmation != MessageBoxResult.OK)
+            {
+                SetBlueStacksOperatorMessage(
+                    "Operator BlueStacks restart canceled.");
+                return;
+            }
+            if (_shutdownStarted)
+            {
+                SetBlueStacksOperatorMessage(
+                    "Operator BlueStacks restart canceled during close.");
+                return;
+            }
+            _blueStacksOperatorMessage = null;
+            await _blueStacksMaintenance.RequestOperatorRestartAsync(
+                preview,
+                CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            SetBlueStacksOperatorMessage(
+                "Operator BlueStacks restart status check timed out.");
+        }
+        catch (Exception exception)
+        {
+            SetBlueStacksOperatorMessage(
+                _blueStacksMaintenance.RequestOutcomeUnknown
+                    ? "Operator BlueStacks restart result is unknown; target "
+                        + "edits remain locked until Linux status reconciles · "
+                        + exception.Message
+                    : "Operator BlueStacks restart was not requested · "
+                        + exception.Message);
+        }
+    }
+
+    private void SetBlueStacksOperatorMessage(string message)
+    {
+        _blueStacksOperatorMessage = message;
+        BlueStacksRecoveryProgressText.Text = message;
+    }
+
     private void RenderConfirmedLocalMappings(
         ConfirmedLocalMappingStatus? status)
     {
@@ -3176,8 +3747,8 @@ public partial class MainWindow : Window
                 _serverCompatibility);
         SaveMappingIntegrationMenuItem.IsEnabled = compatible;
         SaveMappingIntegrationMenuItem.ToolTip = compatible
-            ? "Review exact proposals and prepare one in an owned feature worktree."
-            : "Linux API revision 35 with save_mapping_integration_v1 is required.";
+            ? "Review an exact proposal and stage one verified commit for promotion."
+            : "Linux API revision 42 with save_mapping_staged_candidate_v1 is required.";
         ReviewSaveMappingsButton.IsEnabled = compatible;
         ReviewSaveMappingsButton.ToolTip =
             SaveMappingIntegrationMenuItem.ToolTip;
@@ -3303,7 +3874,8 @@ public partial class MainWindow : Window
             if (_serverCompatibility?.IsCompatible != true)
             {
                 return Unavailable(
-                    "Linux API revision 37 with the required control-surface capabilities is required."
+                    $"Linux API revision {ControlSurfaceCompatibility.MinimumServerRevision} "
+                        + "with the required control-surface capabilities is required."
                 );
             }
             if (model is not null
@@ -3318,8 +3890,8 @@ public partial class MainWindow : Window
         StartBattleButton.IsEnabled = start.Available;
         StartBattleButton.ToolTip = start.Reason;
         var attach = Action("attach_battle");
-        AttachBattleButton.IsEnabled = attach.Available;
-        AttachBattleButton.ToolTip = attach.Reason;
+        _attachBattleAvailability = attach;
+        UpdateAttachBattleAvailability();
         StartBattleButton.Visibility = start.Available
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -3510,6 +4082,12 @@ public partial class MainWindow : Window
             ? "-"
             : $"{FormatBytes(snapshot.BlueStacksWorkingSetBytes)} · "
                 + $"{snapshot.BlueStacksProcessCount} proc";
+        BlueStacksHandlesText.Text = snapshot.BlueStacksHandleCount is null
+            ? "-"
+            : $"{snapshot.BlueStacksHandleCount.Value:N0}"
+                + (snapshot.BlueStacksThreadCount is int threadCount
+                    ? $" · {threadCount:N0} threads"
+                    : "");
         HostGpuText.Text = !snapshot.GpuCountersAvailable
             ? "Unavailable"
             : FormatPercent(snapshot.HostGpuPercent);
@@ -3606,6 +4184,11 @@ public partial class MainWindow : Window
             HostTelemetryQueueText.Text +=
                 $" · {snapshot.DroppedAggregateCount} dropped";
         }
+        if (snapshot.RejectedAggregateCount > 0)
+        {
+            HostTelemetryQueueText.Text +=
+                $" · {snapshot.RejectedAggregateCount} rejected";
+        }
 
         var details = new List<string>
         {
@@ -3628,6 +4211,11 @@ public partial class MainWindow : Window
             $"BlueStacks I/O: read "
                 + $"{FormatRate(snapshot.BlueStacksIoReadBytesPerSecond)}, write "
                 + $"{FormatRate(snapshot.BlueStacksIoWriteBytesPerSecond)}.",
+            snapshot.BlueStacksListener is { } listener
+                ? $"Exact BlueStacks listener: {listener.InstanceName} on "
+                    + $"{listener.AdbPort}, PID {listener.ProcessId}; "
+                    + $"{snapshot.BlueStacksHandleCount?.ToString("N0", CultureInfo.InvariantCulture) ?? "-"} handles."
+                : "Exact BlueStacks listener lifetime is not currently bound.",
             snapshot.GpuCountersAvailable
                 ? $"GPU counter cost: "
                     + $"{snapshot.GpuSampleDurationMilliseconds?.ToString("F2", CultureInfo.InvariantCulture) ?? "-"} ms/sample."
@@ -3643,6 +4231,11 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(snapshot.SamplerError))
         {
             details.Add($"Sampler: {snapshot.SamplerError}");
+        }
+        if (!string.IsNullOrWhiteSpace(snapshot.BlueStacksListenerError))
+        {
+            details.Add(
+                $"BlueStacks listener correlation: {snapshot.BlueStacksListenerError}");
         }
         foreach (var competitor in snapshot.GpuCompetitors)
         {
@@ -3677,6 +4270,18 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(snapshot.UploadError))
         {
             details.Add($"Upload: {snapshot.UploadError}");
+        }
+        if (snapshot.RejectedAggregateCount > 0)
+        {
+            details.Add(
+                $"Rejected telemetry: {snapshot.RejectedAggregateCount} "
+                + "schema-rejected aggregate(s) preserved in "
+                + "host-performance-rejected.jsonl."
+                + (string.IsNullOrWhiteSpace(
+                        snapshot.LastRejectedAggregateReason)
+                    ? ""
+                    : $" Latest reason: "
+                        + snapshot.LastRejectedAggregateReason));
         }
         HostPerformancePanel.ToolTip = string.Join(
             Environment.NewLine,
@@ -4004,6 +4609,7 @@ public partial class MainWindow : Window
                 : !queueAlreadyRequested);
         AdoptStrategyButton.IsEnabled = _strategyLifecycleAvailable
             && _strategyProcessActive
+            && !_strategyDegradedObserver
             && _serverCompatibility?.IsCompatible == true
             && hasSelection
             && !string.Equals(
@@ -4017,15 +4623,19 @@ public partial class MainWindow : Window
             : Visibility.Collapsed;
         Grid.SetColumn(AdoptStrategyButton, retryAvailable ? 1 : 0);
         Grid.SetColumnSpan(AdoptStrategyButton, retryAvailable ? 1 : 2);
-        AdoptStrategyButton.ToolTip =
-            "Request this strategy for the current battle. New-run setup still waits for a genuine boundary.";
+        AdoptStrategyButton.ToolTip = _strategyDegradedObserver
+            ? "This attached battle must remain a degraded observer. The selected Strategy is queued for the next battle."
+            : "Request this strategy for the current battle. New-run setup still waits for a genuine boundary.";
         SelectedStrategyValueText.Text = StrategyDisplayName(selected);
-        StrategyActionHelpText.Text = _strategyProcessActive
+        StrategyActionHelpText.Text = _strategyDegradedObserver
+            ? "This attached battle remains observation-only because its Strategy compatibility was not proved. Changes apply at the next safe battle boundary."
+            : _strategyProcessActive
             ? retryAvailable
                 ? "The automatic next-boundary request failed. The selection is retained for Retry; Switch this battle remains a separate action."
                 : "Changing the selection queues it for the next battle. Switch this battle changes normal strategy behavior now; startup setup still waits for the next real boundary."
             : "Start already uses this selection. Save startup default only if it should be remembered without starting automation.";
         StrategyActionHelpText.Visibility = _strategySelection.Dirty
+            || _strategyDegradedObserver
             ? Visibility.Visible
             : Visibility.Collapsed;
         if (string.IsNullOrWhiteSpace(_strategyRequestMessage)
@@ -4033,6 +4643,17 @@ public partial class MainWindow : Window
         {
             StrategySelectionText.Visibility = Visibility.Collapsed;
         }
+        UpdateAttachBattleAvailability();
+    }
+
+    private void UpdateAttachBattleAvailability()
+    {
+        var availability = ControlSurfaceCompatibility.ResolveAttachAvailability(
+            _attachBattleAvailability,
+            _strategySelection.Dirty,
+            _strategySelection.RequestInFlight);
+        AttachBattleButton.IsEnabled = availability.Available;
+        AttachBattleButton.ToolTip = availability.Reason;
     }
 
     private StrategySelectionContext CurrentStrategySelectionContext() =>

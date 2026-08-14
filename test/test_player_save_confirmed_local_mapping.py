@@ -393,6 +393,51 @@ def test_status_is_nonblocking_and_reports_pending_integration(tmp_path):
     assert status["items"][0]["state"] == "active_local"
 
 
+@pytest.mark.parametrize(
+    "integration_state",
+    [
+        "integration_recovery_required",
+        "integration_unconfirmed",
+        "production_validation_pending",
+        "promotion_pending",
+        "restaging_required",
+    ],
+)
+def test_fast_lane_lifecycle_takes_precedence_over_local_confirmation(
+    tmp_path,
+    integration_state,
+):
+    store = ConfirmedLocalMappingStore(tmp_path / "local")
+    mapping = deepcopy(_mapping_by_id("data-9-game-1073"))
+    dependency = _mapping_semantic_fingerprint(
+        mapping,
+        authority_mapping_id="data-9-game-1073",
+        structural_mapping_id="data-9-game-1073",
+    )
+    record = _record(dependency=dependency)
+    store.accept_candidate(record)
+    candidate_status = {
+        "available": True,
+        "reason": "",
+        "items": [
+            {
+                "candidate_record_id": record["record_id"],
+                "state": integration_state,
+                "reason": "fast-lane checkpoint remains pending",
+            }
+        ],
+        "counts": {integration_state: 1},
+    }
+
+    status = confirmed_local_mapping_status(
+        store=store,
+        candidate_status=candidate_status,
+    )
+
+    assert status["counts"] == {integration_state: 1}
+    assert status["items"] == candidate_status["items"]
+
+
 def test_status_and_runtime_agree_when_dependency_requires_reconfirmation(
     tmp_path,
 ):

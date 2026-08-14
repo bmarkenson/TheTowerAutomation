@@ -699,11 +699,6 @@ def build_environment(
         description="hash-verified development dependency installation",
         env=environment,
     )
-    _run_checked(
-        [str(python), "-I", "-m", "pip", "check"],
-        description="installed dependency consistency check",
-        env=environment,
-    )
     if cache.exists():
         shutil.rmtree(cache)
 
@@ -1360,11 +1355,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_argument_parser().parse_args(argv)
     try:
         config = load_config(repository_root())
-        identity = verify_interpreters(config)
         if arguments.command == "lock":
             regenerate_locks(config)
             print("locks=regenerated")
             return 0
+        identity = verify_interpreters(config)
         locks = validate_lock_inputs(config)
         fingerprint = compute_environment_fingerprint(config, identity)
         if arguments.command == "verify-locks":

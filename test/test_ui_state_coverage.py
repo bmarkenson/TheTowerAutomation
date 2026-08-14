@@ -111,6 +111,111 @@ def test_traversal_fixture_has_explicit_state_and_overlays(
     assert expected_overlays <= set(detection_720p["overlays"])
 
 
+def test_free_ticket_blocks_underlying_home_at_both_supported_resolutions():
+    screenshot = cv2.imread(
+        str(FIXTURES.parent / "free_ticket_home_20260812.png")
+    )
+    assert screenshot is not None
+
+    detection = detect_state_and_overlays(screenshot)
+    assert detection["state"] == "FREE_TICKET"
+    # The retained source proves why primary precedence matters: this visual
+    # fact still exists behind the modal but is not an actionable Home screen.
+    assert "HOME_AD_GEMS_AVAILABLE" in set(detection["overlays"])
+    x, y, width, height = get_label_match(
+        "buttons.claim:free_ticket",
+        screenshot=screenshot,
+    )
+    assert (x + width // 2, y + height // 2) == (540, 1232)
+
+    normalized = normalize_device_screenshot(
+        cv2.resize(screenshot, (720, 1280), interpolation=cv2.INTER_AREA),
+        device_id="fixture:free-ticket:720p",
+    )
+    assert normalized is not None
+    normalized_detection = detect_state_and_overlays(normalized)
+    assert normalized_detection["state"] == "FREE_TICKET"
+    assert "HOME_AD_GEMS_AVAILABLE" in set(
+        normalized_detection["overlays"]
+    )
+
+
+def test_blocking_primary_precedes_an_underlying_ordinary_primary():
+    definitions = {
+        "states": [
+            {
+                "name": "FREE_TICKET",
+                "type": "blocking_primary",
+                "match_keys": ["indicators.free_ticket_dialog"],
+            },
+            {
+                "name": "HOME_SCREEN",
+                "type": "primary",
+                "match_keys": ["indicators.home_screen"],
+            },
+        ],
+        "overlays": [],
+    }
+    frame = cv2.imread(str(FIXTURES.parent / "free_ticket_home_20260812.png"))
+    assert frame is not None
+
+    with patch("core.state_detector.get_match", return_value=((100, 100), 0.99)):
+        detection = detect_state_and_overlays(frame, state_defs=definitions)
+
+    assert detection["state"] == "FREE_TICKET"
+
+
+def test_terminal_primary_still_precedes_a_blocking_primary():
+    definitions = {
+        "states": [
+            {
+                "name": "GAME_OVER",
+                "type": "terminal_primary",
+                "match_keys": ["indicators.game_over"],
+            },
+            {
+                "name": "FREE_TICKET",
+                "type": "blocking_primary",
+                "match_keys": ["indicators.free_ticket_dialog"],
+            },
+        ],
+        "overlays": [],
+    }
+    frame = cv2.imread(str(FIXTURES.parent / "free_ticket_home_20260812.png"))
+    assert frame is not None
+
+    with patch("core.state_detector.get_match", return_value=((100, 100), 0.99)):
+        detection = detect_state_and_overlays(frame, state_defs=definitions)
+
+    assert detection["state"] == "GAME_OVER"
+
+
+def test_multiple_blocking_primaries_fail_closed():
+    definitions = {
+        "states": [
+            {
+                "name": "FREE_TICKET",
+                "type": "blocking_primary",
+                "match_keys": ["indicators.free_ticket_dialog"],
+            },
+            {
+                "name": "OTHER_BLOCKER",
+                "type": "blocking_primary",
+                "match_keys": ["indicators.settings"],
+            },
+        ],
+        "overlays": [],
+    }
+    frame = cv2.imread(str(FIXTURES.parent / "free_ticket_home_20260812.png"))
+    assert frame is not None
+
+    with (
+        patch("core.state_detector.get_match", return_value=((100, 100), 0.99)),
+        pytest.raises(RuntimeError, match="Multiple blocking primary"),
+    ):
+        detect_state_and_overlays(frame, state_defs=definitions)
+
+
 def test_game_over_can_fall_back_to_its_more_stats_button():
     definitions = {
         "states": [

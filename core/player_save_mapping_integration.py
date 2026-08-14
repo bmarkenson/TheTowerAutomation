@@ -1,10 +1,9 @@
-"""Guarded operator preparation of reviewed player-save mapping proposals.
+"""Legacy feature-worktree mapping preparation and shared rendering primitives.
 
-The production control surface discovers linked feature worktrees but never
-writes production or ``develop``.  A client selects only an opaque workspace
-identity and a durable candidate receipt, reviews a server-computed proposal,
-and may then prepare that exact proposal in one clean feature worktree.  The
-result remains uncommitted, unvalidated, and unpromoted by design.
+The feature-worktree workflow is no longer routed by the control surface.  Its
+manager remains named explicitly as legacy only so an old durable journal can
+be diagnosed, while the direct-develop owner reuses the deterministic proposal
+and Git inspection primitives below.
 """
 
 from __future__ import annotations
@@ -356,7 +355,7 @@ def _is_git_object(value: object) -> bool:
     )
 
 
-class SaveMappingIntegrationManager:
+class LegacyFeatureWorktreeSaveMappingIntegrationManager:
     """Project, review, and prepare exact proposals in linked feature roots."""
 
     def __init__(
@@ -1757,9 +1756,9 @@ def _require_workspace_targets_match(
     if workspace != reviewed:
         raise SaveMappingIntegrationError(
             "proposal_workspace_mismatch",
-            "The selected feature target content or file mode differs from the "
+            "The develop target content or file mode differs from the "
             "reviewed integration base; nothing was written. Refresh after "
-            "reconciling the feature worktree.",
+            "reconciling the repository target.",
         )
 
 
@@ -2129,7 +2128,7 @@ def _target_path(repository_root: Path, relative: str) -> Path:
     if not _is_within(candidate, root):
         raise SaveMappingIntegrationError(
             "proposal_target_invalid",
-            "A canonical target path escaped the feature worktree.",
+            "A canonical target path escaped the repository root.",
         )
     parent = root
     for component in relative_path.parts[:-1]:
@@ -2198,5 +2197,5 @@ __all__ = [
     "SAVE_MAPPING_INTEGRATION_CAPABILITY",
     "SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION",
     "SaveMappingIntegrationError",
-    "SaveMappingIntegrationManager",
+    "LegacyFeatureWorktreeSaveMappingIntegrationManager",
 ]

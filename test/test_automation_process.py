@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import stat
+import threading
 import time
 
 import pytest
@@ -937,6 +938,113 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     assert connection_manager.calls == [("localhost:5555", True)]
     assert service.control_store.read()["state"] == "STOPPED"
     assert response["process_service"]["active"] is False
+
+
+def test_process_stop_linearizes_after_an_inflight_enable(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.control_store.set_state("PAUSED", source="test")
+    enable_snapshot_ready = threading.Event()
+    release_enable = threading.Event()
+    original_status = service.status
+    enable_status_calls = 0
+    failures = []
+
+    def blocking_status(*args, **kwargs):
+        nonlocal enable_status_calls
+        result = original_status(*args, **kwargs)
+        if threading.current_thread().name == "enable-request":
+            enable_status_calls += 1
+            if enable_status_calls == 1:
+                enable_snapshot_ready.set()
+                assert release_enable.wait(timeout=2)
+        return result
+
+    service.status = blocking_status
+
+    def enable():
+        try:
+            service.apply_control({"action": "enable"})
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    def stop():
+        try:
+            service.apply_process_action({"action": "stop"})
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    enable_thread = threading.Thread(target=enable, name="enable-request")
+    stop_thread = threading.Thread(target=stop, name="stop-request")
+    enable_thread.start()
+    assert enable_snapshot_ready.wait(timeout=2)
+    stop_thread.start()
+    release_enable.set()
+    enable_thread.join(timeout=2)
+    stop_thread.join(timeout=2)
+
+    assert not enable_thread.is_alive()
+    assert not stop_thread.is_alive()
+    assert failures == []
+    assert service.control_store.status()["state"] == "STOPPED"
+    assert manager.active is False
+
+
+def test_take_manual_cannot_weaken_stop_while_process_exit_is_pending(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    running = service.control_store.set_state("RUNNING", source="test")
+    _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=running,
+    )
+    stop_entered = threading.Event()
+    release_stop = threading.Event()
+    manual_completed = threading.Event()
+    stop_failures = []
+    manual_failures = []
+
+    def block_stop():
+        stop_entered.set()
+        assert release_stop.wait(timeout=2)
+
+    manager.on_stop = block_stop
+
+    def stop():
+        try:
+            service.apply_process_action({"action": "stop"})
+        except Exception as exc:  # pragma: no cover - surfaced below
+            stop_failures.append(exc)
+
+    def take_manual():
+        try:
+            service.apply_control({"action": "take_manual_control"})
+        except Exception as exc:
+            manual_failures.append(exc)
+        finally:
+            manual_completed.set()
+
+    stop_thread = threading.Thread(target=stop)
+    manual_thread = threading.Thread(target=take_manual)
+    stop_thread.start()
+    assert stop_entered.wait(timeout=2)
+    assert service.control_store.status()["state"] == "STOPPED"
+    manual_thread.start()
+    assert not manual_completed.wait(timeout=0.05)
+
+    release_stop.set()
+    stop_thread.join(timeout=2)
+    manual_thread.join(timeout=2)
+
+    assert not stop_thread.is_alive()
+    assert not manual_thread.is_alive()
+    assert stop_failures == []
+    assert len(manual_failures) == 1
+    assert isinstance(manual_failures[0], ControlSurfaceRequestError)
+    assert manual_failures[0].code == "process_stopping"
+    assert service.control_store.status()["state"] == "STOPPED"
+    assert manager.active is False
 
 
 def test_attached_restart_requires_explicit_stop_start_and_attach(tmp_path):

@@ -4,7 +4,7 @@
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 import cv2
 import numpy as np
 
@@ -436,7 +436,7 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
     tap.assert_called_once_with(
         "buttons.home:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
     action_log.assert_called_once_with(
         "Completing the finished battle",
@@ -536,7 +536,7 @@ def test_unavailable_stats_capture_does_not_block_retry():
     tap.assert_called_once_with(
         "buttons.retry:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
 
 
@@ -587,7 +587,7 @@ def test_guarded_preflight_repair_forces_home_after_control_allows_actions():
     tap.assert_called_once_with(
         "buttons.home:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
 
 
@@ -612,7 +612,7 @@ def test_required_post_run_home_inventory_bypasses_wait_mode():
     tap.assert_called_once_with(
         "buttons.home:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
 
 
@@ -675,7 +675,7 @@ def test_game_over_wait_reports_completed_actions_before_polling_for_direction()
     tap.assert_called_once_with(
         "buttons.home:game_over",
         retries=1,
-        action_guard_fn=None,
+        action_guard_fn=ANY,
     )
     assert action_log.call_count == 2
     action_log.assert_any_call(
@@ -730,6 +730,48 @@ def test_game_over_finalizes_boundary_before_terminal_navigation():
         ("tap", "buttons.retry:game_over"),
         ("scope", None),
     ]
+
+
+def test_mode_change_after_selection_blocks_the_stale_terminal_tap():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    dispatched = []
+
+    def guarded_tap(_label, **kwargs):
+        allowed = kwargs["action_guard_fn"]()
+        if allowed:
+            dispatched.append(_label)
+        return allowed
+
+    try:
+        with (
+            patch(
+                "handlers.game_over_handler.tap_if_visible",
+                side_effect=guarded_tap,
+            ),
+            patch(
+                "handlers.game_over_handler.capture_adb_screenshot",
+                return_value=None,
+            ),
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            outcome = handle_game_over(
+                capture_stats=False,
+                before_terminal_action=lambda: setattr(
+                    AUTOMATION,
+                    "mode",
+                    ExecMode.HOME,
+                ),
+            )
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    assert not outcome.route_completed
+    assert outcome.route == "pending_retry"
+    assert dispatched == []
 
 
 def test_game_over_wait_polls_control_and_blocks_retry_while_paused():
