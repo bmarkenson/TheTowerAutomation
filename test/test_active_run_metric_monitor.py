@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 from types import SimpleNamespace
+
+import pytest
 
 from core.active_run_metric_monitor import ActiveRunMetricMonitor
 from core.perk_save_monitor import PerkSaveMonitorContext
@@ -18,14 +21,21 @@ from core.runtime_save import (
     ActiveRoundIdentity,
     ActiveRunTalliesSnapshot,
     BattleHistoryTail,
+    BattleHistoryTailIdentity,
     NormalizedRuntimeSave,
+    RuntimeTallyClaimDefinition,
     RuntimeTallyComponent,
     RuntimeTallyMetric,
 )
+from core.terminal_save_report import terminal_save_report_from_acquisition
 
 
 UTC = timezone.utc
 START = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+CAPABILITY_ID = "thetower.player_save.active_run_tallies.v1"
+SEMANTIC_FINGERPRINT = hashlib.sha256(b"tally-semantics").hexdigest()
+BINDING_FINGERPRINT = hashlib.sha256(b"tally-bindings").hexdigest()
+SEMANTIC_MAPPING_ID = "data-10-game-1102-semantic-via-1101"
 
 
 def _sha(label: str) -> str:
@@ -54,6 +64,8 @@ def _metric(
         unit=unit,
         source_fields=(source,),
         derivation="direct",
+        semantic_id=f"{CAPABILITY_ID}.test.{source}",
+        semantic_fingerprint=_sha(f"semantic:{source}:{unit}"),
         terminal_source=terminal_source,
     )
 
@@ -66,6 +78,19 @@ def _derived(value: int | float, *, unit: str) -> RuntimeTallyMetric:
         unit=unit,
         source_fields=("syntheticNumerator", "syntheticDenominator"),
         derivation="ratio",
+        semantic_id=f"{CAPABILITY_ID}.test.derived.{unit}",
+        semantic_fingerprint=_sha(f"derived:{unit}"),
+    )
+
+
+def _claim_definition(metric: RuntimeTallyMetric) -> RuntimeTallyClaimDefinition:
+    return RuntimeTallyClaimDefinition(
+        unit=metric.unit,
+        source_fields=metric.source_fields,
+        derivation=metric.derivation,
+        semantic_id=metric.semantic_id,
+        semantic_fingerprint=metric.semantic_fingerprint,
+        terminal_source=metric.terminal_source,
     )
 
 
@@ -81,10 +106,14 @@ def _tallies(
     resource: float,
 ) -> ActiveRunTalliesSnapshot:
     average_cph = coins * 3600 / real if real else 0
-    return ActiveRunTalliesSnapshot(
+    snapshot = ActiveRunTalliesSnapshot(
         status="observed",
         reason="",
         state="active_round",
+        capability_id=CAPABILITY_ID,
+        semantic_fingerprint=SEMANTIC_FINGERPRINT,
+        binding_fingerprint=BINDING_FINGERPRINT,
+        forward_policy="additive_dependencies",
         audit_id="V1101-RUNTIME-017",
         evidence_level="cross_channel",
         components=(
@@ -196,6 +225,19 @@ def _tallies(
             ),
         ),
     )
+    return replace(
+        snapshot,
+        components=tuple(
+            replace(
+                component,
+                claim_definitions=tuple(
+                    (name, _claim_definition(metric))
+                    for name, metric in component.metrics
+                ),
+            )
+            for component in snapshot.components
+        ),
+    )
 
 
 def _history_tail() -> BattleHistoryTail:
@@ -208,6 +250,63 @@ def _history_tail() -> BattleHistoryTail:
         completed_entry_status="not_applicable",
         completed_entry_reason="battle_history_empty",
         entry=None,
+    )
+
+
+def _semantic_terminal_tail(
+    label: str,
+    *,
+    count: int,
+    wave: int,
+    is_tournament: bool = False,
+    terminal_metric_claims: dict | None = None,
+) -> BattleHistoryTail:
+    identity = BattleHistoryTailIdentity(
+        mapping_id=SEMANTIC_MAPPING_ID,
+        battle_date={
+            "kind_id": 2,
+            "kind": "local",
+            "clock_basis": "local_wall_clock_without_offset",
+            "clock_time": "2026-08-12T05:00:00",
+            "ticks": str(638900000000000000 + count),
+            "submicrosecond_100ns": 0,
+        },
+        tier=19,
+        wave=wave,
+        game_time_seconds=1250,
+        real_time_seconds=250,
+        killed_by_id=3,
+        is_tournament=is_tournament,
+        fingerprint=_sha(label),
+    )
+    return BattleHistoryTail(
+        structural_status="unavailable",
+        structural_reason="legacy_history_capability_not_declared",
+        entry_count=count,
+        capacity=30,
+        identity=None,
+        completed_entry_status="unavailable",
+        completed_entry_reason="legacy_history_capability_not_declared",
+        entry=None,
+        terminal_metric_claims=terminal_metric_claims or {},
+        terminal_identity=identity,
+        terminal_identity_reason="",
+    )
+
+
+def _semantic_empty_terminal_tail() -> BattleHistoryTail:
+    return BattleHistoryTail(
+        structural_status="empty",
+        structural_reason="battle_history_empty",
+        entry_count=0,
+        capacity=30,
+        identity=None,
+        completed_entry_status="not_applicable",
+        completed_entry_reason="battle_history_empty",
+        entry=None,
+        terminal_mapping_id=SEMANTIC_MAPPING_ID,
+        terminal_tail_fingerprint=_sha("semantic-empty"),
+        terminal_empty_baseline=True,
     )
 
 
@@ -248,6 +347,10 @@ def _runtime(
             status="not_applicable",
             reason="round_inactive",
             state="inactive_round",
+            capability_id=CAPABILITY_ID,
+            semantic_fingerprint=SEMANTIC_FINGERPRINT,
+            binding_fingerprint=BINDING_FINGERPRINT,
+            forward_policy="additive_dependencies",
             audit_id="V1101-RUNTIME-017",
             evidence_level="cross_channel",
             components=(),
@@ -296,12 +399,39 @@ def _acquisition(
             boundary_activity or bound.activity_scope_id,
         )
     )
+    semantic_forward = runtime.mapping_id == SEMANTIC_MAPPING_ID
+    active_identity = runtime.active_round_identity
     snapshot = SimpleNamespace(
         runtime_save=runtime,
-        game_version=1101,
+        game_version=(
+            active_identity.game_version
+            if active_identity is not None
+            else 1102 if semantic_forward else 1101
+        ),
         mapping_id=runtime.mapping_id,
+        mapping_resolution=(
+            "semantic_forward_revision"
+            if semantic_forward
+            else "compatible_exact_revision"
+        ),
+        effective_mapping_fingerprint=_sha("effective-mapping"),
+        captured_at=runtime.capture["captured_at"],
+        source_sha256=runtime.capture["source_sha256"],
+        save_revision=runtime.save_revision,
         shape_valid=True,
         mapping_supported=True,
+        capabilities={
+            CAPABILITY_ID: SimpleNamespace(
+                status=runtime.active_tallies.status,
+                semantic_fingerprint=SEMANTIC_FINGERPRINT,
+                binding_fingerprint=BINDING_FINGERPRINT,
+                resolution=(
+                    "semantic_forward_revision"
+                    if semantic_forward
+                    else "compatible_exact_revision"
+                ),
+            )
+        },
     )
     return PlayerSaveAcquisitionBundle(
         acquisition_type=acquisition_type,
@@ -353,9 +483,27 @@ def _terminal_report() -> dict:
         "wavesSkipped": 30,
         "coinsFromBlackHole": 500,
         "rerollShardsEarned": 70,
+        "gameTime": 1250,
+        "realTime": 250,
     }
     terminal_runtime = _terminal_runtime()
     acquisition = _acquisition(terminal_runtime)
+    reference = _tallies(
+        real=250,
+        game=1250,
+        coins=4000,
+        cells=400,
+        cash=1000,
+        progress=30,
+        coin_source=500,
+        resource=70,
+    )
+    claim_definitions = {
+        metric.terminal_source: metric
+        for component in reference.components
+        for _name, metric in component.metrics
+        if metric.terminal_source is not None
+    }
     return {
         "schema_version": 1,
         "status": "complete",
@@ -389,8 +537,50 @@ def _terminal_report() -> dict:
                 ]
             },
         },
+        "terminal_metric_claims": {
+            "status": "observed",
+            "reason": "",
+            "capability_id": CAPABILITY_ID,
+            "semantic_fingerprint": SEMANTIC_FINGERPRINT,
+            "binding_fingerprint": BINDING_FINGERPRINT,
+            "saved_wave": 250,
+            "claims": {
+                source: {
+                    "status": "observed",
+                    "value_decimal": str(value),
+                    "unit": claim_definitions[source].unit,
+                    "semantic_id": claim_definitions[source].semantic_id,
+                    "semantic_fingerprint": (
+                        claim_definitions[source].semantic_fingerprint
+                    ),
+                }
+                for source, value in direct.items()
+            },
+            "unavailable": {},
+        },
         "ui_fallback": {"required": False, "reason": ""},
     }
+
+
+def _semantic_terminal_report(
+    acquisition: PlayerSaveAcquisitionBundle,
+) -> dict:
+    return terminal_save_report_from_acquisition(
+        acquisition,
+        terminal_state="GAME_OVER",
+        run_binding={
+            "schema_version": 1,
+            "status": "bound",
+            "activity_scope_run_id": "scope-1",
+        },
+        activity_scope={"schema_version": 1, "run_id": "scope-1"},
+        history_transition={
+            "schema_version": 1,
+            "status": "unavailable",
+            "complete": False,
+            "reason": "legacy_history_capability_not_declared",
+        },
+    )
 
 
 def _checkpoint(
@@ -420,6 +610,200 @@ def _checkpoint(
         coin_source=coin_source,
         resource=resource,
     )
+
+
+def test_semantic_forward_terminal_relation_uses_capability_local_tail():
+    monitor = ActiveRunMetricMonitor()
+    active = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    assert active.active_round_identity is not None
+    active = replace(
+        active,
+        mapping_id=SEMANTIC_MAPPING_ID,
+        active_round_identity=replace(
+            active.active_round_identity,
+            game_version=1102,
+        ),
+        battle_history_tail=_semantic_terminal_tail(
+            "semantic-baseline",
+            count=4,
+            wave=5000,
+        ),
+    )
+    terminal_claims = _terminal_report()["terminal_metric_claims"]
+    terminal = replace(
+        _terminal_runtime(),
+        mapping_id=SEMANTIC_MAPPING_ID,
+        battle_history_tail=_semantic_terminal_tail(
+            "semantic-terminal",
+            count=5,
+            wave=250,
+            terminal_metric_claims=terminal_claims,
+        ),
+    )
+
+    assert _observe(monitor, active) == "accepted_checkpoint"
+    terminal_acquisition = _acquisition(terminal)
+    assert monitor.observe_bundle(
+        terminal_acquisition,
+        context=_context(),
+    ) == "terminal_inactive_observed"
+    report = _semantic_terminal_report(terminal_acquisition)
+    assert report["status"] == "unavailable"
+    assert report["terminal_metric_claims"]["status"] == "observed"
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+
+    assert evidence["status"] == "complete"
+    assert evidence["terminal_relation"] == {"status": "bound", "reason": ""}
+    assert evidence["terminal"]["status"] == "reconciled"
+    assert evidence["terminal"]["components"]["economy"]["matched"][
+        "coins_earned"
+    ] == "4000"
+
+
+def test_semantic_forward_empty_history_reconciles_first_terminal():
+    monitor = ActiveRunMetricMonitor()
+    active = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    assert active.active_round_identity is not None
+    active = replace(
+        active,
+        mapping_id=SEMANTIC_MAPPING_ID,
+        active_round_identity=replace(
+            active.active_round_identity,
+            game_version=1102,
+        ),
+        battle_history_tail=_semantic_empty_terminal_tail(),
+    )
+    terminal = replace(
+        _terminal_runtime(),
+        mapping_id=SEMANTIC_MAPPING_ID,
+        battle_history_tail=_semantic_terminal_tail(
+            "semantic-first-terminal",
+            count=1,
+            wave=250,
+            terminal_metric_claims=_terminal_report()[
+                "terminal_metric_claims"
+            ],
+        ),
+    )
+
+    assert _observe(monitor, active) == "accepted_checkpoint"
+    terminal_acquisition = _acquisition(terminal)
+    assert monitor.observe_bundle(
+        terminal_acquisition,
+        context=_context(),
+    ) == "terminal_inactive_observed"
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=_semantic_terminal_report(
+            terminal_acquisition
+        ),
+    )
+
+    assert evidence["status"] == "complete"
+    assert evidence["terminal_relation"]["status"] == "bound"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("unchanged_tail", "wrong_count", "wrong_kind", "provenance_mismatch"),
+)
+def test_semantic_forward_terminal_relation_fails_closed(mutation):
+    monitor = ActiveRunMetricMonitor()
+    active = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    assert active.active_round_identity is not None
+    active = replace(
+        active,
+        mapping_id=SEMANTIC_MAPPING_ID,
+        active_round_identity=replace(
+            active.active_round_identity,
+            game_version=1102,
+        ),
+        battle_history_tail=_semantic_terminal_tail(
+            "semantic-baseline",
+            count=4,
+            wave=5000,
+        ),
+    )
+    terminal_label = (
+        "semantic-baseline"
+        if mutation == "unchanged_tail"
+        else "semantic-terminal"
+    )
+    terminal_count = 6 if mutation == "wrong_count" else 5
+    terminal = replace(
+        _terminal_runtime(),
+        mapping_id=SEMANTIC_MAPPING_ID,
+        battle_history_tail=_semantic_terminal_tail(
+            terminal_label,
+            count=terminal_count,
+            wave=250,
+            is_tournament=mutation == "wrong_kind",
+            terminal_metric_claims=_terminal_report()[
+                "terminal_metric_claims"
+            ],
+        ),
+    )
+
+    assert _observe(monitor, active) == "accepted_checkpoint"
+    terminal_acquisition = _acquisition(terminal)
+    disposition = monitor.observe_bundle(
+        terminal_acquisition,
+        context=_context(),
+    )
+    report = _semantic_terminal_report(terminal_acquisition)
+    if mutation == "provenance_mismatch":
+        assert disposition == "terminal_inactive_observed"
+        report["capture"]["source_fingerprint"] = _sha("wrong-source")
+    else:
+        assert disposition == (
+            "terminal_inactive_observed_without_causal_tail"
+        )
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+
+    assert evidence["status"] == "retained_checkpoints"
+    assert evidence["terminal"]["status"] == "unavailable"
 
 
 def test_tracks_whole_run_and_interval_rates_then_reconciles_terminal():
@@ -526,7 +910,492 @@ def test_tracks_whole_run_and_interval_rates_then_reconciles_terminal():
     ]["per_hour"]["coins_from_black_hole"] == "7200"
 
 
-def test_regression_conflicts_only_its_component_and_retains_other_timelines():
+def test_malformed_checkpoint_leaf_does_not_erase_other_or_prior_claims():
+    monitor = ActiveRunMetricMonitor()
+    first = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    second = _checkpoint(
+        11,
+        offset=200,
+        wave=200,
+        real=200,
+        game=1000,
+        coins=3000,
+        cells=300,
+        cash=900,
+        progress=20,
+        coin_source=400,
+        resource=60,
+    )
+    tallies = second.active_tallies
+    assert tallies is not None
+    components = []
+    for component in tallies.components:
+        if component.name == "economy":
+            component = replace(
+                component,
+                status="partial",
+                reason="one_or_more_tally_claims_unavailable",
+                metrics=tuple(
+                    item for item in component.metrics if item[0] != "cells_earned"
+                ),
+                unavailable=(("cells_earned", "source_type_changed"),),
+            )
+        components.append(component)
+    second = replace(
+        second,
+        active_tallies=replace(
+            tallies,
+            status="partial",
+            reason="one_or_more_active_tally_claims_unavailable",
+            components=tuple(components),
+        ),
+        active_tallies_status="partial",
+    )
+
+    assert _observe(monitor, first) == "accepted_checkpoint"
+    assert _observe(monitor, second) == "accepted_partial_checkpoint"
+    summary = monitor.latest_summary(_context())
+    assert summary is not None
+    assert summary["whole_run"]["coins_per_hour"] == "54000"
+    assert "cells_per_hour" not in summary["whole_run"]
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=_terminal_report(),
+    )
+    economy = evidence["components"]["economy"]
+    assert economy["status"] == "partial"
+    assert "cells_earned" in economy["samples"][0]["metrics"]
+    assert "cells_earned" not in economy["samples"][1]["metrics"]
+    terminal = evidence["terminal"]["components"]["economy"]
+    assert terminal["status"] == "reconciled"
+    assert terminal["tail_interval"]["cells_per_hour"] == "7200"
+
+
+def test_missing_terminal_leaf_only_degrades_its_reconciliation():
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    report = _terminal_report()
+    report["terminal_metric_claims"]["status"] = "partial"
+    report["terminal_metric_claims"]["claims"].pop("cellsEarned")
+    report["terminal_metric_claims"]["unavailable"] = {
+        "cellsEarned": "source_type_changed"
+    }
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+    economy = evidence["terminal"]["components"]["economy"]
+    assert economy["status"] == "partial"
+    assert economy["missing"] == ["cells_earned"]
+    assert economy["matched"]["coins_earned"] == "4000"
+    assert economy["tail_interval"]["coins_per_hour"] == "72000"
+    assert "cells_per_hour" not in economy["tail_interval"]
+
+
+def test_leaf_unavailable_at_every_checkpoint_cannot_report_complete():
+    monitor = ActiveRunMetricMonitor()
+    runtime = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    tallies = runtime.active_tallies
+    assert tallies is not None
+    runtime = replace(
+        runtime,
+        active_tallies=replace(
+            tallies,
+            status="partial",
+            reason="one_or_more_active_tally_claims_unavailable",
+            components=tuple(
+                replace(
+                    component,
+                    status="partial",
+                    reason="one_or_more_tally_claims_unavailable",
+                    metrics=tuple(
+                        item
+                        for item in component.metrics
+                        if item[0] != "cells_earned"
+                    ),
+                    unavailable=(("cells_earned", "source_type_changed"),),
+                )
+                if component.name == "economy"
+                else component
+                for component in tallies.components
+            ),
+        ),
+        active_tallies_status="partial",
+    )
+
+    assert _observe(monitor, runtime) == "accepted_partial_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=_terminal_report(),
+    )
+
+    assert evidence["status"] == "partial"
+    economy = evidence["terminal"]["components"]["economy"]
+    assert economy["status"] == "partial"
+    assert economy["missing"] == ["cells_earned"]
+
+
+def test_entire_unavailable_component_retains_expected_terminal_claims():
+    monitor = ActiveRunMetricMonitor()
+    runtime = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    tallies = runtime.active_tallies
+    assert tallies is not None
+    runtime = replace(
+        runtime,
+        active_tallies=replace(
+            tallies,
+            status="partial",
+            reason="one_or_more_active_tally_claims_unavailable",
+            components=tuple(
+                replace(
+                    component,
+                    status="unavailable",
+                    reason="all_tally_claims_unavailable",
+                    metrics=(),
+                    derived=(),
+                    unavailable=tuple(
+                        (name, "source_type_changed")
+                        for name, _definition in component.claim_definitions
+                    ),
+                )
+                if component.name == "progress"
+                else component
+                for component in tallies.components
+            ),
+        ),
+        active_tallies_status="partial",
+    )
+
+    assert _observe(monitor, runtime) == "accepted_partial_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=_terminal_report(),
+    )
+
+    assert evidence["status"] == "partial"
+    progress = evidence["terminal"]["components"]["progress"]
+    assert progress["status"] == "unavailable"
+    assert progress["reason"] == "component_checkpoint_unavailable"
+    assert evidence["components"]["progress"]["metric_definitions"]
+
+
+def test_recovered_leaf_interval_uses_its_latest_valid_checkpoint():
+    monitor = ActiveRunMetricMonitor()
+    first = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    middle = _checkpoint(
+        11,
+        offset=200,
+        wave=200,
+        real=200,
+        game=1000,
+        coins=3000,
+        cells=300,
+        cash=900,
+        progress=20,
+        coin_source=400,
+        resource=60,
+    )
+    tallies = middle.active_tallies
+    assert tallies is not None
+    middle = replace(
+        middle,
+        active_tallies=replace(
+            tallies,
+            status="partial",
+            reason="one_or_more_active_tally_claims_unavailable",
+            components=tuple(
+                replace(
+                    component,
+                    status="partial",
+                    reason="one_or_more_tally_claims_unavailable",
+                    metrics=tuple(
+                        item
+                        for item in component.metrics
+                        if item[0] != "cells_earned"
+                    ),
+                    unavailable=(("cells_earned", "source_type_changed"),),
+                )
+                if component.name == "economy"
+                else component
+                for component in tallies.components
+            ),
+        ),
+        active_tallies_status="partial",
+    )
+    recovered = _checkpoint(
+        12,
+        offset=300,
+        wave=300,
+        real=300,
+        game=1500,
+        coins=5000,
+        cells=600,
+        cash=1300,
+        progress=30,
+        coin_source=700,
+        resource=100,
+    )
+
+    assert _observe(monitor, first) == "accepted_checkpoint"
+    assert _observe(monitor, middle) == "accepted_partial_checkpoint"
+    assert _observe(monitor, recovered) == "accepted_checkpoint"
+
+    summary = monitor.latest_summary(_context())
+    assert summary is not None
+    interval = summary["interval"]
+    assert interval["cells_earned"] == "500"
+    assert interval["cells_per_hour"] == "9000"
+    assert interval["real_time_seconds_by_metric"]["cells_earned"] == "200"
+
+
+def test_missing_current_wave_preserves_non_wave_totals_and_rates():
+    monitor = ActiveRunMetricMonitor()
+    first = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    second = replace(
+        _checkpoint(
+            11,
+            offset=200,
+            wave=200,
+            real=200,
+            game=1000,
+            coins=3000,
+            cells=300,
+            cash=900,
+            progress=20,
+            coin_source=400,
+            resource=60,
+        ),
+        current_wave=None,
+        current_wave_status="unavailable",
+        current_wave_reason="currentWave must be a nonnegative integer",
+    )
+
+    assert _observe(monitor, first) == "accepted_checkpoint"
+    assert _observe(monitor, second) == "accepted_partial_checkpoint"
+    summary = monitor.latest_summary(_context())
+
+    assert summary is not None
+    assert summary["saved_wave"] is None
+    assert summary["whole_run"]["coins_per_hour"] == "54000"
+    assert summary["whole_run"]["effective_game_speed"] == "5"
+    assert "waves_per_hour" not in summary["whole_run"]
+    assert summary["interval"]["coins_per_hour"] == "72000"
+    assert "waves_per_hour" not in summary["interval"]
+
+
+def test_active_wave_regression_does_not_reappear_in_terminal_rates():
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(
+        monitor,
+        _checkpoint(
+            11,
+            offset=200,
+            wave=90,
+            real=200,
+            game=1000,
+            coins=3000,
+            cells=300,
+            cash=900,
+            progress=20,
+            coin_source=400,
+            resource=60,
+        ),
+    ) == "accepted_partial_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=_terminal_report(),
+    )
+
+    assert evidence["wave_claim"]["status"] == "conflict"
+    economy = evidence["terminal"]["components"]["economy"]
+    assert economy["status"] == "partial"
+    assert "waves_per_hour" not in economy["whole_run"]
+    assert "waves_per_hour" not in economy["tail_interval"]
+    assert economy["whole_run"]["coins_per_hour"] == "57600"
+
+
+def test_real_time_regression_disables_only_transitive_rates():
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(
+        monitor,
+        _checkpoint(
+            11,
+            offset=180,
+            wave=180,
+            real=90,
+            game=900,
+            coins=2000,
+            cells=200,
+            cash=700,
+            progress=18,
+            coin_source=300,
+            resource=45,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(
+        monitor,
+        _checkpoint(
+            12,
+            offset=220,
+            wave=220,
+            real=200,
+            game=1100,
+            coins=3000,
+            cells=300,
+            cash=900,
+            progress=25,
+            coin_source=450,
+            resource=60,
+        ),
+    ) == "accepted_checkpoint"
+
+    summary = monitor.latest_summary(_context())
+    assert summary is not None
+    assert summary["whole_run"] is None
+    assert summary["interval"] is None
+    assert summary["components"]["economy"]["latest"]["metrics"][
+        "coins_earned"
+    ] == "3000"
+    assert summary["components"]["coin_sources"]["latest"]["metrics"][
+        "coins_from_black_hole"
+    ] == "450"
+    assert summary["components"]["coin_sources"]["latest"]["whole_run"] is None
+    assert summary["components"]["progress"]["latest"]["whole_run"] is None
+
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=_terminal_report(),
+    )
+
+    assert evidence["status"] == "partial"
+    for component_name in ("economy", "coin_sources", "progress"):
+        component = evidence["terminal"]["components"][component_name]
+        assert component["status"] == "partial"
+        assert "shared_rate_clock_conflict:real_time_seconds" in component[
+            "reason"
+        ]
+        assert "whole_run" not in component
+        assert "tail_interval" not in component
+        assert component["matched"]
+
+
+def test_regression_conflicts_only_its_leaf_and_retains_other_timelines():
     monitor = ActiveRunMetricMonitor()
     assert _observe(
         monitor,
@@ -567,17 +1436,259 @@ def test_regression_conflicts_only_its_component_and_retains_other_timelines():
         terminal_save_report=_terminal_report(),
     )
     assert evidence["status"] == "partial"
-    assert evidence["components"]["economy"]["status"] == "conflict"
-    assert len(evidence["components"]["economy"]["samples"]) == 1
+    assert evidence["components"]["economy"]["status"] == "partial"
+    assert evidence["components"]["economy"]["metric_conflicts"] == {
+        "coins_earned": "monotonic_metric_regressed:coins_earned"
+    }
+    assert len(evidence["components"]["economy"]["samples"]) == 2
+    assert "coins_earned" not in evidence["components"]["economy"][
+        "samples"
+    ][-1]["metrics"]
     assert len(evidence["components"]["progress"]["samples"]) == 2
-    assert evidence["terminal"]["status"] == "conflict"
-    assert evidence["terminal"]["reason"] == "terminal_component_conflict:economy"
+    assert evidence["terminal"]["status"] == "partial"
+    assert evidence["terminal"]["components"]["economy"]["status"] == (
+        "partial"
+    )
     assert evidence["terminal"]["components"]["progress"]["status"] == (
         "reconciled"
     )
+    terminal_economy = evidence["terminal"]["components"]["economy"]
+    assert "coins_per_hour" not in terminal_economy["whole_run"]
+    assert "coins_per_hour" not in terminal_economy["tail_interval"]
 
 
-def test_duplicate_source_is_ignored_but_mutation_conflicts_components():
+def test_terminal_regression_excludes_only_that_leaf_from_rates():
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    report = _terminal_report()
+    report["terminal_metric_claims"]["claims"]["coinsEarned"][
+        "value_decimal"
+    ] = "900"
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+
+    economy = evidence["terminal"]["components"]["economy"]
+    assert economy["conflicts"]["coins_earned"] == "terminal_metric_regressed"
+    assert "coins_per_hour" not in economy["whole_run"]
+    assert "coins_per_hour" not in economy["tail_interval"]
+    assert economy["whole_run"]["cells_per_hour"] == "5760"
+
+
+def test_terminal_real_time_regression_disables_all_transitive_rates():
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    report = _terminal_report()
+    report["terminal_metric_claims"]["claims"]["realTime"][
+        "value_decimal"
+    ] = "50"
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+
+    assert evidence["status"] == "partial"
+    for component_name in ("economy", "coin_sources", "progress"):
+        component = evidence["terminal"]["components"][component_name]
+        assert component["status"] == "partial"
+        assert "terminal_rate_clock_regressed" in component["reason"]
+        assert "whole_run" not in component
+        assert "tail_interval" not in component
+        assert component["matched"]
+
+
+@pytest.mark.parametrize("mutation", ("missing", "malformed"))
+def test_terminal_real_time_unavailable_is_shared_rate_failure(mutation):
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    report = _terminal_report()
+    claims = report["terminal_metric_claims"]["claims"]
+    if mutation == "missing":
+        claims.pop("realTime")
+    else:
+        claims["realTime"]["value_decimal"] = "malformed"
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+
+    assert evidence["status"] == "partial"
+    for component_name in ("economy", "coin_sources", "progress"):
+        component = evidence["terminal"]["components"][component_name]
+        assert component["status"] == "partial"
+        assert "terminal_rate_clock_unavailable" in component["reason"]
+        assert "whole_run" not in component
+        assert "tail_interval" not in component
+        assert component["matched"]
+
+
+def test_regressed_terminal_wave_degrades_only_wave_rates():
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    report = _terminal_report()
+    report["terminal_metric_claims"]["saved_wave"] = 50
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+
+    assert evidence["status"] == "partial"
+    assert evidence["terminal"]["wave_claim"]["status"] == "conflict"
+    assert evidence["terminal"]["wave_claim"]["reason"] == (
+        "terminal_wave_regressed"
+    )
+    economy = evidence["terminal"]["components"]["economy"]
+    assert economy["status"] == "partial"
+    assert "waves_per_hour" not in economy["whole_run"]
+    assert "waves_per_hour" not in economy["tail_interval"]
+    assert economy["whole_run"]["coins_per_hour"] == "57600"
+
+
+def test_malformed_terminal_leaf_value_preserves_sibling_reconciliation():
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    report = _terminal_report()
+    report["terminal_metric_claims"]["claims"]["cellsEarned"][
+        "value_decimal"
+    ] = "malformed"
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+
+    economy = evidence["terminal"]["components"]["economy"]
+    assert economy["status"] == "partial"
+    assert economy["matched"]["coins_earned"] == "4000"
+    assert economy["missing"] == ["cells_earned"]
+    assert economy["claim_issues"]["cells_earned"] == (
+        "terminal_claim_value_invalid"
+    )
+
+
+def test_terminal_leaf_contract_mismatch_preserves_siblings():
+    monitor = ActiveRunMetricMonitor()
+    assert _observe(
+        monitor,
+        _checkpoint(
+            10,
+            offset=100,
+            wave=100,
+            real=100,
+            game=500,
+            coins=1000,
+            cells=100,
+            cash=500,
+            progress=10,
+            coin_source=100,
+            resource=20,
+        ),
+    ) == "accepted_checkpoint"
+    assert _observe(monitor, _terminal_runtime()) == "terminal_inactive_observed"
+    report = _terminal_report()
+    report["terminal_metric_claims"]["claims"]["cellsEarned"][
+        "semantic_fingerprint"
+    ] = _sha("wrong-leaf-contract")
+
+    evidence = monitor.terminal_evidence(
+        context=_context(),
+        terminal_save_report=report,
+    )
+
+    economy = evidence["terminal"]["components"]["economy"]
+    assert economy["matched"]["coins_earned"] == "4000"
+    assert economy["missing"] == ["cells_earned"]
+    assert economy["claim_issues"]["cells_earned"] == (
+        "terminal_claim_contract_mismatch"
+    )
+
+
+def test_duplicate_source_is_ignored_but_identity_mutation_conflicts_components():
     monitor = ActiveRunMetricMonitor()
     runtime = _checkpoint(
         10,
@@ -614,10 +1725,9 @@ def test_duplicate_source_is_ignored_but_mutation_conflicts_components():
         context=_context(),
         terminal_save_report=_terminal_report(),
     )
-    assert all(
-        component["status"] == "conflict"
-        for component in evidence["components"].values()
-    )
+    assert evidence["components"]["economy"]["status"] == "partial"
+    assert evidence["components"]["progress"]["status"] == "observed"
+    assert evidence["components"]["coin_sources"]["status"] == "observed"
 
 
 def test_save_revision_is_diagnostic_when_later_evidence_is_monotonic():

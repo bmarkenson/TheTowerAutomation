@@ -2,10 +2,11 @@
 
 The collector is deliberately outside every action and lifecycle authority
 path.  Normal App runtime gives its daemon worker the same typed bundles used
-by other consumers; the legacy internal cadence remains available to focused
-standalone callers.  Only a compact allowlisted projection crosses the
-acquisition boundary; raw save bytes, decoded roots, profile evidence, and
-completed-history rows are never retained by this module.
+by other consumers.  A focused standalone cadence must still receive an
+explicit shared acquirer; this module never constructs an acquisition owner.
+Only a compact allowlisted projection crosses the acquisition boundary; raw
+save bytes, decoded roots, profile evidence, and completed-history rows are
+never retained by this module.
 """
 
 from __future__ import annotations
@@ -25,7 +26,6 @@ import time
 from typing import Any, Optional
 from uuid import uuid4
 
-from core.player_save import decode_player_save_bytes, pull_player_save_bytes
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
@@ -1216,13 +1216,10 @@ class PlayerSaveAuditCollector:
         *,
         enabled: bool,
         interval_seconds: int,
-        target_snapshot_fn: Optional[Callable[[], Any]],
         receipt_path: Path | str = DEFAULT_PLAYER_SAVE_AUDIT_RECEIPT_PATH,
         manifest_path: Path | str = DEFAULT_PLAYER_SAVE_AUDIT_MANIFEST_PATH,
-        pull_fn: Callable[..., bytes] = pull_player_save_bytes,
-        decode_fn: Callable[..., Any] = decode_player_save_bytes,
         acquirer: Optional[StablePlayerSaveAcquirer] = None,
-        acquire_internally: bool = True,
+        acquire_internally: bool = False,
         now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         monotonic_fn: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -1236,14 +1233,6 @@ class PlayerSaveAuditCollector:
                 interval_invalid = True
         self._acquirer = acquirer
         self._acquire_internally = bool(acquire_internally)
-        if self._acquirer is None and target_snapshot_fn is not None:
-            self._acquirer = StablePlayerSaveAcquirer(
-                target_snapshot_fn=target_snapshot_fn,
-                pull_fn=pull_fn,
-                decode_fn=decode_fn,
-                now_fn=now_fn,
-                pull_options={"attempts": 3, "settle_seconds": 0.1},
-            )
         self._now_fn = now_fn
         self._monotonic_fn = monotonic_fn
         self._commands: queue.Queue[Any] = queue.Queue(maxsize=_QUEUE_CAPACITY)
@@ -1263,6 +1252,10 @@ class PlayerSaveAuditCollector:
         if interval_invalid:
             self.enabled = False
             self._rate_limited_warning("collector_interval_invalid")
+            return
+        if self._acquire_internally and self._acquirer is None:
+            self.enabled = False
+            self._rate_limited_warning("shared_acquirer_unavailable")
             return
 
         try:

@@ -31,6 +31,7 @@ from core.player_save_acquisition import (
     PlayerSaveBoundaryKind,
     PlayerSaveNaturalBoundary,
     PlayerSaveTargetBinding,
+    StablePlayerSaveAcquirer,
 )
 
 
@@ -86,6 +87,7 @@ def _snapshot_with_history(
         fingerprint="b" * 64,
         tier=19,
         wave=1899,
+        is_tournament=False,
         battle_date={
             "kind_id": 2,
             "kind": "local",
@@ -182,7 +184,11 @@ def _coordinator(
     monkeypatch.setattr(module, "log_input", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(module, "log_result", lambda *_args, **_kwargs: None)
     return PlayerSavePreflightCoordinator(
-        target_snapshot_fn=target_snapshot_fn,
+        acquirer=StablePlayerSaveAcquirer(
+            target_snapshot_fn=target_snapshot_fn,
+            pull_fn=pull_fn,
+            decode_fn=decode_fn,
+        ),
         context_fn=context_fn,
         action_guard_fn=action_guard_fn,
         capture_fn=capture_fn,
@@ -192,8 +198,6 @@ def _coordinator(
         ),
         background_fn=background_fn,
         foreground_fn=foreground_fn,
-        pull_fn=pull_fn,
-        decode_fn=decode_fn,
         mapping_candidate_store=mapping_candidate_store,
         confirmed_local_mapping_store=confirmed_local_mapping_store,
         sleep_fn=lambda _seconds: None,

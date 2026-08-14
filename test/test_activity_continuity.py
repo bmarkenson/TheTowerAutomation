@@ -70,6 +70,7 @@ def _save_metadata(
     tier=19,
     wave=1899,
     semantic_status="observed",
+    is_tournament=False,
     battle_date=None,
 ):
     return {
@@ -77,10 +78,11 @@ def _save_metadata(
         "source": "player_save",
         "mapping_id": "data-9-game-1073",
         "effective_mapping_fingerprint": "9" * 64,
-        "identity_schema_version": 1,
+        "identity_schema_version": 2,
         "fingerprint": fingerprint,
         "tier": tier,
         "wave": wave,
+        "is_tournament": is_tournament,
         "battle_date": battle_date
         or {
             "kind_id": 2,
@@ -159,6 +161,7 @@ def _terminal_handoff(
         fingerprint="b" * 64,
         entry_count=30,
         capacity=30,
+        is_tournament=terminal_state == "TOURNAMENT_RESULTS",
     )
     latest["captured_at"] = "2026-08-07T00:00:01+00:00"
     acquisition = {

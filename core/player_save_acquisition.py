@@ -14,13 +14,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import hashlib
+from pathlib import Path
 import threading
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Optional
 
 from core.adb_target_session import ADB_TARGET_OPERATION_LOCK, AdbTargetSnapshot
 
 if TYPE_CHECKING:
-    from core.player_save import PlayerSaveSnapshot
+    from core.player_save import PlayerSaveParser, PlayerSaveSnapshot
 
 
 class PlayerSaveAcquisitionType(str, Enum):
@@ -227,7 +228,9 @@ class StablePlayerSaveAcquirer:
         target_snapshot_fn: Optional[Callable[[], AdbTargetSnapshot]] = None,
         fixed_target: Optional[str] = None,
         pull_fn: Optional[Callable[..., bytes]] = None,
+        parser: Optional["PlayerSaveParser"] = None,
         decode_fn: Optional[Callable[..., "PlayerSaveSnapshot"]] = None,
+        source_name: str = "playerInfo.dat",
         now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         pull_options: Optional[Mapping[str, Any]] = None,
         completion_observer: Optional[
@@ -250,11 +253,18 @@ class StablePlayerSaveAcquirer:
             assert target_snapshot_fn is not None
             self._target_snapshot_fn = target_snapshot_fn
 
-        from core.player_save import decode_player_save_bytes, pull_player_save_bytes
+        if parser is not None and decode_fn is not None:
+            raise ValueError("provide parser or legacy decode_fn, not both")
+
+        from core.player_save import PlayerSaveParser, pull_player_save_bytes
 
         self._default_pull = pull_fn is None or pull_fn is pull_player_save_bytes
         self._pull_fn = pull_fn or pull_player_save_bytes
-        self._decode_fn = decode_fn or decode_player_save_bytes
+        self._parser = parser or PlayerSaveParser()
+        self._decode_fn = decode_fn or self._parser.parse_bytes
+        self._source_name = Path(str(source_name or "playerInfo.dat")).name
+        if not self._source_name:
+            self._source_name = "playerInfo.dat"
         self._now_fn = now_fn
         self._pull_options = dict(pull_options or {})
         self._completion_observer = completion_observer
@@ -444,7 +454,7 @@ class StablePlayerSaveAcquirer:
             captured_at = max(self._now(), started_at)
             snapshot = self._decode_fn(
                 payload,
-                source_name="playerInfo.dat",
+                source_name=self._source_name,
                 captured_at=captured_at,
             )
         except Exception as exc:

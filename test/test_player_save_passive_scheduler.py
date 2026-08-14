@@ -156,6 +156,34 @@ def test_activity_scope_change_during_read_discards_bundle_before_projection():
     consumer.assert_not_called()
 
 
+def test_target_generation_change_after_read_discards_bundle_before_projection():
+    pull = Mock(return_value=b"stable-payload")
+    decode = Mock(return_value=SimpleNamespace(marker="normalized"))
+    contexts = iter((_context(generation=3), _context(generation=4)))
+    consumer = Mock()
+    scheduler = PlayerSavePassiveScheduler(
+        acquirer=StablePlayerSaveAcquirer(
+            target_snapshot_fn=lambda: SimpleNamespace(
+                target="localhost:5555",
+                generation=3,
+                owned=True,
+            ),
+            pull_fn=pull,
+            decode_fn=decode,
+        ),
+        context_fn=lambda: next(contexts),
+        consumers=(consumer,),
+        start_worker=False,
+    )
+
+    assert scheduler.acquire_once() is False
+    scheduler.close()
+
+    pull.assert_called_once_with(device_id="localhost:5555")
+    decode.assert_called_once()
+    consumer.assert_not_called()
+
+
 def test_app_applies_worker_checkpoint_only_on_matching_current_context():
     app = App.__new__(App)
     context = _context()

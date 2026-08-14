@@ -218,10 +218,13 @@ using strategy plus terminal-screen evidence. It filters by type, Tier, wave
 range, strategy, and capture quality. The report banner includes Coins/hour and
 Cells/hour, followed by a collapsible per-section tree containing complete
 Stats rows, Game Stats-only and derived values, Coins/min progression, and
-exact-1101 save-backed whole-run/interval economy and per-source rates, plus
+semantic save-backed whole-run/interval economy and per-source rates whose
+validated capability currently originates at version 1101, plus
 approximate Second Wind/Demon Mode/Nuke activation waves. The save-backed
 section explicitly keeps realized CPH separate from OCR Coins/min and presents
-the final checkpoint-to-terminal reconciliation. Second Wind rows also show
+direct cumulative counters, per-claim unavailable/conflict reasons, and the
+final checkpoint-to-terminal reconciliation. Unknown additive save fields are
+never displayed. Second Wind rows also show
 the approximate 400-wave re-arm estimate recorded from each observed activation.
 Expanded sections use high-contrast, table-style Stat/Value rows.
 Separate tabs retain the captured perk order, resolved run settings, and

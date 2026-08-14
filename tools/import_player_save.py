@@ -19,10 +19,12 @@ if str(ROOT) not in sys.path:
 from core.player_save import (
     PLAYER_SAVE_DEVICE_PATH,
     PlayerSaveError,
-    decode_player_save_bytes,
-    pull_player_save_bytes,
-    read_player_save_file,
+    PlayerSaveParser,
     reconcile_requirements,
+)
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionType,
+    StablePlayerSaveAcquirer,
 )
 
 
@@ -84,17 +86,22 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        parser_api = PlayerSaveParser()
         if args.file is not None:
-            snapshot = read_player_save_file(args.file)
+            snapshot = parser_api.parse_file(args.file)
         else:
-            payload = pull_player_save_bytes(
-                device_id=args.adb_target,
-                device_path=args.device_path,
-            )
-            snapshot = decode_player_save_bytes(
-                payload,
+            acquirer = StablePlayerSaveAcquirer(
+                fixed_target=args.adb_target,
+                parser=parser_api,
                 source_name=Path(args.device_path).name,
+                pull_options={"device_path": args.device_path},
             )
+            acquisition = acquirer.acquire(
+                PlayerSaveAcquisitionType.PASSIVE_STABLE_READ
+            )
+            if not acquisition.complete or acquisition.snapshot is None:
+                raise PlayerSaveError(acquisition.reason)
+            snapshot = acquisition.snapshot
         report = {"snapshot": snapshot.as_dict()}
         if args.requirements is not None:
             report["reconciliation"] = reconcile_requirements(

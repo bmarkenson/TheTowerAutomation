@@ -735,6 +735,37 @@ public partial class BattleHistoryWindow : Window
             return;
         }
         destination.Add(new ReportRow(
+            "Save-backed metric status",
+            "Overall",
+            ActiveRunStatusSummary(evidence)));
+        if (evidence.TryGetProperty("terminal_relation", out var terminalRelation)
+            && terminalRelation.ValueKind == JsonValueKind.Object)
+        {
+            destination.Add(new ReportRow(
+                "Save-backed capability status",
+                "Terminal relation",
+                ActiveRunStatusSummary(terminalRelation)));
+        }
+        foreach (var component in components.EnumerateObject())
+        {
+            if (component.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            destination.Add(new ReportRow(
+                "Save-backed capability status",
+                Humanize(component.Name),
+                ActiveRunStatusSummary(component.Value)));
+        }
+        if (evidence.TryGetProperty("wave_claim", out var waveClaim)
+            && waveClaim.ValueKind == JsonValueKind.Object)
+        {
+            destination.Add(new ReportRow(
+                "Save-backed capability status",
+                "Wave-derived rates",
+                ActiveRunStatusSummary(waveClaim)));
+        }
+        destination.Add(new ReportRow(
             "Save-backed metric interpretation",
             "Coin sources",
             "Counters can overlap; compare the same source across runs and do not sum rates."));
@@ -777,8 +808,7 @@ public partial class BattleHistoryWindow : Window
 
         foreach (var component in components.EnumerateObject())
         {
-            if (component.NameEquals("economy")
-                || component.Value.ValueKind != JsonValueKind.Object
+            if (component.Value.ValueKind != JsonValueKind.Object
                 || !component.Value.TryGetProperty(
                     "samples",
                     out var componentSamples)
@@ -832,6 +862,14 @@ public partial class BattleHistoryWindow : Window
                 + (JsonValue(terminal, "reason") is var reason && reason != "-"
                     ? $" ({reason})"
                     : string.Empty)));
+            if (terminal.TryGetProperty("wave_claim", out var terminalWaveClaim)
+                && terminalWaveClaim.ValueKind == JsonValueKind.Object)
+            {
+                destination.Add(new ReportRow(
+                    "Terminal save-backed claim status",
+                    "Wave-derived rates",
+                    ActiveRunStatusSummary(terminalWaveClaim)));
+            }
             if (terminal.TryGetProperty("components", out var terminalComponents)
                 && terminalComponents.ValueKind == JsonValueKind.Object
                 && terminalComponents.TryGetProperty("economy", out var terminalEconomy)
@@ -870,9 +908,17 @@ public partial class BattleHistoryWindow : Window
     {
         foreach (var component in terminalComponents.EnumerateObject())
         {
-            if (component.NameEquals("economy")
-                || component.Value.ValueKind != JsonValueKind.Object
-                || !component.Value.TryGetProperty("matched", out var matched)
+            if (component.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            destination.Add(new ReportRow(
+                "Terminal save-backed claim status",
+                Humanize(component.Name),
+                ActiveRunStatusSummary(
+                    component.Value,
+                    missingProperty: "missing")));
+            if (!component.Value.TryGetProperty("matched", out var matched)
                 || matched.ValueKind != JsonValueKind.Object)
             {
                 continue;
@@ -906,6 +952,74 @@ public partial class BattleHistoryWindow : Window
                     value));
             }
         }
+    }
+
+    private static string ActiveRunStatusSummary(
+        JsonElement evidence,
+        string missingProperty = "unavailable_claims")
+    {
+        var summary = JsonValue(evidence, "status");
+        var reason = JsonValue(evidence, "reason");
+        if (reason != "-")
+        {
+            summary += $" ({reason})";
+        }
+        if (evidence.TryGetProperty(missingProperty, out var unavailable))
+        {
+            var unavailableSummary = JsonIssueSummary(unavailable);
+            if (unavailableSummary != "-")
+            {
+                var label = missingProperty == "missing"
+                    ? "missing"
+                    : "unavailable";
+                summary += $"; {label}: {unavailableSummary}";
+            }
+        }
+        if (evidence.TryGetProperty("metric_conflicts", out var metricConflicts))
+        {
+            var conflictSummary = JsonIssueSummary(metricConflicts);
+            if (conflictSummary != "-")
+            {
+                summary += $"; conflicts: {conflictSummary}";
+            }
+        }
+        else if (evidence.TryGetProperty("conflicts", out var conflicts))
+        {
+            var conflictSummary = JsonIssueSummary(conflicts);
+            if (conflictSummary != "-")
+            {
+                summary += $"; conflicts: {conflictSummary}";
+            }
+        }
+        if (evidence.TryGetProperty("claim_issues", out var claimIssues))
+        {
+            var issueSummary = JsonIssueSummary(claimIssues);
+            if (issueSummary != "-")
+            {
+                summary += $"; claim issues: {issueSummary}";
+            }
+        }
+        return summary;
+    }
+
+    private static string JsonIssueSummary(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            var items = value.EnumerateObject()
+                .Select(item => $"{Humanize(item.Name)}: {DisplayJsonValue(item.Value)}")
+                .ToArray();
+            return items.Length == 0 ? "-" : string.Join("; ", items);
+        }
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            var items = value.EnumerateArray()
+                .Select(DisplayJsonValue)
+                .Where(item => item != "-")
+                .ToArray();
+            return items.Length == 0 ? "-" : string.Join("; ", items.Select(Humanize));
+        }
+        return "-";
     }
 
     private static string ActiveRunRateSummary(JsonElement rates) =>

@@ -1581,11 +1581,39 @@
   "runtime_save_extensions": {
     "active_tallies": {
       "schema_version": 1,
+      "capability_id": "thetower.player_save.active_run_tallies.v1",
+      "forward_policy": "additive_dependencies",
       "audit_id": "V1101-RUNTIME-017",
       "evidence_level": "cross_channel",
-      "supported_game_versions": [
-        1101
-      ],
+      "scope": {
+        "semantics": {
+          "state": "cumulative_active_round",
+          "identity": "game_version_tier_started_count_seed",
+          "checkpoint_order": "capture_time_source_identity",
+          "wave_relation": "optional_nondecreasing_rate_dependency",
+          "terminal_identity": "source_order_tail_battle_date_tier_wave_kind",
+          "terminal_relation": "causally_bound_natural_terminal_nondecreasing"
+        },
+        "binding": {
+          "game_version": "versionNumber",
+          "save_revision": "saveRevision",
+          "round_active": "roundActiveBool",
+          "current_tier": "currentTier",
+          "current_wave": "currentWave",
+          "round_seed": "roundSeed",
+          "round_counter_vector": "roundsStartedThisTier",
+          "history_container": "battleHistory",
+          "history_entry_class": "BattleHistoryEntry",
+          "history_capacity": 30,
+          "history_entry_count": "battleHistory.length",
+          "history_battle_date": "battleDate",
+          "history_tier": "tier",
+          "history_kind": "isTournament",
+          "history_wave": "wave",
+          "history_game_time": "gameTime",
+          "history_real_time": "realTime"
+        }
+      },
       "components": {
         "coin_sources": {
           "fields": {

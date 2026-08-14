@@ -16,6 +16,7 @@ from core.app import App
 from core.control_model import validate_setup_capture_preview
 from core.player_save import (
     PLAYER_SAVE_DEVICE_PATH,
+    PlayerSaveParser,
     PlayerSaveError,
     PlayerSavePullError,
     _raw_field_manifest_names,
@@ -25,6 +26,7 @@ from core.player_save import (
     _validate_runtime_save_extensions,
     decode_player_save_bytes,
     pull_player_save_bytes,
+    read_player_save_file,
     reconcile_requirements,
 )
 from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
@@ -40,13 +42,17 @@ from core.player_save_acquisition import (
     PlayerSaveAcquisitionType,
     PlayerSaveTargetBinding,
 )
-from core.player_save_setup_capture import project_forced_save_setup
+from core.player_save_setup_capture import (
+    SetupCaptureError,
+    project_forced_save_setup,
+)
 from core.profile_progression import (
     ProfileProgressionError,
     diff_profile_progression,
     normalize_profile_progression,
 )
 from core.runtime_save import runtime_with_perk_id_overrides
+from core.runtime_save import active_tally_contract_fingerprints
 
 
 CAPTURED_AT = datetime(2026, 7, 31, 20, 0, tzinfo=timezone.utc)
@@ -235,6 +241,35 @@ def test_revision_compatibility_rejects_unknown_tally_terminal_source():
             mapping,
             mappings_by_id={
                 VERSION_MAPPING["mapping_id"]: VERSION_MAPPING,
+                mapping["mapping_id"]: mapping,
+            },
+            source="test mapping",
+        )
+
+
+@pytest.mark.parametrize(
+    ("authority_key", "changed_value"),
+    (
+        ("entry_class", "ChangedBattleHistoryEntry"),
+        ("capacity", 31),
+    ),
+)
+def test_revision_compatibility_rejects_terminal_history_binding_mismatch(
+    authority_key,
+    changed_value,
+):
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    authority = copy.deepcopy(VERSION_MAPPING)
+    authority["runtime_save"]["battle_history"][authority_key] = changed_value
+
+    with pytest.raises(
+        PlayerSaveError,
+        match="terminal-history binding disagrees with runtime authority",
+    ):
+        _validate_revision_compatibility(
+            mapping,
+            mappings_by_id={
+                authority["mapping_id"]: authority,
                 mapping["mapping_id"]: mapping,
             },
             source="test mapping",
@@ -623,6 +658,38 @@ def _snapshot_v1101(monkeypatch, decoded: dict | None = None):
     )
 
 
+def test_global_parser_file_api_and_compatibility_wrapper(monkeypatch, tmp_path):
+    monkeypatch.setattr(nrbf, "loads", lambda _raw: _decoded_save())
+    path = tmp_path / "renamed-player-save.dat"
+    path.write_bytes(gzip.compress(b"synthetic-nrbf"))
+
+    parsed = PlayerSaveParser().parse_file(path, captured_at=CAPTURED_AT)
+    wrapped = read_player_save_file(path)
+
+    assert parsed.source_name == "renamed-player-save.dat"
+    assert parsed.mapping_id == "data-9-game-1073"
+    assert wrapped.source_name == "renamed-player-save.dat"
+    assert wrapped.mapping_id == parsed.mapping_id
+
+
+def test_global_parser_snapshot_is_recursively_read_only(monkeypatch):
+    snapshot = _snapshot_v1101(monkeypatch)
+
+    with pytest.raises(TypeError, match="read-only"):
+        snapshot.capabilities["replacement"] = object()
+    with pytest.raises(TypeError, match="read-only"):
+        snapshot.checks["modules"].value["core_assist"] = "private mutation"
+    with pytest.raises(TypeError, match="read-only"):
+        snapshot.profile_progression["identity"]["game_version"] = 9999
+    assert snapshot.runtime_save is not None
+    with pytest.raises(TypeError, match="read-only"):
+        snapshot.runtime_save.capture["source_name"] = "changed.dat"
+
+    rendered = snapshot.as_dict()
+    rendered["profile_progression"]["identity"]["game_version"] = 9999
+    assert snapshot.profile_progression["identity"]["game_version"] == 1101
+
+
 def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     monkeypatch,
 ):
@@ -697,7 +764,7 @@ def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     )
 
 
-def test_v1101_active_tally_failure_isolated_to_one_component(monkeypatch):
+def test_v1101_active_tally_failure_isolated_to_one_leaf(monkeypatch):
     decoded = _decoded_save_v1101()
     decoded["cellsEarnedThisRound"] = "changed-shape"
 
@@ -707,10 +774,128 @@ def test_v1101_active_tally_failure_isolated_to_one_component(monkeypatch):
     assert runtime.active_tallies is not None
     payload = runtime.active_tallies.as_dict()
     assert payload["status"] == "partial"
-    assert payload["components"]["economy"]["status"] == "unavailable"
+    economy = payload["components"]["economy"]
+    assert economy["status"] == "partial"
+    assert "cells_earned" not in economy["metrics"]
+    assert "average_cells_per_hour" not in economy["derived"]
+    assert economy["metrics"]["coins_earned"]["value_decimal"] == (
+        "7240000000000000000"
+    )
+    assert economy["unavailable"]["cells_earned"].startswith(
+        "active_tally_number_invalid"
+    )
     assert payload["components"]["coin_sources"]["status"] == "observed"
     assert payload["components"]["progress"]["status"] == "observed"
     assert "changed-shape" not in json.dumps(payload)
+
+
+def test_active_tally_contract_separates_semantics_from_raw_binding():
+    original = copy.deepcopy(
+        VERSION_1101_MAPPING["runtime_save_extensions"]["active_tallies"]
+    )
+    semantic, binding = active_tally_contract_fingerprints(original)
+
+    rebound = copy.deepcopy(original)
+    rebound["components"]["economy"]["fields"]["cells_earned"][
+        "source"
+    ] = "renamedCellsThisRound"
+    rebound_semantic, rebound_binding = active_tally_contract_fingerprints(
+        rebound
+    )
+    changed_semantics = copy.deepcopy(original)
+    changed_semantics["components"]["economy"]["fields"]["cells_earned"][
+        "unit"
+    ] = "changed_cells"
+    changed_semantic, changed_binding = active_tally_contract_fingerprints(
+        changed_semantics
+    )
+
+    assert rebound_semantic == semantic
+    assert rebound_binding != binding
+    assert changed_semantic != semantic
+    assert changed_binding == binding
+
+    rebound_scope = copy.deepcopy(original)
+    rebound_scope["scope"]["binding"]["current_wave"] = "renamedWave"
+    scope_semantic, scope_binding = active_tally_contract_fingerprints(
+        rebound_scope
+    )
+    changed_scope = copy.deepcopy(original)
+    changed_scope["scope"]["semantics"]["identity"] = "changed_identity"
+    changed_scope_semantic, changed_scope_binding = (
+        active_tally_contract_fingerprints(changed_scope)
+    )
+
+    assert scope_semantic == semantic
+    assert scope_binding != binding
+    assert changed_scope_semantic != semantic
+    assert changed_scope_binding == binding
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    (
+        ("saveRevision", "changed", "save_revision"),
+        ("currentWave", "changed", "current_wave"),
+        ("roundActiveBool", "changed", "round_state"),
+    ),
+)
+def test_runtime_foundation_claim_failure_is_dependency_local(
+    monkeypatch,
+    field,
+    value,
+    expected,
+):
+    decoded = _decoded_save_v1101()
+    decoded[field] = value
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+
+    assert snapshot.runtime_save is not None
+    runtime = snapshot.runtime_save
+    assert runtime.battle_history_tail.structural_status == "observed"
+    assert snapshot.checks["cards_deck"].status == "observed"
+    if expected == "save_revision":
+        assert runtime.save_revision is None
+        assert runtime.save_revision_status == "unavailable"
+        assert runtime.perks_status == "observed"
+        assert runtime.active_tallies is not None
+    elif expected == "current_wave":
+        assert runtime.current_wave is None
+        assert runtime.current_wave_status == "unavailable"
+        assert runtime.perks_status == "unavailable"
+        assert runtime.active_tallies is not None
+    else:
+        assert runtime.round_active is None
+        assert runtime.round_state_status == "unavailable"
+        assert runtime.perks_status == "unavailable"
+        assert runtime.active_tallies is None
+
+
+@pytest.mark.parametrize(
+    ("field", "affected_check"),
+    (
+        ("ultimateWeaponUnlocked", "ultimate_weapons"),
+        ("cardUnlocked", None),
+    ),
+)
+def test_malformed_non_tally_root_field_does_not_abort_parser(
+    monkeypatch,
+    field,
+    affected_check,
+):
+    decoded = _decoded_save_v1101()
+    decoded[field] = 1
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.battle_history_tail.structural_status == "observed"
+    assert snapshot.runtime_save.active_tallies is not None
+    if affected_check is not None:
+        assert snapshot.checks[affected_check].status == "unmapped"
+    assert snapshot.checks["cards_deck"].status == "observed"
+    assert snapshot.checks["bots_preset"].status == "observed"
 
 
 def test_v1101_inactive_round_does_not_publish_cleared_tallies(monkeypatch):
@@ -736,6 +921,19 @@ def test_runtime_extension_requires_exact_runtime_observation_allowlist():
     mapping["runtime_save_extensions"]["active_tallies"]["components"][
         "economy"
     ]["fields"]["coins_earned"]["source"] = "coins"
+
+    with pytest.raises(PlayerSaveError, match="invalid authority"):
+        _validate_runtime_save_extensions(mapping, source="test mapping")
+
+
+def test_runtime_extension_rejects_duplicate_terminal_sources():
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    fields = mapping["runtime_save_extensions"]["active_tallies"][
+        "components"
+    ]["economy"]["fields"]
+    fields["cells_earned"]["terminal_source"] = fields["coins_earned"][
+        "terminal_source"
+    ]
 
     with pytest.raises(PlayerSaveError, match="invalid authority"):
         _validate_runtime_save_extensions(mapping, source="test mapping")
@@ -801,6 +999,10 @@ def test_v1101_compatible_snapshot_projects_setup_capture_allowlist(monkeypatch)
 
 
 def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
+    provider_capability = _snapshot_v1101(monkeypatch).capability(
+        "thetower.player_save.active_run_tallies.v1"
+    )
+    assert provider_capability is not None
     decoded = _decoded_save_v1101()
     decoded.update(
         {
@@ -822,9 +1024,20 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
     assert snapshot.runtime_save.mapping_id == snapshot.mapping_id
     assert snapshot.runtime_save.active_round_identity is not None
     assert snapshot.runtime_save.active_round_identity.game_version == 1102
-    assert snapshot.runtime_save.active_tallies is None
-    assert snapshot.runtime_save.active_tallies_reason == (
-        "active_tally_mapping_unavailable"
+    assert snapshot.runtime_save.active_tallies is not None
+    assert snapshot.runtime_save.active_tallies.status == "observed"
+    capability = snapshot.capability(
+        "thetower.player_save.active_run_tallies.v1"
+    )
+    assert capability is not None
+    assert capability.status == "observed"
+    assert capability.provider_mapping_id == "data-9-game-1101"
+    assert capability.resolution == "compatible_forward_revision"
+    assert capability.semantic_fingerprint == (
+        provider_capability.semantic_fingerprint
+    )
+    assert capability.binding_fingerprint == (
+        provider_capability.binding_fingerprint
     )
     assert snapshot.profile_progression["status"] == "unavailable"
     assert snapshot.profile_progression["reason"] == (
@@ -839,6 +1052,8 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
         "maturity": "candidate",
         "validated_checks": list(snapshot.validated_checks),
         "shape_valid": True,
+        "manifest_status": "exact",
+        "manifest_warnings": [],
         "resolution": "compatible_forward_revision",
         "authority_id": "data-9-game-1073",
         "structural_id": "data-9-game-1101",
@@ -868,19 +1083,14 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
     )
 
 
-@pytest.mark.parametrize(
-    "mutation",
-    ("missing_field", "changed_array", "changed_data_version"),
-)
-def test_unknown_incompatible_version_falls_back_to_ui(monkeypatch, mutation):
+@pytest.mark.parametrize("mutation", ("missing_field", "changed_array"))
+def test_unknown_forward_drift_fails_only_dependent_claims(monkeypatch, mutation):
     decoded = _decoded_save_v1101()
     decoded["versionNumber"] = 1102
     if mutation == "missing_field":
         decoded.pop("autoPickPerk")
     elif mutation == "changed_array":
         decoded["perkLevel"] = [0] * 51
-    else:
-        decoded["dataVersion"] = 10
 
     snapshot = _snapshot_v1101(monkeypatch, decoded)
     plan = reconcile_requirements(
@@ -889,25 +1099,167 @@ def test_unknown_incompatible_version_falls_back_to_ui(monkeypatch, mutation):
         freshness_verified=True,
     )
 
-    assert not snapshot.mapping_supported
-    assert not snapshot.shape_valid
-    assert snapshot.runtime_save is None
+    assert snapshot.mapping_supported
+    assert snapshot.shape_valid
+    assert snapshot.manifest_status == "drifted"
+    assert snapshot.runtime_save is not None
+    assert snapshot.checks["cards_deck"].status == "observed"
+    assert plan["checks"]["cards_deck"]["disposition"] == "save_match"
+    if mutation == "missing_field":
+        assert snapshot.checks["auto_pick_perks"].status == "unmapped"
+        assert snapshot.runtime_save.perks_status == "observed"
+    else:
+        assert snapshot.checks["auto_pick_perks"].status == "observed"
+        assert snapshot.runtime_save.perks_status == "unavailable"
+    assert snapshot.runtime_save.active_tallies is not None
+    assert snapshot.runtime_save.battle_history_tail.structural_status == "observed"
+
+
+def test_unknown_forward_appended_round_counter_is_dependency_local(monkeypatch):
+    decoded = _decoded_save_v1101()
+    decoded["versionNumber"] = 1102
+    decoded["roundsStartedThisTier"].append("unvalidated-future-tier")
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+
+    assert snapshot.mapping_resolution == "compatible_forward_revision"
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.active_round_identity is not None
+    assert snapshot.runtime_save.active_tallies is not None
+    assert snapshot.runtime_save.active_tallies.status == "observed"
+
+
+def test_unknown_data_lineage_resolves_only_declared_semantic_capability(
+    monkeypatch,
+):
+    decoded = _decoded_save_v1101()
+    decoded["versionNumber"] = 1102
+    decoded["dataVersion"] = 10
+    decoded["battleHistory"][-1]["killedBy"] = 987654321
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+
+    assert snapshot.mapping_supported
+    assert snapshot.shape_valid
+    assert snapshot.mapping_resolution == "semantic_forward_revision"
+    assert snapshot.mapping_authority_id == "data-9-game-1101"
     assert snapshot.checks == {}
-    assert snapshot.mapping_resolution in {
-        "incompatible_revision",
-        "unsupported",
-    }
-    assert plan["checks"]["cards_deck"]["disposition"] == "ui_required"
-    assert plan["checks"]["cards_deck"]["reason"] == (
-        "unsupported_save_version"
+    assert snapshot.profile_progression["status"] == "unavailable"
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.perks_status == "unavailable"
+    assert snapshot.runtime_save.perks_reason == (
+        "legacy_perk_capability_not_declared"
     )
-    assert plan["checks"]["cards_deck"]["fallback"] == "existing_ui_check"
+    assert snapshot.runtime_save.battle_history_tail.completed_entry_status == (
+        "unavailable"
+    )
+    assert snapshot.runtime_save.battle_history_tail.structural_status == (
+        "unavailable"
+    )
+    assert snapshot.runtime_save.battle_history_tail.identity is None
+    assert (
+        snapshot.runtime_save.battle_history_tail.terminal_identity
+        is not None
+    )
+    terminal_identity = (
+        snapshot.runtime_save.battle_history_tail.terminal_identity
+    )
+    assert terminal_identity.game_time_seconds is None
+    assert terminal_identity.real_time_seconds is None
+    assert terminal_identity.killed_by_id is None
+    assert snapshot.runtime_save.battle_history_tail.terminal_identity_reason == ""
+    assert "987654321" not in json.dumps(snapshot.as_dict())
+    assert snapshot.runtime_save.active_tallies is not None
+    capability = snapshot.capability(
+        "thetower.player_save.active_run_tallies.v1"
+    )
+    assert capability is not None
+    assert capability.status == "observed"
+    assert capability.provider_mapping_id == "data-9-game-1101"
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="captured",
+        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        acquisition_started_at=CAPTURED_AT - timedelta(milliseconds=1),
+        captured_at=CAPTURED_AT,
+        acquisition_completed_at=CAPTURED_AT + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=snapshot,
+    )
+    with pytest.raises(
+        SetupCaptureError,
+        match="metric observation only",
+    ) as exc_info:
+        project_forced_save_setup(acquisition)
+    assert exc_info.value.code == (
+        "setup_capture_capability_authority_unavailable"
+    )
+    workflow, status, reason = App._setup_capture_workflow_binding(
+        acquisition,
+        {
+            "game_state": "active_battle",
+            "runtime_id": "semantic-runtime",
+            "activity_scope_run_id": "semantic-scope",
+        },
+    )
+    assert workflow is None
+    assert status == "unavailable"
+    assert reason is not None and "metric observation only" in reason
+
+
+@pytest.mark.parametrize("mutation", ("entry_class", "capacity"))
+def test_semantic_forward_terminal_binding_failure_keeps_active_tallies(
+    monkeypatch,
+    mutation,
+):
+    decoded = _decoded_save_v1101()
+    decoded["versionNumber"] = 1102
+    decoded["dataVersion"] = 10
+    if mutation == "entry_class":
+        decoded["battleHistory"][-1]["__class__"] = "FutureHistoryEntry"
+    else:
+        entry = copy.deepcopy(decoded["battleHistory"][-1])
+        decoded["battleHistory"] = [copy.deepcopy(entry) for _ in range(31)]
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.active_tallies is not None
+    assert snapshot.runtime_save.active_tallies.status == "observed"
+    tail = snapshot.runtime_save.battle_history_tail
+    assert tail.terminal_identity is None
+    assert tail.terminal_tail_fingerprint is None
+    assert tail.terminal_identity_reason in {
+        "history_entry_class_changed:0",
+        "battle_history_exceeds_capacity",
+    }
+
+
+def test_semantic_forward_empty_history_retains_explicit_terminal_baseline(
+    monkeypatch,
+):
+    decoded = _decoded_save_v1101()
+    decoded["versionNumber"] = 1102
+    decoded["dataVersion"] = 10
+    decoded["battleHistory"] = []
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.active_tallies is not None
+    assert snapshot.runtime_save.active_tallies.status == "observed"
+    tail = snapshot.runtime_save.battle_history_tail
+    assert tail.terminal_empty_baseline is True
+    assert tail.terminal_identity is None
+    assert tail.terminal_mapping_id == snapshot.mapping_id
+    assert len(str(tail.terminal_tail_fingerprint or "")) == 64
 
 
 def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     snapshot = _snapshot(monkeypatch)
 
-    assert snapshot.as_dict()["schema_version"] == 6
+    assert snapshot.as_dict()["schema_version"] == 7
     assert snapshot.mapping_id == "data-9-game-1073"
     assert snapshot.mapping_maturity == "candidate"
     assert snapshot.validated_checks == (
@@ -1030,30 +1382,32 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert "/private/path" not in rendered
 
 
-def test_raw_field_manifest_rejects_an_unclassified_decoded_field(monkeypatch):
+def test_raw_field_manifest_reports_but_ignores_an_added_field(monkeypatch):
     decoded = _decoded_save()
     decoded["futureVersion1073Field"] = 1
 
     snapshot = _snapshot(monkeypatch, decoded)
 
-    assert not snapshot.shape_valid
-    assert snapshot.checks == {}
-    assert snapshot.runtime_save is None
+    assert snapshot.shape_valid
+    assert snapshot.manifest_status == "drifted"
+    assert snapshot.checks["cards_deck"].status == "observed"
+    assert snapshot.runtime_save is not None
     assert any(
         "1 unclassified field(s) were decoded: futureVersion1073Field" in warning
         for warning in snapshot.warnings
     )
 
 
-def test_raw_field_manifest_rejects_a_missing_classified_field(monkeypatch):
+def test_missing_unconsumed_manifest_field_does_not_erase_claims(monkeypatch):
     decoded = _decoded_save()
     del decoded["adGemsClaimedToday"]
 
     snapshot = _snapshot(monkeypatch, decoded)
 
-    assert not snapshot.shape_valid
-    assert snapshot.checks == {}
-    assert snapshot.runtime_save is None
+    assert snapshot.shape_valid
+    assert snapshot.manifest_status == "drifted"
+    assert snapshot.checks["cards_deck"].status == "observed"
+    assert snapshot.runtime_save is not None
     assert any(
         "1 classified field(s) are missing: adGemsClaimedToday" in warning
         for warning in snapshot.warnings
@@ -1247,6 +1601,21 @@ def test_runtime_fingerprints_separate_tail_identity_from_semantics(monkeypatch)
     )
 
 
+@pytest.mark.parametrize("field", ("gameTime", "realTime", "killedBy"))
+def test_optional_history_leaf_cannot_advance_structural_tail(monkeypatch, field):
+    baseline = _snapshot(monkeypatch, _decoded_save()).runtime_save
+    changed_decoded = _decoded_save()
+    changed_decoded["battleHistory"][-1][field] = "changed-shape"
+    changed = _snapshot(monkeypatch, changed_decoded).runtime_save
+
+    assert baseline is not None and changed is not None
+    assert baseline.battle_history_tail.structural_fingerprint == (
+        changed.battle_history_tail.structural_fingerprint
+    )
+    assert changed.battle_history_tail.identity is not None
+    assert changed.battle_history_tail.completed_entry_status == "unavailable"
+
+
 def test_inactive_round_exposes_cleared_perks_without_active_identity(monkeypatch):
     decoded = _decoded_save()
     decoded.update(
@@ -1389,10 +1758,6 @@ def test_perk_id_overlay_cannot_replace_static_or_duplicate_semantics(monkeypatc
             ),
             "perk_list_level_mismatch:10",
         ),
-        (
-            lambda decoded: decoded["perksPicked"][0].update(extra=True),
-            "perk_pick_changed_shape:0",
-        ),
     ),
 )
 def test_inconsistent_perk_shapes_fail_closed(monkeypatch, mutation, reason):
@@ -1404,6 +1769,18 @@ def test_inconsistent_perk_shapes_fail_closed(monkeypatch, mutation, reason):
     assert runtime is not None
     assert runtime.perks is None
     assert runtime.perks_reason == reason
+
+
+def test_added_nested_perk_field_is_ignored_and_unpublished(monkeypatch):
+    decoded = _decoded_save()
+    decoded["perksPicked"][0]["futurePerkMetadata"] = {"private": 17}
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.perks_status == "observed"
+    assert "futurePerkMetadata" not in json.dumps(snapshot.as_dict())
+    assert "private" not in json.dumps(snapshot.as_dict())
 
 
 def test_unknown_killed_by_keeps_structural_tail_identity(monkeypatch):
@@ -1455,6 +1832,38 @@ def test_unknown_killed_by_keeps_structural_tail_identity(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize(
+    ("field", "terminal_source"),
+    (
+        ("killedBy", None),
+        ("gameTime", "gameTime"),
+        ("realTime", "realTime"),
+    ),
+)
+def test_terminal_identity_leaf_failure_preserves_unrelated_tally_claims(
+    monkeypatch,
+    field,
+    terminal_source,
+):
+    decoded = _decoded_save_v1101()
+    decoded["battleHistory"][-1][field] = "changed"
+
+    runtime = _snapshot_v1101(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    tail = runtime.battle_history_tail
+    assert tail.structural_status == "observed"
+    assert tail.identity is not None
+    assert tail.completed_entry_status == "unavailable"
+    claims = tail.terminal_metric_claims
+    assert claims["status"] in {"observed", "partial"}
+    assert "coinsEarned" in claims["claims"]
+    if terminal_source is None:
+        assert claims["status"] == "observed"
+        assert tail.identity.killed_by_id is None
+    else:
+        assert terminal_source not in claims["claims"]
+        assert terminal_source in claims["unavailable"]
 def test_unknown_tournament_league_exposes_review_candidate(monkeypatch):
     decoded = _decoded_save()
     decoded["leagueID"] = 4
@@ -1494,16 +1903,17 @@ def test_cross_channel_killed_by_ids_are_semantically_mapped(
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    ("mutation", "completed_status"),
     (
-        lambda entry: entry.pop("coinsEarned"),
-        lambda entry: entry.update(coinsEarned=1),
-        lambda entry: entry.update(unexpectedField=1.0),
+        (lambda entry: entry.pop("coinsEarned"), "unavailable"),
+        (lambda entry: entry.update(coinsEarned=1), "unavailable"),
+        (lambda entry: entry.update(unexpectedField=1.0), "observed"),
     ),
 )
-def test_malformed_history_entry_never_publishes_partial_projection(
+def test_history_semantics_fail_without_erasing_structural_identity(
     monkeypatch,
     mutation,
+    completed_status,
 ):
     decoded = _decoded_save()
     mutation(decoded["battleHistory"][-1])
@@ -1512,11 +1922,11 @@ def test_malformed_history_entry_never_publishes_partial_projection(
 
     assert runtime is not None
     tail = runtime.battle_history_tail
-    assert tail.structural_status == "unavailable"
-    assert tail.structural_fingerprint is None
-    assert tail.identity is None
-    assert tail.completed_entry_status == "unavailable"
-    assert tail.entry is None
+    assert tail.structural_status == "observed"
+    assert tail.structural_fingerprint is not None
+    assert tail.identity is not None
+    assert tail.completed_entry_status == completed_status
+    assert (tail.entry is not None) is (completed_status == "observed")
 
 
 def test_mixed_datetime_kinds_do_not_use_cross_kind_tick_ordering(monkeypatch):
@@ -2420,39 +2830,57 @@ def test_unknown_game_version_decodes_metadata_but_requires_ui(monkeypatch):
     assert decision["ui_required"]
 
 
-def test_exact_version_with_changed_shape_fails_closed(monkeypatch):
+def test_profile_array_drift_is_local_to_profile_projection(monkeypatch):
     decoded = _decoded_save()
     decoded["researchLevel"] = [0] * 251
     snapshot = _snapshot(monkeypatch, decoded)
 
     assert snapshot.mapping_supported
-    assert not snapshot.shape_valid
-    assert snapshot.checks == {}
+    assert snapshot.shape_valid
+    assert snapshot.manifest_status == "drifted"
+    assert snapshot.checks["cards_deck"].status == "observed"
     assert any("researchLevel length changed" in item for item in snapshot.warnings)
 
 
-def test_runtime_array_shape_change_fails_the_exact_mapping(monkeypatch):
+def test_perk_array_shape_change_is_local_to_perks(monkeypatch):
     decoded = _decoded_save()
     decoded["perkLevel"] = [0] * 49
 
     snapshot = _snapshot(monkeypatch, decoded)
 
-    assert not snapshot.shape_valid
-    assert snapshot.runtime_save is None
+    assert snapshot.shape_valid
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.perks_status == "unavailable"
+    assert snapshot.runtime_save.battle_history_tail.structural_status == "observed"
     assert any("perkLevel length changed" in item for item in snapshot.warnings)
 
 
-def test_runtime_round_counter_type_change_publishes_no_runtime_model(monkeypatch):
+def test_unrelated_round_counter_change_preserves_active_identity(monkeypatch):
     decoded = _decoded_save()
     decoded["roundsStartedThisTier"][0] = False
 
     snapshot = _snapshot(monkeypatch, decoded)
 
     assert snapshot.shape_valid
-    assert snapshot.runtime_save is None
-    assert any(
-        "runtime projection failed closed" in item for item in snapshot.warnings
-    )
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.active_round_identity is not None
+    assert snapshot.runtime_save.active_identity_status == "observed"
+    assert snapshot.runtime_save.perks_status == "observed"
+    assert snapshot.runtime_save.battle_history_tail.structural_status == "observed"
+
+
+def test_current_round_counter_failure_is_local_to_active_identity(monkeypatch):
+    decoded = _decoded_save()
+    decoded["roundsStartedThisTier"][decoded["currentTier"]] = False
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert snapshot.shape_valid
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.active_round_identity is None
+    assert snapshot.runtime_save.active_identity_status == "unavailable"
+    assert snapshot.runtime_save.perks_status == "observed"
+    assert snapshot.runtime_save.battle_history_tail.structural_status == "observed"
 
 
 def test_candidate_mapping_keeps_ui_for_matching_checks(monkeypatch):

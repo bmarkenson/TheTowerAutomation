@@ -75,12 +75,14 @@ as checked checkpoint narrative here.
     or remove it. Do not enable it merely for this review. If retained, decide
     whether the unconfirmed direct-Retry rollover or `V1073-RUNTIME-015`/`016`
     warrants a bounded campaign.
-  - [ ] Extend the exact-version runtime projection with independently failing
+  - [ ] Extend the semantic runtime capability registry with independently failing
     active-upgrade, survival-ability, and remaining allowlisted live-tally
-    components. Exact version 1101 already publishes the 29 validated economy,
-    progress, and coin-source counters documented in the
+    claims. The capability whose authority originates at version 1101 already
+    publishes the 29 validated economy, progress, and coin-source counters
+    documented in the
     [versioned audit matrix](../architecture/player_save.md#versioned-audit-addition-data-9-game-1101);
-    exact 1073 and unknown forward versions do not inherit them. For upgrades,
+    exact 1073 remains unavailable, while unknown additive forward revisions
+    may inherit only those declared claims. For upgrades,
     map all three current-level arrays to their Workshop baselines and versioned
     caps so a gold-box claim is explicit rather than inferred from magnitude.
     Damage, resource, upgrade, survival, and other unvalidated candidates remain

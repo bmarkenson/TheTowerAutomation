@@ -7,11 +7,28 @@ import pytest
 
 from core.adb_target_session import AdbTargetSnapshot
 from core.adb_utils import AdbShellDispatchOutcome
+from core.player_save_acquisition import StablePlayerSaveAcquirer
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
 )
 from core.run_state import AUTOMATION, RunState
+
+
+def _acquirer(
+    *,
+    pull_fn=lambda **_kwargs: b"stable-save",
+    decode_fn=lambda _payload, **_kwargs: object(),
+):
+    return StablePlayerSaveAcquirer(
+        target_snapshot_fn=lambda: AdbTargetSnapshot(
+            "private-target",
+            3,
+            True,
+        ),
+        pull_fn=pull_fn,
+        decode_fn=decode_fn,
+    )
 
 
 def _serializer(
@@ -26,18 +43,12 @@ def _serializer(
     debug_log_fn=lambda *_args, **_kwargs: None,
 ):
     return GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=action_guard_fn,
         source_guard_fn=source_guard_fn,
         background_fn=lambda _target: True,
         foreground_fn=lambda _target: True,
-        pull_fn=lambda **_kwargs: b"stable-save",
-        decode_fn=lambda _payload, **_kwargs: object(),
         sleep_fn=sleep_fn,
         monotonic_fn=monotonic_fn,
         restoration_timeout_seconds=restoration_timeout_seconds,
@@ -53,11 +64,7 @@ def _serializer(
 def test_failed_home_dispatch_still_reports_attempted_source_mutation():
     foreground = []
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
@@ -88,11 +95,7 @@ def test_failed_home_dispatch_still_reports_attempted_source_mutation():
 def test_definite_pre_dispatch_home_failure_does_not_attempt_restoration():
     foreground = []
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
@@ -122,11 +125,7 @@ def test_definite_pre_dispatch_home_failure_does_not_attempt_restoration():
 def test_uncertain_home_dispatch_restores_before_reporting_boundary_failure():
     foreground = []
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
@@ -159,16 +158,10 @@ def test_uncertain_home_dispatch_restores_before_reporting_boundary_failure():
 def test_production_adb_timeout_does_not_latch_after_verified_restoration():
     uncertain_results = []
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
-        pull_fn=lambda **_kwargs: b"stable-save",
-        decode_fn=lambda _payload, **_kwargs: object(),
         sleep_fn=lambda _seconds: None,
         input_log_fn=lambda *_args, **_kwargs: None,
         debug_log_fn=lambda *_args, **_kwargs: None,
@@ -205,11 +198,7 @@ def test_production_adb_timeout_does_not_latch_after_verified_restoration():
 
 def test_uncertain_foreground_dispatch_uses_bounded_restoration_evidence():
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
@@ -218,8 +207,6 @@ def test_uncertain_foreground_dispatch_uses_bounded_restoration_evidence():
             attempted=True,
             uncertain=True,
         ),
-        pull_fn=lambda **_kwargs: b"stable-save",
-        decode_fn=lambda _payload, **_kwargs: object(),
         sleep_fn=lambda _seconds: None,
         input_log_fn=lambda *_args, **_kwargs: None,
         debug_log_fn=lambda *_args, **_kwargs: None,
@@ -242,18 +229,12 @@ def test_uncertain_foreground_dispatch_uses_bounded_restoration_evidence():
 
 def test_definite_pre_dispatch_foreground_failure_is_unrestored():
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
         background_fn=lambda _target: True,
         foreground_fn=lambda _target: AdbShellDispatchOutcome(),
-        pull_fn=lambda **_kwargs: b"stable-save",
-        decode_fn=lambda _payload, **_kwargs: object(),
         sleep_fn=lambda _seconds: None,
         input_log_fn=lambda *_args, **_kwargs: None,
         debug_log_fn=lambda *_args, **_kwargs: None,
@@ -283,18 +264,12 @@ def test_shutdown_interrupt_after_background_restores_before_propagating():
         raise KeyboardInterrupt()
 
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(pull_fn=interrupt_acquisition),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
         background_fn=lambda _target: lifecycle.append("background") or True,
         foreground_fn=lambda _target: lifecycle.append("foreground") or True,
-        pull_fn=interrupt_acquisition,
-        decode_fn=lambda _payload, **_kwargs: object(),
         sleep_fn=lambda _seconds: None,
         input_log_fn=lambda *_args, **_kwargs: None,
         debug_log_fn=lambda *_args, **_kwargs: None,
@@ -335,18 +310,12 @@ def test_interrupted_launcher_dispatch_is_retried_before_shutdown():
         return True
 
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
         background_fn=lambda _target: lifecycle.append("background") or True,
         foreground_fn=foreground,
-        pull_fn=lambda **_kwargs: b"stable-save",
-        decode_fn=lambda _payload, **_kwargs: object(),
         sleep_fn=lambda _seconds: None,
         input_log_fn=lambda *_args, **_kwargs: None,
         debug_log_fn=lambda *_args, **_kwargs: None,
@@ -488,18 +457,12 @@ def test_pause_persisted_during_prechecks_blocks_first_lifecycle_input():
         allowed[0] = False
 
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: allowed[0],
         source_guard_fn=lambda _frame, _stable: True,
         background_fn=lambda target: background.append(target) or True,
         foreground_fn=lambda _target: True,
-        pull_fn=lambda **_kwargs: b"stable-save",
-        decode_fn=lambda _payload, **_kwargs: object(),
         sleep_fn=lambda _seconds: None,
         input_log_fn=input_log,
         debug_log_fn=lambda *_args, **_kwargs: None,
@@ -534,18 +497,12 @@ def test_pause_waits_for_required_foreground_restoration():
         return True
 
     serializer = GuardedPlayerSaveSerializer(
-        target_snapshot_fn=lambda: AdbTargetSnapshot(
-            "private-target",
-            3,
-            True,
-        ),
+        acquirer=_acquirer(),
         context_guard_fn=lambda: True,
         action_guard_fn=lambda: True,
         source_guard_fn=lambda _frame, _stable: True,
         background_fn=lambda _target: lifecycle.append("background") or True,
         foreground_fn=foreground,
-        pull_fn=lambda **_kwargs: b"stable-save",
-        decode_fn=lambda _payload, **_kwargs: object(),
         sleep_fn=lambda _seconds: None,
         input_log_fn=lambda *_args, **_kwargs: None,
         debug_log_fn=lambda *_args, **_kwargs: None,

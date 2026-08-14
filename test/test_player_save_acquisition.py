@@ -36,7 +36,7 @@ def _snapshot(**overrides):
     return SimpleNamespace(**values)
 
 
-def test_complete_bundle_is_typed_redacted_and_reusable_by_many_projectors():
+def test_parser_api_runs_once_and_bundle_is_reused_by_many_projectors():
     target = AdbTargetSnapshot("private-serial", 7, True)
     pulled = []
     decoded = []
@@ -53,7 +53,8 @@ def test_complete_bundle_is_typed_redacted_and_reusable_by_many_projectors():
     acquirer = StablePlayerSaveAcquirer(
         target_snapshot_fn=lambda: target,
         pull_fn=pull,
-        decode_fn=decode,
+        parser=SimpleNamespace(parse_bytes=decode),
+        source_name="/private/device/custom-save.dat",
         now_fn=_times(),
     )
 
@@ -64,7 +65,7 @@ def test_complete_bundle_is_typed_redacted_and_reusable_by_many_projectors():
     assert bundle.snapshot is snapshot
     assert pulled == [{"device_id": "private-serial"}]
     assert decoded[0][0] == b"private-save-payload"
-    assert decoded[0][1]["source_name"] == "playerInfo.dat"
+    assert decoded[0][1]["source_name"] == "custom-save.dat"
     assert decoded[0][1]["captured_at"] == bundle.captured_at
 
     # Any number of pure projectors can consume the same immutable bundle.
@@ -82,6 +83,41 @@ def test_complete_bundle_is_typed_redacted_and_reusable_by_many_projectors():
     assert "private-save-payload" not in serialized
     with pytest.raises(FrozenInstanceError):
         bundle.reason = "changed"
+
+
+def test_parser_and_legacy_decode_adapter_are_mutually_exclusive():
+    with pytest.raises(ValueError, match="parser or legacy decode_fn"):
+        StablePlayerSaveAcquirer(
+            fixed_target="owned-target",
+            parser=SimpleNamespace(parse_bytes=lambda *_args, **_kwargs: None),
+            decode_fn=lambda *_args, **_kwargs: None,
+        )
+
+
+def test_each_acquisition_parses_again_without_a_latest_snapshot_cache():
+    target = AdbTargetSnapshot("private-serial", 7, True)
+    parsed = []
+
+    def parse(payload, **_kwargs):
+        snapshot = _snapshot(source_sha256=str(len(parsed) + 1) * 64)
+        parsed.append((payload, snapshot))
+        return snapshot
+
+    acquirer = StablePlayerSaveAcquirer(
+        target_snapshot_fn=lambda: target,
+        pull_fn=lambda **_kwargs: b"stable-payload",
+        parser=SimpleNamespace(parse_bytes=parse),
+        now_fn=_times(16),
+    )
+
+    first = acquirer.acquire(PlayerSaveAcquisitionType.PASSIVE_STABLE_READ)
+    second = acquirer.acquire(PlayerSaveAcquisitionType.PASSIVE_STABLE_READ)
+
+    assert first.complete and second.complete
+    assert len(parsed) == 2
+    assert first.snapshot is parsed[0][1]
+    assert second.snapshot is parsed[1][1]
+    assert first.snapshot is not second.snapshot
 
 
 def test_default_transport_is_quiet_and_bounded():

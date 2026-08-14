@@ -1677,7 +1677,17 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
         for component in components.values()
         if isinstance(component, Mapping)
     )
-    if sample_count == 0:
+    has_component_diagnostics = any(
+        isinstance(component, Mapping)
+        and bool(
+            component.get("status")
+            or component.get("reason")
+            or component.get("unavailable_claims")
+            or component.get("metric_conflicts")
+        )
+        for component in components.values()
+    )
+    if sample_count == 0 and not has_component_diagnostics:
         return []
 
     lines = [
@@ -1691,11 +1701,72 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
         "",
         f"Status: {evidence.get('status', 'unknown')}; mapping "
         f"`{evidence.get('mapping_id', 'unknown')}`; audit "
-        f"`{evidence.get('audit_id', 'unknown')}`.",
+        f"`{evidence.get('audit_id', 'unknown')}`"
+        + (
+            f"; reason `{evidence.get('reason')}`."
+            if evidence.get("reason")
+            else "."
+        ),
         "",
         "Coin-source counters can overlap. Compare the same source across runs; "
         "do not sum source rates as an attribution total.",
     ]
+    terminal_relation = evidence.get("terminal_relation")
+    if isinstance(terminal_relation, Mapping):
+        relation_status = str(
+            terminal_relation.get("status") or "unknown"
+        )
+        relation_reason = str(terminal_relation.get("reason") or "")
+        lines.extend(
+            [
+                "",
+                "Terminal relation: "
+                + relation_status
+                + (f" (`{relation_reason}`)" if relation_reason else "."),
+            ]
+        )
+    component_rows: list[tuple[str, str, str, str, str]] = []
+    for component_name, component in components.items():
+        if not isinstance(component, Mapping):
+            continue
+        component_rows.append(
+            (
+                _display_key(str(component_name)),
+                str(component.get("status") or "unknown"),
+                str(component.get("reason") or ""),
+                _active_run_claim_issue_summary(
+                    component.get("unavailable_claims")
+                ),
+                _active_run_claim_issue_summary(
+                    component.get("metric_conflicts")
+                ),
+            )
+        )
+    wave_claim = evidence.get("wave_claim")
+    if isinstance(wave_claim, Mapping):
+        component_rows.append(
+            (
+                "Wave-derived rates",
+                str(wave_claim.get("status") or "unknown"),
+                str(wave_claim.get("reason") or ""),
+                "—",
+                "—",
+            )
+        )
+    if component_rows:
+        lines.extend(
+            [
+                "",
+                "### Capability status",
+                "",
+                "| Component | Status | Reason | Unavailable claims | Conflicts |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        lines.extend(
+            f"| {name} | {status} | {reason} | {unavailable} | {conflicts} |"
+            for name, status, reason, unavailable, conflicts in component_rows
+        )
     economy = components.get("economy")
     economy_samples = (
         economy.get("samples")
@@ -1737,7 +1808,7 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
 
     latest_rows: list[tuple[str, str, str, str, str]] = []
     for component_name, component in components.items():
-        if component_name == "economy" or not isinstance(component, Mapping):
+        if not isinstance(component, Mapping):
             continue
         samples = component.get("samples")
         definitions = component.get("metric_definitions")
@@ -1752,17 +1823,7 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
         latest_sample = samples[-1]
         metrics = latest_sample.get("metrics")
         whole_run = latest_sample.get("whole_run")
-        whole_per_hour = (
-            whole_run.get("per_hour")
-            if isinstance(whole_run, Mapping)
-            else None
-        )
         interval = latest_sample.get("interval")
-        per_hour = (
-            interval.get("per_hour")
-            if isinstance(interval, Mapping)
-            else None
-        )
         if not isinstance(metrics, Mapping):
             continue
         for metric_name, decimal_value in metrics.items():
@@ -1778,14 +1839,16 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
                     str(metric_name).replace("_", " ").title(),
                     _format_metric_decimal(decimal_value, unit=unit),
                     _format_metric_decimal(
-                        whole_per_hour.get(metric_name)
-                        if isinstance(whole_per_hour, Mapping)
-                        else None
+                        _active_run_hourly_metric(
+                            whole_run,
+                            metric_name,
+                        )
                     ),
                     _format_metric_decimal(
-                        per_hour.get(metric_name)
-                        if isinstance(per_hour, Mapping)
-                        else None
+                        _active_run_hourly_metric(
+                            interval,
+                            metric_name,
+                        )
                     ),
                 )
             )
@@ -1849,10 +1912,47 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
             )
         terminal_rows: list[tuple[str, str, str, str, str]] = []
         if isinstance(terminal_components, Mapping):
+            reconciliation_rows: list[
+                tuple[str, str, str, str, str, str]
+            ] = []
             for component_name, reconciliation in terminal_components.items():
-                if component_name == "economy" or not isinstance(
-                    reconciliation, Mapping
-                ):
+                if not isinstance(reconciliation, Mapping):
+                    continue
+                reconciliation_rows.append(
+                    (
+                        _display_key(str(component_name)),
+                        str(reconciliation.get("status") or "unknown"),
+                        str(reconciliation.get("reason") or ""),
+                        _active_run_claim_issue_summary(
+                            reconciliation.get("missing")
+                        ),
+                        _active_run_claim_issue_summary(
+                            reconciliation.get("conflicts")
+                        ),
+                        _active_run_claim_issue_summary(
+                            reconciliation.get("claim_issues")
+                        ),
+                    )
+                )
+            if reconciliation_rows:
+                lines.extend(
+                    [
+                        "",
+                        "### Terminal claim status",
+                        "",
+                        "| Component | Status | Reason | Missing | Conflicts | "
+                        "Claim issues |",
+                        "| --- | --- | --- | --- | --- | --- |",
+                    ]
+                )
+                lines.extend(
+                    f"| {name} | {status} | {reason} | {missing} | "
+                    f"{conflicts} | {issues} |"
+                    for name, status, reason, missing, conflicts, issues in reconciliation_rows
+                )
+        if isinstance(terminal_components, Mapping):
+            for component_name, reconciliation in terminal_components.items():
+                if not isinstance(reconciliation, Mapping):
                     continue
                 active_component = components.get(component_name)
                 definitions = (
@@ -1862,17 +1962,7 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
                 )
                 matched = reconciliation.get("matched")
                 whole_run = reconciliation.get("whole_run")
-                whole_per_hour = (
-                    whole_run.get("per_hour")
-                    if isinstance(whole_run, Mapping)
-                    else None
-                )
                 tail_interval = reconciliation.get("tail_interval")
-                tail_per_hour = (
-                    tail_interval.get("per_hour")
-                    if isinstance(tail_interval, Mapping)
-                    else None
-                )
                 if not isinstance(matched, Mapping):
                     continue
                 for metric_name, decimal_value in matched.items():
@@ -1892,17 +1982,31 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
                             str(metric_name).replace("_", " ").title(),
                             _format_metric_decimal(decimal_value, unit=unit),
                             _format_metric_decimal(
-                                whole_per_hour.get(metric_name)
-                                if isinstance(whole_per_hour, Mapping)
-                                else None
+                                _active_run_hourly_metric(
+                                    whole_run,
+                                    str(metric_name),
+                                )
                             ),
                             _format_metric_decimal(
-                                tail_per_hour.get(metric_name)
-                                if isinstance(tail_per_hour, Mapping)
-                                else None
+                                _active_run_hourly_metric(
+                                    tail_interval,
+                                    str(metric_name),
+                                )
                             ),
                         )
                     )
+        terminal_wave_claim = terminal.get("wave_claim")
+        if isinstance(terminal_wave_claim, Mapping):
+            lines.append(
+                "Terminal wave-derived rates: "
+                f"{terminal_wave_claim.get('status', 'unknown')}"
+                + (
+                    f" ({terminal_wave_claim.get('reason')})"
+                    if terminal_wave_claim.get("reason")
+                    else ""
+                )
+                + "."
+            )
         if terminal_rows:
             lines.extend(
                 [
@@ -1920,6 +2024,33 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
                 for component, metric, value, whole_rate, interval_rate in terminal_rows
             )
     return lines
+
+
+def _active_run_claim_issue_summary(value: Any) -> str:
+    if isinstance(value, Mapping):
+        items = [
+            f"{_display_key(str(key))}: {reason}"
+            for key, reason in sorted(value.items(), key=lambda item: str(item[0]))
+        ]
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        items = [_display_key(str(item)) for item in value]
+    else:
+        items = []
+    return "; ".join(items).replace("|", "\\|") or "—"
+
+
+def _active_run_hourly_metric(rates: Any, metric_name: str) -> Any:
+    if not isinstance(rates, Mapping):
+        return None
+    per_hour = rates.get("per_hour")
+    if isinstance(per_hour, Mapping) and metric_name in per_hour:
+        return per_hour.get(metric_name)
+    economy_rate = {
+        "coins_earned": "coins_per_hour",
+        "cells_earned": "cells_per_hour",
+        "cash_earned": "cash_per_hour",
+    }.get(str(metric_name))
+    return rates.get(economy_rate) if economy_rate else None
 
 
 def _active_run_rate_markdown_row(

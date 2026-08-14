@@ -3077,6 +3077,25 @@ def test_browser_client_exposes_tournament_start_cancel_and_reminder():
     assert 'resolveTournamentLaunch("cancel")' in script
 
 
+def test_native_battle_history_surfaces_partial_save_metric_claims():
+    source = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+        / "BattleHistoryWindow.xaml.cs"
+    ).read_text(encoding="utf-8")
+
+    assert '"Save-backed metric status"' in source
+    assert '"Save-backed capability status"' in source
+    assert 'TryGetProperty("terminal_relation"' in source
+    assert '"Terminal relation"' in source
+    assert '"Terminal save-backed claim status"' in source
+    assert 'missingProperty: "missing"' in source
+    assert 'TryGetProperty("metric_conflicts"' in source
+    assert 'TryGetProperty("conflicts"' in source
+    assert 'component.NameEquals("economy")' not in source
+
+
 def test_browser_activity_defaults_to_operational_narrative_levels():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")

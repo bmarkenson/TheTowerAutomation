@@ -9,7 +9,6 @@ only aggregate or uniquely-correlated tail facts without rewriting that prefix.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import math
@@ -22,8 +21,8 @@ from core.player_save_acquisition import (
     PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
     PlayerSaveBoundaryKind,
-    PlayerSaveTargetBinding,
 )
+from core.player_save_observation import PlayerSaveObservationContext
 from core.runtime_save import NormalizedRuntimeSave, RuntimePerkSnapshot
 
 
@@ -36,51 +35,7 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _SAFE_KEY_RE = re.compile(r"[a-z][a-z0-9_]{0,95}")
 
 
-@dataclass(frozen=True, repr=False)
-class PerkSaveMonitorContext:
-    """Exact private ownership binding for one active battle."""
-
-    runtime_session_id: str = field(repr=False)
-    activity_scope_id: str = field(repr=False)
-    target_binding: PlayerSaveTargetBinding = field(repr=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "runtime_session_id",
-            str(self.runtime_session_id or "").strip(),
-        )
-        object.__setattr__(
-            self,
-            "activity_scope_id",
-            str(self.activity_scope_id or "").strip(),
-        )
-        if not isinstance(self.target_binding, PlayerSaveTargetBinding):
-            raise TypeError("Perk monitor context requires a typed target binding")
-
-    def valid(self) -> bool:
-        return bool(
-            self.runtime_session_id
-            and self.activity_scope_id
-            and isinstance(self.target_binding, PlayerSaveTargetBinding)
-        )
-
-    def redacted(self) -> dict[str, Any]:
-        return {
-            "runtime_session_fingerprint": _fingerprint_text(
-                self.runtime_session_id
-            ),
-            "activity_scope_fingerprint": _fingerprint_text(
-                self.activity_scope_id
-            ),
-            "target_binding_fingerprint": self.target_binding.fingerprint,
-        }
-
-    def __repr__(self) -> str:
-        return (
-            "PerkSaveMonitorContext("
-            f"binding='{self.target_binding.fingerprint[:16]}...')"
-        )
+PerkSaveMonitorContext = PlayerSaveObservationContext
 
 
 class PerkSaveMonitor:
@@ -1305,7 +1260,9 @@ def _validated_runtime_common(
         raise ValueError("game_version_unavailable")
     if not runtime.mapping_id or not runtime.audit_matrix_id:
         raise ValueError("mapping_identity_unavailable")
-    if type(runtime.save_revision) is not int or runtime.save_revision < 0:
+    if runtime.save_revision is not None and (
+        type(runtime.save_revision) is not int or runtime.save_revision < 0
+    ):
         raise ValueError("save_revision_invalid")
     if type(runtime.current_wave) is not int or runtime.current_wave < 0:
         raise ValueError("saved_wave_invalid")

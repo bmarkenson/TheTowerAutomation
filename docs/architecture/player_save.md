@@ -1,10 +1,15 @@
-# Player-Save Architecture and Versioned Evidence
+# Player-Save Architecture and Semantic Evidence
 
-`core/player_save.py` decodes The Tower's `playerInfo.dat` as an independent,
-read-only view of persistent profile configuration. It is intentionally not a
-replacement for action verification or a universal parser for arbitrary game
-versions. Unknown forward versions are usable only through the declared,
-additive compatibility gate described below.
+`PlayerSaveParser` in `core/player_save.py` is the global in-process API for
+decoding The Tower's `playerInfo.dat` once into a recursively read-only,
+normalized snapshot. It is an independent observation channel, not a
+replacement for action verification and not a raw-field query API. Semantic
+capabilities are resolved from declared contracts and bindings. An unknown
+forward revision may reuse a contract only when its provider explicitly
+declares additive dependencies; additional root or nested fields are ignored
+and unpublished. Legacy configuration, profile, and completed-report
+projections remain exact or explicitly revision-compatible until they are
+migrated to their own semantic contracts.
 
 ## Current status
 
@@ -32,21 +37,44 @@ continues through UI because its algorithm remains exact to version 1073. The
 12 exact-1101 profile-progression components passed their structural contracts
 and remain observation-only.
 
-Exact version 1101 also owns a version-local `runtime_save_extensions`
-allowlist for 29 cumulative active-round counters: 14 coin-source fields,
-eight economy/time fields, and seven progress fields. The three groups
-normalize and fail independently. A bound monitor derives whole-run and
-checkpoint-interval CPH, cells/hour, cash/hour, waves/hour, effective speed,
-and whole-run/interval rates for each coin source. These save-realized rates
-remain distinct from the existing OCR `coin_rate_samples`; a displayed
-Coins/min value is never multiplied by 60 and relabeled as realized CPH. The
-extension applies only to an exact 1101 resolution. Exact 1073 and unknown
-forward versions retain the shared runtime foundation without inheriting the
-1101 tallies.
+The version-1101 mapping is the authority origin and raw binding provider for
+`thetower.player_save.active_run_tallies.v1`: 29 cumulative active-round
+claims covering 14 coin sources, eight economy/time values, and seven progress
+values. Each direct leaf has its own semantic ID, semantics fingerprint, raw
+binding, status, and reason; derived rates declare their dependencies. Unknown
+forward revisions inherit only this capability while its
+`additive_dependencies` policy remains in force, even if their observed data
+lineage advances. Unknown additions remain unpublished. Exact 1073 does not
+inherit the capability because it predates its provider. A later exact mapping
+may preserve, rebind, replace, or revoke an individual claim without changing
+unrelated claims. When a data-lineage-forward resolution cannot inherit legacy
+History, the capability separately projects only its declared source-ordered
+battle-date/Tier/wave/kind tail identity. The active-run monitor binds that
+identity before and after the natural boundary; it grants no general History,
+continuity, navigation, or completed-report authority.
 
-`saveRevision` is the per-write counter and may advance many times within one
-game version; it does not select or invalidate a mapping. Mapping resolution is
-triggered by `dataVersion` and `versionNumber`.
+A bound monitor derives whole-run and leaf-local checkpoint-interval CPH,
+cells/hour, cash/hour, waves/hour, effective speed, and rates for each coin
+source. These realized save rates remain distinct from OCR
+`coin_rate_samples`; a displayed Coins/min value is never multiplied by 60 and
+relabeled as realized CPH.
+
+Each capability result records the observed save identity, provider mapping,
+authority/audit origin, resolution mode, and two distinct fingerprints. The
+semantic fingerprint covers meaning such as unit, cumulative-round temporal
+scope, monotonicity, and derived dependencies; it excludes the version number
+and raw path. The binding fingerprint covers run, source, and terminal field
+bindings; provider mapping and observed identity remain adjacent provenance.
+Rebinding an unchanged semantic claim therefore changes only the
+binding fingerprint, while changing a unit or formula requires a new semantic
+fingerprint. Compatibility is declared and auditable—it is never inferred from
+a coincidentally unchanged field name.
+
+`saveRevision` is a diagnostic per-write counter and may advance many times
+within one game version; it does not select or invalidate a capability.
+`dataVersion` and `versionNumber` remain observed provenance and select legacy
+version bindings. They do not by themselves prove or disprove semantic
+equivalence for a declared capability.
 
 Live cross-channel calibration on game `28.3.1` confirmed that
 `versionNumber: 1073` is the installed application's `versionCode`. At one
@@ -231,7 +259,7 @@ boundary, and isolate the position when possible. Otherwise report the raw
 vector and visible UI values separately, with the position semantics explicitly
 unresolved.
 
-Normal battle records use schema 5 and Tournament records use schema 3. The
+Normal battle records use schema 6 and Tournament records use schema 4. The
 JSON stores the complete normalized snapshot and component fingerprints; the
 Markdown view summarizes Theme/relic ownership and structural completeness.
 When a normal battle is persisted, its `profile_progression_delta` compares
@@ -264,16 +292,16 @@ UI path while unrelated accepted decisions remain authoritative. Unsupported
 requirements, unknown IDs, incomplete per-check structure, and forced audit
 are ordinary `ui_required` dispositions rather than trusted mismatches.
 
-Resolution always tries an exact mapping first. When `versionNumber` advances
-without a `dataVersion` or root-class change, the newest lower mapping may opt
-into forward revision compatibility. The decoded root must retain every field
-in that structural mapping, every required field, and every declared required
-array length; additional root fields are accepted only as unpublished unknowns.
-The effective projection uses the separately named authority mapping and only
-its compatibility allowlist. Missing fields, changed arrays, a different data
-version/root, invalid per-check structure, or any failed component instead
-selects that component's existing UI route. Runtime never writes a mapping or
-promotes authority from its own observation.
+Resolution always tries an exact mapping first. A same-lineage mapping may
+separately opt into legacy version-wide compatibility, while a semantic
+provider may declare an individual capability stable under additive dependency
+changes. The root manifest is diagnostic: additional fields stay unpublished,
+and a missing, malformed, or extended dependency affects only the leaf or
+projection that consumes it. A capability-only resolution never inherits
+legacy configuration, profile, Perk, or structural History authority. A root
+class/envelope failure remains global. Runtime never writes a mapping, infers
+semantic compatibility from coincidentally unchanged names, or promotes
+authority from its own observation.
 
 Mapping, pull, decode, or projection incompatibility is recoverable once the
 original source is safely restored: configuration and History monitoring use
@@ -403,12 +431,17 @@ other selector/type value remain outside runtime authority until a separate
 mapping implementation and review promotes them; no semantics are inferred
 for the other values.
 
-Snapshot schema 6 contains the repository-local save-first runtime foundation;
-its runtime projection is schema 3. For the exact version-1073 mapping it
-publishes capture metadata, `saveRevision`, `roundActiveBool`, `currentWave`,
-the active identity tuple, and independent normalized Perk and Battle History
-tail components; its active-tally component remains unavailable. Perk ID `0`
-is `max_health` (Max Health). Perks are emitted
+Snapshot schema 7 contains observed identity, manifest diagnostics, legacy
+mapping provenance, and independently resolved semantic-capability evidence;
+its runtime projection is schema 3. Parser-wide failure is limited to transport,
+container/decompression, NRBF, non-object root, or an invalid checked-in
+registry. Missing or malformed mapped leaves produce local statuses instead of
+discarding the document. `saveRevision`, `roundActiveBool`, and `currentWave`
+are separate claims: a failure affects only consumers that depend on that
+claim. For the exact version-1073 mapping the snapshot also publishes the
+active identity tuple and independent normalized Perk and Battle History tail
+components; its active-tally capability remains unavailable. Perk ID `0` is
+`max_health` (Max Health). Perks are emitted
 only when every ordered pick, count, and level agrees. The 50-entry level
 array defines numeric storage capacity; it does not prove that all 50 indices
 are live Perk identities. Version 1073 currently has 34 cross-channel-mapped
@@ -421,22 +454,22 @@ and Workshop-level arrays for Attack, Defense, and Utility; round-scoped
 survival-ability counts and recharge/active fields; and broad `ThisRound`
 tallies. It also contains candidate values for current game speed, Damage
 Slider, Orb Distance, buy quantities, Card activity, and subsystem cooldowns.
-Except for the exact-1101 29-field slice, these observations broaden the
-validation plan but do not publish those raw fields or promote their semantics.
+Except for the 29-claim active-tally capability originating at 1101, these
+observations broaden the validation plan but do not publish those raw fields or
+promote their semantics.
 In particular, the save has no literal
 gold-box flag and one snapshot is not a complete survival-activation history.
 
 The source-ordered `battleHistory` list may contain at most 30 entries. Only
-the newest entry is part of the tail contract, so it must retain the exact
-148-field shape and exact field types. Its bounded structural identity and
-fingerprint use battle date kind/ticks, tier, wave, game/real time, numeric
-`killedBy`, and Tournament identity without interpreting the cause enum. A
-separate semantic projection is emitted only when the newest cause ID is
-mapped; it contains all 144 current More Stats rows and its own canonical
-fingerprint. An unknown future cause therefore blocks completed-record
-publication but does not erase tail-change evidence. UTC and local DateTime
-ticks are never ordered against each other; the game's established source list
-order owns which entry is newest.
+the newest entry is part of the tail contract. Added nested fields are ignored;
+required structural identity leaves and each allowlisted More Stats row are
+validated independently. Battle date kind/ticks, tier, wave, and Tournament
+identity establish the causal tail. Game/real time and numeric `killedBy` are
+optional semantic leaves, so a malformed cause or time does not erase the tail
+or unrelated terminal tally claims. The full completed projection still
+requires every current row and a mapped cause before it may suppress the UI.
+UTC and local DateTime ticks are never ordered against each other; the game's
+established source list order owns which entry is newest.
 
 The active-round/terminal projection foundation does not itself bind a process
 or grant navigation authority. The terminal consumer now reuses one stable
@@ -450,7 +483,7 @@ typed passive and natural-terminal bundles; it does not acquire a duplicate
 save or use the campaign auditor's cache.
 Only during an explicitly enabled campaign, the V1073-RUNTIME-013 auditor may
 project the same shared bundle into its session-local audit state. A
-malformed newest entry publishes neither structural nor semantic tail evidence.
+malformed leaf affects only the structural or semantic facts that depend on it.
 The authoritative ownership and slice boundaries are in
 [`runtime.md`](runtime.md#save-first-active-round-and-terminal-evidence).
 
@@ -580,23 +613,23 @@ to account, currency, history, or other excluded values. The current redacted
 `profile_summary` is diagnostic until each semantic count or level group below
 is separately validated; array length alone proves structure, not meaning.
 
-The version-1073 manifest now inventories all 739 exact decoded-root keys: 13
+The version-1073 manifest inventories all 739 observed decoded-root keys: 13
 structural, 31 automation-gating, 51 profile-observation, 34 private, 69
-ignored-with-reason, and 541 unknown. The mapping loader validates the exact
-categories, disjoint membership, declared count, and canonical field-name
-hash. A decoded root must then match that complete name set before any mapped
-value is published by that exact mapping. A removed member still invalidates
-both exact and compatible resolution. An added member invalidates an exact
-mapping unless a newer exact manifest classifies it, but a declared forward
-compatibility source may accept additions dynamically as unpublished unknowns;
-those names and values never acquire a disposition or semantic claim.
+ignored-with-reason, and 541 unknown. The mapping loader validates the checked-in
+categories, disjoint membership, declared count, and canonical field-name hash.
+At runtime, comparison with that inventory is diagnostic rather than an
+all-or-nothing authority gate. Added names are counted as drift but never
+published. A missing, malformed, or changed dependency makes only the claims
+bound to it unavailable, plus their derived dependents. Array length policy is
+claim-local: a complete-set contract may require an exact length while an
+indexed or prefix contract can survive an unrelated append.
 
 ### Evidence and promotion standard
 
 A versioned claim progresses through four evidence levels:
 
-1. **Structural** — exact version, root class, field type, and complete array
-   dimensions are known.
+1. **Structural** — root class, required raw binding, field type, and the
+   claim-local array policy are known for an observed provider revision.
 2. **Cross-channel** — one stable save and authoritative UI evidence agree at
    the same configuration and serialization boundary.
 3. **Causal where needed** — boolean polarity, enum direction, units, and
@@ -607,15 +640,16 @@ A versioned claim progresses through four evidence levels:
 4. **Shortcut-ready** — the entire normalized check is complete, every value
    it could suppress has passed the required evidence, mismatch and malformed
    cases fail to UI in tests, and the check is explicitly allowlisted for the
-   exact mapping.
+   semantic contract and its current binding.
 
 Every causal test must record the before, mutated, restored, and unrelated
 control fields; flush through a proven lifecycle boundary; visually verify the
 restoration; and finish at the original safe boundary. A new or changed
-semantic claim starts again at structural status. A new exact game version may
-reuse only a prior authority's explicitly declared compatible claims after the
-additive structural gate passes; version-derived algorithms and newly observed
-fields do not inherit authority.
+semantic claim starts again at structural status. A later or unknown revision
+may reuse only a prior provider's explicitly declared compatible claims. An
+`additive_dependencies` policy tolerates unknown additions but never proves
+that a changed dependency retained its meaning. Version-derived algorithms,
+newly observed fields, and undeclared capabilities do not inherit authority.
 
 ### Versioned audit matrix: `data-9-game-1073` / revision 4
 
@@ -627,13 +661,13 @@ implemented as a bounded normalized observation at Structural or Cross-channel
 level
 when its stated evidence is complete, but it cannot suppress its UI route
 until it is Shortcut-ready. `Shortcut-ready` here describes the
-decoder/reconciler; runtime navigation adoption is a separate row. Every new
-exact game version receives a new matrix; inherited claims continue to cite
-their prior authority until version-specific evidence advances the new rows.
+decoder/reconciler; runtime navigation adoption is a separate row. New exact
+versions record new bindings and any preserve/rebind/replace/revoke decisions;
+inherited claims continue to cite their originating authority.
 
 | Audit ID and normalized claim | Version-1073 source | Evidence level and retained evidence | Required work / current runtime disposition |
 | --- | --- | --- | --- |
-| `V1073-RAW-001` raw-field disposition manifest | Exact decoded-root keys; no raw values | **Structural and complete for version-1073 field coverage.** Stable exact-target reads established the `SaveLoad+PlayerData` root and all 739 decoded keys. The versioned manifest classifies each name exactly once and is protected by count, canonical hash, loader validation, and strict decoded-root equality. | Disposition coverage is closed, but it is not semantic promotion: private, ignored, and unknown values remain unpublished, and indexed meanings, formulas, caps, and effective values remain in their separate rows. Every new exact version starts a new manifest; any field drift fails closed until reviewed. |
+| `V1073-RAW-001` raw-field disposition manifest | Observed decoded-root keys; no raw values | **Structural and complete for the version-1073 inventory.** Stable exact-target reads established the `SaveLoad+PlayerData` root and 739 decoded keys. The checked-in manifest classifies each known name exactly once and is protected by count, canonical hash, and loader validation. Runtime drift is diagnostic. | Disposition coverage is not semantic promotion: private, ignored, unknown, and newly added values remain unpublished. A missing or malformed dependency fails only its claims and derived dependents; unrelated claims survive. Review a new exact inventory for durable classification without making additions a global parse failure. |
 | `V1073-CFG-001` Cards preset | `presetName`, `currentPreset` | **Shortcut-ready.** UI slot 2/1/2 caused raw `1/0/1`; restoration and unrelated controls were verified. | Audit runtime acquisition, then retain scheduled UI samples. |
 | `V1073-CFG-002` card recharge modes | `demonModeAutomateToggle`, `nukeAutomateToggle` | **Shortcut-ready.** Both booleans were independently flipped and restored; `true` means auto-reactivate. | Audit runtime acquisition, then retain scheduled UI samples. |
 | `V1073-CFG-003` Workshop preset | `workshopPresetName`, `currentWorkshopPreset` | **Shortcut-ready.** Exact selected-name/index agreement at a verified boundary; causality is not required for this non-polarity claim. | Do not manufacture a switch; force UI again on mapping/version audit. |
@@ -666,7 +700,7 @@ their prior authority until version-specific evidence advances the new rows.
 | `V1073-RUNTIME-004` approximately five-minute save freshness | `saveRevision`, capture time, stable source hash, active identity/wave | **Structural.** Multiple ordinary-foreground stable revisions advanced under the same Tier 22 identity through wave 710, corroborating periodic usable writes without retaining exact timestamps. The whole row is not promoted because UI-to-save lag, jitter, unchanged intervals, write-collision behavior, and a runtime staleness threshold were not measured. | The default-300-second observation-only shared polling cadence is implemented with 30–3600-second bounds independently of audit opt-in. It can retain positive lag-tolerant facts but does not make a freshness claim. Pause/background behavior and tighter characterization may be measured during ordinary future use; no capture time, source hash, receipt timing, or `saveRevision` authorizes navigation or claims an exact write time. |
 | `V1073-RUNTIME-005` in-battle Perk inventory | `perkLevel[50]`, `perksPickedCount`, ordered `PerkPick(wave, perk)` list, versioned Perk IDs | **Shortcut-ready** for a complete exact-version snapshot. The final Tier 22 active projection contained 15 internally exact picks; all mapped picks, levels, and order agreed with the terminal UI's 11 collapsed rows. During the first enabled Tier 19 sequence, seven additional IDs were cross-channel calibrated from stable pick waves/levels and the same-round UI timeline; the repaired decoder then accepted all 56 active picks spanning 27 semantic keys. Synthetic unknown-ID, shape, count, level, and non-monotonic-order inconsistencies still publish no snapshot. | The normal run timeline now consumes the monitor's exact bound prefix: each saved pick retains oldest-first sequence, saved wave, semantic key, ID, and level-after. Stable top-bar transitions request a passive checkpoint but never open the in-battle Perks panel and never force serialization. A later failure retains already-proved positive picks; an identical or strict prefix extension may advance the timeline, while regression, mutation, identity, mapping, scope, or target conflict cannot. Structurally valid unknown IDs remain unavailable in normal runtime rather than reopening Perks for calibration. The bounded static calibration is retained in `test/fixtures/player_save_perk_id_calibration_v1073.json`. |
 | `V1073-RUNTIME-006` post-run Perk clearing and same-round retention | Active Perk snapshots followed by the post-run zero/empty fields | **Causal and implemented.** The last complete Tier 22 active snapshot agreed with the terminal Perks inventory, and the immediate stable post-death save was inactive with cleared Perk fields. A later ordinary Tier 19 run retained all 56 exact picks across 1,079 stable top-bar observations, used no in-battle Perks input, and omitted terminal Perks navigation only after the complete bound finality chain. The normal monitor retains a bound monotonic positive prefix and treats a bound natural terminal clear only as window closure. | Game Over omits Perks navigation only with stable exhaustion evidence, a nonempty later active checkpoint whose saved wave includes that boundary, exact round/scope/target binding, and a still-later natural terminal clear. If that finality proof is absent but an exact bound prefix remains, Game Over proves the newest/top edge and progressively captures rows until it reaches the first unchanged saved-recency marker or the actual list edge; repeat counts, levels, order, and any still-unseen marker remain explicit uncertainty. A missing/unbound/conflicted prefix retains the complete Perks traversal. Cleared fields never represent final inventory or prove absence. |
-| `V1073-RUNTIME-007` structural tail identity and complete `BattleHistory` More Stats projection | Source-ordered capped `battleHistory[<=30]`; exact newest 148-field `BattleHistoryEntry` shape | **Shortcut-ready and implemented** for structural activity continuity and causally bound terminal report construction when the cause and value domain are mapped. Retained saves prove mixed UTC/local DateTime kinds and capped rollover. The prior 21 UI-captured battles plus the Tier 22 terminal confirm the complete ordered 144-row projection within UI precision; malformed entries and unknown semantic causes fail closed independently. `adGemsThisRound` supplies Ad Gems. | Source-tagged structural identity supplies Home, direct-Retry, guarded replacement-process `RUNNING` continuity, and same-source terminal tail proof. Trust source order rather than cross-kind ticks; keep raw entries, arbitrary fields, and account data unpublished. Unknown `killedBy` still permits structural continuity but forces More Stats for the report. Retained UI reports prove that `Damage Dealt` and `Chain Lightning` can be negative, but the current blanket nonnegative save invariant intentionally falls back until a narrow signed-field policy is implemented. |
+| `V1073-RUNTIME-007` structural tail identity and complete `BattleHistory` More Stats projection | Source-ordered capped `battleHistory[<=30]`; required newest-entry identity and 144 allowlisted More Stats rows | **Shortcut-ready and implemented** for structural activity continuity and causally bound terminal report construction when the cause and value domain are mapped. Retained saves prove mixed UTC/local DateTime kinds and capped rollover. The prior 21 UI-captured battles plus the Tier 22 terminal confirm the complete ordered 144-row projection within UI precision; added nested fields remain unpublished, while malformed required leaves and unknown semantic causes fail independently. `adGemsThisRound` supplies Ad Gems. | Source-tagged structural identity schema 2 hashes only Battle Date, Tier, wave, and battle kind for continuity; optional time/cause changes cannot manufacture a rollover. Trust source order rather than cross-kind ticks; keep raw entries, arbitrary fields, and account data unpublished. Unknown `killedBy` still permits structural continuity but forces More Stats for the report. Retained UI reports prove that `Damage Dealt` and `Chain Lightning` can be negative, but the current blanket nonnegative save invariant intentionally falls back until a narrow signed-field policy is implemented. |
 | `V1073-RUNTIME-008` Game Over history serialization timing | Pre-run history tail, Game Over observation, post-run stable save | **Causal and implemented.** The known pre-battle tail changed in the immediate stable post-death save while the natural Tier 22 terminal was preserved, proving publication at the Game Over boundary without an exact timestamp. The first enabled Tier 19 run independently recorded clearing and tail publication before normal Retry. | One immediate stable read at Game Over or Tournament Results supplies profile progression, available Tournament conditions, and the candidate report. An unchanged or unavailable tail preserves the UI fallback. `b137ea4` separately adds guarded same-session direct-Retry baseline rollover; state-machine coverage is complete. A future ordinary receipt is optional campaign evidence, not a standing rollout gate. |
 | `V1073-RUNTIME-009` terminal history-tail attachment | Pre-boundary structural tail fingerprint plus newest post-boundary entry tier/time/wave | **Causal and implemented.** The pre-battle baseline changed at capped rollover to a newest Tier 22, wave 751, Boss entry whose complete semantic projection agreed with terminal tier/time/wave evidence. | Normal and Tournament report attachment requires a bound current-process terminal, matching activity-scope ID, compatible player-save baseline, exactly one valid append or capped rollover, inactive save, complete semantic entry, matching terminal kind, and no available compact-identity contradiction. A terminal-only restart, UI-sourced or absent baseline, invalid transition, unknown cause, mismatch, or acquisition failure forces More Stats. The independent collector remains observation-only. |
 | `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, `3=Boss`, `6=Vampire`, `8=Scatter`, and `99=Surrender`; Tier 22 reconfirmed `3=Boss`, but the whole enum claim remains incomplete. Surrender identifies only the terminal cause, not its initiator. | An unknown numeric cause preserves structural tail evidence, keeps the semantic report on UI fallback, and may create a durable review receipt only after the same bound terminal supplies a normalized Game Stats/More Stats value. Reviewed canonical integration extends `runtime_save.battle_history.killed_by_ids`; `Enemy N` is never synthesized. |
@@ -676,7 +710,7 @@ their prior authority until version-specific evidence advances the new rows.
 | `V1073-RUNTIME-014` in-battle upgrade levels and gold-box state | `upgradeLevel[20]`, `upgradeDefenseLevel[20]`, `upgradeUtilityLevel[20]` plus the three Workshop-level arrays | **Structural.** Array shapes and current-versus-Workshop deltas are observed, but the complete index, cap, and special-level semantics are not retained validation evidence. | Create a versioned index/cap manifest and validate non-maxed, round-purchased, Workshop-maxed, locked, and special upgrades against canonical UI evidence. Publish current level, baseline, delta, and `maxed` only as one independently failing component. Never infer Max from magnitude alone. |
 | `V1073-RUNTIME-015` survival-ability checkpoint state | Demon Mode, Nuke, and Second Wind `*UsedThisRound`, use-count, cooldown, `*WavesUntilRefresh`, active/effect-timeout, and timer fields | **Structural.** The fields exist in an active round and clear after the round, but boolean polarity, sentinel values, units, exact-wave relationships, and write timing are not calibrated. | At natural activations, retain stable before/during/rearmed/terminal snapshots and matching visual events. Prove each ability independently, including auto versus manual behavior and multiple activations. Publish counts and state first; publish an exact activation wave only where a causal timer formula is proven, otherwise a save-wave interval. |
 | `V1073-RUNTIME-016` save-checkpoint and visual-tail event merge | Same-round stable revisions, normalized survival checkpoints, passive visual activation events, and terminal Battle History counts | **Structural.** Source precedence and fail-closed merge policy are specified; no cache or merger exists. | Merge monotonically by guarded round identity. Count deltas define event intervals; matching visual transitions may refine them. Retain confirmed visual events after the last stable active save through Game Over and reconcile against terminal counts. Never double count, discard an unexplained count, or synthesize an exact wave. Conflict or missing binding forces the full UI audit. |
-| `V1073-RUNTIME-017` active-round battle tallies | Version-allowlisted `*ThisRound`/`*ThisWave` counters and current round totals | **Structural for version 1073.** The root contains broad live damage, enemy, currency, skip, free-upgrade, survival, and subsystem tallies; version 1073 publishes only their completed-history counterparts. | Prioritize fields that replace current OCR/navigation or strengthen terminal reconciliation. Validate monotonicity, units, reset/clear timing, exceptional decreases, and correspondence to completed-history rows. Publish separate components and provenance; stale tallies remain observational and cannot authorize an input. The independently promoted exact-1101 slice below does not back-propagate authority. |
+| `V1073-RUNTIME-017` active-round battle tallies | Version-allowlisted `*ThisRound`/`*ThisWave` counters and current round totals | **Structural for version 1073.** The root contains broad live damage, enemy, currency, skip, free-upgrade, survival, and subsystem tallies; version 1073 publishes only their completed-history counterparts. | Prioritize fields that replace current OCR/navigation or strengthen terminal reconciliation. Validate monotonicity, units, reset/clear timing, exceptional decreases, and correspondence to completed-history rows. Publish leaf contracts and provenance; stale tallies remain observational and cannot authorize an input. The capability originating at 1101 does not back-propagate to 1073. |
 | `V1073-RUNTIME-018` transient control and cooldown candidates | `gameSpeedMemory`, buy multipliers, candidate Damage Slider/Orb Distance fields, Card activity, and UW/Bot/Guardian cooldown arrays | **Structural.** Plausible fields exist but are deliberately unpublished and may lag the visible game by a complete save interval. | Rank by current observation cost, then calibrate each claim separately across changed/restored values and stable writes. Current-state enforcement and post-action verification remain visual unless the use case explicitly tolerates checkpoint staleness. |
 | `V1073-RUNTIME-019` completed-run profile progression attachment and delta | Same-target-generation terminal stable save; versioned `profile_progression`; newest earlier normal battle snapshot | **Structural and implemented.** Exact-version synthetic coverage validates malformed-field isolation, private-field exclusion, source-index diffs, first-run baselines, prior-record selection, Markdown rendering, and target-generation discard. One bounded read-only live save normalized all 12 current components without retaining the raw save. | The same terminal read now also feeds report attachment, but profile progression stays global and nonblocking while the report independently requires current-process binding and tail causality. A terminal-only process may attach global profile state but cannot inherit Strategy, a save-derived report, or process-local trackers. |
 | `V1073-TOURNEY-001` Tournament condition profile/history coverage | Exact-version generator, event identity fields, and Heat/Overheat UI | **Shortcut-ready** for Legend condition identity only. | Complete UI inventory, effective descriptions, lower leagues, and unknown-condition preservation in the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence). |
@@ -685,7 +719,7 @@ their prior authority until version-specific evidence advances the new rows.
 
 | Audit ID and normalized claim | Version-1101 source | Evidence level and retained evidence | Current runtime disposition |
 | --- | --- | --- | --- |
-| `V1101-RUNTIME-017` active economy, progress, and coin-source tallies | Exact allowlist of 29 cumulative root counters; inherited completed-history projection; compact terminal Game Stats for ad coins | **Cross-channel and implemented.** Two same-identity active checkpoints were monotonic, their interval CPH agreed with the contemporaneous UI scale, the Guardian Fetch algebra reconciled, and every mapped terminal counter was nondecreasing at the causally attached natural boundary. Only normalized allowlisted evidence is retained above. | Exact-1101 runtime schema 3 publishes independent components. The shared passive scheduler owns acquisition; `ActiveRunMetricMonitor` owns bound, bounded per-run retention, whole-run and interval rates, component-local conflicts, and terminal reconciliation including the final interval. Completed JSON, Markdown, and native Battle History retain `active_run_metrics`. No tally grants input, lifecycle, navigation, or Strategy authority. Inactive saves publish no cleared values, and exact 1073 or forward versions do not inherit the extension. |
+| `V1101-RUNTIME-017` active economy, progress, and coin-source tallies | Declared semantic capability with 29 cumulative leaf bindings; inherited completed-history claims; compact terminal Game Stats for ad coins | **Cross-channel and implemented.** Two same-identity active checkpoints were monotonic, their interval CPH agreed with the contemporaneous UI scale, the Guardian Fetch algebra reconciled, and every mapped terminal counter was nondecreasing at the causally attached natural boundary. Only normalized allowlisted evidence is retained above. | Version 1101 is the authority origin and binding provider for `thetower.player_save.active_run_tallies.v1`, not a literal consumer gate. Exact 1073 remains unavailable; unknown additive forward revisions inherit only this declared capability. Unknown fields remain unpublished. Each leaf and derived dependency fails or conflicts independently; per-leaf interval baselines survive a malformed peer. The shared parser/acquirer and passive scheduler own one read/decode/fan-out. `ActiveRunMetricMonitor` retains process/scope/target/round binding and reconciles each eligible terminal claim, including the final interval. Completed JSON, Markdown, and native Battle History expose valid values plus partial reasons. No metric grants input, lifecycle, navigation, or Strategy authority. |
 
 The complete currently eligible configuration set is adopted atomically by
 `V1073-RUNTIME-001`/`002`; this is not a promotion of unrelated profile or
@@ -947,8 +981,9 @@ same-round projection can still prove the positive prefix already serialized.
 | `terminal_final` | Causally attached Battle History / More Stats fields | Requires a bound natural terminal and a valid append or capped rollover. |
 | `boundary_clear` | Inactive, cleared terminal Perk fields | Closes the active checkpoint window; it is not the final Perk inventory and cannot erase the newest complete active prefix. |
 
-Every temporal claim requires the exact mapping plus compatible target
-generation, activity scope, and, where applicable, round identity. Differing
+Every temporal claim requires an exact, explicitly compatible, or
+capability-resolved mapping plus compatible target generation, activity scope,
+and, where applicable, round identity. Differing
 `round_invariant` values for one round invalidate that claim instead of using
 last-write-wins. Point-in-time Card observations retain their individual
 boundaries. Perk checkpoints must be identical or strict prefix extensions;
@@ -1084,8 +1119,9 @@ action authority remain unchanged.
 
 | Situation | Required behavior |
 | --- | --- |
-| Unknown exact version | Decode only safe identity metadata; use UI for every check. |
-| Exact version but changed structure | Reject all mapped values; use UI for every check. |
+| Unknown forward revision with a declared additive semantic provider | Publish only capabilities whose dependency contracts still validate; retain actual version/provider provenance and ignore additions. |
+| Unknown revision or data lineage with no declared provider | Publish safe envelope diagnostics only; use UI for legacy checks. |
+| One missing, malformed, renamed, or changed dependency | Mark that leaf and its derived dependents unavailable; preserve unrelated claims. |
 | Candidate mapping, check not explicitly validated | Report comparison results and run the existing UI check. |
 | Explicitly validated check, complete exact match, and verified serialization boundary | The caller may accept save evidence for that check unless an audit is due. |
 | Explicitly validated check, complete exact mismatch, and globally trusted snapshot | Queue only that check's existing guarded UI verification/repair; preserve unrelated accepted decisions. |
@@ -1108,15 +1144,26 @@ than deleting it.
 
 ## Acquisition and bounded evidence
 
-The local reader never modifies the input file. A device pull reads the default
+The local reader never modifies the input file. `PlayerSaveParser.parse_bytes`
+and `parse_file` are the sole public decode/projection API; the older decode and
+file helpers are compatibility wrappers. The parser eagerly builds all
+allowlisted projections while the decoded root is in scope, recursively freezes
+the normalized snapshot, and discards the root and input bytes. It holds no
+global "latest save" cache.
+
+`App` owns one parser and one `StablePlayerSaveAcquirer`. Preflight, History,
+guarded serialization, passive scheduling, terminal projection, Tournament
+projection, and the optional campaign auditor require that injected acquirer;
+none may construct another acquisition owner. A device pull reads the default
 operator-confirmed path
 `/sdcard/Android/data/com.TechTreeGames.TheTower/files/playerInfo.dat` through
 ADB and accepts a payload only after two consecutive reads are byte-identical.
 Decode then applies compressed and decompressed size limits, checks gzip
-integrity, parses the NRBF root, tries the exact version mapping, and validates
-its structural signature. If no exact mapping exists, it may instead
-select the newest declared forward-compatible structural mapping and apply the
-strict additive gate before building an in-memory mapping.
+integrity, and parses an object NRBF root. It then resolves legacy bindings and
+semantic capabilities independently. Unknown additions affect only manifest
+diagnostics. An exact or compatible legacy mapping may supply its existing
+projections; a semantic-only forward provider supplies only the capabilities it
+declares, never legacy checks by implication.
 
 This is a trusted-single-user project. The normalized report's allowlist is an
 evidence-hygiene, log-size, and subsystem-coupling boundary, not an
@@ -1192,14 +1239,15 @@ then regenerated atomically from the same normalized record.
 
 ## Version update and promotion procedure
 
-At runtime an unrecognized higher `versionNumber` first receives an automatic,
-read-only compatibility attempt. Exact mapping wins. Otherwise the newest
-lower mapping for the same `dataVersion` and root class must explicitly allow
-forward revisions; all its classified fields and required array lengths must
-still be present. Success creates an in-memory mapping with distinct observed,
-structural, and semantic-authority IDs. Failure publishes no partial values and
-immediately retains UI monitoring. `saveRevision` changes do not enter this
-procedure.
+At runtime an unrecognized higher identity receives an automatic, read-only
+resolution attempt. Exact mapping wins. Legacy version-wide reuse still
+requires its same-lineage compatibility declaration. Independently, a lower
+provider with an `additive_dependencies` policy may supply only the semantic
+capability it declares, with the observed identity and provider recorded
+separately. Every dependency is projected independently: additions remain
+unpublished, while a missing or malformed leaf disables only that leaf and its
+derived dependents. Undeclared legacy projections immediately retain their UI
+routes. `saveRevision` is checkpoint evidence, not a mapping selector.
 
 For every released game version that changes either mapping identity field:
 

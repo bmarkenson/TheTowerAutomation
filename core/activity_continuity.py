@@ -1263,13 +1263,18 @@ def _normalize_history_metadata(raw: Any) -> Optional[dict[str, Any]]:
         source = str(raw.get("source") or "").strip()
         mapping_id = str(raw.get("mapping_id") or "").strip()
         identity_schema = raw.get("identity_schema_version")
-        if not source or not mapping_id or identity_schema != 1:
+        expected_identity_schema = 2 if source == "player_save" else 1
+        if (
+            not source
+            or not mapping_id
+            or identity_schema != expected_identity_schema
+        ):
             return None
         result = {
             "schema_version": 2,
             "source": source,
             "mapping_id": mapping_id,
-            "identity_schema_version": 1,
+            "identity_schema_version": identity_schema,
             "fingerprint": fingerprint,
             "tier": raw.get("tier"),
             "wave": raw.get("wave"),
@@ -1284,6 +1289,7 @@ def _normalize_history_metadata(raw: Any) -> Optional[dict[str, Any]]:
                 effective_mapping_fingerprint
             )
         for key in (
+            "is_tournament",
             "battle_date",
             "entry_count",
             "capacity",

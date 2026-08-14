@@ -539,10 +539,24 @@ def test_active_run_metric_markdown_distinguishes_average_and_interval_cph():
             "audit_id": "V1101-RUNTIME-017",
             "components": {
                 "economy": {
+                    "status": "observed",
+                    "reason": "",
+                    "metric_definitions": {
+                        "coins_earned": {"unit": "coins"},
+                        "highest_saved_coins_per_minute": {
+                            "unit": "coins_per_minute"
+                        },
+                    },
                     "samples": [
                         {
                             "captured_at": "2026-08-12T17:05:00-07:00",
                             "saved_wave": 5560,
+                            "metrics": {
+                                "coins_earned": "7240000000000000000",
+                                "highest_saved_coins_per_minute": (
+                                    "39100000000000000"
+                                ),
+                            },
                             "derived": {
                                 "average_coins_per_hour": "1632147558481008000",
                             },
@@ -564,6 +578,8 @@ def test_active_run_metric_markdown_distinguishes_average_and_interval_cph():
                     ],
                 },
                 "coin_sources": {
+                    "status": "observed",
+                    "reason": "",
                     "metric_definitions": {
                         "coins_from_black_hole": {"unit": "coins"},
                     },
@@ -591,6 +607,11 @@ def test_active_run_metric_markdown_distinguishes_average_and_interval_cph():
                 "reason": "",
                 "components": {
                     "economy": {
+                        "status": "reconciled",
+                        "matched": {
+                            "coins_earned": "7245000000000000000",
+                            "cells_earned": "2345000",
+                        },
                         "whole_run": {
                             "coins_per_hour": "1631600000000000000",
                             "cells_per_hour": "529000",
@@ -641,6 +662,11 @@ def test_active_run_metric_markdown_distinguishes_average_and_interval_cph():
         "| Coin Sources | Coins From Black Hole | 412.12q | 92q | 89q |"
         in markdown
     )
+    assert "| Economy | Coins Earned | 7.24Q | 1.63Q | 1.45Q |" in markdown
+    assert (
+        "| Economy | Highest Saved Coins Per Minute | 39.1q | — | — |"
+        in markdown
+    )
     assert "Terminal reconciliation: reconciled" in markdown
     assert (
         "Terminal whole-run realized rates: 1.63Q CPH; 529K cells/hour; "
@@ -657,6 +683,70 @@ def test_active_run_metric_markdown_distinguishes_average_and_interval_cph():
         "| Coin Sources | Coins From Black Hole | 414.6q | 93q | 105q |"
         in markdown
     )
+    assert "| Economy | Coins Earned | 7.24Q | 1.63Q | 1.51Q |" in markdown
+    assert "| Economy | Cells Earned | 2.34M | 529K | 538K |" in markdown
+
+
+def test_active_run_metric_markdown_keeps_partial_leaf_failures_visible():
+    lines = render_active_run_metrics_markdown(
+        {
+            "status": "partial",
+            "reason": "one_or_more_components_partial",
+            "mapping_id": "data-10-game-1102-semantic-via-1101",
+            "audit_id": "V1101-RUNTIME-017",
+            "terminal_relation": {
+                "status": "unavailable",
+                "reason": "terminal_capability_tail_transition_invalid",
+            },
+            "components": {
+                "economy": {
+                    "status": "partial",
+                    "reason": "one_or_more_claims_unavailable",
+                    "unavailable_claims": {
+                        "cells_earned": "active_tally_number_invalid"
+                    },
+                    "metric_conflicts": {
+                        "cash_earned": "metric_regressed"
+                    },
+                    "samples": [],
+                },
+                "coin_sources": {
+                    "status": "observed",
+                    "reason": "",
+                    "unavailable_claims": {},
+                    "metric_conflicts": {},
+                    "samples": [],
+                },
+            },
+            "terminal": {
+                "status": "partial",
+                "reason": "one_or_more_components_not_terminal_reconciled",
+                "components": {
+                    "economy": {
+                        "status": "partial",
+                        "reason": "terminal_metric_missing:cells_earned",
+                        "missing": ["cells_earned"],
+                        "conflicts": {
+                            "cash_earned": "terminal_metric_regressed"
+                        },
+                    }
+                },
+            },
+        }
+    )
+    markdown = "\n".join(lines)
+
+    assert "## Save-backed run metrics" in markdown
+    assert (
+        "Terminal relation: unavailable "
+        "(`terminal_capability_tail_transition_invalid`)" in markdown
+    )
+    assert "### Capability status" in markdown
+    assert "Cells Earned: active_tally_number_invalid" in markdown
+    assert "Cash Earned: metric_regressed" in markdown
+    assert "### Terminal claim status" in markdown
+    assert "Cells Earned" in markdown
+    assert "terminal_metric_regressed" in markdown
 
 
 def test_render_perk_selection_timeline_preserves_atomic_batches():

@@ -12,6 +12,7 @@ from core.player_save_acquisition import (
     PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
     PlayerSaveTargetBinding,
+    StablePlayerSaveAcquirer,
 )
 from core.player_save_history import (
     CrossSourceHistoryStatus,
@@ -68,6 +69,7 @@ def _snapshot(
         fingerprint=fingerprint,
         tier=19,
         wave=1899,
+        is_tournament=False,
         battle_date=battle_date or _save_battle_date(),
     )
     tail = SimpleNamespace(
@@ -155,7 +157,11 @@ def _reader(
     debug_log_fn=lambda *_args, **_kwargs: None,
 ):
     return PlayerSaveHistoryReader(
-        target_snapshot_fn=target_snapshot_fn,
+        acquirer=StablePlayerSaveAcquirer(
+            target_snapshot_fn=target_snapshot_fn,
+            pull_fn=pull_fn,
+            decode_fn=decode_fn,
+        ),
         capture_fn=capture_fn,
         detector=detector,
         home_control_fn=lambda _frame: SimpleNamespace(
@@ -165,8 +171,6 @@ def _reader(
         attachment_context_fn=attachment_context_fn,
         background_fn=background_fn,
         foreground_fn=foreground_fn,
-        pull_fn=pull_fn,
-        decode_fn=decode_fn,
         sleep_fn=sleep_fn,
         input_log_fn=input_log_fn,
         debug_log_fn=debug_log_fn,
@@ -1022,6 +1026,13 @@ def test_source_compatibility_and_capacity_rollover_are_explicit():
 
     assert history_sources_compatible(previous, rollover)
     assert valid_history_tail_advance(previous, rollover)
+    optional_leaf_correction = {
+        **previous,
+        "game_time_seconds": 9000,
+        "real_time_seconds": 1800,
+        "killed_by_id": 7,
+    }
+    assert not valid_history_tail_advance(previous, optional_leaf_correction)
 
     wrong_source = {**rollover, "source": "battle_history_ui"}
     assert not history_sources_compatible(previous, wrong_source)

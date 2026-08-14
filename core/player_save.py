@@ -25,12 +25,14 @@ from typing import Any, Optional
 from core.runtime_save import (
     NormalizedRuntimeSave,
     RuntimeSaveNormalizationError,
+    active_tally_contract_fingerprints,
     normalize_runtime_save,
 )
 from core.profile_progression import (
     ProfileProgressionError,
     normalize_profile_progression,
 )
+from core.read_only_data import deep_freeze, deep_thaw
 from core.tournament_conditions import derive_tournament_conditions_from_save
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
@@ -62,7 +64,7 @@ PLAYER_SAVE_DEVICE_PATH = (
 )
 MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
-SNAPSHOT_SCHEMA_VERSION = 6
+SNAPSHOT_SCHEMA_VERSION = 7
 RAW_FIELD_MANIFEST_SCHEMA_VERSION = 1
 REVISION_COMPATIBILITY_SCHEMA_VERSION = 1
 RUNTIME_SAVE_EXTENSION_SCHEMA_VERSION = 1
@@ -107,15 +109,48 @@ class SaveCheckEvidence:
     authority: Mapping[str, Any] = field(default_factory=dict)
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "source_fields", tuple(self.source_fields))
+        object.__setattr__(self, "value", deep_freeze(self.value))
+        object.__setattr__(self, "authority", deep_freeze(self.authority))
+        object.__setattr__(self, "diagnostics", deep_freeze(self.diagnostics))
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
-            "value": self.value,
+            "value": deep_thaw(self.value),
             "source_fields": list(self.source_fields),
             "complete": self.complete,
             "reason": self.reason,
-            "authority": dict(self.authority),
-            "diagnostics": dict(self.diagnostics),
+            "authority": deep_thaw(self.authority),
+            "diagnostics": deep_thaw(self.diagnostics),
+        }
+
+
+@dataclass(frozen=True)
+class PlayerSaveCapabilityEvidence:
+    """One declared semantic contract resolved for this decoded document."""
+
+    capability_id: str
+    status: str
+    reason: str
+    semantic_fingerprint: str
+    binding_fingerprint: str
+    authority_id: str
+    provider_mapping_id: str
+    resolution: str
+    forward_policy: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "semantic_fingerprint": self.semantic_fingerprint,
+            "binding_fingerprint": self.binding_fingerprint,
+            "authority_id": self.authority_id,
+            "provider_mapping_id": self.provider_mapping_id,
+            "resolution": self.resolution,
+            "forward_policy": self.forward_policy,
         }
 
 
@@ -142,6 +177,11 @@ class PlayerSaveSnapshot:
     profile_summary: Mapping[str, Any]
     checks: Mapping[str, SaveCheckEvidence]
     runtime_save: Optional[NormalizedRuntimeSave]
+    manifest_status: str = "unavailable"
+    manifest_warnings: tuple[str, ...] = ()
+    capabilities: Mapping[str, PlayerSaveCapabilityEvidence] = field(
+        default_factory=dict
+    )
     profile_progression: Mapping[str, Any] = field(default_factory=dict)
     mapping_resolution: str = "exact"
     mapping_authority_id: Optional[str] = None
@@ -151,9 +191,34 @@ class PlayerSaveSnapshot:
     effective_mapping_fingerprint: Optional[str] = None
     confirmed_local_mappings: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "validated_checks", tuple(self.validated_checks))
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(
+            self,
+            "manifest_warnings",
+            tuple(self.manifest_warnings),
+        )
+        for name in (
+            "profile_summary",
+            "checks",
+            "capabilities",
+            "profile_progression",
+            "confirmed_local_mappings",
+        ):
+            object.__setattr__(self, name, deep_freeze(getattr(self, name)))
+
     @property
     def mapping_supported(self) -> bool:
         return self.mapping_id is not None
+
+    def capability(
+        self,
+        capability_id: str,
+    ) -> Optional[PlayerSaveCapabilityEvidence]:
+        """Return one normalized semantic capability without exposing raw data."""
+
+        return self.capabilities.get(str(capability_id))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -179,20 +244,28 @@ class PlayerSaveSnapshot:
                 "maturity": self.mapping_maturity,
                 "validated_checks": list(self.validated_checks),
                 "shape_valid": self.shape_valid,
+                "manifest_status": self.manifest_status,
+                "manifest_warnings": list(self.manifest_warnings),
                 "resolution": self.mapping_resolution,
                 "authority_id": self.mapping_authority_id,
                 "structural_id": self.mapping_structural_id,
                 "semantic_fingerprint": self.mapping_semantic_fingerprint,
                 "canonical_fingerprint": self.canonical_mapping_fingerprint,
                 "effective_fingerprint": self.effective_mapping_fingerprint,
-                "confirmed_local": dict(self.confirmed_local_mappings),
+                "confirmed_local": deep_thaw(self.confirmed_local_mappings),
             },
             "warnings": list(self.warnings),
-            "profile_summary": dict(self.profile_summary),
-            "profile_progression": dict(self.profile_progression),
+            "profile_summary": deep_thaw(self.profile_summary),
+            "profile_progression": deep_thaw(self.profile_progression),
             "checks": {
                 check_id: evidence.as_dict()
                 for check_id, evidence in sorted(self.checks.items())
+            },
+            "capabilities": {
+                capability_id: capability.as_dict()
+                for capability_id, capability in sorted(
+                    self.capabilities.items()
+                )
             },
             "runtime_save": (
                 self.runtime_save.as_dict()
@@ -207,6 +280,7 @@ class _MappingResolution:
     mapping: Optional[dict[str, Any]]
     resolution: str
     shape_warnings: tuple[str, ...] = ()
+    manifest_warnings: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     authority_mapping_id: Optional[str] = None
     structural_mapping_id: Optional[str] = None
@@ -223,14 +297,48 @@ def _empty_confirmed_local_projection() -> dict[str, Any]:
     }
 
 
-def read_player_save_file(path: Path | str) -> PlayerSaveSnapshot:
-    """Decode one local save without modifying or retaining the raw file."""
+class PlayerSaveParser:
+    """Stateless application API for one decode and all allowlisted projections.
 
-    source = Path(path)
-    return decode_player_save_bytes(
-        source.read_bytes(),
-        source_name=source.name,
-    )
+    The parser never retains raw bytes or the decoded NRBF root.  Runtime code
+    injects one instance into the shared acquisition owner, which then fans the
+    read-only normalized snapshot out to every consumer.
+    """
+
+    def parse_bytes(
+        self,
+        payload: bytes,
+        *,
+        source_name: str = "playerInfo.dat",
+        captured_at: Optional[datetime] = None,
+    ) -> PlayerSaveSnapshot:
+        return _parse_player_save_bytes(
+            payload,
+            source_name=source_name,
+            captured_at=captured_at,
+        )
+
+    def parse_file(
+        self,
+        path: Path | str,
+        *,
+        captured_at: Optional[datetime] = None,
+    ) -> PlayerSaveSnapshot:
+        source = Path(path)
+        return self.parse_bytes(
+            source.read_bytes(),
+            source_name=source.name,
+            captured_at=captured_at,
+        )
+
+
+_DEFAULT_PLAYER_SAVE_PARSER = PlayerSaveParser()
+
+
+def read_player_save_file(path: Path | str) -> PlayerSaveSnapshot:
+    """Compatibility wrapper around the shared parser API for local files."""
+
+    return _DEFAULT_PLAYER_SAVE_PARSER.parse_file(path)
 
 
 def decode_player_save_bytes(
@@ -239,7 +347,22 @@ def decode_player_save_bytes(
     source_name: str = "playerInfo.dat",
     captured_at: Optional[datetime] = None,
 ) -> PlayerSaveSnapshot:
-    """Decode a gzip-wrapped or raw NRBF save into a redacted snapshot."""
+    """Compatibility wrapper around :class:`PlayerSaveParser`."""
+
+    return _DEFAULT_PLAYER_SAVE_PARSER.parse_bytes(
+        payload,
+        source_name=source_name,
+        captured_at=captured_at,
+    )
+
+
+def _parse_player_save_bytes(
+    payload: bytes,
+    *,
+    source_name: str = "playerInfo.dat",
+    captured_at: Optional[datetime] = None,
+) -> PlayerSaveSnapshot:
+    """Decode one save into a redacted semantic document."""
 
     if not isinstance(payload, bytes):
         raise TypeError("player save payload must be bytes")
@@ -330,8 +453,11 @@ def decode_player_save_bytes(
         )
 
     shape_warnings = list(mapping_resolution.shape_warnings)
+    manifest_warnings = list(mapping_resolution.manifest_warnings)
     warnings.extend(shape_warnings)
+    warnings.extend(manifest_warnings)
     shape_valid = not shape_warnings
+    manifest_status = "exact" if not manifest_warnings else "drifted"
     mapping_semantic_fingerprint = _mapping_semantic_fingerprint(
         mapping,
         authority_mapping_id=mapping_resolution.authority_mapping_id,
@@ -345,8 +471,11 @@ def decode_player_save_bytes(
         authority_mapping_id=mapping_resolution.authority_mapping_id,
         structural_mapping_id=mapping_resolution.structural_mapping_id,
     )
+    semantic_capabilities_only = bool(
+        mapping.get("semantic_capabilities_only")
+    )
     confirmed_local = _empty_confirmed_local_projection()
-    if shape_valid:
+    if shape_valid and not semantic_capabilities_only:
         mapping, confirmed_local, local_warnings = (
             _apply_confirmed_local_mappings(
                 mapping,
@@ -377,17 +506,18 @@ def decode_player_save_bytes(
     profile_progression: dict[str, Any] = {}
     runtime_save: Optional[NormalizedRuntimeSave] = None
     if shape_valid:
-        checks = _build_checks(decoded, mapping, captured_at=stamp)
-        for blocked_check in confirmed_local["blocked_checks"]:
-            if blocked_check == "modules":
-                checks[blocked_check] = _unmapped_module_evidence(
-                    ("moduleEquipped", "assistModuleSlots"),
-                    "confirmed local module mapping requires UI fallback",
-                    diagnostics={
-                        "confirmed_local_mapping": dict(confirmed_local),
-                    },
-                )
-        profile_summary = _build_profile_summary(decoded, mapping)
+        if not semantic_capabilities_only:
+            checks = _build_checks(decoded, mapping, captured_at=stamp)
+            for blocked_check in confirmed_local["blocked_checks"]:
+                if blocked_check == "modules":
+                    checks[blocked_check] = _unmapped_module_evidence(
+                        ("moduleEquipped", "assistModuleSlots"),
+                        "confirmed local module mapping requires UI fallback",
+                        diagnostics={
+                            "confirmed_local_mapping": dict(confirmed_local),
+                        },
+                    )
+            profile_summary = _build_profile_summary(decoded, mapping)
         capture = {
             "captured_at": stamp.isoformat(),
             "source_name": Path(source_name).name,
@@ -419,7 +549,7 @@ def decode_player_save_bytes(
                 "The selected runtime projection failed closed: "
                 f"{exc}. Runtime save evidence requires UI fallback."
             )
-        if runtime_save is not None:
+        if runtime_save is not None and not semantic_capabilities_only:
             checks["battle_history_killed_by"] = (
                 _battle_history_killed_by_evidence(runtime_save, mapping)
             )
@@ -439,6 +569,11 @@ def decode_player_save_bytes(
             "validated checks may use fresh save evidence without a full UI "
             "audit."
         )
+    capabilities = _build_capability_evidence(
+        mapping,
+        mapping_resolution=mapping_resolution,
+        runtime_save=runtime_save,
+    )
     return PlayerSaveSnapshot(
         captured_at=stamp.isoformat(),
         source_name=Path(source_name).name,
@@ -459,6 +594,9 @@ def decode_player_save_bytes(
         profile_summary=profile_summary,
         checks=checks,
         runtime_save=runtime_save,
+        manifest_status=manifest_status,
+        manifest_warnings=tuple(manifest_warnings),
+        capabilities=capabilities,
         profile_progression=profile_progression,
         mapping_resolution=mapping_resolution.resolution,
         mapping_authority_id=mapping_resolution.authority_mapping_id,
@@ -468,6 +606,65 @@ def decode_player_save_bytes(
         effective_mapping_fingerprint=effective_mapping_fingerprint,
         confirmed_local_mappings=confirmed_local,
     )
+
+
+def _build_capability_evidence(
+    mapping: Mapping[str, Any],
+    *,
+    mapping_resolution: _MappingResolution,
+    runtime_save: Optional[NormalizedRuntimeSave],
+) -> dict[str, PlayerSaveCapabilityEvidence]:
+    """Publish only declared semantic contracts and their normalized status."""
+
+    runtime_spec = mapping.get("runtime_save")
+    tally_spec = (
+        runtime_spec.get("active_tallies")
+        if isinstance(runtime_spec, Mapping)
+        else None
+    )
+    if not isinstance(tally_spec, Mapping):
+        return {}
+    capability_id = str(tally_spec.get("capability_id") or "").strip()
+    if not capability_id:
+        return {}
+    semantic_fingerprint, binding_fingerprint = (
+        active_tally_contract_fingerprints(tally_spec)
+    )
+    tallies = (
+        runtime_save.active_tallies
+        if runtime_save is not None
+        else None
+    )
+    status = getattr(tallies, "status", "unavailable")
+    reason = getattr(
+        tallies,
+        "reason",
+        "runtime_projection_unavailable",
+    )
+    if (
+        runtime_save is not None
+        and runtime_save.round_active
+        and runtime_save.active_round_identity is None
+    ):
+        status = "unavailable"
+        reason = runtime_save.active_identity_reason
+    return {
+        capability_id: PlayerSaveCapabilityEvidence(
+            capability_id=capability_id,
+            status=str(status),
+            reason=str(reason),
+            semantic_fingerprint=semantic_fingerprint,
+            binding_fingerprint=binding_fingerprint,
+            authority_id=str(tally_spec.get("audit_id") or ""),
+            provider_mapping_id=str(
+                mapping_resolution.structural_mapping_id
+                or mapping.get("mapping_id")
+                or ""
+            ),
+            resolution=mapping_resolution.resolution,
+            forward_policy=str(tally_spec.get("forward_policy") or "none"),
+        )
+    }
 
 
 def pull_player_save_bytes(
@@ -884,12 +1081,14 @@ def _resolve_mapping(
     if exact is not None:
         mapping_id = str(exact["mapping_id"])
         shape_warnings = tuple(_validate_shape(decoded, exact))
+        manifest_warnings = tuple(_manifest_drift_warnings(decoded, exact))
         compatibility = exact.get("revision_compatibility")
         if shape_warnings or not isinstance(compatibility, Mapping):
             return _MappingResolution(
                 exact,
                 "exact",
                 shape_warnings=shape_warnings,
+                manifest_warnings=manifest_warnings,
                 authority_mapping_id=mapping_id,
                 structural_mapping_id=mapping_id,
             )
@@ -915,6 +1114,7 @@ def _resolve_mapping(
                 f"check(s). {len(additions)} added root field(s) remain "
                 "unpublished.",
             ),
+            manifest_warnings=manifest_warnings,
             authority_mapping_id=str(authority["mapping_id"]),
             structural_mapping_id=mapping_id,
         )
@@ -925,11 +1125,54 @@ def _resolve_mapping(
         game_version=game_version,
     )
     if structural is None:
-        return _MappingResolution(None, "unsupported")
+        semantic_provider = _select_semantic_forward_provider(
+            decoded,
+            data_version=data_version,
+            game_version=game_version,
+        )
+        if semantic_provider is None:
+            return _MappingResolution(None, "unsupported")
+        assert data_version is not None
+        assert game_version is not None
+        provider_id = str(semantic_provider["mapping_id"])
+        mapping_id = (
+            f"data-{data_version}-game-{game_version}-semantic-via-"
+            f"{(semantic_provider.get('identity') or {})['game_version']}"
+        )
+        return _MappingResolution(
+            _semantic_capability_mapping(
+                provider=semantic_provider,
+                data_version=data_version,
+                game_version=game_version,
+                mapping_id=mapping_id,
+            ),
+            "semantic_forward_revision",
+            warnings=(
+                "No version-structural mapping exists for the decoded save, "
+                "but a declared additive-dependency semantic capability "
+                f"resolved through {provider_id}. Legacy version-bound "
+                "projections remain unavailable.",
+            ),
+            manifest_warnings=tuple(
+                _manifest_drift_warnings(
+                    decoded,
+                    semantic_provider,
+                    allow_additional_fields=True,
+                )
+            ),
+            authority_mapping_id=provider_id,
+            structural_mapping_id=provider_id,
+        )
     compatibility = structural["revision_compatibility"]
     authority = _mapping_by_id(str(compatibility["authority_mapping_id"]))
     shape_warnings = tuple(
         _validate_shape(
+            decoded,
+            structural,
+        )
+    )
+    manifest_warnings = tuple(
+        _manifest_drift_warnings(
             decoded,
             structural,
             allow_additional_fields=True,
@@ -947,6 +1190,7 @@ def _resolve_mapping(
                 f"compatible with {structural_id}: {detail}. All save-backed "
                 "consumers require UI fallback.",
             ),
+            manifest_warnings=manifest_warnings,
             authority_mapping_id=authority_id,
             structural_mapping_id=structural_id,
         )
@@ -974,6 +1218,7 @@ def _resolve_mapping(
             f"{structural_id}. Using validated semantics from {authority_id}; "
             f"{len(additions)} newly observed root field(s) remain unpublished.",
         ),
+        manifest_warnings=manifest_warnings,
         authority_mapping_id=authority_id,
         structural_mapping_id=structural_id,
     )
@@ -1017,6 +1262,89 @@ def _select_forward_compatibility_mapping(
     )
 
 
+def _select_semantic_forward_provider(
+    decoded: Mapping[str, Any],
+    *,
+    data_version: Optional[int],
+    game_version: Optional[int],
+) -> Optional[dict[str, Any]]:
+    """Select only a provider that explicitly allows additive dependencies."""
+
+    if type(data_version) is not int or type(game_version) is not int:
+        return None
+    actual_class = str(decoded.get("__class__") or "")
+    eligible: list[dict[str, Any]] = []
+    for mapping in _load_mappings():
+        identity = mapping.get("identity") or {}
+        extensions = mapping.get("runtime_save_extensions")
+        tally_spec = (
+            extensions.get("active_tallies")
+            if isinstance(extensions, Mapping)
+            else None
+        )
+        mapped_data = identity.get("data_version")
+        mapped_game = identity.get("game_version")
+        if (
+            isinstance(tally_spec, Mapping)
+            and tally_spec.get("forward_policy") == "additive_dependencies"
+            and identity.get("root_class") == actual_class
+            and type(mapped_data) is int
+            and type(mapped_game) is int
+            and data_version >= mapped_data
+            and game_version >= mapped_game
+        ):
+            eligible.append(mapping)
+    if not eligible:
+        return None
+    return max(
+        eligible,
+        key=lambda mapping: (
+            int((mapping.get("identity") or {})["data_version"]),
+            int((mapping.get("identity") or {})["game_version"]),
+        ),
+    )
+
+
+def _semantic_capability_mapping(
+    *,
+    provider: Mapping[str, Any],
+    data_version: int,
+    game_version: int,
+    mapping_id: str,
+) -> dict[str, Any]:
+    """Build a capability-only mapping without inheriting legacy authority."""
+
+    compatibility = provider.get("revision_compatibility")
+    if not isinstance(compatibility, Mapping):
+        raise PlayerSaveError("semantic provider has no runtime authority")
+    authority = _mapping_by_id(str(compatibility["authority_mapping_id"]))
+    runtime_spec = authority.get("runtime_save")
+    extensions = provider.get("runtime_save_extensions")
+    tally_spec = (
+        extensions.get("active_tallies")
+        if isinstance(extensions, Mapping)
+        else None
+    )
+    if not isinstance(runtime_spec, Mapping) or not isinstance(tally_spec, Mapping):
+        raise PlayerSaveError("semantic provider runtime contract is unavailable")
+    effective_runtime = deepcopy(dict(runtime_spec))
+    effective_runtime["active_tallies"] = deepcopy(dict(tally_spec))
+    effective_runtime["semantic_capabilities_only"] = True
+    return {
+        "mapping_id": mapping_id,
+        "maturity": "candidate",
+        "validated_checks": [],
+        "identity": {
+            "data_version": data_version,
+            "game_version": game_version,
+            "root_class": str((provider.get("identity") or {})["root_class"]),
+        },
+        "raw_field_manifest": deepcopy(provider["raw_field_manifest"]),
+        "runtime_save": effective_runtime,
+        "semantic_capabilities_only": True,
+    }
+
+
 def _compatible_mapping(
     *,
     structural: Mapping[str, Any],
@@ -1041,9 +1369,7 @@ def _compatible_mapping(
     )
     if compatibility.get("runtime_save") is not True:
         effective.pop("runtime_save", None)
-    elif retain_exact_profile_progression and isinstance(
-        structural.get("runtime_save_extensions"), Mapping
-    ):
+    elif isinstance(structural.get("runtime_save_extensions"), Mapping):
         runtime_save = effective.get("runtime_save")
         if not isinstance(runtime_save, Mapping):
             raise PlayerSaveError(
@@ -1053,6 +1379,12 @@ def _compatible_mapping(
         for component_name, component in structural[
             "runtime_save_extensions"
         ].items():
+            if not retain_exact_profile_progression and not (
+                isinstance(component, Mapping)
+                and component.get("forward_policy")
+                == "additive_dependencies"
+            ):
+                continue
             if component_name in merged_runtime:
                 raise PlayerSaveError(
                     "runtime-save extension overrides authority component "
@@ -1710,17 +2042,39 @@ def _validate_revision_compatibility(
             if isinstance(authority.get("runtime_save"), Mapping)
             else None
         )
+        active_tallies = extensions.get("active_tallies")
+        tally_scope = (
+            active_tallies.get("scope")
+            if isinstance(active_tallies, Mapping)
+            else None
+        )
+        tally_binding = (
+            tally_scope.get("binding")
+            if isinstance(tally_scope, Mapping)
+            else None
+        )
+        if (
+            not isinstance(history_spec, Mapping)
+            or not isinstance(tally_binding, Mapping)
+            or tally_binding.get("history_entry_class")
+            != history_spec.get("entry_class")
+            or tally_binding.get("history_capacity")
+            != history_spec.get("capacity")
+        ):
+            raise PlayerSaveError(
+                "active-tally terminal-history binding disagrees with "
+                f"runtime authority in {source}"
+            )
         direct_history_sources: set[str] = set()
-        if isinstance(history_spec, Mapping):
-            for section in history_spec.get("more_stats_sections") or ():
-                for raw_row in (section or {}).get("rows") or ():
-                    row_spec = raw_row[1]
-                    if isinstance(row_spec, str):
-                        direct_history_sources.add(row_spec)
-                    elif isinstance(row_spec, Mapping) and isinstance(
-                        row_spec.get("source"), str
-                    ):
-                        direct_history_sources.add(row_spec["source"])
+        for section in history_spec.get("more_stats_sections") or ():
+            for raw_row in (section or {}).get("rows") or ():
+                row_spec = raw_row[1]
+                if isinstance(row_spec, str):
+                    direct_history_sources.add(row_spec)
+                elif isinstance(row_spec, Mapping) and isinstance(
+                    row_spec.get("source"), str
+                ):
+                    direct_history_sources.add(row_spec["source"])
         terminal_sources = {
             str(field_spec["terminal_source"])
             for component in (
@@ -1741,9 +2095,14 @@ def _validate_revision_compatibility(
 def _validate_shape(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
-    *,
-    allow_additional_fields: bool = False,
 ) -> list[str]:
+    """Validate only the decoded envelope shared by every capability.
+
+    Field presence, additions, and array lengths are capability-local concerns.
+    They are reported separately as manifest drift and must not erase unrelated
+    normalized evidence.
+    """
+
     warnings: list[str] = []
     identity = mapping.get("identity") or {}
     expected_class = str(identity.get("root_class") or "")
@@ -1758,6 +2117,18 @@ def _validate_shape(
             "decoded root contains non-string field names: "
             + _summarize_field_names(str(key) for key in non_string_fields)
         )
+    return warnings
+
+
+def _manifest_drift_warnings(
+    decoded: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+    *,
+    allow_additional_fields: bool = False,
+) -> list[str]:
+    """Describe closed-world manifest drift without granting it global veto."""
+
+    warnings: list[str] = []
     actual_fields = {key for key in decoded if isinstance(key, str)}
     expected_fields = set(_raw_field_manifest_names(mapping))
     missing_fields = expected_fields - actual_fields
@@ -1949,25 +2320,65 @@ def _validate_runtime_save_extensions(
     active = extensions.get("active_tallies")
     expected_keys = {
         "schema_version",
+        "capability_id",
+        "forward_policy",
         "audit_id",
         "evidence_level",
-        "supported_game_versions",
+        "scope",
         "components",
     }
     if not isinstance(active, Mapping) or set(active) != expected_keys:
         raise PlayerSaveError(
             f"active-tally runtime extension is malformed in {source}"
         )
-    identity = mapping.get("identity") or {}
-    game_version = identity.get("game_version")
     if (
         active.get("schema_version") != RUNTIME_SAVE_EXTENSION_SCHEMA_VERSION
+        or active.get("capability_id")
+        != "thetower.player_save.active_run_tallies.v1"
+        or active.get("forward_policy") != "additive_dependencies"
         or not str(active.get("audit_id") or "").strip()
         or active.get("evidence_level") != "cross_channel"
-        or active.get("supported_game_versions") != [game_version]
     ):
         raise PlayerSaveError(
             f"active-tally runtime authority is invalid in {source}"
+        )
+    scope = active.get("scope")
+    expected_scope = {
+        "semantics": {
+            "state": "cumulative_active_round",
+            "identity": "game_version_tier_started_count_seed",
+            "checkpoint_order": "capture_time_source_identity",
+            "wave_relation": "optional_nondecreasing_rate_dependency",
+            "terminal_identity": (
+                "source_order_tail_battle_date_tier_wave_kind"
+            ),
+            "terminal_relation": (
+                "causally_bound_natural_terminal_nondecreasing"
+            ),
+        },
+        "binding": {
+            "game_version": "versionNumber",
+            "save_revision": "saveRevision",
+            "round_active": "roundActiveBool",
+            "current_tier": "currentTier",
+            "current_wave": "currentWave",
+            "round_seed": "roundSeed",
+            "round_counter_vector": "roundsStartedThisTier",
+            "history_container": "battleHistory",
+            "history_entry_class": "BattleHistoryEntry",
+            "history_capacity": 30,
+            "history_entry_count": "battleHistory.length",
+            "history_battle_date": "battleDate",
+            "history_tier": "tier",
+            "history_kind": "isTournament",
+            "history_wave": "wave",
+            "history_game_time": "gameTime",
+            "history_real_time": "realTime",
+        },
+    }
+    if scope != expected_scope:
+        raise PlayerSaveError(
+            f"active-tally scope authority is invalid in {source}"
         )
 
     dispositions = (
@@ -1980,6 +2391,7 @@ def _validate_runtime_save_extensions(
             f"active-tally components are unavailable in {source}"
         )
     used_sources: set[str] = set()
+    used_terminal_sources: set[str] = set()
     safe_name = re.compile(r"[a-z][a-z0-9_]{0,95}")
     safe_source_name = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,127}")
     for component_name, component in components.items():
@@ -2032,7 +2444,10 @@ def _validate_runtime_save_extensions(
                 or field_spec.get("monotonic") is not True
                 or (
                     terminal_source is not None
-                    and safe_source_name.fullmatch(str(terminal_source)) is None
+                    and (
+                        safe_source_name.fullmatch(str(terminal_source)) is None
+                        or str(terminal_source) in used_terminal_sources
+                    )
                 )
             ):
                 raise PlayerSaveError(
@@ -2040,6 +2455,8 @@ def _validate_runtime_save_extensions(
                     f"invalid authority in {source}"
                 )
             used_sources.add(source_field)
+            if terminal_source is not None:
+                used_terminal_sources.add(str(terminal_source))
 
         derived = component.get("derived")
         if not isinstance(derived, Mapping):
@@ -2068,6 +2485,7 @@ def _validate_runtime_save_extensions(
             "runtime-observation fields must be published exactly once by "
             f"the active-tally extension in {source}"
         )
+    active_tally_contract_fingerprints(active)
 
 
 def _validate_sorted_field_names(
@@ -2140,7 +2558,8 @@ def _build_profile_summary(
     cards = mapping.get("cards") or {}
     slots_per_preset = int(cards.get("slots_per_preset") or 0)
     preset_count = int(cards.get("preset_count") or 0)
-    assigned = list(decoded.get(str(cards.get("assigned_field") or "")) or [])
+    assigned_raw = decoded.get(str(cards.get("assigned_field") or ""))
+    assigned = list(assigned_raw) if _is_sequence(assigned_raw) else []
     assigned_counts = (
         [
             sum(
@@ -2187,15 +2606,26 @@ def _build_profile_summary(
         },
         "array_lengths": array_lengths,
         "owned_counts": {
-            "cards": sum(bool(value) for value in decoded.get("cardUnlocked") or []),
+            "cards": _boolean_sequence_count(decoded.get("cardUnlocked")),
             "ultimate_weapons": sum(
-                bool(value) for value in decoded.get("ultimateWeaponUnlocked") or []
+                bool(value)
+                for value in (
+                    decoded.get("ultimateWeaponUnlocked")
+                    if _is_sequence(decoded.get("ultimateWeaponUnlocked"))
+                    else ()
+                )
             ),
-            "guardian_chips": sum(
-                bool(value) for value in decoded.get("guardianChipUnlocked") or []
+            "guardian_chips": _boolean_sequence_count(
+                decoded.get("guardianChipUnlocked")
             ),
         },
     }
+
+
+def _boolean_sequence_count(value: Any) -> int:
+    if not _is_sequence(value):
+        return 0
+    return sum(item is True for item in value)
 
 
 def _build_checks(
@@ -3452,9 +3882,16 @@ def _ultimate_weapon_evidence(
     mapping: Mapping[str, Any],
 ) -> SaveCheckEvidence:
     names = list(mapping.get("ultimate_weapon_names") or [])
-    unlocked = list(decoded.get("ultimateWeaponUnlocked") or [])
-    active = list(decoded.get("ultimateWeaponOn") or [])
-    if len(unlocked) != len(names) or len(active) != len(names):
+    unlocked_raw = decoded.get("ultimateWeaponUnlocked")
+    active_raw = decoded.get("ultimateWeaponOn")
+    if (
+        not _is_sequence(unlocked_raw)
+        or not _is_sequence(active_raw)
+        or len(unlocked_raw) != len(names)
+        or len(active_raw) != len(names)
+        or not all(type(value) is bool for value in unlocked_raw)
+        or not all(type(value) is bool for value in active_raw)
+    ):
         return SaveCheckEvidence(
             check_id="ultimate_weapons",
             status="unmapped",
@@ -3463,6 +3900,8 @@ def _ultimate_weapon_evidence(
             complete=False,
             reason="ultimate weapon arrays changed length",
         )
+    unlocked = list(unlocked_raw)
+    active = list(active_raw)
     value: dict[str, dict[str, str]] = {}
     for index, name in enumerate(names):
         if not bool(unlocked[index]):
@@ -3877,6 +4316,8 @@ __all__ = [
     "PLAYER_SAVE_DEVICE_PATH",
     "PlayerSaveDecodeError",
     "PlayerSaveError",
+    "PlayerSaveCapabilityEvidence",
+    "PlayerSaveParser",
     "PlayerSavePullError",
     "PlayerSaveSnapshot",
     "SAVE_ACCEPTED_DISPOSITIONS",

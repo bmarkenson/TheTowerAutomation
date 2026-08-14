@@ -39,7 +39,7 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
-### 2026-08-14 exact-version active-run save metrics port
+### 2026-08-14 semantic player-save API and active-run metrics
 
 - The unmerged `dfd1bdf` behavior was initially ported from its pre-current-main
   base onto a fresh feature candidate based on `e3c0491`. When production
@@ -49,38 +49,39 @@ resolved dossier instead of copying its detail.
   preserves the newer compatible-mapping gate and campaign-only
   `V1073-RUNTIME-013` audit semantics instead of replacing current player-save,
   App, test, or canonical documentation owners.
-- Exact game version 1101 now publishes only the 29 previously validated
-  cumulative fields: 14 coin-source, eight economy/time, and seven progress
-  counters. Exact 1073 keeps active tallies unavailable, unknown forward
-  versions do not inherit the extension, and damage, resources, upgrades,
-  survival, and every other unvalidated candidate remain unpublished.
-- The existing passive scheduler fans its single typed acquisition to a new
-  process/activity/target-generation/round-bound `ActiveRunMetricMonitor`.
-  Economy, progress, and coin-source timelines fail independently, enforce
-  monotonic checkpoints, retain valid components across malformed peers, and
-  grant no input, lifecycle, navigation, or Strategy authority.
+- Version 1101 now supplies the authority and raw binding for the declared
+  `thetower.player_save.active_run_tallies.v1` capability: only the 29
+  previously validated cumulative fields (14 coin-source, eight economy/time,
+  and seven progress counters). Exact 1073 remains unavailable. Unknown
+  additive forward revisions inherit only this semantic capability; arbitrary
+  new fields and values remain unpublished. Damage, resources, upgrades,
+  survival, and every other unvalidated candidate remain unavailable.
+- `PlayerSaveParser` is the global one-decode/all-projections API. `App` owns
+  one parser and one `StablePlayerSaveAcquirer`; preflight, History, guarded
+  serialization, passive scheduling, terminal/Tournament projection, and the
+  optional campaign auditor require that shared owner. The read-only snapshot
+  and identical typed bundle fan out through a neutral observation context,
+  with target-generation recheck and per-subscriber exception isolation. No
+  HTTP status read or consumer performs a duplicate acquisition.
+- Active tallies expose leaf semantic/binding fingerprints, dependency-local
+  failures, and per-leaf monotonic timelines. One malformed or regressed leaf
+  cannot erase valid siblings; an unknown added root/nested field is diagnostic
+  only. Runtime round/save/wave claims, structural History, completed semantics,
+  and terminal tally facts likewise fail only their dependents.
 - Whole-run and interval CPH, cells/hour, cash/hour, waves/hour, effective
   speed, and per-source rates are calculated directly from cumulative save
   evidence. They remain distinct from OCR `coin_rate_samples`; Coins/min is
   never multiplied by 60 and relabeled as realized CPH. The same causally bound
   natural-terminal bundle supplies final whole-run values and the last
   checkpoint-to-terminal interval. Normal and Tournament JSON, Markdown, and
-  native Battle History retain and present `active_run_metrics`.
+  native Battle History retain and present `active_run_metrics`, including
+  partial/unavailable/conflicted claim reasons.
 - The earlier normalized active/terminal evidence remains the semantic basis;
   this port performed no new live capture and created, accelerated, or
   surrendered no battle. Current live validation therefore remains pending a
   naturally occurring boundary after promotion and deployment.
-- Metric-focused validation passed 169 tests, and the post-merge affected set
-  passed 203. The final complete isolated repository
-  checkpoint passed compile and state validation, clickmap integrity with zero
-  errors and 44 informational orphans, and all 2,504 Python tests in 387.01
-  seconds. Both documentation-lifecycle tests and all 332 tracked local
-  Markdown targets/anchors passed; `git diff --check` passed. The portable
-  Control Surface and Tunnel Host suites passed 189 and 18 tests respectively,
-  and the Release WPF cross-build completed with zero errors. Its only warnings
-  were the known read-only NuGet vulnerability-cache `NU1900` warnings. The
-  candidate has not been promoted, deployed, restarted, or published to
-  Windows.
+- Current validation and deployment evidence is recorded with the candidate's
+  final promotion receipt; historical results from `dfd1bdf` were not reused.
 
 ### 2026-08-14 attachment Free Upgrade-lock evidence precedence
 

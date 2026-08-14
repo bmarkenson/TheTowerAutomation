@@ -56,7 +56,7 @@ def _metadata(*, fingerprint: str, count: int, capacity: int = 30):
         "source": "player_save",
         "mapping_id": MAPPING_ID,
         "effective_mapping_fingerprint": "9" * 64,
-        "identity_schema_version": 1,
+        "identity_schema_version": 2,
         "fingerprint": fingerprint,
         "tier": 19,
         "wave": 5000,
@@ -302,6 +302,49 @@ def test_terminal_save_report_fails_closed_without_causal_tail_proof(
     assert report["ui_fallback"]["required"]
 
 
+def test_semantic_forward_report_retains_only_monitor_bound_terminal_claims():
+    snapshot = _snapshot(count=30)
+    snapshot.mapping_resolution = "semantic_forward_revision"
+    tail = snapshot.runtime_save.battle_history_tail
+    tail.structural_status = "unavailable"
+    tail.structural_reason = "legacy_history_capability_not_declared"
+    tail.identity = None
+    tail.terminal_identity = SimpleNamespace(is_tournament=False)
+    tail.terminal_metric_claims = {
+        "status": "observed",
+        "reason": "",
+        "capability_id": "thetower.player_save.active_run_tallies.v1",
+        "claims": {"coinsEarned": {"status": "observed"}},
+        "unavailable": {},
+    }
+    acquisition = _acquisition(snapshot)
+
+    report = terminal_save_report_from_acquisition(
+        acquisition,
+        terminal_state="GAME_OVER",
+        run_binding=_binding(),
+        activity_scope=_scope(_metadata(fingerprint="a" * 64, count=29)),
+        history_transition={
+            "schema_version": 1,
+            "status": "unavailable",
+            "complete": False,
+            "reason": "legacy_history_capability_not_declared",
+        },
+    )
+
+    assert report["status"] == "unavailable"
+    assert report["ui_fallback"]["required"] is True
+    assert report["terminal_metric_claims"] == tail.terminal_metric_claims
+    assert report["capture"]["source_fingerprint"] == snapshot.source_sha256
+    assert report["capture"]["acquisition"] == (
+        acquisition.redacted_provenance()
+    )
+    assert report["active_tally_terminal_relation"] == {
+        "status": "monitor_baseline_required",
+        "reason": "legacy_history_capability_not_declared",
+    }
+
+
 def test_terminal_save_report_requires_semantic_entry_and_matching_kind():
     baseline = _metadata(fingerprint="a" * 64, count=29)
 
@@ -320,6 +363,36 @@ def test_terminal_save_report_requires_semantic_entry_and_matching_kind():
 
     assert unavailable["reason"] == "unmapped_killed_by_id:42"
     assert mismatched["reason"] == "terminal_history_kind_mismatch"
+    assert mismatched["terminal_metric_claims"]["status"] == "unavailable"
+    assert mismatched["terminal_metric_claims"]["reason"] == (
+        "terminal_history_kind_mismatch"
+    )
+    assert mismatched["terminal_metric_claims"]["claims"] == {}
+
+
+@pytest.mark.parametrize(
+    ("terminal_state", "is_tournament"),
+    (("GAME_OVER", True), ("TOURNAMENT_RESULTS", False)),
+)
+def test_structural_terminal_transition_rejects_battle_kind_mismatch(
+    terminal_state,
+    is_tournament,
+):
+    transition = terminal_history_transition_from_acquisition(
+        _acquisition(
+            _snapshot(count=30, is_tournament=is_tournament),
+            terminal_state=terminal_state,
+        ),
+        terminal_state=terminal_state,
+        run_binding=_binding(),
+        activity_scope=_scope(
+            _metadata(fingerprint="a" * 64, count=29)
+        ),
+    )
+
+    assert transition["status"] == "unavailable"
+    assert transition["reason"] == "terminal_history_kind_mismatch"
+    assert transition["handoff"] is None
 
 
 def test_structural_handoff_survives_unknown_semantic_killed_by_without_reprojection():
@@ -388,6 +461,14 @@ def test_terminal_handoff_rejects_process_and_target_generation_changes():
         target_binding=PlayerSaveTargetBinding("private-target", 4),
         destination_reason="new_battle_preflight",
     )
+    wrong_kind_handoff = json.loads(json.dumps(handoff))
+    wrong_kind_handoff["latest_completed_battle"]["is_tournament"] = True
+    wrong_kind, wrong_kind_reason = validate_terminal_history_handoff(
+        wrong_kind_handoff,
+        runtime_session_id="runtime-1",
+        target_binding=acquisition.binding,
+        destination_reason="new_battle_preflight",
+    )
 
     assert accepted is not None
     assert reason == "terminal_history_handoff_accepted"
@@ -395,3 +476,5 @@ def test_terminal_handoff_rejects_process_and_target_generation_changes():
     assert restarted_reason == "terminal_history_handoff_process_changed"
     assert retargeted is None
     assert retargeted_reason == "terminal_history_handoff_target_changed"
+    assert wrong_kind is None
+    assert wrong_kind_reason == "terminal_history_handoff_identity_invalid"

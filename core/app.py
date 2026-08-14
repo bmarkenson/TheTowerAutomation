@@ -89,8 +89,7 @@ from core.battle_stats import (
 )
 from core.battle_activation_tracker import BattleActivationTracker
 from core.player_save import (
-    decode_player_save_bytes,
-    pull_player_save_bytes,
+    PlayerSaveParser,
     reconcile_acquired_requirements,
 )
 from core.player_save_acquisition import (
@@ -101,12 +100,12 @@ from core.player_save_acquisition import (
     PlayerSaveNaturalBoundary,
     PlayerSaveTargetBinding,
     StablePlayerSaveAcquirer,
-    quiet_player_save_read,
 )
 from core.player_save_audit import PlayerSaveAuditCollector
 from core.player_save_passive_scheduler import PlayerSavePassiveScheduler
 from core.active_run_metric_monitor import ActiveRunMetricMonitor
-from core.perk_save_monitor import PerkSaveMonitor, PerkSaveMonitorContext
+from core.perk_save_monitor import PerkSaveMonitor
+from core.player_save_observation import PlayerSaveObservationContext
 from core.player_save_preflight import (
     CarriedEvidenceState,
     PlayerSavePreflightContext,
@@ -389,9 +388,11 @@ class App:
         runtime_mapping_main_commit = canonical_mapping_runtime_commit(
             repository_root=runtime_repository_root,
         )
+        self._player_save_parser = PlayerSaveParser()
         self._player_save_acquirer = (
             StablePlayerSaveAcquirer(
                 target_snapshot_fn=adb_target_session.snapshot,
+                parser=self._player_save_parser,
                 acquisition_start_observer=lambda started_at: (
                     canonical_mapping_decode_start(
                         runtime_main_commit=runtime_mapping_main_commit,
@@ -416,23 +417,21 @@ class App:
         )
         self._player_save_preflight_coordinator = (
             PlayerSavePreflightCoordinator(
-                target_snapshot_fn=adb_target_session.snapshot,
+                acquirer=self._player_save_acquirer,
                 context_fn=self._current_player_save_preflight_context,
                 action_guard_fn=self._runtime_action_guard,
                 capture_fn=self._capture_frame,
-                acquirer=self._player_save_acquirer,
             )
             if adb_target_session is not None
             else None
         )
         save_history_reader = (
             PlayerSaveHistoryReader(
-                target_snapshot_fn=adb_target_session.snapshot,
+                acquirer=self._player_save_acquirer,
                 capture_fn=self._capture_frame,
                 attachment_context_fn=(
                     self._current_player_save_attachment_context
                 ),
-                acquirer=self._player_save_acquirer,
             )
             if adb_target_session is not None
             else None
@@ -483,11 +482,6 @@ class App:
             self._player_save_audit_collector = PlayerSaveAuditCollector(
                 enabled=config.player_save_audit_enabled,
                 interval_seconds=config.player_save_audit_interval_seconds,
-                target_snapshot_fn=(
-                    adb_target_session.snapshot
-                    if adb_target_session is not None
-                    else None
-                ),
                 acquirer=self._player_save_acquirer,
                 acquire_internally=False,
             )
@@ -520,7 +514,7 @@ class App:
             try:
                 self._player_save_passive_scheduler = PlayerSavePassiveScheduler(
                     acquirer=self._player_save_acquirer,
-                    context_fn=self._current_perk_save_monitor_context,
+                    context_fn=self._current_player_save_observation_context,
                     consumers=(self._consume_passive_player_save_bundle,),
                     interval_seconds=config.player_save_audit_interval_seconds,
                 )
@@ -699,9 +693,9 @@ class App:
                 "DEBUG",
             )
 
-    def _current_perk_save_monitor_context(
+    def _current_player_save_observation_context(
         self,
-    ) -> Optional[PerkSaveMonitorContext]:
+    ) -> Optional[PlayerSaveObservationContext]:
         """Return the current exact active-round binding, or no authority."""
 
         runtime_session_id = str(
@@ -724,7 +718,7 @@ class App:
         if target_binding is None:
             return None
         try:
-            return PerkSaveMonitorContext(
+            return PlayerSaveObservationContext(
                 runtime_session_id=runtime_session_id,
                 activity_scope_id=scope_id,
                 target_binding=target_binding,
@@ -732,33 +726,91 @@ class App:
         except (TypeError, ValueError):
             return None
 
+    def _current_perk_save_monitor_context(
+        self,
+    ) -> Optional[PlayerSaveObservationContext]:
+        """Compatibility alias for focused callers predating the shared API."""
+
+        return self._current_player_save_observation_context()
+
     def _consume_passive_player_save_bundle(
         self,
         acquisition: PlayerSaveAcquisitionBundle,
-        context: PerkSaveMonitorContext,
+        context: PlayerSaveObservationContext,
         reason_code: str,
     ) -> None:
-        """Fan one scheduled passive read to monitoring and optional audit."""
+        """Fan one scheduled passive read through the global observation API."""
+
+        self._publish_player_save_observation(
+            acquisition,
+            context=context,
+            reason_code=reason_code,
+        )
+
+    def _publish_player_save_observation(
+        self,
+        acquisition: PlayerSaveAcquisitionBundle,
+        *,
+        context: Optional[PlayerSaveObservationContext],
+        reason_code: str,
+        observe_perks: bool = True,
+        bind_new_activity: bool = False,
+    ) -> None:
+        """Deliver one immutable parsed bundle to every eligible consumer."""
 
         monitor = getattr(self, "_perk_save_monitor", None)
         metric_monitor = getattr(self, "_active_run_metric_monitor", None)
-        if monitor is not None or metric_monitor is not None:
+        if context is not None and (monitor is not None or metric_monitor is not None):
             with self._perk_save_monitor_guard():
                 if monitor is not None:
-                    monitor.observe_bundle(acquisition, context=context)
-                    self._retain_perk_timeline_save_checkpoint(
-                        monitor,
-                        context,
-                    )
+                    try:
+                        perk_bound = bool(
+                            not bind_new_activity
+                            or monitor.bind_context(
+                                context,
+                                new_activity=True,
+                            )
+                        )
+                        if perk_bound and observe_perks:
+                            monitor.observe_bundle(
+                                acquisition,
+                                context=context,
+                            )
+                            self._retain_perk_timeline_save_checkpoint(
+                                monitor,
+                                context,
+                            )
+                    except Exception:
+                        log(
+                            "[PLAYER_SAVE_API] Perk projection rejected one "
+                            "shared observation; other consumers are unaffected",
+                            "DEBUG",
+                        )
                 if metric_monitor is not None:
-                    disposition = metric_monitor.observe_bundle(
-                        acquisition,
-                        context=context,
-                    )
-                    if disposition.startswith("accepted_"):
-                        self._log_active_run_metric_summary(
-                            metric_monitor,
-                            context,
+                    try:
+                        metric_bound = bool(
+                            not bind_new_activity
+                            or metric_monitor.bind_context(
+                                context,
+                                new_activity=True,
+                            )
+                        )
+                        if metric_bound:
+                            disposition = metric_monitor.observe_bundle(
+                                acquisition,
+                                context=context,
+                            )
+                            if disposition.startswith("accepted_"):
+                                self._log_active_run_metric_summary(
+                                    metric_monitor,
+                                    context,
+                                )
+                    except Exception:
+                        log(
+                            "[PLAYER_SAVE_API] Active-metric projection rejected "
+                            "one shared observation; other consumers are "
+                            "unaffected",
+                            "DEBUG",
                         )
         self._observe_shared_acquisition_for_audit(
             acquisition,
@@ -789,7 +841,7 @@ class App:
     def _bind_new_perk_monitor_activity(self) -> None:
         monitor = getattr(self, "_perk_save_monitor", None)
         metric_monitor = getattr(self, "_active_run_metric_monitor", None)
-        context = self._current_perk_save_monitor_context()
+        context = self._current_player_save_observation_context()
         if context is not None and (
             monitor is not None or metric_monitor is not None
         ):
@@ -803,7 +855,7 @@ class App:
     @staticmethod
     def _log_active_run_metric_summary(
         monitor: ActiveRunMetricMonitor,
-        context: PerkSaveMonitorContext,
+        context: PlayerSaveObservationContext,
     ) -> None:
         """Log one compact checkpoint without exposing arbitrary save data."""
 
@@ -834,7 +886,7 @@ class App:
     def _retain_perk_timeline_save_checkpoint(
         self,
         monitor: PerkSaveMonitor,
-        context: PerkSaveMonitorContext,
+        context: PlayerSaveObservationContext,
     ) -> None:
         """Queue one detached positive prefix while holding the monitor lock."""
 
@@ -858,7 +910,7 @@ class App:
             if not (
                 isinstance(pending, tuple)
                 and len(pending) == 2
-                and isinstance(pending[0], PerkSaveMonitorContext)
+                and isinstance(pending[0], PlayerSaveObservationContext)
                 and isinstance(pending[1], Mapping)
             ):
                 return None
@@ -891,7 +943,7 @@ class App:
 
     def _sync_perk_exhaustion_evidence(self) -> None:
         monitor = getattr(self, "_perk_save_monitor", None)
-        context = self._current_perk_save_monitor_context()
+        context = self._current_player_save_observation_context()
         if monitor is None or context is None:
             return
         evidence = self._perk_timeline().exhaustion_evidence()
@@ -1072,7 +1124,7 @@ class App:
         if terminal == "GAME_OVER":
             monitor = getattr(self, "_perk_save_monitor", None)
             monitor_context = (
-                self._current_perk_save_monitor_context()
+                self._current_player_save_observation_context()
                 if binding["status"] == "bound"
                 else None
             )
@@ -1091,7 +1143,7 @@ class App:
                 "_active_run_metric_monitor",
                 None,
             )
-            metric_context = self._current_perk_save_monitor_context()
+            metric_context = self._current_player_save_observation_context()
             if metric_monitor is not None:
                 with self._perk_save_monitor_guard():
                     context["active_run_metrics"] = (
@@ -1215,17 +1267,7 @@ class App:
             return unavailable("adb_target_session_unavailable")
         acquirer = getattr(self, "_player_save_acquirer", None)
         if acquirer is None:
-            # Compatibility for focused unit instances that bypass App.__init__.
-            acquirer = StablePlayerSaveAcquirer(
-                target_snapshot_fn=session.snapshot,
-                pull_fn=pull_player_save_bytes,
-                decode_fn=decode_player_save_bytes,
-                pull_options={
-                    "attempts": 3,
-                    "settle_seconds": 0.1,
-                    "read_fn": quiet_player_save_read,
-                },
-            )
+            return unavailable("shared_player_save_acquirer_unavailable")
 
         try:
             scope = get_activity_scope()
@@ -1256,44 +1298,25 @@ class App:
                 PlayerSaveAcquisitionType.PASSIVE_STABLE_READ
             )
 
-        self._observe_shared_acquisition_for_audit(
-            acquisition,
-            reason_code=(
-                "game_over"
-                if terminal == "GAME_OVER"
-                else "tournament_results"
-                if terminal == "TOURNAMENT_RESULTS"
-                else "terminal_capture"
-            ),
+        reason_code = (
+            "game_over"
+            if terminal == "GAME_OVER"
+            else "tournament_results"
+            if terminal == "TOURNAMENT_RESULTS"
+            else "terminal_capture"
         )
-        if terminal in {"GAME_OVER", "TOURNAMENT_RESULTS"} and run_binding.get(
-            "status"
-        ) == "bound":
-            monitor_context = self._current_perk_save_monitor_context()
-            monitor = getattr(self, "_perk_save_monitor", None)
-            metric_monitor = getattr(
-                self,
-                "_active_run_metric_monitor",
-                None,
-            )
-            if monitor_context is not None and (
-                monitor is not None or metric_monitor is not None
-            ):
-                with self._perk_save_monitor_guard():
-                    if monitor is not None and terminal == "GAME_OVER":
-                        monitor.observe_bundle(
-                            acquisition,
-                            context=monitor_context,
-                        )
-                        self._retain_perk_timeline_save_checkpoint(
-                            monitor,
-                            monitor_context,
-                        )
-                    if metric_monitor is not None:
-                        metric_monitor.observe_bundle(
-                            acquisition,
-                            context=monitor_context,
-                        )
+        monitor_context = (
+            self._current_player_save_observation_context()
+            if terminal in {"GAME_OVER", "TOURNAMENT_RESULTS"}
+            and run_binding.get("status") == "bound"
+            else None
+        )
+        self._publish_player_save_observation(
+            acquisition,
+            context=monitor_context,
+            reason_code=reason_code,
+            observe_perks=terminal == "GAME_OVER",
+        )
 
         if not acquisition.complete or acquisition.snapshot is None:
             reason = (
@@ -4111,6 +4134,15 @@ class App:
         """Bind a capture or classify why fresh save evidence cannot bind it."""
 
         snapshot = acquisition.snapshot
+        if getattr(snapshot, "mapping_resolution", None) == (
+            "semantic_forward_revision"
+        ):
+            return (
+                None,
+                "unavailable",
+                "the forced-save capability grants metric observation only; "
+                "no setup-capture workflow or UI fallback was opened",
+            )
         runtime = getattr(snapshot, "runtime_save", None)
         game_state = str(evidence.get("game_state") or "")
         if runtime is None:
@@ -4527,7 +4559,7 @@ class App:
                 )
                 return True
             serializer = GuardedPlayerSaveSerializer(
-                target_snapshot_fn=session.snapshot,
+                acquirer=acquirer,
                 context_guard_fn=lambda: self._setup_capture_context_matches(
                     requested,
                     request_id,
@@ -4543,7 +4575,6 @@ class App:
                         stable=stable,
                     )
                 ),
-                acquirer=acquirer,
                 log_prefix="SETUP_CAPTURE",
             )
             serialized = serializer.acquire(
@@ -11853,7 +11884,7 @@ class App:
             ):
                 attachment_acquisition = None
             else:
-                monitor_context = PerkSaveMonitorContext(
+                monitor_context = PlayerSaveObservationContext(
                     runtime_session_id=(
                         attachment_bundle_context.runtime_session_id
                     ),
@@ -11862,43 +11893,11 @@ class App:
                     ),
                     target_binding=attachment_acquisition.binding,
                 )
-                monitor = getattr(self, "_perk_save_monitor", None)
-                metric_monitor = getattr(
-                    self,
-                    "_active_run_metric_monitor",
-                    None,
-                )
-                if monitor is not None or metric_monitor is not None:
-                    with self._perk_save_monitor_guard():
-                        if monitor is not None and monitor.bind_context(
-                            monitor_context, new_activity=True
-                        ):
-                            monitor.observe_bundle(
-                                attachment_acquisition,
-                                context=monitor_context,
-                            )
-                            self._retain_perk_timeline_save_checkpoint(
-                                monitor,
-                                monitor_context,
-                            )
-                        if metric_monitor is not None and (
-                            metric_monitor.bind_context(
-                                monitor_context,
-                                new_activity=True,
-                            )
-                        ):
-                            disposition = metric_monitor.observe_bundle(
-                                attachment_acquisition,
-                                context=monitor_context,
-                            )
-                            if disposition.startswith("accepted_"):
-                                self._log_active_run_metric_summary(
-                                    metric_monitor,
-                                    monitor_context,
-                                )
-                self._observe_shared_acquisition_for_audit(
+                self._publish_player_save_observation(
                     attachment_acquisition,
+                    context=monitor_context,
                     reason_code="forced_running_attachment",
+                    bind_new_activity=True,
                 )
         else:
             attachment_acquisition = None
