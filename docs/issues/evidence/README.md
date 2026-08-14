@@ -4,6 +4,13 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-08–13 Home Perk repair confirmation
+
+[`perk-repair-confirmation-2026-08-08-13.md`](perk-repair-confirmation-2026-08-08-13.md)
+preserves the first successful post-deployment Auto Pick correction and later
+exact Ban/Auto Pick save matches used to close the original live-confirmation
+limitation in `ISSUE-2026-033`.
+
 ## 2026-08-07 Utility Dissonance production confirmation
 
 [`utility-dissonance-confirmation-2026-08-07.md`](utility-dissonance-confirmation-2026-08-07.md)

@@ -2115,6 +2115,14 @@ resolved dossier instead of copying its detail.
   Production remained Paused pending a fresh operator-owned screen boundary;
   the deployment smoke passed, but live completion of the repair remained
   intentionally unclaimed.
+- Later production evidence closes that original boundary: a 2026-08-08 Home
+  setup repaired a real Auto Pick mismatch through three verified swaps and a
+  successful final readback, while 2026-08-12 and 2026-08-13 save-backed checks
+  matched the exact Ban set and Auto Pick order. The
+  [resolved dossier](../issues/resolved-2026.md#perk-repair-trusted-transient-ban-reads-and-local-viewport-edges)
+  and its [durable evidence extract](../issues/evidence/perk-repair-confirmation-2026-08-08-13.md)
+  own the detail. Exact ignored-swipe and transient Ban no-op recurrences are
+  not outstanding live gates.
 
 ### 2026-08-07 recoverable superseded feature retirement
 

@@ -483,6 +483,18 @@ and actionable work lives in
   Resume, or other device input. Production remained Paused pending a fresh
   operator-owned screen boundary; live completion of the Perk repair was not
   claimed from that ambiguous state.
+- **Later confirmation:** The retained
+  [2026-08-08–13 production extract](evidence/perk-repair-confirmation-2026-08-08-13.md)
+  closes that original deployment-boundary limitation. On 2026-08-08, a later
+  managed Home setup observed a real Auto Pick mismatch, made three locally
+  verified upward swaps, completed the authoritative final readback, and
+  reported `Auto Pick priority restored` before the complete Home setup
+  succeeded. Save-backed Home checks on 2026-08-12 and 2026-08-13 then matched
+  both the exact six-Ban set and the complete 18-row Auto Pick order. The exact
+  two-ignored-swipe recovery and transient Ban no-op did not naturally recur;
+  their retained regressions remain the appropriate evidence unless a future
+  recurrence supplies another live boundary. No live validation remains
+  pending for this resolved issue.
 - **Fixed by:** `a5825db`, `f747515`.
 
 ### Utility Dissonance star was labeled as Attack
