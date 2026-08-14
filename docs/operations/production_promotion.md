@@ -40,8 +40,10 @@ turning branch cleanup into a release.
    exact `D`, renewed review, and its applicable gate. If production `main`
    advances while `D` stays exact, discard the recorded `M` and repeat the
    ancestry and aggregate `M..D` review. Rerun a check only when it used the old
-   production baseline. If the new `main` is not an ancestor of `D`, reconcile
-   in the candidate worktree; that reconciliation creates a new `D`.
+   production baseline, except that the post-contention path below deliberately
+   repeats the complete applicable gate before trying to acquire ownership
+   again. If the new `main` is not an ancestor of `D`, reconcile in the
+   candidate worktree; that reconciliation creates a new `D`.
 
 Unrelated branches and worktrees may remain dirty or continue independently;
 they block promotion only if their work is included in, overlaps, or obscures
@@ -94,10 +96,10 @@ local private `refs/thetower/promotion-owner` ref for frozen candidate `D`. It
 serializes the shared production transaction; the remote fast-forward rule
 separately guards publishers from another clone.
 
-1. Inspect the ref first. If it exists, make no production or promotion-
-   topology mutation. Its object and reflog identify the in-progress candidate
-   and recorded branch/worktree; age alone never proves it stale.
-2. Acquire it with compare-and-create from any linked checkout:
+1. Inspect the ref first. Its object and reflog identify the in-progress
+   candidate and recorded branch/worktree; age alone never proves it stale.
+2. When the ref is absent, acquire it with compare-and-create from any linked
+   checkout:
 
    ```bash
    git update-ref --create-reflog \
@@ -106,14 +108,30 @@ separately guards publishers from another clone.
      0000000000000000000000000000000000000000
    ```
 
-   Failure means another transaction won the race. Stop, inspect
-   `git reflog show -1 refs/thetower/promotion-owner`, and do not retry around
-   that owner.
-3. Verify the ref equals `D` and keep it unchanged through successful-
+   A failed compare-and-create means another transaction won the race and is
+   handled as contention in step 3.
+3. When the ref already exists or acquisition fails, make no production or
+   promotion-topology mutation. Contention is a waiting state, not promotion
+   failure or task completion. Inspect
+   `git reflog show -1 refs/thetower/promotion-owner`, retain the candidate, and
+   wait read-only with bounded checks and visible status until the ref clears.
+   Do not retry around, time out, or auto-clear the recorded owner. Once it
+   clears, do not resume from the earlier gate:
+
+   a. Reread the candidate branch, tip, and cleanliness; production `HEAD`,
+      `main`, and cleanliness; and the live remote `main` tip.
+   b. Reconcile current production `main` into the candidate when necessary,
+      record the resulting exact `D`, and review the new aggregate `M..D`.
+   c. Rerun the complete applicable candidate gate on exact `D`, even if the
+      candidate survived unchanged.
+   d. Recheck the owner ref and return to step 2. If another transaction wins,
+      repeat this wait, refresh, and gate loop; do not abandon the outcome.
+
+4. Verify the ref equals `D` and keep it unchanged through successful-
    promotion closure. If a changed `main` requires candidate reconciliation,
-   compare-delete the ref at exact old `D`, create and validate the new
-   candidate, then acquire it again; never repoint an active ownership ref.
-4. If the recorded owner cannot finish, only an explicitly assigned recovery
+   compare-delete the ref at exact old `D` and return to step 3's refresh and
+   gate path; never repoint an active ownership ref.
+5. If the recorded owner cannot finish, only an explicitly assigned recovery
    owner may inspect candidate, production, remote, deployment, and cleanup
    state, bring them to a recorded coherent boundary, and compare-delete the
    exact ref. Never auto-clear it or delete it merely to unblock another

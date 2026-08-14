@@ -80,7 +80,12 @@ retires the outcome's clean integrated temporary work unless a retention guard
 applies. Candidate development and validation remain concurrent, while one
 atomically acquired private Git ref serializes the mutable production window
 from final rereads through deployment, publication, and cleanup. Remote
-fast-forward rules remain the guard against a publisher from another clone.
+fast-forward rules remain the guard against a publisher from another clone. A
+contender waits without shared mutation, then refreshes against current
+production, reruns its complete applicable candidate gate, and retries atomic
+acquisition until the outcome promotes or reaches a reported recovery guard.
+The ref is a mutex rather than a persistent FIFO queue; losing another race
+repeats the same loop instead of abandoning the outcome.
 
 Production is never switched to a feature or integration branch. Existing
 operator or parallel changes are preserved. A non-clean production checkout or

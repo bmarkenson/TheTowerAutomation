@@ -39,8 +39,8 @@ the [production procedure](operations/production_promotion.md).
 2. Read the relevant owner, source, callers, and tests; extend an existing
    capability when its boundary fits.
 3. Make one coherent change, stage only owned hunks, validate, and commit it.
-4. If a guard blocks the outcome, stop mutation and report the evidence and
-   options instead of weakening it.
+4. If a guard blocks the outcome, follow its documented wait or recovery path;
+   never weaken it or claim completion.
 
 ## Development Python environment
 
