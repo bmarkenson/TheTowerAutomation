@@ -39,6 +39,21 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 historical-evidence startup routing
+
+- Startup and live-preflight guidance now distinguishes historical evidence
+  from volatile runtime diagnosis. Closed battle records, historical log
+  ranges, retained telemetry, and retained fixtures may be inspected without
+  live preflight when they are used only as historical evidence; they cannot
+  establish current runtime state.
+- The original documentation candidate `6251d5c` was reconciled with the
+  current temporary-feature and exclusive-promotion workflow. The outcome
+  retains current `main` promotion, publication, contention, and retirement
+  rules and does not restore the former standing `develop` topology.
+- The documentation-lifecycle test, changed-link and anchor review, and
+  `git diff --check` passed. The reconciliation used fresh read-only production
+  preflight evidence but performed no service, device, or runtime mutation.
+
 ### 2026-08-14 retained Better Control validation reconciliation
 
 - A read-only audit of retained `actions.log` evidence and the durable control
