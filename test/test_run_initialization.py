@@ -948,6 +948,27 @@ class RunBoundaryTests(unittest.TestCase):
             carry_terminal_history_handoff=True,
         )
 
+    def test_strategy_replacement_preserves_observed_home_run_boundary(self):
+        manager = MissionManager(None, _RunCountingStrategy())
+        manager.start()
+
+        with patch(
+            "automation.missions.manager.start_activity_scope"
+        ) as start_activity_scope:
+            manager.maybe_run_start({"state": "RUNNING"})
+            manager.maybe_run_start(
+                {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+            )
+            manager.replace_strategy_at_boundary(_RunCountingStrategy())
+            manager.maybe_run_start(
+                {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+            )
+
+        start_activity_scope.assert_called_once_with(
+            reason="new_battle_preflight",
+            carry_terminal_history_handoff=True,
+        )
+
     def test_unknown_home_control_does_not_invent_a_run_boundary(self):
         strategy = _RunCountingStrategy()
         manager = MissionManager(None, strategy)

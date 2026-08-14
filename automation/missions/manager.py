@@ -674,7 +674,10 @@ class MissionManager:
 
         self._replace_strategy(strategy)
         self._startup_gates_deferred = False
-        self._new_battle_home_observed = False
+        # Strategy selection does not create a new physical battle boundary.
+        # Preserve an already-observed Home NEW_BATTLE scope so an operator
+        # workflow bound to that scope remains current while the replacement
+        # strategy is applied.
         self.ctx.data["startup_gates_deferred"] = False
         self._clear_attached_check_state()
 
