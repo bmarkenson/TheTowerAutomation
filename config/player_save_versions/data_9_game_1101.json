@@ -17,6 +17,8 @@
       "free_upgrade_locks",
       "guardian_chips",
       "modules",
+      "damage_slider",
+      "orb_distance",
       "auto_pick_perks",
       "target_priority",
       "ultimate_weapon_primaries",
@@ -62,15 +64,18 @@
         "currentBotPreset",
         "currentPreset",
         "currentWorkshopPreset",
+        "damageAdjustmentLog",
         "demonModeAutomateToggle",
         "firstPerkIndex",
         "guardianChipSlot",
         "guardianSlotsUnlocked",
+        "innerOrbDistance",
         "leagueID",
         "moduleEquipped",
         "nukeAutomateToggle",
         "poisonSwampStunOff",
         "presetName",
+        "rangeLevelSelected",
         "slotPresetCardAssignedBool",
         "slotsUnlocked",
         "spotlightSmartMissilesOff",
@@ -84,6 +89,7 @@
         "upgradesDefenseLockedFreeUpgrades",
         "upgradesLockedFreeUpgrades",
         "upgradesUtilityLockedFreeUpgrades",
+        "workshopOrbDistance",
         "workshopPresetName"
       ],
       "profile_observation": [
@@ -332,7 +338,6 @@
         "currentMissions",
         "dailyMissionShardTypeSelection",
         "dailyMissionsUnlocked",
-        "damageAdjustmentLog",
         "damageByDeathRayThisRound",
         "damageByDroppedLandMineThisRound",
         "damageByElectrons",
@@ -484,7 +489,6 @@
         "highestWavePerTierThisCycle",
         "highestWaveThisTier",
         "hitThisWave",
-        "innerOrbDistance",
         "isFirstPurchase",
         "isIntroSprintCancelled",
         "isTestingHeat",
@@ -584,7 +588,6 @@
         "projectilesFiredThisRound",
         "protectorsActive",
         "randomOption",
-        "rangeLevelSelected",
         "rareModulesObtained",
         "rarityAutoRerollAllowed",
         "realTimeThisRound",
@@ -798,7 +801,6 @@
         "weaponChoice3Index",
         "weekMonday",
         "workshopBuyMultiplier",
-        "workshopOrbDistance",
         "wrappedStats"
       ]
     }
@@ -1048,7 +1050,90 @@
       "family": "core"
     }
   },
+  "damage_slider": {
+    "source_field": "damageAdjustmentLog",
+    "values": [
+      {
+        "raw": 6,
+        "value": "1E-22%"
+      },
+      {
+        "raw": 9,
+        "value": "1E-19%"
+      },
+      {
+        "raw": 10,
+        "value": "1E-18%"
+      },
+      {
+        "raw": 30,
+        "value": "1E2%"
+      }
+    ]
+  },
+  "orb_distance": {
+    "context_checks": [
+      "cards_deck",
+      "workshop_preset"
+    ],
+    "source_fields": {
+      "range_basis": "rangeLevelSelected",
+      "extra": "innerOrbDistance",
+      "workshop": "workshopOrbDistance"
+    },
+    "values": [
+      {
+        "raw": {
+          "range_basis": 0,
+          "extra": 3.0,
+          "workshop": 3.8999998569488525
+        },
+        "context": {
+          "cards_deck": "Farm",
+          "workshop_preset": "Farm"
+        },
+        "value": {
+          "range_basis": "30.00m",
+          "extra": "30.00m",
+          "workshop": "39.00m"
+        }
+      },
+      {
+        "raw": {
+          "range_basis": 0,
+          "extra": 3.180000066757202,
+          "workshop": 3.7199997901916504
+        },
+        "context": {
+          "cards_deck": "Farm",
+          "workshop_preset": "Farm"
+        },
+        "value": {
+          "range_basis": "30.00m",
+          "extra": "31.80m",
+          "workshop": "37.20m"
+        }
+      },
+      {
+        "raw": {
+          "range_basis": 0,
+          "extra": 8.71588134765625,
+          "workshop": 8.036911010742188
+        },
+        "context": {
+          "cards_deck": "Tournament",
+          "workshop_preset": "Tourney"
+        },
+        "value": {
+          "range_basis": "98.38m",
+          "extra": "87.16m",
+          "workshop": "80.37m"
+        }
+      }
+    ]
+  },
   "module_loadout": {
+    "assignment_observation_scope": "canonical_global_same_family",
     "assist_slot_class": "AssistModuleSlot",
     "primary": [
       {
@@ -1674,8 +1759,5 @@
       }
     }
   },
-  "unmapped_checks": {
-    "damage_slider": "No authoritative current Damage Slider field has been mapped.",
-    "orb_distance": "The raw orb-distance fields need unit and selected-preset calibration."
-  }
+  "unmapped_checks": {}
 }

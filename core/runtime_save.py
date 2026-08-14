@@ -757,8 +757,14 @@ def _normalize_history_tail(
         history_spec,
         index=latest_index,
     )
+    _validate_history_identity_values(latest, index=latest_index)
     identity = _build_history_tail_identity(latest, mapping)
     try:
+        _validate_history_entry_values(
+            latest,
+            history_spec,
+            index=latest_index,
+        )
         completed = _build_completed_history_entry(
             latest,
             mapping,
@@ -826,10 +832,60 @@ def _validate_history_entry_shape(
     if raw_entry.get("__class__") != expected_class:
         raise _ComponentUnavailable(f"history_entry_class_changed:{index}")
 
+    return raw_entry
+
+
+def _validate_history_identity_values(
+    entry: Mapping[str, Any],
+    *,
+    index: int,
+) -> None:
+    """Validate only fields required for source-scoped tail continuity."""
+
+    for field in ("battleDate", "tier", "wave", "killedBy"):
+        value = entry.get(field)
+        if type(value) is not int:
+            raise _ComponentUnavailable(
+                f"history_entry_field_type_changed:{index}:{field}"
+            )
+        if value < 0:
+            raise _ComponentUnavailable(
+                f"malformed_history_entry_value:{index}:{field}"
+            )
+    for field in ("gameTime", "realTime"):
+        value = entry.get(field)
+        if type(value) is not float:
+            raise _ComponentUnavailable(
+                f"history_entry_field_type_changed:{index}:{field}"
+            )
+        if not math.isfinite(value) or value <= 0:
+            raise _ComponentUnavailable(
+                f"malformed_history_entry_value:{index}:{field}"
+            )
+    if type(entry.get("isTournament")) is not bool:
+        raise _ComponentUnavailable(
+            f"history_entry_field_type_changed:{index}:isTournament"
+        )
+    for field in ("battleDate", "tier", "wave"):
+        if entry[field] <= 0:
+            raise _ComponentUnavailable(
+                f"malformed_history_entry_value:{index}:{field}"
+            )
+
+
+def _validate_history_entry_values(
+    entry: Mapping[str, Any],
+    history_spec: Mapping[str, Any],
+    *,
+    index: int,
+) -> None:
+    """Validate the complete semantic History projection independently."""
+
+    expected_fields = _history_expected_fields(history_spec)
     integer_fields = _string_set(history_spec.get("integer_fields"))
     boolean_fields = _string_set(history_spec.get("boolean_fields"))
     for field in expected_fields - {"__class__"}:
-        value = raw_entry.get(field)
+        value = entry.get(field)
         if field in boolean_fields:
             if type(value) is not bool:
                 raise _ComponentUnavailable(
@@ -845,16 +901,19 @@ def _validate_history_entry_shape(
             raise _ComponentUnavailable(
                 f"history_entry_field_type_changed:{index}:{field}"
             )
-        if not math.isfinite(float(value)) or value < 0:
+        # Finite signed report statistics are valid source values. The game
+        # can overflow large counters such as damageDealt into a negative
+        # number, and the More Stats UI presents that same signed value.
+        # Identity/domain fields retain their stricter checks separately.
+        if not math.isfinite(float(value)):
             raise _ComponentUnavailable(
                 f"malformed_history_entry_value:{index}:{field}"
             )
     for positive_field in ("battleDate", "tier", "wave", "gameTime", "realTime"):
-        if raw_entry.get(positive_field, 0) <= 0:
+        if entry.get(positive_field, 0) <= 0:
             raise _ComponentUnavailable(
                 f"malformed_history_entry_value:{index}:{positive_field}"
             )
-    return raw_entry
 
 
 def _history_expected_fields(history_spec: Mapping[str, Any]) -> set[str]:

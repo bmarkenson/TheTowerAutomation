@@ -43,13 +43,19 @@ from core.level_skip_initializer import initialize_level_skips
 from core.damage_adjuster import (
     configure_damage_slider,
     format_damage_percentage,
+    normalize_damage_percentage,
 )
-from core.orb_distance import configure_orb_distance
+from core.orb_distance import (
+    configure_orb_distance,
+    normalize_orb_distance_preset,
+    normalize_orb_distance_presets,
+)
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     run_read_only_gc_preflight,
 )
 from core.gc_preflight import (
+    configuration_ui_boundary_sections,
     summarize_gc_preflight_mismatch,
     summarize_gc_preflight_variations,
 )
@@ -284,6 +290,7 @@ def _bind_save_backed_home_evidence(
         else None
     )
     consume = getattr(player_save_preflight, "consume", None)
+    retained_ui_sections = configuration_ui_boundary_sections(configuration)
     if isinstance(save_sections, Mapping) and save_sections:
         section_checks = {
             "cards": "cards_deck",
@@ -291,12 +298,36 @@ def _bind_save_backed_home_evidence(
             "bots": "bots_preset",
             "guardians": "guardian_chips",
         }
-        if not callable(consume) or any(
-            consume(section_checks[section]) is None
-            for section in save_sections
-            if section in section_checks
-        ):
+        bound_save_sections: dict[str, dict[str, Any]] = {}
+        binding_complete = callable(consume)
+        for raw_section, provenance in save_sections.items():
+            section = str(raw_section or "").strip()
+            check_id = section_checks.get(section)
+            if check_id is None or not callable(consume):
+                binding_complete = False
+                continue
+            carried = consume(check_id)
+            if carried is None:
+                binding_complete = False
+                continue
+            normalized_provenance = (
+                dict(provenance) if isinstance(provenance, Mapping) else {}
+            )
+            normalized_provenance.update(
+                disposition="save_match",
+                source="bound_player_save_preflight",
+            )
+            bound_save_sections[section] = normalized_provenance
+        if not binding_complete or len(bound_save_sections) != len(save_sections):
             payload.pop("configuration", None)
+            if retained_ui_sections:
+                payload["configuration_ui_boundary_sections"] = (
+                    retained_ui_sections
+                )
+        else:
+            bound_configuration = dict(configuration)
+            bound_configuration["save_backed_sections"] = bound_save_sections
+            payload["configuration"] = bound_configuration
 
     lock_evidence = payload.get("free_upgrade_locks")
     if (
@@ -607,7 +638,43 @@ def execute_actions(
                         "DEBUG",
                     )
                     continue
-                result = initialize_level_skips(screenshot=screen)
+                save_coordinator = (
+                    ctx.data.get(
+                        "player_save_attachment_evidence"
+                        if attachment_context
+                        else "player_save_preflight_coordinator"
+                    )
+                    if ctx is not None
+                    else None
+                )
+                invalidate_snapshot = getattr(
+                    save_coordinator,
+                    "invalidate",
+                    None,
+                )
+                close_mapping_window = getattr(
+                    save_coordinator,
+                    "close_mapping_candidate_window",
+                    None,
+                )
+
+                def observe_level_skip_mutation() -> None:
+                    if callable(invalidate_snapshot):
+                        invalidate_snapshot(
+                            "level_skip_mutation_started",
+                            check_ids=(),
+                        )
+                    elif callable(close_mapping_window):
+                        close_mapping_window("level_skip_mutation_started")
+
+                level_skip_kwargs: Dict[str, Any] = {"screenshot": screen}
+                if callable(invalidate_snapshot) or callable(
+                    close_mapping_window
+                ):
+                    level_skip_kwargs["mutation_observer_fn"] = (
+                        observe_level_skip_mutation
+                    )
+                result = initialize_level_skips(**level_skip_kwargs)
                 if mv is not None:
                     mv["ehls_completed"] = result.ehls_maxed
                     mv["eals_completed"] = result.eals_maxed
@@ -642,22 +709,190 @@ def execute_actions(
                     if attachment_context and requested_mode == "enforce"
                     else requested_mode
                 )
+                save_coordinator = (
+                    ctx.data.get(
+                        "player_save_attachment_evidence"
+                        if attachment_context
+                        else "player_save_preflight_coordinator"
+                    )
+                    if ctx is not None
+                    else None
+                )
+                consume_save = getattr(save_coordinator, "consume", None)
+                carried_damage = (
+                    consume_save("damage_slider")
+                    if callable(consume_save)
+                    else None
+                )
+                try:
+                    expected_damage = normalize_damage_percentage(
+                        act.get("value")
+                    )
+                except (TypeError, ValueError):
+                    expected_damage = None
+                try:
+                    observed_damage = normalize_damage_percentage(
+                        carried_damage
+                    )
+                except (TypeError, ValueError):
+                    observed_damage = None
+                damage_matches = bool(
+                    observed_damage is not None
+                    and expected_damage is not None
+                    and observed_damage == expected_damage
+                )
+                if (
+                    mode in {"observe", "enforce"}
+                    and
+                    observed_damage is not None
+                    and expected_damage is not None
+                    and (damage_matches or mode == "observe")
+                ):
+                    save_reason = (
+                        "bound_player_save_preflight"
+                        if damage_matches
+                        else "bound_player_save_observation"
+                    )
+                    payload = {
+                        "mode": mode,
+                        "expected": expected_damage,
+                        "initial": observed_damage,
+                        "final": observed_damage,
+                        "observed": True,
+                        "matches": damage_matches,
+                        "changed": False,
+                        "steps": 0,
+                        "dismissed": True,
+                        "reason": save_reason,
+                        "success": damage_matches,
+                        "source": "bound_player_save_preflight",
+                    }
+                    if mv is not None:
+                        mv["damage_slider_observation"] = payload
+                        if mode == "enforce":
+                            mv["damage_slider_checked"] = True
+                        elif mode == "observe":
+                            mv["damage_slider_observed"] = True
+                            if attachment_context:
+                                _record_attached_observation_result(
+                                    mv,
+                                    check_id="damage_slider",
+                                    matched=damage_matches,
+                                    reason=save_reason,
+                                )
+                    log_mission(
+                        "[DAMAGE_SLIDER] source=bound_player_save_preflight "
+                        f"mode={mode} expected="
+                        f"{format_damage_percentage(expected_damage)} "
+                        f"observed={format_damage_percentage(observed_damage)} "
+                        f"steps=0 success={damage_matches} "
+                        f"reason={'save_match' if damage_matches else 'save_observation'}",
+                        "INFO" if damage_matches or mode == "observe" else "WARN",
+                    )
+                    continue
+                if carried_damage is not None:
+                    fallback = getattr(save_coordinator, "fallback_checks", None)
+                    if callable(fallback):
+                        fallback(
+                            "damage_slider_action_requirement_changed",
+                            check_ids=("damage_slider",),
+                        )
+                record_mapping_observation = getattr(
+                    save_coordinator,
+                    "record_mapping_observation",
+                    None,
+                )
+                close_mapping_window = getattr(
+                    save_coordinator,
+                    "close_mapping_candidate_window",
+                    None,
+                )
+                invalidate_snapshot = getattr(
+                    save_coordinator,
+                    "invalidate",
+                    None,
+                )
+                record_ui_verification = getattr(
+                    save_coordinator,
+                    "record_ui_verification",
+                    None,
+                )
+
+                def observe_initial_damage_slider(reading: Any) -> None:
+                    percentage = getattr(reading, "percentage", None)
+                    if not callable(record_mapping_observation) or not percentage:
+                        return
+                    try:
+                        record_mapping_observation(
+                            "damage_slider",
+                            build_mapping_candidate_ui_evidence(
+                                "damage_slider",
+                                canonical_values=[percentage],
+                                locator_values={
+                                    "damageAdjustmentLog": percentage,
+                                },
+                                locator_scopes={
+                                    "damageAdjustmentLog": {
+                                        "field": "damageAdjustmentLog",
+                                    }
+                                },
+                            ),
+                        )
+                    except Exception as exc:
+                        log(
+                            "[PLAYER_SAVE_MAPPING] Initial Damage Slider "
+                            f"observation failed: {exc}",
+                            "DEBUG",
+                        )
+
+                def observe_damage_slider_repair() -> None:
+                    if callable(invalidate_snapshot):
+                        invalidate_snapshot(
+                            "damage_slider_repair_started",
+                            check_ids=("damage_slider",),
+                        )
+                    elif callable(close_mapping_window):
+                        close_mapping_window("damage_slider_repair_started")
+
+                damage_slider_kwargs: Dict[str, Any] = {"mode": mode}
+                if callable(record_mapping_observation):
+                    damage_slider_kwargs["initial_evidence_observer_fn"] = (
+                        observe_initial_damage_slider
+                    )
+                if callable(invalidate_snapshot) or callable(
+                    close_mapping_window
+                ):
+                    damage_slider_kwargs["repair_observer_fn"] = (
+                        observe_damage_slider_repair
+                    )
                 result = configure_damage_slider(
                     act.get("value"),
-                    mode=mode,
+                    **damage_slider_kwargs,
                 )
                 payload = result.as_dict()
+                ui_verified = True
+                if result.success and callable(record_ui_verification):
+                    ui_verified = (
+                        record_ui_verification(
+                            "damage_slider",
+                            changed=bool(result.changed),
+                        )
+                        is not False
+                    )
+                    if not ui_verified:
+                        payload["save_ui_verification"] = "contradiction"
+                workflow_success = bool(result.success and ui_verified)
                 if mv is not None:
                     mv["damage_slider_observation"] = payload
                     if mode == "enforce":
-                        mv["damage_slider_checked"] = result.success
+                        mv["damage_slider_checked"] = workflow_success
                     elif mode == "observe":
                         mv["damage_slider_observed"] = True
                         if attachment_context:
                             _record_attached_observation_result(
                                 mv,
                                 check_id="damage_slider",
-                                matched=bool(result.success),
+                                matched=workflow_success,
                                 reason=str(result.reason),
                             )
                 log_mission(
@@ -666,9 +901,9 @@ def execute_actions(
                     f"expected={format_damage_percentage(result.expected)} "
                     f"initial={format_damage_percentage(result.initial)} "
                     f"final={format_damage_percentage(result.final)} "
-                    f"steps={result.steps} success={result.success} "
+                    f"steps={result.steps} success={workflow_success} "
                     f"reason={result.reason}",
-                    "INFO" if result.success else "WARN",
+                    "INFO" if workflow_success else "WARN",
                 )
             elif t == "orb_distance_configure":
                 if is_strategy_action and last_state not in allowed_states:
@@ -696,21 +931,224 @@ def execute_actions(
                     )
                 if action_guard_fn is not None:
                     orb_distance_kwargs["action_guard_fn"] = action_guard_fn
+                save_coordinator = (
+                    ctx.data.get(
+                        "player_save_attachment_evidence"
+                        if attachment_context
+                        else "player_save_preflight_coordinator"
+                    )
+                    if ctx is not None
+                    else None
+                )
+                consume_save = getattr(save_coordinator, "consume", None)
+                carried_orb = (
+                    consume_save("orb_distance")
+                    if callable(consume_save)
+                    else None
+                )
+                orb_action_valid = mode in {"observe", "enforce"}
+                configured_orb_presets = None
+                try:
+                    requested_orb = normalize_orb_distance_preset(
+                        {
+                            "range_basis": act.get("range_basis"),
+                            "extra": act.get("extra"),
+                            "workshop": act.get("workshop"),
+                        }
+                    )
+                    if "range_presets" in act:
+                        configured_orb_presets = normalize_orb_distance_presets(
+                            act.get("range_presets")
+                        )
+                except (TypeError, ValueError):
+                    requested_orb = None
+                    orb_action_valid = False
+                try:
+                    observed_orb = normalize_orb_distance_preset(carried_orb)
+                except (TypeError, ValueError):
+                    observed_orb = None
+                expected_orb = requested_orb
+                if observed_orb is not None and configured_orb_presets is not None:
+                    expected_orb = next(
+                        (
+                            preset
+                            for preset in configured_orb_presets
+                            if preset["range_basis"]
+                            == observed_orb["range_basis"]
+                        ),
+                        None,
+                    )
+                orb_matches = bool(
+                    observed_orb is not None
+                    and expected_orb is not None
+                    and observed_orb == expected_orb
+                )
+                if (
+                    orb_action_valid
+                    and
+                    observed_orb is not None
+                    and expected_orb is not None
+                    and (orb_matches or mode == "observe")
+                ):
+                    save_reason = (
+                        "bound_player_save_preflight"
+                        if orb_matches
+                        else "bound_player_save_observation"
+                    )
+                    payload = {
+                        "mode": mode,
+                        "range_basis": expected_orb["range_basis"],
+                        "range_observed": observed_orb["range_basis"],
+                        "expected_extra": expected_orb["extra"],
+                        "expected_workshop": expected_orb["workshop"],
+                        "initial_extra": observed_orb["extra"],
+                        "initial_workshop": observed_orb["workshop"],
+                        "final_extra": observed_orb["extra"],
+                        "final_workshop": observed_orb["workshop"],
+                        "observed": True,
+                        "matches": orb_matches,
+                        "changed": False,
+                        "extra_steps": 0,
+                        "workshop_steps": 0,
+                        "dismissed": True,
+                        "reason": save_reason,
+                        "preserved": False,
+                        "success": orb_matches,
+                        "source": "bound_player_save_preflight",
+                    }
+                    if mv is not None:
+                        mv["orb_distance_observation"] = payload
+                        if mode == "enforce":
+                            mv["orb_distance_checked"] = True
+                        elif mode == "observe":
+                            mv["orb_distance_observed"] = True
+                            if attachment_context:
+                                _record_attached_observation_result(
+                                    mv,
+                                    check_id="orb_distance",
+                                    matched=orb_matches,
+                                    reason=save_reason,
+                                )
+                    log_mission(
+                        "[ORB_DISTANCE] source=bound_player_save_preflight "
+                        f"mode={mode} range={observed_orb['range_basis']} "
+                        f"expected=({expected_orb['extra']},"
+                        f"{expected_orb['workshop']}) observed=("
+                        f"{observed_orb['extra']},{observed_orb['workshop']}) "
+                        f"steps=(0,0) success={orb_matches} "
+                        f"reason={'save_match' if orb_matches else 'save_observation'}",
+                        "INFO" if orb_matches or mode == "observe" else "WARN",
+                    )
+                    continue
+                if carried_orb is not None:
+                    fallback = getattr(save_coordinator, "fallback_checks", None)
+                    if callable(fallback):
+                        fallback(
+                            "orb_distance_action_requirement_changed",
+                            check_ids=("orb_distance",),
+                        )
+                record_mapping_observation = getattr(
+                    save_coordinator,
+                    "record_mapping_observation",
+                    None,
+                )
+                close_mapping_window = getattr(
+                    save_coordinator,
+                    "close_mapping_candidate_window",
+                    None,
+                )
+                invalidate_snapshot = getattr(
+                    save_coordinator,
+                    "invalidate",
+                    None,
+                )
+                record_ui_verification = getattr(
+                    save_coordinator,
+                    "record_ui_verification",
+                    None,
+                )
+
+                def observe_initial_orb_distance(
+                    range_basis: str,
+                    reading: Any,
+                ) -> None:
+                    if not callable(record_mapping_observation):
+                        return
+                    extra = getattr(reading, "extra", None)
+                    workshop = getattr(reading, "workshop", None)
+                    if not range_basis or extra is None or workshop is None:
+                        return
+                    locator_values = {
+                        "rangeLevelSelected": range_basis,
+                        "innerOrbDistance": extra,
+                        "workshopOrbDistance": workshop,
+                    }
+                    try:
+                        record_mapping_observation(
+                            "orb_distance",
+                            build_mapping_candidate_ui_evidence(
+                                "orb_distance",
+                                canonical_values=list(locator_values.values()),
+                                locator_values=locator_values,
+                                locator_scopes={
+                                    field: {"field": field}
+                                    for field in locator_values
+                                },
+                            ),
+                        )
+                    except Exception as exc:
+                        log(
+                            "[PLAYER_SAVE_MAPPING] Initial Orb Distance "
+                            f"observation failed: {exc}",
+                            "DEBUG",
+                        )
+
+                def observe_orb_distance_repair() -> None:
+                    if callable(invalidate_snapshot):
+                        invalidate_snapshot(
+                            "orb_distance_repair_started",
+                            check_ids=("orb_distance",),
+                        )
+                    elif callable(close_mapping_window):
+                        close_mapping_window("orb_distance_repair_started")
+
+                if callable(record_mapping_observation):
+                    orb_distance_kwargs["initial_evidence_observer_fn"] = (
+                        observe_initial_orb_distance
+                    )
+                if callable(invalidate_snapshot) or callable(
+                    close_mapping_window
+                ):
+                    orb_distance_kwargs["repair_observer_fn"] = (
+                        observe_orb_distance_repair
+                    )
                 result = configure_orb_distance(
                     **orb_distance_kwargs,
                 )
                 payload = result.as_dict()
+                ui_verified = True
+                if result.success and callable(record_ui_verification):
+                    ui_verified = (
+                        record_ui_verification(
+                            "orb_distance",
+                            changed=bool(result.changed),
+                        )
+                        is not False
+                    )
+                    if not ui_verified:
+                        payload["save_ui_verification"] = "contradiction"
+                workflow_success = bool(result.success and ui_verified)
                 if mv is not None:
                     mv["orb_distance_observation"] = payload
                     if mode == "enforce":
-                        mv["orb_distance_checked"] = result.success
+                        mv["orb_distance_checked"] = workflow_success
                     elif mode == "observe":
                         mv["orb_distance_observed"] = True
                         if attachment_context:
                             _record_attached_observation_result(
                                 mv,
                                 check_id="orb_distance",
-                                matched=bool(result.success),
+                                matched=workflow_success,
                                 reason=str(result.reason),
                             )
                 log_mission(
@@ -723,8 +1161,8 @@ def execute_actions(
                     f"{result.initial_workshop}) "
                     f"final=({result.final_extra},{result.final_workshop}) "
                     f"steps=({result.extra_steps},{result.workshop_steps}) "
-                    f"success={result.success} reason={result.reason}",
-                    "INFO" if result.success else "WARN",
+                    f"success={workflow_success} reason={result.reason}",
+                    "INFO" if workflow_success else "WARN",
                 )
             elif t == "target_priority_ensure":
                 if is_strategy_action and last_state not in allowed_states:
@@ -759,6 +1197,17 @@ def execute_actions(
                 def observe_target_repair() -> None:
                     nonlocal target_repaired
                     target_repaired = True
+                    invalidate_snapshot = getattr(
+                        save_coordinator,
+                        "invalidate",
+                        None,
+                    )
+                    if callable(invalidate_snapshot):
+                        invalidate_snapshot(
+                            "target_priority_repair_started",
+                            check_ids=("target_priority",),
+                        )
+                        return
                     close_mapping_window = getattr(
                         save_coordinator,
                         "close_mapping_candidate_window",

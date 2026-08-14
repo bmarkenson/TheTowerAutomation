@@ -144,6 +144,7 @@ from core.player_save_temporal import (
 from core.profile_progression import unavailable_profile_progression
 from core.terminal_save_report import (
     terminal_save_report_complete,
+    terminal_save_report_structural_complete,
     terminal_history_transition_from_acquisition,
     terminal_mapping_workflow_provenance,
     terminal_save_report_from_acquisition,
@@ -4829,22 +4830,44 @@ class App:
         receipt = None
         battle_id = None
         killed_by = ""
-        if (
+        semantic_report_complete = bool(
             isinstance(report, Mapping)
             and terminal_save_report_complete(report)
+        )
+        structural_report_complete = bool(
+            isinstance(report, Mapping)
+            and terminal_save_report_structural_complete(report)
+        )
+        if (
+            isinstance(report, Mapping)
+            and (semantic_report_complete or structural_report_complete)
             and isinstance(acquisition, PlayerSaveAcquisitionBundle)
         ):
-            completed = report.get("completed_entry")
-            identity = (
-                completed.get("identity")
-                if isinstance(completed, Mapping)
-                else None
-            )
-            killed_by = str(
-                identity.get("killed_by")
-                if isinstance(identity, Mapping)
-                else ""
-            ).strip()
+            if semantic_report_complete:
+                completed = report.get("completed_entry")
+                identity = (
+                    completed.get("identity")
+                    if isinstance(completed, Mapping)
+                    else None
+                )
+                killed_by = str(
+                    identity.get("killed_by")
+                    if isinstance(identity, Mapping)
+                    else ""
+                ).strip()
+            else:
+                snapshot = acquisition.snapshot
+                checks = getattr(snapshot, "checks", None)
+                cause = (
+                    checks.get("battle_history_killed_by")
+                    if isinstance(checks, Mapping)
+                    else None
+                )
+                if (
+                    getattr(cause, "status", None) == "observed"
+                    and getattr(cause, "complete", None) is True
+                ):
+                    killed_by = str(getattr(cause, "value", "") or "").strip()
             if killed_by:
                 collection = str(
                     manual.get("surrender_collection") or "minimal"
@@ -4874,52 +4897,79 @@ class App:
                 except (TypeError, ValueError) as exc:
                     reason = f"terminal receipt rejected: {exc}"
                 else:
-                    status = (
-                        "confirmed_surrender"
-                        if killed_by.lower() == "surrender"
-                        else "confirmed_other"
+                    structural_minimal_surrender = bool(
+                        not semantic_report_complete
+                        and killed_by.lower() == "surrender"
+                        and collection == "minimal"
                     )
-                    reason = "causally bound terminal save classified the outcome"
-                    if status == "confirmed_surrender" and collection == "minimal":
-                        operation_id = f"{manual_id}:minimal-surrender-record"
-                        log_action_intent(
-                            "Recording a manual Surrender without terminal UI",
-                            reason=(
-                                "the exact-run natural save confirmed Surrender "
-                                "and minimal collection was selected"
-                            ),
-                            operation_id=operation_id,
+                    if not semantic_report_complete and not structural_minimal_surrender:
+                        receipt = None
+                        reason = (
+                            "terminal History continuity is complete, but the "
+                            "semantic report requires the existing UI fallback"
                         )
-                        try:
-                            record = self._persist_minimal_surrender_record(
-                                context,
-                                acquisition,
-                                initiator="operator_manual_control",
-                                disposition_provenance={
-                                    "terminal_receipt": receipt,
-                                },
-                            )
-                        except (OSError, TypeError, ValueError) as exc:
-                            status = "unavailable"
-                            receipt = None
-                            reason = f"minimal surrender record failed: {exc}"
-                            log_result(
-                                "Manual Surrender record failed; Automation "
-                                "remains Paused and no stats UI was opened",
-                                detail=f"[MANUAL_CONTROL] reason={reason}",
-                                operation_id=operation_id,
+                    else:
+                        status = (
+                            "confirmed_surrender"
+                            if killed_by.lower() == "surrender"
+                            else "confirmed_other"
+                        )
+                        reason = (
+                            "causally bound structural terminal save classified "
+                            "minimal Surrender; semantic record publication is "
+                            "unavailable"
+                            if structural_minimal_surrender
+                            else "causally bound terminal save classified the outcome"
+                        )
+                    if status == "confirmed_surrender" and collection == "minimal":
+                        if structural_minimal_surrender:
+                            log(
+                                "[MANUAL_CONTROL] Exact structural History "
+                                "continuity confirmed minimal Surrender; the "
+                                "malformed semantic report was not published "
+                                "and no terminal UI input is required",
+                                "INFO",
                             )
                         else:
-                            battle_id = str(record.get("battle_id") or "")
-                            log_result(
-                                "Manual Surrender recorded from save; stats UI "
-                                "and optional enrichment were skipped",
-                                detail=(
-                                    "[MANUAL_CONTROL] disposition=minimal "
-                                    f"battle_id={battle_id} analytics=excluded"
+                            operation_id = f"{manual_id}:minimal-surrender-record"
+                            log_action_intent(
+                                "Recording a manual Surrender without terminal UI",
+                                reason=(
+                                    "the exact-run natural save confirmed Surrender "
+                                    "and minimal collection was selected"
                                 ),
                                 operation_id=operation_id,
                             )
+                            try:
+                                record = self._persist_minimal_surrender_record(
+                                    context,
+                                    acquisition,
+                                    initiator="operator_manual_control",
+                                    disposition_provenance={
+                                        "terminal_receipt": receipt,
+                                    },
+                                )
+                            except (OSError, TypeError, ValueError) as exc:
+                                status = "unavailable"
+                                receipt = None
+                                reason = f"minimal surrender record failed: {exc}"
+                                log_result(
+                                    "Manual Surrender record failed; Automation "
+                                    "remains Paused and no stats UI was opened",
+                                    detail=f"[MANUAL_CONTROL] reason={reason}",
+                                    operation_id=operation_id,
+                                )
+                            else:
+                                battle_id = str(record.get("battle_id") or "")
+                                log_result(
+                                    "Manual Surrender recorded from save; stats UI "
+                                    "and optional enrichment were skipped",
+                                    detail=(
+                                        "[MANUAL_CONTROL] disposition=minimal "
+                                        f"battle_id={battle_id} analytics=excluded"
+                                    ),
+                                    operation_id=operation_id,
+                                )
         evidence: Dict[str, object] = {
             "schema_version": 1,
             "status": status,
@@ -13857,12 +13907,23 @@ class App:
                 close_mapping_candidate_window(
                     f"home_setup_retry:{check_id}"
                 )
+            revalidation_required = bool(
+                isinstance(getattr(setup, "evidence", None), Mapping)
+                and isinstance(
+                    setup.evidence.get("save_preflight"),
+                    Mapping,
+                )
+                and setup.evidence["save_preflight"].get(
+                    "revalidation_required"
+                )
+                is True
+            )
             log(
                 f"[GC_NO_BATTLE] Home setup attempt {attempt}/"
                 f"{HOME_SETUP_MAX_ATTEMPTS} failed at {check_id}: "
                 f"{setup.reason}; retrying the complete setup from fresh "
                 "Home evidence",
-                "WARN",
+                "INFO" if revalidation_required else "WARN",
                 console=True,
             )
             current = self._capture_frame()

@@ -41,6 +41,7 @@ MAPPING_CANDIDATE_STATUSES = frozenset(
 MAPPING_CANDIDATE_VALUE_KINDS = frozenset(
     {
         "battle_history_killed_by_id",
+        "damage_slider_calibration",
         "guardian_chip_id",
         "module_assist_type",
         "module_info_index",
@@ -53,6 +54,7 @@ MAPPING_CANDIDATE_VALUE_KINDS = frozenset(
 MAPPING_CANDIDATE_CHECKS = frozenset(
     {
         "battle_history_killed_by",
+        "damage_slider",
         "guardian_chips",
         "modules",
         "orb_distance",
@@ -83,9 +85,19 @@ MAPPING_CANDIDATE_MAPPING_RESOLUTIONS = frozenset(
 _SAFE_CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,95}")
 _SAFE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,191}")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
-_ALLOWED_SCOPE_KEYS = frozenset({"slot_key", "family", "role", "field"})
+_ALLOWED_SCOPE_KEYS = frozenset(
+    {
+        "slot_key",
+        "family",
+        "role",
+        "field",
+        "cards_deck",
+        "workshop_preset",
+    }
+)
 _CHECK_VALUE_KINDS = {
     "battle_history_killed_by": frozenset({"battle_history_killed_by_id"}),
+    "damage_slider": frozenset({"damage_slider_calibration"}),
     "guardian_chips": frozenset({"guardian_chip_id"}),
     "modules": frozenset({"module_assist_type", "module_info_index"}),
     "orb_distance": frozenset({"orb_distance_calibration"}),
@@ -327,7 +339,7 @@ def build_mapping_candidate_ui_evidence(
         _semantic_values(
             canonical_values,
             "canonical_values",
-            allow_duplicates=(check in {"modules", "orb_distance"}),
+            allow_duplicates=(check in {"damage_slider", "modules", "orb_distance"}),
         )
     )
     safe_locators = _locator_values(locator_values, "locator_values")
@@ -434,10 +446,13 @@ def resolve_mapping_candidates(
                 status, strength, reason = _resolved_disposition(item, semantic)
         else:
             observed_scope = locator_scopes.get(item["locator"], {})
+            expected_observed_scope = item["scope"]
+            if item["value_kind"] == "orb_distance_calibration":
+                expected_observed_scope = {"field": item["locator"]}
             if (
                 len(semantic_values) == item["expected_observation_count"]
                 and len(locator_values) == item["expected_observation_count"]
-                and observed_scope == item["scope"]
+                and observed_scope == expected_observed_scope
             ):
                 semantic = locator_values.get(item["locator"])
             if semantic is not None:
@@ -507,11 +522,15 @@ def reconcile_mapping_candidate_resolutions(
     by_discriminator: dict[tuple[str, str, str], list[int]] = {}
     for index, claim in enumerate(normalized):
         candidate = claim["candidate"]
-        scope_owner = (
-            candidate["scope"].get("field", "")
-            if candidate["value_kind"] == "orb_distance_calibration"
-            else ""
-        )
+        scope_owner = ""
+        if candidate["value_kind"] == "damage_slider_calibration":
+            scope_owner = candidate["scope"].get("field", "")
+        elif candidate["value_kind"] == "orb_distance_calibration":
+            scope_owner = json.dumps(
+                candidate["scope"],
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         identity = (
             candidate["value_kind"],
             json.dumps(candidate["raw_discriminator"], sort_keys=True),
@@ -1303,7 +1322,12 @@ def validate_mapping_candidate_record(record: object) -> dict[str, Any]:
                 "observed_semantic_values",
                 allow_duplicates=(
                     kind
-                    in {"module_info_index", "module_assist_type", "orb_distance_calibration"}
+                    in {
+                        "damage_slider_calibration",
+                        "module_info_index",
+                        "module_assist_type",
+                        "orb_distance_calibration",
+                    }
                 ),
             )
         ),
@@ -1482,6 +1506,10 @@ def _require_pending_pairing_invariants(
             "battle_history_killed_by_id",
             "exact_locator",
         ),
+        "damage_slider": (
+            "damage_slider_calibration",
+            "calibration_sample",
+        ),
         "guardian_chips": ("guardian_chip_id", "singleton_remainder"),
         "orb_distance": ("orb_distance_calibration", "calibration_sample"),
         "perk_auto_pick_order": ("perk_id", "exact_locator"),
@@ -1517,10 +1545,20 @@ def _require_pending_pairing_invariants(
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_assist_scope_invalid"
             )
-    elif check_id == "orb_distance":
+    elif check_id == "damage_slider":
         if scope != {"field": candidate["locator"]}:
             raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_orb_scope_invalid"
+                "mapping_candidate_calibration_scope_invalid"
+            )
+    elif check_id == "orb_distance":
+        if (
+            set(scope) != {"field", "cards_deck", "workshop_preset"}
+            or scope.get("field") != candidate["locator"]
+            or not scope.get("cards_deck")
+            or not scope.get("workshop_preset")
+        ):
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_calibration_scope_invalid"
             )
     elif scope:
         raise PlayerSaveMappingCandidateError(
@@ -1537,6 +1575,7 @@ def _require_persisted_pairing_invariants(
     scope = candidate["scope"]
     expected_pairing = {
         "battle_history_killed_by": "exact_locator",
+        "damage_slider": "calibration_sample",
         "guardian_chips": "singleton_remainder",
         "orb_distance": "calibration_sample",
         "perk_auto_pick_order": "exact_locator",
@@ -1571,10 +1610,20 @@ def _require_persisted_pairing_invariants(
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_assist_scope_invalid"
             )
-    elif check_id == "orb_distance":
+    elif check_id == "damage_slider":
         if scope != {"field": candidate["locator"]}:
             raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_orb_scope_invalid"
+                "mapping_candidate_calibration_scope_invalid"
+            )
+    elif check_id == "orb_distance":
+        if scope != {"field": candidate["locator"]} and (
+            set(scope) != {"field", "cards_deck", "workshop_preset"}
+            or scope.get("field") != candidate["locator"]
+            or not scope.get("cards_deck")
+            or not scope.get("workshop_preset")
+        ):
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_calibration_scope_invalid"
             )
     elif scope:
         raise PlayerSaveMappingCandidateError(
@@ -1690,7 +1739,7 @@ def _ui_observation(
     values = _semantic_values(
         raw.get("canonical_values"),
         "canonical_values",
-        allow_duplicates=(check_id in {"modules", "orb_distance"}),
+        allow_duplicates=(check_id in {"damage_slider", "modules", "orb_distance"}),
     )
     locators = _locator_values(raw.get("locator_values"), "locator_values")
     raw_scopes = raw.get("locator_scopes")
@@ -1790,6 +1839,7 @@ def _normalize_resolved(raw: object) -> dict[str, Any]:
                     in {
                         "module_info_index",
                         "module_assist_type",
+                        "damage_slider_calibration",
                         "orb_distance_calibration",
                     }
                 ),
@@ -2061,7 +2111,9 @@ def _raw_discriminator(
     already_wrapped: bool = False,
 ) -> dict[str, Any]:
     discriminator_kind = (
-        "finite_number" if kind == "orb_distance_calibration" else "integer_id"
+        "finite_number"
+        if kind == "orb_distance_calibration"
+        else "integer_id"
     )
     if already_wrapped:
         wrapped = _exact_mapping(raw, {"kind", "value"}, "raw_discriminator")
@@ -2078,6 +2130,10 @@ def _raw_discriminator(
         if not (-1_000_000 <= float(raw) <= 1_000_000):
             raise PlayerSaveMappingCandidateError("raw_discriminator_invalid")
         value: int | float = raw
+    elif kind == "damage_slider_calibration":
+        value = _nonnegative_int(raw, "raw_discriminator")
+        if value > 9_223_372_036_854_775_807:
+            raise PlayerSaveMappingCandidateError("raw_discriminator_invalid")
     else:
         value = _nonnegative_int(raw, "raw_discriminator")
         if value > 9_223_372_036_854_775_807:
@@ -2329,6 +2385,7 @@ __all__ = [
     "PlayerSaveMappingCandidateError",
     "build_mapping_candidate_context",
     "build_mapping_candidate_record",
+    "build_mapping_candidate_ui_evidence",
     "canonical_mapping_set_fingerprint",
     "fingerprint_json",
     "mapping_candidate_record_status",

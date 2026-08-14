@@ -15,6 +15,7 @@ from core.player_save_mapping_candidates import (
     PlayerSaveMappingCandidateError,
     build_mapping_candidate_context,
     build_mapping_candidate_record,
+    build_mapping_candidate_ui_evidence,
     mapping_candidate_review_status,
     pending_mapping_candidate,
     proposed_mapping_patch,
@@ -746,7 +747,11 @@ def test_orb_calibration_retains_duplicate_values_as_supporting_evidence():
         locator="innerOrbDistance",
         expected_observation_count=3,
         minimum_evidence_count=2,
-        scope={"field": "innerOrbDistance"},
+        scope={
+            "field": "innerOrbDistance",
+            "cards_deck": "Farm",
+            "workshop_preset": "Farm",
+        },
     )
     evidence = {
         "canonical_values": ["60.00m", "60.00m", "70.00m"],
@@ -785,6 +790,54 @@ def test_orb_calibration_retains_duplicate_values_as_supporting_evidence():
     assert resolved["status"] == "needs_more_evidence"
     assert resolved["observed_semantic_values"].count("60.00m") == 2
     assert validate_mapping_candidate_record(record) == record
+
+
+def test_damage_calibration_requires_an_exact_integer_discriminator():
+    with pytest.raises(
+        PlayerSaveMappingCandidateError,
+        match="raw_discriminator_invalid",
+    ):
+        pending_mapping_candidate(
+            value_kind="damage_slider_calibration",
+            raw_value=9.0,
+            pairing_method="calibration_sample",
+            locator="damageAdjustmentLog",
+            expected_observation_count=1,
+            minimum_evidence_count=2,
+            scope={"field": "damageAdjustmentLog"},
+        )
+
+    pending = pending_mapping_candidate(
+        value_kind="damage_slider_calibration",
+        raw_value=8,
+        pairing_method="calibration_sample",
+        locator="damageAdjustmentLog",
+        expected_observation_count=1,
+        minimum_evidence_count=2,
+        scope={"field": "damageAdjustmentLog"},
+    )
+    evidence = build_mapping_candidate_ui_evidence(
+        "damage_slider",
+        canonical_values=["1E-20%"],
+        locator_values={"damageAdjustmentLog": "1E-20%"},
+        locator_scopes={
+            "damageAdjustmentLog": {"field": "damageAdjustmentLog"}
+        },
+        observed_at=OBSERVED_AT,
+    )
+
+    resolved = resolve_mapping_candidates(
+        "damage_slider",
+        [pending],
+        evidence,
+    )[0]
+
+    assert resolved["raw_discriminator"] == {
+        "kind": "integer_id",
+        "value": 8,
+    }
+    assert resolved["semantic_value"] == "1E-20%"
+    assert resolved["status"] == "needs_more_evidence"
 
 
 def test_module_assist_pairing_persists_family_scope_and_proposes_replace():
@@ -942,6 +995,100 @@ def test_same_save_discriminator_with_different_ui_semantics_is_ambiguous():
         [
             {"check_id": "perk_first_choice", "candidate": first},
             {"check_id": "perk_auto_pick_order", "candidate": auto},
+        ]
+    )
+
+    assert {item["candidate"]["status"] for item in reconciled} == {
+        "ambiguous"
+    }
+    assert all(
+        item["candidate"]["semantic_value"] is None for item in reconciled
+    )
+
+
+def _resolved_orb_range_candidate(
+    *,
+    cards_deck: str,
+    workshop_preset: str,
+    range_basis: str,
+) -> dict:
+    pending = pending_mapping_candidate(
+        value_kind="orb_distance_calibration",
+        raw_value=0,
+        pairing_method="calibration_sample",
+        locator="rangeLevelSelected",
+        expected_observation_count=3,
+        minimum_evidence_count=2,
+        scope={
+            "field": "rangeLevelSelected",
+            "cards_deck": cards_deck,
+            "workshop_preset": workshop_preset,
+        },
+    )
+    evidence = build_mapping_candidate_ui_evidence(
+        "orb_distance",
+        canonical_values=[range_basis, "87.16m", "80.37m"],
+        locator_values={
+            "rangeLevelSelected": range_basis,
+            "innerOrbDistance": "87.16m",
+            "workshopOrbDistance": "80.37m",
+        },
+        locator_scopes={
+            field: {"field": field}
+            for field in (
+                "rangeLevelSelected",
+                "innerOrbDistance",
+                "workshopOrbDistance",
+            )
+        },
+        observed_at=OBSERVED_AT,
+    )
+    return resolve_mapping_candidates("orb_distance", [pending], evidence)[0]
+
+
+def test_orb_raw_value_may_have_distinct_semantics_in_distinct_preset_contexts():
+    farm = _resolved_orb_range_candidate(
+        cards_deck="Farm",
+        workshop_preset="Farm",
+        range_basis="30.00m",
+    )
+    tournament = _resolved_orb_range_candidate(
+        cards_deck="Tournament",
+        workshop_preset="Tourney",
+        range_basis="98.38m",
+    )
+
+    reconciled = reconcile_mapping_candidate_resolutions(
+        [
+            {"check_id": "orb_distance", "candidate": farm},
+            {"check_id": "orb_distance", "candidate": tournament},
+        ]
+    )
+
+    assert [
+        item["candidate"]["semantic_value"] for item in reconciled
+    ] == ["30.00m", "98.38m"]
+    assert {item["candidate"]["status"] for item in reconciled} == {
+        "needs_more_evidence"
+    }
+
+
+def test_orb_raw_value_conflict_in_same_preset_context_is_ambiguous():
+    first = _resolved_orb_range_candidate(
+        cards_deck="Farm",
+        workshop_preset="Farm",
+        range_basis="30.00m",
+    )
+    second = _resolved_orb_range_candidate(
+        cards_deck="Farm",
+        workshop_preset="Farm",
+        range_basis="98.38m",
+    )
+
+    reconciled = reconcile_mapping_candidate_resolutions(
+        [
+            {"check_id": "orb_distance", "candidate": first},
+            {"check_id": "orb_distance", "candidate": second},
         ]
     )
 

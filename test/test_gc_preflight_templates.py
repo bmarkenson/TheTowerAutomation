@@ -1,12 +1,15 @@
+import copy
 from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from core.auto_pick_perks import measure_auto_pick_perks
 from core.clickmap_access import get_click
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_preflight import (
+    configuration_ui_boundary_sections,
     evaluate_ultimate_weapon_state,
     merge_ultimate_weapon_observations,
     validate_gc_preflight_screens,
@@ -197,6 +200,53 @@ def test_mixed_ui_repaired_and_save_backed_sections_form_complete_evidence():
     assert evidence.workshop.valid
     assert evidence.bots.valid
     assert evidence.guardians.valid
+
+
+def test_retained_home_ui_sections_form_complete_evidence_without_reopening():
+    captured = validate_gc_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+    ).as_dict()
+    captured["ui_verified_sections"] = {
+        section: "ui_verified"
+        for section in ("cards", "workshop", "bots", "guardians")
+    }
+    tokens = configuration_ui_boundary_sections(captured)
+    evidence = validate_gc_preflight_screens(
+        cards_screen=None,
+        workshop_screen=None,
+        bots_screen=None,
+        guardians_screen=None,
+        accepted_sections=tokens,
+    )
+
+    assert evidence.valid
+
+
+def test_retained_home_ui_section_requires_exact_provenance():
+    captured = validate_gc_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+    ).as_dict()
+    captured["ui_verified_sections"] = {"cards": "ui_verified"}
+    token = copy.deepcopy(
+        configuration_ui_boundary_sections(captured)["cards"]
+    )
+    token["section_result"]["detected_state"] = "WORKSHOP"
+    with pytest.raises(ValueError, match="invalid provenance"):
+        validate_gc_preflight_screens(
+            cards_screen=None,
+            workshop_screen=None,
+            bots_screen=None,
+            guardians_screen=None,
+            accepted_sections={
+                "cards": token
+            },
+        )
 
 
 def test_supplied_ui_section_cannot_be_hidden_by_save_match_provenance():

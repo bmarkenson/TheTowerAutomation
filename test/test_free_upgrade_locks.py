@@ -472,3 +472,71 @@ def test_no_battle_enforcement_checks_only_authoritative_mismatch():
         if action == "buttons.free_upgrade_lock:checkbox"
     ] == ["buttons.free_upgrade_lock:checkbox"]
     assert ui.detail_label is None
+
+
+def test_free_upgrade_repair_observer_runs_before_checkbox_input():
+    ui = _WorkshopUi(
+        {
+            "Shockwave Size": FreeUpgradeLockState.CHECKED,
+            "Bounce Shot Targets": FreeUpgradeLockState.UNCHECKED,
+            "Bounce Shot Range": FreeUpgradeLockState.CHECKED,
+        }
+    )
+    events = []
+
+    def tracked_tap(target, **kwargs):
+        if target == "buttons.free_upgrade_lock:checkbox":
+            events.append("checkbox")
+        return ui.tap(target, **kwargs)
+
+    result = inspect_free_upgrade_locks(
+        FARM_FREE_UPGRADE_LOCKS,
+        screenshot=ui.frame,
+        enforce=True,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=tracked_tap,
+        swipe_fn=lambda *_args: None,
+        detect_boxes_fn=ui.detect_boxes,
+        measure_menu_fn=ui.measure_menu,
+        measure_lock_fn=ui.measure_lock,
+        repair_observer_fn=lambda: events.append("observer"),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.evidence.valid
+    assert events == ["observer", "checkbox"]
+
+
+def test_free_upgrade_repair_observer_failure_sends_no_checkbox_input():
+    ui = _WorkshopUi(
+        {
+            "Shockwave Size": FreeUpgradeLockState.CHECKED,
+            "Bounce Shot Targets": FreeUpgradeLockState.UNCHECKED,
+            "Bounce Shot Range": FreeUpgradeLockState.CHECKED,
+        }
+    )
+
+    def reject_repair():
+        raise RuntimeError("save invalidation failed")
+
+    with pytest.raises(RuntimeError, match="save invalidation failed"):
+        inspect_free_upgrade_locks(
+            FARM_FREE_UPGRADE_LOCKS,
+            screenshot=ui.frame,
+            enforce=True,
+            capture_fn=ui.capture,
+            detector=ui.detect,
+            safe_tap_fn=ui.tap,
+            swipe_fn=lambda *_args: None,
+            detect_boxes_fn=ui.detect_boxes,
+            measure_menu_fn=ui.measure_menu,
+            measure_lock_fn=ui.measure_lock,
+            repair_observer_fn=reject_repair,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert all(
+        action != "buttons.free_upgrade_lock:checkbox"
+        for action, _label in ui.actions
+    )

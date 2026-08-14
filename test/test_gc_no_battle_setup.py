@@ -15,6 +15,7 @@ from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_no_battle_setup import (
     GcNoBattleSetupResult,
     GcNoBattleSetupStatus,
+    _ensure_preset,
     _is_not_enough_medals_dialog,
     _replace_guardian_chip,
     recover_gc_no_battle_setup_home,
@@ -467,6 +468,77 @@ def _save_mismatches(requirements, *check_ids):
     }
 
 
+def test_preset_repair_observer_runs_before_selection_input():
+    selected = {"value": False}
+    events = []
+
+    def measure(_frame, region):
+        return PresetSlotSelection(
+            region,
+            True,
+            selected["value"],
+            2_000 if selected["value"] else 0,
+            0 if selected["value"] else 2_000,
+        )
+
+    def tap(_label, **_kwargs):
+        events.append("tap")
+        selected["value"] = True
+        return True
+
+    _frame, changed = _ensure_preset(
+        "cards",
+        state="CARDS",
+        slot_secondary="CARDS_FARM_SLOT",
+        slot_label="indicators.cards:farm_slot",
+        slot_region=CARDS_FARM_PRESET_SLOT,
+        capture_fn=lambda: "cards",
+        detector=lambda _frame: {
+            "state": "CARDS",
+            "secondary_states": ["CARDS_FARM_SLOT"],
+        },
+        tap_visible_fn=tap,
+        measure_selection_fn=measure,
+        repair_observer_fn=lambda: events.append("observer"),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert changed is True
+    assert events == ["observer", "tap"]
+
+
+def test_preset_repair_observer_failure_sends_no_selection_input():
+    taps = []
+
+    with pytest.raises(RuntimeError, match="save invalidation failed"):
+        _ensure_preset(
+            "cards",
+            state="CARDS",
+            slot_secondary="CARDS_FARM_SLOT",
+            slot_label="indicators.cards:farm_slot",
+            slot_region=CARDS_FARM_PRESET_SLOT,
+            capture_fn=lambda: "cards",
+            detector=lambda _frame: {
+                "state": "CARDS",
+                "secondary_states": ["CARDS_FARM_SLOT"],
+            },
+            tap_visible_fn=lambda *_args, **_kwargs: taps.append(True),
+            measure_selection_fn=lambda _frame, region: PresetSlotSelection(
+                region,
+                True,
+                False,
+                0,
+                2_000,
+            ),
+            repair_observer_fn=lambda: (_ for _ in ()).throw(
+                RuntimeError("save invalidation failed")
+            ),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert taps == []
+
+
 def test_matching_save_snapshot_skips_all_eligible_home_navigation_together():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
     requirements = {
@@ -685,7 +757,7 @@ def test_save_backed_required_locks_ignore_unmanaged_health_without_input():
     assert locks["diagnostics"]["unmanaged_locks"] == ["Health"]
 
 
-def test_cards_mismatch_repair_preserves_save_backed_perk_decisions():
+def test_cards_mismatch_repair_invalidates_save_backed_perk_decisions():
     router = _NoBattleRouter(selected=False, correct_guardians=True)
     requirements = {
         "cards_deck": "Farm",
@@ -712,7 +784,25 @@ def test_cards_mismatch_repair_preserves_save_backed_perk_decisions():
     )
     save_decisions.update(_save_mismatches(requirements, "cards_deck"))
     ensure_perks = Mock(
-        side_effect=AssertionError("accepted Perks tabs must remain closed")
+        return_value=HomePerkConfigurationResult(
+            valid=True,
+            changed=False,
+            reason="matched",
+            failed_check=None,
+            evidence={
+                check_id: {
+                    "checked": True,
+                    "valid": True,
+                    "observed": requirements[check_id],
+                }
+                for check_id in (
+                    "perk_first_choice",
+                    "perk_bans",
+                    "perk_auto_pick_order",
+                )
+            },
+            home_screenshot="home",
+        )
     )
 
     result = _run(
@@ -724,30 +814,24 @@ def test_cards_mismatch_repair_preserves_save_backed_perk_decisions():
     )
 
     assert result.complete
-    assert invalidations == []
-    ensure_perks.assert_not_called()
+    assert invalidations == ["cards_deck_repair"]
+    ensure_perks.assert_called_once()
+    assert ensure_perks.call_args.kwargs["waived_fields"] == ()
     assert "navigation.goto_cards_home" in router.static_actions
-    assert "navigation.goto_workshop_home" not in router.static_actions
-    assert "navigation.event:bots_tab" not in router.static_actions
-    assert "navigation.guild:guardian_tab" not in router.static_actions
+    assert "navigation.goto_workshop_home" in router.static_actions
+    assert "navigation.event:bots_tab" in router.static_actions
+    assert "navigation.guild:guardian_tab" in router.static_actions
     assert result.evidence["cards_deck"]["status"] == "ui_verified_repair"
     assert result.evidence["cards_deck"]["source"] == "ui"
     assert result.evidence["cards_deck"]["save_disposition"] == "save_mismatch"
-    assert result.evidence["save_preflight"]["invalidated"] is False
-    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == [
-        "bots_preset",
-        "guardian_chips",
-        "perk_auto_pick_order",
-        "perk_bans",
-        "perk_first_choice",
-        "workshop_preset",
-    ]
+    assert result.evidence["save_preflight"]["invalidated"] is True
+    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == []
     for check_id in (
         "perk_first_choice",
         "perk_bans",
         "perk_auto_pick_order",
     ):
-        assert result.evidence[check_id]["source"] == "player_save_preflight"
+        assert result.evidence[check_id]["checked"] is True
 
 
 def test_multiple_trusted_mismatches_run_only_their_ui_repair_paths():
@@ -778,15 +862,15 @@ def test_multiple_trusted_mismatches_run_only_their_ui_repair_paths():
     assert "navigation.goto_cards_home" in router.static_actions
     assert "navigation.goto_workshop_home" in router.static_actions
     assert "navigation.event:bots_tab" in router.static_actions
-    assert "navigation.guild:guardian_tab" not in router.static_actions
+    assert "navigation.guild:guardian_tab" in router.static_actions
     assert result.evidence["save_preflight"]["ui_verified_checks"] == {
         "bots_preset": "ui_verified_repair",
         "cards_deck": "ui_verified_repair",
+        "guardian_chips": "ui_verified",
         "workshop_preset": "ui_verified_repair",
     }
-    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == [
-        "guardian_chips"
-    ]
+    assert result.evidence["save_preflight"]["invalidated"] is True
+    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == []
 
 
 def test_save_mismatch_ui_already_matches_is_a_contradiction():
@@ -889,6 +973,98 @@ def test_mixed_perk_decisions_visit_only_ui_required_tabs():
         "player_save_preflight"
     )
     assert result.evidence["perk_bans"]["checked"] is True
+
+
+def test_mixed_perk_repair_rechecks_perks_and_requests_full_ui_retry():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "perk_first_choice": "perk_wave_requirement",
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": ["game_speed"],
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    save_decisions = _save_matches(
+        requirements,
+        "cards_deck",
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+        "perk_first_choice",
+        "perk_auto_pick_order",
+    )
+    waived = []
+    invalidations = []
+
+    def ensure_perks(_requirements, **kwargs):
+        waived.append(set(kwargs["waived_fields"]))
+        if len(waived) == 1:
+            kwargs["repair_observer_fn"]("perk_bans")
+            return HomePerkConfigurationResult(
+                valid=True,
+                changed=True,
+                reason="repaired",
+                failed_check=None,
+                evidence={
+                    "perk_bans": {
+                        "checked": True,
+                        "valid": True,
+                        "changed": True,
+                        "observed": list(FARM_PERK_BANS),
+                    }
+                },
+                home_screenshot="home",
+            )
+        return HomePerkConfigurationResult(
+            valid=True,
+            changed=False,
+            reason="matched",
+            failed_check=None,
+            evidence={
+                check_id: {
+                    "checked": True,
+                    "valid": True,
+                    "changed": False,
+                    "observed": requirements[check_id],
+                }
+                for check_id in (
+                    "perk_first_choice",
+                    "perk_bans",
+                    "perk_auto_pick_order",
+                )
+            },
+            home_screenshot="home",
+        )
+
+    result = _run(
+        router,
+        requirements,
+        save_decisions=save_decisions,
+        snapshot_invalidation_fn=invalidations.append,
+        ensure_perk_configuration_fn=ensure_perks,
+    )
+
+    assert not result.complete
+    assert result.retryable_from_home is True
+    assert result.evidence["save_preflight"]["revalidation_required"] is True
+    assert result.evidence["save_preflight"][
+        "revalidation_required_checks"
+    ] == ["cards_deck"]
+    assert waived == [
+        {"perk_first_choice", "perk_auto_pick_order"},
+        set(),
+    ]
+    assert invalidations == ["perk_repair:perk_bans"]
+    assert result.evidence["save_preflight"]["invalidated"] is True
+    assert result.evidence["perk_first_choice"]["source"] == "ui"
+    assert result.evidence["perk_bans"]["source"] == "ui"
+    assert "perk_auto_pick_order" not in result.evidence
 
 
 def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
@@ -2978,6 +3154,79 @@ def test_app_retries_transient_home_setup_failure_before_starting_battle():
         action_guard_fn=ANY,
         return_dispatch_outcome=True,
     )
+
+
+def test_home_repair_retry_drops_every_invalidated_save_decision():
+    frame = object()
+    retry_frame = object()
+    app = App.__new__(App)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._capture_frame = Mock(return_value=retry_frame)
+    coordinator = Mock()
+    coordinator.snapshot_invalidated = False
+    coordinator.carry = SimpleNamespace(
+        state=CarriedEvidenceState.PENDING_LAUNCH
+    )
+    app._player_save_preflight_coordinator = coordinator
+    preflight = SimpleNamespace(
+        decisions=_save_matches(REQUIREMENTS, "cards_deck")
+    )
+    retry_required = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.FAILED,
+        "complete Home UI revalidation required",
+        {
+            "save_preflight": {
+                "invalidated": True,
+                "revalidation_required": True,
+                "revalidation_required_checks": ["cards_deck"],
+            }
+        },
+        failed_check="workshop_preset",
+    )
+    completed = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"configuration": {"ui_verified_sections": {"cards": "verified"}}},
+    )
+
+    def run_setup(*args, **kwargs):
+        if coordinator.snapshot_invalidated is False:
+            coordinator.snapshot_invalidated = True
+            return retry_required
+        return completed
+
+    with patch(
+        "core.app.run_gc_no_battle_setup",
+        side_effect=run_setup,
+    ) as execute:
+        result = app._run_home_setup_attempts(
+            REQUIREMENTS,
+            screenshot=frame,
+            save_preflight=preflight,
+        )
+
+    assert result is completed
+    assert execute.call_args_list == [
+        call(
+            REQUIREMENTS,
+            screenshot=frame,
+            action_guard_fn=app._runtime_action_guard,
+            save_decisions=preflight.decisions,
+            snapshot_invalidation_fn=coordinator.invalidate,
+            save_ui_verification_fn=coordinator.record_ui_verification,
+            save_mapping_observation_fn=(
+                coordinator.record_mapping_observation
+            ),
+            save_mapping_window_close_fn=(
+                coordinator.close_mapping_candidate_window
+            ),
+        ),
+        call(
+            REQUIREMENTS,
+            screenshot=retry_frame,
+            action_guard_fn=app._runtime_action_guard,
+        ),
+    ]
 
 
 def test_app_does_not_publish_gate_or_start_after_control_interruption():

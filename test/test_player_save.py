@@ -18,7 +18,10 @@ from core.player_save import (
     PLAYER_SAVE_DEVICE_PATH,
     PlayerSaveError,
     PlayerSavePullError,
+    _damage_slider_evidence,
+    _effective_mapping_fingerprint,
     _module_loadout_evidence,
+    _orb_distance_evidence,
     _raw_field_manifest_names,
     _raw_field_name_sha256,
     _validate_raw_field_manifest,
@@ -86,6 +89,8 @@ def test_raw_field_manifest_is_complete_disjoint_and_canonical():
     assert manifest["field_count"] == len(names) == 739
     assert manifest["field_name_sha256"] == _raw_field_name_sha256(names)
     assert len(names) == len(set(names))
+    assert len(manifest["dispositions"]["automation_gating"]) == 35
+    assert len(manifest["dispositions"]["unknown"]) == 537
 
     progression_sources = {
         spec["source"]
@@ -123,6 +128,8 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
     assert manifest["audit_id"] == "V1101-RAW-001"
     assert manifest["field_count"] == len(names) == 741
     assert manifest["field_name_sha256"] == _raw_field_name_sha256(names)
+    assert len(manifest["dispositions"]["automation_gating"]) == 35
+    assert len(manifest["dispositions"]["unknown"]) == 539
     assert set(names) - old_names == {
         "enemiesKilledThisWave",
         "enemiesSpawnedThisWave",
@@ -137,11 +144,13 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
         "auto_pick_order",
         "card_recharge_modes",
         "cards",
+        "damage_slider",
         "free_upgrade_lock_fields",
         "guardian_chip_ids",
         "guardian_chips",
         "module_info_indices",
         "module_loadout",
+        "orb_distance",
         "perk_bans",
         "perk_ids",
         "presets",
@@ -182,7 +191,7 @@ def test_revision_compatibility_rejects_published_additions():
 def test_revision_compatibility_rejects_unvalidated_authority_check():
     mapping = copy.deepcopy(VERSION_1101_MAPPING)
     mapping["revision_compatibility"]["validated_checks"].append(
-        "damage_slider"
+        "battle_history_killed_by"
     )
 
     with pytest.raises(
@@ -631,7 +640,14 @@ def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
 
 
 def test_v1101_compatible_snapshot_projects_setup_capture_allowlist(monkeypatch):
-    snapshot = _snapshot_v1101(monkeypatch)
+    decoded = _decoded_save_v1101()
+    decoded.update(
+        damageAdjustmentLog=9,
+        rangeLevelSelected=0,
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
     acquisition = PlayerSaveAcquisitionBundle(
         acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
         status=PlayerSaveAcquisitionStatus.COMPLETE,
@@ -806,6 +822,8 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "free_upgrade_locks",
         "guardian_chips",
         "modules",
+        "damage_slider",
+        "orb_distance",
         "auto_pick_perks",
         "target_priority",
         "ultimate_weapon_primaries",
@@ -1356,6 +1374,363 @@ def test_unknown_tournament_league_exposes_review_candidate(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    ("raw_value", "semantic_value"),
+    (
+        (6, "1E-22%"),
+        (9, "1E-19%"),
+        (10, "1E-18%"),
+        (30, "1E2%"),
+    ),
+)
+def test_damage_slider_exact_values_are_save_backed(
+    monkeypatch,
+    raw_value,
+    semantic_value,
+):
+    decoded = _decoded_save()
+    decoded["damageAdjustmentLog"] = raw_value
+
+    evidence = _snapshot(monkeypatch, decoded).checks["damage_slider"]
+    decision = reconcile_requirements(
+        _snapshot(monkeypatch, decoded),
+        {
+            "damage_slider": {
+                "mode": "enforce",
+                "value": semantic_value,
+            }
+        },
+        freshness_verified=True,
+    )["checks"]["damage_slider"]
+
+    assert evidence.status == "observed"
+    assert evidence.complete is True
+    assert evidence.value == semantic_value
+    assert evidence.diagnostics == {}
+    assert decision["disposition"] == "save_match"
+    assert decision["ui_required"] is False
+
+
+def test_v1101_exact_t18_damage_value_is_save_backed(monkeypatch):
+    decoded = _decoded_save_v1101()
+    decoded["damageAdjustmentLog"] = 6
+
+    evidence = _snapshot_v1101(monkeypatch, decoded).checks["damage_slider"]
+
+    assert evidence.status == "observed"
+    assert evidence.complete is True
+    assert evidence.value == "1E-22%"
+
+
+@pytest.mark.parametrize(
+    ("extra_raw", "workshop_raw", "semantic_value"),
+    (
+        (
+            3.0,
+            3.8999998569488525,
+            {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            },
+        ),
+        (
+            3.180000066757202,
+            3.7199997901916504,
+            {
+                "range_basis": "30.00m",
+                "extra": "31.80m",
+                "workshop": "37.20m",
+            },
+        ),
+    ),
+)
+def test_orb_distance_exact_farm_tuples_are_save_backed(
+    monkeypatch,
+    extra_raw,
+    workshop_raw,
+    semantic_value,
+):
+    decoded = _decoded_save()
+    decoded.update(
+        rangeLevelSelected=0,
+        innerOrbDistance=extra_raw,
+        workshopOrbDistance=workshop_raw,
+    )
+
+    evidence = _snapshot(monkeypatch, decoded).checks["orb_distance"]
+    assert evidence.status == "observed"
+    assert evidence.complete is True
+    assert evidence.value == semantic_value
+    assert evidence.diagnostics == {}
+
+
+@pytest.mark.parametrize("snapshot_fn", (_snapshot, _snapshot_v1101))
+def test_orb_distance_exact_tournament_tuple_is_save_backed(
+    monkeypatch,
+    snapshot_fn,
+):
+    decoded = (
+        _decoded_save_v1101()
+        if snapshot_fn is _snapshot_v1101
+        else _decoded_save()
+    )
+    decoded.update(
+        currentPreset=1,
+        currentWorkshopPreset=1,
+        rangeLevelSelected=0,
+        innerOrbDistance=8.71588134765625,
+        workshopOrbDistance=8.036911010742188,
+    )
+
+    evidence = snapshot_fn(monkeypatch, decoded).checks["orb_distance"]
+
+    assert evidence.status == "observed"
+    assert evidence.complete is True
+    assert evidence.value == {
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
+    }
+    assert evidence.diagnostics == {}
+
+
+def test_orb_distance_save_match_selects_observed_range_preset(monkeypatch):
+    decoded = _decoded_save()
+    decoded.update(
+        rangeLevelSelected=0,
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    decision = reconcile_requirements(
+        snapshot,
+        {
+            "orb_distance": {
+                "mode": "enforce",
+                "resolved": {
+                    "range_basis": "98.38m",
+                    "extra": "87.16m",
+                    "workshop": "80.37m",
+                },
+                "range_presets": [
+                    {
+                        "range_basis": "30.00m",
+                        "extra": "30.00m",
+                        "workshop": "39.00m",
+                    },
+                    {
+                        "range_basis": "98.38m",
+                        "extra": "87.16m",
+                        "workshop": "80.37m",
+                    },
+                ],
+            }
+        },
+        freshness_verified=True,
+    )["checks"]["orb_distance"]
+
+    assert decision["disposition"] == "save_match"
+    assert decision["ui_required"] is False
+    assert decision["observed"] == {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+
+
+def test_orb_distance_mapping_allows_same_semantics_in_distinct_contexts():
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    repeated = copy.deepcopy(mapping["orb_distance"]["values"][0])
+    repeated["context"] = {
+        "cards_deck": "Tournament",
+        "workshop_preset": "Tournament",
+    }
+    mapping["orb_distance"]["values"].append(repeated)
+    decoded = _decoded_save()
+    decoded.update(
+        rangeLevelSelected=0,
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+
+    evidence = _orb_distance_evidence(decoded, mapping)
+
+    assert evidence.status == "observed"
+    assert evidence.complete is True
+    assert evidence.value == {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    assert evidence.authority["values"].count(evidence.value) == 1
+
+
+def test_orb_distance_exact_tuple_requires_its_preset_context(monkeypatch):
+    decoded = _decoded_save()
+    decoded.update(
+        currentWorkshopPreset=1,
+        rangeLevelSelected=0,
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+
+    evidence = _snapshot(monkeypatch, decoded).checks["orb_distance"]
+
+    assert evidence.status == "unmapped"
+    assert evidence.value is None
+    assert "preset context" in evidence.reason
+
+
+def test_unknown_battle_controls_expose_only_safe_calibration_discriminators(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded.update(
+        damageAdjustmentLog=8,
+        rangeLevelSelected=0,
+        innerOrbDistance=3.1,
+        savedWorkshopOrbDistance=8.715879440307617,
+        workshopOrbDistance=3.8,
+    )
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    damage = snapshot.checks["damage_slider"]
+    assert damage.status == "unmapped"
+    assert damage.value is None
+    assert [
+        (
+            item["value_kind"],
+            item["locator"],
+            item["raw_discriminator"]["value"],
+        )
+        for item in damage.diagnostics["mapping_candidates"]
+    ] == [("damage_slider_calibration", "damageAdjustmentLog", 8)]
+    orb = snapshot.checks["orb_distance"]
+    assert orb.status == "unmapped"
+    assert orb.value is None
+    assert [
+        (
+            item["value_kind"],
+            item["locator"],
+            item["raw_discriminator"]["value"],
+        )
+        for item in orb.diagnostics["mapping_candidates"]
+    ] == [
+        ("orb_distance_calibration", "rangeLevelSelected", 0),
+        ("orb_distance_calibration", "innerOrbDistance", 3.1),
+        (
+            "orb_distance_calibration",
+            "workshopOrbDistance",
+            3.8,
+        ),
+    ]
+    assert all(
+        item["scope"]
+        == {
+            "field": item["locator"],
+            "cards_deck": "Farm",
+            "workshop_preset": "Farm",
+        }
+        for item in orb.diagnostics["mapping_candidates"]
+    )
+    rendered = json.dumps(snapshot.as_dict())
+    assert "savedWorkshopOrbDistance" not in rendered
+    assert "8.715879440307617" not in rendered
+
+
+@pytest.mark.parametrize("raw_value", (True, 9.0, None))
+def test_damage_slider_changed_raw_type_fails_closed(raw_value):
+    decoded = _decoded_save()
+    decoded["damageAdjustmentLog"] = raw_value
+
+    evidence = _damage_slider_evidence(decoded, VERSION_MAPPING)
+
+    assert evidence.status == "unmapped"
+    assert evidence.value is None
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda mapping: mapping["damage_slider"]["values"][0].update(
+            value="not-a-percentage"
+        ),
+        lambda mapping: mapping["damage_slider"]["values"][2].update(raw=9),
+        lambda mapping: mapping["damage_slider"]["values"][2].update(
+            value="1e-19%"
+        ),
+    ),
+)
+def test_malformed_damage_slider_mapping_fails_closed(mutation):
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    mutation(mapping)
+
+    evidence = _damage_slider_evidence(
+        {**_decoded_save(), "damageAdjustmentLog": 9},
+        mapping,
+    )
+
+    assert evidence.status == "unmapped"
+    assert evidence.reason == "Damage Slider mapping values are malformed"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda decoded: decoded.update(rangeLevelSelected=True),
+        lambda decoded: decoded.update(innerOrbDistance=3),
+        lambda decoded: decoded.update(workshopOrbDistance=float("inf")),
+        lambda decoded: decoded.update(innerOrbDistance=3.0000000000000004),
+    ),
+)
+def test_orb_distance_changed_or_drifted_raw_tuple_fails_closed(mutation):
+    decoded = _decoded_save()
+    decoded.update(
+        rangeLevelSelected=0,
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+    mutation(decoded)
+
+    evidence = _orb_distance_evidence(decoded, VERSION_MAPPING)
+
+    assert evidence.status == "unmapped"
+    assert evidence.value is None
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda mapping: mapping["orb_distance"]["values"][0]["value"].update(
+            extra="invalid"
+        ),
+        lambda mapping: mapping["orb_distance"]["values"][0]["raw"].update(
+            extra=float("nan")
+        ),
+        lambda mapping: mapping["orb_distance"]["values"].append(
+            copy.deepcopy(mapping["orb_distance"]["values"][0])
+        ),
+    ),
+)
+def test_malformed_orb_distance_mapping_fails_closed(mutation):
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    mutation(mapping)
+    decoded = _decoded_save()
+    decoded.update(
+        rangeLevelSelected=0,
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+
+    evidence = _orb_distance_evidence(decoded, mapping)
+
+    assert evidence.status == "unmapped"
+    assert evidence.reason == "Orb Distance mapping values are malformed"
+
+
+@pytest.mark.parametrize(
     ("killed_by_id", "label"),
     ((3, "Boss"), (6, "Vampire"), (99, "Surrender")),
 )
@@ -1380,11 +1755,10 @@ def test_cross_channel_killed_by_ids_are_semantically_mapped(
     "mutation",
     (
         lambda entry: entry.pop("coinsEarned"),
-        lambda entry: entry.update(coinsEarned=1),
         lambda entry: entry.update(unexpectedField=1.0),
     ),
 )
-def test_malformed_history_entry_never_publishes_partial_projection(
+def test_changed_history_entry_shape_never_publishes_partial_projection(
     monkeypatch,
     mutation,
 ):
@@ -1400,6 +1774,75 @@ def test_malformed_history_entry_never_publishes_partial_projection(
     assert tail.identity is None
     assert tail.completed_entry_status == "unavailable"
     assert tail.entry is None
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    (
+        (
+            lambda entry: entry.update(coinsEarned=1),
+            "history_entry_field_type_changed:0:coinsEarned",
+        ),
+        (
+            lambda entry: entry.update(
+                damageDealt=float("inf"),
+                killedBy=99,
+            ),
+            "malformed_history_entry_value:0:damageDealt",
+        ),
+    ),
+)
+def test_malformed_nonidentity_history_value_preserves_structural_continuity(
+    monkeypatch,
+    mutation,
+    reason,
+):
+    decoded = _decoded_save()
+    mutation(decoded["battleHistory"][-1])
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    tail = runtime.battle_history_tail
+    assert tail.structural_status == "observed"
+    assert tail.structural_fingerprint is not None
+    assert tail.identity is not None
+    assert tail.completed_entry_status == "unavailable"
+    assert tail.completed_entry_reason == reason
+    assert tail.completed_entry_fingerprint is None
+    assert tail.entry is None
+    if "damageDealt" in reason:
+        cause = _snapshot(monkeypatch, decoded).checks[
+            "battle_history_killed_by"
+        ]
+        assert cause.status == "observed"
+        assert cause.complete is True
+        assert cause.value == "Surrender"
+
+
+def test_finite_negative_history_stat_preserves_identity_and_report(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded["battleHistory"][-1]["damageDealt"] = -3.510034714589e36
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    tail = runtime.battle_history_tail
+    assert tail.structural_status == "observed"
+    assert tail.identity is not None
+    assert tail.completed_entry_status == "observed"
+    assert tail.entry is not None
+    damage_dealt = next(
+        row
+        for section in tail.entry.sections
+        for row in section.rows
+        if row.key == "damage_dealt"
+    )
+    assert damage_dealt.value == -3.510034714589e36
+    assert damage_dealt.value_decimal is not None
+    assert damage_dealt.value_decimal.startswith("-")
 
 
 def test_mixed_datetime_kinds_do_not_use_cross_kind_tick_ordering(monkeypatch):
@@ -1917,6 +2360,9 @@ def test_exact_farm_module_loadout_matches_from_one_redacted_snapshot(
 @pytest.mark.parametrize("mapping", (VERSION_MAPPING, VERSION_1101_MAPPING))
 def test_all_current_module_info_indices_are_globally_mapped(mapping):
     assert mapping["module_info_indices"] == MODULE_INFO_INDICES
+    assert mapping["module_loadout"]["assignment_observation_scope"] == (
+        "canonical_global_same_family"
+    )
     assert len({item["name"] for item in MODULE_INFO_INDICES.values()}) == 24
     assert {
         family: sum(
@@ -1924,6 +2370,39 @@ def test_all_current_module_info_indices_are_globally_mapped(mapping):
         )
         for family in ("cannon", "armor", "generator", "core")
     } == {"cannon": 6, "armor": 6, "generator": 6, "core": 6}
+
+
+def test_global_module_identity_map_matches_the_ui_icon_catalog():
+    catalog = json.loads(
+        (ROOT / "config/module_icon_index.json").read_text(encoding="utf-8")
+    )
+
+    assert {
+        (item["name"], item["family"])
+        for item in MODULE_INFO_INDICES.values()
+    } == {
+        (item["name"], item["family"])
+        for item in catalog["modules"]
+    }
+
+
+@pytest.mark.parametrize("scope", (None, "unsupported"))
+def test_module_global_observation_scope_is_explicit_and_fail_closed(scope):
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    if scope is None:
+        mapping["module_loadout"].pop("assignment_observation_scope")
+    else:
+        mapping["module_loadout"]["assignment_observation_scope"] = scope
+    decoded = _decoded_save()
+    decoded["moduleEquipped"][3]["infoIndex"] = 39
+
+    evidence = _module_loadout_evidence(decoded, mapping)
+
+    assert evidence.status == "unmapped"
+    if scope is None:
+        assert "unsupported primary module value" in evidence.reason
+    else:
+        assert evidence.reason == "module loadout structural contract is incomplete"
 
 
 @pytest.mark.parametrize(
@@ -2034,6 +2513,43 @@ def test_tournament_variation_is_reported_without_enforcement(monkeypatch):
         '"infoIndex"',
     ):
         assert private_marker not in rendered
+
+
+def test_observe_mode_accepts_mapped_damage_and_orb_mismatches(monkeypatch):
+    decoded = _decoded_save()
+    decoded.update(
+        damageAdjustmentLog=9,
+        rangeLevelSelected=0,
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+    snapshot = _snapshot(monkeypatch, decoded)
+    requirements = {
+        "damage_slider": {"mode": "observe", "value": "1E2%"},
+        "orb_distance": {
+            "mode": "observe",
+            "resolved": {
+                "range_basis": "30.00m",
+                "extra": "31.80m",
+                "workshop": "37.20m",
+            },
+        },
+    }
+
+    decisions = reconcile_requirements(
+        snapshot,
+        requirements,
+        freshness_verified=True,
+    )
+
+    for check_id in ("damage_slider", "orb_distance"):
+        decision = decisions["checks"][check_id]
+        assert decision["disposition"] == "save_observation"
+        assert decision["reason"] == "exact_version_save_observation"
+        assert decision["matches"] is False
+        assert decision["policy"] == "observe"
+        assert decision["ui_required"] is False
+    assert decisions["summary"]["save_observations"] == 2
 
 
 def test_tournament_module_observation_audit_still_requires_ui(monkeypatch):
@@ -2238,7 +2754,9 @@ def test_fresh_decode_effective_fingerprint_tracks_local_mapping_generation(
     evidence = after.checks["modules"]
     assert evidence.status == "unmapped"
     assert evidence.value is None
-    assert "unsupported assist module value" in evidence.reason
+    assert evidence.reason == (
+        "locally confirmed module identity requires canonical integration"
+    )
     assert evidence.diagnostics == {
         "slots": [
             *before.checks["modules"].diagnostics["slots"][:-1],
@@ -2247,14 +2765,63 @@ def test_fresh_decode_effective_fingerprint_tracks_local_mapping_generation(
                 "family": "core",
                 "role": "assist",
                 "name": "Future Module",
-                "mapping_status": "mapped_identity_unsupported_scope",
+                "mapping_status": "mapped_identity_local_only",
             },
         ]
     }
     assert before.as_dict() == before_projection
 
 
-def test_known_global_module_pair_in_a_new_scope_is_diagnostic_only(
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda mapping: mapping["damage_slider"]["values"][0].update(
+            value="1E-20%"
+        ),
+        lambda mapping: mapping["orb_distance"]["values"][0]["value"].update(
+            extra="30.01m"
+        ),
+        lambda mapping: mapping["perk_ids"].update(
+            {"11": "different_perk"}
+        ),
+        lambda mapping: mapping["target_priority_ids"].update(
+            {"2": "Slow"}
+        ),
+        lambda mapping: mapping["runtime_save"]["battle_history"][
+            "killed_by_ids"
+        ].update({"99": "Other"}),
+        lambda mapping: mapping["card_recharge_modes"]["Nuke"].update(
+            true_value="different_mode"
+        ),
+    ),
+)
+def test_effective_mapping_fingerprint_binds_complete_authority(mutation):
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    confirmed_local = {
+        "available": False,
+        "generation": None,
+        "document_fingerprint": None,
+        "applied_event_ids": [],
+        "blocked_checks": [],
+        "items": [],
+    }
+    kwargs = {
+        "canonical_dependency_fingerprint": "a" * 64,
+        "mapping_resolution": "exact",
+        "authority_mapping_id": mapping["mapping_id"],
+        "structural_mapping_id": mapping["mapping_id"],
+        "confirmed_local": confirmed_local,
+    }
+    before = _effective_mapping_fingerprint(mapping, **kwargs)
+    changed = copy.deepcopy(mapping)
+    mutation(changed)
+
+    after = _effective_mapping_fingerprint(changed, **kwargs)
+
+    assert before != after
+
+
+def test_known_global_same_family_pair_is_a_complete_observation(
     monkeypatch,
 ):
     decoded = _decoded_save()
@@ -2263,16 +2830,21 @@ def test_known_global_module_pair_in_a_new_scope_is_diagnostic_only(
     snapshot = _snapshot(monkeypatch, decoded)
     evidence = snapshot.checks["modules"]
 
-    assert evidence.status == "unmapped"
-    assert "unsupported primary module value" in evidence.reason
+    assert evidence.status == "observed"
+    assert evidence.complete is True
+    assert evidence.value["core_primary"] == "Harmony Conductor"
     assert "mapping_candidates" not in evidence.diagnostics
     assert evidence.diagnostics["slots"][3] == {
         "slot_key": "core_primary",
         "family": "core",
         "role": "primary",
         "name": "Harmony Conductor",
-        "mapping_status": "mapped_identity_unsupported_scope",
+        "mapping_status": "mapped_global_observation",
     }
+    assert evidence.authority["supported_names"]["core_primary"] == [
+        "Multiverse Nexus",
+        "Dimension Core",
+    ]
 
 
 def test_known_unsupported_module_does_not_hide_later_unknown_candidate(
@@ -2293,7 +2865,7 @@ def test_known_unsupported_module_does_not_hide_later_unknown_candidate(
         item["slot_key"]: item.get("mapping_status")
         for item in evidence.diagnostics["slots"]
     }
-    assert statuses["core_primary"] == "mapped_identity_unsupported_scope"
+    assert statuses["core_primary"] == "mapped_global_observation"
     assert statuses["core_assist"] == "unmapped"
 
     ui_values = dict(FARM_MODULES)

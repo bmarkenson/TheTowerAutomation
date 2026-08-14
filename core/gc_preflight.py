@@ -607,9 +607,25 @@ class GcSessionPreflightEvidence:
         )
         payload["configuration"]["valid"] = self.configuration.valid
         if accepted_sections:
-            payload["configuration"]["save_backed_sections"] = (
-                accepted_sections
-            )
+            save_backed_sections = {
+                section: provenance
+                for section, provenance in accepted_sections.items()
+                if provenance.get("source") == "bound_player_save_preflight"
+            }
+            ui_verified_sections = {
+                section: provenance
+                for section, provenance in accepted_sections.items()
+                if provenance.get("source") == "home_ui_boundary"
+                and provenance.get("disposition") == "ui_verified"
+            }
+            if save_backed_sections:
+                payload["configuration"]["save_backed_sections"] = (
+                    save_backed_sections
+                )
+            if ui_verified_sections:
+                payload["configuration"]["ui_verified_sections"] = (
+                    ui_verified_sections
+                )
         payload["free_upgrade_locks"] = dict(self.free_upgrade_locks)
         payload["free_upgrade_locks"]["blocking_valid"] = True
         if self.modules is None:
@@ -692,6 +708,179 @@ GC_SECTION_SPECS = {
 }
 
 
+def _normalize_configuration_ui_boundary_token(
+    section: str,
+    token: Any,
+    spec: GcSectionSpec,
+) -> Optional[dict[str, Any]]:
+    """Validate and normalize one exact Home UI section proof."""
+
+    if not isinstance(token, Mapping) or set(token) != {
+        "source",
+        "disposition",
+        "verification",
+        "section_result",
+        "selection",
+    }:
+        return None
+    if (
+        token.get("source") != "home_ui_boundary"
+        or token.get("disposition") != "ui_verified"
+        or token.get("verification")
+        not in {"ui_verified", "ui_verified_repair"}
+    ):
+        return None
+
+    result = token.get("section_result")
+    if not isinstance(result, Mapping) or set(result) != {
+        "name",
+        "valid",
+        "detected_state",
+        "required_secondary",
+        "detected_secondary",
+        "missing_secondary",
+    }:
+        return None
+
+    def normalized_strings(value: Any) -> Optional[tuple[str, ...]]:
+        if not isinstance(value, (list, tuple)):
+            return None
+        normalized: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or not item:
+                return None
+            normalized.append(item)
+        if len(set(normalized)) != len(normalized):
+            return None
+        return tuple(normalized)
+
+    required = normalized_strings(result.get("required_secondary"))
+    detected = normalized_strings(result.get("detected_secondary"))
+    missing = normalized_strings(result.get("missing_secondary"))
+    if (
+        result.get("name") != section
+        or result.get("valid") is not True
+        or result.get("detected_state") != spec.expected_state
+        or required is None
+        or set(required) != set(spec.required_secondary)
+        or len(required) != len(spec.required_secondary)
+        or detected is None
+        or not set(spec.required_secondary).issubset(set(detected))
+        or missing != ()
+    ):
+        return None
+
+    raw_selection = token.get("selection")
+    normalized_selection: Optional[dict[str, Any]]
+    if spec.selection_region is None:
+        if raw_selection is not None:
+            return None
+        normalized_selection = None
+    else:
+        if not isinstance(raw_selection, Mapping) or set(raw_selection) != {
+            "region",
+            "valid_region",
+            "selected",
+        }:
+            return None
+        region = raw_selection.get("region")
+        if (
+            not isinstance(region, (list, tuple))
+            or len(region) != 4
+            or any(
+                not isinstance(value, int) or isinstance(value, bool)
+                for value in region
+            )
+            or tuple(region) != tuple(spec.selection_region)
+            or raw_selection.get("valid_region") is not True
+            or raw_selection.get("selected") is not True
+        ):
+            return None
+        normalized_selection = {
+            "region": tuple(region),
+            "valid_region": True,
+            "selected": True,
+        }
+
+    return {
+        "source": "home_ui_boundary",
+        "disposition": "ui_verified",
+        "verification": str(token["verification"]),
+        "section_result": {
+            "name": section,
+            "valid": True,
+            "detected_state": spec.expected_state,
+            "required_secondary": tuple(sorted(required)),
+            "detected_secondary": tuple(sorted(detected)),
+            "missing_secondary": (),
+        },
+        "selection": normalized_selection,
+    }
+
+
+def configuration_ui_boundary_sections(
+    configuration: Any,
+    *,
+    section_specs: Optional[Mapping[str, GcSectionSpec]] = None,
+) -> dict[str, dict[str, Any]]:
+    """Extract only structurally proven, independently UI-verified sections."""
+
+    if not isinstance(configuration, Mapping):
+        return {}
+    specs = section_specs or GC_SECTION_SPECS
+    raw_markers = configuration.get("ui_verified_sections")
+    if not isinstance(raw_markers, Mapping):
+        return {}
+    raw_save_sections = configuration.get("save_backed_sections")
+    save_sections = (
+        {str(section) for section in raw_save_sections}
+        if isinstance(raw_save_sections, Mapping)
+        else set()
+    )
+    extracted: dict[str, dict[str, Any]] = {}
+    for raw_section, marker in raw_markers.items():
+        section = str(raw_section or "").strip()
+        spec = specs.get(section)
+        if spec is None or section in save_sections:
+            continue
+        if isinstance(marker, Mapping):
+            token = _normalize_configuration_ui_boundary_token(
+                section,
+                marker,
+                spec,
+            )
+            if token is not None:
+                extracted[section] = token
+            continue
+        verification = str(marker or "").strip()
+        result = configuration.get(section)
+        raw_selection = configuration.get(f"{section}_selection")
+        selection = (
+            {
+                "region": raw_selection.get("region"),
+                "valid_region": raw_selection.get("valid_region"),
+                "selected": raw_selection.get("selected"),
+            }
+            if isinstance(raw_selection, Mapping)
+            else None
+        )
+        candidate = {
+            "source": "home_ui_boundary",
+            "disposition": "ui_verified",
+            "verification": verification,
+            "section_result": dict(result) if isinstance(result, Mapping) else None,
+            "selection": selection,
+        }
+        token = _normalize_configuration_ui_boundary_token(
+            section,
+            candidate,
+            spec,
+        )
+        if token is not None:
+            extracted[section] = token
+    return extracted
+
+
 def evaluate_gc_section(spec: GcSectionSpec, detection: Detection) -> GcSectionResult:
     """Evaluate one already-captured configuration screen."""
 
@@ -766,6 +955,26 @@ def validate_gc_preflight_screens(
             "preflight has unsupported accepted sections: "
             + ", ".join(unsupported_accepted)
         )
+    for section, provenance in accepted.items():
+        if not isinstance(provenance, Mapping):
+            raise ValueError(
+                f"preflight accepted section {section} lacks provenance"
+            )
+        disposition = str(provenance.get("disposition") or "")
+        if disposition == "save_match":
+            continue
+        if disposition == "ui_verified" and (
+            _normalize_configuration_ui_boundary_token(
+                section,
+                provenance,
+                section_specs[section],
+            )
+            is not None
+        ):
+            continue
+        raise ValueError(
+            f"preflight accepted section {section} has invalid provenance"
+        )
     deferred = {str(name).strip() for name in deferred_sections or ()}
     unsupported_deferred = sorted(deferred - required_names)
     if unsupported_deferred:
@@ -781,7 +990,8 @@ def validate_gc_preflight_screens(
         provenance = accepted.get(name)
         if (
             isinstance(provenance, Mapping)
-            and provenance.get("disposition") == "save_match"
+            and provenance.get("disposition")
+            in {"save_match", "ui_verified"}
         ):
             detection = {
                 "state": spec.expected_state,
@@ -1064,6 +1274,21 @@ def validate_gc_session_preflight_screens(
         for section, provenance in (accepted_sections or {}).items()
         if isinstance(provenance, Mapping)
     }
+    for section, provenance in active_accepted_sections.items():
+        if provenance.get("disposition") != "ui_verified":
+            continue
+        if (
+            section not in section_specs
+            or _normalize_configuration_ui_boundary_token(
+                section,
+                provenance,
+                section_specs[section],
+            )
+            is None
+        ):
+            raise ValueError(
+                f"accepted UI section {section} lacks Home verification"
+            )
     active_attachment_checks = {
         str(check_id): dict(check)
         for check_id, check in (attachment_requirement_checks or {}).items()
@@ -1433,6 +1658,7 @@ __all__ = [
     "GcSectionSpec",
     "UltimateWeaponEvidence",
     "UltimateWeaponResult",
+    "configuration_ui_boundary_sections",
     "evaluate_gc_section",
     "evaluate_ultimate_weapon_state",
     "merge_ultimate_weapon_observations",

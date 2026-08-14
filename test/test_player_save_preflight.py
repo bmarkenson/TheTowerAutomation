@@ -115,6 +115,49 @@ def _snapshot_with_history(
     return replace(_snapshot(), runtime_save=runtime)
 
 
+def _snapshot_with_battle_controls() -> PlayerSaveSnapshot:
+    snapshot = _snapshot()
+    damage = "1E-19%"
+    orb = {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    return replace(
+        snapshot,
+        validated_checks=(
+            *snapshot.validated_checks,
+            "damage_slider",
+            "orb_distance",
+        ),
+        checks={
+            **snapshot.checks,
+            "damage_slider": SaveCheckEvidence(
+                "damage_slider",
+                "observed",
+                damage,
+                ("damageAdjustmentLog",),
+                authority={"kind": "exact_values", "values": [damage]},
+            ),
+            "orb_distance": SaveCheckEvidence(
+                "orb_distance",
+                "observed",
+                orb,
+                (
+                    "rangeLevelSelected",
+                    "innerOrbDistance",
+                    "workshopOrbDistance",
+                    "presetName",
+                    "currentPreset",
+                    "workshopPresetName",
+                    "currentWorkshopPreset",
+                ),
+                authority={"kind": "exact_values", "values": [orb]},
+            ),
+        },
+    )
+
+
 def _context(*, generation: int = 1, strategy: str = "farm_t19"):
     return PlayerSavePreflightContext(
         runtime_session_id="runtime-private",
@@ -275,6 +318,8 @@ def test_candidate_receipt_and_local_confirmation_preserve_current_ui_fallback(
     monkeypatch,
     tmp_path,
 ):
+    import core.player_save_preflight as module
+
     candidate_store = AppendOnlyMappingCandidateStore(
         tmp_path / "candidate-receipts.jsonl"
     )
@@ -287,6 +332,8 @@ def test_candidate_receipt_and_local_confirmation_preserve_current_ui_fallback(
         mapping_candidate_store=candidate_store,
         confirmed_local_mapping_store=confirmation_store,
     )
+    emitted = Mock()
+    monkeypatch.setattr(module, "log", emitted)
 
     result = coordinator.acquire(
         {"modules": MODULE_ASSIGNMENTS},
@@ -330,6 +377,14 @@ def test_candidate_receipt_and_local_confirmation_preserve_current_ui_fallback(
     assert document["generation"] == 1
     assert document["events"][0]["semantic_value"] == "Magnetic Hook"
     assert document["events"][0]["raw_value"] == 777
+    candidate_messages = [
+        call.args[0]
+        for call in emitted.call_args_list
+        if "Candidate observation recorded" in call.args[0]
+    ]
+    assert len(candidate_messages) == 1
+    assert "777" not in candidate_messages[0]
+    assert "raw=" not in candidate_messages[0]
 
 
 def test_candidate_correlation_requires_pre_mutation_and_same_context(
@@ -368,7 +423,7 @@ def test_candidate_correlation_requires_pre_mutation_and_same_context(
     assert candidate_store.list_records() == []
 
 
-def test_ui_repair_closes_candidate_window_without_invalidating_snapshot(
+def test_ui_repair_closes_candidate_window_and_invalidates_snapshot(
     monkeypatch,
     tmp_path,
 ):
@@ -391,7 +446,8 @@ def test_ui_repair_closes_candidate_window_without_invalidating_snapshot(
     )
 
     assert coordinator.record_ui_verification("cards_deck", changed=True)
-    assert not coordinator.snapshot_invalidated
+    assert coordinator.snapshot_invalidated
+    assert coordinator._snapshot_invalidation_reason == "ui_repair:cards_deck"
     assert coordinator.record_mapping_observation(
         "modules",
         _module_mapping_ui_evidence(),
@@ -501,6 +557,65 @@ def test_natural_game_over_save_binds_only_to_exact_retry_successor(monkeypatch)
     assert coordinator.consume("auto_pick_perks") is True
 
 
+@pytest.mark.parametrize("direct_retry", (False, True))
+def test_exact_battle_controls_are_carried_across_home_and_retry(
+    monkeypatch,
+    direct_retry,
+):
+    successor = replace(_context(), activity_scope_id="activity-retry")
+    coordinator = _coordinator(
+        monkeypatch,
+        context_fn=(lambda: successor) if direct_retry else (lambda: _context()),
+        decode_fn=lambda _payload, **_kwargs: _snapshot_with_battle_controls(),
+    )
+    requirements = {
+        "damage_slider": {"mode": "enforce", "value": "1E-19%"},
+        "orb_distance": {
+            "mode": "enforce",
+            "resolved": {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            },
+        },
+    }
+    if direct_retry:
+        acquisition = replace(
+            _terminal_acquisition(),
+            snapshot=_snapshot_with_battle_controls(),
+        )
+        result = coordinator.stage_direct_retry(
+            acquisition,
+            requirements,
+            source_activity_scope_id="activity-source",
+        )
+        assert coordinator.bind_running(
+            battle_started=True,
+            stable_running=True,
+            continuity_verified=True,
+        )
+    else:
+        result = coordinator.acquire(requirements, initial_frame=object())
+        assert coordinator.mark_runtime_launch(
+            control=HomeBattleControl.NEW_BATTLE,
+            action_authorized=True,
+            dispatched=True,
+        )
+        assert coordinator.bind_running(
+            battle_started=True,
+            stable_running=True,
+            continuity_verified=True,
+        )
+
+    assert result.accepted_checks == ("damage_slider", "orb_distance")
+    assert coordinator.consume("damage_slider") == "1E-19%"
+    assert coordinator.consume("orb_distance") == {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+
+
 @pytest.mark.parametrize(
     "acquisition",
     [
@@ -596,7 +711,7 @@ def test_requirement_fallback_preserves_unrelated_carried_check(monkeypatch):
     assert coordinator.consume("auto_pick_perks") is True
 
 
-def test_trusted_mismatch_queues_ui_without_erasing_unrelated_carry(monkeypatch):
+def test_trusted_mismatch_repair_invalidates_unrelated_carry(monkeypatch):
     coordinator = _coordinator(monkeypatch)
 
     result = coordinator.acquire(
@@ -616,20 +731,10 @@ def test_trusted_mismatch_queues_ui_without_erasing_unrelated_carry(monkeypatch)
     assert coordinator.ui_verified_checks == {
         "cards_deck": "ui_verified_repair"
     }
-    assert result.carry.values == {"auto_pick_perks": True}
-    assert "cards_deck" not in result.carry.values
-
-    assert coordinator.mark_runtime_launch(
-        control=HomeBattleControl.NEW_BATTLE,
-        action_authorized=True,
-        dispatched=True,
-    )
-    assert coordinator.bind_running(
-        battle_started=True,
-        stable_running=True,
-        continuity_verified=True,
-    )
-    assert coordinator.consume("auto_pick_perks") is True
+    assert coordinator.snapshot_invalidated
+    assert result.carry.values == {}
+    assert result.carry.state is CarriedEvidenceState.INVALIDATED
+    assert coordinator.consume("auto_pick_perks") is None
 
 
 def test_save_mismatch_ui_already_matches_invalidates_snapshot(monkeypatch):
@@ -649,6 +754,31 @@ def test_save_mismatch_ui_already_matches_invalidates_snapshot(monkeypatch):
     assert result.carry.state is CarriedEvidenceState.INVALIDATED
     assert result.carry.values == {}
     assert result.carry.invalidation_reason == "save_ui_contradiction"
+
+
+def test_invalidated_snapshot_does_not_reuse_stale_mismatch_as_contradiction(
+    monkeypatch,
+):
+    coordinator = _coordinator(monkeypatch)
+    result = coordinator.acquire(
+        {"cards_deck": "Tournament", "auto_pick_perks": True},
+        initial_frame=object(),
+    )
+    assert result.carry is not None
+
+    coordinator.invalidate(
+        "damage_slider_repair_started",
+        check_ids=("damage_slider",),
+    )
+
+    assert coordinator.record_ui_verification(
+        "cards_deck",
+        changed=False,
+    )
+    assert result.carry.invalidation_reason == "damage_slider_repair_started"
+    assert coordinator.ui_verified_checks == {
+        "cards_deck": "ui_verified"
+    }
 
 
 def test_observation_only_modules_are_accepted_and_carried(monkeypatch):
@@ -1012,6 +1142,15 @@ def test_force_ui_skips_save_lifecycle_and_comparison_audit_keeps_ui_authority(
 
     requirements = {
         "cards_deck": "Farm",
+        "damage_slider": {"mode": "enforce", "value": "1E-19%"},
+        "orb_distance": {
+            "mode": "enforce",
+            "resolved": {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            },
+        },
         "perk_auto_pick_order": ["perk_wave_requirement"],
         "free_upgrade_locks": ["Shockwave Size"],
         "modules": {"cannon_primary": "Amplifying Strike"},

@@ -245,6 +245,7 @@ def initialize_level_skips(
     stream_ready_timeout_s: float = 8.0,
     ehls_taps_per_burst: int = EHLS_TAPS_PER_BURST,
     eals_taps_per_burst: int = EALS_TAPS_PER_BURST,
+    mutation_observer_fn: Optional[Callable[[], None]] = None,
 ) -> LevelSkipInitializationResult:
     """Gold-box EHLS then EALS with minimum capture and navigation overhead.
 
@@ -278,8 +279,42 @@ def initialize_level_skips(
     completion_frames: Dict[str, Frame] = {}
     completion_elapsed: Dict[str, float] = {}
     frame_stream: Optional[ScreenrecordFrameStream] = None
+    mutation_observed = False
+    mutation_observer_failed = False
+
+    def observe_before_mutation() -> bool:
+        """Invalidate carried save authority before the first state change."""
+
+        nonlocal mutation_observed, mutation_observer_failed
+        if mutation_observed:
+            return True
+        if mutation_observer_fn is not None:
+            try:
+                mutation_observer_fn()
+            except Exception as exc:
+                mutation_observer_failed = True
+                log(
+                    "[RUN_INIT] Snapshot invalidation failed before the first "
+                    f"level-skip mutation: {exc}",
+                    "WARN",
+                )
+                return False
+        mutation_observed = True
+        return True
+
+    def guarded_mutation_tap(
+        point: Point,
+        *,
+        label: str,
+        verification: TapVerification,
+    ) -> bool:
+        if not observe_before_mutation():
+            return False
+        return tap_fn(point, label=label, verification=verification)
 
     def finish(reason: str) -> LevelSkipInitializationResult:
+        if mutation_observer_failed:
+            reason = "snapshot_invalidation_failed"
         result = _result(
             started,
             monotonic_fn,
@@ -353,6 +388,8 @@ def initialize_level_skips(
             f"[RUN_INIT] Utility buy quantity is {quantity!r}; setting Max before level skips",
             "DEBUG",
         )
+        if not observe_before_mutation():
+            return finish("snapshot_invalidation_failed")
         try:
             frame = ensure_buy_quantity(
                 "max",
@@ -477,7 +514,7 @@ def initialize_level_skips(
                             eals_first_tap_elapsed_s = monotonic_fn() - started
                             eals_first_tap_frame = frame
                         if frame_stream is not None:
-                            if not tap_fn(
+                            if not guarded_mutation_tap(
                                 _purchase_point(eals_box),
                                 label=f"level_skip:{EALS}",
                                 verification=_target_tap_verification(
@@ -494,7 +531,7 @@ def initialize_level_skips(
                                 point=_purchase_point(eals_box),
                                 label=f"level_skip:{EALS}",
                                 capture_fn=capture_fn,
-                                tap_fn=tap_fn,
+                                tap_fn=guarded_mutation_tap,
                                 verification=_target_tap_verification(
                                     frame,
                                     EALS,
@@ -519,7 +556,7 @@ def initialize_level_skips(
                 eals_first_tap_elapsed_s = monotonic_fn() - started
                 eals_first_tap_frame = frame
             if using_live_stream or frame_stream is not None:
-                if not tap_fn(
+                if not guarded_mutation_tap(
                     point,
                     label=f"level_skip:{target}",
                     verification=verification,
@@ -534,7 +571,7 @@ def initialize_level_skips(
                     burst_taps, dispatch_ok = _tap_burst(
                         point=point,
                         label=f"level_skip:{EHLS}",
-                        tap_fn=tap_fn,
+                        tap_fn=guarded_mutation_tap,
                         verification=verification,
                         max_taps=ehls_burst_limit,
                     )
@@ -559,7 +596,7 @@ def initialize_level_skips(
                             point=_purchase_point(eals_box),
                             label=f"level_skip:{EALS}",
                             capture_fn=capture_fn,
-                            tap_fn=tap_fn,
+                            tap_fn=guarded_mutation_tap,
                             verification=_target_tap_verification(
                                 frame,
                                 EALS,
@@ -575,7 +612,7 @@ def initialize_level_skips(
                         point=point,
                         label=f"level_skip:{EALS}",
                         capture_fn=capture_fn,
-                        tap_fn=tap_fn,
+                        tap_fn=guarded_mutation_tap,
                         verification=verification,
                         max_taps=eals_burst_limit,
                     )

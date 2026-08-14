@@ -334,6 +334,20 @@ class BoundRunningAttachmentSaveEvidence:
         if callable(close):
             close(reason)
 
+    def invalidate(
+        self,
+        reason: str,
+        *,
+        check_ids: tuple[str, ...] = (),
+    ) -> None:
+        """Invalidate every remaining fact after the first UI mutation."""
+
+        del check_ids
+        self._invalidated = True
+        self.close_mapping_candidate_window(
+            str(reason or "running_attachment_invalidated")
+        )
+
     def temporal_class(
         self,
         check_id: str,

@@ -316,14 +316,14 @@ def ensure_target_priority_order(
                         detect_target_priority_order(frame)[index] == expected
                     ),
                 )
+                if not repair_observed and repair_observer_fn is not None:
+                    repair_observer_fn()
+                    repair_observed = True
                 if not tap_fn(
                     (_UP_ARROW_X, arrow_y),
                     verification=verification,
                 ):
                     raise RuntimeError(f"Failed moving {target!r} upward")
-                if not repair_observed and repair_observer_fn is not None:
-                    repair_observer_fn()
-                    repair_observed = True
                 working[current_index - 1], working[current_index] = (
                     working[current_index], working[current_index - 1]
                 )

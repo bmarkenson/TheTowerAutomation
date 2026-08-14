@@ -84,6 +84,8 @@ CARRIED_SAVE_CHECKS = frozenset(
     {
         *HOME_SAVE_CHECKS,
         "auto_pick_perks",
+        "damage_slider",
+        "orb_distance",
         "target_priority",
         "ultimate_weapon_primaries",
         "spotlight_missiles",
@@ -967,7 +969,12 @@ class PlayerSavePreflightCoordinator:
         prior_repair = self._ui_verified_checks.get(normalized) == (
             "ui_verified_repair"
         )
-        if trusted_mismatch and not changed and not prior_repair:
+        if (
+            trusted_mismatch
+            and not changed
+            and not prior_repair
+            and not self._snapshot_invalidation_reason
+        ):
             self.invalidate(
                 "save_ui_contradiction",
                 check_ids=(normalized,),
@@ -986,7 +993,10 @@ class PlayerSavePreflightCoordinator:
         if changed or normalized not in self._ui_verified_checks:
             self._ui_verified_checks[normalized] = status
         if changed:
-            self.close_mapping_candidate_window(f"ui_repair:{normalized}")
+            self.invalidate(
+                f"ui_repair:{normalized}",
+                check_ids=(normalized,),
+            )
         log(
             "[PLAYER_SAVE_PREFLIGHT] Current UI evidence recorded: "
             f"check={normalized} disposition={status} "
@@ -1142,7 +1152,6 @@ class PlayerSavePreflightCoordinator:
                 "[PLAYER_SAVE_MAPPING] Candidate observation recorded: "
                 f"mapping_id={record['mapping']['mapping_id']} "
                 f"check={normalized} value_kind={payload['value_kind']} "
-                f"raw={payload['raw_discriminator']['value']} "
                 f"semantic={payload['semantic_value']!r} "
                 f"status={payload['status']} disposition=candidate_only",
                 "INFO",

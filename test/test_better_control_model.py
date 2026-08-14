@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -3841,6 +3842,99 @@ def test_terminal_return_write_retry_does_not_repeat_save_or_ui_work(
     assert completed["status"] == "completed"
     app._terminal_battle_bundle.assert_not_called()
     assert app._manual_terminal_claims() == {}
+
+
+def test_structural_terminal_surrender_does_not_require_semantic_stats(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    active = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    active["pid"] = owner["pid"]
+    requested = store.request_manual_control(
+        evidence=active,
+        source="test",
+        surrender_collection="minimal",
+    )
+    store.transition_manual_control(
+        requested["manual_control_id"],
+        "active",
+        pause_acknowledgement=active,
+    )
+    terminal = _evidence(
+        game_state="game_over",
+        observation_id="runtime-1:structural-terminal",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    terminal["pid"] = owner["pid"]
+    manual = store.request_return_control(
+        requested["manual_control_id"],
+        evidence=terminal,
+        source="test",
+    )
+    supervisor.apply_control()
+    cause = SaveCheckEvidence(
+        "battle_history_killed_by",
+        "observed",
+        "Surrender",
+        ("battleHistory[-1].killedBy",),
+        complete=True,
+        authority={"kind": "matching_value"},
+    )
+    acquisition = replace(
+        _natural_terminal_acquisition(terminal),
+        snapshot=SimpleNamespace(
+            checks={"battle_history_killed_by": cause},
+        ),
+    )
+    report = {
+        "schema_version": 1,
+        "status": "unavailable",
+        "complete": False,
+        "reason": "malformed_history_entry_value:29:damagedealt",
+        "structural_history": {"status": "complete", "reason": ""},
+        "history_transition": {
+            "status": "capacity_rollover",
+            "baseline_fingerprint": "a" * 64,
+            "observed_fingerprint": "b" * 64,
+            "baseline_entry_count": 30,
+            "observed_entry_count": 30,
+            "capacity": 30,
+        },
+    }
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._terminal_battle_bundle = MagicMock(
+        return_value=(
+            {"terminal_save_report": report},
+            acquisition,
+            None,
+        )
+    )
+    app._player_save_runtime_session_id = str(terminal["runtime_id"])
+    app._manual_terminal_save_claims = {}
+    app._flag_recoverable_runtime_failure = MagicMock()
+
+    with patch.object(app, "_persist_minimal_surrender_record") as persist:
+        recorded = app._observe_manual_terminal(manual, terminal)
+
+    assert recorded is not None
+    evidence = recorded["terminal_evidence"]
+    assert evidence["status"] == "confirmed_surrender"
+    assert "semantic record publication is unavailable" in evidence["reason"]
+    assert "battle_id" not in evidence
+    assert evidence["receipt"]["terminal"]["surrendered"] is True
+    persist.assert_not_called()
+    app._flag_recoverable_runtime_failure.assert_not_called()
 
 
 def test_terminal_ui_fallback_completion_retry_preserves_enabled_authority(

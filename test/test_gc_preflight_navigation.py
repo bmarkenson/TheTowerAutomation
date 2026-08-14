@@ -2,11 +2,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_module_loadout import gc_module_loadout_evidence_from_assignments
-from core.gc_preflight import summarize_gc_preflight_mismatch
+from core.gc_preflight import GC_SECTION_SPECS, summarize_gc_preflight_mismatch
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     _ensure_auto_pick_perks_enabled,
@@ -44,6 +45,32 @@ PREFLIGHT_REQUIREMENTS = {
     "modules": MODULE_REQUIREMENTS,
     "auto_pick_perks": True,
 }
+
+
+def _ui_boundary_token(section, verification="ui_verified"):
+    spec = GC_SECTION_SPECS[section]
+    return {
+        "source": "home_ui_boundary",
+        "disposition": "ui_verified",
+        "verification": verification,
+        "section_result": {
+            "name": section,
+            "valid": True,
+            "detected_state": spec.expected_state,
+            "required_secondary": tuple(sorted(spec.required_secondary)),
+            "detected_secondary": tuple(sorted(spec.required_secondary)),
+            "missing_secondary": (),
+        },
+        "selection": (
+            {
+                "region": tuple(spec.selection_region),
+                "valid_region": True,
+                "selected": True,
+            }
+            if spec.selection_region is not None
+            else None
+        ),
+    }
 
 
 class _FakeUi:
@@ -320,6 +347,60 @@ def test_enabled_auto_pick_perks_does_not_send_a_toggle():
     )
 
     assert result is frame
+    assert taps == []
+
+
+def test_auto_pick_repair_observer_runs_before_checkbox_input():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    events = []
+
+    def measure(candidate):
+        return SimpleNamespace(
+            valid_region=True,
+            enabled=bool(candidate[220:310, 255:355].any()),
+            region=(255, 220, 100, 90),
+        )
+
+    def tap(*_args, **_kwargs):
+        events.append("tap")
+        frame[220:310, 255:355] = (0, 255, 0)
+        return True
+
+    result = _ensure_auto_pick_perks_enabled(
+        frame,
+        capture_fn=lambda: frame,
+        detector=lambda _frame: {"state": "PERKS"},
+        safe_tap_fn=tap,
+        sleep_fn=lambda _seconds: None,
+        measure_fn=measure,
+        repair_observer_fn=lambda: events.append("observer"),
+    )
+
+    assert result is frame
+    assert events == ["observer", "tap"]
+
+
+def test_auto_pick_repair_observer_failure_sends_no_checkbox_input():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    taps = []
+
+    with pytest.raises(RuntimeError, match="save invalidation failed"):
+        _ensure_auto_pick_perks_enabled(
+            frame,
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "PERKS"},
+            safe_tap_fn=lambda *_args, **_kwargs: taps.append(True),
+            sleep_fn=lambda _seconds: None,
+            measure_fn=lambda _frame: SimpleNamespace(
+                valid_region=True,
+                enabled=False,
+                region=(255, 220, 100, 90),
+            ),
+            repair_observer_fn=lambda: (_ for _ in ()).throw(
+                RuntimeError("save invalidation failed")
+            ),
+        )
+
     assert taps == []
 
 
@@ -1581,14 +1662,18 @@ def test_bound_save_components_skip_redundant_auto_pick_and_uw_navigation():
     assert ui.swipes == []
 
 
-def test_poison_stun_repair_preserves_unrelated_carried_evidence():
+def test_poison_stun_repair_invalidates_and_rechecks_carried_evidence():
     ui = _FakeUi()
+    ui.frame[220:310, 255:355] = (0, 255, 0)
     setup_evidence = {
         "configuration": {
             "valid": True,
             "source": "NEW_BATTLE",
             "save_backed_sections": {
                 "cards": {"disposition": "save_match"},
+            },
+            "ui_verified_sections": {
+                "bots": _ui_boundary_token("bots"),
             },
         },
         "modules": {"checked": True, "valid": True},
@@ -1609,8 +1694,8 @@ def test_poison_stun_repair_preserves_unrelated_carried_evidence():
         def consume(self, check_id):
             return carried.get(check_id)
 
-        def invalidate(self, reason):
-            invalidations.append(reason)
+        def invalidate(self, reason, *, check_ids):
+            invalidations.append((reason, check_ids))
 
         def record_ui_verification(self, check_id, *, changed):
             ui_verifications.append((check_id, changed))
@@ -1659,22 +1744,28 @@ def test_poison_stun_repair_preserves_unrelated_carried_evidence():
     )
 
     assert result.status is GcPreflightNavigationStatus.COMPLETE
-    assert invalidations == []
-    assert ui_verifications == [("poison_swamp_stun", True)]
-    assert validated["ultimate_observations"] == {
-        "Golden Tower": {"primary": "on"},
-        "Black Hole": {"primary": "on"},
-        "Poison Swamp": {"primary": "on", "stun": "off"},
-        "Spotlight": {"primary": "on", "missiles": "on"},
-    }
-    assert validated["configuration_boundary_evidence"] == setup_evidence[
-        "configuration"
+    assert invalidations == [
+        ("poison_swamp_stun_repair_started", ("poison_swamp_stun",))
     ]
-    assert validated["free_upgrade_lock_boundary_evidence"] == {
-        "status": "save_match",
-        "source": "bound_player_save_preflight",
+    assert ui_verifications == [
+        ("poison_swamp_stun", True),
+        ("auto_pick_perks", False),
+    ]
+    assert validated["ultimate_observations"] == {
+        "Poison Swamp": {"primary": "on", "stun": "off"},
     }
-    assert "navigation.Cards" not in ui.visible_taps
+    assert validated.get("configuration_boundary_evidence") is None
+    assert validated.get("free_upgrade_lock_boundary_evidence") is None
+    assert validated.get("auto_pick_boundary_evidence") is None
+    assert validated["accepted_sections"]["bots"] == (
+        _ui_boundary_token("bots")
+    )
+    assert validated["perks_screen"] is ui.frame
+    assert "navigation.open_perks" in ui.static_taps
+    assert "buttons.perks:auto_pick" not in ui.static_taps
+    assert "navigation.Cards" in ui.visible_taps
+    assert "navigation.menu_event" not in ui.visible_taps
+    assert "navigation.menu_modules" not in ui.visible_taps
 
 
 def test_uw_ui_contradiction_to_carried_save_match_invalidates_snapshot():

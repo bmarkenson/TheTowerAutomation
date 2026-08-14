@@ -139,3 +139,37 @@ def test_bound_attachment_mapping_observer_rechecks_context_and_closes():
     assert changed.record_mapping_observation("modules", payload) == 0
     assert calls[-1] == ("close", "running_attachment_context_changed")
     assert changed.record_mapping_observation("modules", payload) == 0
+
+
+def test_bound_attachment_invalidation_rejects_every_remaining_fact():
+    observations = running_attachment_observations(
+        {
+            "damage_slider": "1E-19%",
+            "orb_distance": {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            },
+        }
+    )
+    calls = []
+
+    class Observer:
+        def close(self, reason):
+            calls.append(reason)
+
+    evidence = BoundRunningAttachmentSaveEvidence(
+        observations,
+        _context,
+        Observer(),
+    )
+
+    evidence.invalidate(
+        "damage_slider_ui_input",
+        check_ids=("damage_slider",),
+    )
+
+    assert evidence.consume("damage_slider") is None
+    assert evidence.consume("orb_distance") is None
+    assert evidence.record_mapping_observation("orb_distance", {}) == 0
+    assert calls == ["damage_slider_ui_input"]

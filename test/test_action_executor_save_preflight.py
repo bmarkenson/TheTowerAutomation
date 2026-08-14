@@ -1,10 +1,12 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from automation.missions.base import MissionContext
 from core.action_executor import _bind_save_backed_home_evidence, execute_actions
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
-from core.gc_preflight import _free_upgrade_lock_boundary_evidence
+from core.gc_preflight import GC_SECTION_SPECS, _free_upgrade_lock_boundary_evidence
 from core.gc_preflight_navigation import (
     GcLivePreflightResult,
     GcPreflightNavigationStatus,
@@ -44,6 +46,32 @@ TOURNAMENT_VARIATION = {
     "armor_primary": "Anti-Cube Portal",
     "armor_assist": "Space Displacer",
 }
+
+
+def _ui_boundary_token(section, verification="ui_verified"):
+    spec = GC_SECTION_SPECS[section]
+    return {
+        "source": "home_ui_boundary",
+        "disposition": "ui_verified",
+        "verification": verification,
+        "section_result": {
+            "name": section,
+            "valid": True,
+            "detected_state": spec.expected_state,
+            "required_secondary": tuple(sorted(spec.required_secondary)),
+            "detected_secondary": tuple(sorted(spec.required_secondary)),
+            "missing_secondary": (),
+        },
+        "selection": (
+            {
+                "region": tuple(spec.selection_region),
+                "valid_region": True,
+                "selected": True,
+            }
+            if spec.selection_region is not None
+            else None
+        ),
+    }
 
 
 def test_running_attachment_always_uses_in_battle_preflight_route():
@@ -638,6 +666,344 @@ def test_target_priority_attachment_consumes_attachment_save_carrier():
     )
 
 
+def test_battle_controls_consume_exact_bound_values_without_opening_ui():
+    values = {
+        "damage_slider": "1E2%",
+        "orb_distance": {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
+    }
+
+    class BoundSave:
+        def consume(self, check_id):
+            return values[check_id]
+
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+
+    with (
+        patch("core.action_executor.configure_damage_slider") as damage_ui,
+        patch("core.action_executor.configure_orb_distance") as orb_ui,
+    ):
+        execute_actions(
+            None,
+            [
+                {
+                    "type": "damage_slider_configure",
+                    "mode": "enforce",
+                    "value": "100%",
+                },
+                {
+                    "type": "orb_distance_configure",
+                    "mode": "enforce",
+                    "range_basis": "98.38m",
+                    "extra": "87.16m",
+                    "workshop": "80.37m",
+                },
+            ],
+            ctx,
+            action_guard_fn=lambda: True,
+        )
+
+    damage_ui.assert_not_called()
+    orb_ui.assert_not_called()
+    variables = ctx.data["mission_vars"]
+    assert variables["damage_slider_checked"] is True
+    assert variables["orb_distance_checked"] is True
+    assert variables["damage_slider_observation"]["source"] == (
+        "bound_player_save_preflight"
+    )
+    assert variables["orb_distance_observation"]["source"] == (
+        "bound_player_save_preflight"
+    )
+
+
+def test_orb_carry_uses_preset_for_observed_range_without_opening_ui():
+    class BoundSave:
+        def consume(self, check_id):
+            assert check_id == "orb_distance"
+            return {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            }
+
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+    presets = [
+        {
+            "range_basis": "30.00m",
+            "extra": "30.00m",
+            "workshop": "39.00m",
+        },
+        {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
+    ]
+
+    with patch("core.action_executor.configure_orb_distance") as orb_ui:
+        execute_actions(
+            None,
+            [
+                {
+                    "type": "orb_distance_configure",
+                    "mode": "enforce",
+                    "range_basis": "98.38m",
+                    "extra": "87.16m",
+                    "workshop": "80.37m",
+                    "range_presets": presets,
+                }
+            ],
+            ctx,
+            action_guard_fn=lambda: True,
+        )
+
+    orb_ui.assert_not_called()
+    observation = ctx.data["mission_vars"]["orb_distance_observation"]
+    assert observation["range_basis"] == "30.00m"
+    assert observation["matches"] is True
+    assert observation["source"] == "bound_player_save_preflight"
+
+
+@pytest.mark.parametrize(
+    ("action", "owner"),
+    (
+        (
+            {
+                "type": "damage_slider_configure",
+                "mode": "bogus",
+                "value": "1E2%",
+            },
+            "core.action_executor.configure_damage_slider",
+        ),
+        (
+            {
+                "type": "orb_distance_configure",
+                "mode": "enforce",
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+                "range_presets": [],
+            },
+            "core.action_executor.configure_orb_distance",
+        ),
+    ),
+)
+def test_carried_battle_controls_do_not_bypass_action_validation(action, owner):
+    values = {
+        "damage_slider": "1E2%",
+        "orb_distance": {
+            "range_basis": "30.00m",
+            "extra": "30.00m",
+            "workshop": "39.00m",
+        },
+    }
+
+    class BoundSave:
+        def consume(self, check_id):
+            return values[check_id]
+
+        def fallback_checks(self, _reason, *, check_ids):
+            assert len(check_ids) == 1
+
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+
+    with patch(owner, side_effect=ValueError("invalid action")) as ui_owner:
+        execute_actions(None, [action], ctx)
+
+    ui_owner.assert_called_once()
+
+
+def test_observed_battle_control_variations_use_save_without_opening_ui():
+    values = {
+        "damage_slider": "1E-19%",
+        "orb_distance": {
+            "range_basis": "30.00m",
+            "extra": "30.00m",
+            "workshop": "39.00m",
+        },
+    }
+
+    class BoundSave:
+        def consume(self, check_id):
+            return values[check_id]
+
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+
+    with (
+        patch("core.action_executor.configure_damage_slider") as damage_ui,
+        patch("core.action_executor.configure_orb_distance") as orb_ui,
+    ):
+        execute_actions(
+            None,
+            [
+                {
+                    "type": "damage_slider_configure",
+                    "mode": "observe",
+                    "value": "1E2%",
+                },
+                {
+                    "type": "orb_distance_configure",
+                    "mode": "observe",
+                    "range_basis": "98.38m",
+                    "extra": "87.16m",
+                    "workshop": "80.37m",
+                },
+            ],
+            ctx,
+            action_guard_fn=lambda: True,
+        )
+
+    damage_ui.assert_not_called()
+    orb_ui.assert_not_called()
+    variables = ctx.data["mission_vars"]
+    assert variables["damage_slider_observed"] is True
+    assert variables["damage_slider_observation"]["matches"] is False
+    assert variables["damage_slider_observation"]["reason"] == (
+        "bound_player_save_observation"
+    )
+    assert variables["orb_distance_observed"] is True
+    assert variables["orb_distance_observation"]["matches"] is False
+    assert variables["orb_distance_observation"]["range_observed"] == (
+        "30.00m"
+    )
+    assert variables["orb_distance_observation"]["reason"] == (
+        "bound_player_save_observation"
+    )
+
+
+def test_battle_control_requirement_change_restores_complete_ui_path():
+    fallbacks = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            assert check_id == "damage_slider"
+            return "1E-19%"
+
+        def fallback_checks(self, reason, *, check_ids):
+            fallbacks.append((reason, check_ids))
+
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+    result = SimpleNamespace(
+        expected="1E2%",
+        initial="1E-19%",
+        final="1E2%",
+        steps=21,
+        success=True,
+        changed=True,
+        reason="matched",
+        as_dict=lambda: {"success": True, "changed": True},
+    )
+
+    with patch(
+        "core.action_executor.configure_damage_slider",
+        return_value=result,
+    ) as damage_ui:
+        execute_actions(
+            None,
+            [
+                {
+                    "type": "damage_slider_configure",
+                    "mode": "enforce",
+                    "value": "100%",
+                }
+            ],
+            ctx,
+        )
+
+    assert fallbacks == [
+        (
+            "damage_slider_action_requirement_changed",
+            ("damage_slider",),
+        )
+    ]
+    damage_ui.assert_called_once_with("100%", mode="enforce")
+
+
+def test_battle_control_first_repair_invalidates_remaining_save_carry():
+    invalidations = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            assert check_id == "damage_slider"
+            return None
+
+        def invalidate(self, reason, *, check_ids):
+            invalidations.append((reason, check_ids))
+
+        def record_ui_verification(self, check_id, *, changed):
+            assert (check_id, changed) == ("damage_slider", True)
+            return True
+
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+    result = SimpleNamespace(
+        expected="1E2%",
+        initial="1E-19%",
+        final="1E2%",
+        steps=21,
+        success=True,
+        changed=True,
+        reason="matched",
+        as_dict=lambda: {"success": True, "changed": True},
+    )
+
+    def repair(_expected, **kwargs):
+        kwargs["repair_observer_fn"]()
+        return result
+
+    with patch(
+        "core.action_executor.configure_damage_slider",
+        side_effect=repair,
+    ):
+        execute_actions(
+            None,
+            [
+                {
+                    "type": "damage_slider_configure",
+                    "mode": "enforce",
+                    "value": "100%",
+                }
+            ],
+            ctx,
+        )
+
+    assert invalidations == [
+        ("damage_slider_repair_started", ("damage_slider",))
+    ]
+
+
 def test_target_priority_requirement_change_falls_back_without_global_invalidation():
     fallbacks = []
 
@@ -673,7 +1039,7 @@ def test_target_priority_requirement_change_falls_back_without_global_invalidati
     assert ensure.call_args.kwargs["expected"] == ORDER
 
 
-def test_target_priority_ui_repair_preserves_other_carried_checks():
+def test_target_priority_ui_repair_invalidates_other_carried_checks():
     invalidations = []
     verifications = []
     mapping_observations = []
@@ -683,8 +1049,8 @@ def test_target_priority_ui_repair_preserves_other_carried_checks():
         def consume(self, _check_id):
             return None
 
-        def invalidate(self, reason):
-            invalidations.append(reason)
+        def invalidate(self, reason, *, check_ids):
+            invalidations.append((reason, check_ids))
 
         def record_ui_verification(self, check_id, *, changed):
             verifications.append((check_id, changed))
@@ -724,8 +1090,10 @@ def test_target_priority_ui_repair_preserves_other_carried_checks():
             action_guard_fn=lambda: True,
         )
 
-    assert invalidations == []
-    assert mapping_windows_closed == ["target_priority_repair_started"]
+    assert invalidations == [
+        ("target_priority_repair_started", ("target_priority",))
+    ]
+    assert mapping_windows_closed == []
     assert verifications == [("target_priority", True)]
     assert len(mapping_observations) == 1
     check_id, mapping_evidence = mapping_observations[0]
@@ -817,6 +1185,68 @@ def test_bound_save_locks_preserve_required_subset_with_unmanaged_extra():
     assert normalized["valid"] is True
     assert normalized["observed"] == [*expected, "Health"]
     assert normalized["diagnostics"]["unmanaged_locks"] == ["Health"]
+
+
+def test_invalidated_configuration_carry_retains_only_home_ui_sections():
+    consumed = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            consumed.append(check_id)
+            return None
+
+    setup = {
+        "configuration": {
+            "valid": True,
+            "save_backed_sections": {
+                "cards": {"disposition": "save_match"},
+                "workshop": {"disposition": "save_match"},
+            },
+            "ui_verified_sections": {
+                "bots": _ui_boundary_token("bots"),
+                "guardians": _ui_boundary_token(
+                    "guardians", "ui_verified_repair"
+                ),
+            },
+        }
+    }
+
+    bound = _bind_save_backed_home_evidence(setup, BoundSave())
+
+    assert consumed == ["cards_deck", "workshop_preset"]
+    assert "configuration" not in bound
+    assert bound["configuration_ui_boundary_sections"] == {
+        "bots": _ui_boundary_token("bots"),
+        "guardians": _ui_boundary_token(
+            "guardians", "ui_verified_repair"
+        ),
+    }
+
+
+def test_partial_configuration_binding_retains_independent_exact_sections():
+    class BoundSave:
+        def consume(self, check_id):
+            return "Farm" if check_id == "cards_deck" else None
+
+    setup = {
+        "configuration": {
+            "valid": True,
+            "save_backed_sections": {
+                "cards": {"disposition": "save_match"},
+                "workshop": {"disposition": "save_match"},
+            },
+            "ui_verified_sections": {
+                "bots": _ui_boundary_token("bots")
+            },
+        }
+    }
+
+    bound = _bind_save_backed_home_evidence(setup, BoundSave())
+
+    assert "configuration" not in bound
+    assert bound["configuration_ui_boundary_sections"] == {
+        "bots": _ui_boundary_token("bots"),
+    }
 
 
 def test_exact_save_backed_modules_bind_into_final_session_evidence():
@@ -971,12 +1401,12 @@ def test_unbound_home_uw_copy_is_not_reused_by_session_preflight():
     assert "ultimate_weapons" not in bound
 
 
-def test_ui_only_configuration_repairs_preserve_remaining_carried_checks():
+def test_ui_configuration_repairs_invalidate_remaining_carried_checks():
     invalidations = []
 
     class BoundSave:
-        def invalidate(self, reason):
-            invalidations.append(reason)
+        def invalidate(self, reason, *, check_ids):
+            invalidations.append((reason, check_ids))
 
     ctx = MissionContext(
         data={
@@ -1011,14 +1441,22 @@ def test_ui_only_configuration_repairs_preserve_remaining_carried_checks():
         as_dict=lambda: {"changed": True},
     )
 
+    def repair_damage(_value, **kwargs):
+        kwargs["repair_observer_fn"]()
+        return damage
+
+    def repair_orb(**kwargs):
+        kwargs["repair_observer_fn"]()
+        return orb
+
     with (
         patch(
             "core.action_executor.configure_damage_slider",
-            return_value=damage,
+            side_effect=repair_damage,
         ),
         patch(
             "core.action_executor.configure_orb_distance",
-            return_value=orb,
+            side_effect=repair_orb,
         ),
     ):
         execute_actions(
@@ -1041,4 +1479,7 @@ def test_ui_only_configuration_repairs_preserve_remaining_carried_checks():
             action_guard_fn=lambda: True,
         )
 
-    assert invalidations == []
+    assert invalidations == [
+        ("damage_slider_repair_started", ("damage_slider",)),
+        ("orb_distance_repair_started", ("orb_distance",)),
+    ]

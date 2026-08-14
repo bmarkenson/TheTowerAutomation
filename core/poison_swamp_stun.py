@@ -276,6 +276,7 @@ def ensure_poison_swamp_stun(
         [Optional[Frame]], Optional[str]
     ] = measure_workshop_upgrade_menu,
     swipe_fn: Callable[[str, str], Any] = swipe_upgrade_menu,
+    repair_observer_fn: Callable[[], None] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> PoisonSwampStunResult:
     """Ensure Stun has the required state from Workshop or the active UW menu."""
@@ -388,6 +389,8 @@ def ensure_poison_swamp_stun(
             if evidence.state is PoisonSwampStunState.ON
             else "buttons.poison_swamp_stun_off"
         )
+        if repair_observer_fn is not None:
+            repair_observer_fn()
         if not tap_visible_fn(visible_control, screenshot=detail):
             raise PoisonSwampStunError(
                 f"verified Stun-{evidence.state.value} checkbox tap failed"

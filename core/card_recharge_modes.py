@@ -228,6 +228,7 @@ def ensure_card_recharge_modes(
     safe_long_press_fn: Callable[..., bool] = safe_long_press,
     safe_tap_fn: Callable[..., bool] = safe_tap,
     swipe_fn: Callable[[str], bool] = swipe_now,
+    repair_observer_fn: Callable[[], None] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> CardRechargeModesResult:
     """Restore Demon Mode/Nuke recharge behavior from the Cards inventory."""
@@ -240,6 +241,15 @@ def ensure_card_recharge_modes(
     changed_labels: set[str] = set()
     viewport_evidence: list[_InventoryViewportEvidence] = []
     viewport_index = 0
+    repair_announced = False
+
+    def announce_repair() -> None:
+        nonlocal repair_announced
+        if repair_announced:
+            return
+        if repair_observer_fn is not None:
+            repair_observer_fn()
+        repair_announced = True
 
     def inspect_viewport(frame: Frame, phase: str) -> Frame:
         nonlocal viewport_index
@@ -296,6 +306,7 @@ def ensure_card_recharge_modes(
                 detector=detector,
                 safe_long_press_fn=safe_long_press_fn,
                 safe_tap_fn=safe_tap_fn,
+                repair_observer_fn=announce_repair,
                 sleep_fn=sleep_fn,
             )
             evidence_by_label[label] = observed
@@ -499,6 +510,7 @@ def _ensure_inventory_card_mode(
     detector: Detector,
     safe_long_press_fn: Callable[..., bool],
     safe_tap_fn: Callable[..., bool],
+    repair_observer_fn: Callable[[], None],
     sleep_fn: Callable[[float], None],
 ) -> tuple[Frame, CardRechargeModeEvidence, bool]:
     template_key = _CARD_TEMPLATE_KEYS[label]
@@ -533,6 +545,7 @@ def _ensure_inventory_card_mode(
                 raise CardRechargeModeError(
                     f"{label} recharge evidence changed before correction"
                 )
+            repair_observer_fn()
             if not safe_tap_fn(
                 _CHECKBOX_POINT,
                 dispatch="now",

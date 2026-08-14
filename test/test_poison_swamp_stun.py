@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import cv2
 import numpy as np
+import pytest
 
 from core.matcher import get_match
 from core.poison_swamp_stun import (
@@ -159,6 +160,93 @@ def test_guarded_correction_toggles_on_to_off_and_reverifies():
         "buttons.poison_swamp_stun_on",
         screenshot=detail_on,
     )
+
+
+def test_poison_stun_repair_observer_runs_before_checkbox_input():
+    uw = _frame(10)
+    detail_on = _frame(20)
+    detail_off = _frame(30)
+    cleared = _frame(40)
+    captures = iter((uw, detail_on, detail_off))
+    events = []
+
+    def detector(frame):
+        if int(frame[0, 0, 0]) in {10, 40}:
+            return {"state": "RUNNING", "menu": "UW_MENU", "overlays": []}
+        return {
+            "state": "UPGRADE_DETAIL",
+            "menu": None,
+            "overlays": ["UPGRADE_DETAIL"],
+        }
+
+    result = ensure_poison_swamp_stun_off(
+        capture_fn=lambda: next(captures),
+        detector=detector,
+        detect_boxes_fn=lambda _frame, **_kwargs: {
+            "left": [
+                UpgradeBox(
+                    "left",
+                    (26, 1367, 511, 246),
+                    text="Poison Swamp",
+                )
+            ],
+            "right": [],
+        },
+        safe_tap_fn=Mock(return_value=True),
+        tap_visible_fn=lambda *_args, **_kwargs: events.append("checkbox") or True,
+        dismiss_fn=lambda **_kwargs: cleared,
+        measure_fn=lambda frame: _evidence(
+            PoisonSwampStunState.ON
+            if int(frame[0, 0, 0]) == 20
+            else PoisonSwampStunState.OFF
+        ),
+        repair_observer_fn=lambda: events.append("observer"),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.changed
+    assert events == ["observer", "checkbox"]
+
+
+def test_poison_stun_repair_observer_failure_sends_no_checkbox_input():
+    uw = _frame(10)
+    detail_on = _frame(20)
+    captures = iter((uw, detail_on))
+    checkbox = Mock(return_value=True)
+
+    def detector(frame):
+        if int(frame[0, 0, 0]) == 10:
+            return {"state": "RUNNING", "menu": "UW_MENU", "overlays": []}
+        return {
+            "state": "UPGRADE_DETAIL",
+            "menu": None,
+            "overlays": ["UPGRADE_DETAIL"],
+        }
+
+    with pytest.raises(RuntimeError, match="save invalidation failed"):
+        ensure_poison_swamp_stun_off(
+            capture_fn=lambda: next(captures),
+            detector=detector,
+            detect_boxes_fn=lambda _frame, **_kwargs: {
+                "left": [
+                    UpgradeBox(
+                        "left",
+                        (26, 1367, 511, 246),
+                        text="Poison Swamp",
+                    )
+                ],
+                "right": [],
+            },
+            safe_tap_fn=Mock(return_value=True),
+            tap_visible_fn=checkbox,
+            measure_fn=lambda _frame: _evidence(PoisonSwampStunState.ON),
+            repair_observer_fn=lambda: (_ for _ in ()).throw(
+                RuntimeError("save invalidation failed")
+            ),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    checkbox.assert_not_called()
 
 
 def test_guarded_correction_toggles_off_to_on_and_reverifies():

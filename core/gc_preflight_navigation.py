@@ -15,6 +15,7 @@ from core.auto_pick_perks import measure_auto_pick_perks
 from core.gc_module_loadout import gc_module_loadout_evidence_from_assignments
 from core.gc_preflight import (
     GcSessionPreflightEvidence,
+    configuration_ui_boundary_sections,
     merge_ultimate_weapon_observations,
     summarize_gc_preflight_mismatch,
     summarize_gc_preflight_variations,
@@ -309,6 +310,7 @@ def _ensure_auto_pick_perks_enabled(
     safe_tap_fn: Callable[..., bool],
     sleep_fn: Callable[[float], None],
     measure_fn: Callable[[Frame], Any],
+    repair_observer_fn: Callable[[], None] | None = None,
 ) -> Frame:
     """Enable Auto Pick only from a verified Perks screen and remeasure it."""
 
@@ -319,6 +321,8 @@ def _ensure_auto_pick_perks_enabled(
         log("[GC_PREFLIGHT] Auto Pick Perks verified enabled", "INFO")
         return current
 
+    if repair_observer_fn is not None:
+        repair_observer_fn()
     if not safe_tap_fn(
         "buttons.perks:auto_pick",
         dispatch="now",
@@ -747,8 +751,38 @@ def run_read_only_gc_preflight(
             and ultimate_boundary_payload.get("source")
             in {"player_save_preflight", "bound_player_save_preflight"}
         )
+
+        def boundary_evidence_is_save_backed(payload: Any) -> bool:
+            if not isinstance(payload, Mapping):
+                return False
+            if payload.get("source") in {
+                "player_save_preflight",
+                "bound_player_save_preflight",
+            }:
+                return True
+            save_backed_sections = payload.get("save_backed_sections")
+            return bool(
+                isinstance(save_backed_sections, Mapping)
+                and save_backed_sections
+            )
+
+        retained_setup_sections = (
+            no_battle_setup_evidence.get("configuration_ui_boundary_sections")
+            if isinstance(no_battle_setup_evidence, Mapping)
+            else None
+        )
+        accepted_sections: dict[str, dict[str, Any]] = {
+            str(section): dict(provenance)
+            for section, provenance in (
+                retained_setup_sections.items()
+                if isinstance(retained_setup_sections, Mapping)
+                else ()
+            )
+            if isinstance(provenance, Mapping)
+        }
         use_no_battle_evidence = bool(
             isinstance(configuration_boundary_evidence, Mapping)
+            and not accepted_sections
             and (
                 module_mode == "preserve"
                 or isinstance(module_boundary_evidence, Mapping)
@@ -885,6 +919,78 @@ def run_read_only_gc_preflight(
                     f"{check_id}"
                 )
 
+        save_repair_invalidated_checks: set[str] = set()
+
+        def invalidate_save_evidence_before_repair(check_id: str) -> None:
+            nonlocal auto_pick_boundary_evidence
+            nonlocal configuration_boundary_evidence
+            nonlocal module_boundary_evidence
+            nonlocal ultimate_boundary_observations
+            nonlocal ultimate_boundary_payload
+            nonlocal ultimate_boundary_save_backed
+            nonlocal use_no_battle_evidence
+            nonlocal free_upgrade_lock_boundary_evidence
+            nonlocal carried_module_boundary_evidence
+
+            if check_id in save_repair_invalidated_checks:
+                return
+            save_repair_invalidated_checks.add(check_id)
+            invalidate = getattr(player_save_preflight, "invalidate", None)
+            if callable(invalidate):
+                invalidate(
+                    f"{check_id}_repair_started",
+                    check_ids=(check_id,),
+                )
+            if boundary_evidence_is_save_backed(
+                configuration_boundary_evidence
+            ):
+                accepted_sections.update(
+                    configuration_ui_boundary_sections(
+                        configuration_boundary_evidence
+                    )
+                )
+                configuration_boundary_evidence = None
+            if boundary_evidence_is_save_backed(module_boundary_evidence):
+                module_boundary_evidence = None
+            if ultimate_boundary_save_backed:
+                ultimate_boundary_observations = {}
+                ultimate_boundary_payload = None
+                ultimate_boundary_save_backed = False
+            if boundary_evidence_is_save_backed(
+                free_upgrade_lock_boundary_evidence
+            ):
+                free_upgrade_lock_boundary_evidence = None
+            if boundary_evidence_is_save_backed(
+                auto_pick_boundary_evidence
+            ):
+                auto_pick_boundary_evidence = None
+            retained_ui_sections = {
+                section: provenance
+                for section, provenance in accepted_sections.items()
+                if provenance.get("source") == "home_ui_boundary"
+                and provenance.get("disposition") == "ui_verified"
+            }
+            accepted_sections.clear()
+            accepted_sections.update(retained_ui_sections)
+            use_no_battle_evidence = bool(
+                isinstance(configuration_boundary_evidence, Mapping)
+                and (
+                    module_mode == "preserve"
+                    or isinstance(module_boundary_evidence, Mapping)
+                )
+            )
+            carried_module_boundary_evidence = (
+                module_boundary_evidence
+                if (
+                    not use_no_battle_evidence
+                    and isinstance(module_boundary_evidence, Mapping)
+                    and not boundary_evidence_is_save_backed(
+                        module_boundary_evidence
+                    )
+                )
+                else None
+            )
+
         _wait_for(
             state="RUNNING",
             capture_fn=capture_fn,
@@ -927,11 +1033,10 @@ def run_read_only_gc_preflight(
                 "INFO",
             )
         perks = None
-        if (
-            auto_pick_perks
-            and not auto_pick_skipped
-            and auto_pick_boundary_evidence is None
-        ):
+
+        def verify_auto_pick_from_ui() -> None:
+            nonlocal perks
+
             _guarded_static_tap(
                 "navigation.open_perks",
                 allowed_states={"RUNNING"},
@@ -954,6 +1059,11 @@ def run_read_only_gc_preflight(
                     safe_tap_fn=safe_tap_fn,
                     sleep_fn=sleep_fn,
                     measure_fn=measure_auto_pick_fn,
+                    repair_observer_fn=lambda: (
+                        invalidate_save_evidence_before_repair(
+                            "auto_pick_perks"
+                        )
+                    ),
                 )
             record_ui_verification(
                 "auto_pick_perks",
@@ -973,6 +1083,13 @@ def run_read_only_gc_preflight(
                 sleep_fn=sleep_fn,
             )
 
+        if (
+            auto_pick_perks
+            and not auto_pick_skipped
+            and auto_pick_boundary_evidence is None
+        ):
+            verify_auto_pick_from_ui()
+
         ultimate_observations: dict[str, dict[str, str]] = {
             label: dict(toggles)
             for label, toggles in ultimate_boundary_observations.items()
@@ -985,8 +1102,18 @@ def run_read_only_gc_preflight(
             if ultimate_boundary_save_backed
             else {}
         )
-        accepted_sections: dict[str, dict[str, Any]] = {}
-        carried_module_boundary_evidence = None
+        ui_ultimate_observations: dict[str, dict[str, str]] = {}
+        carried_module_boundary_evidence = (
+            module_boundary_evidence
+            if (
+                not use_no_battle_evidence
+                and isinstance(module_boundary_evidence, Mapping)
+                and not boundary_evidence_is_save_backed(
+                    module_boundary_evidence
+                )
+            )
+            else None
+        )
         if not use_no_battle_evidence and callable(consume_save):
             for section, check_id in (
                 ("cards", "cards_deck"),
@@ -995,6 +1122,8 @@ def run_read_only_gc_preflight(
                 ("guardians", "guardian_chips"),
             ):
                 if check_id not in requirements:
+                    continue
+                if section in accepted_sections:
                     continue
                 carried_value = consume_save(check_id)
                 if carried_value is not None and save_check_matches_requirement(
@@ -1239,6 +1368,22 @@ def run_read_only_gc_preflight(
             }
             for label, toggles in save_ultimate_observations.items()
         }
+
+        def invalidate_poison_save_evidence_before_repair() -> None:
+            nonlocal normalized_save_ultimate_observations
+            nonlocal save_ultimate_observations
+            nonlocal ultimate_observations
+            nonlocal ultimate_weapons_source
+
+            invalidate_save_evidence_before_repair("poison_swamp_stun")
+            ultimate_observations = {
+                label: dict(toggles)
+                for label, toggles in ui_ultimate_observations.items()
+            }
+            save_ultimate_observations = {}
+            normalized_save_ultimate_observations = {}
+            ultimate_weapons_source = "ui"
+
         if ultimate_ui_required:
             _select_running_menu(
                 "navigation.goto_uw",
@@ -1322,6 +1467,7 @@ def run_read_only_gc_preflight(
                     "contradicted current UI"
                 )
             for label, toggles in visible_observations.items():
+                ui_ultimate_observations.setdefault(label, {}).update(toggles)
                 ultimate_observations.setdefault(label, {}).update(toggles)
             poison_boxes = [
                 box
@@ -1343,14 +1489,27 @@ def run_read_only_gc_preflight(
                     detect_boxes_fn=detect_boxes_fn,
                     safe_tap_fn=safe_tap_fn,
                     tap_visible_fn=tap_visible_fn,
+                    repair_observer_fn=(
+                        invalidate_poison_save_evidence_before_repair
+                    ),
                     sleep_fn=sleep_fn,
                 )
                 frame = result.screenshot
+                ui_ultimate_observations.setdefault(
+                    poison_swamp_label or "Poison Swamp",
+                    {},
+                )["stun"] = result.evidence.state.value
                 ultimate_observations.setdefault(
                     poison_swamp_label or "Poison Swamp",
                     {},
                 )["stun"] = result.evidence.state.value
                 poison_swamp_stun_observed = True
+                if result.changed:
+                    # The production owner invokes the observer before input.
+                    # Keep injected implementations honest as well: a helper
+                    # cannot report a mutation while retaining copied save
+                    # authority merely because it omitted the callback.
+                    invalidate_poison_save_evidence_before_repair()
                 record_ui_verification(
                     "poison_swamp_stun",
                     changed=result.changed,
@@ -1372,6 +1531,14 @@ def run_read_only_gc_preflight(
             if position < 5:
                 swipe_fn("towards_bottom", "medium")
                 sleep_fn(0.5)
+
+        if (
+            auto_pick_perks
+            and not auto_pick_skipped
+            and auto_pick_boundary_evidence is None
+            and perks is None
+        ):
+            verify_auto_pick_from_ui()
 
         cards = None
         if not use_no_battle_evidence and "cards" not in accepted_sections:
