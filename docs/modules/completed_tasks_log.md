@@ -43,11 +43,10 @@ resolved dossier instead of copying its detail.
 
 - The unmerged `dfd1bdf` behavior was initially ported from its pre-current-main
   base onto a fresh feature candidate based on `e3c0491`. Current main
-  `65a9eb3`, `8a5af61`, and then `1fe1228` were merged as production advanced.
-  Their attachment-lock repair, retained-evidence guidance, operational
-  evidence, and proportional-validation policy had no source/test overlap;
-  only adjacent completion-log insertions needed reconciliation. The final
-  candidate preserves the newer compatible-mapping gate and campaign-only
+  `65a9eb3`, `8a5af61`, `1fe1228`, and then `aca3357` were merged as production
+  advanced. The final reconciliation retained the newer attachment-lock,
+  retained-evidence, proportional-validation, ELS-first startup, signed
+  History-stat, and campaign-only
   `V1073-RUNTIME-013` audit semantics instead of replacing current player-save,
   App, test, or canonical documentation owners.
 - Version 1101 now supplies the authority and raw binding for the declared
@@ -81,21 +80,16 @@ resolved dossier instead of copying its detail.
   this port performed no new live capture and created, accelerated, or
   surrendered no battle. Current live validation therefore remains pending a
   naturally occurring boundary after promotion and deployment.
-- At exact code candidate `77daaa9`, the 579-test affected suite, 189 portable
+- At exact code candidate `884e186`, the 689-test affected suite, 189 portable
   control-surface tests, 18 TunnelHost tests, and Release win-x64 WPF
   cross-build passed. The complete development checkpoint compiled all Python,
   validated state definitions and clickmap integrity with zero errors, and
-  passed all 2,561 tests in the fingerprinted environment
+  passed all 2,563 tests in the fingerprinted environment
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
-  Refreshed candidate `0ee0941` then merged current main `1fe1228`; review of
-  `77daaa9..0ee0941` found changes only to the development-isolation and
-  production-promotion guidance and this completion record. Those changes did
-  not affect Python compilation, state/clickmap inputs, runtime or test source,
-  configuration, dependencies, units, or native-package inputs, so those
-  baseline-independent results carried forward under the proportional
-  validation rule. The affected documentation-lifecycle, local-link/anchor,
-  and whitespace checks reran on the final receipt. Historical results from
-  `dfd1bdf` were not reused.
+  Its immediately following completion-record-only receipt passed the affected
+  documentation-lifecycle, local-link/anchor, and whitespace checks. This
+  current-main gate supersedes the earlier candidate runs; historical results
+  from `dfd1bdf` were not reused.
 
 ### 2026-08-14 proportional post-contention validation
 
