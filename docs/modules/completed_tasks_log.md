@@ -41,11 +41,14 @@ resolved dossier instead of copying its detail.
 
 ### 2026-08-14 exact-version active-run save metrics port
 
-- The unmerged `dfd1bdf` behavior was ported from its pre-current-main base
-  onto a fresh feature candidate based on `e3c0491`. The port preserves the
-  newer compatible-mapping gate and campaign-only `V1073-RUNTIME-013` audit
-  semantics instead of replacing current player-save, App, test, or canonical
-  documentation owners.
+- The unmerged `dfd1bdf` behavior was initially ported from its pre-current-main
+  base onto a fresh feature candidate based on `e3c0491`. When production
+  advanced during validation, current main `65a9eb3` was merged into the
+  feature; its attachment-lock repair had no source/test overlap and only the
+  adjacent completion-log insertion needed reconciliation. The final candidate
+  preserves the newer compatible-mapping gate and campaign-only
+  `V1073-RUNTIME-013` audit semantics instead of replacing current player-save,
+  App, test, or canonical documentation owners.
 - Exact game version 1101 now publishes only the 29 previously validated
   cumulative fields: 14 coin-source, eight economy/time, and seven progress
   counters. Exact 1073 keeps active tallies unavailable, unknown forward
@@ -67,9 +70,10 @@ resolved dossier instead of copying its detail.
   this port performed no new live capture and created, accelerated, or
   surrendered no battle. Current live validation therefore remains pending a
   naturally occurring boundary after promotion and deployment.
-- Focused validation passed 169 tests. The complete isolated repository
+- Metric-focused validation passed 169 tests, and the post-merge affected set
+  passed 203. The final complete isolated repository
   checkpoint passed compile and state validation, clickmap integrity with zero
-  errors and 44 informational orphans, and all 2,504 Python tests in 384.67
+  errors and 44 informational orphans, and all 2,504 Python tests in 387.01
   seconds. Both documentation-lifecycle tests and all 332 tracked local
   Markdown targets/anchors passed; `git diff --check` passed. The portable
   Control Surface and Tunnel Host suites passed 189 and 18 tests respectively,
