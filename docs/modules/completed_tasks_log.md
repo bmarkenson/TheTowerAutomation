@@ -39,6 +39,18 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 Start Battle strategy-scope continuity
+
+- Resolved
+  [`ISSUE-2026-045`](../issues/resolved-2026.md#start-battle-intent-was-rejected-after-its-strategy-applied-at-home):
+  applying a queued Strategy on an already-observed Home New Battle boundary
+  no longer creates a second activity scope and invalidates the operator's
+  exact Start Battle request. Unrelated scope changes remain fail-closed.
+- Exact code candidate `5d75375` passed a 512-test affected slice and the
+  complete 2,696-test checkpoint. It was deployed from `48cbc40` behind
+  rollback tag `production-before-20260814T235526Z-48cbc40`; replacement PID
+  `1646204` remained Paused at fresh Home New Battle and sent no battle input.
+
 ### 2026-08-14 global Module save identity completion
 
 - Commit `888f101` separates the complete 24-ID Module name/family catalog
