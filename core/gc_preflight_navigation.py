@@ -1083,10 +1083,24 @@ def run_read_only_gc_preflight(
                         "modules",
                         "module_boundary_requirement_changed",
                     )
+            lock_boundary_unavailable = bool(
+                free_upgrade_lock_boundary_evidence is None
+                or (
+                    isinstance(
+                        free_upgrade_lock_boundary_evidence,
+                        Mapping,
+                    )
+                    and free_upgrade_lock_boundary_evidence.get("status")
+                    == "unavailable_deferred"
+                )
+            )
             if (
                 free_upgrade_lock_requirements is not None
-                and free_upgrade_lock_boundary_evidence is None
+                and lock_boundary_unavailable
             ):
+                # Attachment initialization records an unavailable placeholder
+                # before its forced save is bound.  That placeholder is not
+                # boundary proof and must not shadow a later exact-bound fact.
                 carried_locks = consume_save("free_upgrade_locks")
                 if (
                     isinstance(carried_locks, list)

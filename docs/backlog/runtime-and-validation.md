@@ -49,10 +49,14 @@ as checked checkpoint narrative here.
     its superseded prototype.
     - [ ] Confirm one replacement-process attachment whose forced save also
       contains authoritative Free Upgrade-lock evidence opens none of the
-      configuration UI. A retained 2026-08-13 replacement attachment already
-      used the bound save for Cards, Workshop, Bots, Guardians, Modules, Perk
-      configuration, Target Priority, Auto Pick, and Ultimate Weapons without
-      opening those screens, but correctly deferred Free Upgrade locks.
+      configuration UI. Regression coverage now requires the non-authoritative
+      attachment placeholder to yield to a complete exact-bound lock fact while
+      genuine absence remains deferred; retain this item for one natural
+      post-deployment confirmation. A retained 2026-08-13 replacement
+      attachment already used the bound save for Cards, Workshop, Bots,
+      Guardians, Modules, Perk configuration, Target Priority, Auto Pick, and
+      Ultimate Weapons without opening those screens, but correctly deferred
+      Free Upgrade locks because that attachment had no authoritative lock fact.
       Separately confirm authoritative Module, Free Upgrade-lock, and Perk Auto
       Pick-order mismatches are each logged once and remain report-only without
       configuration UI or Home-repair authority. An intentionally unparseable

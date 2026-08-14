@@ -990,6 +990,12 @@ save is authoritative current evidence for all of those facts at its exact
 capture boundary; temporal class controls what a mismatch means rather than
 whether the fact may be consumed.
 
+An attachment-initialization `unavailable_deferred` Free Upgrade-lock record is
+only a diagnostic placeholder. The exact-bound attachment consumer is consulted
+before that placeholder is retained; a complete match replaces it, a complete
+mismatch is reported under the normal round-invariant policy, and only a missing
+or unusable fact remains deferred.
+
 An exact match omits that check's redundant UI. Missing, incomplete,
 unsupported, unparseable, or rebound evidence retains the supported per-field
 UI fallback. A field with no current-battle UI route remains explicitly
