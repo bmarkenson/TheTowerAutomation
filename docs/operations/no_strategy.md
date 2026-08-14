@@ -27,14 +27,18 @@ supported configuration discovery instead; attachment completes
 observation-only with Automation Enabled so No Strategy monitoring and safe
 collectors continue. Home New Return similarly runs the supported Home UI
 checks, and Game Over Return runs the full terminal UI collector. Restoration,
-owner, target, scope, or authority loss still blocks input. A blocked Home
-serializer is terminalized once rather than repeated on later heartbeats. The
+owner, target, scope, or authority loss is catastrophic and leaves input
+Paused. A catastrophically unsafe Home serializer is terminalized once rather
+than repeated on later heartbeats. Recoverable mismatch, unavailable evidence,
+and exhausted repair are flagged while automation continues. The
 future terminal policy does not repair or replace this continuity step.
 
-Attachment is observation-only by default: the configured startup Strategy is
-not silently applied to the existing battle. Remain on No Strategy to monitor
-and collect, or use the separate active-battle Strategy action when explicitly
-warranted. Strategy adoption never grants Surrender authority.
+Selecting No Strategy before Attach deliberately requests observation-only
+adoption and is not a degraded condition. Other selections use the
+strategy-aware Attach contract: a compatible snapshotted Strategy becomes
+active, while an incompatible or unprovable selection observes the current
+battle as degraded and remains pending for the next safe boundary. Strategy
+adoption never grants Surrender or current-battle repair authority.
 
 When taking manual control, choose whether a save-confirmed manual Surrender
 uses the default minimal excluded record with no terminal UI or opts into full
@@ -48,8 +52,9 @@ the guarded capture hold. Review the fresh-save values and unresolved rows,
 then save a new Module preset or inactive Strategy draft. Saving does not
 select or apply it. Automation Paused reports that refresh is unavailable and
 never substitutes a cached snapshot. A failed capture receipt is retried from
-the exact process-local preview without a second serialization; any lost owner
-or round contradiction retains its documented gate/Pause outcome. Capture has
+the exact process-local preview without a second serialization. A safely
+restored round contradiction fails that capture and releases its owner; lost
+owner/target/source authority may Pause for safety. Capture has
 no complete UI authoring equivalent; an unusable save reports the capture
 unavailable without disabling the separate No Strategy UI monitors.
 

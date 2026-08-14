@@ -7,6 +7,13 @@ using System.Text.Json;
 
 namespace TheTower.ControlSurface;
 
+internal interface IHostMaintenanceApi
+{
+    Task<StatusResponse> PostHostMaintenanceAsync(
+        object payload,
+        CancellationToken cancellationToken);
+}
+
 public sealed class ControlSurfaceApiException : InvalidOperationException
 {
     public ControlSurfaceApiException(
@@ -28,7 +35,7 @@ public sealed class ControlSurfaceApiException : InvalidOperationException
     public JsonElement? Details { get; }
 }
 
-public sealed class ControlSurfaceApi : IDisposable
+public sealed class ControlSurfaceApi : IDisposable, IHostMaintenanceApi
 {
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(120) };
     private readonly object _configurationGate = new();
@@ -190,10 +197,10 @@ public sealed class ControlSurfaceApi : IDisposable
             payload,
             cancellationToken);
 
-    public Task<SaveMappingPreparedResult> PrepareSaveMappingIntegrationAsync(
+    public Task<SaveMappingIntegratedResult> IntegrateSaveMappingAsync(
         object payload,
         CancellationToken cancellationToken) =>
-        PostAsync<SaveMappingPreparedResult>(
+        PostAsync<SaveMappingIntegratedResult>(
             "/api/v1/save-mapping-integration",
             payload,
             cancellationToken);
@@ -214,11 +221,19 @@ public sealed class ControlSurfaceApi : IDisposable
             payload,
             cancellationToken);
 
-    public Task<HostPerformancePublishResponse> PostHostPerformanceAsync(
-        HostPerformanceBatch payload,
+    internal Task<HostPerformancePublishResponse> PostHostPerformanceAsync(
+        HostPerformanceUploadPayload payload,
         CancellationToken cancellationToken) =>
-        PostAsync<HostPerformancePublishResponse>(
+        PostSerializedJsonAsync<HostPerformancePublishResponse>(
             "/api/v1/host-performance",
+            payload.Json,
+            cancellationToken);
+
+    public Task<StatusResponse> PostHostMaintenanceAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<StatusResponse>(
+            "/api/v1/host-maintenance",
             payload,
             cancellationToken);
 
@@ -241,6 +256,24 @@ public sealed class ControlSurfaceApi : IDisposable
             JsonSerializer.Serialize(payload, _json),
             Encoding.UTF8,
             "application/json");
+        using var response = await _http.SendAsync(request, cancellationToken);
+        await EnsureSuccess(response, cancellationToken);
+        return await response.Content.ReadFromJsonAsync<T>(_json, cancellationToken)
+            ?? throw new InvalidOperationException("The Linux service returned an empty response.");
+    }
+
+    private async Task<T> PostSerializedJsonAsync<T>(
+        string path,
+        byte[] payload,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(HttpMethod.Post, path);
+        request.Content = new ByteArrayContent(payload);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(
+            "application/json")
+        {
+            CharSet = "utf-8",
+        };
         using var response = await _http.SendAsync(request, cancellationToken);
         await EnsureSuccess(response, cancellationToken);
         return await response.Content.ReadFromJsonAsync<T>(_json, cancellationToken)

@@ -31,23 +31,23 @@ public sealed class ControlSurfaceCompatibilityTests
     [Fact]
     public void BetterControlActionsRejectMissingCapability()
     {
-        var status = Status(37);
+        var status = Status(40);
         var result = ControlSurfaceCompatibility.Evaluate(status);
 
         Assert.False(result.IsCompatible);
         Assert.Contains("better_control_model_v2", result.MissingCapabilities);
         Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
-            "confirmed_local_mapping_status_v1",
+            "confirmed_local_mapping_status_v2",
             result.MissingCapabilities);
         Assert.Contains(
             "save_backed_setup_capture_v2",
             result.MissingCapabilities);
         Assert.Contains(
-            "save_mapping_integration_v1",
+            "save_mapping_staged_candidate_v1",
             result.MissingCapabilities);
         Assert.Contains(
-            "save_mapping_review_status_v1",
+            "save_mapping_review_status_v2",
             result.MissingCapabilities);
         Assert.Contains(
             "strategy_authoring_preset_local_copy_v1",
@@ -55,6 +55,44 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Contains(
             "host_performance_process_attribution_v1",
             result.MissingCapabilities);
+        Assert.Contains(
+            "strategy_aware_attach_v1",
+            result.MissingCapabilities);
+    }
+
+    [Fact]
+    public void StrategyAwareAttachRequiresRevisionThirtyEight()
+    {
+        var result = ControlSurfaceCompatibility.Evaluate(
+            Status(
+                37,
+                "strategy_aware_attach_v1"));
+
+        Assert.False(result.IsCompatible);
+        Assert.False(result.ServerRevisionSupported);
+    }
+
+    [Theory]
+    [InlineData(true, false, "strategy_selection_unaccepted")]
+    [InlineData(false, true, "strategy_selection_pending")]
+    public void AttachWaitsForTheVisibleStrategySelectionToBeAccepted(
+        bool dirty,
+        bool requestInFlight,
+        string expectedCode)
+    {
+        var availability = ControlSurfaceCompatibility.ResolveAttachAvailability(
+            new BetterControlActionAvailability
+            {
+                Available = true,
+                Code = "available",
+                Reason = "Attach is available.",
+            },
+            dirty,
+            requestInFlight);
+
+        Assert.False(availability.Available);
+        Assert.Equal(expectedCode, availability.Code);
+        Assert.Contains("Strategy", availability.Reason);
     }
 
     [Fact]
@@ -113,6 +151,31 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Equal("farm_t18", presentation.CurrentStrategy);
         Assert.Equal("farm_t19", presentation.PendingStrategy);
         Assert.Equal("Pending boundary", presentation.PendingLabel);
+    }
+
+    [Fact]
+    public void AuthoritativeStrategyScopeFlagsRunningDegradation()
+    {
+        var status = Status(38, "better_control_model_v2");
+        status.ControlModel = new BetterControlModelStatus
+        {
+            StrategyScope = new BetterControlStrategyScopeStatus
+            {
+                StartupDefault = "farm_t19",
+                ActiveBattle = null,
+                Degradation = new Dictionary<string, object?>
+                {
+                    ["reason"] = "attached Tier mismatch",
+                },
+            },
+        };
+
+        var presentation = ControlSurfaceCompatibility.ResolveStrategyScope(
+            status,
+            processActive: true,
+            configuredStrategy: "farm_t19");
+
+        Assert.True(presentation.Degraded);
     }
 
     [Fact]
@@ -282,12 +345,16 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                37,
+                42,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
+                "bluestacks_maintenance_v1",
+                "bluestacks_maintenance_v2",
+                "bluestacks_operator_restart_v1",
+                "bluestacks_listener_lifetime_telemetry_v1",
                 "completed_battle_discard",
-                "confirmed_local_mapping_status_v1",
+                "confirmed_local_mapping_status_v2",
                 "current_battle_perks_v1",
                 "current_run_activity_scope",
                 "exclusive_strategy_validation_status",
@@ -301,8 +368,9 @@ public sealed class ControlSurfaceCompatibilityTests
                 "runtime_control_acknowledgements_v1",
                 "selected_strategy_process_start",
                 "save_backed_setup_capture_v2",
-                "save_mapping_integration_v1",
-                "save_mapping_review_status_v1",
+                "save_mapping_staged_candidate_v1",
+                "save_mapping_review_status_v2",
+                "strategy_aware_attach_v1",
                 "strategy_action_gate_v1",
                 "strategy_authoring_local_loadout_editors_v1",
                 "strategy_authoring_preset_local_copy_v1",
@@ -337,6 +405,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var active = new ConfirmedLocalMappingStatus
         {
+            SchemaVersion = 2,
             Available = true,
             BlocksStartup = false,
             Items =
@@ -391,9 +460,39 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Equal("danger", presentation.Severity);
         Assert.Contains("conflicting canonical value", presentation.Detail);
 
+        active.Items =
+        [
+            new ConfirmedLocalMappingItem
+            {
+                State = "active_local",
+                Reason = "ordinary local queue",
+            },
+            new ConfirmedLocalMappingItem
+            {
+                State = "promotion_pending",
+                Reason = "awaiting exact production promotion",
+            },
+        ];
+        presentation = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+        Assert.Contains("production promotion", presentation.Title);
+        Assert.Contains("awaiting exact production promotion", presentation.Detail);
+
+        active.Items =
+        [
+            new ConfirmedLocalMappingItem
+            {
+                State = "restaging_required",
+                Reason = "main advanced",
+            },
+        ];
+        presentation = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+        Assert.Equal("warning", presentation.Severity);
+        Assert.Contains("restaged", presentation.Title);
+
         active.Items = null!;
-        Assert.False(
-            ControlSurfaceCompatibility.ConfirmedLocalMapping(active).Visible);
+        var malformed = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+        Assert.True(malformed.Visible);
+        Assert.Equal("danger", malformed.Severity);
     }
 
     [Fact]
@@ -480,5 +579,221 @@ public sealed class ControlSurfaceCompatibilityTests
             "orb_distance",
             response.Draft.Review.Unresolved[0].SettingId);
         Assert.Equal(1, response.Draft.Review.CapturedVsBase.GetProperty("change_count").GetInt32());
+    }
+
+    [Fact]
+    public void StatusDeserializesBlueStacksRecoveryContracts()
+    {
+        var response = System.Text.Json.JsonSerializer.Deserialize<StatusResponse>(
+            """
+            {
+              "emulator_degradation": {
+                "schema_version": 1,
+                "assessed_at": "2026-08-10T12:00:00+00:00",
+                "status": "automatic_ready",
+                "automatic_ready": true,
+                "reason": "degraded",
+                "candidate_battle_ids": ["Battle1", "Battle2"],
+                "candidate_cph_ratio": 0.88,
+                "effective_game_speed_ratio": 0.99,
+                "host_evidence": {
+                  "status": "confirmed_growth",
+                  "identity_scope": "exact_listener_lifetime",
+                  "sample_count": 120,
+                  "span_seconds": 1190,
+                  "stable_process_windows": 120,
+                  "sampler_session_count": 3,
+                  "handle_low_water": 3884,
+                  "handle_recent_median": 25297,
+                  "handle_ratio": 6.51,
+                  "handle_delta": 21413,
+                  "listener_identity": {
+                    "host_id": "ALIEN",
+                    "adb_port": 5555,
+                    "process_id": 90,
+                    "process_started_at": "2026-08-10T10:00:00.1234567+00:00",
+                    "executable_path": "C:\\\\Program Files\\\\BlueStacks_nxt\\\\HD-Player.exe",
+                    "instance_name": "Nougat32"
+                  },
+                  "reason": "sustained handle growth confirmed"
+                }
+              },
+              "host_maintenance": {
+                "schema_version": 1,
+                "host_restart_authorized": true,
+                "operator_restart": {
+                  "available": true,
+                  "code": "available",
+                  "reason": "fresh RUNNING Farm battle authority is available"
+                },
+                "request": {
+                  "request_id": "0123456789abcdef0123456789abcdef",
+                  "state": "requested",
+                  "reason": "degraded",
+                  "initiator": "operator",
+                  "terminal_disposition": "fallback_new_battle",
+                  "terminal_reason": "resume unavailable; new Farm battle started",
+                  "host_target": {
+                    "host_id": "ALIEN",
+                    "adb_port": 5555,
+                    "process_id": 90,
+                    "process_started_at": "2026-08-10T10:00:00.1234567+00:00",
+                    "executable_path": "C:\\\\Program Files\\\\BlueStacks_nxt\\\\HD-Player.exe",
+                    "instance_name": "Nougat32"
+                  }
+                }
+              }
+            }
+            """);
+
+        Assert.NotNull(response);
+        Assert.True(response!.EmulatorDegradation.AutomaticReady);
+        Assert.Equal(0.88, response.EmulatorDegradation.CandidateCphRatio);
+        Assert.Equal(
+            "exact_listener_lifetime",
+            response.EmulatorDegradation.HostEvidence!.IdentityScope);
+        Assert.Equal(25297, response.EmulatorDegradation.HostEvidence.HandleRecentMedian);
+        Assert.Equal(3, response.EmulatorDegradation.HostEvidence.SamplerSessionCount);
+        Assert.Equal(
+            "2026-08-10T10:00:00.1234567+00:00",
+            response.EmulatorDegradation.HostEvidence.ListenerIdentity!
+                .ProcessStartedAt);
+        Assert.True(response.HostMaintenance.HostRestartAuthorized);
+        Assert.True(response.HostMaintenance.OperatorRestart.Available);
+        Assert.Equal("requested", response.HostMaintenance.Request!.State);
+        Assert.Equal("operator", response.HostMaintenance.Request.Initiator);
+        Assert.Equal(90, response.HostMaintenance.Request.HostTarget!.ProcessId);
+        Assert.Equal(
+            "2026-08-10T10:00:00.1234567+00:00",
+            response.HostMaintenance.Request.HostTarget.ProcessStartedAt);
+        Assert.Equal(
+            "fallback_new_battle",
+            response.HostMaintenance.Request.TerminalDisposition);
+        Assert.Equal(
+            "resume unavailable; new Farm battle started",
+            response.HostMaintenance.Request.TerminalReason);
+    }
+
+    [Theory]
+    [InlineData("Nougat32")]
+    [InlineData("Pie64_1")]
+    public void BlueStacksInstanceNamesAreBounded(string instanceName)
+    {
+        Assert.Equal(
+            instanceName,
+            BlueStacksInstanceController.ValidateInstanceName(instanceName));
+        Assert.Throws<ArgumentException>(() =>
+            BlueStacksInstanceController.ValidateInstanceName(
+                instanceName + " --instance Other"));
+    }
+
+    [Fact]
+    public void BlueStacksConfigurationBindsInstanceNameToStatusAdbPort()
+    {
+        var mappings = BlueStacksInstanceController.ParseInstanceAdbPortMappings(
+            [
+                "bst.instance.Nougat32.status.adb_port=\"5555\"",
+                "bst.instance.Pie64_1.status.adb_port=\"5565\"",
+                "bst.instance.Nougat32.adb_port=\"9999\"",
+                "unrelated=value",
+            ]);
+
+        Assert.Equal(2, mappings.Count);
+        Assert.Equal(5555, mappings["Nougat32"]);
+        Assert.Equal(5565, mappings["Pie64_1"]);
+    }
+
+    [Fact]
+    public void BlueStacksStoppedPortCannotBecomeAnotherLiveInstancePort()
+    {
+        var target = new BlueStacksRecoveryTarget(
+            @"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            "Nougat32",
+            5555);
+
+        BlueStacksInstanceController.ValidateConfiguredPortBinding(
+            target,
+            5555,
+            allowStoppedPort: false);
+        BlueStacksInstanceController.ValidateConfiguredPortBinding(
+            target,
+            0,
+            allowStoppedPort: true);
+        Assert.True(
+            BlueStacksInstanceController.ReplacementMappingReady(target, 5555));
+        Assert.False(
+            BlueStacksInstanceController.ReplacementMappingReady(target, 0));
+        Assert.Throws<BlueStacksTargetBindingException>(() =>
+            BlueStacksInstanceController.ValidateConfiguredPortBinding(
+                target,
+                5565,
+                allowStoppedPort: true));
+        Assert.Throws<BlueStacksTargetBindingException>(() =>
+            BlueStacksInstanceController.ReplacementMappingReady(target, 5565));
+        Assert.Throws<BlueStacksTargetBindingException>(() =>
+            BlueStacksInstanceController.ValidateConfiguredPortBinding(
+                target,
+                0,
+                allowStoppedPort: false));
+    }
+
+    [Fact]
+    public void BlueStacksConfiguredPortMustIdentifyOneInstance()
+    {
+        var target = new BlueStacksRecoveryTarget(
+            @"C:\Program Files\BlueStacks_nxt\HD-Player.exe",
+            "Nougat32",
+            5555);
+
+        BlueStacksInstanceController.ValidateUniqueConfiguredPortBinding(
+            target,
+            new Dictionary<string, int>
+            {
+                ["Nougat32"] = 5555,
+                ["Pie64"] = 5565,
+            },
+            5555);
+        Assert.Throws<BlueStacksTargetBindingException>(() =>
+            BlueStacksInstanceController.ValidateUniqueConfiguredPortBinding(
+                target,
+                new Dictionary<string, int>
+                {
+                    ["Nougat32"] = 5555,
+                    ["Pie64"] = 5555,
+                },
+                5555));
+
+        // Multiple stopped instances commonly use zero and do not make a
+        // previously acknowledged exact process ambiguous.
+        BlueStacksInstanceController.ValidateUniqueConfiguredPortBinding(
+            target,
+            new Dictionary<string, int>
+            {
+                ["Nougat32"] = 0,
+                ["Pie64"] = 0,
+            },
+            0);
+    }
+
+    [Fact]
+    public void BlueStacksNativeCreationTimePreservesWindowsTicks()
+    {
+        var expected = new DateTimeOffset(
+                2026,
+                8,
+                13,
+                4,
+                0,
+                0,
+                TimeSpan.Zero)
+            .AddTicks(1_234_567);
+        var fileTime = expected.ToFileTime();
+        var native = new BlueStacksInstanceController.NativeFileTime(
+            unchecked((uint)fileTime),
+            unchecked((uint)(fileTime >> 32)));
+
+        Assert.Equal(
+            expected,
+            BlueStacksInstanceController.FileTimeToUtc(native));
     }
 }

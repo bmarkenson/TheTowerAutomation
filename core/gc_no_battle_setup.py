@@ -326,18 +326,26 @@ def run_gc_no_battle_setup(
 
     def guarded_safe_tap(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return original_safe_tap_fn(*args, **kwargs)
 
     def guarded_safe_long_press(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return original_safe_long_press_fn(*args, **kwargs)
 
     def guarded_visible_tap(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return original_tap_visible_fn(*args, **kwargs)
 
     def guarded_swipe(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return original_swipe_fn(*args, **kwargs)
 
     def guarded_workshop_swipe(*args, **kwargs):
@@ -2515,10 +2523,14 @@ def recover_gc_no_battle_setup_home(
 
     def guarded_safe_tap(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return safe_tap_fn(*args, **kwargs)
 
     def guarded_visible_tap(*args, **kwargs):
         require_action()
+        if action_guard_fn is not None:
+            kwargs.setdefault("action_guard_fn", action_guard_fn)
         return tap_visible_fn(*args, **kwargs)
 
     return _recover_home(

@@ -28,7 +28,8 @@ internal sealed record StrategyScopePresentation(
     string? CurrentStrategy,
     string? PendingNextBoundary,
     string? PendingActiveBattle,
-    bool Authoritative)
+    bool Authoritative,
+    bool Degraded)
 {
     public string? PendingStrategy =>
         PendingActiveBattle ?? PendingNextBoundary;
@@ -58,7 +59,7 @@ internal static class ControlSurfaceCompatibility
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 37;
+    public const int MinimumServerRevision = 42;
 
     private static readonly string[] RequiredCapabilities =
     [
@@ -66,7 +67,7 @@ internal static class ControlSurfaceCompatibility
         "advisory_preflight_decisions",
         "better_control_model_v2",
         "completed_battle_discard",
-        "confirmed_local_mapping_status_v1",
+        "confirmed_local_mapping_status_v2",
         "current_battle_perks_v1",
         "current_run_activity_scope",
         "exclusive_strategy_validation_status",
@@ -75,13 +76,17 @@ internal static class ControlSurfaceCompatibility
         "host_performance_gpu_v1",
         "host_performance_process_attribution_v1",
         "host_performance_telemetry_v1",
+        "bluestacks_maintenance_v2",
+        "bluestacks_operator_restart_v1",
+        "bluestacks_listener_lifetime_telemetry_v1",
         "managed_custom_module_presets_v1",
         "observed_game_speed",
         "runtime_control_acknowledgements_v1",
         "selected_strategy_process_start",
         "save_backed_setup_capture_v2",
-        "save_mapping_integration_v1",
-        "save_mapping_review_status_v1",
+        "save_mapping_staged_candidate_v1",
+        "save_mapping_review_status_v2",
+        "strategy_aware_attach_v1",
         "strategy_action_gate_v1",
         "strategy_authoring_local_loadout_editors_v1",
         "strategy_authoring_preset_local_copy_v1",
@@ -123,6 +128,36 @@ internal static class ControlSurfaceCompatibility
         ControlSurfaceCompatibilityResult? compatibility) =>
         compatibility?.IsCompatible == true;
 
+    public static BetterControlActionAvailability ResolveAttachAvailability(
+        BetterControlActionAvailability serverAvailability,
+        bool strategySelectionDirty,
+        bool strategyRequestInFlight)
+    {
+        if (!serverAvailability.Available)
+        {
+            return serverAvailability;
+        }
+        if (strategyRequestInFlight)
+        {
+            return new BetterControlActionAvailability
+            {
+                Available = false,
+                Code = "strategy_selection_pending",
+                Reason = "Wait for Linux to accept the selected Strategy before attaching.",
+            };
+        }
+        if (strategySelectionDirty)
+        {
+            return new BetterControlActionAvailability
+            {
+                Available = false,
+                Code = "strategy_selection_unaccepted",
+                Reason = "Attach uses the accepted Strategy, so retry this selection or reselect the accepted Strategy first.",
+            };
+        }
+        return serverAvailability;
+    }
+
     public static StrategyScopePresentation ResolveStrategyScope(
         StatusResponse status,
         bool processActive,
@@ -145,7 +180,8 @@ internal static class ControlSurfaceCompatibility
                 processActive
                     ? NormalizeStrategy(scope?.PendingActiveBattle)
                     : null,
-                true);
+                true,
+                processActive && scope?.Degradation is not null);
         }
 
         var configured = NormalizeStrategy(configuredStrategy);
@@ -171,13 +207,14 @@ internal static class ControlSurfaceCompatibility
             current,
             pending && !activeRequest ? requested : null,
             activeRequest ? requested : null,
+            false,
             false);
     }
 
     public static ConfirmedLocalMappingPresentation ConfirmedLocalMapping(
         ConfirmedLocalMappingStatus? status)
     {
-        if (status is null)
+        if (status is null || status.SchemaVersion != 2 || status.Items is null)
         {
             return new(
                 true,
@@ -210,6 +247,11 @@ internal static class ControlSurfaceCompatibility
             "review_required",
             "more_evidence_required",
             "evidence_ambiguous",
+            "integration_unconfirmed",
+            "integration_recovery_required",
+            "restaging_required",
+            "promotion_pending",
+            "production_validation_pending",
         };
         var visibleItems = (status.Items ?? [])
             .Where(item => visibleStates.Contains(item.State))
@@ -230,23 +272,35 @@ internal static class ControlSurfaceCompatibility
                 "invalid_local_store",
                 "identity_conflict",
                 "evidence_ambiguous",
+                "integration_unconfirmed",
             ]);
+        var winningState = visibleItems[0].State;
         var severity = dangerous
             ? "danger"
-            : states.Contains("authority_pending")
-                || states.Contains("active_local")
-                || states.Contains("review_required")
-                || states.Contains("more_evidence_required")
+            : winningState == "integration_recovery_required"
+                || winningState == "restaging_required"
+                || winningState == "authority_pending"
+                || winningState == "active_local"
+                || winningState == "review_required"
+                || winningState == "more_evidence_required"
                 ? "warning"
                 : "info";
         var title = dangerous
             ? "A local save mapping needs attention"
-            : states.Contains("authority_pending")
+            : winningState == "integration_recovery_required"
+                ? "Save-mapping integration recovery requires direction"
+            : winningState == "restaging_required"
+                ? "Save mapping must be restaged on current main"
+            : winningState == "promotion_pending"
+                ? "Save mapping awaiting production promotion"
+            : winningState == "production_validation_pending"
+                ? "Deployed save mapping awaiting fresh validation"
+            : winningState == "authority_pending"
                 ? "Canonical save-mapping authority is still pending"
-                : states.Contains("active_local")
+                : winningState == "active_local"
                     ? "A locally confirmed save mapping needs integration"
-                    : states.Contains("review_required")
-                        || states.Contains("more_evidence_required")
+                    : winningState == "review_required"
+                        || winningState == "more_evidence_required"
                         ? "A save mapping observation needs review"
                     : "Exact-version save-mapping mirror is pending";
         var first = visibleItems[0];
@@ -268,7 +322,7 @@ internal static class ControlSurfaceCompatibility
             ? "Canonical integration is pending."
             : first.Reason;
         var count = visibleItems.Length > 1
-            ? $" {visibleItems.Length} records require review."
+            ? $" {visibleItems.Length} records remain pending."
             : "";
         var subject = string.Equals(first.CheckId, "modules", StringComparison.Ordinal)
             ? $"Module{slot}"
@@ -287,10 +341,15 @@ internal static class ControlSurfaceCompatibility
         {
             "canonical_conflict" or "identity_conflict"
                 or "invalid_local_store" or "reconfirmation_required"
-                or "evidence_ambiguous" => 0,
-            "authority_pending" or "active_local" or "review_required"
-                or "more_evidence_required" => 1,
-            "mirror_pending" => 2,
+                or "evidence_ambiguous" or "integration_unconfirmed" => 0,
+            "integration_recovery_required" or "restaging_required" => 1,
+            "promotion_pending" => 2,
+            "production_validation_pending" => 3,
+            "authority_pending" => 4,
+            "active_local" => 5,
+            "review_required" => 6,
+            "more_evidence_required" => 7,
+            "mirror_pending" => 8,
             _ => 99,
         };
 

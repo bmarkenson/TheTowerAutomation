@@ -16,11 +16,23 @@ changes this model.
   supported bootstrap in `docs/new_thread.md` and must never execute, copy,
   link, or mutate production's environment. Run project Python and tests only
   through the selected `.venv/bin/python`.
-- `main` is production, `develop` is integration, and all tracked outcome
-  changes, including documentation-only maintenance, are made in feature
-  worktrees. Only the operator or an explicitly assigned integration owner
-  updates `develop` or promotes to `main` through the
-  [production procedure](docs/operations/production_promotion.md).
+- `main` is production and implementation belongs on temporary feature
+  branches. Use temporary integration only when several reviewed feature tips
+  must ship together. A promotion owner follows the
+  [production procedure](docs/operations/production_promotion.md) through its
+  exclusive mutable transaction, exact fast-forward, `origin/main`
+  publication, and default retirement of clean integrated temporary work.
+  While the procedure's private coordination ref exists, other threads may
+  continue candidate work and validation but must not mutate the production
+  checkout, services, published artifacts, `origin/main`, or promotion cleanup
+  topology. Contenders follow its wait, refresh, retest, and retry loop;
+  contention is not completion. Documentation-only coordinators have standing
+  promotion ownership; every other `main` update requires the operator or an
+  explicitly assigned promotion owner.
+- The operator-confirmed save-mapping fast lane documented in
+  [development isolation](docs/architecture/development_isolation.md) is the
+  only application-owned feature-branch exception. It may stage one allowlisted
+  child of current `main`, but never moves `main` or grants a general bypass.
 - Treat unrelated tracked and untracked changes as another participant's work.
   Do not overwrite, delete, stage, or incorporate them. Recheck status and each
   target diff immediately before editing, staging, or committing; reconcile a
@@ -49,11 +61,6 @@ changes this model.
   [sandbox boundary](docs/sandbox_boundaries.md) and host-backed evidence.
 - Use bounded, exact-target ADB commands. Never use sandbox `adb connect`,
   `start-server`, or `kill-server` as an availability probe.
-- An explicit operator instruction may authorize one bounded on-demand passive
-  stream after live preflight. Follow
-  [`docs/operations/passive_stream.md`](docs/operations/passive_stream.md): use
-  the exact target, disable control, keep cleanup attached, and grant no input
-  or ADB connection-management authority.
 - Never Surrender a pre-existing or operator-owned battle for a test boundary.
   Exceptional owned-test and runtime-repair authority exists only under
   [`docs/live_action_authority.md`](docs/live_action_authority.md); ambiguity
@@ -64,20 +71,13 @@ changes this model.
 
 ## Outcome coordination
 
-Use one disposable outcome coordinator per coherent result. Delegate only when
-at least two substantial independent subtasks can proceed in parallel, to no
-more than three direct subagents; descendants require explicit operator
-authorization. In a shared checkout the coordinator is the sole writer.
-Parallel writers require separate feature worktrees and explicit ownership.
-Repository artifacts, not chats, hold durable state; use the checkpoint,
-evidence-summary, handoff, and closure procedure in `docs/new_thread.md`.
+Follow the disposable-coordinator and durable-state rules in
+`docs/new_thread.md`. One writer owns a checkout; parallel writers require
+separate feature worktrees.
 
 ## Documentation routing
 
 Use [`docs/documentation_maintenance.md`](docs/documentation_maintenance.md)
-for tracked guidance or lifecycle changes. `PENDING_DEVELOPMENT.md` and its
-domain backlogs own actionable work; `docs/observed_issues.md` is a compact
-issue router, with evidence and history under `docs/issues/`. A handoff is
-needed only when responsibility moves to another top-level chat and must follow
-[`docs/handoff_template.md`](docs/handoff_template.md) with freshly inspected
-volatile state only.
+for guidance or lifecycle changes. Backlogs own work, `docs/observed_issues.md`
+routes active issues, and a top-level-chat transfer uses the delta-only
+[`handoff template`](docs/handoff_template.md).

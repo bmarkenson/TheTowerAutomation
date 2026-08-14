@@ -684,6 +684,7 @@ def run_read_only_gc_preflight(
     free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
     player_save_preflight: Any = None,
     stay_in_battle: bool = False,
+    allow_repair: bool = True,
     detect_home_control_fn: HomeControlDetector = detect_home_battle_control,
     sleep_fn: Callable[[float], None] = time.sleep,
     validate_fn: Callable[
@@ -696,7 +697,8 @@ def run_read_only_gc_preflight(
     Home path. Exact bound save facts may replace their redundant UI
     observations; the evidence owner decides which temporal classes are safe
     to consume. Any unresolved Home-only Workshop preset check is reported as
-    deferred.
+    deferred. When ``allow_repair`` is false, mutable controls are measured and
+    reported but never changed.
     """
 
     route_completed = False
@@ -916,8 +918,12 @@ def run_read_only_gc_preflight(
             and auto_pick_perks is not None
         ):
             log(
-                "[PLAYER_SAVE_ATTACHMENT] Auto Pick mismatch requires the "
-                "existing guarded in-battle repair",
+                "[PLAYER_SAVE_ATTACHMENT] Auto Pick mismatch requires "
+                + (
+                    "the existing guarded in-battle repair"
+                    if allow_repair
+                    else "read-only UI confirmation"
+                ),
                 "INFO",
             )
         perks = None
@@ -940,17 +946,18 @@ def run_read_only_gc_preflight(
                 sleep_fn=sleep_fn,
             )
             auto_pick_before = measure_auto_pick_fn(perks)
-            perks = _ensure_auto_pick_perks_enabled(
-                perks,
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-                sleep_fn=sleep_fn,
-                measure_fn=measure_auto_pick_fn,
-            )
+            if allow_repair:
+                perks = _ensure_auto_pick_perks_enabled(
+                    perks,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    safe_tap_fn=safe_tap_fn,
+                    sleep_fn=sleep_fn,
+                    measure_fn=measure_auto_pick_fn,
+                )
             record_ui_verification(
                 "auto_pick_perks",
-                changed=not auto_pick_before.enabled,
+                changed=bool(allow_repair and not auto_pick_before.enabled),
             )
             _guarded_visible_tap(
                 "buttons.close:perks",
@@ -1076,10 +1083,24 @@ def run_read_only_gc_preflight(
                         "modules",
                         "module_boundary_requirement_changed",
                     )
+            lock_boundary_unavailable = bool(
+                free_upgrade_lock_boundary_evidence is None
+                or (
+                    isinstance(
+                        free_upgrade_lock_boundary_evidence,
+                        Mapping,
+                    )
+                    and free_upgrade_lock_boundary_evidence.get("status")
+                    == "unavailable_deferred"
+                )
+            )
             if (
                 free_upgrade_lock_requirements is not None
-                and free_upgrade_lock_boundary_evidence is None
+                and lock_boundary_unavailable
             ):
+                # Attachment initialization records an unavailable placeholder
+                # before its forced save is bound.  That placeholder is not
+                # boundary proof and must not shadow a later exact-bound fact.
                 carried_locks = consume_save("free_upgrade_locks")
                 if (
                     isinstance(carried_locks, list)
@@ -1206,7 +1227,7 @@ def run_read_only_gc_preflight(
                     toggles.get("stun") or ""
                 ).strip().lower()
             break
-        saved_stun_repair_required = bool(
+        saved_stun_verification_required = bool(
             carried_stun in {"on", "off"}
             and poison_swamp_stun_required in {"on", "off"}
             and str(carried_stun) != poison_swamp_stun_required
@@ -1216,7 +1237,7 @@ def run_read_only_gc_preflight(
                 ultimate_requirements,
                 ultimate_observations,
             )
-            or saved_stun_repair_required
+            or saved_stun_verification_required
         )
         ultimate_weapons_source = (
             "mixed"
@@ -1326,6 +1347,7 @@ def run_read_only_gc_preflight(
                 poison_swamp_stun_required
                 and not poison_swamp_stun_observed
                 and poison_boxes
+                and allow_repair
             ):
                 result = ensure_poison_swamp_stun_fn(
                     screenshot=frame,

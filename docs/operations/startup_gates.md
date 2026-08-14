@@ -21,11 +21,12 @@ Pause an active runtime before opening or saving configuration. A staged skip
 is bound to the selected Strategy, claimed only at an applicable boundary, and
 removed when claimed. Changing Strategy clears it.
 
-After three complete Home setup attempts fail with the same requirement, the
-runtime publishes its expected/observed evidence and allowed choices. Ordinary
-failures return through guarded Home cleanup and retry from a fresh frame;
-Pause, interruption, and unsupported requirements do not loop. Resolve the
-pending request with the native/browser dialog or:
+After bounded Home setup attempts fail, the runtime publishes its
+expected/observed evidence as a nonblocking advisory with only scoped choices.
+Ordinary failures return through guarded Home cleanup and retry from a fresh
+frame; Pause, interruption, and unsupported requirements do not loop. The
+failed requirement is then retained as degraded evidence and launch authority
+is released. Review the advisory with the native/browser dialog or:
 
 ```bash
 .venv/bin/python tools/automation_ctl.py gate
@@ -33,19 +34,23 @@ pending request with the native/browser dialog or:
 ```
 
 `gate` prompts; `gate <choice-id>` is noninteractive. **Decide later** leaves
-the gate pending and sends no input. `force-continue` is only a compatibility
+the advisory pending and sends no input, but does not block automation.
+`force-continue` is only a compatibility
 alias for the scoped `gate bypass_once`; it cannot create a waiver before a
 real failure or skip unrelated checks.
 
-A terminal in-battle failure opens **Session preflight needs direction** rather
-than a startup-labelled dialog. The check name is human-readable, and a generic
-failure reason is replaced with retained expected-versus-observed evidence when
-available. If the runtime could not recover one recognized failed check, the
-request remains blocking and offers only Retry; no bypass, profile fallback, or
-repair is safe without a requirement scope. A subsequent successful preflight
-automatically retires the same Strategy's session-preflight request. If an old
-dialog remains visible after that status refresh, close it without choosing an
-option; the consumed request is no longer actionable.
+An in-battle mismatch or unavailable validator completes the one-shot session
+preflight in degraded mode and never opens a blocking direction request. The
+runtime retains the human-readable requirement plus expected/observed evidence,
+and later successful validation clears that degraded state. If an old blocking
+dialog remains visible after status refresh, close it without choosing an
+option; current runtimes consume that legacy request automatically.
+
+For Attach, every configuration rule is observational even when its ordinary
+in-battle contract can repair a value. A mismatch, missing validator result,
+unsupported action, or validator exception completes degraded and releases the
+attachment hold. The attached battle is never changed to make its selected
+Strategy match.
 
 ## Authority and save-first behavior
 
@@ -59,10 +64,15 @@ The default `save_first` policy may omit redundant Home UI only after one
 guarded exact-target serialization/restore workflow yields a complete supported
 mapping. Missing, mismatched, unknown, stale, unsupported, or audit-forced
 claims use the existing guarded UI route after verified Home restoration;
-owner, target, control, foreground, or boundary ambiguity blocks all later
-input. A trusted mismatch queues only that requirement's existing verified UI
-repair and supplies no mutation authority itself. `force_ui` retains complete
-UI behavior; `comparison_audit` compares while UI stays authoritative.
+loss of control authority or exact-target ownership is catastrophic and blocks
+later input. Ambiguous foreground or boundary evidence authorizes no input for
+that check; it is flagged and released unless lifecycle input has already made
+source restoration or the input result uncertain. A trusted mismatch queues
+only that requirement's existing verified UI repair at a safe Home boundary
+and supplies no mutation authority itself. If that repair is unavailable or
+exhausts, the runtime records degraded evidence and continues. `force_ui`
+retains complete UI behavior; `comparison_audit` compares while UI stays
+authoritative.
 
 The persistent save-mapping review banner is not a startup gate. It reports a
 durable unmapped-value receipt or local exact-version Module confirmation that
@@ -70,6 +80,6 @@ still needs canonical review. Leave the banner visible until the mapping is
 integrated; do not use a startup-gate bypass to dismiss it. Candidate status
 does not change the current check's UI fallback or authorize repair.
 
-An exhausted active-session Home-only mismatch may offer a profile-owned repair
-only under
-[`live_action_authority.md`](../live_action_authority.md#configuration-gate-repair).
+An active-session Home-only mismatch cannot create Surrender or restart
+authority. It remains degraded until an ordinary safe Home boundary can run the
+profile-owned repair.

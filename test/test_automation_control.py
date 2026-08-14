@@ -2,12 +2,17 @@ import json
 from datetime import datetime
 import os
 from pathlib import Path
+import subprocess
+import threading
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from automation.missions.manager import MissionManager
 from core.automation_supervisor import AutomationSupervisor
+from core.adb_utils import adb_shell, screencap_png, screencap_raw
+from core.app import App
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
@@ -20,6 +25,7 @@ from core.gate_decisions import (
 )
 from core.control_surface import ControlSurfaceService
 from core.run_state import AUTOMATION, AutomationControl, ExecMode
+from core.runtime_failure_policy import RuntimeFailureKind
 from tools.automation_ctl import main as automation_ctl_main
 
 
@@ -136,9 +142,743 @@ def test_pause_remains_authoritative_until_explicit_enable(
     assert AUTOMATION.state.value == "RUNNING"
 
 
+def test_final_adb_boundary_consumes_pause_before_dispatch(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+    token = AUTOMATION.install_mutation_guard(
+        lambda: (
+            supervisor.apply_control() is not None
+            and supervisor.control_state == "RUNNING"
+        )
+    )
+    try:
+        paused = store.set_state("PAUSED", source="test")
+        with patch("core.adb_utils.subprocess.run") as dispatch:
+            result = adb_shell(
+                ["input", "tap", "100", "200"],
+                check=False,
+            )
+
+        assert result is None
+        dispatch.assert_not_called()
+        assert supervisor.is_paused
+        assert supervisor.control_acknowledgements["state"]["request_id"] == (
+            paused["state_request_id"]
+        )
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_final_adb_boundary_keeps_passive_shell_observation_available():
+    AUTOMATION.state = "PAUSED"
+    token = AUTOMATION.install_mutation_guard(lambda: False)
+    observed = object()
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            return_value=observed,
+        ) as dispatch:
+            result = adb_shell(["pidof", "com.prineside.tdi2"], check=False)
+
+        assert result is observed
+        dispatch.assert_called_once()
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_clipboard_observation_remains_available_while_paused():
+    AUTOMATION.state = "PAUSED"
+    token = AUTOMATION.install_mutation_guard(lambda: False)
+    observed = SimpleNamespace(returncode=0)
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            return_value=observed,
+        ) as dispatch:
+            result = adb_shell(
+                [
+                    "service",
+                    "call",
+                    "clipboard",
+                    "3",
+                    "s16",
+                    "com.android.shell",
+                ],
+                check=False,
+            )
+
+        assert result is observed
+        dispatch.assert_called_once()
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_unlisted_dumpsys_command_requires_mutation_authority():
+    token = AUTOMATION.install_mutation_guard(lambda: False)
+    try:
+        with patch("core.adb_utils.subprocess.run") as dispatch:
+            result = adb_shell(
+                ["dumpsys", "package", "com.prineside.tdi2"],
+                check=False,
+            )
+
+        assert result is None
+        dispatch.assert_not_called()
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_mutating_adb_timeout_pauses_and_reports_uncertain_result():
+    AUTOMATION.state = "RUNNING"
+    failures = []
+    token = AUTOMATION.install_mutation_guard(
+        lambda: True,
+        uncertain_result_handler=failures.append,
+    )
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("adb", 10.0),
+        ) as dispatch:
+            result = adb_shell(
+                ["input", "tap", "100", "200"],
+                check=False,
+            )
+
+        assert result is None
+        assert AUTOMATION.state.value == "PAUSED"
+        assert len(failures) == 1
+        assert "timed out after dispatch" in failures[0]
+        assert dispatch.call_args.kwargs["timeout"] == 10.0
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_mutating_adb_nonzero_result_pauses_as_uncertain():
+    AUTOMATION.state = "RUNNING"
+    failures = []
+    token = AUTOMATION.install_mutation_guard(
+        lambda: True,
+        uncertain_result_handler=failures.append,
+    )
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            return_value=SimpleNamespace(returncode=1),
+        ):
+            result = adb_shell(
+                ["input", "swipe", "1", "2", "3", "4", "100"],
+                check=False,
+            )
+
+        assert result is None
+        assert AUTOMATION.state.value == "PAUSED"
+        assert len(failures) == 1
+        assert "nonzero result" in failures[0]
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_mutating_adb_process_creation_failure_is_not_catastrophic():
+    AUTOMATION.state = "RUNNING"
+    failures = []
+    token = AUTOMATION.install_mutation_guard(
+        lambda: True,
+        uncertain_result_handler=failures.append,
+    )
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            side_effect=FileNotFoundError("adb is unavailable"),
+        ):
+            result = adb_shell(
+                ["input", "tap", "100", "200"],
+                check=False,
+                report_errors=False,
+            )
+
+        assert result is None
+        assert AUTOMATION.state.value == "RUNNING"
+        assert failures == []
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_mutating_adb_typed_outcome_distinguishes_pre_dispatch_failure():
+    AUTOMATION.state = "RUNNING"
+    token = AUTOMATION.install_mutation_guard(lambda: True)
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            side_effect=FileNotFoundError("adb is unavailable"),
+        ):
+            outcome = adb_shell(
+                ["input", "keyevent", "KEYCODE_HOME"],
+                check=False,
+                report_errors=False,
+                return_dispatch_outcome=True,
+            )
+
+        assert outcome.accepted is False
+        assert outcome.attempted is False
+        assert outcome.uncertain is False
+        assert AUTOMATION.state.value == "RUNNING"
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_mutating_adb_typed_outcome_marks_timeout_attempted_and_uncertain():
+    AUTOMATION.state = "RUNNING"
+    token = AUTOMATION.install_mutation_guard(lambda: True)
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("adb", 10.0),
+        ):
+            outcome = adb_shell(
+                ["input", "keyevent", "KEYCODE_HOME"],
+                check=False,
+                report_errors=False,
+                return_dispatch_outcome=True,
+            )
+
+        assert outcome.accepted is False
+        assert outcome.attempted is True
+        assert outcome.uncertain is True
+        assert AUTOMATION.state.value == "PAUSED"
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_mutating_adb_keyboard_interrupt_is_reported_before_propagation():
+    AUTOMATION.state = "RUNNING"
+    failures = []
+    token = AUTOMATION.install_mutation_guard(
+        lambda: True,
+        uncertain_result_handler=failures.append,
+    )
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            side_effect=KeyboardInterrupt(),
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                adb_shell(
+                    ["input", "tap", "100", "200"],
+                    check=False,
+                )
+
+        assert AUTOMATION.state.value == "PAUSED"
+        assert len(failures) == 1
+        assert "interrupted after dispatch may have started" in failures[0]
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_mutating_adb_post_start_oserror_is_uncertain():
+    AUTOMATION.state = "RUNNING"
+    failures = []
+    token = AUTOMATION.install_mutation_guard(
+        lambda: True,
+        uncertain_result_handler=failures.append,
+    )
+    try:
+        with patch(
+            "core.adb_utils.subprocess.run",
+            side_effect=BrokenPipeError("child transport failed"),
+        ):
+            outcome = adb_shell(
+                ["input", "tap", "100", "200"],
+                check=False,
+                return_dispatch_outcome=True,
+            )
+
+        assert outcome.attempted is True
+        assert outcome.uncertain is True
+        assert AUTOMATION.state.value == "PAUSED"
+        assert len(failures) == 1
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_screenshot_subprocesses_have_finite_timeouts():
+    observed = SimpleNamespace(stdout=b"frame")
+    with patch(
+        "core.adb_utils.subprocess.run",
+        return_value=observed,
+    ) as dispatch:
+        assert screencap_png(report_errors=False) == b"frame"
+        assert screencap_raw() == b"frame"
+
+    assert dispatch.call_count == 2
+    assert [call.kwargs["timeout"] for call in dispatch.call_args_list] == [
+        10.0,
+        10.0,
+    ]
+
+
+def test_screenshot_timeouts_return_without_hanging():
+    with patch(
+        "core.adb_utils.subprocess.run",
+        side_effect=subprocess.TimeoutExpired("adb", 0.1),
+    ):
+        assert screencap_png(report_errors=False, timeout_s=0.1) is None
+        assert screencap_raw(timeout_s=0.1) is None
+
+
+def test_runtime_mutation_guard_exception_is_reported_once_and_fails_closed():
+    control = AutomationControl()
+    failures = []
+
+    def fail_guard():
+        raise RuntimeError("control refresh failed")
+
+    token = control.install_mutation_guard(
+        fail_guard,
+        guard_failure_handler=failures.append,
+    )
+    try:
+        with control.authorize_mutation() as allowed:
+            assert not allowed
+        control.state = "RUNNING"
+        with control.authorize_mutation() as allowed:
+            assert not allowed
+
+        assert control.state.value == "PAUSED"
+        assert len(failures) == 1
+        assert "control refresh failed" in failures[0]
+    finally:
+        control.clear_mutation_guard(token)
+
+
+def test_recoverable_runtime_failure_survives_diagnostic_log_io_failure():
+    with patch("core.app.log", side_effect=OSError("disk full")):
+        decision = App._flag_recoverable_runtime_failure(
+            RuntimeFailureKind.REPORTING_FAILURE,
+            "durable status report unavailable",
+        )
+
+    assert decision.disposition.value == "continue_degraded"
+
+
+def test_shutdown_latch_denies_mutation_after_runtime_guard_is_removed():
+    control = AutomationControl()
+    token = control.install_mutation_guard(lambda: True)
+    assert control.shutdown_mutations(token)
+    assert control.clear_mutation_guard(token)
+
+    control.state = "RUNNING"
+    with control.authorize_mutation() as allowed:
+        assert not allowed
+
+    replacement = control.install_mutation_guard(lambda: True)
+    try:
+        with control.authorize_mutation() as allowed:
+            assert allowed
+    finally:
+        control.clear_mutation_guard(replacement)
+
+
+def test_pause_acknowledgement_follows_current_dispatch_and_blocks_the_next(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+
+    def runtime_guard() -> bool:
+        supervisor.apply_control()
+        return supervisor.control_state == "RUNNING"
+
+    token = AUTOMATION.install_mutation_guard(
+        runtime_guard,
+        dispatch_control_lock_path=str(store.dispatch_lock_path),
+    )
+    dispatch_started = threading.Event()
+    release_dispatch = threading.Event()
+    pause_applied = threading.Event()
+
+    def dispatch(_command, **_kwargs):
+        dispatch_started.set()
+        assert release_dispatch.wait(timeout=2)
+        return object()
+
+    paused = []
+
+    def apply_pause():
+        paused.append(store.set_state("PAUSED", source="test"))
+        supervisor.apply_control()
+        pause_applied.set()
+
+    try:
+        with patch("core.adb_utils.subprocess.run", side_effect=dispatch) as run:
+            first_input = threading.Thread(
+                target=lambda: adb_shell(
+                    ["input", "tap", "100", "200"],
+                    check=False,
+                )
+            )
+            first_input.start()
+            assert dispatch_started.wait(timeout=2)
+
+            pause_thread = threading.Thread(target=apply_pause)
+            pause_thread.start()
+            assert not pause_applied.wait(timeout=0.05)
+
+            release_dispatch.set()
+            first_input.join(timeout=2)
+            pause_thread.join(timeout=2)
+            assert not first_input.is_alive()
+            assert not pause_thread.is_alive()
+            assert pause_applied.is_set()
+            assert supervisor.control_acknowledgements["state"]["request_id"] == (
+                paused[0]["state_request_id"]
+            )
+
+            assert adb_shell(
+                ["input", "tap", "300", "400"],
+                check=False,
+            ) is None
+            run.assert_called_once()
+    finally:
+        release_dispatch.set()
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_pause_persists_during_lifecycle_prechecks_and_blocks_first_input(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    AUTOMATION.state = "RUNNING"
+    prechecks_started = threading.Event()
+    release_prechecks = threading.Event()
+    pause_persisted = threading.Event()
+    input_dispatched = []
+
+    def guard() -> bool:
+        return store.status()["state"] == "RUNNING"
+
+    token = AUTOMATION.install_mutation_guard(
+        guard,
+        dispatch_control_lock_path=str(store.dispatch_lock_path),
+    )
+
+    def lifecycle():
+        with AUTOMATION.authorize_mutation(
+            guard,
+            defer_dispatch_boundary=True,
+        ) as allowed:
+            assert allowed
+            prechecks_started.set()
+            assert release_prechecks.wait(timeout=2)
+            if AUTOMATION.refresh_mutation_authority(guard):
+                input_dispatched.append(True)
+
+    def pause():
+        store.set_state("PAUSED", source="test")
+        pause_persisted.set()
+
+    lifecycle_thread = threading.Thread(target=lifecycle)
+    pause_thread = threading.Thread(target=pause)
+    try:
+        lifecycle_thread.start()
+        assert prechecks_started.wait(timeout=2)
+        pause_thread.start()
+        assert pause_persisted.wait(timeout=1)
+        release_prechecks.set()
+        lifecycle_thread.join(timeout=2)
+        pause_thread.join(timeout=2)
+
+        assert not lifecycle_thread.is_alive()
+        assert not pause_thread.is_alive()
+        assert input_dispatched == []
+    finally:
+        release_prechecks.set()
+        lifecycle_thread.join(timeout=2)
+        pause_thread.join(timeout=2)
+        AUTOMATION.clear_mutation_guard(token)
+
+
+def test_control_state_is_reasserted_after_process_local_drift(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    paused = store.set_state("PAUSED", source="test")
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+    AUTOMATION.state = "UNKNOWN"
+
+    supervisor.apply_control()
+
+    assert supervisor.is_paused
+    assert supervisor.control_acknowledgements["state"]["request_id"] == (
+        paused["state_request_id"]
+    )
+
+
+def test_unreadable_control_authority_fails_closed(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    ControlDirectiveStore(control_file).set_state("RUNNING", source="test")
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+    assert supervisor.control_state == "RUNNING"
+
+    with patch.object(
+        supervisor._control_store,
+        "read",
+        side_effect=ControlDirectiveError("unreadable"),
+    ):
+        supervisor.apply_control()
+
+    assert supervisor.is_paused
+    assert supervisor.control_acknowledgements["state"]["value"] == "RUNNING"
+
+    # Recovering the same old RUNNING snapshot is not an Enable request.
+    supervisor.apply_control()
+    assert supervisor.is_paused
+
+    enabled = ControlDirectiveStore(control_file).set_state(
+        "RUNNING",
+        source="test-enable",
+    )
+    supervisor.apply_control()
+    assert not supervisor.is_paused
+    assert supervisor.control_acknowledgements["state"]["request_id"] == (
+        enabled["state_request_id"]
+    )
+
+
+def test_failed_catastrophic_pause_persistence_requires_fresh_enable(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+    assert supervisor.control_state == "RUNNING"
+
+    with patch.object(
+        supervisor._control_store,
+        "set_paused_unless_stopped",
+        side_effect=ControlDirectiveError("write failed"),
+    ):
+        persisted = supervisor.pause_for_catastrophic_failure(
+            RuntimeFailureKind.INPUT_RESULT_UNCERTAIN,
+            reason="ADB result unknown",
+        )
+
+    assert not persisted
+    assert supervisor.is_paused
+    supervisor.apply_control()
+    assert supervisor.is_paused
+
+    enabled = store.set_state("RUNNING", source="test-enable")
+    supervisor.apply_control()
+    assert not supervisor.is_paused
+    assert supervisor.control_acknowledgements["state"]["request_id"] == (
+        enabled["state_request_id"]
+    )
+
+
+def test_catastrophic_pause_latches_before_fallible_logging(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+
+    with patch(
+        "core.automation_supervisor._write_log",
+        side_effect=OSError("disk full"),
+    ):
+        assert supervisor.pause_for_catastrophic_failure(
+            RuntimeFailureKind.INPUT_RESULT_UNCERTAIN,
+            reason="ADB result unknown",
+        )
+
+    assert supervisor.is_paused
+    assert supervisor.catastrophic_pause_hold["active"] is True
+    supervisor.apply_control()
+    assert supervisor.is_paused
+
+    store.set_state("RUNNING", source="fresh-enable")
+    supervisor.apply_control()
+    assert supervisor.is_paused is False
+
+
+def test_explicit_stop_wins_over_late_catastrophic_result(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+    stopped = store.set_state("STOPPED", source="operator-stop")
+
+    assert supervisor.pause_for_catastrophic_failure(
+        RuntimeFailureKind.INPUT_RESULT_UNCERTAIN,
+        reason="late result from an in-flight command",
+    )
+
+    persisted = store.status()
+    assert persisted["state"] == "STOPPED"
+    assert persisted["state_request_id"] == stopped["state_request_id"]
+    assert supervisor.control_state == "STOPPED"
+    assert supervisor.catastrophic_pause_hold["active"] is False
+
+
+def test_initial_control_read_failure_requires_a_fresh_enable(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    running = store.set_state("RUNNING", source="old-running")
+    original_read = ControlDirectiveStore.read
+    reads = 0
+
+    def fail_first_read(instance):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            raise ControlDirectiveError("initial read failed")
+        return original_read(instance)
+
+    with patch.object(ControlDirectiveStore, "read", new=fail_first_read):
+        supervisor = _supervisor(control_file)
+        supervisor.apply_control()
+
+    assert supervisor.is_paused
+    acknowledgement = supervisor.control_acknowledgements["state"]
+    assert not (
+        isinstance(acknowledgement, dict)
+        and acknowledgement.get("request_id") == running["state_request_id"]
+        and acknowledgement.get("value") == "RUNNING"
+    )
+
+    enabled = store.set_state("RUNNING", source="test-enable")
+    supervisor.apply_control()
+    assert not supervisor.is_paused
+    assert supervisor.control_acknowledgements["state"]["request_id"] == (
+        enabled["state_request_id"]
+    )
+
+
+def test_deleted_control_authority_requires_a_fresh_enable(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    running = store.set_state("RUNNING", source="old-running")
+    old_payload = store.read()
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+
+    control_file.unlink()
+    supervisor.apply_control()
+
+    assert supervisor.is_paused
+    assert supervisor.catastrophic_pause_hold["active"] is True
+
+    # Recreating the same stale authority cannot resume input.
+    control_file.write_text(json.dumps(old_payload), encoding="utf-8")
+    supervisor.apply_control()
+    assert supervisor.is_paused
+    assert supervisor.control_request_identity["state_request_id"] == (
+        running["state_request_id"]
+    )
+
+    enabled = store.set_state("RUNNING", source="test-enable")
+    supervisor.apply_control()
+    assert not supervisor.is_paused
+    assert supervisor.control_request_identity["state_request_id"] == (
+        enabled["state_request_id"]
+    )
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    (
+        lambda payload: payload.clear(),
+        lambda payload: payload.pop("state_request_id"),
+        lambda payload: payload.__setitem__("state", "DANCING"),
+    ),
+)
+def test_malformed_core_state_authority_fails_closed(tmp_path, corrupt):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+    payload = store.read()
+    corrupt(payload)
+    control_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    supervisor.apply_control()
+
+    assert supervisor.is_paused
+    assert supervisor.catastrophic_pause_hold["active"] is True
+
+
+def test_failed_initial_control_materialization_starts_paused(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    with patch.object(
+        ControlDirectiveStore,
+        "ensure_request_identities",
+        side_effect=ControlDirectiveError("bootstrap write failed"),
+    ):
+        supervisor = _supervisor(control_file)
+
+    assert supervisor.is_paused
+    assert supervisor.catastrophic_pause_hold["active"] is True
+
+    # Materialized defaults establish a baseline; only the later explicit
+    # Enable request may release the process-local catastrophic hold.
+    store = ControlDirectiveStore(control_file)
+    store.ensure_request_identities()
+    supervisor.apply_control()
+    assert supervisor.is_paused
+    enabled = store.set_state("RUNNING", source="test-enable")
+    supervisor.apply_control()
+    assert not supervisor.is_paused
+    assert supervisor.control_request_identity["state_request_id"] == (
+        enabled["state_request_id"]
+    )
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "interactive_development_lease",
+        "manual_control",
+        "battle_workflow",
+        "setup_capture",
+    ),
+)
+def test_final_mutation_guard_rejects_malformed_input_authority(
+    tmp_path,
+    field,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+    payload = store.read()
+    payload[field] = {}
+    control_file.write_text(json.dumps(payload), encoding="utf-8")
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._runtime_shutting_down = False
+    app._status_reporter = None
+
+    assert app._runtime_control_mutation_guard() is False
+    assert supervisor.is_paused
+    assert supervisor.input_authority_error is not None
+    assert store.read()["state"] == "PAUSED"
+
+
 def test_auto_return_pairs_intent_and_terminal_result(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    ControlDirectiveStore(control_file).set_state("RUNNING", source="test")
     supervisor = AutomationSupervisor(
-        control_file=str(tmp_path / "automation_ctl.json"),
+        control_file=str(control_file),
         auto_return_secs=5,
     )
     supervisor._rtg_visible_since_ts = 0.0
@@ -346,7 +1086,7 @@ def test_implicit_control_defaults_gain_exact_runtime_receipts(tmp_path):
     )
 
     migrated = ControlDirectiveStore(control_file).status()
-    assert migrated["state"] == "RUNNING"
+    assert migrated["state"] == "PAUSED"
     assert migrated["mode"] == "NEXT_BATTLE"
     assert migrated["game_speed_target"] == 6.3
     assert migrated["state_request_id"]
@@ -363,6 +1103,83 @@ def test_implicit_control_defaults_gain_exact_runtime_receipts(tmp_path):
     )
     assert acknowledgements["game_speed_target"]["request_id"] == (
         migrated["game_speed_target_request_id"]
+    )
+    assert supervisor.is_paused
+
+
+def test_malformed_present_state_identity_is_preserved_and_rejected(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.replace(
+        {
+            "state": "RUNNING",
+            "state_request_id": 123,
+        }
+    )
+
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+    )
+
+    assert store.read()["state_request_id"] == 123
+    assert supervisor.is_paused
+    assert supervisor.catastrophic_pause_hold["active"] is True
+
+
+def test_legacy_running_without_identity_is_migrated_to_safe_pause(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.replace({"state": "RUNNING"})
+
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+    )
+    migrated = store.read()
+
+    assert migrated["state"] == "PAUSED"
+    assert isinstance(migrated["state_request_id"], str)
+    assert migrated["state_request_id"]
+    assert supervisor.is_paused
+
+
+def test_malformed_stopped_identity_preserves_stop_without_acknowledgement(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.replace({"state": "STOPPED", "state_request_id": 123})
+
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+    )
+
+    assert store.read()["state_request_id"] == 123
+    assert supervisor.control_state == "STOPPED"
+    assert supervisor.catastrophic_pause_hold["active"] is False
+    assert supervisor.control_acknowledgements["state"] is None
+
+
+def test_control_read_failure_never_weakens_explicit_stop(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    stopped = store.set_state("STOPPED", source="test")
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+
+    with patch.object(
+        supervisor._control_store,
+        "read",
+        side_effect=ControlDirectiveError("unreadable"),
+    ):
+        assert supervisor.apply_control() is False
+
+    assert supervisor.control_state == "STOPPED"
+    assert supervisor.catastrophic_pause_hold["active"] is False
+    assert supervisor.control_acknowledgements["state"]["request_id"] == (
+        stopped["state_request_id"]
     )
 
 
@@ -499,10 +1316,9 @@ def test_default_runtime_configuration_has_no_global_pause_expiry_options():
 
 def test_runtime_owned_mode_transition_is_persisted_before_waiting(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
-    control_file.write_text(
-        json.dumps({"state": "RUNNING", "mode": "NEXT_BATTLE"}),
-        encoding="utf-8",
-    )
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    store.set_mode("NEXT_BATTLE", source="test")
     supervisor = _supervisor(control_file)
     supervisor.apply_control()
 
@@ -668,7 +1484,7 @@ def test_gate_decision_has_guarded_lifecycle(tmp_path):
     assert consumed["completion_reason"] == "waiver applied"
 
 
-def test_advisory_gate_decision_persists_nonblocking_pause_choice(tmp_path):
+def test_advisory_gate_decision_has_no_failure_owned_pause_choice(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
     options = build_gate_decision_options(
@@ -687,46 +1503,53 @@ def test_advisory_gate_decision_persists_nonblocking_pause_choice(tmp_path):
     )
     resolved = store.resolve_gate_decision(
         requested["request_id"],
-        "pause_for_changes",
+        "continue_observing",
         source="test",
     )
 
     assert requested["blocking"] is False
     assert [option["id"] for option in requested["options"]] == [
-        "pause_for_changes",
         "retry",
         "continue_observing",
     ]
     assert resolved is not None
     assert resolved["blocking"] is False
-    assert resolved["selected_option"]["action"] == "pause"
+    assert resolved["selected_option"]["action"] == "waive"
 
 
-def test_attached_mismatch_can_offer_guarded_restart():
-    options = build_gate_decision_options(
-        "modules",
-        allow_repair_restart=True,
-    )
+def test_failed_check_options_never_offer_pause_or_battle_restart():
+    options = build_gate_decision_options("modules")
+    advisory = build_gate_decision_options("modules", advisory=True)
 
-    restart = next(
-        option for option in options
-        if option["id"] == "restart_and_repair"
-    )
-    assert restart["action"] == "repair_restart"
-    assert restart["label"] == "Surrender this battle and repair setup"
-    assert "separate authority" in restart["description"]
+    assert {option["action"] for option in options} <= {"retry", "waive"}
+    assert {option["action"] for option in advisory} <= {"retry", "waive"}
 
 
-def test_runtime_can_persist_advisory_pause(tmp_path):
+def test_runtime_can_persist_operator_authority_pause(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     supervisor = _supervisor(control_file)
 
-    assert supervisor.persist_state("PAUSED")
+    assert supervisor.pause_for_operator_authority("operator selected Pause")
 
     saved = json.loads(control_file.read_text(encoding="utf-8"))
     assert saved["state"] == "PAUSED"
-    assert saved["updated_by"] == "runtime"
+    assert saved["updated_by"] == "runtime-operator-authority"
     assert supervisor.is_paused
+
+
+def test_recoverable_failure_cannot_use_catastrophic_pause_api(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    supervisor = _supervisor(control_file)
+
+    with pytest.raises(ValueError, match="recoverable"):
+        supervisor.pause_for_catastrophic_failure(
+            RuntimeFailureKind.CONFIGURATION_MISMATCH,
+            reason="configuration differs",
+        )
+
+    assert store.status()["state"] == "RUNNING"
 
 
 def test_terminal_gate_prompt_displays_issue_and_returns_shared_option_id():

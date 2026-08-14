@@ -4,6 +4,8 @@ import numpy as np
 
 from core.clickmap_access import get_click, get_explicit_tap, resolve_dot_path
 from core.input import (
+    TapDispatchOutcome,
+    TapDispatchStatus,
     TapVerification,
     safe_long_press,
     safe_tap,
@@ -60,13 +62,48 @@ def test_safe_tap_records_input_summary_and_coordinate_detail(
             ),
         )
 
-    dispatch.assert_called_once_with(10, 20, label="test_target", dispatch="queue")
+    dispatch.assert_called_once_with(
+        10,
+        20,
+        label="test_target",
+        dispatch="queue",
+    )
     lines = action_log.read_text(encoding="utf-8").splitlines()
     assert lines[0].startswith("[INPUT ")
     assert lines[0].endswith("] Tap queued: Test target")
     assert lines[1].endswith(
         "] TAP_SAFE now=False label=test_target at (10,20) "
         "verified=unit_test_target"
+    )
+
+
+def test_safe_tap_preserves_uncertain_device_dispatch_as_typed_result():
+    screenshot = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    verification = TapVerification(
+        screenshot=screenshot,
+        target_region=(0, 0, 30, 40),
+        description="uncertain_target",
+        verifier=lambda _frame: True,
+    )
+    uncertain = TapDispatchOutcome(TapDispatchStatus.UNCERTAIN)
+
+    with patch("core.input._dispatch_tap", return_value=uncertain) as dispatch:
+        result = safe_tap(
+            (10, 20),
+            verification=verification,
+            return_dispatch_outcome=True,
+        )
+
+    assert isinstance(result, TapDispatchOutcome)
+    assert result.status is TapDispatchStatus.UNCERTAIN
+    assert result.attempted is True
+    assert result.dispatched is False
+    dispatch.assert_called_once_with(
+        10,
+        20,
+        label="tap@10,20",
+        dispatch="now",
+        return_dispatch_outcome=True,
     )
 
 
@@ -172,7 +209,13 @@ def test_safe_long_press_uses_fresh_template_geometry_and_configured_offset():
         "buttons.card_inventory:demon_mode",
         screenshot=screenshot,
     )
-    dispatch.assert_called_once_with(415, 1280, 415, 1280, 800)
+    dispatch.assert_called_once_with(
+        415,
+        1280,
+        415,
+        1280,
+        800,
+    )
     input_log.assert_called_once()
     assert input_log.call_args.args == (
         "Long press requested: Card inventory (demon mode)",

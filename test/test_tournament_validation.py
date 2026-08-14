@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
+import pytest
+
 from automation.missions.manager import MissionManager
 from automation.strategies import get_strategy
 from core.automation_supervisor import AutomationSupervisor
@@ -12,6 +14,9 @@ from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
 from core.app import App
+from core.input import TapDispatchOutcome, TapDispatchStatus
+from core.run_state import AUTOMATION
+from core.runtime_failure_policy import RuntimeFailureKind
 from handlers.tournament_launch_handler import TournamentLaunchDispatch
 
 
@@ -27,6 +32,17 @@ OWNER_TWO = {
 }
 
 
+@pytest.fixture(autouse=True)
+def restore_automation_state():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    try:
+        yield
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+
 def _current_receipt(store: ControlDirectiveStore):
     ledger = store.status()["exclusive_validation"]
     return ledger["receipts"][ledger["current_request_id"]]
@@ -36,6 +52,7 @@ def _app_for_pending_validation(tmp_path, *, home_preflight_complete=True):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
     store.set_strategy("tournament", source="test")
+    store.set_state("RUNNING", source="test")
     supervisor = AutomationSupervisor(control_file=str(control_file))
     strategy = get_strategy("tournament")
     assert strategy is not None
@@ -95,6 +112,7 @@ def _app_for_ready_launch(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
     ready, definition = _ready_validation(store)
+    store.set_state("RUNNING", source="test")
     supervisor = AutomationSupervisor(control_file=str(control_file))
     strategy = get_strategy("tournament")
     assert strategy is not None
@@ -434,7 +452,7 @@ def test_restart_fails_claimed_receipt_closed_without_reclaim(tmp_path):
     assert failed["owner"] == OWNER_ONE
 
 
-def test_restart_fails_old_owner_before_exposing_new_pending_request(tmp_path):
+def test_restart_retires_old_owner_without_holding_new_pending_request(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
     first = store.set_strategy("tournament", source="test")
@@ -461,7 +479,7 @@ def test_restart_fails_old_owner_before_exposing_new_pending_request(tmp_path):
     assert receipt is not None
     assert receipt["status"] == "pending"
     assert receipt["strategy_request_id"] == second["strategy_request_id"]
-    assert app._exclusive_validation_ownership_hold
+    assert not app._exclusive_validation_ownership_hold
     old = store.status()["exclusive_validation"]["receipts"][claimed["request_id"]]
     assert old["outcome"] == "failed"
 
@@ -595,8 +613,12 @@ def test_explicit_start_owns_tournament_validation_launch_through_adoption(
         ) is True
 
     assert supervisor.battle_workflow["status"] == "action_dispatched"
+    launch_scope = supervisor.battle_workflow["acknowledgement"][
+        "activity_scope_run_id"
+    ]
     app._control_observation = {
         **app._control_observation,
+        "activity_scope_run_id": launch_scope,
         "observation_id": "tournament-workflow:running",
         "primary_state": "RUNNING",
         "home_battle_control": "UNKNOWN",
@@ -629,7 +651,7 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
         assert not app._maybe_start_exclusive_validation(
             home_control=HomeBattleControl.NEW_BATTLE
         )
-    start.assert_called_once_with()
+    start.assert_called_once_with(return_dispatch_outcome=True)
     claimed = _current_receipt(store)
     assert claimed["status"] == "claimed"
 
@@ -682,6 +704,34 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
     assert result_log.call_args.args[0].startswith(
         "Tournament validation complete — "
     )
+
+
+def test_uncertain_validation_battle_dispatch_pauses_and_never_replays(
+    tmp_path,
+):
+    app, store, _manager = _app_for_pending_validation(tmp_path)
+    uncertain = TapDispatchOutcome(TapDispatchStatus.UNCERTAIN)
+
+    with (
+        patch(
+            "core.app.tap_verified_new_battle",
+            return_value=uncertain,
+        ) as start,
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+        assert not app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+
+    start.assert_called_once_with(return_dispatch_outcome=True)
+    result = _current_receipt(store)
+    assert result["status"] == "result"
+    assert result["outcome"] == "failed"
+    assert app._supervisor.control_state == "PAUSED"
 
 
 def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
@@ -784,6 +834,44 @@ def test_exclusive_validation_observes_modules_without_a_waiver(tmp_path):
     assert run_setup.call_args.kwargs["screenshot"] is frame
     mark_complete.assert_called_once_with(setup.evidence)
     assert store.status()["startup_gate_waivers"] == {}
+
+
+def test_failed_validation_home_navigation_retries_without_pausing():
+    receipt = {
+        "request_id": "validation-1",
+        "status": "cleanup",
+        "pending_outcome": "ready",
+        "pending_reason": "validation checks completed",
+    }
+    result = {
+        **receipt,
+        "status": "result",
+        "outcome": "failed",
+    }
+    app = App.__new__(App)
+    app._exclusive_validation_terminal_hold = None
+    app._supervisor = Mock()
+    app._supervisor.is_paused = False
+    app._supervisor.owns_exclusive_validation.return_value = True
+    app._supervisor.finish_exclusive_validation.return_value = result
+    app._reconcile_exclusive_validation = Mock(return_value=receipt)
+    app._announce_exclusive_validation_result = Mock()
+    app._flag_recoverable_runtime_failure = Mock()
+
+    reason = (
+        "validation checks completed; the owned battle ended, but verified "
+        "NEW_BATTLE Home was not reached"
+    )
+    with patch("core.app.return_home_from_game_over", return_value=False):
+        assert app._handle_exclusive_validation_game_over() is True
+
+    app._flag_recoverable_runtime_failure.assert_called_once_with(
+        RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+        reason,
+    )
+    app._supervisor.pause_for_catastrophic_failure.assert_not_called()
+    assert app._exclusive_validation_terminal_hold is None
+    app._supervisor.finish_exclusive_validation.assert_not_called()
 
 
 def test_claimed_validation_timeout_fails_without_surrender(tmp_path):

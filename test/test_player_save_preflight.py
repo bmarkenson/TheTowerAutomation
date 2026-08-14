@@ -906,14 +906,16 @@ def test_target_generation_change_blocks_all_followup_input(monkeypatch):
 
     assert result.status is PlayerSavePreflightStatus.BLOCKED
     assert not result.safe_ui_fallback
-    assert result.reason == "restored_target_or_new_battle_boundary_unverified"
+    assert result.reason == "exact_target_ownership_unverified"
     assert "acquisition" not in result.provenance
 
 
 def test_failed_foreground_restoration_blocks_ui_and_battle_progression(monkeypatch):
+    from core.adb_utils import AdbShellDispatchOutcome
+
     coordinator = _coordinator(
         monkeypatch,
-        foreground_fn=lambda _target: False,
+        foreground_fn=lambda _target: AdbShellDispatchOutcome(),
     )
 
     result = coordinator.acquire(
@@ -927,10 +929,10 @@ def test_failed_foreground_restoration_blocks_ui_and_battle_progression(monkeypa
     assert "acquisition" not in result.provenance
 
 
-def test_control_interruption_while_backgrounded_cannot_dispatch_restore(
+def test_control_interruption_while_backgrounded_restores_before_yielding(
     monkeypatch,
 ):
-    authority = iter((True, False))
+    authority = iter((True, True, False))
     foreground = Mock(return_value=True)
     coordinator = _coordinator(
         monkeypatch,
@@ -944,8 +946,9 @@ def test_control_interruption_while_backgrounded_cannot_dispatch_restore(
     )
 
     assert not result.ready
-    assert result.reason == "control_authority_interrupted_before_foreground"
-    foreground.assert_not_called()
+    assert result.reason == "restored_control_authority_interrupted"
+    assert result.provenance["source_restored"] is True
+    foreground.assert_called_once_with("private-device-target")
 
 
 def test_lifecycle_logging_has_one_action_two_inputs_and_one_result(monkeypatch):

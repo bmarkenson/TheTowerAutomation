@@ -332,7 +332,9 @@ def _build_coordination_harness(
     monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(logs / "actions.log"))
     control_path = logs / "automation_ctl.json"
     store = ControlDirectiveStore(control_path)
-    store.replace({"state": "RUNNING", "mode": "WAIT", "custom": "preserved"})
+    store.replace({"custom": "preserved"})
+    store.set_state("RUNNING", source="test-harness")
+    store.set_mode("WAIT", source="test-harness")
     supervisor = AutomationSupervisor(
         control_file=str(control_path),
         auto_return_enabled=False,
@@ -634,6 +636,13 @@ def test_operator_pause_and_stop_precede_helper_and_never_revive_the_lease(
     assert terminal["terminal_disposition"] == "revoked"
     assert operator_state in terminal["terminal_reason"]
     assert not harness.app._external_development_hold_active
+
+    if action == "stop":
+        with pytest.raises(ControlSurfaceRequestError) as error:
+            harness.service.apply_control({"action": "resume"})
+        assert error.value.code == "process_stopping"
+        assert harness.store.status()["state"] == "STOPPED"
+        return
 
     harness.service.apply_control({"action": "resume"})
     harness.supervisor.apply_control()

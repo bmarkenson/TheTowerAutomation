@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import pytest
 
-from core.input import TapVerification
+from core.input import TapDispatchOutcome, TapDispatchStatus, TapVerification
 from core.matcher import get_match
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HomeBattleEvidence, detect_home_battle_control
@@ -92,6 +92,29 @@ def test_home_battle_alternative_probes_keep_misses_diagnostic():
         call.kwargs["failure_log_level"] == "DEBUG"
         for call in tap.call_args_list
     )
+    assert all(
+        call.kwargs["return_dispatch_outcome"] is True
+        for call in tap.call_args_list
+    )
+
+
+def test_home_battle_probe_preserves_uncertainty_without_fallback_replay():
+    uncertain = TapDispatchOutcome(TapDispatchStatus.UNCERTAIN)
+    with (
+        patch(
+            "handlers.home_screen_handler.tap_if_visible",
+            return_value=uncertain,
+        ) as tap,
+        patch(
+            "handlers.home_screen_handler._tap_verified_home_battle_control"
+        ) as fallback,
+        patch("handlers.home_screen_handler.time.sleep"),
+    ):
+        result = handle_home_screen(return_dispatch_outcome=True)
+
+    assert result is uncertain
+    tap.assert_called_once()
+    fallback.assert_not_called()
 
 
 def test_disabled_auto_start_is_silent_in_low_level_handler():

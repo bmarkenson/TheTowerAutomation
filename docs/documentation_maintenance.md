@@ -25,7 +25,7 @@ or adding a documentation category. Keep one canonical statement and links.
 | Detailed active work | One matching `docs/backlog/*.md` file |
 | Active issue classification and routing | `docs/observed_issues.md` |
 | Issue dossiers, history, and durable evidence | `docs/issues/` as routed by its `README.md` |
-| Completed implementation outcomes | `docs/modules/completed_tasks_log.md` |
+| Concise completed-outcome index and non-issue completion records | `docs/modules/completed_tasks_log.md` |
 | Superseded reasoning or dated investigations | A clearly labeled history file |
 
 Do not track or routinely load API summaries. Generate an explicitly requested
@@ -57,9 +57,35 @@ row only for a genuinely new information class.
 - Put an actionable task in exactly one domain backlog. Change the root backlog
   only when domain routing or priority changes.
 - Keep active-task evidence only while it constrains remaining work.
-- At completion, remove the active item and record the outcome, commit, and
-  validation in the completed-task log. Complete any related issue transition.
-  Completed narrative is on-demand history, never active required reading.
+- Do not retain checked items or dated implementation checkpoints in an active
+  backlog; completion belongs in the completion owner and Git history.
+- At completion, remove the active item and create one durable outcome record.
+  For non-issue work, the completed-task log owns its concise outcome, commits,
+  and validation. For an issue fix, the resolved dossier owns the detail; add
+  only a concise completed-task link and complete the issue transition.
+- A commit that adds or corrects the completion record belongs to the outcome
+  it records and needs no recursive completion entry. The production
+  procedure's narrow
+  [completion-record exception](operations/production_promotion.md#completion-record-exception)
+  covers an otherwise final code candidate followed only by that record.
+
+Completed narrative is on-demand history, never active required reading.
+
+### Automatic documentation closure
+
+An outcome is documentation-only when its aggregate candidate changes tracked
+guidance, planning, issue, completion, or history artifacts but no source,
+tests, configuration, generated output, runtime-read asset, dependency or unit
+input, or native-package input. Behavior-coupled documentation still receives
+its affected validation; running a test does not change the candidate class.
+
+Unless the operator requests a draft, review-only result, retained branch, or
+no promotion, its coordinator has standing promotion ownership and follows the
+[exact-candidate production procedure](operations/production_promotion.md#promote-one-exact-candidate)
+through publication and default clean integrated retirement. Scope expansion
+beyond documentation ends that standing authority. Any ordinary promotion or
+cleanup guard retains the exact state and is reported; never force the
+automatic path.
 
 ### Issues and evidence
 
@@ -89,20 +115,26 @@ not protect it.
 
 ## Validation
 
-For each documentation change:
+First apply the repository-change preflight and immediate-before-mutation
+rechecks in [`new_thread.md`](new_thread.md#repository-change-preflight). The
+documentation-specific additions are:
 
-1. Recheck status and target diffs before editing, staging, and committing;
-   preserve unrelated work.
-2. Search all current inbound references to a moved path or heading. Historical
+1. Search all current inbound references to a moved path or heading. Historical
    prose may retain old path text, but its navigation must reach the owner.
-3. Verify every changed local Markdown target and anchor.
-4. Account for every active task or open issue before deleting or archiving it.
-5. Verify changed durable evidence is tracked, fixture-owned, or narrowly
+2. Verify every changed local Markdown target and anchor.
+3. Account for every active task or open issue before deleting or archiving it.
+4. Verify changed durable evidence is tracked, fixture-owned, or narrowly
    protected.
-6. For every new current document, verify one intentional inbound route, its
+5. For every new current document, verify one intentional inbound route, its
    stated load condition, and the absence of a new mandatory-reading cycle.
+6. When active work or completion lifecycle changes, run
+   `.venv/bin/python -m pytest -q test/test_documentation_lifecycle.py`; it
+   rejects completed task markers in current queues while excluding history.
 7. Run `git diff --check` plus proportionate tests for generated, executable,
    schema-defining, or behavior-coupled documentation.
+
+These checks form the documentation candidate gate; an unchanged exact
+candidate does not need a second copy of them after promotion or cleanup.
 
 Never put volatile runtime facts in durable guidance. They belong only in a
 freshly inspected diagnostic report or conditional handoff section.

@@ -4,6 +4,7 @@ from unittest.mock import patch
 import numpy as np
 
 from core.automation_supervisor import AutomationSupervisor
+from core.control_directives import ControlDirectiveStore
 from utils.coin_detector import format_compact_decimal, parse_compact_number
 
 
@@ -143,8 +144,10 @@ def test_supervisor_does_not_confirm_isolated_jump(tmp_path):
 
 
 def test_coin_display_toggle_requires_two_missing_min_samples(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    ControlDirectiveStore(control_file).set_state("RUNNING", source="test")
     supervisor = AutomationSupervisor(
-        control_file=str(tmp_path / "automation_ctl.json"),
+        control_file=str(control_file),
         auto_return_enabled=False,
     )
     supervisor._last_coins_val = Decimal("362e12")
@@ -178,8 +181,10 @@ def test_coin_display_toggle_requires_two_missing_min_samples(tmp_path):
 
 
 def test_coin_toggle_does_not_publish_total_as_rate(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    ControlDirectiveStore(control_file).set_state("RUNNING", source="test")
     supervisor = AutomationSupervisor(
-        control_file=str(tmp_path / "automation_ctl.json"),
+        control_file=str(control_file),
         auto_return_enabled=False,
     )
     supervisor._last_coins_val = Decimal("362e12")

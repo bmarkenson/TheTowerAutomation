@@ -318,6 +318,31 @@ def validate_battle_workflow(value: object) -> Optional[dict[str, Any]]:
         "requested_at": requested_at,
         "evidence": evidence,
     }
+    if value.get("strategy") is not None:
+        strategy = _bounded(value.get("strategy"), 100)
+        if strategy is None:
+            return None
+        result["strategy"] = strategy.strip().lower()
+    if value.get("strategy_request_id") is not None:
+        strategy_request_id = _bounded(
+            value.get("strategy_request_id"),
+            100,
+        )
+        if strategy_request_id is None or "strategy" not in result:
+            return None
+        result["strategy_request_id"] = strategy_request_id
+    if value.get("strategy_definition_fingerprint") is not None:
+        strategy_fingerprint = _bounded(
+            value.get("strategy_definition_fingerprint"),
+            100,
+        )
+        if (
+            not _sha256(strategy_fingerprint)
+            or result.get("strategy") in {None, "none"}
+            or "strategy_request_id" not in result
+        ):
+            return None
+        result["strategy_definition_fingerprint"] = strategy_fingerprint
     _copy_optional_fields(
         value,
         result,
@@ -325,18 +350,27 @@ def validate_battle_workflow(value: object) -> Optional[dict[str, Any]]:
         text=("reason", "updated_by"),
         mappings=("acknowledgement", "save_receipt", "configuration"),
     )
-    if intent == "attach_battle" and status in {
-        "ready",
-        "completed",
-    }:
+    if intent == "attach_battle" and status in {"ready", "completed"}:
         receipt = validate_save_reconciliation_receipt(
             result.get("save_receipt"),
             expected_kind="running_attachment_reconciliation",
             expected_workflow_id=request_id,
         )
-        if receipt is None:
+        if receipt is not None:
+            result["save_receipt"] = receipt
+        elif status == "ready":
             return None
-        result["save_receipt"] = receipt
+        else:
+            configuration = result.get("configuration")
+            if not (
+                isinstance(configuration, Mapping)
+                and configuration.get("schema_version") == 1
+                and configuration.get("stage") == "completed"
+                and configuration.get("reporting_status") == "unavailable"
+                and configuration.get("attachment_mode") == "observation_only"
+                and configuration.get("degraded") is True
+            ):
+                return None
     return result
 
 

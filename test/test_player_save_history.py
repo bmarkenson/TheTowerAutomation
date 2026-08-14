@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.adb_target_session import AdbTargetSnapshot
+from core.adb_utils import AdbShellDispatchOutcome
 from core.battle_lifecycle import HomeBattleControl
 from core.player_save import SaveCheckEvidence, pull_player_save_bytes
 from core.player_save_acquisition import (
@@ -486,9 +487,9 @@ def test_active_attachment_forces_serialization_and_restores_same_running_source
     assert result.running_attachment_context == _attachment_context()
     assert result.acquisition is not None
     assert calls == {
-        "target": 5,
+        "target": 7,
         "context": 5,
-        "capture": 4,
+        "capture": 6,
         "background": 1,
         "foreground": 1,
         "pull": 1,
@@ -499,6 +500,8 @@ def test_active_attachment_forces_serialization_and_restores_same_running_source
 def test_active_attachment_waits_for_delayed_running_restoration():
     states = iter(
         (
+            {"state": "RUNNING"},
+            {"state": "RUNNING"},
             {"state": "RUNNING"},
             {"state": "RUNNING"},
             {"state": "UNKNOWN"},
@@ -525,7 +528,7 @@ def test_active_attachment_waits_for_delayed_running_restoration():
     )
 
     assert result.complete
-    assert calls["capture"] == 5
+    assert calls["capture"] == 7
     assert any(
         "result=source_not_yet_stable attempt=1/6" in message
         for message in diagnostics
@@ -653,6 +656,26 @@ def test_active_attachment_allows_ui_fallback_only_after_safe_restoration(
     assert lifecycle == ["background", "foreground"]
 
 
+def test_active_attachment_pre_dispatch_serialization_failure_uses_ui_fallback():
+    lifecycle = []
+    result = _read_active(
+        _reader(
+            attachment_context_fn=_attachment_context,
+            background_fn=lambda _target: AdbShellDispatchOutcome(),
+            foreground_fn=lambda target: lifecycle.append(target) or True,
+        )
+    )
+
+    assert result.status is PlayerSaveHistoryReadStatus.UI_FALLBACK
+    assert result.safe_ui_fallback
+    assert result.reason == (
+        "active_attachment_background_serialization_dispatch_unavailable"
+    )
+    assert result.operator_workflow_interrupted is False
+    assert result.source_restored is True
+    assert lifecycle == []
+
+
 @pytest.mark.parametrize(
     "failure_kind",
     ("target", "scope", "source", "control"),
@@ -698,8 +721,8 @@ def test_active_attachment_prebackground_authority_failure_is_action_free(
     assert lifecycle == []
 
 
-def test_active_attachment_control_loss_while_backgrounded_cannot_restore():
-    authority = iter((True, False))
+def test_active_attachment_control_loss_restores_before_yielding():
+    authority = iter((True, True, False))
     lifecycle = []
     result = _read_active(
         _reader(
@@ -713,11 +736,12 @@ def test_active_attachment_control_loss_while_backgrounded_cannot_restore():
     assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
     assert not result.safe_ui_fallback
     assert result.reason.endswith(
-        "control_authority_interrupted_before_foreground"
+        "restored_control_authority_interrupted"
     )
     assert result.background_dispatched is True
     assert result.operator_workflow_interrupted is True
-    assert lifecycle == ["background"]
+    assert result.source_restored is True
+    assert lifecycle == ["background", "foreground"]
 
 
 def test_active_attachment_rechecks_context_at_background_input_boundary():
@@ -752,57 +776,55 @@ def test_active_attachment_restoration_ambiguity_blocks_ui_fallback(
     failure_kind,
 ):
     lifecycle = []
-    targets = iter(
-        (
-            AdbTargetSnapshot("private-target", 3, True),
-            AdbTargetSnapshot(
-                "private-target",
-                4 if failure_kind == "target_generation" else 3,
-                True,
-            ),
+    target_calls = 0
+    context_calls = 0
+    state_calls = 0
+
+    def target():
+        nonlocal target_calls
+        target_calls += 1
+        generation = (
+            4
+            if failure_kind == "target_generation" and target_calls >= 3
+            else 3
         )
-    )
-    contexts = iter(
-        (
-            _attachment_context(),
-            _attachment_context(),
-            _attachment_context(),
-            _attachment_context(
-                runtime_session_id=(
-                    "runtime-2" if failure_kind == "process" else "runtime-1"
-                )
-            ),
-            _attachment_context(
-                runtime_session_id=(
-                    "runtime-2" if failure_kind == "process" else "runtime-1"
-                )
-            ),
+        return AdbTargetSnapshot("private-target", generation, True)
+
+    def context():
+        nonlocal context_calls
+        context_calls += 1
+        return _attachment_context(
+            runtime_session_id=(
+                "runtime-2"
+                if failure_kind == "process" and context_calls >= 5
+                else "runtime-1"
+            )
         )
-    )
-    states = iter(
-        (
-            {"state": "RUNNING"},
-            {"state": "RUNNING"},
-            {"state": "RUNNING"},
-            {
-                "state": (
-                    "HOME_SCREEN"
-                    if failure_kind == "restored_source"
-                    else "RUNNING"
-                )
-            },
-        )
-    )
+
+    def detector(_frame):
+        nonlocal state_calls
+        state_calls += 1
+        return {
+            "state": (
+                "HOME_SCREEN"
+                if failure_kind == "restored_source" and state_calls >= 5
+                else "RUNNING"
+            )
+        }
 
     result = _read_active(
         _reader(
-            target_snapshot_fn=lambda: next(targets),
-            detector=lambda _frame: next(states),
-            attachment_context_fn=lambda: next(contexts),
+            target_snapshot_fn=target,
+            detector=detector,
+            attachment_context_fn=context,
             background_fn=lambda _target: lifecycle.append("background") or True,
             foreground_fn=lambda _target: (
                 lifecycle.append("foreground")
-                or failure_kind != "foreground"
+                or (
+                    AdbShellDispatchOutcome()
+                    if failure_kind == "foreground"
+                    else True
+                )
             ),
         )
     )
@@ -830,14 +852,7 @@ def test_active_attachment_rechecks_authority_after_stable_restoration(
             ),
         )
     )
-    authority = iter(
-        (
-            True,
-            True,
-            True,
-            failure_kind != "control",
-        )
-    )
+    authority = iter((True, True, failure_kind != "control"))
 
     result = _read_active(
         _reader(
