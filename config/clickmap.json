@@ -2277,6 +2277,26 @@
         "y": 1550
       }
     },
+    "home_tier:decrease": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 405,
+        "y": 1080
+      }
+    },
+    "home_tier:increase": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 675,
+        "y": 1080
+      }
+    },
     "tournament_open:home": {
       "roles": [
         "button"

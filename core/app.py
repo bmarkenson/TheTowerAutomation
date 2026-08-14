@@ -10009,6 +10009,30 @@ class App:
         strategy = self._mission_mgr.strategy
         return str(strategy.name if strategy else "none").strip().lower()
 
+    def _current_strategy_home_tier(self) -> Optional[int]:
+        """Return an exact strategy-declared Home tier, if one is applicable."""
+
+        strategy = self._mission_mgr.strategy
+        if strategy is None:
+            return None
+        run_configuration_fn = getattr(strategy, "run_configuration", None)
+        run_configuration = (
+            run_configuration_fn()
+            if callable(run_configuration_fn)
+            else {}
+        )
+        if not isinstance(run_configuration, Mapping):
+            return None
+        if "tier" not in run_configuration:
+            return None
+        tier = run_configuration.get("tier")
+        if type(tier) is not int or not 1 <= tier <= 100:
+            raise ValueError(
+                "selected Strategy declares an invalid Home tier; expected an "
+                "integer between 1 and 100"
+            )
+        return tier
+
     def _begin_no_strategy_observation_boundary(
         self,
         boundary_id: str,
@@ -17059,6 +17083,26 @@ class App:
                     or emulator_recovery_launch
                     or legacy_home_launch_authorized
                 )
+                tier_specific_new_battle = bool(
+                    explicit_start
+                    or terminal_continuation_authorized
+                    or emulator_recovery_new_battle
+                    or carry_pending
+                    or (
+                        legacy_home_launch_authorized
+                        and home_control is HomeBattleControl.NEW_BATTLE
+                    )
+                )
+                required_home_tier = None
+                if tier_specific_new_battle:
+                    try:
+                        required_home_tier = self._current_strategy_home_tier()
+                    except ValueError as exc:
+                        self._flag_recoverable_runtime_failure(
+                            RuntimeFailureKind.VALIDATION_UNAVAILABLE,
+                            str(exc),
+                        )
+                        return
                 preserve_dispatched_carry = bool(
                     carry is not None
                     and carry.state is CarriedEvidenceState.LAUNCH_DISPATCHED
@@ -17089,6 +17133,14 @@ class App:
                             request_id=home_launch_request_id,
                             home_control=home_control,
                         )
+                        if allowed and required_home_tier is not None:
+                            try:
+                                allowed = (
+                                    self._current_strategy_home_tier()
+                                    == required_home_tier
+                                )
+                            except ValueError:
+                                allowed = False
                         launch_guard_state["allowed"] = allowed
                         return allowed
 
@@ -17184,6 +17236,11 @@ class App:
                 typed_dispatch_kwargs = {
                     "return_dispatch_outcome": True
                 }
+                tier_dispatch_kwargs = (
+                    {"required_tier": required_home_tier}
+                    if required_home_tier is not None
+                    else {}
+                )
                 if explicit_attach or manual_return_resume or (
                     emulator_recovery_launch
                     and emulator_recovery_resume
@@ -17209,6 +17266,7 @@ class App:
                         action_purpose=workflow_action_purpose,
                         action_reason=workflow_action_reason,
                         action_guard_fn=launch_action_guard,
+                        **tier_dispatch_kwargs,
                         **typed_dispatch_kwargs,
                     )
                 elif carry_pending:
@@ -17216,6 +17274,19 @@ class App:
                         restart_enabled=restart_enabled,
                         require_new_battle=True,
                         action_guard_fn=launch_action_guard,
+                        **tier_dispatch_kwargs,
+                        **typed_dispatch_kwargs,
+                    )
+                elif (
+                    legacy_home_launch_authorized
+                    and home_control is HomeBattleControl.NEW_BATTLE
+                    and required_home_tier is not None
+                ):
+                    launch_result = handle_home_screen(
+                        restart_enabled=restart_enabled,
+                        require_new_battle=True,
+                        action_guard_fn=launch_action_guard,
+                        **tier_dispatch_kwargs,
                         **typed_dispatch_kwargs,
                     )
                 elif legacy_home_launch_authorized:
@@ -17255,8 +17326,8 @@ class App:
                     ) + 1
                 if launch_outcome.uncertain:
                     reason = (
-                        "the verified Home battle-control input may have reached "
-                        "the device, but its dispatch result was uncertain"
+                        "a verified Home launch input may have reached the "
+                        "device, but its result was uncertain"
                     )
                     if explicit_start or explicit_attach:
                         workflow = self._supervisor.battle_workflow

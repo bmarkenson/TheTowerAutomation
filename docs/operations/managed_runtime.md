@@ -28,9 +28,14 @@ under its own exact evidence and serialization authority.
 Battle** evidence. If requested while Paused it remains `awaiting_enable`;
 explicit **Enable Automation** revalidates the same runtime, target, activity
 scope, and boundary before normal new-run gates receive action authority.
-Once the verified Home control is tapped, status reports `action_dispatched`;
-the workflow continues to suppress unrelated input until lifecycle adoption or
-a visible interrupted/failed result.
+When the selected Strategy declares a numeric tier, the runtime reads the Home
+tier selector, moves it one verified step at a time in either direction, and
+rechecks the requested tier on a fresh frame immediately before Battle. It
+does not tap Battle when the current tier, an individual selector transition,
+or the final tier cannot be proved. A strategy without a numeric tier retains
+the existing launch behavior. Once the verified Home control is tapped, status
+reports `action_dispatched`; the workflow continues to suppress unrelated
+input until lifecycle adoption or a visible interrupted/failed result.
 If Pause, Stop, or Take Manual Control arrives during a Home configuration
 route, setup yields at the first denied input and performs no cleanup action.
 Observation and acknowledgement continue. A later Enable restores Home only

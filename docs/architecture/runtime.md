@@ -1473,6 +1473,18 @@ warning text in `actions.log`.
   Home repair, or Surrender request; Poison Swamp Stun falls back to its guarded
   in-battle detail check; Home `RESUME_BATTLE` preserves the attachment, and
   the Home-owned gates rearm at the next genuine `NEW_BATTLE` boundary.
+- A numeric `run_configuration.tier` is a generic launch requirement, not a
+  strategy-name special case. Before any ordinary runtime-owned New Battle,
+  the Home handler requires fresh `HOME_SCREEN` / `NEW_BATTLE` evidence and an
+  exact OCR tier. It moves the selector one arrow at a time, rechecking action
+  authority before each input and observing the exact one-tier postcondition
+  before the next. The Battle control is recaptured and the requested tier is
+  reverified at its final input boundary. Unknown tier evidence, a stable
+  no-change result, or lost authority blocks Battle; an unexpected selector
+  result remains typed uncertainty and is never replayed. Strategies without
+  a numeric tier, Resume Battle, and the separate Tournament launch workflow
+  retain their existing behavior. Tier inputs and the final Battle tap remain
+  within the launch workflow's single correlated `ACTION` / `RESULT` pair.
 - A confident mismatch is repaired only at an already-safe boundary such as
   verified Home `NEW_BATTLE`. An active-battle or otherwise unsafe mismatch is
   recorded once as completed degraded validation; it cannot request Surrender,

@@ -59,6 +59,17 @@ resolved dossier instead of copying its detail.
   seconds. State/clickmap validation, changed links/anchors, and whitespace
   checks also passed.
 
+### 2026-08-14 strategy-tier launch preflight
+
+- Resolved
+  [`ISSUE-2026-042`](../issues/resolved-2026.md#tier-specific-strategy-launched-on-homes-previously-selected-tier):
+  an ordinary New Battle now reconciles and finally reverifies any numeric
+  strategy tier before Battle, while no-tier, Resume, and Tournament paths
+  remain unchanged. Exact code commit `32392a9` passed all 2,576 tests and was
+  promoted behind rollback tag
+  `production-before-20260814T222225Z-81914dd`; the replacement runtime smoke
+  remained Paused at Home/Tier 19 and issued no device input.
+
 ### 2026-08-14 semantic player-save API and active-run metrics
 
 - The unmerged `dfd1bdf` behavior was initially ported from its pre-current-main

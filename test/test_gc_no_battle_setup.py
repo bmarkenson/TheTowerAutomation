@@ -2069,7 +2069,11 @@ def test_guardian_replacement_templates_require_known_visible_loadout():
 def test_app_runs_no_battle_setup_before_starting_profile_battle():
     frame = object()
     manager = Mock()
-    manager.strategy = None
+    manager.strategy = SimpleNamespace(
+        name="farm_t19_ad_assist",
+        runtime_policy=lambda: {},
+        run_configuration=lambda: {"profile": "farm", "tier": 19},
+    )
     manager.awaiting_initial_battle_intent.return_value = False
     manager.no_battle_setup_requirements.return_value = REQUIREMENTS
     app = App.__new__(App)
@@ -2130,6 +2134,7 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
             "new-run gates"
         ),
         action_guard_fn=ANY,
+        required_tier=19,
         return_dispatch_outcome=True,
     )
     manager.on_home.assert_called_once_with()
