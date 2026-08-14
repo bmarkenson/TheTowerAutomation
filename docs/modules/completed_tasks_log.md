@@ -1028,6 +1028,13 @@ resolved dossier instead of copying its detail.
   `bcc3a6c`; current-main reconciliation retained the patch-equivalent
   production commit `0db73ab` and its newer surrounding control behavior and
   regressions.
+- Exact current-main code candidate `1219c14` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,493 tests in 387.68 seconds in development
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  The completion-record-only follow-up passed the documentation-lifecycle
+  tests and `git diff --check`; no Markdown link target or anchor changed.
 
 ### 2026-08-10 durable control acknowledgements and Strategy Scope
 
