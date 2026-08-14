@@ -1101,6 +1101,40 @@ resolved dossier instead of copying its detail.
   original Return Control mismatch or a degraded Game Over boundary; those
   natural-boundary confirmations remain separately tracked.
 
+### 2026-08-10 ELS-first startup continuity
+
+- Commit `349b369` keeps EHLS and EALS ahead of every deferrable running-start
+  task. Activity Continuity preserves its pending Home source but performs no
+  save serialization or Battle History UI route until both level-skip boxes
+  are complete; an already gold-boxed pair retires that priority immediately.
+- Save-backed Battle History now retains finite signed report statistics as
+  exact game evidence, including observed negative large-number overflow,
+  while identity fields remain positive and shape, type, and non-finite
+  failures still fail closed. UI fallback attribution and successful
+  `GC_NO_BATTLE` diagnostics report their actual outcome without failure-only
+  fields.
+- The original affected file suite passed all 255 tests and the expanded
+  startup/save/control suite passed all 388 tests. Its supported checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,213 tests in 361.77
+  seconds. Feature validation used repository evidence and fixtures without
+  device interaction.
+- The separate Return Control race was initially fixed on this branch by
+  `bcc3a6c`; current-main reconciliation retained the patch-equivalent
+  production commit `0db73ab` and its newer surrounding control behavior and
+  regressions.
+- Exact pre-contention code candidate `1219c14` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,493 tests in 387.68 seconds in development
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  Review of `1219c14..d01c0b8` proved the refreshed post-contention code
+  candidate changed only promoted `docs/**` content: no compile, state,
+  clickmap, source, configuration, runtime-read, dependency, unit, or test
+  input changed. The complete checkpoint therefore carried forward under the
+  proportional rule in `1fe1228`; the affected documentation-lifecycle tests
+  and `git diff --check` passed, and no Markdown link target or anchor changed.
+
 ### 2026-08-10 durable control acknowledgements and Strategy Scope
 
 - Commit `3460d5c` advances the server/native contract to revision 37 with

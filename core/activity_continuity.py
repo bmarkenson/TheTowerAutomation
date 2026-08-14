@@ -335,6 +335,7 @@ class ActivityContinuityCoordinator:
         *,
         post_retry_poll_allowed: bool = True,
         defer_home_baseline: bool = False,
+        defer_running_check: bool = False,
     ) -> bool:
         """Return whether this frame can advance an unchecked run scope."""
 
@@ -345,6 +346,9 @@ class ActivityContinuityCoordinator:
         if not run_id or run_id == self._checked_scope_id:
             return False
         post_retry_pending = _pending_latest_completed_battle(scope) is not None
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        if defer_running_check and state == "RUNNING":
+            return False
         if self._pending_source is not None:
             if (
                 self._pending_mode == "post_retry_baseline"
@@ -356,7 +360,6 @@ class ActivityContinuityCoordinator:
             not post_retry_poll_allowed or self._clock() < self._retry_at
         ):
             return False
-        state = str(detection.get("state") or "UNKNOWN").upper()
         control = HomeBattleControl.parse(
             detection.get("home_battle_control", "UNKNOWN")
         )
@@ -400,6 +403,7 @@ class ActivityContinuityCoordinator:
         action_guard_fn: Callable[[], bool],
         post_retry_poll_allowed: bool = True,
         defer_home_baseline: bool = False,
+        defer_running_check: bool = False,
         player_save_mode: str = "force_ui",
     ) -> ActivityContinuityOutcome:
         scope = get_activity_scope()
@@ -428,6 +432,12 @@ class ActivityContinuityCoordinator:
         control = HomeBattleControl.parse(
             detection.get("home_battle_control", "UNKNOWN")
         )
+        if defer_running_check and state == "RUNNING":
+            # A newly launched Farm battle has a short, irreversible ELS
+            # purchase race. Preserve any pending Home source, but do not let
+            # continuity claim authority, serialize the game, or open History
+            # until that priority action has completed.
+            return ActivityContinuityOutcome()
         if self._pending_source is None:
             if (
                 defer_home_baseline
@@ -1058,13 +1068,23 @@ class ActivityContinuityCoordinator:
                 ),
             )
         elif self._pending_mode == "attachment_baseline":
+            source = str(metadata.get("source") or "")
+            if source == PLAYER_SAVE_HISTORY_SOURCE:
+                source_label = "guarded player save"
+                disposition = "attachment_save_baseline_recorded"
+            elif source == UI_HISTORY_SOURCE:
+                source_label = "guarded Battle History UI"
+                disposition = "attachment_ui_baseline_recorded"
+            else:
+                source_label = "guarded History source"
+                disposition = "attachment_history_baseline_recorded"
             log_result(
-                "Attached battle baseline recorded from the guarded player save "
+                f"Attached battle baseline recorded from the {source_label} "
                 "— latest completed battle is "
                 f"Tier {metadata.get('tier')}, wave {metadata.get('wave')}",
                 detail=(
                     "[BATTLE_CONTINUITY] "
-                    "disposition=attachment_save_baseline_recorded "
+                    f"disposition={disposition} "
                     f"latest={_metadata_detail(metadata)} scope_id={run_id}"
                 ),
             )

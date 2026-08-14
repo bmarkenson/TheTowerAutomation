@@ -1779,7 +1779,12 @@ def _validate_history_entry_shape(
             raise _ComponentUnavailable(
                 f"history_entry_field_type_changed:{index}:{field}"
             )
-        if not math.isfinite(float(value)) or value < 0:
+        # The game can persist finite negative report statistics after its own
+        # large-number overflow (observed for ``damageDealt``), and the More
+        # Stats UI displays that same signed value. Keep it as source evidence
+        # instead of discarding the independent History identity. Structural
+        # identity fields retain their positive-domain checks below.
+        if not math.isfinite(float(value)):
             raise _ComponentUnavailable(
                 f"malformed_history_entry_value:{index}:{field}"
             )

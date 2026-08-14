@@ -12807,6 +12807,11 @@ class App:
                     initialization_blocks_history = (
                         self._mission_mgr.run_initialization_pending()
                     )
+                    level_skip_priority_pending = (
+                        self._level_skip_priority_pending(
+                            initialization_pending=initialization_blocks_history
+                        )
+                    )
                     session_preflight_blocks_history = bool(
                         not initialization_blocks_history
                         and self._mission_mgr.session_preflight_pending()
@@ -12832,6 +12837,7 @@ class App:
                             detection,
                             post_retry_poll_allowed=post_retry_poll_allowed,
                             defer_home_baseline=home_save_preflight_pending,
+                            defer_running_check=level_skip_priority_pending,
                         )
                     )
                     operator_workflow_hold = workflow_hold
@@ -12874,6 +12880,7 @@ class App:
                         ),
                         post_retry_poll_allowed=post_retry_poll_allowed,
                         defer_home_baseline=home_save_preflight_pending,
+                        defer_running_check=level_skip_priority_pending,
                         player_save_mode=player_save_mode,
                     )
                     continuity_pending = continuity.pending
@@ -14419,6 +14426,21 @@ class App:
             self._publish_action_authority()
         return True
 
+    def _level_skip_priority_pending(
+        self,
+        *,
+        initialization_pending: bool,
+    ) -> bool:
+        """Return whether Farm's urgent EHLS/EALS purchase still owns priority."""
+
+        if not initialization_pending:
+            return False
+        mv = self._mission_mgr.ctx.data.get("mission_vars", {})
+        level_skip_keys = {"ehls_completed", "eals_completed"}
+        if not level_skip_keys.intersection(mv):
+            return False
+        return not all(bool(mv.get(key)) for key in level_skip_keys)
+
     def _game_speed_priority_ready(
         self,
         *,
@@ -14426,13 +14448,9 @@ class App:
     ) -> bool:
         """Keep Farm's urgent EHLS/EALS purchases ahead of game speed."""
 
-        if not initialization_pending:
-            return True
-        mv = self._mission_mgr.ctx.data.get("mission_vars", {})
-        level_skip_keys = {"ehls_completed", "eals_completed"}
-        if not level_skip_keys.intersection(mv):
-            return True
-        return all(bool(mv.get(key)) for key in level_skip_keys)
+        return not self._level_skip_priority_pending(
+            initialization_pending=initialization_pending
+        )
 
     def _game_speed_control_snapshot(self) -> Dict[str, Any]:
         """Return run-scoped speed-mode experiment metadata."""
