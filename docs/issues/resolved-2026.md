@@ -139,8 +139,12 @@ and actionable work lives in
   in 357.50 seconds and was deployed on 2026-08-11 behind rollback tag
   `production-before-20260811T162652Z-d9305fc`. A replacement-runtime Attach
   and active-Strategy smoke preserved the existing battle and reached steady
-  `RUNNING`; the original Return Control mismatch and degraded Game Over/Home
-  repair paths still await natural post-fix boundary observation.
+  `RUNNING`. Retained 2026-08-13 evidence later confirmed a clean post-fix Home
+  New Return: the completed workflow reconciled all 14 mapped checks, recorded
+  no unresolved or UI-required check, released its hold, and remained
+  `RUNNING`. That sequence did not reproduce the original skipped-check
+  mismatch or the degraded Game Over/Home repair path; those exact paths still
+  await natural post-fix boundary observation.
 - **Fixed by:** `1b16db9`, `4ac5237`.
 
 ### Open in-battle side menu suppressed Mission reward scheduling

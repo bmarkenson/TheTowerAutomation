@@ -39,6 +39,31 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 retained Better Control validation reconciliation
+
+- A read-only audit of retained `actions.log` evidence and the durable control
+  ledger found a completed post-fix manual-control workflow that was not yet
+  subtracted from the Better Control acceptance backlog. On 2026-08-13,
+  workflow `42e7985ea9f3414ca23017d059dfbe40` acknowledged Take Control during an
+  active battle, acquired its natural terminal save, recorded the selected
+  minimal manual Surrender, and reused the terminal History handoff at Home
+  with `save_reads=0` and `history_navigation=0`.
+- Return was then requested at Home New. Its forced serialization used mapping
+  `data-9-game-1101`, resolved all 14 required configuration checks with no
+  mismatch, unresolved check, or UI fallback, and completed the durable ledger
+  as `home_save_reconciliation_complete`. This confirms the clean post-fix Home
+  Return and authority-release path, not the original skipped-check mismatch or
+  a Return-specific unusable-save fallback.
+- Separate retained 2026-08-08 Home setup evidence confirms one real partial
+  save-to-UI route: an unsupported assist Module value produced `ui_required`,
+  the Modules UI repaired the loadout, `ui_verified_repair` was recorded, and
+  Home configuration completed. Remaining acceptance is narrowed to the exact
+  active/resumable, Return-specific full-UI, degraded mismatch/Home-first,
+  Tournament Results, and native Windows lifecycle paths. This reconciliation
+  performed no service, process, device, or input action.
+- The documentation-lifecycle suite passed both tests, `git diff --check`
+  passed, and no Markdown link target or anchor changed.
+
 ### 2026-08-14 attachment Free Upgrade-lock evidence precedence
 
 - A running-attachment initialization placeholder marked Free Upgrade locks
