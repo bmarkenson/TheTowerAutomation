@@ -22,6 +22,13 @@ as checked checkpoint narrative here.
     retained Module receipt was confirmed at attachment, integrated in
     `dbe3d34`, and accepted by later fresh decodes; there is no unresolved
     current receipt. Do not create or end a battle for this evidence.
+  - [ ] At the next ordinary operator-authorized Start from Home, confirm the
+    deployed `f01e050` per-check dispositions accept the matching Farm save and
+    omit Modules, Damage Slider, Orb Distance, Target Priority, Auto Pick, and
+    the other supported duplicate UI routes. The deployment smoke already
+    proved a fresh Home `NEW_BATTLE` boundary under acknowledged Pause and sent
+    no input; do not override Pause or manufacture a battle solely for this
+    confirmation.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping

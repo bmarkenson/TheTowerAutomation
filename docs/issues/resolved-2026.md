@@ -75,11 +75,37 @@ and actionable work lives in
   clickmap validators passed with zero errors and the established 44 orphan
   notices. The supported isolated checkpoint passed compilation and all 2,514
   tests in 386.25 seconds. Changed local Markdown targets and anchors and
-  `git diff --check` passed.
-- **Deployment:** Not performed by this worker. The coordinator must reconcile
-  the overlapping active-run save-metrics branch, integrate and deploy the
-  exact candidate, then observe an ordinary Home boundary. No additional
-  calibration campaign or special battle is required.
+  `git diff --check` passed. After current-main reconciliation, exact final
+  candidate `f01e050` passed the complete isolated checkpoint again: all 2,695
+  tests in 409.82 seconds plus compilation, state definitions, and clickmap
+  integrity. Its affected Home/control slice passed 459 tests before the final
+  merge and 310 after the stricter deployed manual-return authority was
+  reconciled; 128 local links/anchors across 11 changed Markdown files and both
+  base-range whitespace checks passed.
+- **Deployment:** Production advanced from `872123c` to `f01e050` behind
+  rollback tag `production-before-20260814T230213Z-872123c`. Replacement
+  control-surface PID `1584049` and automation PID `1584307` reported the exact
+  `localhost:5555` lock, current `PAUSED`/`WAIT` acknowledgements, and a fresh
+  complete Home `NEW_BATTLE` frame at Tier 19. The rollout preserved Pause,
+  started no battle, and sent no device input; the last `INPUT` remained the
+  predeployment 15:15:22 Perks swipe. This fresh ordinary Home observation
+  proves the deployed runtime and boundary, while per-check save-first routing
+  remains queued for the next normal operator-authorized Start rather than a
+  manufactured validation battle.
+- **Native package:** The complete package was published from `f01e050` at
+  23:03:57 UTC. Current Control Surface is 72,481,195 bytes with SHA-256
+  `f48d3cf595673dcee397d12ba3c3db942234fc2a42d43fe4c79349ae08fd7a5e`;
+  current Tunnel Host is 35,172,119 bytes with SHA-256
+  `5e313c2d90bb33c2f443abe9d1b6ecc6dda41517d54da6181f45fee03e88905c`.
+  Retained slot 1 is the prior `5d83b79` package: 72,481,183-byte Control
+  Surface `6564152e1e065f37ca7255a2a0c1c84d06723d1387b2a3c6e34fc91facf9497d`
+  and 35,172,099-byte Tunnel Host
+  `9985212d9285da747063a267bbf0c55842cb59295e62dbad739b3115fbe5059b`.
+  Retained slot 2 is the prior `823ab8a` package: 72,477,605-byte Control
+  Surface `af821cc6cb2c6706012d5d93fad1f269446b98aeff6e723f8159e8328eb5cb61`
+  and 35,172,132-byte Tunnel Host
+  `96e27dc3a73c77a9be6777533b2273720d041a581847a757d521103580bcbae5`.
+  Linux publication does not establish Windows WPF lifecycle behavior.
 - **Fixed by:** `888f101`.
 
 ### Unbound manual terminal handoff permanently disabled Automation at Home
@@ -1193,8 +1219,10 @@ and actionable work lives in
   compilation, state definitions, and clickmap integrity with zero errors and
   44 known orphans. Generated strategies were byte-identical; changed canonical
   docs passed local-link/anchor and base-range whitespace checks. Validation was
-  code-only. Deployment and first ordinary-boundary observation remain
-  coordinator work.
+  code-only. The later integrated `f01e050` candidate passed all 2,695 tests and
+  was deployed at a fresh ordinary Home `NEW_BATTLE` boundary under acknowledged
+  Pause with no input. Runtime per-check omission remains a passive confirmation
+  for the next normal Start; no special battle is required.
 - **Fixed by:** `fe0c43fee8b2c013e13b89e85508e7555b377054`.
 - **Follow-up:** The 2026-08-05 operator-authorized Tournament pairing above
   subsequently closed the Project Funding/Harmony Conductor gap without
