@@ -42,11 +42,12 @@ resolved dossier instead of copying its detail.
 ### 2026-08-14 semantic player-save API and active-run metrics
 
 - The unmerged `dfd1bdf` behavior was initially ported from its pre-current-main
-  base onto a fresh feature candidate based on `e3c0491`. When production
-  advanced during validation, current main `65a9eb3` was merged into the
-  feature; its attachment-lock repair had no source/test overlap and only the
-  adjacent completion-log insertion needed reconciliation. The final candidate
-  preserves the newer compatible-mapping gate and campaign-only
+  base onto a fresh feature candidate based on `e3c0491`. Current main
+  `65a9eb3` and then `8a5af61` were merged as production advanced. Their
+  attachment-lock repair, retained-evidence guidance, and operational evidence
+  had no source/test overlap; only adjacent completion-log insertions needed
+  reconciliation. The final candidate preserves the newer compatible-mapping
+  gate and campaign-only
   `V1073-RUNTIME-013` audit semantics instead of replacing current player-save,
   App, test, or canonical documentation owners.
 - Version 1101 now supplies the authority and raw binding for the declared
@@ -82,6 +83,69 @@ resolved dossier instead of copying its detail.
   naturally occurring boundary after promotion and deployment.
 - Current validation and deployment evidence is recorded with the candidate's
   final promotion receipt; historical results from `dfd1bdf` were not reused.
+
+### 2026-08-14 Death Stranding x2 retained-evidence reconciliation
+
+- Six complete, identical-configuration T19 Farm battles were confirmed at
+  effective speeds `2.0497`–`2.2242` during the operator-reported 2026-08-10/11
+  sequence. Death Stranding appeared in every retained host sample spanning
+  those battles; average host CPU, GPU, memory pressure, and collection cost
+  were all materially higher than the bounded pre/post controls.
+- The sequence confirms that x2 did not guarantee a good survival outcome
+  under severe contention. It does not cleanly reproduce the older sparse-
+  entity signature: early-wave entity density overlaps a clean same-
+  configuration short run, raw Coins/hour is speed-dependent, and no clean x2
+  control was retained. The open issue and calibration backlog now require a
+  matched clean x2 control before any speed-policy or trigger-threshold change.
+- A narrow, reproducible read-only extract preserves 1,851 unique host
+  aggregates plus four sample-weighted window summaries before rolling
+  retention can remove them. The investigation used closed battle records,
+  historical action logs, and retained telemetry only; it made no process,
+  service, device, or runtime change.
+- The exporter reproduced all expected rows, samples, overlapping-window
+  membership, and Death Stranding sample counts. Its compilation, both
+  documentation-lifecycle tests, changed-link/anchor review, and
+  `git diff --check` passed.
+
+### 2026-08-14 historical-evidence startup routing
+
+- Startup and live-preflight guidance now distinguishes historical evidence
+  from volatile runtime diagnosis. Closed battle records, historical log
+  ranges, retained telemetry, and retained fixtures may be inspected without
+  live preflight when they are used only as historical evidence; they cannot
+  establish current runtime state.
+- The original documentation candidate `6251d5c` was reconciled with the
+  current temporary-feature and exclusive-promotion workflow. The outcome
+  retains current `main` promotion, publication, contention, and retirement
+  rules and does not restore the former standing `develop` topology.
+- The documentation-lifecycle test, changed-link and anchor review, and
+  `git diff --check` passed. The reconciliation used fresh read-only production
+  preflight evidence but performed no service, device, or runtime mutation.
+
+### 2026-08-14 retained Better Control validation reconciliation
+
+- A read-only audit of retained `actions.log` evidence and the durable control
+  ledger found a completed post-fix manual-control workflow that was not yet
+  subtracted from the Better Control acceptance backlog. On 2026-08-13,
+  workflow `42e7985ea9f3414ca23017d059dfbe40` acknowledged Take Control during an
+  active battle, acquired its natural terminal save, recorded the selected
+  minimal manual Surrender, and reused the terminal History handoff at Home
+  with `save_reads=0` and `history_navigation=0`.
+- Return was then requested at Home New. Its forced serialization used mapping
+  `data-9-game-1101`, resolved all 14 required configuration checks with no
+  mismatch, unresolved check, or UI fallback, and completed the durable ledger
+  as `home_save_reconciliation_complete`. This confirms the clean post-fix Home
+  Return and authority-release path, not the original skipped-check mismatch or
+  a Return-specific unusable-save fallback.
+- Separate retained 2026-08-08 Home setup evidence confirms one real partial
+  save-to-UI route: an unsupported assist Module value produced `ui_required`,
+  the Modules UI repaired the loadout, `ui_verified_repair` was recorded, and
+  Home configuration completed. Remaining acceptance is narrowed to the exact
+  active/resumable, Return-specific full-UI, degraded mismatch/Home-first,
+  Tournament Results, and native Windows lifecycle paths. This reconciliation
+  performed no service, process, device, or input action.
+- The documentation-lifecycle suite passed both tests, `git diff --check`
+  passed, and no Markdown link target or anchor changed.
 
 ### 2026-08-14 attachment Free Upgrade-lock evidence precedence
 
@@ -2159,6 +2223,14 @@ resolved dossier instead of copying its detail.
   Production remained Paused pending a fresh operator-owned screen boundary;
   the deployment smoke passed, but live completion of the repair remained
   intentionally unclaimed.
+- Later production evidence closes that original boundary: a 2026-08-08 Home
+  setup repaired a real Auto Pick mismatch through three verified swaps and a
+  successful final readback, while 2026-08-12 and 2026-08-13 save-backed checks
+  matched the exact Ban set and Auto Pick order. The
+  [resolved dossier](../issues/resolved-2026.md#perk-repair-trusted-transient-ban-reads-and-local-viewport-edges)
+  and its [durable evidence extract](../issues/evidence/perk-repair-confirmation-2026-08-08-13.md)
+  own the detail. Exact ignored-swipe and transient Ban no-op recurrences are
+  not outstanding live gates.
 
 ### 2026-08-07 recoverable superseded feature retirement
 

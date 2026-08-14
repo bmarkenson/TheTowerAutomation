@@ -52,8 +52,10 @@ changes this model.
 ## Live safeguards
 
 - Complete [`docs/live_preflight.md`](docs/live_preflight.md) before process or
-  device interaction, live validation or diagnosis, or any claim about
-  volatile runtime state. A handoff or old screenshot is not current evidence.
+  device interaction, live validation, diagnosis that depends on current or
+  changing runtime state, or any claim about volatile runtime state. Historical
+  production artifacts used only as retained evidence do not trigger live
+  preflight and do not prove current state.
 - A sandbox-negative PID, process, systemd, socket, or ADB result is not proof
   of host absence. Use the relevant
   [sandbox boundary](docs/sandbox_boundaries.md) and host-backed evidence.

@@ -305,11 +305,23 @@ as checked checkpoint narrative here.
     Take/Return Control states. Requests must show exact pending,
     acknowledged, rejected, unavailable, and no-op outcomes without deriving
     authority from GUI state.
-  - At natural Home, active/resumable, manual-control, Game Over, and
-    Tournament Results boundaries, confirm save-backed reconciliation and its
-    independently guarded UI fallbacks. Observe the original Return Control
-    mismatch or degraded Game Over/Home-first repair without manufacturing a
-    boundary.
+  - Retained 2026-08-13 evidence closes the basic Home New save-backed Return
+    path. Manual-control workflow `42e7985ea9f3414ca23017d059dfbe40`
+    acknowledged Take Control during an active battle, accepted its natural
+    terminal save and zero-read History handoff, then completed Return from
+    Home New with all 14 mapped checks resolved and no unresolved or UI-
+    required check. The completed ledger records
+    `home_save_reconciliation_complete`; this did not exercise the original
+    mismatch or any Return-specific UI fallback.
+  - Retained 2026-08-08 Home evidence separately proves a partial save fallback:
+    an unsupported Module value selected `ui_required`, ran the complete
+    Modules UI repair, recorded `ui_verified_repair`, and completed Home
+    configuration. This ordinary Home receipt does not prove that Return can
+    complete from a wholly unusable save.
+  - At natural active/resumable, Return-specific unusable-save Home or Game
+    Over, and Tournament Results boundaries, confirm the remaining save/UI
+    reconciliation paths. Observe the original Return Control mismatch or
+    degraded Game Over/Home-first repair without manufacturing a boundary.
   - Run the revision-37 long-output and rotation checks for every indicator,
     plus authoritative current/pending/startup Strategy rendering and
     dirty/retry/same-ID/stopped/active-adoption behavior. Track the known
@@ -362,6 +374,12 @@ as checked checkpoint narrative here.
     independently guarded in-battle gem, daily-gem, and reward collectors.
     GUI-close reconciliation, sampler-baseline/session continuity, one detector
     decision, and the explicitly authorized fallback branch remain outstanding.
+    The retained 2026-08-10/11 six-battle x2 cohort is a positive severe-
+    contention calibration window: `ds` occupied every host sample, host load
+    was sharply elevated, and x2 did not guarantee survival. It does not meet
+    the original near-normal-speed throughput trigger and has no uncontended
+    x2 control. Retain one same-configuration clean x2 control before changing
+    speed policy or treating this cohort as detector-threshold proof.
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
     second client, as tracked in
