@@ -39,6 +39,25 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 attachment Free Upgrade-lock evidence precedence
+
+- A running-attachment initialization placeholder marked Free Upgrade locks
+  `unavailable_deferred` before the forced save was bound. Session preflight
+  treated that non-null placeholder as final, so it never consumed a complete
+  authoritative lock fact from the same attachment and falsely reported a
+  Home-only deferral.
+- Commit `3565ade` makes that one unavailable placeholder yield to the existing
+  exact-bound consumer. A complete match now becomes bound save evidence, a
+  complete round-invariant mismatch remains report-only, and genuine absence
+  remains deferred; the established one-use consumption order is unchanged.
+- Focused preflight, executor, initialization, template, and documentation-
+  lifecycle validation passed 206 tests. The complete checkpoint at `3565ade`
+  passed compilation, maintained static validation, clickmap integrity with
+  zero errors, and all 2,491 tests in the fingerprinted development environment
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  `git diff --check` passed and no Markdown link target changed. One natural
+  post-deployment replacement attachment remains in the validation backlog.
+
 ### 2026-08-14 Strategy Authoring operator acceptance
 
 - After sustained use of the native Windows GUI, including Module editing, the
