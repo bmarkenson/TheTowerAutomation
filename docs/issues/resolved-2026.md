@@ -8,6 +8,70 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tier-specific Strategy launched on Home's previously selected tier
+
+**Stable ID:** `ISSUE-2026-042` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-13, an explicit Start Battle selected
+  `farm_t19_ad_assist` while Home was still set to Tier 14.
+- **Symptom:** The Battle control was dispatched at 05:01:58 PDT without
+  changing the selector. The resulting T19-profile Farm battle ran on Tier 14
+  until its 09:32 terminal capture, roughly four and a half hours later.
+- **Evidence:** Historical `actions.log` rows show the selected T19 Strategy,
+  save-first preflight, all declared Home configuration checks, and then the
+  verified New Battle tap with no tier observation or selector input between
+  them. Retained record `Battle20260813T163222+0000.json` declares configured
+  `run_configuration.tier=19` while its authoritative terminal analysis
+  reports `observed_tier=14` and signal `terminal_observation:tier_14`.
+- **Safety response:** Diagnosis used only retained logs, the closed battle
+  record, and existing Home fixtures. It did not alter the live runtime,
+  device, or battle. Deployment preserved a pre-existing Pause and did
+  not manufacture a battle for validation.
+- **Cause:** Strategy tier lived in generic `run_configuration`, but
+  `no_battle_setup_requirements()` exposed only persistent configuration
+  checks. The Home launch handler verified New Battle itself and never read,
+  selected, or finally reverified the numeric tier before tapping Battle.
+- **Resolution:** Commit `32392a9` makes any numeric
+  `run_configuration.tier` a generic ordinary-New-Battle launch requirement.
+  A strict Home OCR reader observes the current tier; verified static arrow
+  controls move one tier at a time in either direction; every input retains the
+  launch workflow's action guard and must reach its exact one-step
+  postcondition before another tap. The handler recaptures Home and rechecks
+  the target tier at the final Battle input boundary. Unknown evidence,
+  unchanged selection, or lost authority blocks Battle, while an unresolved
+  or unexpected result remains typed uncertainty and is not replayed. No-tier,
+  Resume Battle, and Tournament launch behavior is unchanged.
+- **Regression:** `test/test_home_screen_handler.py` reads Tier 18 from a
+  retained real Home frame; covers exact T14→T19 and downward selection,
+  per-step fresh evidence, no-change blocking, resolved and unresolved dispatch
+  uncertainty, final-tier revalidation, and refusal to tap Battle after a
+  failed selector outcome. `test/test_gc_no_battle_setup.py` proves the App
+  passes T19 from generic strategy configuration into the exact Start Battle
+  dispatch. Clickmap integrity validates both selector controls.
+- **Validation:** The affected Home/setup, action-authority, No Strategy,
+  Tournament, initialization, control, and documentation suite passed 401
+  tests. Exact code candidate `32392a9` then passed the supported checkpoint:
+  compilation, state definitions, clickmap integrity with zero errors and the
+  established 44 orphan notices, and all 2,576 tests in 420.08 seconds in
+  development environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Deployment:** Production advanced from `81914dd` to `32392a9` behind local
+  rollback tag `production-before-20260814T222225Z-81914dd`. Managed PID
+  `1491800` stopped cleanly while already Paused at Home; replacement
+  PID `1525358`, runtime `30fb32080c404ae18537c5d4e1c48fba`, acquired the
+  `localhost:5555` lock and acknowledged `PAUSED`, `WAIT`, and
+  `farm_t19_ad_assist`. At 15:24 PDT, exact-target transport was `device` and a
+  fresh complete 1080x1920 frame classified as Home New Battle with OCR Tier
+  19 at confidence 95.5. The rollout sent no device input; the last `INPUT`
+  remained the pre-rollout 15:15:22 post-run inventory swipe. A concurrent
+  pre-deployment Start request had already reached terminal `rejected` status
+  after its activity scope changed and was not replayed on restart. Because
+  Home already displayed Tier 19, smoke did not move the selector or start a
+  battle; the exact mismatched-tier launch path remains covered by retained
+  evidence and deterministic regression tests rather than a manufactured live
+  boundary.
+- **Fixed by:** `32392a9`.
+
 ### Pause allowed the remainder of an already-authorized compound action
 
 **Stable ID:** `ISSUE-2026-040` · **Lifecycle:** `resolved`

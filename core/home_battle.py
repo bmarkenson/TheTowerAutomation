@@ -1,8 +1,9 @@
-"""Read-only classification of the Home screen's Battle/Resume control."""
+"""Read-only classification of Home battle controls and tier evidence."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Optional
 
 from core.battle_lifecycle import HomeBattleControl
@@ -11,11 +12,22 @@ from utils.ocr_utils import ocr_text_and_conf
 
 
 HOME_BATTLE_CONTROL_REGION = (270, 1450, 540, 210)
+HOME_TIER_REGION = (430, 1020, 220, 120)
+HOME_TIER_SELECTOR_REGION = (330, 1010, 420, 150)
+_HOME_TIER_CONFIDENCE_FLOOR = 55.0
 
 
 @dataclass(frozen=True)
 class HomeBattleEvidence:
     control: HomeBattleControl
+    source: str
+    confidence: float = -1.0
+    raw_text: str = ""
+
+
+@dataclass(frozen=True)
+class HomeTierEvidence:
+    tier: Optional[int]
     source: str
     confidence: float = -1.0
     raw_text: str = ""
@@ -102,8 +114,55 @@ def detect_home_battle_control(screenshot) -> HomeBattleEvidence:
     )
 
 
+def detect_home_tier(screenshot) -> HomeTierEvidence:
+    """Read the exact numeric tier shown by the ordinary Home selector."""
+
+    if (
+        screenshot is None
+        or not hasattr(screenshot, "shape")
+        or len(screenshot.shape) < 2
+    ):
+        return HomeTierEvidence(None, "invalid_screenshot")
+
+    x, y, w, h = HOME_TIER_REGION
+    screen_h, screen_w = screenshot.shape[:2]
+    if x < 0 or y < 0 or x + w > screen_w or y + h > screen_h:
+        return HomeTierEvidence(None, "region_out_of_bounds")
+
+    try:
+        raw_text, confidence = ocr_text_and_conf(
+            screenshot[y : y + h, x : x + w],
+            psm=7,
+        )
+    except Exception:
+        return HomeTierEvidence(None, "ocr_failed")
+
+    normalized = " ".join(str(raw_text).upper().split())
+    match = re.search(r"\bTIER\s+([1-9]\d{0,2})\b", normalized)
+    if match is None or confidence < _HOME_TIER_CONFIDENCE_FLOOR:
+        return HomeTierEvidence(
+            None,
+            "ocr_unrecognized",
+            confidence,
+            raw_text,
+        )
+    tier = int(match.group(1))
+    if not 1 <= tier <= 100:
+        return HomeTierEvidence(
+            None,
+            "ocr_out_of_range",
+            confidence,
+            raw_text,
+        )
+    return HomeTierEvidence(tier, "ocr", confidence, raw_text)
+
+
 __all__ = [
     "HOME_BATTLE_CONTROL_REGION",
+    "HOME_TIER_REGION",
+    "HOME_TIER_SELECTOR_REGION",
     "HomeBattleEvidence",
+    "HomeTierEvidence",
     "detect_home_battle_control",
+    "detect_home_tier",
 ]
