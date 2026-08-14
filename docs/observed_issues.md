@@ -74,8 +74,13 @@ current runtime state.
 - Two T19 runs kept near-normal effective speed but
   processed far fewer enemies and combos; host scheduling is an inference, so
   do not change strategy or speed policy from this evidence alone. On
-  2026-08-10, an operator-reported lower-CPH sequence recovered after a manual
-  BlueStacks restart, supporting but not proving emulator aging.
+  2026-08-10/11, six same-configuration x2 runs ended at waves 578–1,841 while
+  Death Stranding appeared in every retained host sample and host CPU/GPU load
+  was far above the surrounding controls. This proves the reported lower speed
+  was not a guarantee under severe contention, but the early-wave entity
+  density was not uniformly anomalous and there is no clean x2 control. A
+  separate lower-CPH sequence recovered after a manual BlueStacks restart,
+  supporting but not proving emulator aging.
 - Load the [dossier](issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed)
   for a throughput recurrence, T19 causal analysis, or host-correlation work.
   Revision 41 adds a confirmed operator path, visible handle evidence, and a

@@ -39,6 +39,29 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 Death Stranding x2 retained-evidence reconciliation
+
+- Six complete, identical-configuration T19 Farm battles were confirmed at
+  effective speeds `2.0497`–`2.2242` during the operator-reported 2026-08-10/11
+  sequence. Death Stranding appeared in every retained host sample spanning
+  those battles; average host CPU, GPU, memory pressure, and collection cost
+  were all materially higher than the bounded pre/post controls.
+- The sequence confirms that x2 did not guarantee a good survival outcome
+  under severe contention. It does not cleanly reproduce the older sparse-
+  entity signature: early-wave entity density overlaps a clean same-
+  configuration short run, raw Coins/hour is speed-dependent, and no clean x2
+  control was retained. The open issue and calibration backlog now require a
+  matched clean x2 control before any speed-policy or trigger-threshold change.
+- A narrow, reproducible read-only extract preserves 1,851 unique host
+  aggregates plus four sample-weighted window summaries before rolling
+  retention can remove them. The investigation used closed battle records,
+  historical action logs, and retained telemetry only; it made no process,
+  service, device, or runtime change.
+- The exporter reproduced all expected rows, samples, overlapping-window
+  membership, and Death Stranding sample counts. Its compilation, both
+  documentation-lifecycle tests, changed-link/anchor review, and
+  `git diff --check` passed.
+
 ### 2026-08-14 historical-evidence startup routing
 
 - Startup and live-preflight guidance now distinguishes historical evidence

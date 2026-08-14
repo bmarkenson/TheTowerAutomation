@@ -367,6 +367,12 @@ as checked checkpoint narrative here.
     independently guarded in-battle gem, daily-gem, and reward collectors.
     GUI-close reconciliation, sampler-baseline/session continuity, one detector
     decision, and the explicitly authorized fallback branch remain outstanding.
+    The retained 2026-08-10/11 six-battle x2 cohort is a positive severe-
+    contention calibration window: `ds` occupied every host sample, host load
+    was sharply elevated, and x2 did not guarantee survival. It does not meet
+    the original near-normal-speed throughput trigger and has no uncontended
+    x2 control. Retain one same-configuration clean x2 control before changing
+    speed policy or treating this cohort as detector-threshold proof.
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
     second client, as tracked in
