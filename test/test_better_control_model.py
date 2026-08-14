@@ -3553,6 +3553,139 @@ def test_interrupted_manual_terminal_evidence_does_not_block_enable(tmp_path):
     assert service.control_store.status()["state"] == "RUNNING"
 
 
+def test_unbound_terminal_handoff_can_enable_from_exact_home_boundary(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    terminal = _evidence(game_state="game_over")
+    home = _evidence(
+        game_state="home_new_battle",
+        observation_id="runtime-1:home",
+    )
+    manual = service.control_store.request_manual_control(
+        evidence=terminal,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=terminal,
+    )
+    service.control_store.record_manual_terminal_evidence(
+        manual["manual_control_id"],
+        {
+            "schema_version": 1,
+            "status": "unavailable",
+            "observation_id": terminal["observation_id"],
+            "activity_scope_fingerprint": "a" * 64,
+            "reason": "terminal_run_unbound",
+        },
+    )
+    service.control_store.request_return_control(
+        manual["manual_control_id"],
+        evidence=terminal,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "awaiting_enable",
+        refresh_status="save_validation_pending",
+        configuration={
+            "schema_version": 1,
+            "starting_game_state": "game_over",
+            "observed_game_state": "home_new_battle",
+            "battle_scope_preserved": True,
+        },
+    )
+    service.control_store.set_state("PAUSED", source="runtime")
+    _publish_runtime_observation(service, home, paused=True)
+
+    availability = service.status()["control_model"]["actions"]["enable"]
+
+    assert availability["available"] is True
+    assert availability["code"] == "available"
+    assert "Home New Battle" in availability["reason"]
+    response = service.apply_control({"action": "enable"})
+    assert response["request"]["accepted"] is True
+    assert service.control_store.status()["state"] == "RUNNING"
+
+
+@pytest.mark.parametrize(
+    ("game_state", "expected_status"),
+    (
+        ("home_new_battle", "awaiting_enable"),
+        ("home_resume_battle", "return_requested"),
+        ("active_battle", "return_requested"),
+        ("unknown", "return_requested"),
+    ),
+)
+def test_unbound_terminal_handoff_waits_for_exact_home_boundary(
+    tmp_path,
+    monkeypatch,
+    game_state,
+    expected_status,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    terminal = _evidence(
+        game_state="game_over",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    terminal["pid"] = owner["pid"]
+    manual = store.request_manual_control(evidence=terminal, source="test")
+    store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=terminal,
+    )
+    store.record_manual_terminal_evidence(
+        manual["manual_control_id"],
+        {
+            "schema_version": 1,
+            "status": "unavailable",
+            "observation_id": terminal["observation_id"],
+            "activity_scope_fingerprint": "a" * 64,
+            "reason": "terminal_run_unbound",
+        },
+    )
+    store.request_return_control(
+        manual["manual_control_id"],
+        evidence=terminal,
+        source="test",
+    )
+    supervisor.apply_control()
+    current = _evidence(
+        game_state=game_state,
+        observation_id=f"runtime-1:{game_state}",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    current["pid"] = owner["pid"]
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._control_observation = {
+        key: value
+        for key, value in current.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+
+    app._sync_operator_control_workflows(
+        {"state": str(current["primary_state"])}
+    )
+
+    current_manual = supervisor.manual_control
+    assert current_manual["status"] == expected_status
+    if expected_status == "awaiting_enable":
+        assert current_manual["configuration"] == {
+            "schema_version": 1,
+            "starting_game_state": "game_over",
+            "observed_game_state": "home_new_battle",
+            "battle_scope_preserved": True,
+        }
+
+
 def test_manual_correction_enable_discards_prior_claim_before_new_home_save(
     tmp_path,
     monkeypatch,

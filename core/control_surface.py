@@ -5169,12 +5169,34 @@ class ControlSurfaceService:
             and isinstance(manual_terminal, Mapping)
             and manual_terminal.get("status") == "unavailable"
         )
+        manual_configuration = (
+            manual.get("configuration")
+            if isinstance(manual, Mapping)
+            and isinstance(manual.get("configuration"), Mapping)
+            else {}
+        )
+        exact_home_return_available = bool(
+            terminal_evidence_unavailable
+            and isinstance(manual, Mapping)
+            and manual.get("status") == "awaiting_enable"
+            and indefinite_pause_acknowledged
+            and return_binding_available
+            and isinstance(evidence, Mapping)
+            and evidence.get("game_state") == "home_new_battle"
+            and manual_configuration.get("observed_game_state")
+            == "home_new_battle"
+            and manual_configuration.get("battle_scope_preserved") is True
+        )
+        terminal_evidence_blocks_enable = bool(
+            terminal_evidence_unavailable
+            and not exact_home_return_available
+        )
         enable_available = bool(
             not control_error
             and process_live
             and state_request != "STOPPED"
             and not manual_error
-            and not terminal_evidence_unavailable
+            and not terminal_evidence_blocks_enable
             and (
                 not manual_busy
                 or manual.get("status")
@@ -5199,11 +5221,12 @@ class ControlSurfaceService:
         elif manual_error:
             enable_code = "manual_control_invalid"
             enable_reason = manual_error
-        elif terminal_evidence_unavailable:
+        elif terminal_evidence_blocks_enable:
             enable_code = "manual_terminal_evidence_unavailable"
             enable_reason = (
                 "manual terminal evidence is ambiguous; Automation remains "
-                "Paused and terminal UI input is not authorized"
+                "Paused until Return Control reaches a fresh exact Home New "
+                "Battle boundary"
             )
         elif manual_busy and manual.get("status") not in {
             "return_requested",
@@ -5225,7 +5248,12 @@ class ControlSurfaceService:
             )
         else:
             enable_code = "available"
-            enable_reason = "explicitly permit guarded actions"
+            enable_reason = (
+                "explicitly permit save-first reconciliation from the fresh "
+                "Home New Battle boundary; terminal UI remains unauthorized"
+                if exact_home_return_available
+                else "explicitly permit guarded actions"
+            )
 
         pause_available = bool(
             not control_error
