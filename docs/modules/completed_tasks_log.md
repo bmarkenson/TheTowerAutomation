@@ -81,8 +81,15 @@ resolved dossier instead of copying its detail.
   this port performed no new live capture and created, accelerated, or
   surrendered no battle. Current live validation therefore remains pending a
   naturally occurring boundary after promotion and deployment.
-- Current validation and deployment evidence is recorded with the candidate's
-  final promotion receipt; historical results from `dfd1bdf` were not reused.
+- At exact code candidate `77daaa9`, the 579-test affected suite, 189 portable
+  control-surface tests, 18 TunnelHost tests, and Release win-x64 WPF
+  cross-build passed. The complete development checkpoint compiled all Python,
+  validated state definitions and clickmap integrity with zero errors, and
+  passed all 2,561 tests in the fingerprinted environment
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  Its immediately following completion-record-only commit passed the
+  documentation-lifecycle, local-link/anchor, and whitespace checks.
+  Historical results from `dfd1bdf` were not reused.
 
 ### 2026-08-14 Death Stranding x2 retained-evidence reconciliation
 
