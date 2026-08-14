@@ -39,6 +39,26 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 global Module save identity completion
+
+- Commit `888f101` separates the complete 24-ID Module name/family catalog
+  from the unchanged exact slot/role allowlists. Unknown future IDs can enter
+  the reviewed global identity pipeline, while known unsupported placements
+  and locally confirmed identities retain the full Modules UI route and never
+  gain repair authority. The
+  [resolved dossier](../issues/resolved-2026.md#global-module-save-identities-were-incomplete-and-conflated-with-slot-authority)
+  owns the mapping, campaign, restoration, and safety evidence.
+- An operator-authorized no-battle Home campaign paired the twelve remaining
+  identities, restored and reserialized the original eight-slot loadout, and
+  retained no raw save, private record, or screenshot. The collector was not
+  involved. Deployment, overlapping-branch reconciliation, and ordinary Home
+  observation remain coordinator work.
+- Focused suites passed 331 Module/save tests and 106 Strategy/loadout tests;
+  portable native compatibility passed 189; documentation lifecycle passed 2;
+  and the supported isolated checkpoint passed all 2,514 tests in 386.25
+  seconds. State/clickmap validation, changed links/anchors, and whitespace
+  checks also passed.
+
 ### 2026-08-14 Strategy Authoring operator acceptance
 
 - After sustained use of the native Windows GUI, including Module editing, the

@@ -8,6 +8,80 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Global Module save identities were incomplete and conflated with slot authority
+
+**Stable ID:** `ISSUE-2026-042` · **Lifecycle:** `resolved`
+
+- **Observed:** By 2026-08-14, save-backed Module decoding knew only identities
+  already accepted in particular Primary or Assist slots. The remaining twelve
+  current Module identities were absent, and the discovery/local-confirmation
+  path would append a newly paired identity to the observed slot's supported
+  values.
+- **Symptom:** A save `infoIndex` seen in a new placement could not be named
+  independently of whether that placement was allowed to suppress Modules UI.
+  That made global identity coverage incomplete and risked treating one
+  observation as enforcement authority. During the completion campaign, the
+  fixed inventory-row search also initially missed a visible Ancestral Havoc
+  Bringer after an inertial scroll settled its row between the expected
+  centers.
+- **Cause:** `module_loadout.*.values` served both as the identity catalog and
+  the exact slot/role allowlist. Candidate grouping and proposal generation
+  were therefore slot-scoped, and confirmed-local evidence overlaid the slot
+  list. The inventory finder had only three fixed row centers even though a
+  bounded scroll need not settle on that grid.
+- **Resolution:** Commit `888f101` adds a versioned global
+  `module_info_indices` owner containing all 24 current
+  `infoIndex -> (name, family)` identities in the version-1073 authority and
+  version-1101 structural mirror. Existing `module_loadout` values remain
+  unchanged as exact slot/role UI-suppression allowlists. A globally known but
+  slot-unsupported value is diagnostic only and retains the complete Modules
+  UI route without generating a duplicate candidate. A truly unknown ID emits
+  a global identity candidate and also retains UI. Reviewed proposals and
+  confirmed-local overlays add only global identity; they never add slot
+  support, make Modules observed, or authorize equip/repair input. Scope,
+  family, locator, case-normalized name, and cross-receipt conflicts now fail
+  closed. The inventory fallback retains the fixed-grid fast path and adds a
+  requested-identity-only vertical search whose result must still pass the
+  complete icon-catalog margin, Ancestral-frame, and exact detail guards.
+- **Mapping evidence:** An operator-authorized no-battle Home campaign paired
+  three exact four-Primary UI loadouts with fresh stable version-1101 saves.
+  It established Havoc Bringer `7`, Death Penalty `8`, Wormhole Redirector
+  `17`, Negative Mass Projector `18`, Pulsar Harvester `28`, Galaxy Compressor
+  `29`, Om Chip `40`, Shrink Ray `41`, Sharp Fortitude `42`, Magnetic Hook
+  `44`, Restorative Bonus `47`, and Primordial Collapse `48`. Existing paired
+  evidence supplied the other twelve identities, including Project Funding
+  `43` and Harmony Conductor `39`. The observation collector was not enabled or
+  consulted. No raw save, GUID, effect, inventory record, level, private value,
+  or campaign screenshot was retained.
+- **Safety and restoration:** The campaign ran only after exact Home
+  `NEW_BATTLE`, target, process, control, and diagnostic-lease verification.
+  The first missed-Havoc attempt restored and reserialized the baseline before
+  exiting. The successful rounds then restored the original four Primary and
+  four Assist assignments exactly, reserialized that baseline, returned to
+  Home `NEW_BATTLE`, and terminally released the lease with fresh
+  post-release evidence. It did not start, end, or Surrender a battle; restart
+  a process, service, emulator, or ADB server; deploy code; or modify installed
+  production files.
+- **Regression:** Decoder tests require the complete catalog in both mappings,
+  reject malformed identities and slot/global disagreement, and distinguish
+  unknown IDs from globally known unsupported placements. Candidate,
+  confirmed-local, integration, status-presentation, and shifted-inventory-row
+  tests prove global conflict handling, identity-only proposals/overlays,
+  unchanged slot authority, later-slot candidate discovery, and guarded Havoc
+  selection.
+- **Validation:** Focused Module/save/candidate/control tests passed 331 tests;
+  Strategy/loadout authoring passed 106; documentation lifecycle passed 2;
+  portable native compatibility passed all 189 tests; and state-definition and
+  clickmap validators passed with zero errors and the established 44 orphan
+  notices. The supported isolated checkpoint passed compilation and all 2,514
+  tests in 386.25 seconds. Changed local Markdown targets and anchors and
+  `git diff --check` passed.
+- **Deployment:** Not performed by this worker. The coordinator must reconcile
+  the overlapping active-run save-metrics branch, integrate and deploy the
+  exact candidate, then observe an ordinary Home boundary. No additional
+  calibration campaign or special battle is required.
+- **Fixed by:** `888f101`.
+
 ### Pause allowed the remainder of an already-authorized compound action
 
 **Stable ID:** `ISSUE-2026-040` · **Lifecycle:** `resolved`
