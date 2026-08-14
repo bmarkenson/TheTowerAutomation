@@ -39,6 +39,22 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-13 promotion contention completion continuity
+
+- Commit `7452881` changes promotion contention from a terminal acquisition
+  failure into a read-only wait with bounded, visible status checks. Contention
+  is explicitly neither task failure nor completion.
+- After the active owner clears, the waiting coordinator rereads its candidate,
+  production, and remote state; reconciles current `main` when needed; reruns
+  the complete applicable candidate gate even when the candidate is unchanged;
+  and attempts atomic ownership again. Losing another race repeats the loop.
+- The design reuses the existing mutex rather than adding a durable FIFO queue
+  or new runtime mechanism. Mandatory `AGENTS.md` plus `docs/new_thread.md`
+  guidance grew by 14 words; detailed steps remain conditional on promotion.
+- Both documentation-lifecycle tests passed and `git diff --check` passed. No
+  Markdown link target changed, and the new completion heading is unique. No
+  service, device, or live validation was required.
+
 ### 2026-08-13 promotion serialization and completion-lifecycle guard
 
 - Commit `939141a` keeps candidate development and validation concurrent while
