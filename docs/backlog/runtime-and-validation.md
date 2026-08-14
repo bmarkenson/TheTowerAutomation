@@ -16,18 +16,22 @@ as checked checkpoint narrative here.
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for incompatible versions, shape
   changes, stale data, mismatches, and unmapped settings.
-  - [ ] After promotion, validate receipt/local-confirmation behavior only at
-    ordinary Home, attachment, and terminal boundaries. Review each persistent
-    receipt and integrate accepted values into every required canonical owner
-    and exact structural mirror; do not create or end a battle for evidence.
-    - [ ] Exercise the remaining Home and terminal candidate paths only when
-      those boundaries occur naturally.
-    - [ ] Diagnose why that production attachment's continuity projector
-      rejected battle-history entry 29 at `chainlightningdamage` as a malformed
-      value. Determine whether the game emitted a valid negative/sentinel stat
-      before relaxing any invariant. The guarded Battle History fallback
-      completed safely, and independent configuration projections—including
-      Modules, Auto Pick, perk order, and Ultimate Weapons—remained save-backed.
+  - [ ] At the next naturally occurring unknown Home or terminal mapping
+    candidate, validate its receipt path and integrate an accepted value into
+    every required canonical owner and exact structural mirror. The only
+    retained Module receipt was confirmed at attachment, integrated in
+    `dbe3d34`, and accepted by later fresh decodes; there is no unresolved
+    current receipt. Do not create or end a battle for this evidence.
+  - [ ] Replace the blanket nonnegative `BattleHistory` numeric invariant with
+    a reviewed, field-scoped signed-value policy. The exact 144-row clipboard
+    records for `Battle20260810T141801-0700`,
+    `Battle20260810T203606-0700`, and `Battle20260811T005344-0700` prove that
+    the game itself displayed negative `Damage Dealt` and `Chain Lightning`
+    values; they do not establish whether the values are overflow, a sentinel,
+    or semantically meaningful damage. Preserve the current independent More
+    Stats fallback until finite signed fields, formatting, and malformed-value
+    isolation have focused regression coverage. No additional battle is needed
+    to diagnose the observed rejection.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module value. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
@@ -43,42 +47,21 @@ as checked checkpoint narrative here.
     [typed acquisition and temporal-authority contract](../architecture/player_save.md#acquisition-provenance-and-temporal-authority).
     The deployed shared typed interface is authoritative; do not reconstruct
     its superseded prototype.
-    - [ ] Complete post-deployment validation only at ordinary natural
-      boundaries; do not create, surrender, accelerate, or otherwise alter a
-      battle for evidence.
-      - [ ] Confirm valid Game Over → Home and Game Over → direct Retry each
-        perform zero second save acquisition and zero Battle History
-        navigation. On direct Retry, also confirm the same terminal bundle
-        supplies supported Cards, Workshop, Bots, Guardians, Modules, Free
-        Upgrade locks, Auto Pick, Target Priority, and Ultimate Weapon checks
-        without opening their UI; any unsupported or changed check must fall
-        back independently.
-      - [ ] Confirm one replacement-process attachment with a complete mapped
-        forced save opens no Cards, Workshop, Bots, Guardians, Modules, Free
-        Upgrade-lock, Perk-configuration, Target Priority, Auto Pick, or
-        Ultimate Weapon UI. Also confirm authoritative Module, Free Upgrade-lock,
-        and Perk Auto Pick-order mismatches are each logged once and continue
-        without configuration UI or Home-repair authority, while an
-        intentionally unparseable Module fact uses Modules UI and applies the
-        same report-only result when that fallback is fully observed.
-      - [ ] Confirm Tournament Results → Home reuses its valid terminal handoff
-        without reacquisition.
-      - [ ] Confirm one natural-terminal bundle fans out without duplicate
-        pulls and that terminal Perks navigation is omitted only after bound
-        exhaustion, a later nonempty final prefix with exact round binding,
-        and a later natural terminal clear prove completeness. No qualifying
-        natural terminal boundary occurred during the deployment window, so
-        every terminal UI fallback remains authoritative.
-      - [ ] Observe an ordinary battle without creating or accelerating a
-        boundary. Confirm stable top-bar transitions produce passive
-        acquisition/timeline progress with no in-battle
-        `navigation.open_perks` input. At natural Game Over, confirm a proved
-        exhausted final prefix performs zero Perks navigation, or a nonfinal
-        bound prefix proves the newest/top edge and dispatches
-        `gesture_targets.goto_next:perks` only until the first unchanged
-        saved-recency marker (or the actual list edge). Retain the record to
-        confirm exact saved picks and any terminal uncertainty are rendered
-        separately.
+    - [ ] Confirm one replacement-process attachment whose forced save also
+      contains authoritative Free Upgrade-lock evidence opens none of the
+      configuration UI. A retained 2026-08-13 replacement attachment already
+      used the bound save for Cards, Workshop, Bots, Guardians, Modules, Perk
+      configuration, Target Priority, Auto Pick, and Ultimate Weapons without
+      opening those screens, but correctly deferred Free Upgrade locks.
+      Separately confirm authoritative Module, Free Upgrade-lock, and Perk Auto
+      Pick-order mismatches are each logged once and remain report-only without
+      configuration UI or Home-repair authority. An intentionally unparseable
+      Module fact must use Modules UI and apply the same report-only result when
+      that fallback is fully observed.
+    - [ ] Confirm a natural Tournament Results → Home transition reuses its
+      valid terminal handoff without reacquisition. The retained 2026-08-08
+      Tournament Results interval stayed Paused and moved to Tournament Screen,
+      so it did not exercise this path.
   - [ ] On or after 2026-09-04, review whether the default-disabled,
     campaign-only `V1073-RUNTIME-013` temporal auditor still justifies its App
     hooks, manifest/schema, state machine, tests, and procedure. Count concrete
@@ -115,15 +98,6 @@ as checked checkpoint narrative here.
     cost and staleness tolerance, then validate and adopt one independent claim
     at a time. Enforcement, mutation confirmation, and transition authority
     remain visual.
-  - [ ] Extend the version-1073 Module loadout mapping for the primary
-    `infoIndex` observed during the 2026-08-06 No Strategy attachment. The
-    current bounded projection fails closed with
-    `unsupported primary module infoIndex`, so Modules correctly remains a UI
-    fallback. Identify the exact new index from bounded raw evidence, map it to
-    the independently verified Module identity, retain unknown-index failure,
-    and regress the full attachment path so a complete save skips Module UI.
-    See the
-    [promotion evidence](../issues/evidence/no-strategy-attachment-promotion-2026-08-06.md).
   - [ ] Add any future normal-runtime consumer only through the shared typed
     acquisition owner and only after its own matrix evidence is complete. The
     campaign-only `V1073-RUNTIME-013` auditor may consume a passive bundle when
@@ -134,11 +108,6 @@ as checked checkpoint narrative here.
   - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
     for future bounded normalized candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.
-    - [ ] During an ordinary Farm T18 start, compare its distinct complete
-      Target Priority order with the mapped save sequence as generic
-      serialization-order confirmation only. The accepted complete Farm
-      permutation is already sufficient for the current mapping; do not test
-      all permutations.
     - [ ] Extend exact-slot Module values only through future natural paired
       evidence. Magnetic Hook remains unmapped after the operator withdrew its
       identification; an unknown ID, unsupported requested name, or partial

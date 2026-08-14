@@ -59,6 +59,38 @@ resolved dossier instead of copying its detail.
   passed, and the closure changes no Markdown link target. No service, device,
   or additional live validation was required.
 
+### 2026-08-14 retained player-save boundary validation
+
+- Retained normal-runtime evidence closes three post-deployment checks: Game
+  Over → Home and Game Over → direct Retry both reused their terminal History
+  handoff with zero additional save reads or History navigation; one ordinary
+  run advanced a passive exact Perk inventory without in-battle Perks input;
+  and its bound exhaustion, later active checkpoint, and terminal clear omitted
+  terminal Perks navigation while the same terminal acquisition supplied all
+  144 Stats rows. The
+  [player-save architecture](../architecture/player_save.md#2026-08-13-ordinary-runtime-boundary-confirmation)
+  owns the concise evidence and limitations.
+- Direct Retry also staged every supported Cards, Workshop, Bots, Guardians,
+  Modules, Free Upgrade-lock, Auto Pick, Target Priority, and Ultimate Weapon
+  check from that same bundle with no UI fallback. A replacement-process
+  attachment separately covered every named active check without configuration
+  UI, but deferred Free Upgrade locks; the required attachment mismatch and
+  malformed-Module cases remain unobserved. No retained Tournament Results →
+  Home transition exercised terminal handoff reuse.
+- The earlier `infoIndex 10` / Astral Deliverance request is removed from the
+  active backlog because `dbe3d34` already integrated its canonical authority
+  and structural mirror and later fresh decodes accepted it. The ordinary Farm
+  T18 Target Priority comparison is also retired: a verified UI repair was
+  followed by a later Home save containing the same distinct complete ten-ID
+  sequence.
+- Three guarded More Stats fallbacks retained exact negative `Damage Dealt`
+  and `Chain Lightning` clipboard rows. That closes diagnosis of why the
+  blanket nonnegative invariant rejected those entries; a narrow signed-field
+  parser policy and regression coverage remain active work, without requiring
+  another battle. The documentation-lifecycle tests, changed Markdown link and
+  anchor checks, and `git diff --check` passed. No live state was inspected or
+  changed for this reconciliation.
+
 ### 2026-08-14 default-disabled player-save temporal auditor
 
 - Fresh diagnosis found that `V1073-RUNTIME-013` rejected decoder-approved game
