@@ -79,14 +79,15 @@ as checked checkpoint narrative here.
         saved-recency marker (or the actual list edge). Retain the record to
         confirm exact saved picks and any terminal uncertainty are rendered
         separately.
-  - [ ] Confirm the deployed direct-Retry repair on the next ordinary
-    `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
-    retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh
-    session accepted counter 232 at revision `46521`, wave 290, without
-    inheriting a terminal-only pre-round baseline; the next same-process Retry
-    should emit `terminal_retry_baseline_carried` and accept the first
-    advancing revision under the new identity. Observe normal farming rather
-    than creating a special battle.
+  - [ ] On or after 2026-09-04, review whether the default-disabled,
+    campaign-only `V1073-RUNTIME-013` temporal auditor still justifies its App
+    hooks, manifest/schema, state machine, tests, and procedure. Count concrete
+    investigations where its cross-boundary receipts were uniquely useful
+    beyond normal consumers, `comparison_audit`, and targeted mapping
+    calibration. Decide whether to retain it for named campaigns, simplify it,
+    or remove it. Do not enable it merely for this review. If retained, decide
+    whether the unconfirmed direct-Retry rollover or `V1073-RUNTIME-015`/`016`
+    warrants a bounded campaign.
   - [ ] Extend the exact-version runtime projection with independently failing
     active-upgrade, survival-ability, and allowlisted live-tally components.
     For upgrades, map all three current-level arrays to their Workshop
@@ -116,7 +117,7 @@ as checked checkpoint narrative here.
     remain visual.
   - [ ] Extend the version-1073 Module loadout mapping for the primary
     `infoIndex` observed during the 2026-08-06 No Strategy attachment. The
-    current privacy-safe projection fails closed with
+    current bounded projection fails closed with
     `unsupported primary module infoIndex`, so Modules correctly remains a UI
     fallback. Identify the exact new index from bounded raw evidence, map it to
     the independently verified Module identity, retain unknown-index failure,
@@ -125,12 +126,13 @@ as checked checkpoint narrative here.
     [promotion evidence](../issues/evidence/no-strategy-attachment-promotion-2026-08-06.md).
   - [ ] Add any future normal-runtime consumer only through the shared typed
     acquisition owner and only after its own matrix evidence is complete. The
-    optional `V1073-RUNTIME-013` audit collector may consume a passive bundle
-    but is not an acquisition service or an authority source. Every consumer
+    campaign-only `V1073-RUNTIME-013` auditor may consume a passive bundle when
+    explicitly enabled but is not an acquisition service or an authority
+    source. Every consumer
     must preserve current-process terminal binding and its own temporal,
     fallback, and action-authority rules.
   - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
-    for future privacy-safe candidates. Candidates never self-promote; mapping
+    for future bounded normalized candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.
     - [ ] During an ordinary Farm T18 start, compare its distinct complete
       Target Priority order with the mapped save sequence as generic

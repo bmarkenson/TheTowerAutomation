@@ -39,6 +39,34 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 default-disabled player-save temporal auditor
+
+- Fresh diagnosis found that `V1073-RUNTIME-013` rejected decoder-approved game
+  version 1101 projections because its validator treated the 1073 manifest's
+  mapping and game version as literal runtime locks. The collector now accepts
+  only a supported, shape-valid normalized runtime projection carrying the
+  expected audit-matrix capability, records actual mapping/version provenance,
+  and pins that context per process session so a handoff still fails closed.
+  The exact-context Perk-ID calibration overlay remains version-specific.
+- The collector is classified as a default-disabled, campaign-only temporal
+  auditor: a human may use its append-only receipts to compare already-known
+  normalized claims across natural boundaries. Receipts have no automated
+  consumer, grant no runtime authority, and are not an unknown-field discovery
+  dataset. The current contract describes bounded evidence as log-size,
+  reviewability, and subsystem-coupling hygiene for this trusted-single-user
+  project rather than an adversarial privacy boundary.
+- The managed environment was explicitly set to
+  `THETOWER_PLAYER_SAVE_AUDIT=0` at a fresh Home `NEW_BATTLE` boundary. The
+  supported Stop/Start flow produced a new process on the same exact target;
+  current Enabled/Home acknowledgements were restored and the receipt file did
+  not grow. No collector campaign or battle was created for validation.
+- Focused compatibility, collector, decoder, and documentation-lifecycle
+  validation passed 43 tests; the affected player-save, App/dispatch,
+  continuity, activation, and terminal set passed 725; the complete Python
+  suite passed 2,491. A dated 2026-09-04 backlog review will decide whether
+  concrete diagnostic use justifies retaining, simplifying, or removing the
+  dormant feature; the review itself does not authorize enabling it.
+
 ### 2026-08-13 promotion contention completion continuity
 
 - Commit `7452881` changes promotion contention from a terminal acquisition

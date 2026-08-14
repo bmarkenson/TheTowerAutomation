@@ -584,6 +584,10 @@ def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     assert snapshot.shape_valid
     assert snapshot.runtime_save is not None
     assert snapshot.runtime_save.mapping_id == "data-9-game-1101"
+    assert (
+        snapshot.runtime_save.audit_matrix_id
+        == "data-9-game-1073-runtime-audit-v2"
+    )
     assert snapshot.runtime_save.active_round_identity is not None
     assert snapshot.runtime_save.active_round_identity.game_version == 1101
     assert snapshot.profile_progression["status"] == "complete"

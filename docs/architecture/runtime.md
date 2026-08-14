@@ -334,12 +334,12 @@ the existing forced-save, passive Retry poll, or guarded UI fallback unchanged.
 
 #### Save-first active-round and terminal evidence
 
-The normalized runtime-save model is a second privacy boundary inside the
+The normalized runtime-save model is a bounded normalized-evidence boundary inside the
 exact-version decoder. Snapshot schema 2 exposes only the fields allowlisted by
 `data-9-game-1073-runtime-audit-v2`; it never publishes the decoded root or an
 arbitrary `BattleHistoryEntry`. A root-level version or structural failure
 publishes no runtime model. Perks and the history tail fail independently so an
-unknown Perk ID cannot leak a partial inventory, while an unknown `killedBy`
+unknown Perk ID cannot publish a partial inventory, while an unknown `killedBy`
 ID blocks only the semantic completed entry and preserves structural
 tail-change evidence. The same authoritative Home snapshot now also supplies
 the initial activity-continuity baseline before the UI route is eligible; it
@@ -370,7 +370,7 @@ possible Perk; the exact-version table currently maps all 34 defined semantic
 IDs, including ID `11` as `unlock_random_ultimate_weapon`.
 Changed entry shape/class, non-monotonic waves, or any count/list/level
 inconsistency publishes no Perk snapshot. A structurally consistent unknown ID
-retains a private numeric calibration projection for the audit sidecar, but it
+retains an unpublished numeric calibration projection for the audit sidecar, but it
 does not appear in the public runtime dictionary and does not create a partial
 semantic snapshot. An inactive zero/empty projection is explicitly `cleared`;
 the normal monitor retains the newest complete same-round positive prefix and
@@ -391,7 +391,7 @@ ambiguous levels, repeat counts, order, or a missing saved-recency marker remain
 explicitly unresolved. Only absent, unbound, malformed, or round-conflicted
 prefix evidence takes the complete terminal Perks traversal.
 
-The same privacy boundary will expose additional active-round components only
+The same bounded-evidence boundary will expose additional active-round components only
 through exact-version manifests. In-battle Attack, Defense, and Utility levels
 are stored separately from their Workshop baselines. The save does not carry a
 literal gold-box flag; a normalized `maxed` claim therefore requires a
@@ -413,7 +413,7 @@ The history component accepts the game's source-ordered list of at most 30
 entries and exact-shape-validates only its newest 148-field entry. UTC and local
 .NET DateTime ticks use different clock bases, so they are normalized
 individually and never compared across kinds; source order owns the tail. A
-privacy-safe structural identity/fingerprint uses battle date kind/ticks,
+bounded structural identity/fingerprint uses battle date kind/ticks,
 tier, wave, game/real time, numeric `killedBy`, and Tournament identity. It is
 independent from the canonical 16-section, 144-row More Stats projection and
 its semantic fingerprint. The two hourly rows and effect-active percentages
@@ -560,21 +560,41 @@ evidence and stores an exact-path `profile_progression_delta`; the first such
 record declares a missing baseline. Tournament records retain the snapshot but
 do not alter normal-battle baseline selection.
 
-##### Implemented natural-boundary audit collector
+##### Implemented, campaign-only natural-boundary temporal auditor
 
-`V1073-RUNTIME-013` is implemented as an explicitly enabled,
-observation-only sidecar, not a normal-runtime evidence consumer. It consumes
-stable exact-version reads and passive boundary observations without pausing or
-backgrounding the game, navigating, tapping, dispatching a handler, changing a
-lifecycle decision, or suppressing UI. Its one daemon worker allows at most one
-bounded stable-read acquisition at a time, so a slow or failed read never
-delays the App heartbeat. It reads only the exact target owned by the current
-`AdbTargetSession`; a handoff/release generation change discards the result.
-Capture and detection continue to feed it while global Pause blocks actions.
+`V1073-RUNTIME-013` is a default-disabled, observation-only temporal auditor
+for short, named diagnostic campaigns. It can answer questions such as whether
+an already-understood normalized Perk prefix advanced monotonically and cleared
+at the next natural terminal boundary, or whether a structural history tail
+changed after a known Home baseline. No subsystem reads its receipts, and the
+runtime does not use them to make a decision. A human inspects them after the
+campaign. It is not a save-acquisition service, an unknown-field discovery
+system, or a normal-runtime evidence consumer.
+
+When a campaign is enabled, the normal App supplies the same typed stable-save
+bundles already acquired for passive monitoring and natural boundaries. The
+legacy standalone path still bounds its own work to one daemon acquisition at a
+time. In either mode, a slow or failed read cannot delay the App heartbeat. The
+auditor never pauses or backgrounds the game, navigates, taps, dispatches a
+handler, changes a lifecycle decision, or suppresses UI. It reads only the
+exact target owned by the current `AdbTargetSession`; a handoff or release
+generation change discards the result. Capture and detection continue to feed
+it while global Pause blocks actions.
+
+Compatibility is granted by the decoder, not by matching the manifest's game
+version literally. The decoder must resolve a supported, shape-valid exact or
+explicitly compatible mapping and emit a normalized runtime projection with
+the manifest's audit-matrix capability. A root that is merely parseable is
+rejected. The manifest mapping and game version identify the evidence authority
+from which that capability originated; every receipt records the actual
+mapping and game version observed. The first accepted
+`(mapping, audit matrix, game version)` tuple is pinned for the collector
+session. A later tuple change fails closed instead of merging evidence across a
+decoder or game-version handoff.
 
 Each collector start creates new runtime and collector session identities and
 appends canonical JSONL records without reading or rewriting an earlier
-session. Its exact-version manifest and receipt schema retain only:
+session. Its bounded normalized-evidence schema retains only:
 
 - audit/mapping/schema/session IDs, safe reason codes, timestamps, revision,
   and source fingerprint;
@@ -598,21 +618,20 @@ disabled or rejected optional component cannot erase a valid core receipt.
 Visual waves are explicitly approximate observations, never exact activation
 waves.
 
-The legacy UI Perk timeline may feed a stripped calibration batch only after an
-explicit UI owner has independently accepted a complete exact selection
-boundary. Display text, OCR output, colors, pixels, restored checkpoints, and
-the normal save-backed timeline never cross this queue. When a stable save is
-structurally complete but contains an unmapped numeric ID, the pure resolver
-can group an explicitly supplied UI batch with save picks by exact wave, cancel
-already mapped semantics, and apply singleton constraint propagation. It
-restores the semantic projection only if every needed assignment is unique,
-uses an already allowlisted Perk family at at least 80% confidence, and
-successfully appends the calibration receipt. Ordinary passive monitoring does
-not open Perks to create such evidence; an unknown ID therefore remains
-unavailable and preserves terminal fallback. Multi-wave aggregates, visibility
-gaps, count differences, duplicate semantics, conflicting later evidence, and
-ambiguous assignments stay unavailable. The static exact-version manifest is
-never rewritten.
+Unknown-field discovery remains a separate, targeted mapping-calibration
+workflow that gathers purpose-specific evidence. The auditor is not a raw
+dataset for that work. Its legacy UI Perk resolver is narrower: an explicit UI
+owner may supply a stripped calibration batch only after independently
+accepting a complete exact selection boundary. Display text, OCR output,
+colors, pixels, restored checkpoints, and the normal save-backed timeline never
+cross this queue. The resolver restores a semantic projection only when exact
+wave correspondence and singleton constraint propagation make every needed
+assignment unique, each semantic family is already allowlisted at at least 80%
+confidence, and the bounded calibration receipt is successfully appended.
+Ordinary passive monitoring does not open Perks to create such evidence; an
+unknown ID therefore remains unavailable and preserves terminal fallback.
+Ambiguous or conflicting evidence stays unavailable, and the static mapping
+manifest is never rewritten.
 
 The collector begins with a pre-round structural-tail baseline, records the
 first naturally serialized active identity, samples only stable revision
@@ -622,8 +641,10 @@ and any structural tail change—including 30-entry rollover—as candidates. It
 may calculate candidate tier/wave/time agreement, but it cannot call that entry
 attached, update a battle record, decide whether to open Perks, or suppress any
 UI route. Raw saves, decoded roots, account identifiers, arbitrary history
-fields, screenshot pixels, and OCR text are outside its retained schema. The
-existing visual activation tracker continues to retain only its confirmed
+fields, screenshot pixels, and OCR text are outside its retained schema. Those
+limits keep the diagnostic log compact, reviewable, and decoupled from decoder
+internals; they are not an authentication or adversarial-security boundary.
+The existing visual activation tracker continues to retain only its confirmed
 first-transition evidence frames under the ordinary evidence policy; the audit
 receipt stores event metadata and an optional evidence reference, not the
 image. The passive compact Game Stats capture remains a separate optional
@@ -642,24 +663,19 @@ survive UI correlation-window resets and ordinary direct Retries on the same
 owned target generation, while per-round UI batches do not. A target handoff,
 generation change, collector restart, or exact conflict discards the overlay.
 
-The authorized Tier 22 boundary supplies the collector's core natural-round
-evidence: new identity, ordinary-foreground revision progress, final
-Perk/clearing behavior, and Game Over tail serialization. The first explicitly
-enabled ordinary Tier 19 run subsequently validated exact Home through stable
-active revisions and natural terminal clearing/tail publication without
-changing the UI path. Its first direct Retry exposed fail-closed old-identity
-retention and seven missing exact-version Perk IDs; `b137ea4` repairs both and
-is deployed. Its fresh-session revision-46521 checkpoint accepted the new
-counter-232 identity and complete mapped Perk progression while correctly
-reporting that a terminal-only restart supplied no pre-round baseline. The next
-ordinary same-process Retry remains the passive rollover confirmation. No
-replacement purpose-built battle is required. Upgrade, survival-ability, and
-other candidate components remain independently unavailable until their own
-matrix rows are promoted, but they do not gate the core collector. The
-collector remains observation-only. The separate terminal consumer now makes a
-causally bound exact-version report primary while Game Stats and Perks remain
-passive evidence, More Stats remains the guarded fallback, and continuity,
-terminal binding, and lifecycle authority remain unchanged.
+Past Tier 22 and Tier 19 campaigns established the core natural-round behavior
+and exposed direct-Retry identity retention plus missing Perk IDs; the reviewed
+repair remains in normal code. That history does not justify ambient
+collection. The auditor stays off until a future investigation names a
+specific question and finish condition. Upgrade, survival-ability, and other
+candidate components remain independently unavailable until their own matrix
+rows are promoted, and they do not gate valid core receipts. The separate
+terminal consumer makes a causally bound report primary while Game Stats and
+Perks remain passive evidence, More Stats remains the guarded fallback, and
+continuity, terminal binding, Strategy, attachment, record construction,
+Perks-navigation decisions, UI suppression, and lifecycle authority remain
+unchanged. A terminal-only process remains unbound and cannot inherit Strategy
+or process-local evidence.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through

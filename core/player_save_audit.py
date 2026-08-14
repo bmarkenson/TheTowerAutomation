@@ -50,6 +50,8 @@ DEFAULT_PLAYER_SAVE_AUDIT_RECEIPT_PATH = (
 DEFAULT_PLAYER_SAVE_AUDIT_MANIFEST_PATH = (
     ROOT / "config" / "player_save_audit" / "data_9_game_1073.json"
 )
+# The manifest names the semantic authority origin. Compatible runtime mappings
+# are accepted through its audit-matrix capability, not this filename/version.
 PLAYER_SAVE_AUDIT_RECEIPT_SCHEMA_VERSION = 1
 PLAYER_SAVE_AUDIT_RECEIPT_SCHEMA_ID = "thetower.player_save_natural_boundary_audit.v1"
 PLAYER_SAVE_AUDIT_ID = "V1073-RUNTIME-013"
@@ -140,7 +142,7 @@ class AuditComponentSpec:
 
 @dataclass(frozen=True)
 class PlayerSaveAuditManifest:
-    """Exact-version component gate for the observation-only collector."""
+    """Audit-capability authority origin and optional-component gate."""
 
     schema_version: int
     manifest_id: str
@@ -235,7 +237,7 @@ class _StopCommand:
 def load_player_save_audit_manifest(
     path: Path | str = DEFAULT_PLAYER_SAVE_AUDIT_MANIFEST_PATH,
 ) -> PlayerSaveAuditManifest:
-    """Load and strictly validate the exact-version audit component manifest."""
+    """Load and strictly validate the normalized audit-capability manifest."""
 
     source = Path(path)
     try:
@@ -412,6 +414,13 @@ class PlayerSaveAuditStateMachine:
         self._sequence = 0
         self._seen_observations: set[tuple[int, str]] = set()
         self._seen_observation_order: list[tuple[int, str]] = []
+        self._mapping_context: Optional[tuple[str, str, int]] = None
+        self._seen_mapping_context_discontinuities: set[
+            tuple[str, str, int, int, str]
+        ] = set()
+        self._seen_mapping_context_discontinuity_order: list[
+            tuple[str, str, int, int, str]
+        ] = []
         self._baseline: Optional[dict[str, Any]] = None
         self._active_identity_fingerprint: Optional[str] = None
         self._active_identity_discontinuous = False
@@ -508,6 +517,29 @@ class PlayerSaveAuditStateMachine:
                 ),
                 component="normalization",
             )
+            return False
+
+        mapping_context = (
+            normalized["mapping_id"],
+            normalized["audit_matrix_id"],
+            normalized["game_version"],
+        )
+        if self._mapping_context is None:
+            self._mapping_context = mapping_context
+        elif mapping_context != self._mapping_context:
+            discontinuity_key = (
+                *mapping_context,
+                normalized["save_revision"],
+                normalized["source_fingerprint"],
+            )
+            if discontinuity_key not in self._seen_mapping_context_discontinuities:
+                self._remember_mapping_context_discontinuity(discontinuity_key)
+                self.record_outcome(
+                    "mapping_context_discontinuity",
+                    request=request,
+                    target_fingerprint=normalized["target_fingerprint"],
+                    component="normalization",
+                )
             return False
 
         boundary = _boundary_label(request.boundary_label)
@@ -1125,6 +1157,16 @@ class PlayerSaveAuditStateMachine:
             expired = self._seen_observation_order.pop(0)
             self._seen_observations.discard(expired)
 
+    def _remember_mapping_context_discontinuity(
+        self,
+        key: tuple[str, str, int, int, str],
+    ) -> None:
+        self._seen_mapping_context_discontinuities.add(key)
+        self._seen_mapping_context_discontinuity_order.append(key)
+        if len(self._seen_mapping_context_discontinuity_order) > 4096:
+            expired = self._seen_mapping_context_discontinuity_order.pop(0)
+            self._seen_mapping_context_discontinuities.discard(expired)
+
     def _reset_round_state(self) -> None:
         self._baseline = None
         self._active_identity_fingerprint = None
@@ -1631,7 +1673,7 @@ class PlayerSaveAuditCollector:
             return
         if runtime is None:
             if not mapping_supported:
-                code = "unsupported_exact_version"
+                code = "unsupported_runtime_mapping"
             elif not shape_valid:
                 code = "save_shape_unavailable"
             else:
@@ -1937,15 +1979,14 @@ def _validated_observation(
     observation: AuditSaveObservation,
     manifest: PlayerSaveAuditManifest,
 ) -> dict[str, Any]:
-    if observation.mapping_id != manifest.mapping_id:
-        raise PlayerSaveAuditError("observation_mapping_mismatch")
-    if observation.audit_matrix_id != manifest.audit_matrix_id:
+    mapping_id = _safe_id(observation.mapping_id, "mapping_id")
+    audit_matrix_id = _safe_id(observation.audit_matrix_id, "audit_matrix_id")
+    if audit_matrix_id != manifest.audit_matrix_id:
         raise PlayerSaveAuditError("observation_audit_matrix_mismatch")
-    if observation.game_version != manifest.game_version:
-        raise PlayerSaveAuditError("observation_game_version_mismatch")
+    game_version = _nonnegative_int(observation.game_version, "game_version")
     round_active = _strict_bool(observation.round_active, "round_active")
     identity = _normalize_active_identity(observation.active_identity)
-    if identity is not None and identity["game_version"] != manifest.game_version:
+    if identity is not None and identity["game_version"] != game_version:
         raise PlayerSaveAuditError("active_identity_game_version_mismatch")
     if round_active and identity is None:
         raise PlayerSaveAuditError("active_observation_missing_identity")
@@ -1954,15 +1995,9 @@ def _validated_observation(
     perks = _normalize_perks_payload(observation.perks)
     history = _normalize_history_payload(observation.history_tail)
     return {
-        "mapping_id": _safe_id(observation.mapping_id, "mapping_id"),
-        "audit_matrix_id": _safe_id(
-            observation.audit_matrix_id,
-            "audit_matrix_id",
-        ),
-        "game_version": _nonnegative_int(
-            observation.game_version,
-            "game_version",
-        ),
+        "mapping_id": mapping_id,
+        "audit_matrix_id": audit_matrix_id,
+        "game_version": game_version,
         "captured_at": _aware_datetime(observation.captured_at, "captured_at"),
         "source_fingerprint": _sha256(
             observation.source_fingerprint,
