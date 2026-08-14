@@ -39,6 +39,20 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 proportional post-contention validation
+
+- Promotion contention still waits read-only, refreshes current production and
+  remote state, reconciles when needed, reviews the new aggregate, and retries
+  atomic ownership until the outcome finishes or reaches a recovery guard.
+- A changed candidate object ID no longer forces an otherwise redundant
+  complete checkpoint. Prior validation carries forward only when the exact
+  candidate delta proves that none of that check's inputs changed and the
+  result did not depend on the old production baseline. Affected checks rerun;
+  uncertainty selects the strongest applicable gate.
+- This supersedes the unconditional retest rule recorded by `7452881` while
+  preserving its wait-and-retry correction. The documentation-lifecycle tests
+  and `git diff --check` passed; no Markdown link target or anchor changed.
+
 ### 2026-08-14 Death Stranding x2 retained-evidence reconciliation
 
 - Six complete, identical-configuration T19 Farm battles were confirmed at
