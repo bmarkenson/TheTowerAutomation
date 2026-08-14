@@ -2893,6 +2893,9 @@ def test_all_current_module_info_indices_are_globally_mapped(mapping):
     assert mapping["module_loadout"]["assignment_observation_scope"] == (
         "canonical_global_same_family"
     )
+    assert mapping["module_loadout"]["assignment_authority_scope"] == (
+        "canonical_global_same_family"
+    )
     assert len({item["name"] for item in MODULE_INFO_INDICES.values()}) == 24
     assert {
         family: sum(
@@ -2929,9 +2932,29 @@ def test_module_global_observation_scope_is_explicit_and_fail_closed(scope):
     evidence = _module_loadout_evidence(decoded, mapping)
 
     assert evidence.status == "unmapped"
+    assert evidence.reason == "module loadout structural contract is incomplete"
+
+
+@pytest.mark.parametrize("scope", (None, "unsupported"))
+def test_module_global_authority_scope_is_explicit_and_fail_closed(scope):
+    mapping = copy.deepcopy(VERSION_MAPPING)
     if scope is None:
-        assert "unsupported primary module value" in evidence.reason
+        mapping["module_loadout"].pop("assignment_authority_scope")
     else:
+        mapping["module_loadout"]["assignment_authority_scope"] = scope
+    decoded = _decoded_save()
+    decoded["assistModuleSlots"][2]["module"]["infoIndex"] = 43
+    evidence = _module_loadout_evidence(decoded, mapping)
+
+    if scope is None:
+        assert evidence.status == "observed"
+        assert evidence.complete is True
+        assert evidence.authority["scope"] == "calibrated_slot_values"
+        assert evidence.authority["supported_names"]["generator_assist"] == [
+            "Singularity Harness"
+        ]
+    else:
+        assert evidence.status == "unmapped"
         assert evidence.reason == "module loadout structural contract is incomplete"
 
 
@@ -3105,7 +3128,7 @@ def test_tournament_module_observation_audit_still_requires_ui(monkeypatch):
     assert decision["reason"] == "scheduled_ui_audit"
 
 
-def test_unmapped_tournament_module_name_retains_complete_ui_path(monkeypatch):
+def test_unknown_tournament_module_name_retains_complete_ui_path(monkeypatch):
     decoded = _decoded_save()
     _set_module_loadout(
         decoded,
@@ -3113,7 +3136,7 @@ def test_unmapped_tournament_module_name_retains_complete_ui_path(monkeypatch):
         assist=(9, 20, 30, 39),
     )
     snapshot = _snapshot(monkeypatch, decoded)
-    requested = {**TOURNAMENT_MODULES, "core_assist": "Magnetic Hook"}
+    requested = {**TOURNAMENT_MODULES, "core_assist": "Future Module"}
 
     decision = reconcile_requirements(
         snapshot,
@@ -3141,6 +3164,12 @@ def test_unmapped_tournament_module_name_retains_complete_ui_path(monkeypatch):
                 "infoIndex", 999
             ),
             "unsupported primary module infoIndex",
+        ),
+        (
+            lambda decoded: decoded["assistModuleSlots"][2]["module"].__setitem__(
+                "infoIndex", 39
+            ),
+            "Assist module family mapping changed",
         ),
         (
             lambda decoded: decoded["assistModuleSlots"][0].__setitem__(
@@ -3371,13 +3400,57 @@ def test_known_global_same_family_pair_is_a_complete_observation(
         "name": "Harmony Conductor",
         "mapping_status": "mapped_global_observation",
     }
+    assert evidence.authority["scope"] == "canonical_global_same_family"
     assert evidence.authority["supported_names"]["core_primary"] == [
-        "Multiverse Nexus",
-        "Dimension Core",
+        item["name"]
+        for item in MODULE_INFO_INDICES.values()
+        if item["family"] == "core"
     ]
 
 
-def test_known_unsupported_module_does_not_hide_later_unknown_candidate(
+def test_known_generator_identity_in_generator_assist_is_save_backed(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded["assistModuleSlots"][2]["module"]["infoIndex"] = 43
+    snapshot = _snapshot(monkeypatch, decoded)
+    requested = {**FARM_MODULES, "generator_assist": "Project Funding"}
+
+    decision = reconcile_requirements(
+        snapshot,
+        {"modules": requested},
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert snapshot.checks["modules"].value == requested
+    assert decision["save_requirement_supported"] is True
+    assert decision["disposition"] == "save_match"
+    assert decision["ui_required"] is False
+    assert snapshot.checks["modules"].authority["supported_names"][
+        "generator_assist"
+    ] == [
+        item["name"]
+        for item in MODULE_INFO_INDICES.values()
+        if item["family"] == "generator"
+    ]
+
+
+def test_duplicate_same_family_module_requirement_remains_ui_backed(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+    requested = {**FARM_MODULES, "core_primary": "Dimension Core"}
+
+    decision = reconcile_requirements(
+        snapshot,
+        {"modules": requested},
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert decision["save_requirement_supported"] is False
+    assert decision["disposition"] == "ui_required"
+    assert decision["reason"] == "save_requirement_outside_validated_scope"
+
+
+def test_known_cross_role_module_does_not_hide_later_unknown_candidate(
     monkeypatch,
 ):
     decoded = _decoded_save()

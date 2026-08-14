@@ -1127,6 +1127,7 @@
   },
   "module_loadout": {
     "assignment_observation_scope": "canonical_global_same_family",
+    "assignment_authority_scope": "canonical_global_same_family",
     "assist_slot_class": "AssistModuleSlot",
     "primary": [
       {

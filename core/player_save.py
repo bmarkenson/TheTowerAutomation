@@ -3797,6 +3797,7 @@ def _module_loadout_evidence(
     primary_specs = spec.get("primary")
     assist_specs = spec.get("assist")
     observation_scope = spec.get("assignment_observation_scope")
+    authority_scope = spec.get("assignment_authority_scope")
     if (
         not _is_sequence(primary_specs)
         or not _is_sequence(assist_specs)
@@ -3804,6 +3805,12 @@ def _module_loadout_evidence(
         or len(assist_specs) != 4
         or observation_scope
         not in {None, "canonical_global_same_family"}
+        or authority_scope
+        not in {None, "canonical_global_same_family"}
+        or (
+            authority_scope == "canonical_global_same_family"
+            and observation_scope != authority_scope
+        )
         or not _module_loadout_specs_are_valid(primary_specs, assist_specs)
     ):
         return SaveCheckEvidence(
@@ -3878,6 +3885,7 @@ def _module_loadout_evidence(
             raw_spec,
             item,
             observation_scope=observation_scope,
+            authority_scope=authority_scope,
         )
         if failure:
             return _unmapped_module_evidence(
@@ -4003,6 +4011,7 @@ def _module_loadout_evidence(
             raw_spec,
             item,
             observation_scope=observation_scope,
+            authority_scope=authority_scope,
         )
         if failure:
             return _unmapped_module_evidence(
@@ -4072,6 +4081,7 @@ def _module_loadout_evidence(
         complete=True,
         authority={
             "kind": "slot_scoped_module_values",
+            "scope": authority_scope or "calibrated_slot_values",
             "assignments": assignments,
             "supported_names": supported_names,
         },
@@ -4133,6 +4143,7 @@ def _record_mapped_module_assignment(
     item: Mapping[str, Any],
     *,
     observation_scope: Any,
+    authority_scope: Any,
 ) -> str:
     slot_key = str(spec.get("slot_key") or "").strip()
     family = str(spec.get("family") or "").strip()
@@ -4213,7 +4224,18 @@ def _record_mapped_module_assignment(
         )
         return ""
     assignments[slot_key] = name
-    supported_names[slot_key] = [option_name for _index, option_name in options]
+    if authority_scope == "canonical_global_same_family":
+        supported_names[slot_key] = [
+            option_name
+            for _index, (option_name, option_family) in sorted(
+                canonical_module_identities.items()
+            )
+            if option_family == family
+        ]
+    else:
+        supported_names[slot_key] = [
+            option_name for _index, option_name in options
+        ]
     diagnostic = {
         "slot_key": slot_key,
         "family": family,
@@ -4645,6 +4667,8 @@ def _requirement_is_supported(
             for key, value in expected.items()
         }
         if set(expected_names) != {str(key) for key in supported_names}:
+            return False
+        if len(set(expected_names.values())) != len(expected_names):
             return False
         return all(
             expected_name
