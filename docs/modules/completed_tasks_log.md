@@ -43,11 +43,11 @@ resolved dossier instead of copying its detail.
 
 - The unmerged `dfd1bdf` behavior was initially ported from its pre-current-main
   base onto a fresh feature candidate based on `e3c0491`. Current main
-  `65a9eb3` and then `8a5af61` were merged as production advanced. Their
-  attachment-lock repair, retained-evidence guidance, and operational evidence
-  had no source/test overlap; only adjacent completion-log insertions needed
-  reconciliation. The final candidate preserves the newer compatible-mapping
-  gate and campaign-only
+  `65a9eb3`, `8a5af61`, and then `1fe1228` were merged as production advanced.
+  Their attachment-lock repair, retained-evidence guidance, operational
+  evidence, and proportional-validation policy had no source/test overlap;
+  only adjacent completion-log insertions needed reconciliation. The final
+  candidate preserves the newer compatible-mapping gate and campaign-only
   `V1073-RUNTIME-013` audit semantics instead of replacing current player-save,
   App, test, or canonical documentation owners.
 - Version 1101 now supplies the authority and raw binding for the declared
@@ -90,6 +90,20 @@ resolved dossier instead of copying its detail.
   Its immediately following completion-record-only commit passed the
   documentation-lifecycle, local-link/anchor, and whitespace checks.
   Historical results from `dfd1bdf` were not reused.
+
+### 2026-08-14 proportional post-contention validation
+
+- Promotion contention still waits read-only, refreshes current production and
+  remote state, reconciles when needed, reviews the new aggregate, and retries
+  atomic ownership until the outcome finishes or reaches a recovery guard.
+- A changed candidate object ID no longer forces an otherwise redundant
+  complete checkpoint. Prior validation carries forward only when the exact
+  candidate delta proves that none of that check's inputs changed and the
+  result did not depend on the old production baseline. Affected checks rerun;
+  uncertainty selects the strongest applicable gate.
+- This supersedes the unconditional retest rule recorded by `7452881` while
+  preserving its wait-and-retry correction. The documentation-lifecycle tests
+  and `git diff --check` passed; no Markdown link target or anchor changed.
 
 ### 2026-08-14 Death Stranding x2 retained-evidence reconciliation
 
