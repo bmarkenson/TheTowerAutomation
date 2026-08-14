@@ -345,6 +345,10 @@ def configure_damage_slider(
     tap_fn: Callable[..., bool] = safe_tap,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
     ensure_menu_fn: Callable[..., Optional[Frame]] = ensure_upgrade_menu,
+    initial_evidence_observer_fn: Optional[
+        Callable[[DamageAdjusterReading], None]
+    ] = None,
+    repair_observer_fn: Optional[Callable[[], None]] = None,
     sleep_fn: SleepFn = time.sleep,
     max_steps: int = 64,
     settle_attempts: int = 6,
@@ -393,6 +397,7 @@ def configure_damage_slider(
     steps = 0
     dismissed = False
     reason = "not_started"
+    repair_observer_notified = False
 
     attack = ensure_menu_fn("attack", capture_fn=capture_fn)
     if attack is None:
@@ -439,6 +444,15 @@ def configure_damage_slider(
         if current_value is None:
             reason = "value_not_authoritative"
         else:
+            if initial_evidence_observer_fn is not None:
+                try:
+                    initial_evidence_observer_fn(reading)
+                except Exception as exc:
+                    log(
+                        "[DAMAGE_ADJUSTER] Initial evidence observer failed: "
+                        f"{exc}",
+                        "DEBUG",
+                    )
             observed = True
             matches = current_value == expected_value
             if canonical_mode == "observe":
@@ -476,6 +490,19 @@ def configure_damage_slider(
                         reason = "arrow_not_verified"
                         break
                     arrow_point, verification = arrow_authority
+                    if not repair_observer_notified:
+                        if repair_observer_fn is not None:
+                            try:
+                                repair_observer_fn()
+                            except Exception as exc:
+                                log(
+                                    "[DAMAGE_ADJUSTER] Snapshot invalidation "
+                                    f"failed before repair input: {exc}",
+                                    "ERROR",
+                                )
+                                reason = "snapshot_invalidation_failed"
+                                break
+                        repair_observer_notified = True
                     dispatched = 0
                     dispatch_failed = False
                     for _ in range(batch_steps):

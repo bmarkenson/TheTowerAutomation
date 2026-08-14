@@ -227,6 +227,38 @@ def test_forced_save_capture_reuses_authoring_normalizers_and_preserves_unresolv
     assert "private-target" not in str(capture)
 
 
+def test_mapped_battle_controls_are_captured_through_existing_authoring():
+    checks = _checks()
+    damage = "1E2%"
+    orb = {
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
+    }
+    checks["damage_slider"] = _evidence(
+        "damage_slider",
+        damage,
+        authority={"kind": "exact_values", "values": [damage]},
+    )
+    checks["orb_distance"] = _evidence(
+        "orb_distance",
+        orb,
+        authority={"kind": "exact_values", "values": [orb]},
+    )
+
+    capture = project_forced_save_setup(_acquisition(checks=checks))
+
+    assert capture["settings"]["damage_slider"] == "1E2%"
+    assert capture["settings"]["orb_distance"] == {"local": orb}
+    assert {"damage_slider", "orb_distance"} <= set(
+        capture["captured_check_ids"]
+    )
+    assert all(
+        item["setting_id"] not in {"damage_slider", "orb_distance"}
+        for item in capture["unresolved"]
+    )
+
+
 def test_chrono_auto_pick_order_is_captured_diffed_and_saved_as_managed_source(
     tmp_path,
 ):

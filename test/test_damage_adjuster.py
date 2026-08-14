@@ -303,6 +303,63 @@ def test_damage_slider_already_at_target_sends_no_arrow_tap():
     assert taps == []
 
 
+def test_damage_slider_observes_initial_value_and_invalidates_before_repair():
+    events = []
+    with (
+        patch(
+            "core.damage_adjuster.open_damage_adjuster",
+            return_value=_reading("1E-20%"),
+        ),
+        patch(
+            "core.damage_adjuster.read_damage_adjuster",
+            return_value=_reading("1E-21%"),
+        ),
+        patch("core.damage_adjuster.dismiss_damage_adjuster", return_value=True),
+    ):
+        result = configure_damage_slider(
+            "1E-21%",
+            capture_fn=lambda: object(),
+            tap_fn=lambda *_args, **_kwargs: events.append("tap") or True,
+            ensure_menu_fn=lambda *_args, **_kwargs: object(),
+            initial_evidence_observer_fn=lambda reading: events.append(
+                f"observe:{reading.percentage}"
+            ),
+            repair_observer_fn=lambda: events.append("invalidate"),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert events == ["observe:1E-20%", "invalidate", "tap"]
+
+
+def test_damage_slider_invalidation_failure_blocks_repair_input():
+    taps = []
+
+    def fail_invalidation():
+        raise RuntimeError("invalidation unavailable")
+
+    with (
+        patch(
+            "core.damage_adjuster.open_damage_adjuster",
+            return_value=_reading("1E-20%"),
+        ),
+        patch("core.damage_adjuster.dismiss_damage_adjuster", return_value=True),
+    ):
+        result = configure_damage_slider(
+            "1E-21%",
+            capture_fn=lambda: object(),
+            tap_fn=lambda *args, **kwargs: taps.append((args, kwargs)) or True,
+            ensure_menu_fn=lambda *_args, **_kwargs: object(),
+            repair_observer_fn=fail_invalidation,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert not result.success
+    assert result.reason == "snapshot_invalidation_failed"
+    assert result.steps == 0
+    assert taps == []
+
+
 def test_damage_slider_observation_reports_mismatch_without_changing_value():
     taps = []
     with (

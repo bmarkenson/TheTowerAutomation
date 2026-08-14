@@ -125,6 +125,9 @@ def test_fallback_initializer_taps_ehls_before_eals():
             frame_stream_factory=None,
             ehls_taps_per_burst=1,
             eals_taps_per_burst=1,
+            mutation_observer_fn=lambda: events.append(
+                "snapshot_invalidated"
+            ),
         )
 
     assert result.success
@@ -140,12 +143,142 @@ def test_fallback_initializer_taps_ehls_before_eals():
     assert events.index(f"level_skip:{EHLS}") < events.index(
         f"level_skip:{EALS}"
     ) < events.index("ehls_max_observed")
+    assert events.count("snapshot_invalidated") == 1
+    assert events.index("snapshot_invalidated") < events.index(
+        f"level_skip:{EHLS}"
+    )
     first_wave_ocr = events.index("wave_ocr")
     assert all(
         index < first_wave_ocr
         for index, event in enumerate(events)
         if event.startswith("level_skip:")
     )
+
+
+def test_initializer_observer_failure_prevents_purchase_mutation():
+    initial = _frame(1)
+    taps = []
+
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "menu": "UTILITY_MENU"},
+        ),
+        patch(
+            "core.level_skip_initializer.detect_current_buy_quantity",
+            return_value="max",
+        ),
+        patch(
+            "core.level_skip_initializer._target_boxes",
+            return_value={
+                EHLS: _box(EHLS, "affordable"),
+                EALS: _box(EALS, "affordable"),
+            },
+        ),
+        patch(
+            "core.level_skip_initializer.evaluate_upgrade_box_gold_box",
+            return_value=(False, {}),
+        ),
+    ):
+        result = initialize_level_skips(
+            screenshot=initial,
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, point)) or True
+            ),
+            sleep_fn=lambda _seconds: None,
+            mutation_observer_fn=lambda: (_ for _ in ()).throw(
+                RuntimeError("synthetic invalidation failure")
+            ),
+        )
+
+    assert result.success is False
+    assert result.reason == "snapshot_invalidation_failed"
+    assert result.taps_sent == 0
+    assert taps == []
+
+
+def test_initializer_invalidates_before_buy_quantity_mutation():
+    initial = _frame(1)
+    events = []
+
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "menu": "UTILITY_MENU"},
+        ),
+        patch(
+            "core.level_skip_initializer.detect_current_buy_quantity",
+            return_value="x1",
+        ),
+        patch(
+            "core.level_skip_initializer.ensure_buy_quantity",
+            side_effect=lambda *args, **kwargs: (
+                events.append("buy_quantity"),
+                initial,
+            )[-1],
+        ),
+        patch(
+            "core.level_skip_initializer._target_boxes",
+            return_value={
+                EHLS: _box(EHLS, "maxed"),
+                EALS: _box(EALS, "maxed"),
+            },
+        ),
+        patch(
+            "core.level_skip_initializer.evaluate_upgrade_box_gold_box",
+            return_value=(True, {}),
+        ),
+        patch(
+            "core.level_skip_initializer.detect_wave_number_from_image",
+            return_value=(20, 99.0),
+        ),
+    ):
+        result = initialize_level_skips(
+            screenshot=initial,
+            mutation_observer_fn=lambda: events.append("invalidate"),
+        )
+
+    assert result.success
+    assert events == ["invalidate", "buy_quantity"]
+
+
+def test_initializer_does_not_invalidate_when_both_level_skips_are_maxed():
+    initial = _frame(1)
+    observations = []
+
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "menu": "UTILITY_MENU"},
+        ),
+        patch(
+            "core.level_skip_initializer.detect_current_buy_quantity",
+            return_value="max",
+        ),
+        patch(
+            "core.level_skip_initializer._target_boxes",
+            return_value={
+                EHLS: _box(EHLS, "maxed"),
+                EALS: _box(EALS, "maxed"),
+            },
+        ),
+        patch(
+            "core.level_skip_initializer.evaluate_upgrade_box_gold_box",
+            return_value=(True, {}),
+        ),
+        patch(
+            "core.level_skip_initializer.detect_wave_number_from_image",
+            return_value=(20, 99.0),
+        ),
+    ):
+        result = initialize_level_skips(
+            screenshot=initial,
+            mutation_observer_fn=lambda: observations.append("invalidate"),
+        )
+
+    assert result.success
+    assert result.taps_sent == 0
+    assert observations == []
 
 
 def test_guarded_screenshot_path_is_the_production_default():
@@ -778,6 +911,8 @@ def test_fast_initializer_refuses_non_running_screen_without_taps():
 def test_executor_records_fast_initializer_metrics():
     ctx = MissionContext()
     ctx.data["mission_vars"] = {"last_detection_state": "RUNNING"}
+    save_coordinator = Mock()
+    ctx.data["player_save_preflight_coordinator"] = save_coordinator
     result = LevelSkipInitializationResult(
         success=True,
         ehls_maxed=True,
@@ -791,7 +926,14 @@ def test_executor_records_fast_initializer_metrics():
         eals_first_tap_elapsed_s=4.75,
     )
 
-    with patch("core.action_executor.initialize_level_skips", return_value=result):
+    def initialize_with_invalidation(**kwargs):
+        kwargs["mutation_observer_fn"]()
+        return result
+
+    with patch(
+        "core.action_executor.initialize_level_skips",
+        side_effect=initialize_with_invalidation,
+    ):
         execute_actions(
             _frame(1),
             [{"type": "level_skip_initialize", "_strategy": True}],
@@ -807,3 +949,7 @@ def test_executor_records_fast_initializer_metrics():
     assert mv["eals_first_tap_elapsed_s"] == 4.75
     assert mv["level_skip_elapsed_s"] == 5.25
     assert mv["level_skip_taps_sent"] == 8
+    save_coordinator.invalidate.assert_called_once_with(
+        "level_skip_mutation_started",
+        check_ids=(),
+    )

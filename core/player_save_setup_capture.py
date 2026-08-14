@@ -38,14 +38,14 @@ _DIRECT_CHECKS = (
     "auto_pick_perks",
     "perk_bans",
     "perk_auto_pick_order",
+    "damage_slider",
 )
-_LOCAL_LOADOUT_CHECKS = ("modules", "target_priority")
+_LOCAL_LOADOUT_CHECKS = ("modules", "target_priority", "orb_distance")
 _ULTIMATE_COMPONENT_CHECKS = (
     "ultimate_weapon_primaries",
     "poison_swamp_stun",
     "spotlight_missiles",
 )
-_UNRESOLVED_AUTHORING_SETTINGS = ("damage_slider", "orb_distance")
 
 
 class SetupCaptureError(ValueError):
@@ -318,17 +318,6 @@ def project_forced_save_setup(
                     _ULTIMATE_COMPONENT_CHECKS,
                     combined,
                 )
-
-    for setting_id in _UNRESOLVED_AUTHORING_SETTINGS:
-        value, reason, status = trusted_evidence(setting_id)
-        unresolved_entry(
-            setting_id,
-            (setting_id,),
-            reason or "save observation is not yet mapped into capture authoring",
-            observed_value=value,
-            observed=reason is None,
-            status=status if reason is not None else "unresolved",
-        )
 
     first_perk, first_perk_reason, first_perk_status = trusted_evidence(
         "perk_first_choice"

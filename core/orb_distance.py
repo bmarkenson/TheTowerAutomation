@@ -564,6 +564,10 @@ def configure_orb_distance(
     read_range_fn: Callable[..., RangeReading] = read_attack_range,
     ensure_menu_fn: Callable[..., bool] = ensure_menu_open,
     action_guard_fn: Optional[ActionGuardFn] = None,
+    initial_evidence_observer_fn: Optional[
+        Callable[[str, OrbDistanceReading], None]
+    ] = None,
+    repair_observer_fn: Optional[Callable[[], None]] = None,
     read_wave_fn: ReadWaveFn = detect_wave_number_from_image,
     sleep_fn: SleepFn = time.sleep,
     max_steps_per_row: int = 160,
@@ -711,6 +715,7 @@ def configure_orb_distance(
         )
 
     panel_opened = False
+    repair_observer_notified = False
     for panel_session in range(max(1, int(max_panel_sessions))):
         if not _action_allowed(action_guard_fn):
             result_values["reason"] = "action_guard_rejected"
@@ -737,6 +742,21 @@ def configure_orb_distance(
             if not reading.authoritative:
                 result_values["reason"] = "value_not_authoritative"
             else:
+                if (
+                    panel_session == 0
+                    and initial_evidence_observer_fn is not None
+                ):
+                    try:
+                        initial_evidence_observer_fn(
+                            range_reading.distance,
+                            reading,
+                        )
+                    except Exception as exc:
+                        log(
+                            "[ORB_DISTANCE] Initial evidence observer failed: "
+                            f"{exc}",
+                            "DEBUG",
+                        )
                 result_values["observed"] = True
                 result_values["matches"] = (
                     reading.extra == expected["extra"]
@@ -774,6 +794,25 @@ def configure_orb_distance(
                                 f"{expected[row]} with one {direction} tap",
                                 "DEBUG",
                             )
+                            if not repair_observer_notified:
+                                if repair_observer_fn is not None:
+                                    try:
+                                        repair_observer_fn()
+                                    except Exception as exc:
+                                        log(
+                                            "[ORB_DISTANCE] Snapshot invalidation "
+                                            f"failed before repair input: {exc}",
+                                            "ERROR",
+                                        )
+                                        result_values["reason"] = (
+                                            "snapshot_invalidation_failed"
+                                        )
+                                        break
+                                repair_observer_notified = True
+                            if result_values["reason"] == (
+                                "snapshot_invalidation_failed"
+                            ):
+                                break
                             if not tap_visible_fn(
                                 button,
                                 screenshot=reading.screenshot,

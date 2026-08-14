@@ -265,6 +265,73 @@ def test_orb_distance_already_at_target_sends_no_arrow_tap():
     assert taps == []
 
 
+def test_orb_distance_observes_initial_value_and_invalidates_before_repair():
+    events = []
+    with (
+        patch(
+            "core.orb_distance.open_orb_distance",
+            return_value=_reading("30.00m", "39.00m"),
+        ),
+        patch(
+            "core.orb_distance.read_orb_distance",
+            return_value=_reading("31.00m", "39.00m"),
+        ),
+        patch("core.orb_distance.dismiss_orb_distance", return_value=True),
+    ):
+        result = configure_orb_distance(
+            range_basis="30m",
+            extra="31m",
+            workshop="39m",
+            capture_fn=lambda: object(),
+            read_range_fn=lambda **_kwargs: _range("30.00m"),
+            tap_visible_fn=lambda *_args, **_kwargs: events.append("tap") or True,
+            initial_evidence_observer_fn=lambda range_basis, reading: (
+                events.append(
+                    f"observe:{range_basis}:{reading.extra}:{reading.workshop}"
+                )
+            ),
+            repair_observer_fn=lambda: events.append("invalidate"),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert events == [
+        "observe:30.00m:30.00m:39.00m",
+        "invalidate",
+        "tap",
+    ]
+
+
+def test_orb_distance_invalidation_failure_blocks_repair_input():
+    taps = []
+
+    def fail_invalidation():
+        raise RuntimeError("invalidation unavailable")
+
+    with (
+        patch(
+            "core.orb_distance.open_orb_distance",
+            return_value=_reading("30.00m", "39.00m"),
+        ),
+        patch("core.orb_distance.dismiss_orb_distance", return_value=True),
+    ):
+        result = configure_orb_distance(
+            range_basis="30m",
+            extra="31m",
+            workshop="39m",
+            read_range_fn=lambda **_kwargs: _range("30.00m"),
+            tap_visible_fn=lambda *args, **kwargs: taps.append((args, kwargs))
+            or True,
+            repair_observer_fn=fail_invalidation,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert not result.success
+    assert result.reason == "snapshot_invalidation_failed"
+    assert result.extra_steps == 0
+    assert taps == []
+
+
 def test_orb_distance_enforces_each_row_with_single_step_feedback():
     reads = iter(
         (

@@ -29,7 +29,7 @@ structural candidate with a declared revision-compatibility authority of
 lengths, and exactly two additional integer fields:
 `enemiesKilledThisWave` and `enemiesSpawnedThisWave`. Both counters remain in
 the `unknown` raw-field disposition and are never published. The compatibility
-gate therefore reuses the 15 previously validated configuration checks and the
+gate therefore reuses the 17 previously validated configuration checks and the
 runtime normalizer; every check and runtime component still validates its own
 type, length, ID domain, and internal structure independently. The
 version-derived Tournament-condition generator is deliberately excluded and
@@ -114,9 +114,37 @@ armor Primary Anti-Cube Portal (`20`), generator Primary Project Funding
 (`9`), armor Assist Space Displacer (`19`), generator Assist Singularity
 Harness (`30`), and core Assist Harmony Conductor (`39`). Combined with the
 prior Farm evidence, every value in `tournament_standard` is now decodable.
-These are slot-scoped equipped-value facts, not a generic Module ID or inventory
-map. The currently observed armor variation is evidence only; it does not
-replace the Tournament reference.
+The top-level `module_info_indices` table owns each observed global
+`infoIndex`/name/family identity. The separate `module_loadout.*.values` tables
+remain exact slot/role allowlists: identity knowledge alone cannot suppress the
+Modules UI route or authorize a loadout change. Neither table is a Module
+inventory map. The currently observed armor variation is evidence only; it
+does not replace the Tournament reference.
+
+On 2026-08-14 an operator-authorized no-battle campaign completed the global
+identity catalog on the compatible version-1101 structure. Three exact
+four-Primary UI loadouts were paired with fresh stable saves, then the original
+eight-slot loadout was restored, reserialized, and returned to verified Home
+`NEW_BATTLE`. Existing Farm/Tournament identities were reused; the campaign
+calibrated only the twelve gaps. A first Havoc Bringer search failed because an
+inertial inventory scroll settled between fixed row centers, recovered the
+baseline without accepting evidence, and led to a variable-row guarded search
+regression. The successful pass required exact Ancestral detail OCR before
+equipping Havoc Bringer. The collector was neither enabled nor consulted.
+
+The current global catalog contains all 24 Modules, six in each family:
+
+| Family | Exact `infoIndex` identities |
+| --- | --- |
+| cannon | `7` Havoc Bringer; `8` Death Penalty; `9` Being Annihilator; `10` Astral Deliverance; `41` Shrink Ray; `45` Amplifying Strike |
+| armor | `17` Wormhole Redirector; `18` Negative Mass Projector; `19` Space Displacer; `20` Anti-Cube Portal; `42` Sharp Fortitude; `46` Orbital Augment |
+| generator | `27` Black Hole Digestor; `28` Pulsar Harvester; `29` Galaxy Compressor; `30` Singularity Harness; `43` Project Funding; `47` Restorative Bonus |
+| core | `37` Multiverse Nexus; `38` Dimension Core; `39` Harmony Conductor; `40` Om Chip; `44` Magnetic Hook; `48` Primordial Collapse |
+
+The version-1073 authority and version-1101 exact structural mirror carry the
+same catalog. This completes identity decoding only. The exact current Farm and
+`tournament_standard` assignments are slot-allowlisted; other placements of a
+globally known identity still run the complete Modules UI path.
 
 Bounded mutation testing then established direct causality and the save-write
 boundary. Changing the visible Cards preset from slot 2 to slot 1 and back
@@ -157,7 +185,11 @@ Auto Pick enabled for the required value `true`; complete Target Priority ID
 and ordering semantics; Poison Swamp Stun in both calibrated polarities; all
 nine Ultimate Weapon primaries for the all-on requirement; and Spotlight
 Missiles for the on requirement. This adoption reused the prior calibration
-evidence atomically; it did not require or perform another live campaign.
+evidence atomically; it did not require or perform another live campaign. A
+later, separately authorized 2026-08-14 campaign mapped Damage Slider, Orb
+Distance, and the remaining global Module identities. Those later observations
+are recorded independently below and do not retroactively turn the original
+coordinator evidence into live validation.
 
 The monolithic Ultimate Weapon check is deliberately not allowlisted. Poison
 Swamp Stun, the all-primary-on aggregate, and Spotlight-Missiles-on are separate
@@ -186,16 +218,19 @@ The currently mapped profile checks are:
 - Auto Pick Perks, bans, first choice, and the mapped Auto Pick priority
   prefix (the visible ranked block is distinct from the save's unranked tail);
 - Ultimate Weapon primary toggles, Poison Swamp Stun, and Spotlight Missiles;
+- exact calibrated Damage Slider values and context-bound Orb Distance tuples;
 - current Legend Tournament identity and version-derived Battle Conditions.
 
-Card recharge modes are now mapped and validated. Damage Slider and Orb
-Distance remain explicitly unmapped and always use the UI. A complete mapped
-Tournament loadout may supply observation without opening Modules; a difference
-from `tournament_standard` is reported, never enforced or repaired. Magnetic
-Hook, any unsupported requested name or unknown slot `infoIndex`, and any
-nonexact structure or partial loadout retain the full Modules UI route. More
-fields can be added only with cross-channel calibration, not merely because a
-plausible raw field exists.
+Card recharge modes are mapped and validated. Damage Slider has exact authority
+for raw `6=1E-22%`, `9=1E-19%`, `10=1E-18%`, and `30=1E2%`. Orb Distance has
+exact context-bound authority for Farm `30.00m/30.00m/39.00m`, Farm
+`30.00m/31.80m/37.20m`, and Tournament
+`98.38m/87.16m/80.37m`; no formula or tolerance is inferred. The current Farm
+and `tournament_standard` eight-slot Module assignments are fully supported.
+A different globally named Module placement, unsupported requested name,
+unknown slot `infoIndex`, or nonexact/partial loadout retains the complete
+Modules UI route. More values can be added only with cross-channel calibration,
+not merely because a plausible raw field exists.
 
 ### Implemented completed-run profile progression snapshots
 
@@ -288,9 +323,19 @@ when all eight actual assignments and all requested reference names are
 supported; a difference is carried as `save_observation`, not a match or repair
 authorization. A complete allowlisted exact or compatible mismatch in an
 enforced check is `save_mismatch`: it queues only that check's existing guarded
-UI path while unrelated accepted decisions remain authoritative. Unsupported
-requirements, unknown IDs, incomplete per-check structure, and forced audit
-are ordinary `ui_required` dispositions rather than trusted mismatches.
+UI path while the plan remains read-only. If that path actually mutates UI, the
+first input invalidates every remaining save-derived decision; if it only
+verifies a match, unrelated decisions remain authoritative. Unsupported
+requirements, unknown IDs, incomplete per-check structure, and forced audit are
+ordinary `ui_required` dispositions rather than trusted mismatches.
+
+Operator diagnostics emit one privacy-safe record per requested check with the
+mapping ID, evidence completeness, requirement-support status, disposition,
+and normalized reason. Accepted scalar/mapping/list evidence is rendered from
+its normalized save projection, so Card Recharge Modes and Perk Bans no longer
+appear as `observed=unavailable` after acceptance. Logs never include raw
+discriminators, save values, decoded objects, account/private fields, Module
+records, or GUIDs.
 
 Resolution always tries an exact mapping first. A same-lineage mapping may
 separately opt into legacy version-wide compatibility, while a semantic
@@ -354,12 +399,16 @@ evidence; it does not quarantine the snapshot. Restart/Stop, attachment,
 strategy/configuration/target change, a competing workflow, manual or ambiguous
 launch, wrong transition, or an unrelated later battle discards the carrier.
 A requirement change, unsupported mapping, or incomplete component routes only
-the affected check to UI. A verified Home, Target Priority, Poison Swamp Stun,
-Damage Slider, Orb Distance, or other independent UI-only repair preserves
-unrelated carry. Only an authoritative save/UI contradiction quarantines every
-remaining saved decision. The repaired check stays supported only by its UI
-evidence unless a genuinely new authoritative snapshot is acquired. Save
-evidence never authorizes a tap, repair, launch, lifecycle transition,
+the affected check to UI before input. Any first actual UI mutation—including
+Home setup, Target Priority, Poison Swamp Stun, Damage Slider, Orb Distance, or
+level-skip input—invalidates every remaining snapshot-derived decision before
+the tap. Home setup restarts without save decisions if an already-materialized
+save check preceded the repair. Independently UI-verified Home sections may be
+retained with explicit per-section UI provenance; they are never relabeled as
+save-backed. A read-only UI match preserves carry, while a save/UI
+contradiction fails closed globally. The repaired check stays supported only by
+its UI evidence unless a genuinely new authoritative snapshot is acquired.
+Save evidence never authorizes a tap, repair, launch, lifecycle transition,
 attachment, terminal binding, dispatch, or strategy action.
 
 The same authoritative Home snapshot supplies the source-tagged structural
@@ -615,8 +664,8 @@ to account, currency, history, or other excluded values. The current redacted
 is separately validated; array length alone proves structure, not meaning.
 
 The version-1073 manifest inventories all 739 observed decoded-root keys: 13
-structural, 31 automation-gating, 51 profile-observation, 34 private, 69
-ignored-with-reason, and 541 unknown. The mapping loader validates the checked-in
+structural, 35 automation-gating, 51 profile-observation, 34 private, 69
+ignored-with-reason, and 537 unknown. The mapping loader validates the checked-in
 categories, disjoint membership, declared count, and canonical field-name hash.
 At runtime, comparison with that inventory is diagnostic rather than an
 all-or-nothing authority gate. Added names are counted as drift but never
@@ -685,9 +734,9 @@ inherited claims continue to cite their originating authority.
 | `V1073-CFG-012B` all nine Ultimate Weapon primaries on | Exact nine-element `ultimateWeaponUnlocked` and `ultimateWeaponOn` arrays | **Shortcut-ready, value-scoped** only when all nine exact booleans are unlocked and on. | Any subset, mixed/off request, false value, non-boolean, name/length change, or locked weapon restores UI. Validate each individual off/on index before supporting future mixed requirements. |
 | `V1073-CFG-012C` Spotlight Missiles on | `spotlightSmartMissilesOff` plus exact unlocked Spotlight structure | **Shortcut-ready, value-scoped** only for raw exact `false` / required on. | Off, raw true, malformed, missing, locked, or changed structure remains UI-required until one reversible off transition and restoration are reviewed. |
 | `V1073-CFG-013` Legend Tournament conditions | Tournament identity fields plus exact-version generator | **Shortcut-ready.** Seventeen consecutive event sets agreed with historical/live UI evidence. | Retain Heat/Overheat audits; validate every additional league and new exact game version independently. |
-| `V1073-CFG-014` Modules | Four `moduleEquipped` `ModuleItem` entries plus four typed `assistModuleSlots` | **Shortcut-ready, exact-slot/value-scoped.** Farm maps cannon Primary Amplifying Strike (`45`), armor Primary Orbital Augment (`46`), generator Primary Black Hole Digestor (`27`), core Primary Multiverse Nexus (`37`); cannon Assist Being Annihilator (`9`), armor Assist Anti-Cube Portal (`20`), generator Assist Singularity Harness (`30`), and core Assist Dimension Core (`38`). Tournament evidence adds generator Primary Project Funding (`43`), core Primary Dimension Core (`38`), core Assist Harmony Conductor (`39`), plus observed alternatives armor Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`). | Require exact slot/family/role/mapped name, four unlocked exact-boolean Assist slots, and complete structure. `enforce` requires equality; `observe` reports any complete mapped assignment without repair. Unknown IDs, nil/missing/locked/partial entries, Magnetic Hook or another unsupported request retain the full UI path. No generic Module-ID, rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
-| `V1073-CFG-015` Damage Slider | No accepted field | **Structural.** The absence of an accepted normalized source is explicit. | In an explicitly authorized test battle, correlate at least two values and restoration, percentage encoding, and save timing; UI remains required. |
-| `V1073-CFG-016` Orb Distance | Candidate distance/preset fields not accepted | **Structural.** Candidate fields are deliberately unpublished. | In an explicitly authorized battle, cycle known Extra/Workshop presets, prove units and selected-preset semantics, and restore the original pair; UI remains required. |
+| `V1073-CFG-014` Modules | Four `moduleEquipped` `ModuleItem` entries plus four typed `assistModuleSlots` | **Shortcut-ready, exact-slot/value-scoped.** The global `module_info_indices` catalog contains all 24 currently defined ID/name/family identities. Farm's slot allowlists map cannon Primary Amplifying Strike (`45`), armor Primary Orbital Augment (`46`), generator Primary Black Hole Digestor (`27`), core Primary Multiverse Nexus (`37`); cannon Assist Being Annihilator (`9`), armor Assist Anti-Cube Portal (`20`), generator Assist Singularity Harness (`30`), and core Assist Dimension Core (`38`). Tournament evidence adds generator Primary Project Funding (`43`), core Primary Dimension Core (`38`), core Assist Harmony Conductor (`39`), plus observed alternatives armor Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`). | Require exact slot/family/role/allowlisted name, four unlocked exact-boolean Assist slots, and complete structure. `enforce` requires equality; `observe` reports any complete slot-supported assignment without repair. A globally identified but slot-unsupported value is diagnostic only and retains the full UI path without generating a duplicate identity candidate. A future unknown ID generates global identity-review evidence and retains UI. Nil/missing/locked/partial entries or unsupported requests also retain UI. No rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
+| `V1073-CFG-015` Damage Slider | `damageAdjustmentLog`, exact calibrated value table | **Shortcut-ready, exact-value-scoped** for raw `6=1E-22%`, `9=1E-19%`, `10=1E-18%`, and `30=1E2%`. | Matching canonical requirements may omit UI. Unknown raw values, unsupported requested values, malformed data, invalid action modes, `force_ui`, and audit retain the complete slider route. No logarithmic formula, neighboring value, or tolerance is inferred. |
+| `V1073-CFG-016` Orb Distance | `rangeLevelSelected`, `innerOrbDistance`, `workshopOrbDistance`, plus Cards/Workshop context | **Shortcut-ready, exact-tuple-scoped** for Farm `30.00m/30.00m/39.00m`, Farm `30.00m/31.80m/37.20m`, and Tournament `98.38m/87.16m/80.37m`. | Matching context and one exact tuple may omit UI; allowed range presets remain generic UI policy. Changed context, unknown tuple, malformed data, unsupported requirement, `force_ui`, or audit retains the complete route. `savedWorkshopOrbDistance` is not authoritative and no formula/tolerance is inferred. |
 | `V1073-PROFILE-001` card ownership, levels, mastery unlocks, and five 28-slot decks | `cardUnlocked`, `cardLevel`, `cardMasteryUnlocked`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | **Structural and implemented for completed-run comparison.** Exact vectors, source fields, and changed indices are retained; base/effective width remains distinct. | Build the complete card-ID and mastery-effect map before assigning names or effects to indices. The snapshot never suppresses Cards UI. |
 | `V1073-PROFILE-002` Workshop and Enhancements | Active Attack/Defense/Utility Workshop and Enhancement level/unlock arrays | **Structural and implemented for completed-run comparison.** Exact source-index levels and changed indices are retained. | Map every index; verify zero, nonzero, maxed, unlocked, and special-level semantics before naming an index or claiming an effective multiplier. |
 | `V1073-PROFILE-003` Research and Labs | `researchLevel`, `labLevel`, `labsUnlocked` | **Structural and implemented for completed-run comparison.** Exact level vectors and changed indices are retained. | Map Research IDs/levels; keep active queue, duration, completion time, and effective-value formulas independent until validated. |
@@ -696,7 +745,7 @@ inherited claims continue to cite their originating authority.
 | `V1073-PROFILE-006` equipped Module progression | Eight equipped Primary/Assist items with `infoIndex`, rarity, level, indexed effects/locks, and Assist efficiency levels | **Structural and implemented for completed-run comparison.** GUIDs, costs, reroll counters, inventory records, and the 150-item inventory remain excluded. | Decode effect IDs, rarity/stars, levels, and efficiency formulas across naturally occurring loadouts before claiming effective values. The slot-name CFG row remains independently value-scoped. |
 | `V1073-PROFILE-007` passive account, Theme, and relic progression | Pack/ad unlock booleans; `towerUnlocked[100]`, `backgroundUnlocked[100]`, `menuUnlocked[100]`, matching Dice vectors, `totalSkinsBought`; `relicsUnlocked[305]`, `profileRelics[5]` | **Structural and implemented for completed-run comparison.** Exact ownership vectors, counts, and changed indices are retained. The three Theme ownership counts are not forced to equal `totalSkinsBought`. | Map individual Theme/relic IDs and effective coin/health/damage bonuses before attributing a run delta to a specific formula. Account balances and purchase histories remain excluded. |
 | `V1073-RUNTIME-001` guarded save-first Home acquisition | Proven Android-Home flush, two identical exact-target reads, exact decoder, stable restored `NEW_BATTLE` | **Shortcut-ready and implemented.** One runtime/preflight/configuration/target generation owns the lifecycle workflow and retains only normalized redacted provenance. | `save_first` uses this path; acquisition/decode uncertainty safely restored to Home runs UI, while restoration/ownership/control/boundary uncertainty blocks input. The optional audit collector is not an authority source. |
-| `V1073-RUNTIME-002` atomic per-check suppression and exact-next-battle carry | Resolved configuration fingerprint, per-component decisions, runtime-owned launch, first stable `RUNNING` | **Shortcut-ready and implemented** for all currently allowlisted Home/session components together. | `force_ui` preserves complete UI behavior; `comparison_audit` collects normalized comparison evidence while UI remains authoritative. A trusted exact mismatch queues only its own guarded UI path and a verified repair preserves unrelated accepted decisions/carry. Trust, continuity, requirement, and save/UI-contradiction failures reject all carry. Future comparisons never self-promote a manifest. |
+| `V1073-RUNTIME-002` atomic per-check suppression and exact-next-battle carry | Resolved configuration fingerprint, per-component decisions, runtime-owned launch, first stable `RUNNING` | **Shortcut-ready and implemented** for all currently allowlisted Home/session components together, including Damage Slider and Orb Distance. | `force_ui` preserves complete UI behavior; `comparison_audit` collects normalized comparison evidence while UI remains authoritative. A trusted exact mismatch initially queues only its guarded UI path, but the first actual UI mutation invalidates every remaining save-derived decision before input. Independently UI-verified Home sections retain explicit UI provenance. Trust, continuity, requirement, and save/UI-contradiction failures reject carry. Future comparisons never self-promote a manifest. |
 | `V1073-RUNTIME-003` active round identity | `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)` | **Causal.** A known Home boundary preceded the first stable Tier 22 active projection with a new per-tier counter and round seed; subsequent stable revisions retained that exact identity through wave 710. No finer wall-clock latency is claimed. | The guarded replacement-process Current-run comparison requires this identity after forced serialization and stable `RUNNING` restoration; it does not manufacture terminal binding or process-local evidence. `V1073-RUNTIME-013` still uses the tuple only for observation receipts. |
 | `V1073-RUNTIME-004` approximately five-minute save freshness | `saveRevision`, capture time, stable source hash, active identity/wave | **Structural.** Multiple ordinary-foreground stable revisions advanced under the same Tier 22 identity through wave 710, corroborating periodic usable writes without retaining exact timestamps. The whole row is not promoted because UI-to-save lag, jitter, unchanged intervals, write-collision behavior, and a runtime staleness threshold were not measured. | The default-300-second observation-only shared polling cadence is implemented with 30–3600-second bounds independently of audit opt-in. It can retain positive lag-tolerant facts but does not make a freshness claim. Pause/background behavior and tighter characterization may be measured during ordinary future use; no capture time, source hash, receipt timing, or `saveRevision` authorizes navigation or claims an exact write time. |
 | `V1073-RUNTIME-005` in-battle Perk inventory | `perkLevel[50]`, `perksPickedCount`, ordered `PerkPick(wave, perk)` list, versioned Perk IDs | **Shortcut-ready** for a complete exact-version snapshot. The final Tier 22 active projection contained 15 internally exact picks; all mapped picks, levels, and order agreed with the terminal UI's 11 collapsed rows. During the first enabled Tier 19 sequence, seven additional IDs were cross-channel calibrated from stable pick waves/levels and the same-round UI timeline; the repaired decoder then accepted all 56 active picks spanning 27 semantic keys. Synthetic unknown-ID, shape, count, level, and non-monotonic-order inconsistencies still publish no snapshot. | The normal run timeline now consumes the monitor's exact bound prefix: each saved pick retains oldest-first sequence, saved wave, semantic key, ID, and level-after. Stable top-bar transitions request a passive checkpoint but never open the in-battle Perks panel and never force serialization. A later failure retains already-proved positive picks; an identical or strict prefix extension may advance the timeline, while regression, mutation, identity, mapping, scope, or target conflict cannot. Structurally valid unknown IDs remain unavailable in normal runtime rather than reopening Perks for calibration. The bounded static calibration is retained in `test/fixtures/player_save_perk_id_calibration_v1073.json`. |
@@ -789,24 +838,28 @@ tail; candidate collection never requests another save read or blocks terminal
 routing. An unknown Tournament league name remains review-only because the
 condition generator has no general league-name mapping owner.
 
-One narrow case receives local future-decode authority automatically: a
-deterministic pre-mutation `module_info_index` pairing from an exact-version
-boundary. The runtime first durably rereads its candidate receipt, then appends
-an accept event to the ignored
+One narrow case receives local future-decode **identity evidence**
+automatically: a deterministic pre-mutation `module_info_index` pairing from
+an exact-version boundary. The runtime first durably rereads its candidate
+receipt, then appends an accept event to the ignored
 `config/player_save_versions/local/data_<data>_game_<game>.confirmed.json`
 document. Accept and revoke events are locked, atomic, private, append-only,
 generation-counted, and capacity-reserved so every active acceptance remains
-revokable. The global Module mapping is a bijection: the same exact
-`(infoIndex, name)` pair may appear in more than one slot, while either raw ID
-or name paired differently is rejected.
+revokable. The global Module identity mapping is a bijection of
+`infoIndex -> (name, family)` within one version. The slot recorded on an event
+is pairing provenance, not an enforcement target; several different identities
+may therefore be learned through the same slot over time. A conflicting raw
+ID, name, or family is rejected.
 
-Local authority applies only during a later fresh decode whose exact identity,
-root class, mapping resolution, authority/structural IDs, validation policy,
-revision-compatibility declaration, and canonical Module dependency still
-match. It never changes the snapshot whose UI produced the receipt. Each
-snapshot publishes the exact canonical authority/structural mapping-set
-fingerprint used by its decoder and an effective-mapping fingerprint after the
-local overlay;
+Local identity evidence applies only during a later fresh decode whose exact
+identity, root class, mapping resolution, authority/structural IDs, validation
+policy, revision-compatibility declaration, and canonical Module dependency
+still match. It never changes the snapshot whose UI produced the receipt, and
+it adds only the global identity for diagnostics. It never appends a
+`module_loadout` value, makes Modules observed, suppresses UI, or authorizes an
+equip/repair. Each snapshot publishes the exact canonical authority/structural
+mapping-set fingerprint used by its decoder and an effective-mapping
+fingerprint after the local identity overlay;
 all carry, setup-capture, attachment, History, and terminal provenance binds to
 that fingerprint. Dependency drift, conflict, malformed local state, or a
 read/write failure leaves canonical values authoritative and the unknown value
@@ -1125,10 +1178,10 @@ action authority remain unchanged.
 | One missing, malformed, renamed, or changed dependency | Mark that leaf and its derived dependents unavailable; preserve unrelated claims. |
 | Candidate mapping, check not explicitly validated | Report comparison results and run the existing UI check. |
 | Explicitly validated check, complete exact match, and verified serialization boundary | The caller may accept save evidence for that check unless an audit is due. |
-| Explicitly validated check, complete exact mismatch, and globally trusted snapshot | Queue only that check's existing guarded UI verification/repair; preserve unrelated accepted decisions. |
+| Explicitly validated check, complete exact mismatch, and globally trusted snapshot | Queue only that check's existing guarded UI verification/repair before input; a read-only UI match preserves other decisions, while an actual repair invalidates every remaining save-derived decision before its first mutation. |
 | No verified serialization boundary for a current-configuration claim | Treat the pull as potentially stale and use the existing UI check. Positive facts with a separately declared lag-tolerant temporal class remain governed by that class. |
 | Missing, incomplete, stale, unsupported, or forced-audit value | Use the existing UI check for that setting without treating it as a trusted mismatch. |
-| UI automation changes a setting | Verify the result in the UI, record UI provenance, preserve unrelated carry, and do not treat the pre-action save as confirmation. |
+| UI automation changes a setting | Invalidate every remaining save-derived decision before the first mutation, verify the result in UI, retain only independently UI-proven sections with UI provenance, and never treat the pre-action save as confirmation. |
 | Authoritative UI contradicts a save match or finds a trusted mismatch already matching | Invalidate the complete snapshot and fail closed. |
 
 Tournament identity is not a recently changed profile setting. Its terminal

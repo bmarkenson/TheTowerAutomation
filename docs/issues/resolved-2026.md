@@ -8,6 +8,162 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Global Module save identities were incomplete and conflated with slot authority
+
+**Stable ID:** `ISSUE-2026-044` · **Lifecycle:** `resolved`
+
+- **Observed:** By 2026-08-14, save-backed Module decoding knew only identities
+  already accepted in particular Primary or Assist slots. The remaining twelve
+  current Module identities were absent, and the discovery/local-confirmation
+  path would append a newly paired identity to the observed slot's supported
+  values.
+- **Symptom:** A save `infoIndex` seen in a new placement could not be named
+  independently of whether that placement was allowed to suppress Modules UI.
+  That made global identity coverage incomplete and risked treating one
+  observation as enforcement authority. During the completion campaign, the
+  fixed inventory-row search also initially missed a visible Ancestral Havoc
+  Bringer after an inertial scroll settled its row between the expected
+  centers.
+- **Cause:** `module_loadout.*.values` served both as the identity catalog and
+  the exact slot/role allowlist. Candidate grouping and proposal generation
+  were therefore slot-scoped, and confirmed-local evidence overlaid the slot
+  list. The inventory finder had only three fixed row centers even though a
+  bounded scroll need not settle on that grid.
+- **Resolution:** Commit `888f101` adds a versioned global
+  `module_info_indices` owner containing all 24 current
+  `infoIndex -> (name, family)` identities in the version-1073 authority and
+  version-1101 structural mirror. Existing `module_loadout` values remain
+  unchanged as exact slot/role UI-suppression allowlists. A globally known but
+  slot-unsupported value is diagnostic only and retains the complete Modules
+  UI route without generating a duplicate candidate. A truly unknown ID emits
+  a global identity candidate and also retains UI. Reviewed proposals and
+  confirmed-local overlays add only global identity; they never add slot
+  support, make Modules observed, or authorize equip/repair input. Scope,
+  family, locator, case-normalized name, and cross-receipt conflicts now fail
+  closed. The inventory fallback retains the fixed-grid fast path and adds a
+  requested-identity-only vertical search whose result must still pass the
+  complete icon-catalog margin, Ancestral-frame, and exact detail guards.
+- **Mapping evidence:** An operator-authorized no-battle Home campaign paired
+  three exact four-Primary UI loadouts with fresh stable version-1101 saves.
+  It established Havoc Bringer `7`, Death Penalty `8`, Wormhole Redirector
+  `17`, Negative Mass Projector `18`, Pulsar Harvester `28`, Galaxy Compressor
+  `29`, Om Chip `40`, Shrink Ray `41`, Sharp Fortitude `42`, Magnetic Hook
+  `44`, Restorative Bonus `47`, and Primordial Collapse `48`. Existing paired
+  evidence supplied the other twelve identities, including Project Funding
+  `43` and Harmony Conductor `39`. The observation collector was not enabled or
+  consulted. No raw save, GUID, effect, inventory record, level, private value,
+  or campaign screenshot was retained.
+- **Safety and restoration:** The campaign ran only after exact Home
+  `NEW_BATTLE`, target, process, control, and diagnostic-lease verification.
+  The first missed-Havoc attempt restored and reserialized the baseline before
+  exiting. The successful rounds then restored the original four Primary and
+  four Assist assignments exactly, reserialized that baseline, returned to
+  Home `NEW_BATTLE`, and terminally released the lease with fresh
+  post-release evidence. It did not start, end, or Surrender a battle; restart
+  a process, service, emulator, or ADB server; deploy code; or modify installed
+  production files.
+- **Regression:** Decoder tests require the complete catalog in both mappings,
+  reject malformed identities and slot/global disagreement, and distinguish
+  unknown IDs from globally known unsupported placements. Candidate,
+  confirmed-local, integration, status-presentation, and shifted-inventory-row
+  tests prove global conflict handling, identity-only proposals/overlays,
+  unchanged slot authority, later-slot candidate discovery, and guarded Havoc
+  selection.
+- **Validation:** Focused Module/save/candidate/control tests passed 331 tests;
+  Strategy/loadout authoring passed 106; documentation lifecycle passed 2;
+  portable native compatibility passed all 189 tests; and state-definition and
+  clickmap validators passed with zero errors and the established 44 orphan
+  notices. The supported isolated checkpoint passed compilation and all 2,514
+  tests in 386.25 seconds. Changed local Markdown targets and anchors and
+  `git diff --check` passed. After current-main reconciliation, exact final
+  candidate `f01e050` passed the complete isolated checkpoint again: all 2,695
+  tests in 409.82 seconds plus compilation, state definitions, and clickmap
+  integrity. Its affected Home/control slice passed 459 tests before the final
+  merge and 310 after the stricter deployed manual-return authority was
+  reconciled; 128 local links/anchors across 11 changed Markdown files and both
+  base-range whitespace checks passed.
+- **Deployment:** Production advanced from `872123c` to `f01e050` behind
+  rollback tag `production-before-20260814T230213Z-872123c`. Replacement
+  control-surface PID `1584049` and automation PID `1584307` reported the exact
+  `localhost:5555` lock, current `PAUSED`/`WAIT` acknowledgements, and a fresh
+  complete Home `NEW_BATTLE` frame at Tier 19. The rollout preserved Pause,
+  started no battle, and sent no device input; the last `INPUT` remained the
+  predeployment 15:15:22 Perks swipe. This fresh ordinary Home observation
+  proves the deployed runtime and boundary, while per-check save-first routing
+  remains queued for the next normal operator-authorized Start rather than a
+  manufactured validation battle.
+- **Native package:** The complete package was published from `f01e050` at
+  23:03:57 UTC. Current Control Surface is 72,481,195 bytes with SHA-256
+  `f48d3cf595673dcee397d12ba3c3db942234fc2a42d43fe4c79349ae08fd7a5e`;
+  current Tunnel Host is 35,172,119 bytes with SHA-256
+  `5e313c2d90bb33c2f443abe9d1b6ecc6dda41517d54da6181f45fee03e88905c`.
+  Retained slot 1 is the prior `5d83b79` package: 72,481,183-byte Control
+  Surface `6564152e1e065f37ca7255a2a0c1c84d06723d1387b2a3c6e34fc91facf9497d`
+  and 35,172,099-byte Tunnel Host
+  `9985212d9285da747063a267bbf0c55842cb59295e62dbad739b3115fbe5059b`.
+  Retained slot 2 is the prior `823ab8a` package: 72,477,605-byte Control
+  Surface `af821cc6cb2c6706012d5d93fad1f269446b98aeff6e723f8159e8328eb5cb61`
+  and 35,172,132-byte Tunnel Host
+  `96e27dc3a73c77a9be6777533b2273720d041a581847a757d521103580bcbae5`.
+  Linux publication does not establish Windows WPF lifecycle behavior.
+- **Fixed by:** `888f101`.
+
+### Unbound manual terminal handoff permanently disabled Automation at Home
+
+**Stable ID:** `ISSUE-2026-043` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-14, Take Manual Control was acknowledged on Game
+  Over without a bound terminal run. After the operator navigated to Home New
+  Battle and requested Return Control, the native Automation control remained
+  disabled.
+- **Symptom:** The server reported the manual workflow as `awaiting_enable`,
+  but its Enable action was unavailable with code
+  `manual_terminal_evidence_unavailable` and reason
+  `terminal_run_unbound`. The workflow therefore required Enable to continue
+  while the Enable gate categorically rejected the same workflow.
+- **Evidence:** The durable control ledger and `actions.log` place Take Manual
+  Control at 12:58 PDT on Game Over, Return Control at 13:00, and a fresh Home
+  New Battle observation at 13:07. The status model still exposed
+  `available=false` after the exact Home boundary and indefinite Pause were
+  acknowledged. Static tracing confirmed that the runtime advanced an
+  unavailable-terminal workflow after any non-Game-Over observation, while
+  the control surface rejected unavailable terminal evidence in every state.
+- **Safety response:** Diagnosis was read-only. The repair does not authorize
+  terminal UI input, infer a terminal run, seed terminal completion, treat
+  unavailable terminal evidence as terminal authority, or accept Home Resume,
+  active-battle, unknown, stale, or unacknowledged return evidence. Deployment
+  preserved Pause and started no battle.
+- **Cause:** The manual-return state transition and Enable-availability model
+  applied incompatible predicates. One treated every non-Game-Over state as a
+  sufficient boundary for save-first return, while the other treated the
+  missing terminal binding as an unconditional block, producing a reachable
+  state with no legal outgoing action.
+- **Resolution:** Commit `dd57c32` limits an unbound terminal handoff to a fresh
+  exact Home New Battle boundary. Only an `awaiting_enable` workflow with the
+  acknowledged indefinite Pause, exact return binding, matching fresh Home
+  evidence, and recorded `battle_scope_preserved=true` may make Enable
+  available for save-first Home reconciliation. Other states remain
+  `return_requested`; terminal UI remains unauthorized.
+- **Regression:** `test/test_better_control_model.py` proves that the exact
+  unbound Game Over → Home New handoff exposes and accepts Enable, while Home
+  Resume, active battle, and unknown evidence do not advance the workflow.
+- **Validation:** The focused Better Control model passed 172 tests, the
+  combined Better Control/control-surface/automation-control slice passed 346
+  tests, and exact merged code candidate `a82fb6e` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,581 tests in 382.25 seconds in development
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Deployment:** Production advanced from `4655aa8` to `a82fb6e` behind local
+  rollback tag `production-before-20260814T223859Z-4655aa8`. Both managed
+  services stopped cleanly; replacement control-surface PID `1553758` and
+  automation PID `1555340` reported a healthy exact-target smoke with the
+  runtime lock held, `localhost:5555` connected, all acknowledgements current,
+  and fresh Home New Battle evidence under `PAUSED`. Enable was available and
+  the rollout sent no device input or battle action. No Windows package input
+  changed.
+- **Fixed by:** `dd57c32`, `a82fb6e`.
+
 ### Tier-specific Strategy launched on Home's previously selected tier
 
 **Stable ID:** `ISSUE-2026-042` · **Lifecycle:** `resolved`
@@ -922,6 +1078,12 @@ and actionable work lives in
   inspect or interact with the production process, systemd, ADB, emulator,
   shared live frame, or battle, and did not deploy or modify installed files.
 - **Fixed by:** `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b`.
+- **Superseded safety refinement:** Later save-backed Damage/Orb and
+  level-skip ordering made blanket preservation unsafe. Current behavior still
+  plans each mismatch independently while read-only, but the first actual UI
+  mutation invalidates every remaining save-derived decision before input.
+  Home setup restarts without save decisions when necessary, and only
+  independently UI-verified sections survive with explicit UI provenance.
 
 ### First Perk Choice compared a value-bearing OCR slug to its semantic key
 
@@ -1039,10 +1201,10 @@ and actionable work lives in
   18/16 ranked/inventory split and no sentinel; ID `11` is static. Target
   Priority uses the accepted complete map. Locks require only every requested
   bit and report extras without input. The exact current eight-slot Farm Module
-  loadout is value-scoped while Tournament gaps remain UI-backed. The same Home
-  snapshot seeds source-tagged continuity, and direct Retry passively polls a
-  fresh stable tail with append/30-entry-rollover validation and guarded UI
-  fallback. Per-check diagnostics are normalized and privacy-safe.
+  loadout is value-scoped. The same Home snapshot seeds source-tagged
+  continuity, and direct Retry passively polls a fresh stable tail with
+  append/30-entry-rollover validation and guarded UI fallback. Per-check
+  diagnostics are normalized and privacy-safe.
 - **Regression:** `test/test_player_save.py` covers Auto Pick, Target Priority,
   lock-subset, Module, malformed-shape, and redaction contracts;
   `test/test_player_save_preflight.py` covers one-snapshot History publication,
@@ -1057,12 +1219,17 @@ and actionable work lives in
   compilation, state definitions, and clickmap integrity with zero errors and
   44 known orphans. Generated strategies were byte-identical; changed canonical
   docs passed local-link/anchor and base-range whitespace checks. Validation was
-  code-only. Deployment and first ordinary-boundary observation remain
-  coordinator work.
+  code-only. The later integrated `f01e050` candidate passed all 2,695 tests and
+  was deployed at a fresh ordinary Home `NEW_BATTLE` boundary under acknowledged
+  Pause with no input. Runtime per-check omission remains a passive confirmation
+  for the next normal Start; no special battle is required.
 - **Fixed by:** `fe0c43fee8b2c013e13b89e85508e7555b377054`.
 - **Follow-up:** The 2026-08-05 operator-authorized Tournament pairing above
   subsequently closed the Project Funding/Harmony Conductor gap without
-  changing Tournament's observation-only policy.
+  changing Tournament's observation-only policy. The 2026-08-14 no-battle
+  campaign then completed all 24 global Module identities; exact current Farm
+  and `tournament_standard` assignments suppress duplicate Modules UI, while a
+  globally known identity in an unsupported slot remains UI-backed.
 ### Stopping managed automation removed the only localhost ADB registration
 
 - **Observed:** 2026-08-05 at a post-automation invocation boundary for the

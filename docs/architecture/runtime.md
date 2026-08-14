@@ -188,33 +188,48 @@ state in which all nine weapons are present, unlocked, and on; Spotlight
 Missiles supports only the exact unlocked/on state. A mixed/off primary request,
 Spotlight Missiles off, malformed structure, or unsupported value restores only
 the applicable shared-screen UI work, where any component actually observed
-can still contradict carried evidence. Module decoding is value-scoped by
-exact slot rather than a generic inventory map. Farm's four Primary and four
-typed Assist assignments remain enforced. The Tournament reference is also
-fully mapped: Primary Amplifying Strike (`45`), Orbital Augment (`46`), Project
-Funding (`43`), and Dimension Core (`38`); Assist Being Annihilator (`9`),
-Anti-Cube Portal (`20`), Singularity Harness (`30`), and Harmony Conductor
-(`39`). A same-run stable-save/UI pairing additionally established armor
-Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`).
+can still contradict carried evidence. Module decoding separates a global
+`infoIndex -> (name, family)` identity catalog from exact slot/role allowlists;
+it is not a generic inventory map. The catalog now names all 24 current
+Modules—six per family—under the
+[player-save mapping owner](player_save.md#current-status). This does not add
+any slot support. Farm's four Primary and four typed Assist assignments remain
+enforced. The Tournament reference is also fully mapped:
+Primary Amplifying Strike (`45`), Orbital Augment (`46`), Project Funding
+(`43`), and Dimension Core (`38`); Assist Being Annihilator (`9`), Anti-Cube
+Portal (`20`), Singularity Harness (`30`), and Harmony Conductor (`39`). A
+same-run stable-save/UI pairing additionally established armor Primary
+Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`).
 
-Exact slot, family, role, mapped name, unlocked Assist state, and complete
+Exact slot, family, role, allowlisted name, unlocked Assist state, and complete
 structure must agree before save evidence can replace Modules observation.
 Tournament's `observe` policy records a fully decoded difference from
 `tournament_standard` as `save_observation`; it neither fails the gate nor
 authorizes a repair. An `enforce` policy still requires exact equality.
-Magnetic Hook, any other unsupported requested name or unknown slot value, and
-malformed or partial structures retain the complete Modules UI path. These
-facts do not map rarity, levels, stars, effects, substats, inventory semantics,
-GUIDs, or private record values. Orb Distance and Damage Slider remain
-UI-authoritative.
+A globally identified value outside a slot's allowlist is normalized for
+diagnostics but still retains the complete Modules UI path and does not produce
+a duplicate candidate. A genuinely unknown ID produces identity-review
+evidence at a complete, exact, pre-mutation UI observation and also retains the
+full route. A later local confirmation makes only that identity available for
+diagnostics; it does not widen the slot allowlist. Unsupported requested names
+and malformed or partial structures likewise retain UI. These facts do not map
+rarity, levels, stars, effects, substats, inventory semantics, GUIDs, or private
+record values. Orb Distance and Damage Slider remain UI-authoritative.
+
+Inventory fallback first checks the normal fixed grid, then—only when no
+authoritative target match exists—searches variable vertical centers left by
+inertial scrolling. The requested icon must still win the complete catalog's
+confidence/margin comparison, retain Ancestral frame evidence, and open an
+exact name/rarity/action detail before any equip input.
 
 Session-only accepted decisions become typed, single-use carry across either
 the exact next runtime-owned Home `NEW_BATTLE` launch or the exact same-process
 successor of one natural Game Over -> direct Retry transition. The current
 carry covers Cards, Workshop, Bot and Guardian selections, Free Upgrade locks,
 Modules, Auto Pick enabled `true`, a complete exact ten-ID Target Priority
-order, the all-nine-primary-on aggregate, Spotlight-Missiles-on, Poison Swamp
-Stun, and the other exact Home sections used by the later consistency check.
+order, Damage Slider, Orb Distance, the all-nine-primary-on aggregate,
+Spotlight-Missiles-on, Poison Swamp Stun, and the other exact Home sections used
+by the later consistency check.
 The version-1073 Target Priority map is `0=Closest (Default)`, `1=Basic`,
 `2=Fast`, `3=Tank`, `4=Ranged`, `5=Boss`, `6=In Spotlight`, `7=Protector`,
 `8=Elites`, and `9=Fleets`; complete membership, uniqueness, and ordered policy
@@ -237,18 +252,20 @@ snapshot. Stop/process restart, attachment or competing workflow, manual or
 ambiguous launch, target/context/configuration change, a wrong transition, or
 a later unrelated battle discards that transition's carry. A changed
 requirement routes only that check to UI; unsupported or incomplete evidence
-already does the same. WAIT by itself does neither. A verified independent Home
-or in-battle repair likewise preserves unrelated carry.
+already does the same. WAIT by itself does neither. A read-only UI verification
+preserves unrelated carry, but the first actual UI mutation invalidates every
+remaining save-derived fact before dispatch.
 
 A pre-action snapshot never confirms the result of an input. The reconciliation
 plan is frozen before setup input as independent accepted matches/observations,
 trusted mismatches, and non-authoritative UI requirements. A trusted mismatch
 selects only its existing UI path; that path must independently observe the
-current value, establish a mismatch before mutation, repair under its normal
-guards, and verify the result. The repaired check is `ui_verified`, is not
-reclassified as save-confirmed, and is not added to save carry. Unrelated
-accepted decisions and carry survive verified Cards, Target Priority, Poison
-Swamp Stun, Damage Slider, Orb Distance, and other independent UI-only repairs.
+current value, establish a mismatch before mutation, invalidate remaining save
+facts, repair under its normal guards, and verify the result. The repaired check
+is `ui_verified`, is not reclassified as save-confirmed, and is not added to
+save carry. Home setup restarts without save decisions when a mutation follows
+an already-materialized save check. Independently UI-verified Home sections may
+remain available only through explicit per-section UI provenance.
 
 Acquisition, serialization, freshness, version/structure, ownership, and safe
 source-restoration failures retain their established whole-boundary block or
@@ -1387,9 +1404,12 @@ warning text in `actions.log`.
   Guardians, and Modules. The save-first coordinator may omit exact
   allowlisted matches and complete observation-policy Module evidence. Exact
   Farm assignments remain enforced; mapped Tournament assignments are reported
-  only. Unsupported Module names, Damage Slider, and Orb Distance remain
-  UI-only. Navigation required for one fallback does
-  not discard an unrelated accepted component. Card recharge traversal checks
+  only. Current Farm/Tournament Module placements and calibrated exact
+  Damage/Orb values may omit duplicate UI; unsupported placements, requests,
+  values, contexts, or structures remain UI-backed. Navigation alone does not
+  discard another accepted component, but the first actual UI mutation
+  invalidates every remaining save-derived decision. Card recharge traversal
+  checks
   both unresolved Cards on the initial inventory frame and after every bounded
   upward or downward swipe, validates
   whichever is visible in any order, and stops without another swipe as soon as
@@ -1503,9 +1523,16 @@ warning text in `actions.log`.
   the separate acknowledgement. The watchdog may continue passive observation,
   but restart and foreground recovery make their final typed lifecycle check
   under that shared guard. A 120-second heartbeat deadline, Pause/Stop,
-  runtime/PID/target replacement, or an authoritative battle boundary makes
-  status inactive and terminates the lease. Resume never revives the terminal
-  request. The development input helper consumes that composite `active`
+  runtime/PID/target replacement, or an authoritative battle boundary normally
+  makes status inactive and terminates the lease. Resume never revives the
+  terminal request. One explicit `owned_battle_start=true` request is accepted
+  only from fresh exact Home `NEW_BATTLE` with a nonempty scope and target
+  generation. It may retain the same process-local scope/target claim through
+  that one run. At Game Over the lease itself terminalizes, while the claim may
+  authorize only the supported minimal return-to-Home terminal route. A
+  replacement scope, target generation, runtime/PID, terminal type, Pause, or
+  Stop performs no cleanup input. The development input helper consumes that
+  composite `active`
   decision instead of duplicating the production authority calculation, while
   separately binding its one command to the matching lease, runtime, exact
   target, and acknowledged expiry. Its final pre-input status check reserves
@@ -1514,9 +1541,10 @@ warning text in `actions.log`.
 - A normal development release remains held through the first post-release
   capture and detection. A known same-battle screen permits the runtime to
   publish the terminal result and remove the hold. An ambiguous screen or
-  failed terminal write retains the hold; natural Game Over instead terminates
-  the lease and restores normal production terminal authority on that fresh
-  observation.
+  failed terminal write retains the hold; natural Game Over terminates the
+  lease. Ordinary leases restore normal production terminal authority without
+  claiming the battle. Only the exact preclaimed owned-battle variant retains
+  the narrow process-local minimal-Home cleanup claim described above.
 - Control synchronization precedes capture, so an ADB outage cannot prevent a
   Pause acknowledgement or a paused target-handoff request. Connection recovery
   may continue while paused but may not foreground or restart the game.

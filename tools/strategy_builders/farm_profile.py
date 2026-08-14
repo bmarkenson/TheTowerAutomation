@@ -117,6 +117,14 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         requirements["profile_skips"] = copy.deepcopy(
             setup["skipped_checks"]
         )
+    if damage_policy["mode"] != "preserve":
+        requirements["damage_slider"] = copy.deepcopy(damage_policy)
+    if orb_distance_policy["mode"] != "preserve":
+        requirements["orb_distance"] = {
+            key: copy.deepcopy(value)
+            for key, value in orb_distance_policy.items()
+            if key != "preset"
+        }
     gate_fallbacks = _normalize_gate_fallbacks(
         profile.get("gate_fallbacks"),
         supported_checks=set(requirements) | {"modules", "target_priority"},

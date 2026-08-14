@@ -22,18 +22,15 @@ as checked checkpoint narrative here.
     retained Module receipt was confirmed at attachment, integrated in
     `dbe3d34`, and accepted by later fresh decodes; there is no unresolved
     current receipt. Do not create or end a battle for this evidence.
-  - [ ] Replace the blanket nonnegative `BattleHistory` numeric invariant with
-    a reviewed, field-scoped signed-value policy. The exact 144-row clipboard
-    records for `Battle20260810T141801-0700`,
-    `Battle20260810T203606-0700`, and `Battle20260811T005344-0700` prove that
-    the game itself displayed negative `Damage Dealt` and `Chain Lightning`
-    values; they do not establish whether the values are overflow, a sentinel,
-    or semantically meaningful damage. Preserve the current independent More
-    Stats fallback until finite signed fields, formatting, and malformed-value
-    isolation have focused regression coverage. No additional battle is needed
-    to diagnose the observed rejection.
+  - [ ] At the next ordinary operator-authorized Start from Home, confirm the
+    deployed `f01e050` per-check dispositions accept the matching Farm save and
+    omit Modules, Damage Slider, Orb Distance, Target Priority, Auto Pick, and
+    the other supported duplicate UI routes. The deployment smoke already
+    proved a fresh Home `NEW_BATTLE` boundary under acknowledged Pause and sent
+    no input; do not override Pause or manufacture a battle solely for this
+    confirmation.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
-    confirmed Module value. Acquire Pause or otherwise stop new-battle input,
+    confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
     observation windows, invalidate only affected Module evidence, force a
     fresh decode, and resume only after the new effective mapping fingerprint
@@ -104,11 +101,11 @@ as checked checkpoint narrative here.
     Over, and reconcile the merged events with terminal Battle History counts.
     Missing timing remains unknown/bounded; conflicts force the full UI audit.
   - [ ] Inventory checkpoint candidates that could replace other observation
-    routes, including game speed, buy quantities, Damage Slider, Orb Distance,
-    Card activity, and UW/Bot/Guardian cooldowns. Rank them by navigation/OCR
-    cost and staleness tolerance, then validate and adopt one independent claim
-    at a time. Enforcement, mutation confirmation, and transition authority
-    remain visual.
+    routes, including game speed, buy quantities, Card activity, and
+    UW/Bot/Guardian cooldowns. Rank them by navigation/OCR cost and staleness
+    tolerance, then validate and adopt one independent claim at a time.
+    Enforcement, mutation confirmation, and transition authority remain
+    visual.
   - [ ] Add any future normal-runtime consumer only through the shared typed
     acquisition owner and only after its own matrix evidence is complete. The
     campaign-only `V1073-RUNTIME-013` auditor may consume a passive bundle when
@@ -119,34 +116,24 @@ as checked checkpoint narrative here.
   - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
     for future bounded normalized candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.
-    - [ ] Extend exact-slot Module values only through future natural paired
-      evidence. Magnetic Hook remains unmapped after the operator withdrew its
-      identification; an unknown ID, unsupported requested name, or partial
-      structure must retain the complete Modules UI route. Do not infer rarity,
-      levels, stars, effects, substats, GUIDs, or inventory semantics.
+    - [ ] Extend exact-slot Module allowlists only through future natural paired
+      placement evidence. All 24 current ID/name/family identities are globally
+      mapped, including Magnetic Hook, but identity knowledge does not support
+      a new Primary/Assist placement. A future unknown ID, globally known but
+      slot-unsupported value, unsupported requested name, or partial structure
+      must retain the complete Modules UI route. Do not infer rarity, levels,
+      stars, effects, substats, GUIDs, or inventory semantics.
+    - [ ] Extend Damage Slider and Orb Distance only when a natural UI fallback
+      supplies one unique exact normalized value/tuple and the reviewed mapping
+      workflow accepts it. Current Farm/Tournament values are save-backed;
+      incompatible versions or shapes and unknown/unsupported values retain the
+      complete UI route. Do not infer neighboring slider values, an Orb formula,
+      or a tolerance from the calibrated points.
     - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
       weapon index's off/on polarity at a time with normalized
       before/change/restore evidence. Validate Spotlight Missiles off through
       one explicitly authorized reversible transition. Do not enumerate every
       boolean combination.
-    - [ ] Prefer a natural Farm `30.00m / 30.00m / 39.00m` → Tournament
-      `98.38m / 87.16m / 80.37m` → Farm Orb Distance sequence. Pair UI and
-      guarded stable saves to establish field identity, units/rounding,
-      selected-preset versus derived semantics, serialization timing, Home
-      versus active behavior, and restoration. Only if natural transitions are
-      insufficient may a later coordinator authorize one owned bounded
-      calibration.
-      - [ ] Resume the authorized changed/restored calibration only after a
-        fresh preflight confirms a steady running battle. The 2026-08-10
-        pre-deployment attempt ended at a natural Game
-        Over before the first Orb value mutation; the panel had already been
-        closed, the lease was terminal with no external hold, and the last
-        authoritative pair remained Extra `30.00m` / Workshop `39.00m`.
-    - [ ] Continue routing incompatible versions and shapes, unknown IDs or
-      values, unsupported Module requests, and Damage Slider through UI. A
-      unique exact-evidence mapping attempt may use the existing fail-closed
-      resolver; ambiguity/conflict remains UI-only, and the observation
-      collector never supplies preflight authority.
 - [ ] Capture the numeric level of every equipped Module from authoritative
   overview evidence, retain it with preflight and completed-run records, and
   surface threshold violations without confusing an intentional Tournament

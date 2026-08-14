@@ -308,6 +308,7 @@ def inspect_free_upgrade_locks(
     measure_unavailable_fn: Callable[
         [Optional[Frame], str], Optional[FreeUpgradeLockEvidence]
     ] = measure_unavailable_free_upgrade_lock,
+    repair_observer_fn: Callable[[], None] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> FreeUpgradeLockInspectionResult:
     """Inspect supported Workshop locks, optionally checking verified mismatches."""
@@ -317,6 +318,16 @@ def inspect_free_upgrade_locks(
     evidence: list[FreeUpgradeLockEvidence] = []
     changed: list[str] = []
     detail_open = False
+    repair_announced = False
+
+    def announce_repair() -> None:
+        nonlocal repair_announced
+        if repair_announced:
+            return
+        if repair_observer_fn is not None:
+            repair_observer_fn()
+        repair_announced = True
+
     try:
         current = _require_workshop(current, detector, measure_menu_fn, menu=None)
         for label in labels:
@@ -415,6 +426,7 @@ def inspect_free_upgrade_locks(
                     raise FreeUpgradeLockInspectionError(
                         f"lost authoritative unchecked evidence for {label}"
                     )
+                announce_repair()
                 if not safe_tap_fn(
                     "buttons.free_upgrade_lock:checkbox",
                     dispatch="now",

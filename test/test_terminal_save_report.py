@@ -18,6 +18,7 @@ from core.terminal_save_report import (
     terminal_mapping_workflow_provenance,
     terminal_save_report_complete,
     terminal_save_report_from_acquisition,
+    terminal_save_report_structural_complete,
     validate_terminal_history_handoff,
 )
 from core.player_save_history import history_metadata_from_acquisition
@@ -362,7 +363,10 @@ def test_terminal_save_report_requires_semantic_entry_and_matching_kind():
     )
 
     assert unavailable["reason"] == "unmapped_killed_by_id:42"
+    assert terminal_save_report_structural_complete(unavailable)
+    assert not terminal_save_report_complete(unavailable)
     assert mismatched["reason"] == "terminal_history_kind_mismatch"
+    assert not terminal_save_report_structural_complete(mismatched)
     assert mismatched["terminal_metric_claims"]["status"] == "unavailable"
     assert mismatched["terminal_metric_claims"]["reason"] == (
         "terminal_history_kind_mismatch"

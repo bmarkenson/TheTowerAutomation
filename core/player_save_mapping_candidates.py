@@ -41,6 +41,7 @@ MAPPING_CANDIDATE_STATUSES = frozenset(
 MAPPING_CANDIDATE_VALUE_KINDS = frozenset(
     {
         "battle_history_killed_by_id",
+        "damage_slider_calibration",
         "guardian_chip_id",
         "module_assist_type",
         "module_info_index",
@@ -53,6 +54,7 @@ MAPPING_CANDIDATE_VALUE_KINDS = frozenset(
 MAPPING_CANDIDATE_CHECKS = frozenset(
     {
         "battle_history_killed_by",
+        "damage_slider",
         "guardian_chips",
         "modules",
         "orb_distance",
@@ -83,9 +85,19 @@ MAPPING_CANDIDATE_MAPPING_RESOLUTIONS = frozenset(
 _SAFE_CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,95}")
 _SAFE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,191}")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
-_ALLOWED_SCOPE_KEYS = frozenset({"slot_key", "family", "role", "field"})
+_ALLOWED_SCOPE_KEYS = frozenset(
+    {
+        "slot_key",
+        "family",
+        "role",
+        "field",
+        "cards_deck",
+        "workshop_preset",
+    }
+)
 _CHECK_VALUE_KINDS = {
     "battle_history_killed_by": frozenset({"battle_history_killed_by_id"}),
+    "damage_slider": frozenset({"damage_slider_calibration"}),
     "guardian_chips": frozenset({"guardian_chip_id"}),
     "modules": frozenset({"module_assist_type", "module_info_index"}),
     "orb_distance": frozenset({"orb_distance_calibration"}),
@@ -327,7 +339,7 @@ def build_mapping_candidate_ui_evidence(
         _semantic_values(
             canonical_values,
             "canonical_values",
-            allow_duplicates=(check in {"modules", "orb_distance"}),
+            allow_duplicates=(check in {"damage_slider", "modules", "orb_distance"}),
         )
     )
     safe_locators = _locator_values(locator_values, "locator_values")
@@ -434,10 +446,13 @@ def resolve_mapping_candidates(
                 status, strength, reason = _resolved_disposition(item, semantic)
         else:
             observed_scope = locator_scopes.get(item["locator"], {})
+            expected_observed_scope = item["scope"]
+            if item["value_kind"] == "orb_distance_calibration":
+                expected_observed_scope = {"field": item["locator"]}
             if (
                 len(semantic_values) == item["expected_observation_count"]
                 and len(locator_values) == item["expected_observation_count"]
-                and observed_scope == item["scope"]
+                and observed_scope == expected_observed_scope
             ):
                 semantic = locator_values.get(item["locator"])
             if semantic is not None:
@@ -507,11 +522,15 @@ def reconcile_mapping_candidate_resolutions(
     by_discriminator: dict[tuple[str, str, str], list[int]] = {}
     for index, claim in enumerate(normalized):
         candidate = claim["candidate"]
-        scope_owner = (
-            candidate["scope"].get("field", "")
-            if candidate["value_kind"] == "orb_distance_calibration"
-            else ""
-        )
+        scope_owner = ""
+        if candidate["value_kind"] == "damage_slider_calibration":
+            scope_owner = candidate["scope"].get("field", "")
+        elif candidate["value_kind"] == "orb_distance_calibration":
+            scope_owner = json.dumps(
+                candidate["scope"],
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         identity = (
             candidate["value_kind"],
             json.dumps(candidate["raw_discriminator"], sort_keys=True),
@@ -519,12 +538,20 @@ def reconcile_mapping_candidate_resolutions(
         )
         by_discriminator.setdefault(identity, []).append(index)
     for indexes in by_discriminator.values():
-        semantics = {
-            normalized[index]["candidate"]["semantic_value"]
+        claims_for_discriminator = {
+            (
+                candidate["semantic_value"],
+                (
+                    candidate["scope"].get("family", "")
+                    if candidate["value_kind"] == "module_info_index"
+                    else ""
+                ),
+            )
             for index in indexes
-            if normalized[index]["candidate"]["semantic_value"] is not None
+            for candidate in (normalized[index]["candidate"],)
+            if candidate["semantic_value"] is not None
         }
-        if len(semantics) <= 1:
+        if len(claims_for_discriminator) <= 1:
             continue
         for index in indexes:
             candidate = normalized[index]["candidate"]
@@ -965,50 +992,19 @@ def _candidate_state_in_mapping(
             return "match" if mapped == semantic else "conflict"
         return "conflict" if semantic in owner.values() else "absent"
     if kind == "module_info_index":
-        loadout = mapping.get("module_loadout") or {}
-        role = candidate["scope"].get("role")
-        slots = loadout.get(role) if isinstance(loadout, Mapping) else None
-        if not isinstance(slots, list):
+        identities = _module_identity_pairs(mapping)
+        if identities is None:
             return "missing"
-        all_values = [
-            value
-            for candidate_role in ("primary", "assist")
-            for slot in loadout.get(candidate_role, ())
-            if isinstance(slot, Mapping)
-            for value in slot.get("values", ())
-            if isinstance(value, Mapping)
-        ]
+        family = str(candidate["scope"].get("family") or "")
+        known = identities.get(raw_value)
+        if known is not None:
+            return "match" if known == (semantic, family) else "conflict"
         if any(
-            value.get("info_index") == raw_value
-            and value.get("name") != semantic
-            for value in all_values
-        ) or any(
-            value.get("name") == semantic
-            and value.get("info_index") != raw_value
-            for value in all_values
+            name.casefold() == semantic.casefold()
+            for name, _family in identities.values()
         ):
             return "conflict"
-        target = next(
-            (
-                slot
-                for slot in slots
-                if isinstance(slot, Mapping)
-                and slot.get("slot_key") == candidate["scope"].get("slot_key")
-            ),
-            None,
-        )
-        if not isinstance(target, Mapping):
-            return "missing"
-        return (
-            "match"
-            if any(
-                isinstance(value, Mapping)
-                and value.get("info_index") == raw_value
-                and value.get("name") == semantic
-                for value in target.get("values", ())
-            )
-            else "absent"
-        )
+        return "absent"
     if kind == "module_assist_type":
         assist = (mapping.get("module_loadout") or {}).get("assist")
         if not isinstance(assist, list):
@@ -1034,6 +1030,72 @@ def _candidate_state_in_mapping(
             return "conflict"
         return "absent"
     return "unsupported"
+
+
+def _module_identity_pairs(
+    mapping: Mapping[str, Any],
+) -> Optional[dict[int, tuple[str, str]]]:
+    raw = mapping.get("module_info_indices")
+    if not isinstance(raw, Mapping) or not raw:
+        return None
+    pairs: dict[int, tuple[str, str]] = {}
+    seen_names: set[str] = set()
+    for raw_key, raw_identity in raw.items():
+        if (
+            not isinstance(raw_key, str)
+            or not raw_key.isdigit()
+            or str(int(raw_key)) != raw_key
+            or not isinstance(raw_identity, Mapping)
+            or set(raw_identity) != {"name", "family"}
+        ):
+            return None
+        raw_name = raw_identity.get("name")
+        raw_family = raw_identity.get("family")
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        family = raw_family.strip() if isinstance(raw_family, str) else ""
+        normalized = name.casefold()
+        if (
+            not name
+            or raw_name != name
+            or raw_family != family
+            or family not in {"cannon", "armor", "generator", "core"}
+            or normalized in seen_names
+        ):
+            return None
+        pairs[int(raw_key)] = (name, family)
+        seen_names.add(normalized)
+    return pairs
+
+
+def _module_slot_values_match_identities(
+    mapping: Mapping[str, Any],
+    identities: Mapping[int, tuple[str, str]],
+) -> bool:
+    loadout = mapping.get("module_loadout")
+    if not isinstance(loadout, Mapping):
+        return False
+    for role in ("primary", "assist"):
+        slots = loadout.get(role)
+        if not isinstance(slots, list):
+            return False
+        for slot in slots:
+            if not isinstance(slot, Mapping):
+                return False
+            family = str(slot.get("family") or "")
+            values = slot.get("values")
+            if not isinstance(values, list):
+                return False
+            for value in values:
+                if (
+                    not isinstance(value, Mapping)
+                    or isinstance(value.get("info_index"), bool)
+                    or not isinstance(value.get("info_index"), int)
+                    or not isinstance(value.get("name"), str)
+                    or identities.get(value["info_index"])
+                    != (value["name"], family)
+                ):
+                    return False
+    return True
 
 
 # Compatibility with the reference branch's public writer name.
@@ -1148,56 +1210,14 @@ def validate_mapping_candidate_result(
                 "mapping_candidate_proposal_result_mismatch"
             )
         return
-    loadout = mapping.get("module_loadout")
-    if not isinstance(loadout, Mapping):
+    identities = _module_identity_pairs(mapping)
+    if (
+        identities is None
+        or not _module_slot_values_match_identities(mapping, identities)
+    ):
         raise PlayerSaveMappingCandidateError(
             "mapping_candidate_proposal_result_invalid"
         )
-    raw_to_name: dict[int, str] = {}
-    name_to_raw: dict[str, int] = {}
-    for role in ("primary", "assist"):
-        slots = loadout.get(role)
-        if not isinstance(slots, list):
-            raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_proposal_result_invalid"
-            )
-        for slot in slots:
-            if not isinstance(slot, Mapping):
-                raise PlayerSaveMappingCandidateError(
-                    "mapping_candidate_proposal_result_invalid"
-                )
-            values = slot.get("values")
-            if not isinstance(values, list):
-                raise PlayerSaveMappingCandidateError(
-                    "mapping_candidate_proposal_result_invalid"
-                )
-            for value in values:
-                if (
-                    not isinstance(value, Mapping)
-                    or isinstance(value.get("info_index"), bool)
-                    or not isinstance(value.get("info_index"), int)
-                    or not isinstance(value.get("name"), str)
-                    or not value["name"].strip()
-                ):
-                    raise PlayerSaveMappingCandidateError(
-                        "mapping_candidate_proposal_result_invalid"
-                    )
-                raw_value = value["info_index"]
-                semantic_value = value["name"]
-                prior_name = raw_to_name.get(raw_value)
-                prior_raw = name_to_raw.get(semantic_value)
-                if (
-                    prior_name is not None
-                    and prior_name != semantic_value
-                ) or (
-                    prior_raw is not None
-                    and prior_raw != raw_value
-                ):
-                    raise PlayerSaveMappingCandidateError(
-                        "mapping_candidate_proposal_result_conflict"
-                    )
-                raw_to_name[raw_value] = semantic_value
-                name_to_raw[semantic_value] = raw_value
     if _candidate_state_in_mapping(candidate, mapping) != "match":
         raise PlayerSaveMappingCandidateError(
             "mapping_candidate_proposal_result_mismatch"
@@ -1302,7 +1322,12 @@ def validate_mapping_candidate_record(record: object) -> dict[str, Any]:
                 "observed_semantic_values",
                 allow_duplicates=(
                     kind
-                    in {"module_info_index", "module_assist_type", "orb_distance_calibration"}
+                    in {
+                        "damage_slider_calibration",
+                        "module_info_index",
+                        "module_assist_type",
+                        "orb_distance_calibration",
+                    }
                 ),
             )
         ),
@@ -1481,6 +1506,10 @@ def _require_pending_pairing_invariants(
             "battle_history_killed_by_id",
             "exact_locator",
         ),
+        "damage_slider": (
+            "damage_slider_calibration",
+            "calibration_sample",
+        ),
         "guardian_chips": ("guardian_chip_id", "singleton_remainder"),
         "orb_distance": ("orb_distance_calibration", "calibration_sample"),
         "perk_auto_pick_order": ("perk_id", "exact_locator"),
@@ -1504,11 +1533,10 @@ def _require_pending_pairing_invariants(
             "mapping_candidate_count_policy_invalid"
         )
     if check_id == "modules" and kind == "module_info_index":
-        if set(scope) != {"slot_key", "family", "role"}:
-            raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_module_scope_invalid"
-            )
-        if scope["role"] not in {"primary", "assist"}:
+        if (
+            not _module_scope_is_canonical(scope)
+            or candidate["locator"] != scope["slot_key"]
+        ):
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_scope_invalid"
             )
@@ -1517,10 +1545,20 @@ def _require_pending_pairing_invariants(
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_assist_scope_invalid"
             )
-    elif check_id == "orb_distance":
+    elif check_id == "damage_slider":
         if scope != {"field": candidate["locator"]}:
             raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_orb_scope_invalid"
+                "mapping_candidate_calibration_scope_invalid"
+            )
+    elif check_id == "orb_distance":
+        if (
+            set(scope) != {"field", "cards_deck", "workshop_preset"}
+            or scope.get("field") != candidate["locator"]
+            or not scope.get("cards_deck")
+            or not scope.get("workshop_preset")
+        ):
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_calibration_scope_invalid"
             )
     elif scope:
         raise PlayerSaveMappingCandidateError(
@@ -1537,6 +1575,7 @@ def _require_persisted_pairing_invariants(
     scope = candidate["scope"]
     expected_pairing = {
         "battle_history_killed_by": "exact_locator",
+        "damage_slider": "calibration_sample",
         "guardian_chips": "singleton_remainder",
         "orb_distance": "calibration_sample",
         "perk_auto_pick_order": "exact_locator",
@@ -1556,9 +1595,13 @@ def _require_persisted_pairing_invariants(
             "mapping_candidate_pairing_kind_mismatch"
         )
     if check_id == "modules":
+        if not _module_scope_is_canonical(scope):
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_module_scope_invalid"
+            )
         if (
-            set(scope) != {"slot_key", "family", "role"}
-            or scope["role"] not in {"primary", "assist"}
+            kind == "module_info_index"
+            and candidate["locator"] != scope["slot_key"]
         ):
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_scope_invalid"
@@ -1567,10 +1610,20 @@ def _require_persisted_pairing_invariants(
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_assist_scope_invalid"
             )
-    elif check_id == "orb_distance":
+    elif check_id == "damage_slider":
         if scope != {"field": candidate["locator"]}:
             raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_orb_scope_invalid"
+                "mapping_candidate_calibration_scope_invalid"
+            )
+    elif check_id == "orb_distance":
+        if scope != {"field": candidate["locator"]} and (
+            set(scope) != {"field", "cards_deck", "workshop_preset"}
+            or scope.get("field") != candidate["locator"]
+            or not scope.get("cards_deck")
+            or not scope.get("workshop_preset")
+        ):
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_calibration_scope_invalid"
             )
     elif scope:
         raise PlayerSaveMappingCandidateError(
@@ -1637,7 +1690,13 @@ def _resolved_disposition(
             "deterministic",
             "existing global discriminator pair was observed in a new exact module scope",
         )
-    if semantic in set(item["known_semantic_values"]):
+    known_semantics = set(item["known_semantic_values"])
+    semantic_is_known = (
+        any(value.casefold() == semantic.casefold() for value in known_semantics)
+        if item["value_kind"] == "module_info_index"
+        else semantic in known_semantics
+    )
+    if semantic_is_known:
         return (
             "conflicts_existing_mapping",
             "conflicting",
@@ -1680,7 +1739,7 @@ def _ui_observation(
     values = _semantic_values(
         raw.get("canonical_values"),
         "canonical_values",
-        allow_duplicates=(check_id in {"modules", "orb_distance"}),
+        allow_duplicates=(check_id in {"damage_slider", "modules", "orb_distance"}),
     )
     locators = _locator_values(raw.get("locator_values"), "locator_values")
     raw_scopes = raw.get("locator_scopes")
@@ -1780,6 +1839,7 @@ def _normalize_resolved(raw: object) -> dict[str, Any]:
                     in {
                         "module_info_index",
                         "module_assist_type",
+                        "damage_slider_calibration",
                         "orb_distance_calibration",
                     }
                 ),
@@ -1987,66 +2047,26 @@ def _proposal_operation(
         }
     if kind == "module_info_index":
         scope = candidate["scope"]
-        role = scope.get("role")
-        module_loadout = mapping.get("module_loadout") or {}
-        slots = module_loadout.get(role)
-        if role not in {"primary", "assist"} or not isinstance(slots, list):
+        identities = _module_identity_pairs(mapping)
+        owner = mapping.get("module_info_indices")
+        if identities is None or not isinstance(owner, Mapping):
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_module_owner_missing"
             )
-        slot_index = next(
-            (
-                index
-                for index, item in enumerate(slots)
-                if isinstance(item, Mapping)
-                and item.get("slot_key") == scope.get("slot_key")
-            ),
-            None,
-        )
-        if slot_index is None:
-            raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_module_slot_missing"
-            )
-        all_values = [
-            value
-            for slot_role in ("primary", "assist")
-            for slot in module_loadout.get(slot_role, ())
-            if isinstance(slot, Mapping)
-            for value in slot.get("values", ())
-            if isinstance(value, Mapping)
-        ]
-        raw_conflict = any(
-            value.get("info_index") == raw_value
-            and value.get("name") != semantic
-            for value in all_values
-        )
-        semantic_conflict = any(
-            value.get("name") == semantic
-            and value.get("info_index") != raw_value
-            for value in all_values
-        )
-        if raw_conflict or semantic_conflict:
+        family = str(scope.get("family") or "")
+        state = _candidate_state_in_mapping(candidate, mapping)
+        if state == "conflict":
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_proposal_conflicts_current_file"
             )
-        target_values = slots[slot_index].get("values")
-        if not isinstance(target_values, list):
-            raise PlayerSaveMappingCandidateError(
-                "mapping_candidate_module_owner_missing"
-            )
-        if any(
-            isinstance(value, Mapping)
-            and value.get("info_index") == raw_value
-            and value.get("name") == semantic
-            for value in target_values
-        ):
+        if state == "match":
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_proposal_already_integrated"
             )
         return {
             "op": "add",
-            "path": f"/module_loadout/{role}/{slot_index}/values/-",
-            "value": {"info_index": raw_value, "name": semantic},
+            "path": f"/module_info_indices/{raw_value}",
+            "value": {"name": semantic, "family": family},
         }
     if kind == "module_assist_type":
         module_loadout = mapping.get("module_loadout") or {}
@@ -2091,7 +2111,9 @@ def _raw_discriminator(
     already_wrapped: bool = False,
 ) -> dict[str, Any]:
     discriminator_kind = (
-        "finite_number" if kind == "orb_distance_calibration" else "integer_id"
+        "finite_number"
+        if kind == "orb_distance_calibration"
+        else "integer_id"
     )
     if already_wrapped:
         wrapped = _exact_mapping(raw, {"kind", "value"}, "raw_discriminator")
@@ -2108,6 +2130,10 @@ def _raw_discriminator(
         if not (-1_000_000 <= float(raw) <= 1_000_000):
             raise PlayerSaveMappingCandidateError("raw_discriminator_invalid")
         value: int | float = raw
+    elif kind == "damage_slider_calibration":
+        value = _nonnegative_int(raw, "raw_discriminator")
+        if value > 9_223_372_036_854_775_807:
+            raise PlayerSaveMappingCandidateError("raw_discriminator_invalid")
     else:
         value = _nonnegative_int(raw, "raw_discriminator")
         if value > 9_223_372_036_854_775_807:
@@ -2220,6 +2246,18 @@ def _scope(raw: object) -> dict[str, str]:
         _safe_code(key, "scope_key"): _safe_id(value, f"scope_{key}")
         for key, value in sorted(raw.items())
     }
+
+
+def _module_scope_is_canonical(scope: Mapping[str, str]) -> bool:
+    if set(scope) != {"slot_key", "family", "role"}:
+        return False
+    family = scope["family"]
+    role = scope["role"]
+    return bool(
+        family in {"cannon", "armor", "generator", "core"}
+        and role in {"primary", "assist"}
+        and scope["slot_key"] == f"{family}_{role}"
+    )
 
 
 def _locator_values(raw: object, label: str) -> dict[str, str]:
@@ -2347,6 +2385,7 @@ __all__ = [
     "PlayerSaveMappingCandidateError",
     "build_mapping_candidate_context",
     "build_mapping_candidate_record",
+    "build_mapping_candidate_ui_evidence",
     "canonical_mapping_set_fingerprint",
     "fingerprint_json",
     "mapping_candidate_record_status",

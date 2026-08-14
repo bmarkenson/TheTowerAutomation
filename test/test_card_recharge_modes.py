@@ -253,7 +253,7 @@ class _MissingDemonRouter(_CardRouter):
         return True
 
 
-def _ensure(router: _CardRouter):
+def _ensure(router: _CardRouter, **kwargs):
     return ensure_card_recharge_modes(
         REQUIRED,
         cards_screenshot=router.current,
@@ -263,6 +263,7 @@ def _ensure(router: _CardRouter):
         safe_tap_fn=router.safe_tap,
         swipe_fn=router.swipe,
         sleep_fn=lambda _seconds: None,
+        **kwargs,
     )
 
 
@@ -373,3 +374,41 @@ def test_mismatched_card_recharge_modes_are_toggled_and_reverified():
         "auto_reactivate",
         "ready_after_recharge",
     ]
+
+
+def test_card_recharge_repair_observer_runs_before_checkbox_input():
+    router = _CardRouter(mismatched=True)
+    events = []
+    original_tap = router.safe_tap
+
+    def tracked_tap(target, **kwargs):
+        if isinstance(target, tuple):
+            events.append("checkbox")
+        return original_tap(target, **kwargs)
+
+    result = ensure_card_recharge_modes(
+        REQUIRED,
+        cards_screenshot=router.current,
+        capture_fn=router.capture,
+        detector=detect_state_and_overlays,
+        safe_long_press_fn=router.long_press,
+        safe_tap_fn=tracked_tap,
+        swipe_fn=router.swipe,
+        repair_observer_fn=lambda: events.append("observer"),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.valid
+    assert events == ["observer", "checkbox", "checkbox"]
+
+
+def test_card_recharge_repair_observer_failure_sends_no_checkbox_input():
+    router = _CardRouter(mismatched=True)
+
+    def reject_repair():
+        raise RuntimeError("save invalidation failed")
+
+    with pytest.raises(RuntimeError, match="save invalidation failed"):
+        _ensure(router, repair_observer_fn=reject_repair)
+
+    assert router.checkbox_taps == []

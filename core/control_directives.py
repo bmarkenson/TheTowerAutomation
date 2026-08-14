@@ -1286,6 +1286,7 @@ class ControlDirectiveStore:
         owner_label: str,
         runtime: Mapping[str, object],
         starting_evidence: Mapping[str, object],
+        owned_battle_start: bool = False,
         now: Optional[float] = None,
         ttl_seconds: int = INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
     ) -> dict[str, Any]:
@@ -1310,6 +1311,22 @@ class ControlDirectiveStore:
         if normalized_evidence is None:
             raise ValueError(
                 "Interactive development request requires starting screen evidence"
+            )
+        if not isinstance(owned_battle_start, bool):
+            raise ValueError(
+                "Interactive development owned_battle_start must be a boolean"
+            )
+        if owned_battle_start and not (
+            normalized_evidence.get("screen_state") == "HOME_SCREEN"
+            and normalized_evidence.get("home_battle_control") == "NEW_BATTLE"
+            and normalized_evidence.get("battle_active") is False
+            and str(normalized_evidence.get("battle_scope") or "").strip()
+            and type(normalized_evidence.get("target_generation")) is int
+            and int(normalized_evidence["target_generation"]) > 0
+        ):
+            raise ValueError(
+                "An owned development battle must be preclaimed from exact "
+                "Home New Battle evidence with a target generation and scope"
             )
         if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
             raise ValueError("Interactive development lease TTL must be an integer")
@@ -1343,6 +1360,8 @@ class ControlDirectiveStore:
                 "runtime": normalized_runtime,
                 "starting_evidence": normalized_evidence,
             }
+            if owned_battle_start:
+                lease["owned_battle_start"] = True
             data["interactive_development_lease"] = lease
             return data
 
@@ -3378,18 +3397,31 @@ def _valid_interactive_development_evidence(
     observed_at = _bounded_text(value.get("observed_at"), 64)
     battle_active = value.get("battle_active")
     battle_scope = _bounded_text(value.get("battle_scope"), 128) or None
+    home_battle_control = _bounded_text(
+        value.get("home_battle_control"), 64
+    ).upper()
+    target_generation = value.get("target_generation")
     if not screen_state or not isinstance(battle_active, bool):
         return None
     try:
         _timestamp_value(observed_at)
     except ValueError:
         return None
-    return {
+    if target_generation is not None and (
+        type(target_generation) is not int or target_generation < 1
+    ):
+        return None
+    result = {
         "screen_state": screen_state,
         "battle_active": battle_active,
         "battle_scope": battle_scope,
         "observed_at": observed_at,
     }
+    if home_battle_control:
+        result["home_battle_control"] = home_battle_control
+    if target_generation is not None:
+        result["target_generation"] = target_generation
+    return result
 
 
 def _valid_interactive_development_lease(
@@ -3437,6 +3469,18 @@ def _valid_interactive_development_lease(
         "runtime": runtime,
         "starting_evidence": starting_evidence,
     }
+    owned_battle_start = value.get("owned_battle_start")
+    if owned_battle_start is not None:
+        if owned_battle_start is not True or not (
+            starting_evidence.get("screen_state") == "HOME_SCREEN"
+            and starting_evidence.get("home_battle_control") == "NEW_BATTLE"
+            and starting_evidence.get("battle_active") is False
+            and str(starting_evidence.get("battle_scope") or "").strip()
+            and type(starting_evidence.get("target_generation")) is int
+            and int(starting_evidence["target_generation"]) > 0
+        ):
+            return None
+        result["owned_battle_start"] = True
     release_requested_at = value.get("release_requested_at")
     if release_requested_at is not None:
         normalized = _bounded_text(release_requested_at, 64)

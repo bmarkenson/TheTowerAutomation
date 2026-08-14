@@ -17,6 +17,7 @@ from core.module_icon_index import (
     ancestral_green_fraction,
     identify_equipped_ancestral_modules,
     load_module_icon_catalog,
+    module_icon_similarity,
     rank_module_icon_candidates,
 )
 from core.ss_capture import capture_adb_screenshot
@@ -29,6 +30,7 @@ INVENTORY_COLUMNS = (145, 345, 543, 741, 941)
 INVENTORY_ROWS = (1090, 1295, 1500)
 INVENTORY_ICON_CROP_SIZE = 134
 INVENTORY_FRAME_CROP_SIZE = 190
+INVENTORY_ROW_SCAN_BOUNDS = (1040, 1580)
 MODULE_DETAIL_SETTLE_SECONDS = 1.0
 _MAX_CORRECTION_STEPS = 16
 _MAX_INVENTORY_SCROLLS = 8
@@ -721,59 +723,119 @@ def _inventory_fingerprint(frame) -> np.ndarray:
     return cv2.resize(gray, (54, 32), interpolation=cv2.INTER_AREA)
 
 
+def _inventory_candidate_at_center(
+    frame,
+    target: str,
+    catalog: ModuleIconCatalog,
+    center: tuple[int, int],
+) -> Optional[tuple[float, float, tuple[int, int]]]:
+    x, y = center
+    frame_crop = _crop_centered(
+        frame,
+        center,
+        INVENTORY_FRAME_CROP_SIZE,
+    )
+    if (
+        ancestral_green_fraction(frame_crop, catalog=catalog)
+        < catalog.minimum_green_fraction
+    ):
+        return None
+    icon_crops = (
+        _crop_centered(
+            frame,
+            (x + x_offset, y + y_offset),
+            INVENTORY_ICON_CROP_SIZE,
+        )
+        for y_offset in range(
+            -catalog.alignment_radius,
+            catalog.alignment_radius + 1,
+        )
+        for x_offset in range(
+            -catalog.alignment_radius,
+            catalog.alignment_radius + 1,
+        )
+    )
+    ranked = rank_module_icon_candidates(icon_crops, catalog=catalog)
+    if len(ranked) < 2:
+        return None
+    best_score, best = ranked[0]
+    runner_score, _runner = ranked[1]
+    margin = best_score - runner_score
+    if (
+        best.name != target
+        or best_score < catalog.inventory_minimum_confidence
+        or margin < catalog.inventory_minimum_margin
+    ):
+        return None
+    return best_score, margin, center
+
+
 def _inventory_candidates(frame, target: str, catalog: ModuleIconCatalog):
     candidates: list[tuple[float, float, tuple[int, int]]] = []
     for y in INVENTORY_ROWS:
         for x in INVENTORY_COLUMNS:
             center = (x, y)
-            frame_crop = _crop_centered(
+            candidate = _inventory_candidate_at_center(
                 frame,
+                target,
+                catalog,
                 center,
-                INVENTORY_FRAME_CROP_SIZE,
             )
+            if candidate is not None:
+                candidates.append(candidate)
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    if candidates:
+        return candidates
+
+    # A short inertial swipe does not settle inventory rows onto the initial
+    # fixed grid. Search only after the fast path fails, rank the requested
+    # identity cheaply, then apply the full all-template authority check to
+    # distinct high-confidence centers before allowing a tap.
+    target_scores: list[tuple[float, tuple[int, int]]] = []
+    for y in range(
+        INVENTORY_ROW_SCAN_BOUNDS[0],
+        INVENTORY_ROW_SCAN_BOUNDS[1] + 1,
+    ):
+        for x in INVENTORY_COLUMNS:
+            center = (x, y)
             if (
-                ancestral_green_fraction(frame_crop, catalog=catalog)
+                ancestral_green_fraction(
+                    _crop_centered(
+                        frame,
+                        center,
+                        INVENTORY_FRAME_CROP_SIZE,
+                    ),
+                    catalog=catalog,
+                )
                 < catalog.minimum_green_fraction
             ):
                 continue
-            icon_crops = (
-                _crop_centered(
-                    frame,
-                    (x + x_offset, y + y_offset),
-                    INVENTORY_ICON_CROP_SIZE,
-                )
-                for y_offset in range(
-                    -catalog.alignment_radius,
-                    catalog.alignment_radius + 1,
-                )
-                for x_offset in range(
-                    -catalog.alignment_radius,
-                    catalog.alignment_radius + 1,
-                )
-            )
-            ranked = rank_module_icon_candidates(
-                icon_crops,
+            score = module_icon_similarity(
+                _crop_centered(frame, center, INVENTORY_ICON_CROP_SIZE),
+                target,
                 catalog=catalog,
             )
-            if len(ranked) < 2:
-                continue
-            scores = [
-                (
-                    score,
-                    module.name,
-                )
-                for score, module in ranked
-            ]
-            best_score, best_name = scores[0]
-            runner_score, _runner_name = scores[1]
-            margin = best_score - runner_score
-            if best_name != target:
-                continue
-            if best_score < catalog.inventory_minimum_confidence:
-                continue
-            if margin < catalog.inventory_minimum_margin:
-                continue
-            candidates.append((best_score, margin, center))
+            if score >= catalog.inventory_minimum_confidence:
+                target_scores.append((score, center))
+
+    reviewed: list[tuple[int, int]] = []
+    for _target_score, center in sorted(target_scores, reverse=True):
+        if any(
+            prior[0] == center[0] and abs(prior[1] - center[1]) < 100
+            for prior in reviewed
+        ):
+            continue
+        reviewed.append(center)
+        candidate = _inventory_candidate_at_center(
+            frame,
+            target,
+            catalog,
+            center,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+        if len(reviewed) >= 12:
+            break
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates
 

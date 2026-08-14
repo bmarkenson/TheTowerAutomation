@@ -1,8 +1,9 @@
 """Durable, exact-version local player-save mapping confirmations.
 
 Candidate receipts remain review evidence.  This module owns the separate,
-ignored local authority file that may project one narrowly supported mapping
-on a *later* fresh decode.  Runtime never edits tracked canonical mappings.
+ignored local identity-evidence file that may project one narrowly supported
+identity on a *later* fresh decode.  Runtime never edits tracked canonical
+mappings or expands slot-scoped save authority.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ _SUPPORTED_RESOLUTIONS = frozenset(
 
 
 class ConfirmedLocalMappingError(ValueError):
-    """A local mapping authority document or transition was unsafe."""
+    """A local mapping identity document or transition was unsafe."""
 
 
 class ConfirmedLocalMappingStore:
@@ -69,10 +70,10 @@ class ConfirmedLocalMappingStore:
         *,
         recorded_at: object = None,
     ) -> dict[str, Any]:
-        """Accept one deterministic module value for later fresh decodes.
+        """Accept one deterministic module identity for later fresh decodes.
 
         This is idempotent for the same candidate and dependency.  A different
-        semantic claim for an already-active slot/value is rejected.
+        semantic or family claim for an active global identity is rejected.
         """
 
         try:
@@ -182,6 +183,14 @@ class ConfirmedLocalMappingStore:
                 if (
                     prior["raw_value"] == raw_value
                     and prior["semantic_value"] != event["semantic_value"]
+                ):
+                    raise ConfirmedLocalMappingError(
+                        "confirmed_local_active_raw_conflict"
+                    )
+                if (
+                    prior["raw_value"] == raw_value
+                    and prior["semantic_value"] == event["semantic_value"]
+                    and prior["scope"]["family"] != scope["family"]
                 ):
                     raise ConfirmedLocalMappingError(
                         "confirmed_local_active_raw_conflict"
@@ -675,7 +684,7 @@ def _empty_document(identity: Mapping[str, Any]) -> dict[str, Any]:
 def _validate_active_module_bijection(
     events: list[dict[str, Any]],
 ) -> None:
-    """Require one global raw/name bijection while allowing repeated scopes."""
+    """Require one global ID/name/family bijection across provenance scopes."""
 
     revoked = {
         event["target_event_id"]
@@ -687,29 +696,30 @@ def _validate_active_module_bijection(
         for event in events
         if event["event_type"] == "accept" and event["event_id"] not in revoked
     ]
-    raw_to_name: dict[int, str] = {}
+    raw_to_identity: dict[int, tuple[str, str]] = {}
     name_to_raw: dict[str, int] = {}
-    slot_to_pair: dict[str, tuple[int, str]] = {}
     for event in active:
         raw_value = event["raw_value"]
         semantic = event["semantic_value"]
-        slot_key = event["scope"]["slot_key"]
-        if raw_value in raw_to_name and raw_to_name[raw_value] != semantic:
+        family = event["scope"]["family"]
+        identity = (semantic, family)
+        normalized_name = semantic.casefold()
+        if (
+            raw_value in raw_to_identity
+            and raw_to_identity[raw_value] != identity
+        ):
             raise ConfirmedLocalMappingError(
                 "confirmed_local_active_raw_conflict"
             )
-        if semantic in name_to_raw and name_to_raw[semantic] != raw_value:
+        if (
+            normalized_name in name_to_raw
+            and name_to_raw[normalized_name] != raw_value
+        ):
             raise ConfirmedLocalMappingError(
                 "confirmed_local_active_semantic_conflict"
             )
-        pair = (raw_value, semantic)
-        if slot_key in slot_to_pair and slot_to_pair[slot_key] != pair:
-            raise ConfirmedLocalMappingError(
-                "confirmed_local_active_slot_conflict"
-            )
-        raw_to_name[raw_value] = semantic
-        name_to_raw[semantic] = raw_value
-        slot_to_pair[slot_key] = pair
+        raw_to_identity[raw_value] = identity
+        name_to_raw[normalized_name] = raw_value
 
 
 def _require_revocation_capacity(
@@ -839,7 +849,11 @@ def _module_scope(raw: object) -> dict[str, str]:
         raise ConfirmedLocalMappingError("confirmed_local_module_scope_invalid")
     scope = {
         "slot_key": _safe_id(raw.get("slot_key"), "slot_key"),
-        "family": _safe_id(raw.get("family"), "family"),
+        "family": _choice(
+            raw.get("family"),
+            frozenset({"cannon", "armor", "generator", "core"}),
+            "family",
+        ),
         "role": _choice(
             raw.get("role"), frozenset({"primary", "assist"}), "role"
         ),

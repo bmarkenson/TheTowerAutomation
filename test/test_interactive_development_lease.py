@@ -55,6 +55,7 @@ def _runtime_app(
     battle_active: bool = True,
     screen_state: str = "RUNNING",
     scope: str = "run-1",
+    owned_battle_start: bool = False,
     now: float = 1_000.0,
 ) -> tuple[App, AutomationSupervisor, ControlDirectiveStore, dict[str, object]]:
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
@@ -83,7 +84,12 @@ def _runtime_app(
             "battle_active": battle_active,
             "battle_scope": scope,
             "observed_at": _timestamp(now),
+            "home_battle_control": (
+                "NEW_BATTLE" if screen_state == "HOME_SCREEN" else None
+            ),
+            "target_generation": 7,
         },
+        owned_battle_start=owned_battle_start,
         now=now,
     )
     supervisor.apply_control()
@@ -101,6 +107,25 @@ def _runtime_app(
     app._external_development_hold_active = False
     app._interactive_development_ack = None
     app._current_run_scope_id = lambda: scope
+    app._control_observation = {
+        "schema_version": 1,
+        "observation_id": "runtime-1:1",
+        "observed_at": _timestamp(now),
+        "primary_state": screen_state,
+        "home_battle_control": (
+            "NEW_BATTLE" if screen_state == "HOME_SCREEN" else "UNKNOWN"
+        ),
+        "game_state": (
+            "home_new_battle"
+            if screen_state == "HOME_SCREEN" and not battle_active
+            else "active_battle"
+            if battle_active
+            else "unknown"
+        ),
+        "active_battle": battle_active,
+        "activity_scope_run_id": scope,
+        "target_generation": 7,
+    }
     return app, supervisor, store, lease
 
 
@@ -241,6 +266,7 @@ def test_hold_precedes_ack_and_waits_for_background_input_quiescence(
         "battle_active": True,
         "battle_scope": "run-1",
         "observed_at": _timestamp(1_003.0),
+        "target_generation": 7,
     }
     assert active["holds"][0]["hold"] == "external_development"
 
@@ -714,6 +740,176 @@ def test_home_lease_ends_when_a_running_battle_boundary_appears(
     terminal = store.status()["interactive_development_lease"]
     assert terminal["terminal_disposition"] == "battle_boundary"
     assert "running-battle boundary changed" in terminal["terminal_reason"]
+
+
+def test_owned_home_lease_retains_exact_run_and_terminal_cleanup_claim(
+    tmp_path,
+    monkeypatch,
+):
+    app, _supervisor, store, lease = _runtime_app(
+        tmp_path,
+        monkeypatch,
+        battle_active=False,
+        screen_state="HOME_SCREEN",
+        owned_battle_start=True,
+    )
+    _activate(
+        app,
+        detection={
+            "state": "HOME_SCREEN",
+            "home_battle_control": "NEW_BATTLE",
+        },
+    )
+    app._authority_battle_active = True
+    app._authority_primary_state = "RUNNING"
+    app._control_observation.update(
+        {
+            "observation_id": "runtime-1:running",
+            "primary_state": "RUNNING",
+            "home_battle_control": "UNKNOWN",
+            "game_state": "active_battle",
+            "active_battle": True,
+        }
+    )
+
+    with (
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch("core.app.is_blind_gem_tapper_active", return_value=False),
+    ):
+        app._sync_interactive_development_observation(
+            {"state": "RUNNING"},
+            now=1_004.0,
+        )
+
+    active = store.status()["interactive_development_lease"]
+    assert active["lease_id"] == lease["lease_id"]
+    assert active["request_state"] == "requested"
+    assert app._external_development_hold_active
+    assert app._interactive_development_ack["state"] == "active"
+    assert app._interactive_development_ack["owned_battle_evidence"] == {
+        "screen_state": "RUNNING",
+        "battle_active": True,
+        "battle_scope": "run-1",
+        "observed_at": _timestamp(1_004.0),
+        "target_generation": 7,
+    }
+    assert app._observed_active_battle_scope_id == "run-1"
+
+    app._authority_battle_active = False
+    app._authority_primary_state = "GAME_OVER"
+    app._control_observation.update(
+        {
+            "observation_id": "runtime-1:terminal",
+            "primary_state": "GAME_OVER",
+            "game_state": "game_over",
+            "active_battle": False,
+        }
+    )
+    with (
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch("core.app.is_blind_gem_tapper_active", return_value=False),
+    ):
+        app._sync_interactive_development_observation(
+            {"state": "GAME_OVER"},
+            now=1_005.0,
+        )
+
+    terminal = store.status()["interactive_development_lease"]
+    assert terminal["request_state"] == "terminal"
+    assert terminal["terminal_disposition"] == "natural_game_over"
+    assert not app._external_development_hold_active
+    claim = app._matching_interactive_development_owned_terminal_claim(
+        app._current_control_workflow_evidence()
+    )
+    assert claim == {
+        "schema_version": 1,
+        "lease_id": lease["lease_id"],
+        "activity_scope_run_id": "run-1",
+        "target_generation": 7,
+    }
+
+
+@pytest.mark.parametrize(
+    "changed_field",
+    ("activity_scope_run_id", "target_generation", "game_state"),
+)
+def test_owned_terminal_claim_rejects_replacement_or_nonterminal_boundary(
+    tmp_path,
+    monkeypatch,
+    changed_field,
+):
+    app, _supervisor, _store, lease = _runtime_app(
+        tmp_path,
+        monkeypatch,
+        battle_active=False,
+        screen_state="HOME_SCREEN",
+        owned_battle_start=True,
+    )
+    owner = app._interactive_development_runtime_owner()
+    app._interactive_development_ack = {
+        "schema_version": 1,
+        "lease_id": lease["lease_id"],
+        "owner_label": lease["owner_label"],
+        "state": "terminal",
+        "runtime": owner,
+        "owned_battle_start": True,
+        "terminal_disposition": "natural_game_over",
+        "owned_battle_evidence": {
+            "screen_state": "RUNNING",
+            "battle_active": True,
+            "battle_scope": "run-1",
+            "observed_at": _timestamp(1_004.0),
+            "target_generation": 7,
+        },
+        "terminal_evidence": {
+            "screen_state": "GAME_OVER",
+            "battle_active": False,
+            "battle_scope": "run-1",
+            "observed_at": _timestamp(1_005.0),
+            "target_generation": 7,
+        },
+    }
+    current = {
+        "schema_version": 1,
+        **owner,
+        "game_state": "game_over",
+        "activity_scope_run_id": "run-1",
+        "target_generation": 7,
+    }
+    current[changed_field] = {
+        "activity_scope_run_id": "run-2",
+        "target_generation": 8,
+        "game_state": "active_battle",
+    }[changed_field]
+
+    assert (
+        app._matching_interactive_development_owned_terminal_claim(current)
+        is None
+    )
+
+
+def test_owned_battle_request_requires_exact_home_new_boundary(
+    tmp_path,
+    monkeypatch,
+):
+    _app, supervisor, store, _lease = _runtime_app(
+        tmp_path,
+        monkeypatch,
+    )
+    with pytest.raises(ValueError, match="must be preclaimed"):
+        store.request_interactive_development_lease(
+            owner_label="invalid owned battle",
+            runtime=supervisor.current_exclusive_validation_owner(),
+            starting_evidence={
+                "screen_state": "RUNNING",
+                "battle_active": True,
+                "battle_scope": "run-2",
+                "observed_at": _timestamp(1_010.0),
+                "target_generation": 7,
+            },
+            owned_battle_start=True,
+            now=1_010.0,
+        )
 
 
 def test_release_stays_held_through_ambiguous_and_then_fresh_observation(

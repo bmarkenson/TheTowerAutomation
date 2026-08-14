@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import gzip
 import hashlib
 import json
+import math
 from functools import lru_cache
 from pathlib import Path
 import re
@@ -471,6 +472,9 @@ def _parse_player_save_bytes(
         authority_mapping_id=mapping_resolution.authority_mapping_id,
         structural_mapping_id=mapping_resolution.structural_mapping_id,
     )
+    canonical_module_info_indices = deepcopy(
+        mapping.get("module_info_indices")
+    )
     semantic_capabilities_only = bool(
         mapping.get("semantic_capabilities_only")
     )
@@ -507,7 +511,12 @@ def _parse_player_save_bytes(
     runtime_save: Optional[NormalizedRuntimeSave] = None
     if shape_valid:
         if not semantic_capabilities_only:
-            checks = _build_checks(decoded, mapping, captured_at=stamp)
+            checks = _build_checks(
+                decoded,
+                mapping,
+                captured_at=stamp,
+                canonical_module_info_indices=canonical_module_info_indices,
+            )
             for blocked_check in confirmed_local["blocked_checks"]:
                 if blocked_check == "modules":
                     checks[blocked_check] = _unmapped_module_evidence(
@@ -774,7 +783,8 @@ def reconcile_requirements(
             or str(check_id) in snapshot.validated_checks
         )
         observation_only = bool(
-            str(check_id) == "modules" and check_policy == "observe"
+            str(check_id) in {"modules", "damage_slider", "orb_distance"}
+            and check_policy == "observe"
         )
 
         if force_ui_audit:
@@ -1435,6 +1445,7 @@ def _mapping_semantic_fingerprint(
                 str(value) for value in mapping.get("validated_checks") or ()
             ),
             "structural_revision_compatibility": structural_compatibility,
+            "module_info_indices": mapping.get("module_info_indices"),
             "module_loadout": mapping.get("module_loadout"),
             "runtime_save": mapping.get("runtime_save"),
         }
@@ -1471,12 +1482,23 @@ def _effective_mapping_fingerprint(
             "canonical_dependency_fingerprint": (
                 canonical_dependency_fingerprint
             ),
+            # Bind every effective semantic/structural mapping decision used
+            # by this decode.  The narrower canonical dependency fingerprint
+            # above intentionally remains Module-local for confirmed-local
+            # lifecycle validation; carry, History, and preflight bindings
+            # require the complete effective mapping instead.
+            "effective_mapping": deepcopy(mapping),
             "identity": deepcopy(mapping.get("identity")),
             "mapping_id": str(mapping.get("mapping_id") or ""),
             "mapping_resolution": str(mapping_resolution or ""),
             "authority_mapping_id": str(authority_mapping_id or ""),
             "structural_mapping_id": str(structural_mapping_id or ""),
+            "module_info_indices": deepcopy(
+                mapping.get("module_info_indices")
+            ),
             "module_loadout": deepcopy(mapping.get("module_loadout")),
+            "damage_slider": deepcopy(mapping.get("damage_slider")),
+            "orb_distance": deepcopy(mapping.get("orb_distance")),
             "confirmed_local": {
                 "available": confirmed_local.get("available") is True,
                 "generation": confirmed_local.get("generation"),
@@ -1592,31 +1614,34 @@ def _apply_confirmed_local_mappings(
         if lifecycle == "reconfirmation_required":
             items.append(item)
             continue
-        slot = _module_slot_spec(mapping, event["scope"])
-        if slot is None:
+        identities = mapping.get("module_info_indices")
+        if not isinstance(identities, dict):
             item["state"] = "reconfirmation_required"
-            item["reason"] = "canonical module slot is unavailable"
+            item["reason"] = "canonical module identity owner is unavailable"
             items.append(item)
             continue
-        options = slot.get("values")
-        if not isinstance(options, list):
-            item["state"] = "reconfirmation_required"
-            item["reason"] = "canonical module values are unavailable"
+        raw_key = str(event["raw_value"])
+        existing = identities.get(raw_key)
+        expected = {
+            "name": event["semantic_value"],
+            "family": event["scope"]["family"],
+        }
+        if existing is not None and existing != expected:
+            item["state"] = "canonical_conflict"
+            item["reason"] = "canonical module identity conflicts with local evidence"
             items.append(item)
             continue
-        options.append(
-            {
-                "info_index": event["raw_value"],
-                "name": event["semantic_value"],
-            }
-        )
+        identities[raw_key] = expected
         applied.append(event["event_id"])
         item["state"] = (
             "authority_pending"
             if lifecycle == "authority_pending"
             else "active_local"
         )
-        item["reason"] = "local exact-version confirmation is active"
+        item["reason"] = (
+            "local exact-version Module identity confirmation is active; "
+            "slot-scoped save authority is unchanged"
+        )
         items.append(item)
     projection.update(
         applied_event_ids=applied,
@@ -1626,9 +1651,10 @@ def _apply_confirmed_local_mappings(
     warnings: tuple[str, ...] = ()
     if applied:
         warnings = (
-            "A locally confirmed exact-version Module mapping was applied "
-            "to this fresh save decode; canonical repository integration is "
-            "still pending.",
+            "A locally confirmed exact-version Module identity was applied "
+            "to this fresh save decode for mapping diagnostics only; "
+            "slot-scoped save authority and canonical repository integration "
+            "remain unchanged.",
         )
     if any(
         item.get("state")
@@ -1636,30 +1662,11 @@ def _apply_confirmed_local_mappings(
         for item in items
     ):
         warnings += (
-            "A confirmed-local Module mapping conflicted with or outlived its "
+            "A confirmed-local Module identity conflicted with or outlived its "
             "canonical dependency; the local event was ignored and canonical "
             "values remain authoritative.",
         )
     return mapping, projection, warnings
-
-
-def _module_slot_spec(
-    mapping: Mapping[str, Any],
-    scope: Mapping[str, Any],
-) -> Optional[dict[str, Any]]:
-    role = str(scope.get("role") or "")
-    slots = (mapping.get("module_loadout") or {}).get(role)
-    if role not in {"primary", "assist"} or not isinstance(slots, list):
-        return None
-    matches = [
-        slot
-        for slot in slots
-        if isinstance(slot, dict)
-        and slot.get("slot_key") == scope.get("slot_key")
-        and slot.get("family") == scope.get("family")
-        and slot.get("role") == role
-    ]
-    return matches[0] if len(matches) == 1 else None
 
 
 def _canonical_module_event_lifecycle(event: Mapping[str, Any]) -> str:
@@ -1746,7 +1753,9 @@ def _canonical_module_event_state(
     mapping: Mapping[str, Any],
     event: Mapping[str, Any],
 ) -> str:
-    module_loadout = mapping.get("module_loadout") or {}
+    module_loadout = mapping.get("module_loadout")
+    if not isinstance(module_loadout, Mapping):
+        return "unavailable"
     specs = [
         *(
             module_loadout.get("primary")
@@ -1759,35 +1768,29 @@ def _canonical_module_event_state(
             else []
         ),
     ]
-    known_values = _known_module_values(specs)
-    if known_values is None:
+    identities = _module_identity_options(mapping, specs)
+    if identities is None:
         return "unavailable"
     raw_value = event["raw_value"]
     semantic = event["semantic_value"]
-    known_semantic = known_values.get(raw_value)
-    if known_semantic is not None and known_semantic != semantic:
-        return "conflict"
-    semantic_raw = next(
+    family = str((event.get("scope") or {}).get("family") or "")
+    known_identity = identities.get(raw_value)
+    if known_identity is not None:
+        return (
+            "match"
+            if known_identity == (semantic, family)
+            else "conflict"
+        )
+    semantic_identity = next(
         (
-            info_index
-            for info_index, name in known_values.items()
-            if name == semantic
+            (info_index, mapped_family)
+            for info_index, (name, mapped_family) in identities.items()
+            if name.casefold() == semantic.casefold()
         ),
         None,
     )
-    if semantic_raw is not None and semantic_raw != raw_value:
+    if semantic_identity is not None:
         return "conflict"
-    slot = _module_slot_spec(mapping, event["scope"])
-    if slot is None:
-        return "unavailable"
-    options = _module_value_options(slot)
-    if options is None:
-        return "unavailable"
-    for info_index, name in options:
-        if info_index == raw_value:
-            return "match" if name == semantic else "conflict"
-        if name == semantic:
-            return "conflict"
     return "absent"
 
 
@@ -1797,12 +1800,24 @@ def _confirmed_local_item(
     lifecycle: str,
 ) -> dict[str, Any]:
     reasons = {
-        "active_local": "canonical integration is pending",
-        "authority_pending": "canonical authority integration is pending",
-        "mirror_pending": "exact-version mirror integration is pending",
-        "integrated": "canonical owner and exact-version mirror agree",
-        "canonical_conflict": "canonical mapping conflicts with local evidence",
-        "reconfirmation_required": "canonical mapping dependency is unavailable",
+        "active_local": (
+            "canonical Module identity integration is pending; slot-scoped "
+            "save authority is unchanged"
+        ),
+        "authority_pending": (
+            "canonical Module identity owner integration is pending; "
+            "slot-scoped save authority is unchanged"
+        ),
+        "mirror_pending": (
+            "exact-version Module identity mirror integration is pending"
+        ),
+        "integrated": "canonical Module identity owner and mirror agree",
+        "canonical_conflict": (
+            "canonical Module identity conflicts with local evidence"
+        ),
+        "reconfirmation_required": (
+            "canonical Module identity dependency is unavailable"
+        ),
     }
     return {
         "event_id": event["event_id"],
@@ -1828,7 +1843,7 @@ def confirmed_local_mapping_status(
     repository_root: Path | str = ROOT,
     candidate_status: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Project durable local authority and review receipts for status UIs."""
+    """Project durable local identity evidence and receipts for status UIs."""
 
     owner = store or ConfirmedLocalMappingStore()
     if candidate_status is None:
@@ -2633,6 +2648,7 @@ def _build_checks(
     mapping: Mapping[str, Any],
     *,
     captured_at: datetime,
+    canonical_module_info_indices: Any = None,
 ) -> dict[str, SaveCheckEvidence]:
     checks: dict[str, SaveCheckEvidence] = {}
     for check_id, spec in (mapping.get("presets") or {}).items():
@@ -2667,6 +2683,8 @@ def _build_checks(
         decoded,
         mapping,
     )
+    checks["damage_slider"] = _damage_slider_evidence(decoded, mapping)
+    checks["orb_distance"] = _orb_distance_evidence(decoded, mapping)
 
     perk_ids = mapping.get("perk_ids") or {}
     first_id = _exact_int(decoded.get("firstPerkIndex"))
@@ -2778,7 +2796,11 @@ def _build_checks(
         },
     )
 
-    checks["modules"] = _module_loadout_evidence(decoded, mapping)
+    checks["modules"] = _module_loadout_evidence(
+        decoded,
+        mapping,
+        canonical_module_info_indices=canonical_module_info_indices,
+    )
 
     target_ids = mapping.get("target_priority_ids") or {}
     priority, priority_complete, priority_reason = _validated_complete_order(
@@ -2914,8 +2936,328 @@ def _build_checks(
             source_fields=(),
             complete=False,
             reason=str(reason),
+            diagnostics=_unmapped_check_candidate_diagnostics(
+                str(check_id),
+                decoded,
+            ),
         )
     return checks
+
+
+def _unmapped_check_candidate_diagnostics(
+    check_id: str,
+    decoded: Mapping[str, Any],
+    *,
+    scope_context: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    """Retain safe control discriminators without publishing raw save data."""
+
+    fields: tuple[str, ...]
+    if check_id == "damage_slider":
+        fields = ("damageAdjustmentLog",)
+    elif check_id == "orb_distance":
+        fields = (
+            "rangeLevelSelected",
+            "innerOrbDistance",
+            "workshopOrbDistance",
+        )
+    else:
+        return {}
+
+    candidates: list[dict[str, Any]] = []
+    for field in fields:
+        raw_value = decoded.get(field)
+        if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+            continue
+        candidate = _pending_mapping_candidate(
+            value_kind=f"{check_id}_calibration",
+            raw_value=raw_value,
+            pairing_method="calibration_sample",
+            locator=field,
+            expected_observation_count=len(fields),
+            minimum_evidence_count=2,
+            scope={"field": field, **dict(scope_context or {})},
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+    return {"mapping_candidates": candidates}
+
+
+def _damage_slider_evidence(
+    decoded: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> SaveCheckEvidence:
+    """Decode only causally calibrated Damage Slider discriminator values."""
+
+    spec = mapping.get("damage_slider")
+    source_field = (
+        str(spec.get("source_field") or "")
+        if isinstance(spec, Mapping)
+        else ""
+    )
+    values = spec.get("values") if isinstance(spec, Mapping) else None
+    if (
+        source_field != "damageAdjustmentLog"
+        or not _is_sequence(values)
+        or not values
+    ):
+        return SaveCheckEvidence(
+            check_id="damage_slider",
+            status="unmapped",
+            value=None,
+            source_fields=("damageAdjustmentLog",),
+            complete=False,
+            reason="Damage Slider mapping is malformed",
+        )
+
+    raw_to_value: dict[int, str] = {}
+    semantic_values: list[str] = []
+    for option in values:
+        if not isinstance(option, Mapping) or set(option) != {"raw", "value"}:
+            raw_to_value.clear()
+            break
+        raw = _exact_int(option.get("raw"))
+        try:
+            # Keep save evidence byte-for-byte comparable with the canonical
+            # value consumed by the guarded UI workflow (for example, 100%
+            # is represented as 1E2%).  The import stays local so decoding
+            # does not make UI components an import-time dependency.
+            from core.damage_adjuster import normalize_damage_percentage
+
+            value = normalize_damage_percentage(option.get("value"))
+        except (TypeError, ValueError):
+            raw_to_value.clear()
+            break
+        if raw is None or raw in raw_to_value or value in semantic_values:
+            raw_to_value.clear()
+            break
+        raw_to_value[raw] = value
+        semantic_values.append(value)
+    if not raw_to_value:
+        return SaveCheckEvidence(
+            check_id="damage_slider",
+            status="unmapped",
+            value=None,
+            source_fields=(source_field,),
+            complete=False,
+            reason="Damage Slider mapping values are malformed",
+        )
+
+    raw_value = _exact_int(decoded.get(source_field))
+    observed = raw_to_value.get(raw_value) if raw_value is not None else None
+    complete = observed is not None
+    return SaveCheckEvidence(
+        check_id="damage_slider",
+        status="observed" if complete else "unmapped",
+        value=observed,
+        source_fields=(source_field,),
+        complete=complete,
+        reason=(
+            ""
+            if complete
+            else "Damage Slider discriminator is not an exact mapped integer"
+        ),
+        authority={"kind": "exact_values", "values": semantic_values},
+        diagnostics=(
+            {}
+            if complete
+            else _unmapped_check_candidate_diagnostics(
+                "damage_slider",
+                decoded,
+            )
+        ),
+    )
+
+
+def _orb_distance_evidence(
+    decoded: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> SaveCheckEvidence:
+    """Decode only complete Orb tuples observed in the same preset context."""
+
+    expected_fields = {
+        "range_basis": "rangeLevelSelected",
+        "extra": "innerOrbDistance",
+        "workshop": "workshopOrbDistance",
+    }
+    spec = mapping.get("orb_distance")
+    source_fields = spec.get("source_fields") if isinstance(spec, Mapping) else None
+    context_checks = (
+        tuple(spec.get("context_checks") or ())
+        if isinstance(spec, Mapping)
+        else ()
+    )
+    values = spec.get("values") if isinstance(spec, Mapping) else None
+    if (
+        not isinstance(source_fields, Mapping)
+        or dict(source_fields) != expected_fields
+        or context_checks != ("cards_deck", "workshop_preset")
+        or not _is_sequence(values)
+        or not values
+    ):
+        return SaveCheckEvidence(
+            check_id="orb_distance",
+            status="unmapped",
+            value=None,
+            source_fields=tuple(expected_fields.values()),
+            complete=False,
+            reason="Orb Distance mapping is malformed",
+        )
+
+    observed_context: dict[str, str] = {}
+    context_source_fields: list[str] = []
+    preset_specs = mapping.get("presets")
+    if not isinstance(preset_specs, Mapping):
+        preset_specs = {}
+    for check_id in context_checks:
+        preset_spec = preset_specs.get(check_id)
+        if not isinstance(preset_spec, Mapping):
+            observed_context.clear()
+            break
+        selected = _selected_preset(decoded, preset_spec)
+        active_name = selected.get("active_name")
+        names_field = str(preset_spec.get("names_field") or "")
+        active_field = str(preset_spec.get("active_field") or "")
+        if not isinstance(active_name, str) or not active_name or not all(
+            (names_field, active_field)
+        ):
+            observed_context.clear()
+            break
+        observed_context[check_id] = active_name
+        context_source_fields.extend((names_field, active_field))
+
+    evidence_source_fields = tuple(
+        dict.fromkeys((*expected_fields.values(), *context_source_fields))
+    )
+    raw_to_value: dict[
+        tuple[int, float, float, tuple[str, ...]],
+        dict[str, str],
+    ] = {}
+    semantic_values: list[dict[str, str]] = []
+    malformed = len(observed_context) != len(context_checks)
+    for option in values:
+        if (
+            not isinstance(option, Mapping)
+            or set(option) != {"raw", "context", "value"}
+        ):
+            malformed = True
+            break
+        raw = option.get("raw")
+        context = option.get("context")
+        value = option.get("value")
+        if (
+            not isinstance(raw, Mapping)
+            or set(raw) != set(expected_fields)
+            or not isinstance(context, Mapping)
+            or set(context) != set(context_checks)
+            or not isinstance(value, Mapping)
+            or set(value) != set(expected_fields)
+        ):
+            malformed = True
+            break
+        range_raw = _exact_int(raw.get("range_basis"))
+        extra_raw = raw.get("extra")
+        workshop_raw = raw.get("workshop")
+        try:
+            # Use the same canonical notation as the guarded UI owner.  This
+            # prevents a mapping spelling such as 30m from silently becoming
+            # distinct authority from 30.00m.
+            from core.orb_distance import normalize_orb_distance_preset
+
+            semantic = normalize_orb_distance_preset(value)
+        except (TypeError, ValueError):
+            malformed = True
+            break
+        normalized_context = {
+            key: str(context.get(key) or "").strip()
+            for key in context_checks
+        }
+        if (
+            range_raw is None
+            or isinstance(extra_raw, bool)
+            or not isinstance(extra_raw, float)
+            or not math.isfinite(extra_raw)
+            or isinstance(workshop_raw, bool)
+            or not isinstance(workshop_raw, float)
+            or not math.isfinite(workshop_raw)
+            or not all(semantic.values())
+            or not all(normalized_context.values())
+        ):
+            malformed = True
+            break
+        raw_key = (
+            range_raw,
+            extra_raw,
+            workshop_raw,
+            tuple(normalized_context[key] for key in context_checks),
+        )
+        if raw_key in raw_to_value:
+            malformed = True
+            break
+        raw_to_value[raw_key] = semantic
+        if semantic not in semantic_values:
+            semantic_values.append(semantic)
+    if malformed or not raw_to_value:
+        return SaveCheckEvidence(
+            check_id="orb_distance",
+            status="unmapped",
+            value=None,
+            source_fields=evidence_source_fields,
+            complete=False,
+            reason="Orb Distance mapping values are malformed",
+        )
+
+    range_raw = _exact_int(decoded.get(expected_fields["range_basis"]))
+    extra_raw = decoded.get(expected_fields["extra"])
+    workshop_raw = decoded.get(expected_fields["workshop"])
+    raw_valid = bool(
+        range_raw is not None
+        and not isinstance(extra_raw, bool)
+        and isinstance(extra_raw, float)
+        and math.isfinite(extra_raw)
+        and not isinstance(workshop_raw, bool)
+        and isinstance(workshop_raw, float)
+        and math.isfinite(workshop_raw)
+    )
+    observed = (
+        raw_to_value.get(
+            (
+                range_raw,
+                extra_raw,
+                workshop_raw,
+                tuple(observed_context[key] for key in context_checks),
+            )
+        )
+        if raw_valid
+        else None
+    )
+    complete = observed is not None
+    return SaveCheckEvidence(
+        check_id="orb_distance",
+        status="observed" if complete else "unmapped",
+        value=observed,
+        source_fields=evidence_source_fields,
+        complete=complete,
+        reason=(
+            ""
+            if complete
+            else "Orb Distance tuple and preset context are not an exact mapped value"
+        ),
+        authority={"kind": "exact_values", "values": semantic_values},
+        diagnostics=(
+            {}
+            if complete
+            else (
+                _unmapped_check_candidate_diagnostics(
+                    "orb_distance",
+                    decoded,
+                    scope_context=observed_context,
+                )
+                if len(observed_context) == len(context_checks)
+                else {}
+            )
+        ),
+    )
 
 
 def _battle_history_killed_by_evidence(
@@ -2925,27 +3267,35 @@ def _battle_history_killed_by_evidence(
     """Expose a semantic-neutral terminal cause discriminator for UI pairing."""
 
     tail = runtime_save.battle_history_tail
-    entry = tail.entry
-    if tail.completed_entry_status == "observed" and entry is not None:
+    identity = tail.identity
+    raw_value = getattr(identity, "killed_by_id", None)
+    killed_by_ids = (
+        ((mapping.get("runtime_save") or {}).get("battle_history") or {}).get(
+            "killed_by_ids"
+        )
+        or {}
+    )
+    mapped_value = (
+        killed_by_ids.get(str(raw_value))
+        if type(raw_value) is int and isinstance(killed_by_ids, Mapping)
+        else None
+    )
+    if (
+        tail.structural_status == "observed"
+        and isinstance(mapped_value, str)
+        and mapped_value
+    ):
         return SaveCheckEvidence(
             check_id="battle_history_killed_by",
             status="observed",
-            value=entry.killed_by,
+            value=mapped_value,
             source_fields=("battleHistory[-1].killedBy",),
             complete=True,
             authority={"kind": "matching_value"},
         )
     reason = str(tail.completed_entry_reason or "")
-    identity = tail.identity
-    raw_value = getattr(identity, "killed_by_id", None)
     candidates: list[dict[str, Any]] = []
     if reason == f"unmapped_killed_by_id:{raw_value}" and type(raw_value) is int:
-        killed_by_ids = (
-            ((mapping.get("runtime_save") or {}).get("battle_history") or {}).get(
-                "killed_by_ids"
-            )
-            or {}
-        )
         candidate = _pending_mapping_candidate(
             value_kind="battle_history_killed_by_id",
             raw_value=raw_value,
@@ -3430,6 +3780,8 @@ def _mapped_free_upgrade_locks(
 def _module_loadout_evidence(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
+    *,
+    canonical_module_info_indices: Any = None,
 ) -> SaveCheckEvidence:
     spec = mapping.get("module_loadout")
     source_fields = ("moduleEquipped", "assistModuleSlots")
@@ -3444,11 +3796,14 @@ def _module_loadout_evidence(
         )
     primary_specs = spec.get("primary")
     assist_specs = spec.get("assist")
+    observation_scope = spec.get("assignment_observation_scope")
     if (
         not _is_sequence(primary_specs)
         or not _is_sequence(assist_specs)
         or len(primary_specs) != 4
         or len(assist_specs) != 4
+        or observation_scope
+        not in {None, "canonical_global_same_family"}
         or not _module_loadout_specs_are_valid(primary_specs, assist_specs)
     ):
         return SaveCheckEvidence(
@@ -3477,8 +3832,20 @@ def _module_loadout_evidence(
     supported_names: dict[str, list[str]] = {}
     slot_diagnostics: list[dict[str, str]] = []
     mapping_candidates: list[dict[str, Any]] = []
-    known_module_values = _known_module_values((*primary_specs, *assist_specs))
-    if known_module_values is None:
+    module_identities = _module_identity_options(
+        mapping,
+        (*primary_specs, *assist_specs),
+    )
+    canonical_identity_mapping = dict(mapping)
+    if canonical_module_info_indices is not None:
+        canonical_identity_mapping["module_info_indices"] = (
+            canonical_module_info_indices
+        )
+    canonical_module_identities = _module_identity_options(
+        canonical_identity_mapping,
+        (*primary_specs, *assist_specs),
+    )
+    if module_identities is None or canonical_module_identities is None:
         return _unmapped_module_evidence(
             source_fields,
             "module infoIndex mapping changed",
@@ -3506,12 +3873,18 @@ def _module_loadout_evidence(
             supported_names,
             slot_diagnostics,
             mapping_candidates,
-            known_module_values,
+            module_identities,
+            canonical_module_identities,
             raw_spec,
             item,
+            observation_scope=observation_scope,
         )
         if failure:
-            return _unmapped_module_evidence(source_fields, failure)
+            return _unmapped_module_evidence(
+                source_fields,
+                failure,
+                diagnostics={"slots": slot_diagnostics},
+            )
 
     assist_by_type: dict[int, Mapping[str, Any]] = {}
     assist_slot_class = str(spec.get("assist_slot_class") or "").strip()
@@ -3625,12 +3998,18 @@ def _module_loadout_evidence(
             supported_names,
             slot_diagnostics,
             mapping_candidates,
-            known_module_values,
+            module_identities,
+            canonical_module_identities,
             raw_spec,
             item,
+            observation_scope=observation_scope,
         )
         if failure:
-            return _unmapped_module_evidence(source_fields, failure)
+            return _unmapped_module_evidence(
+                source_fields,
+                failure,
+                diagnostics={"slots": slot_diagnostics},
+            )
 
     if mapping_candidates:
         for candidate in mapping_candidates:
@@ -3657,9 +4036,33 @@ def _module_loadout_evidence(
             },
         )
     if len(assignments) != 8:
+        local_only = any(
+            item.get("mapping_status") == "mapped_identity_local_only"
+            for item in slot_diagnostics
+        )
+        unsupported_roles = {
+            item.get("role")
+            for item in slot_diagnostics
+            if item.get("mapping_status")
+            == "mapped_identity_unsupported_scope"
+        }
+        if local_only:
+            partial_reason = (
+                "locally confirmed module identity requires canonical "
+                "integration"
+            )
+        elif unsupported_roles == {"primary"}:
+            partial_reason = "unsupported primary module value for exact slot"
+        elif unsupported_roles == {"assist"}:
+            partial_reason = "unsupported assist module value for exact slot"
+        elif unsupported_roles:
+            partial_reason = "unsupported module values for exact slots"
+        else:
+            partial_reason = "module loadout is partial"
         return _unmapped_module_evidence(
             source_fields,
-            "module loadout is partial",
+            partial_reason,
+            diagnostics={"slots": slot_diagnostics},
         )
     return SaveCheckEvidence(
         check_id="modules",
@@ -3724,9 +4127,12 @@ def _record_mapped_module_assignment(
     supported_names: dict[str, list[str]],
     diagnostics: list[dict[str, str]],
     mapping_candidates: list[dict[str, Any]],
-    known_module_values: Mapping[int, str],
+    module_identities: Mapping[int, tuple[str, str]],
+    canonical_module_identities: Mapping[int, tuple[str, str]],
     spec: Mapping[str, Any],
     item: Mapping[str, Any],
+    *,
+    observation_scope: Any,
 ) -> str:
     slot_key = str(spec.get("slot_key") or "").strip()
     family = str(spec.get("family") or "").strip()
@@ -3750,17 +4156,18 @@ def _record_mapped_module_assignment(
         (option for option in options if option[0] == observed_info_index),
         None,
     )
-    if selected is None:
+    known_identity = module_identities.get(observed_info_index)
+    if known_identity is None:
         candidate = _pending_mapping_candidate(
             value_kind="module_info_index",
             raw_value=observed_info_index,
             pairing_method="exact_locator",
             locator=slot_key,
             expected_observation_count=8,
-            known_semantic_values=tuple(known_module_values.values()),
-            known_raw_semantic_value=known_module_values.get(
-                observed_info_index
+            known_semantic_values=tuple(
+                name for name, _family in module_identities.values()
             ),
+            known_raw_semantic_value=None,
             scope={
                 "slot_key": slot_key,
                 "family": family,
@@ -3779,38 +4186,96 @@ def _record_mapped_module_assignment(
             }
         )
         return ""
-    _info_index, name = selected
+    name, mapped_family = known_identity
+    if mapped_family != family:
+        return f"{role.title()} module family mapping changed"
+    canonical_identity = canonical_module_identities.get(observed_info_index)
+    if canonical_identity != known_identity:
+        diagnostics.append(
+            {
+                "slot_key": slot_key,
+                "family": family,
+                "role": role,
+                "name": name,
+                "mapping_status": "mapped_identity_local_only",
+            }
+        )
+        return ""
+    if selected is None and observation_scope != "canonical_global_same_family":
+        diagnostics.append(
+            {
+                "slot_key": slot_key,
+                "family": family,
+                "role": role,
+                "name": name,
+                "mapping_status": "mapped_identity_unsupported_scope",
+            }
+        )
+        return ""
     assignments[slot_key] = name
     supported_names[slot_key] = [option_name for _index, option_name in options]
-    diagnostics.append(
-        {
-            "slot_key": slot_key,
-            "family": family,
-            "role": role,
-            "name": name,
-        }
-    )
+    diagnostic = {
+        "slot_key": slot_key,
+        "family": family,
+        "role": role,
+        "name": name,
+    }
+    if selected is None:
+        diagnostic["mapping_status"] = "mapped_global_observation"
+    diagnostics.append(diagnostic)
     return ""
 
 
-def _known_module_values(
+def _module_identity_options(
+    mapping: Mapping[str, Any],
     specs: Sequence[Any],
-) -> Optional[dict[int, str]]:
-    values: dict[int, str] = {}
+) -> Optional[dict[int, tuple[str, str]]]:
+    raw_identities = mapping.get("module_info_indices")
+    if not isinstance(raw_identities, Mapping) or not raw_identities:
+        return None
+    identities: dict[int, tuple[str, str]] = {}
+    seen_names: set[str] = set()
+    for raw_info_index, raw_identity in raw_identities.items():
+        if not isinstance(raw_identity, Mapping):
+            return None
+        info_index = _exact_int_string_key(raw_info_index)
+        raw_name = raw_identity.get("name")
+        raw_family = raw_identity.get("family")
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        family = raw_family.strip() if isinstance(raw_family, str) else ""
+        normalized_name = _normal_scalar(name)
+        if (
+            set(raw_identity) != {"name", "family"}
+            or info_index is None
+            or info_index < 0
+            or not name
+            or raw_name != name
+            or raw_family != family
+            or family not in {"cannon", "armor", "generator", "core"}
+            or normalized_name in seen_names
+        ):
+            return None
+        identities[info_index] = (name, family)
+        seen_names.add(normalized_name)
+
     for raw_spec in specs:
         if not isinstance(raw_spec, Mapping):
             return None
+        family = str(raw_spec.get("family") or "").strip()
         options = _module_value_options(raw_spec)
         if options is None:
             return None
         for info_index, name in options:
-            prior = values.get(info_index)
-            if prior is not None and prior != name:
+            if identities.get(info_index) != (name, family):
                 return None
-            values[info_index] = name
-    if len(values) != len(set(values.values())):
+    return identities
+
+
+def _exact_int_string_key(value: Any) -> Optional[int]:
+    if not isinstance(value, str) or not value or not value.isdigit():
         return None
-    return values
+    parsed = int(value)
+    return parsed if str(parsed) == value else None
 
 
 def _module_value_options(
@@ -4045,6 +4510,22 @@ def _expanded_requirement_values(
         "_gate_waivers",
     ):
         values.pop(metadata_key, None)
+    damage = values.get("damage_slider")
+    if isinstance(damage, Mapping):
+        if str(damage.get("mode") or "").strip().lower() == "preserve":
+            values.pop("damage_slider", None)
+        elif "value" in damage:
+            values["damage_slider"] = damage.get("value")
+    orb = values.get("orb_distance")
+    if isinstance(orb, Mapping):
+        if str(orb.get("mode") or "").strip().lower() == "preserve":
+            values.pop("orb_distance", None)
+        elif _is_sequence(orb.get("range_presets")):
+            values["orb_distance"] = [
+                deepcopy(value) for value in orb["range_presets"]
+            ]
+        elif isinstance(orb.get("resolved"), Mapping):
+            values["orb_distance"] = dict(orb["resolved"])
     ultimate = values.pop("ultimate_weapons", None)
     if not isinstance(ultimate, Mapping):
         return values
@@ -4072,6 +4553,15 @@ def _requirement_policy(
     check_id: str,
 ) -> str:
     values = _requirement_values(requirements)
+    if check_id in {"damage_slider", "orb_distance"}:
+        policy = values.get(check_id)
+        if isinstance(policy, Mapping):
+            normalized = str(policy.get("mode") or "enforce").strip().lower()
+            return (
+                normalized
+                if normalized in {"enforce", "observe", "preserve"}
+                else "enforce"
+            )
     policies = values.get("loadout_policies")
     if not isinstance(policies, Mapping):
         return "enforce"
@@ -4096,6 +4586,14 @@ def _requirement_is_supported(
 ) -> bool:
     authority = evidence.authority
     kind = str(authority.get("kind") or "")
+    if check_id == "orb_distance" and kind == "exact_values":
+        options = _normalized_orb_requirement_options(expected)
+        allowed = [
+            candidate
+            for value in authority.get("values") or ()
+            for candidate in (_normalized_orb_requirement_options(value) or ())
+        ]
+        return bool(options and any(option in allowed for option in options))
     if kind == "matching_value":
         return True
     if kind == "allowed_values":
@@ -4224,6 +4722,15 @@ def save_check_matches_requirement(
             str(key): _normal_scalar(value)
             for key, value in observed.items()
         }
+    if check_id == "orb_distance":
+        options = _normalized_orb_requirement_options(expected)
+        normalized_observed = _normalized_orb_requirement_options(observed)
+        return bool(
+            options
+            and normalized_observed
+            and len(normalized_observed) == 1
+            and normalized_observed[0] in options
+        )
     if isinstance(expected, Mapping):
         return _mapping_is_subset(expected, observed)
     if isinstance(expected, Sequence) and not isinstance(expected, (str, bytes)):
@@ -4264,6 +4771,26 @@ def _mapping_is_subset(expected: Mapping[str, Any], observed: Any) -> bool:
         elif _normal_scalar(expected_value) != _normal_scalar(observed_value):
             return False
     return True
+
+
+def _normalized_orb_requirement_options(
+    value: Any,
+) -> Optional[list[dict[str, str]]]:
+    """Normalize either one Orb tuple or its complete Range-preset set."""
+
+    try:
+        from core.orb_distance import (
+            normalize_orb_distance_preset,
+            normalize_orb_distance_presets,
+        )
+
+        if isinstance(value, Mapping):
+            return [normalize_orb_distance_preset(value)]
+        if _is_sequence(value):
+            return normalize_orb_distance_presets(value)
+    except (TypeError, ValueError):
+        return None
+    return None
 
 
 def _snapshot_is_stale(

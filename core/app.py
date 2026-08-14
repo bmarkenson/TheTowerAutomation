@@ -144,6 +144,7 @@ from core.player_save_temporal import (
 from core.profile_progression import unavailable_profile_progression
 from core.terminal_save_report import (
     terminal_save_report_complete,
+    terminal_save_report_structural_complete,
     terminal_history_transition_from_acquisition,
     terminal_mapping_workflow_provenance,
     terminal_save_report_from_acquisition,
@@ -3770,12 +3771,21 @@ class App:
                 if current is None:
                     return
                 terminal_evidence = manual.get("terminal_evidence")
+                terminal_evidence_unavailable = bool(
+                    isinstance(terminal_evidence, Mapping)
+                    and terminal_evidence.get("status") == "unavailable"
+                )
                 if (
                     current.get("game_state") == "game_over"
                     and (
                         not isinstance(terminal_evidence, Mapping)
-                        or terminal_evidence.get("status") == "unavailable"
+                        or terminal_evidence_unavailable
                     )
+                ):
+                    return
+                if (
+                    terminal_evidence_unavailable
+                    and current.get("game_state") != "home_new_battle"
                 ):
                     return
                 configuration = {
@@ -3809,6 +3819,19 @@ class App:
                         "[MANUAL_CONTROL] Return Control is waiting for a fresh "
                         "runtime observation before save refresh; all ordinary "
                         "input remains held",
+                        "WARN",
+                    )
+                    return
+                terminal_evidence = manual.get("terminal_evidence")
+                if (
+                    isinstance(terminal_evidence, Mapping)
+                    and terminal_evidence.get("status") == "unavailable"
+                    and current.get("game_state") != "home_new_battle"
+                ):
+                    log(
+                        "[MANUAL_CONTROL] Return Control retained its hold "
+                        "because unavailable terminal evidence may resume "
+                        "only from a fresh exact Home New Battle boundary",
                         "WARN",
                     )
                     return
@@ -4946,22 +4969,44 @@ class App:
         receipt = None
         battle_id = None
         killed_by = ""
-        if (
+        semantic_report_complete = bool(
             isinstance(report, Mapping)
             and terminal_save_report_complete(report)
+        )
+        structural_report_complete = bool(
+            isinstance(report, Mapping)
+            and terminal_save_report_structural_complete(report)
+        )
+        if (
+            isinstance(report, Mapping)
+            and (semantic_report_complete or structural_report_complete)
             and isinstance(acquisition, PlayerSaveAcquisitionBundle)
         ):
-            completed = report.get("completed_entry")
-            identity = (
-                completed.get("identity")
-                if isinstance(completed, Mapping)
-                else None
-            )
-            killed_by = str(
-                identity.get("killed_by")
-                if isinstance(identity, Mapping)
-                else ""
-            ).strip()
+            if semantic_report_complete:
+                completed = report.get("completed_entry")
+                identity = (
+                    completed.get("identity")
+                    if isinstance(completed, Mapping)
+                    else None
+                )
+                killed_by = str(
+                    identity.get("killed_by")
+                    if isinstance(identity, Mapping)
+                    else ""
+                ).strip()
+            else:
+                snapshot = acquisition.snapshot
+                checks = getattr(snapshot, "checks", None)
+                cause = (
+                    checks.get("battle_history_killed_by")
+                    if isinstance(checks, Mapping)
+                    else None
+                )
+                if (
+                    getattr(cause, "status", None) == "observed"
+                    and getattr(cause, "complete", None) is True
+                ):
+                    killed_by = str(getattr(cause, "value", "") or "").strip()
             if killed_by:
                 collection = str(
                     manual.get("surrender_collection") or "minimal"
@@ -4991,52 +5036,79 @@ class App:
                 except (TypeError, ValueError) as exc:
                     reason = f"terminal receipt rejected: {exc}"
                 else:
-                    status = (
-                        "confirmed_surrender"
-                        if killed_by.lower() == "surrender"
-                        else "confirmed_other"
+                    structural_minimal_surrender = bool(
+                        not semantic_report_complete
+                        and killed_by.lower() == "surrender"
+                        and collection == "minimal"
                     )
-                    reason = "causally bound terminal save classified the outcome"
-                    if status == "confirmed_surrender" and collection == "minimal":
-                        operation_id = f"{manual_id}:minimal-surrender-record"
-                        log_action_intent(
-                            "Recording a manual Surrender without terminal UI",
-                            reason=(
-                                "the exact-run natural save confirmed Surrender "
-                                "and minimal collection was selected"
-                            ),
-                            operation_id=operation_id,
+                    if not semantic_report_complete and not structural_minimal_surrender:
+                        receipt = None
+                        reason = (
+                            "terminal History continuity is complete, but the "
+                            "semantic report requires the existing UI fallback"
                         )
-                        try:
-                            record = self._persist_minimal_surrender_record(
-                                context,
-                                acquisition,
-                                initiator="operator_manual_control",
-                                disposition_provenance={
-                                    "terminal_receipt": receipt,
-                                },
-                            )
-                        except (OSError, TypeError, ValueError) as exc:
-                            status = "unavailable"
-                            receipt = None
-                            reason = f"minimal surrender record failed: {exc}"
-                            log_result(
-                                "Manual Surrender record failed; Automation "
-                                "remains Paused and no stats UI was opened",
-                                detail=f"[MANUAL_CONTROL] reason={reason}",
-                                operation_id=operation_id,
+                    else:
+                        status = (
+                            "confirmed_surrender"
+                            if killed_by.lower() == "surrender"
+                            else "confirmed_other"
+                        )
+                        reason = (
+                            "causally bound structural terminal save classified "
+                            "minimal Surrender; semantic record publication is "
+                            "unavailable"
+                            if structural_minimal_surrender
+                            else "causally bound terminal save classified the outcome"
+                        )
+                    if status == "confirmed_surrender" and collection == "minimal":
+                        if structural_minimal_surrender:
+                            log(
+                                "[MANUAL_CONTROL] Exact structural History "
+                                "continuity confirmed minimal Surrender; the "
+                                "malformed semantic report was not published "
+                                "and no terminal UI input is required",
+                                "INFO",
                             )
                         else:
-                            battle_id = str(record.get("battle_id") or "")
-                            log_result(
-                                "Manual Surrender recorded from save; stats UI "
-                                "and optional enrichment were skipped",
-                                detail=(
-                                    "[MANUAL_CONTROL] disposition=minimal "
-                                    f"battle_id={battle_id} analytics=excluded"
+                            operation_id = f"{manual_id}:minimal-surrender-record"
+                            log_action_intent(
+                                "Recording a manual Surrender without terminal UI",
+                                reason=(
+                                    "the exact-run natural save confirmed Surrender "
+                                    "and minimal collection was selected"
                                 ),
                                 operation_id=operation_id,
                             )
+                            try:
+                                record = self._persist_minimal_surrender_record(
+                                    context,
+                                    acquisition,
+                                    initiator="operator_manual_control",
+                                    disposition_provenance={
+                                        "terminal_receipt": receipt,
+                                    },
+                                )
+                            except (OSError, TypeError, ValueError) as exc:
+                                status = "unavailable"
+                                receipt = None
+                                reason = f"minimal surrender record failed: {exc}"
+                                log_result(
+                                    "Manual Surrender record failed; Automation "
+                                    "remains Paused and no stats UI was opened",
+                                    detail=f"[MANUAL_CONTROL] reason={reason}",
+                                    operation_id=operation_id,
+                                )
+                            else:
+                                battle_id = str(record.get("battle_id") or "")
+                                log_result(
+                                    "Manual Surrender recorded from save; stats UI "
+                                    "and optional enrichment were skipped",
+                                    detail=(
+                                        "[MANUAL_CONTROL] disposition=minimal "
+                                        f"battle_id={battle_id} analytics=excluded"
+                                    ),
+                                    operation_id=operation_id,
+                                )
         evidence: Dict[str, object] = {
             "schema_version": 1,
             "status": status,
@@ -7016,6 +7088,7 @@ class App:
         now: Optional[float] = None,
         reason: Optional[str] = None,
         starting_evidence: Optional[Mapping[str, object]] = None,
+        owned_battle_evidence: Optional[Mapping[str, object]] = None,
         terminal_evidence: Optional[Mapping[str, object]] = None,
     ) -> Dict[str, Any]:
         lease_id = str(lease.get("lease_id") or "")
@@ -7034,11 +7107,14 @@ class App:
             "runtime": self._interactive_development_runtime_owner(),
             "updated_at": timestamp,
         }
+        if lease.get("owned_battle_start") is True:
+            acknowledgement["owned_battle_start"] = True
         for name in (
             "hold_installed_at",
             "acknowledged_at",
             "activated_at",
             "starting_evidence",
+            "owned_battle_evidence",
         ):
             if existing.get(name) is not None:
                 acknowledgement[name] = existing[name]
@@ -7052,6 +7128,10 @@ class App:
             acknowledgement.setdefault("hold_installed_at", timestamp)
         if starting_evidence is not None:
             acknowledgement["starting_evidence"] = dict(starting_evidence)
+        if owned_battle_evidence is not None:
+            acknowledgement["owned_battle_evidence"] = dict(
+                owned_battle_evidence
+            )
         if state == "active":
             acknowledgement.setdefault("hold_installed_at", timestamp)
             acknowledgement.setdefault("acknowledged_at", timestamp)
@@ -8244,13 +8324,68 @@ class App:
         battle_active: bool,
         battle_scope: Optional[str],
         observed_at: str,
+        target_generation: Optional[int] = None,
     ) -> Dict[str, object]:
-        return {
+        evidence: Dict[str, object] = {
             "screen_state": str(detection.get("state") or "UNKNOWN").upper(),
             "battle_active": bool(battle_active),
             "battle_scope": battle_scope,
             "observed_at": observed_at,
         }
+        home_control = str(
+            detection.get("home_battle_control") or ""
+        ).strip().upper()
+        if home_control:
+            evidence["home_battle_control"] = home_control
+        if type(target_generation) is int and target_generation > 0:
+            evidence["target_generation"] = target_generation
+        return evidence
+
+    @staticmethod
+    def _interactive_development_owned_battle_evidence(
+        lease: Mapping[str, object],
+        acknowledgement: object,
+        starting: Mapping[str, object],
+        current: Mapping[str, object],
+    ) -> Optional[Dict[str, object]]:
+        """Retain only one explicitly preclaimed exact Home-to-run owner."""
+
+        if lease.get("owned_battle_start") is not True:
+            return None
+        existing = (
+            acknowledgement.get("owned_battle_evidence")
+            if isinstance(acknowledgement, Mapping)
+            else None
+        )
+        current_state = str(
+            current.get("screen_state") or "UNKNOWN"
+        ).upper()
+        if current_state in {"UNKNOWN", "GAME_OVER", "TOURNAMENT_RESULTS"}:
+            return None
+        expected = existing if isinstance(existing, Mapping) else starting
+        same_binding = bool(
+            str(expected.get("battle_scope") or "")
+            and expected.get("battle_scope") == current.get("battle_scope")
+            and type(expected.get("target_generation")) is int
+            and expected.get("target_generation")
+            == current.get("target_generation")
+        )
+        if isinstance(existing, Mapping):
+            if current.get("battle_active") is True and same_binding:
+                return dict(existing)
+            return None
+        if not (
+            str(starting.get("screen_state") or "").upper()
+            == "HOME_SCREEN"
+            and str(starting.get("home_battle_control") or "").upper()
+            == "NEW_BATTLE"
+            and starting.get("battle_active") is False
+            and current_state == "RUNNING"
+            and current.get("battle_active") is True
+            and same_binding
+        ):
+            return None
+        return dict(current)
 
     @staticmethod
     def _interactive_development_boundary_reason(
@@ -8268,7 +8403,74 @@ class App:
         current_scope = str(current.get("battle_scope") or "")
         if starting_scope and current_scope and starting_scope != current_scope:
             return "the authoritative battle/session identity changed"
+        starting_generation = starting.get("target_generation")
+        current_generation = current.get("target_generation")
+        if (
+            starting_generation is not None
+            and starting_generation != current_generation
+        ):
+            return "the authoritative ADB target generation changed"
         return None
+
+    def _matching_interactive_development_owned_terminal_claim(
+        self,
+        current: object,
+    ) -> Optional[Dict[str, object]]:
+        """Return one same-process preclaimed development terminal owner."""
+
+        acknowledgement = getattr(
+            self,
+            "_interactive_development_ack",
+            None,
+        )
+        if not (
+            isinstance(current, Mapping)
+            and current.get("game_state") == "game_over"
+            and isinstance(acknowledgement, Mapping)
+            and acknowledgement.get("state") == "terminal"
+            and acknowledgement.get("owned_battle_start") is True
+            and acknowledgement.get("terminal_disposition")
+            == "natural_game_over"
+            and self._interactive_development_control_state() == "RUNNING"
+        ):
+            return None
+        runtime = acknowledgement.get("runtime")
+        owned = acknowledgement.get("owned_battle_evidence")
+        terminal = acknowledgement.get("terminal_evidence")
+        if not (
+            isinstance(runtime, Mapping)
+            and isinstance(owned, Mapping)
+            and isinstance(terminal, Mapping)
+            and terminal.get("screen_state") == "GAME_OVER"
+        ):
+            return None
+        if not all(
+            runtime.get(source) == current.get(target)
+            for source, target in (
+                ("runtime_id", "runtime_id"),
+                ("pid", "pid"),
+                ("adb_target", "adb_target"),
+            )
+        ):
+            return None
+        scope_id = str(owned.get("battle_scope") or "")
+        target_generation = owned.get("target_generation")
+        if not (
+            scope_id
+            and type(target_generation) is int
+            and target_generation > 0
+            and scope_id == terminal.get("battle_scope")
+            and scope_id == current.get("activity_scope_run_id")
+            and target_generation == terminal.get("target_generation")
+            and target_generation == current.get("target_generation")
+        ):
+            return None
+        return {
+            "schema_version": 1,
+            "lease_id": str(acknowledgement.get("lease_id") or ""),
+            "activity_scope_run_id": scope_id,
+            "target_generation": target_generation,
+        }
 
     def _sync_interactive_development_observation(
         self,
@@ -8289,11 +8491,18 @@ class App:
         observed_at = self._interactive_development_timestamp(now)
         battle_active = bool(getattr(self, "_authority_battle_active", False))
         battle_scope = self._current_run_scope_id()
+        current_workflow = self._current_control_workflow_evidence()
+        target_generation = (
+            current_workflow.get("target_generation")
+            if isinstance(current_workflow, Mapping)
+            else None
+        )
         evidence = self._interactive_development_evidence(
             detection,
             battle_active=battle_active,
             battle_scope=battle_scope,
             observed_at=observed_at,
+            target_generation=target_generation,
         )
         acknowledgement = getattr(self, "_interactive_development_ack", None)
         starting = (
@@ -8304,10 +8513,20 @@ class App:
         if not isinstance(starting, Mapping):
             candidate = lease.get("starting_evidence")
             starting = candidate if isinstance(candidate, Mapping) else {}
+        owned_battle_evidence = (
+            self._interactive_development_owned_battle_evidence(
+                lease,
+                acknowledgement,
+                starting,
+                evidence,
+            )
+        )
         boundary_reason = self._interactive_development_boundary_reason(
             starting,
             evidence,
         )
+        if owned_battle_evidence is not None:
+            boundary_reason = None
         if boundary_reason:
             disposition = (
                 "natural_game_over"
@@ -8406,11 +8625,17 @@ class App:
             if isinstance(acknowledgement, Mapping)
             else None
         )
+        if owned_battle_evidence is not None:
+            self._observed_active_battle_scope_id = str(
+                owned_battle_evidence.get("battle_scope") or ""
+            ) or None
+            self._last_unbound_terminal_signature = None
         self._set_interactive_development_ack(
             lease,
             state="active",
             now=now,
             starting_evidence=evidence,
+            owned_battle_evidence=owned_battle_evidence,
         )
         if previous_state != "active":
             log(
@@ -13992,12 +14217,23 @@ class App:
                 close_mapping_candidate_window(
                     f"home_setup_retry:{check_id}"
                 )
+            revalidation_required = bool(
+                isinstance(getattr(setup, "evidence", None), Mapping)
+                and isinstance(
+                    setup.evidence.get("save_preflight"),
+                    Mapping,
+                )
+                and setup.evidence["save_preflight"].get(
+                    "revalidation_required"
+                )
+                is True
+            )
             log(
                 f"[GC_NO_BATTLE] Home setup attempt {attempt}/"
                 f"{HOME_SETUP_MAX_ATTEMPTS} failed at {check_id}: "
                 f"{setup.reason}; retrying the complete setup from fresh "
                 "Home evidence",
-                "WARN",
+                "INFO" if revalidation_required else "WARN",
                 console=True,
             )
             current = self._capture_frame()
@@ -15367,6 +15603,11 @@ class App:
                 # screen; never replay collection or navigation from it.
                 return
             current_manual_evidence = self._current_control_workflow_evidence()
+            owned_development_terminal_claim = (
+                self._matching_interactive_development_owned_terminal_claim(
+                    current_manual_evidence
+                )
+            )
             manual_terminal_claim = (
                 self._matching_manual_terminal_claim(
                     manual,
@@ -15434,6 +15675,14 @@ class App:
                 log(
                     "[MANUAL_CONTROL] Terminal save evidence is unavailable; "
                     "using the supported Game Stats/Perks/More Stats UI route",
+                    "INFO",
+                    console=True,
+                )
+            if owned_development_terminal_claim is not None:
+                log(
+                    "[INTERACTIVE_DEVELOPMENT] The exact preclaimed owned "
+                    "battle reached Game Over; the supported minimal terminal "
+                    "route will return Home",
                     "INFO",
                     console=True,
                 )
@@ -15844,11 +16093,35 @@ class App:
                 if emulator_fallback
                 else None
             )
+            owned_development_disposition = (
+                {
+                    "schema_version": 1,
+                    "outcome": "interrupted",
+                    "initiator": "interactive_development_owned_battle",
+                    "collection": "minimal_terminal_save",
+                    "representative": False,
+                    "analytics": "excluded",
+                    "history": "excluded_by_default",
+                    "reason": (
+                        "an explicitly preclaimed development battle reached "
+                        "its authorized terminal cleanup"
+                    ),
+                    "provenance": {
+                        "lease_id": str(
+                            owned_development_terminal_claim.get("lease_id")
+                            or ""
+                        ),
+                    },
+                }
+                if owned_development_terminal_claim is not None
+                else None
+            )
             terminal_outcome = handle_game_over(
                 capture_stats=(
                     not isinstance(pending_terminal_route, Mapping)
                     and repair_terminal_failure_reason is None
                     and not repair_in_progress
+                    and owned_development_terminal_claim is None
                     and (
                         (
                             manual_return
@@ -15889,11 +16162,13 @@ class App:
                     or no_strategy_run
                     or degraded_home_repair
                     or emulator_fallback
+                    or owned_development_terminal_claim is not None
                 ),
                 battle_context=terminal_battle_context,
                 report_disposition=(
                     manual_full_disposition
                     or emulator_fallback_disposition
+                    or owned_development_disposition
                 ),
                 captured_at=(
                     terminal_acquisition.captured_at
@@ -15970,6 +16245,7 @@ class App:
                         or no_strategy_run
                         or degraded_home_repair
                         or emulator_fallback
+                        or owned_development_terminal_claim is not None
                         or AUTOMATION.mode is ExecMode.HOME
                         else "retry"
                     ),
@@ -15998,6 +16274,15 @@ class App:
                         "continuation",
                         "INFO",
                         console=True,
+                    )
+                if owned_development_terminal_claim is not None:
+                    log_result(
+                        "Owned development battle cleanup reached verified Home",
+                        detail=(
+                            "[INTERACTIVE_DEVELOPMENT] "
+                            "disposition=owned_battle_home_complete "
+                            f"lease_id={owned_development_terminal_claim.get('lease_id')}"
+                        ),
                     )
             if repair_terminal_failure_reason is not None:
                 self._mission_mgr.fail_session_preflight_repair(

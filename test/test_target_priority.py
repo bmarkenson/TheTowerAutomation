@@ -22,6 +22,7 @@ def test_enforcer_moves_rows_up_and_verifies():
     reads = iter((list(reversed(TARGETS)), list(TARGETS)))
     taps = []
     repairs = []
+    events = []
     with (
         patch("core.target_priority.read_target_priority_order", side_effect=reads),
         patch("core.target_priority.log"),
@@ -29,14 +30,23 @@ def test_enforcer_moves_rows_up_and_verifies():
     ):
         assert ensure_target_priority_order(
             capture_fn=lambda: np.full((1920, 1080, 3), 32, dtype=np.uint8),
-            tap_fn=lambda point, **_kwargs: taps.append(point) or True,
+            tap_fn=lambda point, **_kwargs: (
+                events.append(("tap", point)),
+                taps.append(point),
+                True,
+            )[-1],
             ensure_menu_fn=lambda: True,
             sleep_fn=lambda _seconds: None,
-            repair_observer_fn=lambda: repairs.append("started"),
+            repair_observer_fn=lambda: (
+                events.append(("repair", "started")),
+                repairs.append("started"),
+            ),
         )
     assert taps[0] == (910, 380)
     assert taps[-1] == (950, 100)
     assert repairs == ["started"]
+    assert events[1] == ("repair", "started")
+    assert events[2][0] == "tap"
     result_log.assert_called_once()
     assert result_log.call_args.args[0] == (
         "Target Priority setup complete — order verified"

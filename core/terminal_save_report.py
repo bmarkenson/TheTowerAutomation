@@ -621,6 +621,22 @@ def terminal_save_report_complete(value: Any) -> bool:
     )
 
 
+def terminal_save_report_structural_complete(value: Any) -> bool:
+    """Return whether exact-run History continuity succeeded independently."""
+
+    structural = value.get("structural_history") if isinstance(value, Mapping) else None
+    transition = value.get("history_transition") if isinstance(value, Mapping) else None
+    return bool(
+        isinstance(value, Mapping)
+        and value.get("schema_version") == TERMINAL_SAVE_REPORT_SCHEMA_VERSION
+        and isinstance(structural, Mapping)
+        and structural.get("status") == "complete"
+        and structural.get("reason") == ""
+        and isinstance(transition, Mapping)
+        and transition.get("status") in {"append", "capacity_rollover"}
+    )
+
+
 def terminal_mapping_workflow_provenance(
     acquisition: PlayerSaveAcquisitionBundle,
     *,
@@ -884,6 +900,7 @@ __all__ = [
     "terminal_history_handoff_matches_source_scope",
     "terminal_mapping_workflow_provenance",
     "terminal_save_report_complete",
+    "terminal_save_report_structural_complete",
     "terminal_save_report_from_acquisition",
     "unavailable_terminal_save_report",
     "validate_terminal_history_handoff",

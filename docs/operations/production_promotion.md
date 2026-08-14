@@ -208,6 +208,11 @@ durable observation, inspect **Private staging eligibility**, review the exact
 proposal and target hashes, then confirm **Stage reviewed mapping for
 promotion…**.
 
+A Module `infoIndex` proposal adds only its global name/family identity. It
+must not append the observed name to a `module_loadout` slot allowlist; slot
+support is a separate ordinary code review because it can suppress future UI
+observation.
+
 The review fingerprint binds the mapping proposal, canonical target
 before/after hashes and modes, mapping-set fingerprint, candidate identity, and
 commit-message contract. It intentionally does not bind unrelated files or the

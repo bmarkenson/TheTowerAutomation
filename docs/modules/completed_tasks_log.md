@@ -39,6 +39,40 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 global Module save identity completion
+
+- Commit `888f101` separates the complete 24-ID Module name/family catalog
+  from the unchanged exact slot/role allowlists. Unknown future IDs can enter
+  the reviewed global identity pipeline, while known unsupported placements
+  and locally confirmed identities retain the full Modules UI route and never
+  gain repair authority. The
+  [`ISSUE-2026-044`](../issues/resolved-2026.md#global-module-save-identities-were-incomplete-and-conflated-with-slot-authority)
+  owns the mapping, campaign, restoration, and safety evidence.
+- An operator-authorized no-battle Home campaign paired the twelve remaining
+  identities, restored and reserialized the original eight-slot loadout, and
+  retained no raw save, private record, or screenshot. The collector was not
+  involved. Current-main reconciliation retained the separately deployed
+  active-run metrics, signed History values, strategy-tier launch guard, and
+  exact manual-return authority rather than replacing them.
+- Focused suites passed 331 Module/save tests and 106 Strategy/loadout tests;
+  portable native compatibility passed 189; documentation lifecycle passed 2;
+  and the supported isolated checkpoint passed all 2,514 tests in 386.25
+  seconds. State/clickmap validation, changed links/anchors, and whitespace
+  checks also passed.
+- Exact integrated candidate `f01e050` then passed the complete checkpoint with
+  all 2,695 tests in 409.82 seconds. Production advanced from `872123c` behind
+  rollback tag `production-before-20260814T230213Z-872123c`; replacement PIDs
+  `1584049` (control surface) and `1584307` (automation) were healthy, locked to
+  `localhost:5555`, and acknowledged `PAUSED`/`WAIT` at a fresh complete Home
+  `NEW_BATTLE`, Tier 19 boundary. No battle or device input was manufactured.
+- The complete native package was published from `f01e050`. Current executable
+  hashes are Control Surface
+  `f48d3cf595673dcee397d12ba3c3db942234fc2a42d43fe4c79349ae08fd7a5e`
+  (72,481,195 bytes) and Tunnel Host
+  `5e313c2d90bb33c2f443abe9d1b6ecc6dda41517d54da6181f45fee03e88905c`
+  (35,172,119 bytes). Prior complete slots remain associated with `5d83b79`
+  and `823ab8a`; Windows WPF lifecycle validation remains separate.
+
 ### 2026-08-14 strategy-tier launch preflight
 
 - Resolved
@@ -49,6 +83,21 @@ resolved dossier instead of copying its detail.
   promoted behind rollback tag
   `production-before-20260814T222225Z-81914dd`; the replacement runtime smoke
   remained Paused at Home/Tier 19 and issued no device input.
+
+### 2026-08-14 unbound manual-terminal Home return
+
+- Resolved
+  [`ISSUE-2026-043`](../issues/resolved-2026.md#unbound-manual-terminal-handoff-permanently-disabled-automation-at-home):
+  an unbound terminal handoff can now expose Enable only from an exact,
+  acknowledged Home New Battle return boundary. Home Resume, active, unknown,
+  stale, or incompletely bound evidence remains fail-closed, and no terminal UI
+  input is authorized.
+- Exact merged code candidate `a82fb6e` passed the 346-test affected slice and
+  the complete 2,581-test checkpoint. It was deployed behind rollback tag
+  `production-before-20260814T223859Z-4655aa8`; the healthy replacement smoke
+  remained Paused at fresh Home New Battle with all receipts current and sent
+  no device input. The immediately following completion-record-only commit
+  changes no validation input and passed its documentation checks.
 
 ### 2026-08-14 semantic player-save API and active-run metrics
 
@@ -219,7 +268,6 @@ resolved dossier instead of copying its detail.
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
   `git diff --check` passed and no Markdown link target changed. One natural
   post-deployment replacement attachment remains in the validation backlog.
-
 ### 2026-08-14 Strategy Authoring operator acceptance
 
 - After sustained use of the native Windows GUI, including Module editing, the
@@ -3121,17 +3169,17 @@ resolved dossier instead of copying its detail.
   zero errors and 44 known orphans, and all 1,432 tests; the final focused set
   passed all 231 tests. Generated strategies were byte-identical, and all 42
   local links across the six changed documents, including 27 anchors, resolved.
-- Accepted coordinator evidence was reused; no duplicate campaign or live
-  validation was performed. This worker did not inspect or change a production
-  process, systemd service, ADB server/target, emulator, shared live frame, or
-  battle. Deployment and ordinary-boundary observation remain coordinator
-  work.
-- The next, separate Perk phase remains active backlog work: add a
-  collector-independent normal-runtime stable-save cache, preserve exact saved
-  pick waves, obtain a terminal stable prefix, and retain UI for unknown,
-  unbound, audit, or unresolved-final evidence. It must not background an
-  active battle by default; forced serialization requires explicit policy and
-  preserved lifecycle/control authority.
+- Accepted coordinator evidence was reused; the original correction performed
+  no duplicate campaign or live validation. The later `f01e050` integration and
+  deployment replaced both managed services at a fresh Home boundary, preserved
+  Pause, and sent no input. The next normal operator-authorized Start owns the
+  remaining passive per-check omission confirmation; it does not justify a
+  special battle.
+- This entry originally retained a separate collector-independent save-backed
+  Perk timeline phase. That phase was subsequently completed by the
+  [passive save-backed Perk timeline correction](#2026-08-08-passive-save-backed-perk-timeline-correction):
+  naturally serialized stable revisions preserve exact saved pick waves and a
+  terminal prefix without backgrounding an active battle by default.
 ### 2026-08-05 persistent managed ADB registration
 
 - Commit `cd78104` moved managed TCP registration/reconnect ownership from the
