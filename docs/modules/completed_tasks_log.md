@@ -59,6 +59,175 @@ resolved dossier instead of copying its detail.
   seconds. State/clickmap validation, changed links/anchors, and whitespace
   checks also passed.
 
+### 2026-08-14 semantic player-save API and active-run metrics
+
+- The unmerged `dfd1bdf` behavior was initially ported from its pre-current-main
+  base onto a fresh feature candidate based on `e3c0491`. Current main
+  `65a9eb3`, `8a5af61`, `1fe1228`, and then `aca3357` were merged as production
+  advanced. The final reconciliation retained the newer attachment-lock,
+  retained-evidence, proportional-validation, ELS-first startup, signed
+  History-stat, and campaign-only
+  `V1073-RUNTIME-013` audit semantics instead of replacing current player-save,
+  App, test, or canonical documentation owners.
+- Version 1101 now supplies the authority and raw binding for the declared
+  `thetower.player_save.active_run_tallies.v1` capability: only the 29
+  previously validated cumulative fields (14 coin-source, eight economy/time,
+  and seven progress counters). Exact 1073 remains unavailable. Unknown
+  additive forward revisions inherit only this semantic capability; arbitrary
+  new fields and values remain unpublished. Damage, resources, upgrades,
+  survival, and every other unvalidated candidate remain unavailable.
+- `PlayerSaveParser` is the global one-decode/all-projections API. `App` owns
+  one parser and one `StablePlayerSaveAcquirer`; preflight, History, guarded
+  serialization, passive scheduling, terminal/Tournament projection, and the
+  optional campaign auditor require that shared owner. The read-only snapshot
+  and identical typed bundle fan out through a neutral observation context,
+  with target-generation recheck and per-subscriber exception isolation. No
+  HTTP status read or consumer performs a duplicate acquisition.
+- Active tallies expose leaf semantic/binding fingerprints, dependency-local
+  failures, and per-leaf monotonic timelines. One malformed or regressed leaf
+  cannot erase valid siblings; an unknown added root/nested field is diagnostic
+  only. Runtime round/save/wave claims, structural History, completed semantics,
+  and terminal tally facts likewise fail only their dependents.
+- Whole-run and interval CPH, cells/hour, cash/hour, waves/hour, effective
+  speed, and per-source rates are calculated directly from cumulative save
+  evidence. They remain distinct from OCR `coin_rate_samples`; Coins/min is
+  never multiplied by 60 and relabeled as realized CPH. The same causally bound
+  natural-terminal bundle supplies final whole-run values and the last
+  checkpoint-to-terminal interval. Normal and Tournament JSON, Markdown, and
+  native Battle History retain and present `active_run_metrics`, including
+  partial/unavailable/conflicted claim reasons.
+- The earlier normalized active/terminal evidence remains the semantic basis;
+  this port performed no new live capture and created, accelerated, or
+  surrendered no battle. Current live validation therefore remains pending a
+  naturally occurring boundary after promotion and deployment.
+- At exact code candidate `884e186`, the 689-test affected suite, 189 portable
+  control-surface tests, 18 TunnelHost tests, and Release win-x64 WPF
+  cross-build passed. The complete development checkpoint compiled all Python,
+  validated state definitions and clickmap integrity with zero errors, and
+  passed all 2,563 tests in the fingerprinted environment
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  Its immediately following completion-record-only receipt passed the affected
+  documentation-lifecycle, local-link/anchor, and whitespace checks. This
+  current-main gate supersedes the earlier candidate runs; historical results
+  from `dfd1bdf` were not reused.
+- Production advanced from `aca3357` to source/validation receipt `5d83b79`
+  behind rollback tag `production-before-20260814T191329Z-aca3357`. Updated
+  control-surface PID 1276030 and automation PID 1276909 served a healthy,
+  acknowledged `HOME_SCREEN/PAUSED` observation on exact target
+  `localhost:5555`; the rollout performed no device input or battle action.
+  No naturally occurring active-to-terminal boundary was available, so live
+  active-metric reconciliation remains explicitly pending.
+- The complete native package was published from `5d83b79` at 12:16 PDT.
+  Current Control Surface is 72,481,183 bytes with SHA-256
+  `6564152e1e065f37ca7255a2a0c1c84d06723d1387b2a3c6e34fc91facf9497d`;
+  current Tunnel Host is 35,172,099 bytes with SHA-256
+  `9985212d9285da747063a267bbf0c55842cb59295e62dbad739b3115fbe5059b`.
+  Retained slot 1 is the prior `823ab8a` package: 72,477,605-byte Control
+  Surface `af821cc6cb2c6706012d5d93fad1f269446b98aeff6e723f8159e8328eb5cb61`
+  and 35,172,132-byte Tunnel Host
+  `96e27dc3a73c77a9be6777533b2273720d041a581847a757d521103580bcbae5`.
+  Retained slot 2 is the prior `c737897` package: 72,477,518-byte Control
+  Surface `a51381325dd9fdf3a029dc04d6fd4871a1a7e60ff51381f075fa344f6917c871`
+  and 35,172,113-byte Tunnel Host
+  `1c1de580b47e3fb04ab7dd31a2c4aa3d762e06e5e825715f1457c4064e245c2e`.
+  Linux publication does not establish Windows WPF runtime behavior; that
+  lifecycle validation remains pending on Windows.
+
+### 2026-08-14 proportional post-contention validation
+
+- Promotion contention still waits read-only, refreshes current production and
+  remote state, reconciles when needed, reviews the new aggregate, and retries
+  atomic ownership until the outcome finishes or reaches a recovery guard.
+- A changed candidate object ID no longer forces an otherwise redundant
+  complete checkpoint. Prior validation carries forward only when the exact
+  candidate delta proves that none of that check's inputs changed and the
+  result did not depend on the old production baseline. Affected checks rerun;
+  uncertainty selects the strongest applicable gate.
+- This supersedes the unconditional retest rule recorded by `7452881` while
+  preserving its wait-and-retry correction. The documentation-lifecycle tests
+  and `git diff --check` passed; no Markdown link target or anchor changed.
+
+### 2026-08-14 Death Stranding x2 retained-evidence reconciliation
+
+- Six complete, identical-configuration T19 Farm battles were confirmed at
+  effective speeds `2.0497`–`2.2242` during the operator-reported 2026-08-10/11
+  sequence. Death Stranding appeared in every retained host sample spanning
+  those battles; average host CPU, GPU, memory pressure, and collection cost
+  were all materially higher than the bounded pre/post controls.
+- The sequence confirms that x2 did not guarantee a good survival outcome
+  under severe contention. It does not cleanly reproduce the older sparse-
+  entity signature: early-wave entity density overlaps a clean same-
+  configuration short run, raw Coins/hour is speed-dependent, and no clean x2
+  control was retained. The open issue and calibration backlog now require a
+  matched clean x2 control before any speed-policy or trigger-threshold change.
+- A narrow, reproducible read-only extract preserves 1,851 unique host
+  aggregates plus four sample-weighted window summaries before rolling
+  retention can remove them. The investigation used closed battle records,
+  historical action logs, and retained telemetry only; it made no process,
+  service, device, or runtime change.
+- The exporter reproduced all expected rows, samples, overlapping-window
+  membership, and Death Stranding sample counts. Its compilation, both
+  documentation-lifecycle tests, changed-link/anchor review, and
+  `git diff --check` passed.
+
+### 2026-08-14 historical-evidence startup routing
+
+- Startup and live-preflight guidance now distinguishes historical evidence
+  from volatile runtime diagnosis. Closed battle records, historical log
+  ranges, retained telemetry, and retained fixtures may be inspected without
+  live preflight when they are used only as historical evidence; they cannot
+  establish current runtime state.
+- The original documentation candidate `6251d5c` was reconciled with the
+  current temporary-feature and exclusive-promotion workflow. The outcome
+  retains current `main` promotion, publication, contention, and retirement
+  rules and does not restore the former standing `develop` topology.
+- The documentation-lifecycle test, changed-link and anchor review, and
+  `git diff --check` passed. The reconciliation used fresh read-only production
+  preflight evidence but performed no service, device, or runtime mutation.
+
+### 2026-08-14 retained Better Control validation reconciliation
+
+- A read-only audit of retained `actions.log` evidence and the durable control
+  ledger found a completed post-fix manual-control workflow that was not yet
+  subtracted from the Better Control acceptance backlog. On 2026-08-13,
+  workflow `42e7985ea9f3414ca23017d059dfbe40` acknowledged Take Control during an
+  active battle, acquired its natural terminal save, recorded the selected
+  minimal manual Surrender, and reused the terminal History handoff at Home
+  with `save_reads=0` and `history_navigation=0`.
+- Return was then requested at Home New. Its forced serialization used mapping
+  `data-9-game-1101`, resolved all 14 required configuration checks with no
+  mismatch, unresolved check, or UI fallback, and completed the durable ledger
+  as `home_save_reconciliation_complete`. This confirms the clean post-fix Home
+  Return and authority-release path, not the original skipped-check mismatch or
+  a Return-specific unusable-save fallback.
+- Separate retained 2026-08-08 Home setup evidence confirms one real partial
+  save-to-UI route: an unsupported assist Module value produced `ui_required`,
+  the Modules UI repaired the loadout, `ui_verified_repair` was recorded, and
+  Home configuration completed. Remaining acceptance is narrowed to the exact
+  active/resumable, Return-specific full-UI, degraded mismatch/Home-first,
+  Tournament Results, and native Windows lifecycle paths. This reconciliation
+  performed no service, process, device, or input action.
+- The documentation-lifecycle suite passed both tests, `git diff --check`
+  passed, and no Markdown link target or anchor changed.
+
+### 2026-08-14 attachment Free Upgrade-lock evidence precedence
+
+- A running-attachment initialization placeholder marked Free Upgrade locks
+  `unavailable_deferred` before the forced save was bound. Session preflight
+  treated that non-null placeholder as final, so it never consumed a complete
+  authoritative lock fact from the same attachment and falsely reported a
+  Home-only deferral.
+- Commit `3565ade` makes that one unavailable placeholder yield to the existing
+  exact-bound consumer. A complete match now becomes bound save evidence, a
+  complete round-invariant mismatch remains report-only, and genuine absence
+  remains deferred; the established one-use consumption order is unchanged.
+- Focused preflight, executor, initialization, template, and documentation-
+  lifecycle validation passed 206 tests. The complete checkpoint at `3565ade`
+  passed compilation, maintained static validation, clickmap integrity with
+  zero errors, and all 2,491 tests in the fingerprinted development environment
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  `git diff --check` passed and no Markdown link target changed. One natural
+  post-deployment replacement attachment remains in the validation backlog.
 ### 2026-08-14 Strategy Authoring operator acceptance
 
 - After sustained use of the native Windows GUI, including Module editing, the
@@ -966,6 +1135,40 @@ resolved dossier instead of copying its detail.
   so no Windows package was rebuilt. The live smoke did not manufacture the
   original Return Control mismatch or a degraded Game Over boundary; those
   natural-boundary confirmations remain separately tracked.
+
+### 2026-08-10 ELS-first startup continuity
+
+- Commit `349b369` keeps EHLS and EALS ahead of every deferrable running-start
+  task. Activity Continuity preserves its pending Home source but performs no
+  save serialization or Battle History UI route until both level-skip boxes
+  are complete; an already gold-boxed pair retires that priority immediately.
+- Save-backed Battle History now retains finite signed report statistics as
+  exact game evidence, including observed negative large-number overflow,
+  while identity fields remain positive and shape, type, and non-finite
+  failures still fail closed. UI fallback attribution and successful
+  `GC_NO_BATTLE` diagnostics report their actual outcome without failure-only
+  fields.
+- The original affected file suite passed all 255 tests and the expanded
+  startup/save/control suite passed all 388 tests. Its supported checkpoint
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,213 tests in 361.77
+  seconds. Feature validation used repository evidence and fixtures without
+  device interaction.
+- The separate Return Control race was initially fixed on this branch by
+  `bcc3a6c`; current-main reconciliation retained the patch-equivalent
+  production commit `0db73ab` and its newer surrounding control behavior and
+  regressions.
+- Exact pre-contention code candidate `1219c14` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,493 tests in 387.68 seconds in development
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  Review of `1219c14..d01c0b8` proved the refreshed post-contention code
+  candidate changed only promoted `docs/**` content: no compile, state,
+  clickmap, source, configuration, runtime-read, dependency, unit, or test
+  input changed. The complete checkpoint therefore carried forward under the
+  proportional rule in `1fe1228`; the affected documentation-lifecycle tests
+  and `git diff --check` passed, and no Markdown link target or anchor changed.
 
 ### 2026-08-10 durable control acknowledgements and Strategy Scope
 
@@ -2116,6 +2319,14 @@ resolved dossier instead of copying its detail.
   Production remained Paused pending a fresh operator-owned screen boundary;
   the deployment smoke passed, but live completion of the repair remained
   intentionally unclaimed.
+- Later production evidence closes that original boundary: a 2026-08-08 Home
+  setup repaired a real Auto Pick mismatch through three verified swaps and a
+  successful final readback, while 2026-08-12 and 2026-08-13 save-backed checks
+  matched the exact Ban set and Auto Pick order. The
+  [resolved dossier](../issues/resolved-2026.md#perk-repair-trusted-transient-ban-reads-and-local-viewport-edges)
+  and its [durable evidence extract](../issues/evidence/perk-repair-confirmation-2026-08-08-13.md)
+  own the detail. Exact ignored-swipe and transient Ban no-op recurrences are
+  not outstanding live gates.
 
 ### 2026-08-07 recoverable superseded feature retirement
 

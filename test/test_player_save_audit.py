@@ -19,6 +19,7 @@ from core.player_save_acquisition import (
     PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
     PlayerSaveTargetBinding,
+    StablePlayerSaveAcquirer,
 )
 from core.player_save_audit import (
     AppendOnlyAuditReceiptWriter,
@@ -62,6 +63,24 @@ FORBIDDEN_KEY_PARTS = {
 
 def _sha(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()
+
+
+def _shared_acquirer(
+    *,
+    target_snapshot_fn=lambda: SimpleNamespace(
+        target="localhost:5555",
+        generation=1,
+        owned=True,
+    ),
+    pull_fn=None,
+    decode_fn=None,
+):
+    return StablePlayerSaveAcquirer(
+        target_snapshot_fn=target_snapshot_fn,
+        pull_fn=pull_fn,
+        decode_fn=decode_fn,
+        pull_options={"attempts": 3, "settle_seconds": 0.1},
+    )
 
 
 def _identity(
@@ -361,9 +380,12 @@ def test_disabled_collector_performs_zero_acquisition_and_creates_zero_files(
     collector = PlayerSaveAuditCollector(
         enabled=False,
         interval_seconds=300,
-        target_snapshot_fn=targets,
+        acquirer=_shared_acquirer(
+            target_snapshot_fn=targets,
+            pull_fn=pulls,
+        ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=pulls,
     )
 
     collector.observe_screen(
@@ -393,9 +415,12 @@ def test_collector_rejects_out_of_bounds_interval_without_acquisition_or_receipt
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=29,
-        target_snapshot_fn=targets,
+        acquirer=_shared_acquirer(
+            target_snapshot_fn=targets,
+            pull_fn=pulls,
+        ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=pulls,
     )
     collector.observe_screen({"state": "RUNNING"})
     collector.close(wait=True)
@@ -405,6 +430,26 @@ def test_collector_rejects_out_of_bounds_interval_without_acquisition_or_receipt
     targets.assert_not_called()
     assert not receipt.exists()
     assert not receipt.parent.exists()
+
+
+def test_internal_cadence_requires_an_explicit_shared_acquirer(
+    tmp_path,
+    monkeypatch,
+):
+    log = Mock()
+    monkeypatch.setattr("core.player_save_audit.log", log)
+
+    collector = PlayerSaveAuditCollector(
+        enabled=True,
+        interval_seconds=300,
+        acquire_internally=True,
+        receipt_path=tmp_path / "receipts.jsonl",
+    )
+
+    assert collector.enabled is False
+    collector.close(wait=True)
+    assert any("shared_acquirer_unavailable" in str(call) for call in log.call_args_list)
+    assert not (tmp_path / "receipts.jsonl").exists()
 
 
 def test_enabled_worker_projects_only_normalized_runtime_evidence(tmp_path):
@@ -457,14 +502,12 @@ def test_enabled_worker_projects_only_normalized_runtime_evidence(tmp_path):
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
+        acquirer=_shared_acquirer(
+            pull_fn=pull,
+            decode_fn=decode,
         ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=pull,
-        decode_fn=decode,
     )
     collector.observe_screen(
         {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
@@ -515,13 +558,7 @@ def test_external_mode_projects_shared_bundle_without_another_pull(tmp_path):
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
-        ),
         receipt_path=receipt,
-        pull_fn=pull,
         acquire_internally=False,
     )
 
@@ -560,14 +597,12 @@ def test_collector_maps_unknown_perk_and_keeps_mapping_across_retry_reset(tmp_pa
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
+        acquirer=_shared_acquirer(
+            pull_fn=lambda **_kwargs: b"stable",
+            decode_fn=decode,
         ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=lambda **_kwargs: b"stable",
-        decode_fn=decode,
     )
     collector.observe_screen({"state": "RUNNING"})
     assert collector.wait_until_idle(2.0)
@@ -653,10 +688,13 @@ def test_target_generation_change_discards_learned_perk_mapping(tmp_path):
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=target_snapshot,
+        acquirer=_shared_acquirer(
+            target_snapshot_fn=target_snapshot,
+            pull_fn=lambda **_kwargs: b"stable",
+            decode_fn=decode,
+        ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=lambda **_kwargs: b"stable",
-        decode_fn=decode,
     )
     collector.observe_screen({"state": "RUNNING"})
     assert collector.wait_until_idle(2.0)
@@ -701,14 +739,12 @@ def test_compatible_core_mapping_does_not_broaden_exact_perk_calibration(tmp_pat
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
+        acquirer=_shared_acquirer(
+            pull_fn=lambda **_kwargs: b"stable",
+            decode_fn=decode,
         ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=lambda **_kwargs: b"stable",
-        decode_fn=decode,
     )
     collector.observe_screen({"state": "RUNNING"})
     assert collector.wait_until_idle(2.0)
@@ -737,15 +773,13 @@ def test_collector_rejects_unallowlisted_perk_mapping_before_queue(tmp_path):
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
+        acquirer=_shared_acquirer(
+            pull_fn=lambda **_kwargs: (_ for _ in ()).throw(
+                PlayerSavePullError("unused")
+            ),
         ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=lambda **_kwargs: (_ for _ in ()).throw(
-            PlayerSavePullError("unused")
-        ),
     )
     unsafe = _mapping_batch()
     unsafe["selections"][0]["display_text"] = "must not queue"
@@ -1804,13 +1838,11 @@ def test_slow_failed_acquisition_does_not_block_or_change_app_dispatch(tmp_path)
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
+        acquirer=_shared_acquirer(
+            pull_fn=slow_pull,
         ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=slow_pull,
     )
     app = App.__new__(App)
     app._player_save_audit_collector = collector
@@ -1871,10 +1903,13 @@ def test_exact_target_result_is_discarded_after_handoff(tmp_path, monkeypatch):
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=target_snapshot,
+        acquirer=_shared_acquirer(
+            target_snapshot_fn=target_snapshot,
+            pull_fn=lambda **_kwargs: b"stable",
+            decode_fn=decode,
+        ),
+        acquire_internally=True,
         receipt_path=receipt,
-        pull_fn=lambda **_kwargs: b"stable",
-        decode_fn=decode,
     )
 
     collector.observe_screen(
@@ -1913,13 +1948,11 @@ def test_single_worker_never_has_more_than_one_poll_in_flight(tmp_path):
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
+        acquirer=_shared_acquirer(
+            pull_fn=pull,
         ),
+        acquire_internally=True,
         receipt_path=tmp_path / "receipts.jsonl",
-        pull_fn=pull,
     )
     collector.request_observation("test_request_one")
     collector.request_observation("test_request_two")
@@ -2015,16 +2048,14 @@ def test_receipt_write_or_decoder_failure_cannot_escape_into_normal_runtime(
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
+        acquirer=_shared_acquirer(
+            pull_fn=lambda **_kwargs: b"stable",
+            decode_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                PlayerSaveDecodeError("private decoder detail")
+            ),
         ),
+        acquire_internally=True,
         receipt_path=receipt_path,
-        pull_fn=lambda **_kwargs: b"stable",
-        decode_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            PlayerSaveDecodeError("private decoder detail")
-        ),
     )
     collector.observe_screen({"state": "RUNNING"})
     assert collector.wait_until_idle(2.0)
@@ -2053,7 +2084,8 @@ def test_collector_worker_start_failure_disables_it_without_runtime_failure(
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=targets,
+        acquirer=_shared_acquirer(target_snapshot_fn=targets),
+        acquire_internally=True,
         receipt_path=receipt,
     )
 
@@ -2074,13 +2106,11 @@ def test_tournament_terminal_boundary_requests_an_immediate_observation(tmp_path
     collector = PlayerSaveAuditCollector(
         enabled=True,
         interval_seconds=300,
-        target_snapshot_fn=lambda: SimpleNamespace(
-            target="localhost:5555",
-            generation=1,
-            owned=True,
+        acquirer=_shared_acquirer(
+            pull_fn=pull,
         ),
+        acquire_internally=True,
         receipt_path=tmp_path / "receipts.jsonl",
-        pull_fn=pull,
     )
     collector.observe_screen({"state": "TOURNAMENT_RESULTS"})
 

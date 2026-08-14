@@ -13,7 +13,6 @@ import copy
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Optional
 
-from core.adb_target_session import AdbTargetSnapshot
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionType,
@@ -487,37 +486,13 @@ def derive_tournament_conditions_from_save(
 
 def capture_current_tournament_conditions(
     *,
-    captured_at: Optional[datetime] = None,
-    device_id: Optional[str] = None,
-    pull_fn: Optional[Callable[..., bytes]] = None,
-    decode_fn: Optional[Callable[..., Any]] = None,
-    target_snapshot_fn: Optional[Callable[[], AdbTargetSnapshot]] = None,
-    acquirer: Optional[StablePlayerSaveAcquirer] = None,
+    acquirer: StablePlayerSaveAcquirer,
 ) -> dict[str, Any]:
-    """Capture normalized current-event evidence without changing game state."""
+    """Project one shared stable acquisition without changing game state."""
 
-    when = captured_at or datetime.now().astimezone()
-    owner = acquirer
-    if owner is None:
-        if target_snapshot_fn is not None:
-            owner = StablePlayerSaveAcquirer(
-                target_snapshot_fn=target_snapshot_fn,
-                pull_fn=pull_fn,
-                decode_fn=decode_fn,
-                now_fn=lambda: when,
-                pull_options={"attempts": 2},
-            )
-        else:
-            from core.adb_utils import resolve_adb_device
-
-            owner = StablePlayerSaveAcquirer(
-                fixed_target=resolve_adb_device(device_id),
-                pull_fn=pull_fn,
-                decode_fn=decode_fn,
-                now_fn=lambda: when,
-                pull_options={"attempts": 2},
-            )
-    acquisition = owner.acquire(
+    if not isinstance(acquirer, StablePlayerSaveAcquirer):
+        raise TypeError("Tournament capture requires the shared acquirer")
+    acquisition = acquirer.acquire(
         PlayerSaveAcquisitionType.PASSIVE_STABLE_READ
     )
     try:

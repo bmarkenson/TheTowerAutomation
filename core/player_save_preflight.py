@@ -15,15 +15,12 @@ import os
 import time
 from typing import Any, Callable, Mapping, Optional
 
-from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import detect_home_battle_control
 from core.player_save import (
     PlayerSaveSnapshot,
     SAVE_ACCEPTED_DISPOSITIONS,
     SAVE_MISMATCH_DISPOSITION,
-    decode_player_save_bytes,
-    pull_player_save_bytes,
     reconcile_acquired_requirements,
     reconcile_direct_retry_requirements,
 )
@@ -395,7 +392,7 @@ class PlayerSavePreflightCoordinator:
     def __init__(
         self,
         *,
-        target_snapshot_fn: Callable[[], AdbTargetSnapshot],
+        acquirer: StablePlayerSaveAcquirer,
         context_fn: Callable[[], PlayerSavePreflightContext],
         action_guard_fn: Callable[[], bool],
         capture_fn: Optional[Callable[[], Any]] = None,
@@ -405,9 +402,6 @@ class PlayerSavePreflightCoordinator:
         home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
         background_fn: Optional[Callable[[str], bool]] = None,
         foreground_fn: Optional[Callable[[str], bool]] = None,
-        pull_fn: Callable[..., bytes] = pull_player_save_bytes,
-        decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
-        acquirer: Optional[StablePlayerSaveAcquirer] = None,
         mapping_candidate_store: Optional[
             AppendOnlyMappingCandidateStore
         ] = None,
@@ -416,7 +410,8 @@ class PlayerSavePreflightCoordinator:
         ] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
     ) -> None:
-        self._target_snapshot_fn = target_snapshot_fn
+        if not isinstance(acquirer, StablePlayerSaveAcquirer):
+            raise TypeError("player-save preflight requires the shared acquirer")
         self._context_fn = context_fn
         self._action_guard_fn = action_guard_fn
         self._capture_fn = capture_fn or _capture_default
@@ -424,13 +419,7 @@ class PlayerSavePreflightCoordinator:
         self._home_control_fn = home_control_fn
         self._background_fn = background_fn or background_to_android_home
         self._foreground_fn = foreground_fn or restore_tower_launcher
-        self._pull_fn = pull_fn
-        self._decode_fn = decode_fn
-        self._acquirer = acquirer or StablePlayerSaveAcquirer(
-            target_snapshot_fn=target_snapshot_fn,
-            pull_fn=pull_fn,
-            decode_fn=decode_fn,
-        )
+        self._acquirer = acquirer
         self._mapping_candidate_store = (
             mapping_candidate_store or AppendOnlyMappingCandidateStore()
         )
@@ -555,7 +544,7 @@ class PlayerSavePreflightCoordinator:
         )
 
         serializer = GuardedPlayerSaveSerializer(
-            target_snapshot_fn=self._target_snapshot_fn,
+            acquirer=self._acquirer,
             context_guard_fn=lambda: self._same_context(context),
             action_guard_fn=self._action_allowed,
             source_guard_fn=lambda frame, stable: self._verify_home(
@@ -564,9 +553,6 @@ class PlayerSavePreflightCoordinator:
             ),
             background_fn=self._background_fn,
             foreground_fn=self._foreground_fn,
-            pull_fn=self._pull_fn,
-            decode_fn=self._decode_fn,
-            acquirer=self._acquirer,
             sleep_fn=self._sleep_fn,
             input_log_fn=log_input,
             debug_log_fn=log,

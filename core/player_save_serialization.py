@@ -12,11 +12,7 @@ from enum import Enum
 import time
 from typing import Any, Callable, Optional
 
-from core.player_save import (
-    PlayerSaveSnapshot,
-    decode_player_save_bytes,
-    pull_player_save_bytes,
-)
+from core.player_save import PlayerSaveSnapshot
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionType,
@@ -86,15 +82,12 @@ class GuardedPlayerSaveSerializer:
     def __init__(
         self,
         *,
-        target_snapshot_fn: Callable[[], AdbTargetSnapshot],
+        acquirer: StablePlayerSaveAcquirer,
         context_guard_fn: Callable[[], bool],
         action_guard_fn: Callable[[], bool],
         source_guard_fn: Callable[[Any, bool], bool],
         background_fn: Optional[Callable[[str], Any]] = None,
         foreground_fn: Optional[Callable[[str], Any]] = None,
-        pull_fn: Callable[..., bytes] = pull_player_save_bytes,
-        decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
-        acquirer: Optional[StablePlayerSaveAcquirer] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         monotonic_fn: Callable[[], float] = time.monotonic,
         restoration_timeout_seconds: float = (
@@ -108,11 +101,9 @@ class GuardedPlayerSaveSerializer:
         debug_log_fn: Callable[..., None] = log,
         log_prefix: str = "PLAYER_SAVE_SERIALIZATION",
     ) -> None:
-        self._acquirer = acquirer or StablePlayerSaveAcquirer(
-            target_snapshot_fn=target_snapshot_fn,
-            pull_fn=pull_fn,
-            decode_fn=decode_fn,
-        )
+        if not isinstance(acquirer, StablePlayerSaveAcquirer):
+            raise TypeError("guarded serialization requires the shared acquirer")
+        self._acquirer = acquirer
         self._context_guard_fn = context_guard_fn
         self._action_guard_fn = action_guard_fn
         self._source_guard_fn = source_guard_fn

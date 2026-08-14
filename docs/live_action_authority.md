@@ -35,6 +35,16 @@ evidence excludes Tournament identity. A later unrelated `RUNNING` battle,
 terminal-persistence failure, or ownership ambiguity closes the receipt and
 performs no Retry or Surrender.
 
+An explicitly authorized interactive-development test may instead preclaim one
+ordinary battle with `owned_battle_start=true` while a fresh exact Home
+`NEW_BATTLE` lease is active. That claim must preserve the same runtime/PID,
+exact target and generation, activity scope, and non-Tournament battle from the
+verified start through Game Over. The lease itself ends at Game Over;
+production may use the retained process-local claim only for its guarded
+minimal return-to-Home terminal route. It does not authorize Retry, terminal
+lease reacquisition, representative collection, another battle, or retroactive
+ownership. Pause, Stop, replacement, or ambiguity sends no cleanup input.
+
 ## Configuration repair
 
 A recoverable configuration mismatch never grants Surrender, Exit Battle,

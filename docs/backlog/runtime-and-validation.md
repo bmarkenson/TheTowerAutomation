@@ -22,16 +22,6 @@ as checked checkpoint narrative here.
     retained Module receipt was confirmed at attachment, integrated in
     `dbe3d34`, and accepted by later fresh decodes; there is no unresolved
     current receipt. Do not create or end a battle for this evidence.
-  - [ ] Replace the blanket nonnegative `BattleHistory` numeric invariant with
-    a reviewed, field-scoped signed-value policy. The exact 144-row clipboard
-    records for `Battle20260810T141801-0700`,
-    `Battle20260810T203606-0700`, and `Battle20260811T005344-0700` prove that
-    the game itself displayed negative `Damage Dealt` and `Chain Lightning`
-    values; they do not establish whether the values are overflow, a sentinel,
-    or semantically meaningful damage. Preserve the current independent More
-    Stats fallback until finite signed fields, formatting, and malformed-value
-    isolation have focused regression coverage. No additional battle is needed
-    to diagnose the observed rejection.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
@@ -49,10 +39,14 @@ as checked checkpoint narrative here.
     its superseded prototype.
     - [ ] Confirm one replacement-process attachment whose forced save also
       contains authoritative Free Upgrade-lock evidence opens none of the
-      configuration UI. A retained 2026-08-13 replacement attachment already
-      used the bound save for Cards, Workshop, Bots, Guardians, Modules, Perk
-      configuration, Target Priority, Auto Pick, and Ultimate Weapons without
-      opening those screens, but correctly deferred Free Upgrade locks.
+      configuration UI. Regression coverage now requires the non-authoritative
+      attachment placeholder to yield to a complete exact-bound lock fact while
+      genuine absence remains deferred; retain this item for one natural
+      post-deployment confirmation. A retained 2026-08-13 replacement
+      attachment already used the bound save for Cards, Workshop, Bots,
+      Guardians, Modules, Perk configuration, Target Priority, Auto Pick, and
+      Ultimate Weapons without opening those screens, but correctly deferred
+      Free Upgrade locks because that attachment had no authoritative lock fact.
       Separately confirm authoritative Module, Free Upgrade-lock, and Perk Auto
       Pick-order mismatches are each logged once and remain report-only without
       configuration UI or Home-repair authority. An intentionally unparseable
@@ -71,13 +65,20 @@ as checked checkpoint narrative here.
     or remove it. Do not enable it merely for this review. If retained, decide
     whether the unconfirmed direct-Retry rollover or `V1073-RUNTIME-015`/`016`
     warrants a bounded campaign.
-  - [ ] Extend the exact-version runtime projection with independently failing
-    active-upgrade, survival-ability, and allowlisted live-tally components.
-    For upgrades, map all three current-level arrays to their Workshop
-    baselines and versioned caps so a gold-box claim is explicit rather than
-    inferred from magnitude. For live tallies, prioritize values that replace
-    an existing OCR/navigation route or reconcile a terminal record; keep the
-    arbitrary decoded root private.
+  - [ ] Extend the semantic runtime capability registry with independently failing
+    active-upgrade, survival-ability, and remaining allowlisted live-tally
+    claims. The capability whose authority originates at version 1101 already
+    publishes the 29 validated economy, progress, and coin-source counters
+    documented in the
+    [versioned audit matrix](../architecture/player_save.md#versioned-audit-addition-data-9-game-1101);
+    exact 1073 remains unavailable, while unknown additive forward revisions
+    may inherit only those declared claims. For upgrades,
+    map all three current-level arrays to their Workshop baselines and versioned
+    caps so a gold-box claim is explicit rather than inferred from magnitude.
+    Damage, resource, upgrade, survival, and other unvalidated candidates remain
+    unavailable. Prioritize only values that replace an existing
+    OCR/navigation route or reconcile a terminal record, and keep the arbitrary
+    decoded root private.
   - [ ] Causally calibrate Demon Mode, Nuke, and Second Wind active-round
     fields across natural activation, recharge, repeated activation, Game
     Over, and clearing. Establish use-count polarity, sentinel values, timer
@@ -93,11 +94,11 @@ as checked checkpoint narrative here.
     Over, and reconcile the merged events with terminal Battle History counts.
     Missing timing remains unknown/bounded; conflicts force the full UI audit.
   - [ ] Inventory checkpoint candidates that could replace other observation
-    routes, including game speed, buy quantities, Damage Slider, Orb Distance,
-    Card activity, and UW/Bot/Guardian cooldowns. Rank them by navigation/OCR
-    cost and staleness tolerance, then validate and adopt one independent claim
-    at a time. Enforcement, mutation confirmation, and transition authority
-    remain visual.
+    routes, including game speed, buy quantities, Card activity, and
+    UW/Bot/Guardian cooldowns. Rank them by navigation/OCR cost and staleness
+    tolerance, then validate and adopt one independent claim at a time.
+    Enforcement, mutation confirmation, and transition authority remain
+    visual.
   - [ ] Add any future normal-runtime consumer only through the shared typed
     acquisition owner and only after its own matrix evidence is complete. The
     campaign-only `V1073-RUNTIME-013` auditor may consume a passive bundle when
@@ -115,29 +116,17 @@ as checked checkpoint narrative here.
       slot-unsupported value, unsupported requested name, or partial structure
       must retain the complete Modules UI route. Do not infer rarity, levels,
       stars, effects, substats, GUIDs, or inventory semantics.
+    - [ ] Extend Damage Slider and Orb Distance only when a natural UI fallback
+      supplies one unique exact normalized value/tuple and the reviewed mapping
+      workflow accepts it. Current Farm/Tournament values are save-backed;
+      incompatible versions or shapes and unknown/unsupported values retain the
+      complete UI route. Do not infer neighboring slider values, an Orb formula,
+      or a tolerance from the calibrated points.
     - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
       weapon index's off/on polarity at a time with normalized
       before/change/restore evidence. Validate Spotlight Missiles off through
       one explicitly authorized reversible transition. Do not enumerate every
       boolean combination.
-    - [ ] Prefer a natural Farm `30.00m / 30.00m / 39.00m` → Tournament
-      `98.38m / 87.16m / 80.37m` → Farm Orb Distance sequence. Pair UI and
-      guarded stable saves to establish field identity, units/rounding,
-      selected-preset versus derived semantics, serialization timing, Home
-      versus active behavior, and restoration. Only if natural transitions are
-      insufficient may a later coordinator authorize one owned bounded
-      calibration.
-      - [ ] Resume the authorized changed/restored calibration only after a
-        fresh preflight confirms a steady running battle. The 2026-08-10
-        pre-deployment attempt ended at a natural Game
-        Over before the first Orb value mutation; the panel had already been
-        closed, the lease was terminal with no external hold, and the last
-        authoritative pair remained Extra `30.00m` / Workshop `39.00m`.
-    - [ ] Continue routing incompatible versions and shapes, unknown IDs or
-      values, unsupported Module requests, and Damage Slider through UI. A
-      unique exact-evidence mapping attempt may use the existing fail-closed
-      resolver; ambiguity/conflict remains UI-only, and the observation
-      collector never supplies preflight authority.
 - [ ] Capture the numeric level of every equipped Module from authoritative
   overview evidence, retain it with preflight and completed-run records, and
   surface threshold violations without confusing an intentional Tournament
@@ -296,11 +285,23 @@ as checked checkpoint narrative here.
     Take/Return Control states. Requests must show exact pending,
     acknowledged, rejected, unavailable, and no-op outcomes without deriving
     authority from GUI state.
-  - At natural Home, active/resumable, manual-control, Game Over, and
-    Tournament Results boundaries, confirm save-backed reconciliation and its
-    independently guarded UI fallbacks. Observe the original Return Control
-    mismatch or degraded Game Over/Home-first repair without manufacturing a
-    boundary.
+  - Retained 2026-08-13 evidence closes the basic Home New save-backed Return
+    path. Manual-control workflow `42e7985ea9f3414ca23017d059dfbe40`
+    acknowledged Take Control during an active battle, accepted its natural
+    terminal save and zero-read History handoff, then completed Return from
+    Home New with all 14 mapped checks resolved and no unresolved or UI-
+    required check. The completed ledger records
+    `home_save_reconciliation_complete`; this did not exercise the original
+    mismatch or any Return-specific UI fallback.
+  - Retained 2026-08-08 Home evidence separately proves a partial save fallback:
+    an unsupported Module value selected `ui_required`, ran the complete
+    Modules UI repair, recorded `ui_verified_repair`, and completed Home
+    configuration. This ordinary Home receipt does not prove that Return can
+    complete from a wholly unusable save.
+  - At natural active/resumable, Return-specific unusable-save Home or Game
+    Over, and Tournament Results boundaries, confirm the remaining save/UI
+    reconciliation paths. Observe the original Return Control mismatch or
+    degraded Game Over/Home-first repair without manufacturing a boundary.
   - Run the revision-37 long-output and rotation checks for every indicator,
     plus authoritative current/pending/startup Strategy rendering and
     dirty/retry/same-ID/stopped/active-adoption behavior. Track the known
@@ -353,6 +354,12 @@ as checked checkpoint narrative here.
     independently guarded in-battle gem, daily-gem, and reward collectors.
     GUI-close reconciliation, sampler-baseline/session continuity, one detector
     decision, and the explicitly authorized fallback branch remain outstanding.
+    The retained 2026-08-10/11 six-battle x2 cohort is a positive severe-
+    contention calibration window: `ds` occupied every host sample, host load
+    was sharply elevated, and x2 did not guarantee survival. It does not meet
+    the original near-normal-speed throughput trigger and has no uncontended
+    x2 control. Retain one same-configuration clean x2 control before changing
+    speed policy or treating this cohort as detector-threshold proof.
   - [ ] Confirm that a second launch from the SMB publish path reaches the
     single-instance guard without showing a host/runtime prompt or creating a
     second client, as tracked in

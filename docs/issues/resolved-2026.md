@@ -213,8 +213,12 @@ and actionable work lives in
   in 357.50 seconds and was deployed on 2026-08-11 behind rollback tag
   `production-before-20260811T162652Z-d9305fc`. A replacement-runtime Attach
   and active-Strategy smoke preserved the existing battle and reached steady
-  `RUNNING`; the original Return Control mismatch and degraded Game Over/Home
-  repair paths still await natural post-fix boundary observation.
+  `RUNNING`. Retained 2026-08-13 evidence later confirmed a clean post-fix Home
+  New Return: the completed workflow reconciled all 14 mapped checks, recorded
+  no unresolved or UI-required check, released its hold, and remained
+  `RUNNING`. That sequence did not reproduce the original skipped-check
+  mismatch or the degraded Game Over/Home repair path; those exact paths still
+  await natural post-fix boundary observation.
 - **Fixed by:** `1b16db9`, `4ac5237`.
 
 ### Open in-battle side menu suppressed Mission reward scheduling
@@ -557,6 +561,18 @@ and actionable work lives in
   Resume, or other device input. Production remained Paused pending a fresh
   operator-owned screen boundary; live completion of the Perk repair was not
   claimed from that ambiguous state.
+- **Later confirmation:** The retained
+  [2026-08-08–13 production extract](evidence/perk-repair-confirmation-2026-08-08-13.md)
+  closes that original deployment-boundary limitation. On 2026-08-08, a later
+  managed Home setup observed a real Auto Pick mismatch, made three locally
+  verified upward swaps, completed the authoritative final readback, and
+  reported `Auto Pick priority restored` before the complete Home setup
+  succeeded. Save-backed Home checks on 2026-08-12 and 2026-08-13 then matched
+  both the exact six-Ban set and the complete 18-row Auto Pick order. The exact
+  two-ignored-swipe recovery and transient Ban no-op did not naturally recur;
+  their retained regressions remain the appropriate evidence unless a future
+  recurrence supplies another live boundary. No live validation remains
+  pending for this resolved issue.
 - **Fixed by:** `a5825db`, `f747515`.
 
 ### Utility Dissonance star was labeled as Attack
@@ -916,6 +932,12 @@ and actionable work lives in
   inspect or interact with the production process, systemd, ADB, emulator,
   shared live frame, or battle, and did not deploy or modify installed files.
 - **Fixed by:** `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b`.
+- **Superseded safety refinement:** Later save-backed Damage/Orb and
+  level-skip ordering made blanket preservation unsafe. Current behavior still
+  plans each mismatch independently while read-only, but the first actual UI
+  mutation invalidates every remaining save-derived decision before input.
+  Home setup restarts without save decisions when necessary, and only
+  independently UI-verified sections survive with explicit UI provenance.
 
 ### First Perk Choice compared a value-bearing OCR slug to its semantic key
 
@@ -1033,10 +1055,10 @@ and actionable work lives in
   18/16 ranked/inventory split and no sentinel; ID `11` is static. Target
   Priority uses the accepted complete map. Locks require only every requested
   bit and report extras without input. The exact current eight-slot Farm Module
-  loadout is value-scoped while Tournament gaps remain UI-backed. The same Home
-  snapshot seeds source-tagged continuity, and direct Retry passively polls a
-  fresh stable tail with append/30-entry-rollover validation and guarded UI
-  fallback. Per-check diagnostics are normalized and privacy-safe.
+  loadout is value-scoped. The same Home snapshot seeds source-tagged
+  continuity, and direct Retry passively polls a fresh stable tail with
+  append/30-entry-rollover validation and guarded UI fallback. Per-check
+  diagnostics are normalized and privacy-safe.
 - **Regression:** `test/test_player_save.py` covers Auto Pick, Target Priority,
   lock-subset, Module, malformed-shape, and redaction contracts;
   `test/test_player_save_preflight.py` covers one-snapshot History publication,
@@ -1056,7 +1078,10 @@ and actionable work lives in
 - **Fixed by:** `fe0c43fee8b2c013e13b89e85508e7555b377054`.
 - **Follow-up:** The 2026-08-05 operator-authorized Tournament pairing above
   subsequently closed the Project Funding/Harmony Conductor gap without
-  changing Tournament's observation-only policy.
+  changing Tournament's observation-only policy. The 2026-08-14 no-battle
+  campaign then completed all 24 global Module identities; exact current Farm
+  and `tournament_standard` assignments suppress duplicate Modules UI, while a
+  globally known identity in an unsupported slot remains UI-backed.
 ### Stopping managed automation removed the only localhost ADB registration
 
 - **Observed:** 2026-08-05 at a post-automation invocation boundary for the

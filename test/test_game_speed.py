@@ -837,10 +837,13 @@ def test_farm_level_skips_remain_ahead_of_game_speed():
         ctx=SimpleNamespace(data={"mission_vars": mission_vars})
     )
 
+    assert app._level_skip_priority_pending(initialization_pending=True)
     assert not app._game_speed_priority_ready(initialization_pending=True)
     mission_vars["ehls_completed"] = True
+    assert app._level_skip_priority_pending(initialization_pending=True)
     assert not app._game_speed_priority_ready(initialization_pending=True)
     mission_vars["eals_completed"] = True
+    assert not app._level_skip_priority_pending(initialization_pending=True)
     assert app._game_speed_priority_ready(initialization_pending=True)
 
 
@@ -849,10 +852,12 @@ def test_non_farm_and_attached_battles_do_not_invent_a_level_skip_dependency():
     app._mission_mgr = SimpleNamespace(
         ctx=SimpleNamespace(data={"mission_vars": {}})
     )
+    assert not app._level_skip_priority_pending(initialization_pending=True)
     assert app._game_speed_priority_ready(initialization_pending=True)
 
     app._mission_mgr.ctx.data["mission_vars"] = {
         "ehls_completed": False,
         "eals_completed": False,
     }
+    assert not app._level_skip_priority_pending(initialization_pending=False)
     assert app._game_speed_priority_ready(initialization_pending=False)

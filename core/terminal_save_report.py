@@ -60,6 +60,12 @@ def unavailable_terminal_save_report(
         },
         "history_transition": {},
         "completed_entry": None,
+        "terminal_metric_claims": {
+            "status": "unavailable",
+            "reason": _safe_reason(reason),
+            "claims": {},
+            "unavailable": {},
+        },
         "ui_fallback": {
             "required": True,
             "reason": _safe_reason(reason),
@@ -113,10 +119,14 @@ def terminal_save_report_from_acquisition(
         else dict(history_transition)
     )
     if not _terminal_history_transition_complete(structural):
-        return unavailable(
-            structural.get("reason")
-            if isinstance(structural, Mapping)
-            else "terminal_history_transition_unavailable"
+        return _retain_semantic_forward_terminal_metrics(
+            unavailable(
+                structural.get("reason")
+                if isinstance(structural, Mapping)
+                else "terminal_history_transition_unavailable"
+            ),
+            acquisition=acquisition,
+            terminal=terminal,
         )
     if not acquisition.complete or snapshot is None:
         return unavailable(acquisition.reason)
@@ -176,6 +186,25 @@ def terminal_save_report_from_acquisition(
             unavailable("runtime_history_projection_unavailable"), structural
         )
     tail = getattr(runtime, "battle_history_tail", None)
+    terminal_metric_claims = (
+        dict(getattr(tail, "terminal_metric_claims", {}) or {})
+        if tail is not None
+        else {}
+    )
+    expected_tournament = terminal == "TOURNAMENT_RESULTS"
+    tail_identity = getattr(tail, "identity", None)
+    if (
+        tail_identity is not None
+        and bool(getattr(tail_identity, "is_tournament", False))
+        is not expected_tournament
+    ):
+        terminal_metric_claims["status"] = "unavailable"
+        terminal_metric_claims["reason"] = "terminal_history_kind_mismatch"
+        return _semantic_unavailable(
+            unavailable("terminal_history_kind_mismatch"),
+            structural,
+            terminal_metric_claims=terminal_metric_claims,
+        )
     entry = getattr(tail, "entry", None)
     if (
         tail is None
@@ -188,23 +217,31 @@ def terminal_save_report_from_acquisition(
                 or "semantic_completed_entry_unavailable"
             ),
             structural,
+            terminal_metric_claims=terminal_metric_claims,
         )
 
-    expected_tournament = terminal == "TOURNAMENT_RESULTS"
     if bool(getattr(entry, "is_tournament", False)) is not expected_tournament:
+        terminal_metric_claims["status"] = "unavailable"
+        terminal_metric_claims["reason"] = "terminal_history_kind_mismatch"
         return _semantic_unavailable(
-            unavailable("terminal_history_kind_mismatch"), structural
+            unavailable("terminal_history_kind_mismatch"),
+            structural,
+            terminal_metric_claims=terminal_metric_claims,
         )
 
     try:
         completed_entry = entry.as_dict()
     except (AttributeError, KeyError, TypeError, ValueError):
         return _semantic_unavailable(
-            unavailable("semantic_completed_entry_changed_shape"), structural
+            unavailable("semantic_completed_entry_changed_shape"),
+            structural,
+            terminal_metric_claims=terminal_metric_claims,
         )
     if not isinstance(completed_entry, Mapping):
         return _semantic_unavailable(
-            unavailable("semantic_completed_entry_changed_shape"), structural
+            unavailable("semantic_completed_entry_changed_shape"),
+            structural,
+            terminal_metric_claims=terminal_metric_claims,
         )
 
     return {
@@ -225,6 +262,7 @@ def terminal_save_report_from_acquisition(
             structural.get("history_transition") or {}
         ),
         "completed_entry": dict(completed_entry),
+        "terminal_metric_claims": terminal_metric_claims,
         "ui_fallback": {
             "required": False,
             "reason": "",
@@ -306,6 +344,17 @@ def terminal_history_transition_from_acquisition(
     latest = dict(history_result.metadata)
     if latest.get("source") != PLAYER_SAVE_HISTORY_SOURCE:
         return unavailable("terminal_history_source_invalid")
+    runtime = getattr(snapshot, "runtime_save", None)
+    tail = getattr(runtime, "battle_history_tail", None)
+    tail_identity = getattr(tail, "identity", None)
+    expected_tournament = terminal == "TOURNAMENT_RESULTS"
+    if (
+        tail_identity is None
+        or type(getattr(tail_identity, "is_tournament", None)) is not bool
+        or bool(tail_identity.is_tournament) is not expected_tournament
+        or latest.get("is_tournament") is not expected_tournament
+    ):
+        return unavailable("terminal_history_kind_mismatch")
     if not history_sources_compatible(baseline, latest):
         return unavailable("pre_terminal_history_source_incompatible")
     if baseline.get("fingerprint") == latest.get("fingerprint"):
@@ -313,7 +362,6 @@ def terminal_history_transition_from_acquisition(
     if not valid_history_tail_advance(baseline, latest):
         return unavailable("terminal_history_tail_transition_invalid")
 
-    runtime = getattr(snapshot, "runtime_save", None)
     if runtime is None:
         return unavailable("runtime_history_projection_unavailable")
     if getattr(runtime, "round_active", True):
@@ -447,7 +495,8 @@ def validate_terminal_history_handoff(
     if not (
         latest.get("schema_version") == 2
         and latest.get("source") == PLAYER_SAVE_HISTORY_SOURCE
-        and latest.get("identity_schema_version") == 1
+        and latest.get("identity_schema_version") == 2
+        and latest.get("is_tournament") is (terminal == "TOURNAMENT_RESULTS")
         and mapping_id
         and _sha256_fingerprint(effective_mapping_fingerprint)
         and latest.get("mapping_id") == mapping_id
@@ -725,15 +774,83 @@ def _terminal_history_transition_complete(value: Any) -> bool:
 def _semantic_unavailable(
     report: dict[str, Any],
     structural: Mapping[str, Any],
+    *,
+    terminal_metric_claims: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Retain structural success while leaving the report UI authoritative."""
 
     report["history_transition"] = dict(
         structural.get("history_transition") or {}
     )
+    report["capture"] = dict(structural.get("capture") or {})
+    report["run_binding"] = dict(structural.get("run_binding") or {})
+    report["latest_completed_battle"] = dict(
+        structural.get("latest_completed_battle") or {}
+    )
+    if terminal_metric_claims is not None:
+        report["terminal_metric_claims"] = dict(terminal_metric_claims)
     report["structural_history"] = {
         "status": "complete",
         "reason": "",
+    }
+    return report
+
+
+def _retain_semantic_forward_terminal_metrics(
+    report: dict[str, Any],
+    *,
+    acquisition: PlayerSaveAcquisitionBundle,
+    terminal: str,
+) -> dict[str, Any]:
+    """Retain capability facts while its monitor owns causal tail proof.
+
+    A data-lineage-forward resolution intentionally grants no legacy History
+    continuity authority. Its active-tally contract nevertheless declares a
+    smaller tail identity, which the bound monitor compares with the active
+    baseline before consuming these facts. The completed report and UI
+    fallback remain unavailable here.
+    """
+
+    snapshot = acquisition.snapshot
+    if (
+        snapshot is None
+        or getattr(snapshot, "mapping_resolution", None)
+        != "semantic_forward_revision"
+        or acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.NATURAL_BOUNDARY
+        or acquisition.boundary is None
+        or acquisition.boundary.kind.value != terminal
+    ):
+        return report
+    runtime = getattr(snapshot, "runtime_save", None)
+    tail = getattr(runtime, "battle_history_tail", None)
+    identity = getattr(tail, "terminal_identity", None)
+    claims = getattr(tail, "terminal_metric_claims", None)
+    expected_tournament = terminal == "TOURNAMENT_RESULTS"
+    source_fingerprint = str(
+        getattr(snapshot, "source_sha256", None) or ""
+    ).strip().lower()
+    if not (
+        runtime is not None
+        and getattr(runtime, "round_active", True) is False
+        and identity is not None
+        and bool(getattr(identity, "is_tournament", False))
+        is expected_tournament
+        and isinstance(claims, Mapping)
+        and claims.get("status") in {"observed", "partial"}
+        and _sha256_fingerprint(source_fingerprint)
+    ):
+        return report
+    report["capture"] = {
+        "captured_at": getattr(snapshot, "captured_at", None),
+        "save_revision": getattr(snapshot, "save_revision", None),
+        "source_fingerprint": source_fingerprint,
+        "acquisition": acquisition.redacted_provenance(),
+    }
+    report["terminal_metric_claims"] = dict(claims)
+    report["active_tally_terminal_relation"] = {
+        "status": "monitor_baseline_required",
+        "reason": "legacy_history_capability_not_declared",
     }
     return report
 

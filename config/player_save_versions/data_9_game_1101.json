@@ -145,6 +145,37 @@
         "upgradeWorkshopLevel",
         "upgradeWorkshopUtilityLevel"
       ],
+      "runtime_observation": [
+        "blackHoleCoinsThisRound",
+        "cashEarnedThisRound",
+        "cellsEarnedThisRound",
+        "coinsBonusTotalCoinsThisRound",
+        "coinsBonusUpgradeCoinsThisRound",
+        "coinsEarnedCPWThisRound",
+        "coinsEarnedFromAdBonusThisRound",
+        "coinsEarnedThisRound",
+        "coinsEarnedThisRoundWithoutFetch",
+        "coinsEarnedWaveSkipThisRound",
+        "critCoinCoinsThisRound",
+        "deathWaveCoinsThisRound",
+        "enemyAttackLevelSkips",
+        "enemyHealthLevelSkips",
+        "freeAttackUpgradesThisRound",
+        "freeDefenseUpgradesThisRound",
+        "freeUtilityUpgradesThisRound",
+        "gameplayTimeThisRound",
+        "goldenTowerCoinsThisRound",
+        "goldenTowerPlusCoinsThisRound",
+        "highestCPMThisRound",
+        "orbCoinsThisRound",
+        "realTimeThisRound",
+        "spotlightCoinsThisRound",
+        "totalCoinsByBotThisRound",
+        "totalCoinsFetchedByGuardianThisRound",
+        "totalCoinsStolenByGuardianThisRound",
+        "totalEnemiesDestroyedThisRound",
+        "wavesSkippedThisRound"
+      ],
       "private": [
         "bits",
         "bucketID",
@@ -285,7 +316,6 @@
         "battlePassActive",
         "bitsPurchasedThisSeason",
         "blackHoleCoins",
-        "blackHoleCoinsThisRound",
         "botsActive",
         "botsActivePresets",
         "botsCooldownTimers",
@@ -305,9 +335,7 @@
         "cardRegistries",
         "cardsBoughtTotal",
         "cashEarnedFromInterestThisRound",
-        "cashEarnedThisRound",
         "cashEarnedThisWave",
-        "cellsEarnedThisRound",
         "cellsPurchasedThisSeason",
         "chainThunderBlockedThisRound",
         "cheaterBool",
@@ -315,14 +343,7 @@
         "chronoFieldBlockedThisRound",
         "claimedTournaments",
         "cloudInviteSent",
-        "coinsBonusTotalCoinsThisRound",
-        "coinsBonusUpgradeCoinsThisRound",
-        "coinsEarnedCPWThisRound",
-        "coinsEarnedFromAdBonusThisRound",
-        "coinsEarnedThisRound",
-        "coinsEarnedThisRoundWithoutFetch",
         "coinsEarnedThisWave",
-        "coinsEarnedWaveSkipThisRound",
         "commonModulesObtained",
         "completedLabs",
         "completedMissionsThisWeek",
@@ -332,7 +353,6 @@
         "coreSubstatBans",
         "counterEALS",
         "counterEHLS",
-        "critCoinCoinsThisRound",
         "currencyEarnedThisCycle",
         "currencySpentThisCycle",
         "currentMissions",
@@ -354,7 +374,6 @@
         "damageTakenWhileBerskerActiveThisRound",
         "daysLogged",
         "deathDefyThisRound",
-        "deathWaveCoinsThisRound",
         "deathWaveHealthGainThisWave",
         "deathwaveDamageRemaining",
         "defenseAbsoluteBlockedThisRound",
@@ -414,8 +433,6 @@
         "enemiesHitByThunderBotThisRound",
         "enemiesKilledThisWave",
         "enemiesSpawnedThisWave",
-        "enemyAttackLevelSkips",
-        "enemyHealthLevelSkips",
         "energyShieldHitsAbsorbedThisRound",
         "enhancementBuyMultiplier",
         "epicModulesObtained",
@@ -440,14 +457,10 @@
         "fetchRareModuleRewards",
         "firstTradeOffPerkIndex",
         "flameBotBlockedThisRound",
-        "freeAttackUpgradesThisRound",
         "freeBotRespecs",
-        "freeDefenseUpgradesThisRound",
         "freeTicketGiven",
-        "freeUtilityUpgradesThisRound",
         "gameSpeedMemory",
         "gameStartedDate",
-        "gameplayTimeThisRound",
         "gemBlockLastClaimedDate",
         "gemBlockLastClaimedWave",
         "gemBlocksThisRound",
@@ -464,8 +477,6 @@
         "generatorShardsPurchasedThisSeason",
         "generatorSubstatBans",
         "goldenTowerCashThisRound",
-        "goldenTowerCoinsThisRound",
-        "goldenTowerPlusCoinsThisRound",
         "guardianCooldownTimers",
         "guardianRespecAvailable",
         "guardianSkinIndex",
@@ -481,7 +492,6 @@
         "healthFromDeathWaveMaxed",
         "healthFromDeathWaveThisRound",
         "hideCompletedResearches",
-        "highestCPMThisRound",
         "highestCellsEarnedThisTier",
         "highestCoinsEarnedThisTier",
         "highestLeague",
@@ -557,7 +567,6 @@
         "nukeUsedThisRound",
         "nukeWavesUntilRefresh",
         "nukesUsedThisRound",
-        "orbCoinsThisRound",
         "orbHitsThisRound",
         "pauseBattleInsideMenus",
         "playTime",
@@ -590,7 +599,6 @@
         "randomOption",
         "rareModulesObtained",
         "rarityAutoRerollAllowed",
-        "realTimeThisRound",
         "recoveryPackagesRegenThisRound",
         "recoveryPackagesThisRound",
         "relicsUnlockedThisEvent",
@@ -622,7 +630,6 @@
         "showRangeOfRangedEnemy",
         "songEndOption",
         "spotlightCoins",
-        "spotlightCoinsThisRound",
         "starterPackLastAdvertisedDate",
         "stoneSpendWarning",
         "stonesPurchaseCount1",
@@ -655,21 +662,18 @@
         "totalCellsSpent",
         "totalCellsSpent_v2",
         "totalCoinsByBot",
-        "totalCoinsByBotThisRound",
         "totalCoinsByGuardian",
         "totalCoinsEarned",
         "totalCoinsEarnedFromAdBonus",
         "totalCoinsEarnedFromKills",
         "totalCoinsEarnedFromMine",
         "totalCoinsEarnedFromWaves",
-        "totalCoinsFetchedByGuardianThisRound",
         "totalCoinsSpentAttackEnhancements",
         "totalCoinsSpentDefenseEnhancements",
         "totalCoinsSpentEnhancements",
         "totalCoinsSpentOnResearch",
         "totalCoinsSpentUtilityEnhancements",
         "totalCoinsSpentWorkshop",
-        "totalCoinsStolenByGuardianThisRound",
         "totalCommonModulesByGuardianThisRound",
         "totalCoreShardsByGuardianThisRound",
         "totalDamageByBlackHole",
@@ -724,7 +728,6 @@
         "totalEnemiesDestroyedScattersThisRound",
         "totalEnemiesDestroyedTank",
         "totalEnemiesDestroyedTankThisRound",
-        "totalEnemiesDestroyedThisRound",
         "totalEnemiesDestroyedVampiresThisRound",
         "totalEnemiesDestryoedByOrbs",
         "totalEnemiesTaggedByDeathwaveThisRound",
@@ -795,7 +798,6 @@
         "wave40",
         "wave60",
         "waveMilestonePostedEvents",
-        "wavesSkippedThisRound",
         "weaponChoice1Index",
         "weaponChoice2Index",
         "weaponChoice3Index",
@@ -1755,6 +1757,293 @@
           "source": "upgradeWorkshopUtilityLevel",
           "kind": "integer_vector",
           "length": 20
+        }
+      }
+    }
+  },
+  "runtime_save_extensions": {
+    "active_tallies": {
+      "schema_version": 1,
+      "capability_id": "thetower.player_save.active_run_tallies.v1",
+      "forward_policy": "additive_dependencies",
+      "audit_id": "V1101-RUNTIME-017",
+      "evidence_level": "cross_channel",
+      "scope": {
+        "semantics": {
+          "state": "cumulative_active_round",
+          "identity": "game_version_tier_started_count_seed",
+          "checkpoint_order": "capture_time_source_identity",
+          "wave_relation": "optional_nondecreasing_rate_dependency",
+          "terminal_identity": "source_order_tail_battle_date_tier_wave_kind",
+          "terminal_relation": "causally_bound_natural_terminal_nondecreasing"
+        },
+        "binding": {
+          "game_version": "versionNumber",
+          "save_revision": "saveRevision",
+          "round_active": "roundActiveBool",
+          "current_tier": "currentTier",
+          "current_wave": "currentWave",
+          "round_seed": "roundSeed",
+          "round_counter_vector": "roundsStartedThisTier",
+          "history_container": "battleHistory",
+          "history_entry_class": "BattleHistoryEntry",
+          "history_capacity": 30,
+          "history_entry_count": "battleHistory.length",
+          "history_battle_date": "battleDate",
+          "history_tier": "tier",
+          "history_kind": "isTournament",
+          "history_wave": "wave",
+          "history_game_time": "gameTime",
+          "history_real_time": "realTime"
+        }
+      },
+      "components": {
+        "coin_sources": {
+          "fields": {
+            "coins_from_black_hole": {
+              "source": "blackHoleCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromBlackHole"
+            },
+            "coins_from_coin_bonuses": {
+              "source": "coinsBonusTotalCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromCoinBonuses"
+            },
+            "coins_from_coin_per_wave": {
+              "source": "coinsEarnedCPWThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsEarnedCPW"
+            },
+            "coins_from_coin_upgrade": {
+              "source": "coinsBonusUpgradeCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromCoinUpgrade"
+            },
+            "coins_from_crit_coin": {
+              "source": "critCoinCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromCritCoin"
+            },
+            "coins_from_death_wave": {
+              "source": "deathWaveCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromDeathWave"
+            },
+            "coins_from_golden_bot": {
+              "source": "totalCoinsByBotThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "goldenBotCoinsEarned"
+            },
+            "coins_from_golden_tower": {
+              "source": "goldenTowerCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromGoldenTower"
+            },
+            "coins_from_golden_tower_plus": {
+              "source": "goldenTowerPlusCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromGoldenTowerPlus"
+            },
+            "coins_from_orbs": {
+              "source": "orbCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromOrbs"
+            },
+            "coins_from_spotlight": {
+              "source": "spotlightCoinsThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsFromSpotlight"
+            },
+            "coins_from_wave_skip": {
+              "source": "coinsEarnedWaveSkipThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsEarnedWaveSkip"
+            },
+            "guardian_coins_fetched": {
+              "source": "totalCoinsFetchedByGuardianThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "guardianCoinsFetched"
+            },
+            "guardian_coins_stolen": {
+              "source": "totalCoinsStolenByGuardianThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "guardianCoinsStolen"
+            }
+          },
+          "derived": {}
+        },
+        "economy": {
+          "fields": {
+            "cash_earned": {
+              "source": "cashEarnedThisRound",
+              "kind": "nonnegative_number",
+              "unit": "cash",
+              "monotonic": true,
+              "terminal_source": "cashEarned"
+            },
+            "cells_earned": {
+              "source": "cellsEarnedThisRound",
+              "kind": "nonnegative_number",
+              "unit": "cells",
+              "monotonic": true,
+              "terminal_source": "cellsEarned"
+            },
+            "coins_earned": {
+              "source": "coinsEarnedThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true,
+              "terminal_source": "coinsEarned"
+            },
+            "coins_earned_from_ad_bonus": {
+              "source": "coinsEarnedFromAdBonusThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true
+            },
+            "coins_earned_without_fetch": {
+              "source": "coinsEarnedThisRoundWithoutFetch",
+              "kind": "nonnegative_number",
+              "unit": "coins",
+              "monotonic": true
+            },
+            "game_time_seconds": {
+              "source": "gameplayTimeThisRound",
+              "kind": "nonnegative_number",
+              "unit": "seconds",
+              "monotonic": true,
+              "terminal_source": "gameTime"
+            },
+            "highest_coins_per_minute": {
+              "source": "highestCPMThisRound",
+              "kind": "nonnegative_number",
+              "unit": "coins_per_minute",
+              "monotonic": true,
+              "terminal_source": "highestCPM"
+            },
+            "real_time_seconds": {
+              "source": "realTimeThisRound",
+              "kind": "nonnegative_number",
+              "unit": "seconds",
+              "monotonic": true,
+              "terminal_source": "realTime"
+            }
+          },
+          "derived": {
+            "average_cash_per_hour": {
+              "derive": "per_real_hour",
+              "numerator": "cash_earned",
+              "denominator": "real_time_seconds",
+              "unit": "cash_per_hour"
+            },
+            "average_cells_per_hour": {
+              "derive": "per_real_hour",
+              "numerator": "cells_earned",
+              "denominator": "real_time_seconds",
+              "unit": "cells_per_hour"
+            },
+            "average_coins_per_hour": {
+              "derive": "per_real_hour",
+              "numerator": "coins_earned",
+              "denominator": "real_time_seconds",
+              "unit": "coins_per_hour"
+            },
+            "average_coins_per_minute": {
+              "derive": "per_real_minute",
+              "numerator": "coins_earned",
+              "denominator": "real_time_seconds",
+              "unit": "coins_per_minute"
+            },
+            "effective_game_speed": {
+              "derive": "ratio",
+              "numerator": "game_time_seconds",
+              "denominator": "real_time_seconds",
+              "unit": "multiplier"
+            }
+          }
+        },
+        "progress": {
+          "fields": {
+            "attack_level_skips": {
+              "source": "enemyAttackLevelSkips",
+              "kind": "nonnegative_integer",
+              "unit": "levels",
+              "monotonic": true,
+              "terminal_source": "attackLevelSkips"
+            },
+            "free_attack_upgrades": {
+              "source": "freeAttackUpgradesThisRound",
+              "kind": "nonnegative_integer",
+              "unit": "upgrades",
+              "monotonic": true,
+              "terminal_source": "freeAttackUpgrades"
+            },
+            "free_defense_upgrades": {
+              "source": "freeDefenseUpgradesThisRound",
+              "kind": "nonnegative_integer",
+              "unit": "upgrades",
+              "monotonic": true,
+              "terminal_source": "freeDefenseUpgrades"
+            },
+            "free_utility_upgrades": {
+              "source": "freeUtilityUpgradesThisRound",
+              "kind": "nonnegative_integer",
+              "unit": "upgrades",
+              "monotonic": true,
+              "terminal_source": "freeUtilityUpgrades"
+            },
+            "health_level_skips": {
+              "source": "enemyHealthLevelSkips",
+              "kind": "nonnegative_integer",
+              "unit": "levels",
+              "monotonic": true,
+              "terminal_source": "healthLevelSkips"
+            },
+            "total_enemies_destroyed": {
+              "source": "totalEnemiesDestroyedThisRound",
+              "kind": "nonnegative_number",
+              "unit": "enemies",
+              "monotonic": true,
+              "terminal_source": "totalEnemies"
+            },
+            "waves_skipped": {
+              "source": "wavesSkippedThisRound",
+              "kind": "nonnegative_integer",
+              "unit": "waves",
+              "monotonic": true,
+              "terminal_source": "wavesSkipped"
+            }
+          },
+          "derived": {}
         }
       }
     }

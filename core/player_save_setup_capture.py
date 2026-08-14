@@ -96,6 +96,13 @@ def project_forced_save_setup(
         )
 
     snapshot = acquisition.snapshot
+    if getattr(snapshot, "mapping_resolution", None) == (
+        "semantic_forward_revision"
+    ):
+        raise SetupCaptureError(
+            "The resolved save capability grants metric observation only",
+            code="setup_capture_capability_authority_unavailable",
+        )
     mapping_id = str(getattr(snapshot, "mapping_id", None) or "").strip()
     mapping_maturity = str(
         getattr(snapshot, "mapping_maturity", None) or ""

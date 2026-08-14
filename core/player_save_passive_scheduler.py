@@ -13,17 +13,17 @@ import threading
 import time
 from typing import Callable, Optional, Sequence
 
-from core.perk_save_monitor import PerkSaveMonitorContext
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionType,
     StablePlayerSaveAcquirer,
 )
+from core.player_save_observation import PlayerSaveObservationContext
 from utils.logger import log
 
 
 PassiveBundleConsumer = Callable[
-    [PlayerSaveAcquisitionBundle, PerkSaveMonitorContext, str],
+    [PlayerSaveAcquisitionBundle, PlayerSaveObservationContext, str],
     None,
 ]
 
@@ -38,7 +38,7 @@ class PlayerSavePassiveScheduler:
         self,
         *,
         acquirer: StablePlayerSaveAcquirer,
-        context_fn: Callable[[], Optional[PerkSaveMonitorContext]],
+        context_fn: Callable[[], Optional[PlayerSaveObservationContext]],
         consumers: Sequence[PassiveBundleConsumer],
         interval_seconds: float = 300.0,
         monotonic_fn: Callable[[], float] = time.monotonic,
@@ -146,7 +146,7 @@ class PlayerSavePassiveScheduler:
             context = self._context_fn()
         except Exception:
             return False
-        if not isinstance(context, PerkSaveMonitorContext) or not context.valid():
+        if not isinstance(context, PlayerSaveObservationContext) or not context.valid():
             return False
         acquisition = self._acquirer.acquire(
             PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
@@ -157,9 +157,8 @@ class PlayerSavePassiveScheduler:
         except Exception:
             return False
         if (
-            not isinstance(current_context, PerkSaveMonitorContext)
-            or current_context.runtime_session_id != context.runtime_session_id
-            or current_context.activity_scope_id != context.activity_scope_id
+            not isinstance(current_context, PlayerSaveObservationContext)
+            or current_context != context
         ):
             return False
         delivered = False

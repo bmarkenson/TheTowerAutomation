@@ -70,6 +70,7 @@ def _save_metadata(
     tier=19,
     wave=1899,
     semantic_status="observed",
+    is_tournament=False,
     battle_date=None,
 ):
     return {
@@ -77,10 +78,11 @@ def _save_metadata(
         "source": "player_save",
         "mapping_id": "data-9-game-1073",
         "effective_mapping_fingerprint": "9" * 64,
-        "identity_schema_version": 1,
+        "identity_schema_version": 2,
         "fingerprint": fingerprint,
         "tier": tier,
         "wave": wave,
+        "is_tournament": is_tournament,
         "battle_date": battle_date
         or {
             "kind_id": 2,
@@ -159,6 +161,7 @@ def _terminal_handoff(
         fingerprint="b" * 64,
         entry_count=30,
         capacity=30,
+        is_tournament=terminal_state == "TOURNAMENT_RESULTS",
     )
     latest["captured_at"] = "2026-08-07T00:00:01+00:00"
     acquisition = {
@@ -597,7 +600,69 @@ def test_missing_attachment_baseline_uses_history_ui_when_save_is_unusable(
     assert logger.get_activity_scope()["latest_completed_battle"]["source"] == (
         "battle_history_ui"
     )
-    assert "using the guarded UI route" in log_path.read_text(encoding="utf-8")
+    contents = log_path.read_text(encoding="utf-8")
+    assert "using the guarded UI route" in contents
+    assert "recorded from the guarded Battle History UI" in contents
+    assert "attachment_ui_baseline_recorded" in contents
+    assert "recorded from the guarded player save" not in contents
+
+
+def test_priority_run_initialization_defers_running_continuity(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+    metadata = _save_metadata(wave=430)
+    save_reads = []
+    ui_reads = []
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **kwargs: (
+            save_reads.append(kwargs) or _save_complete(metadata)
+        ),
+        history_reader=lambda **kwargs: ui_reads.append(kwargs),
+    )
+
+    waiting_home = coordinator.handle(
+        {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"},
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+        player_save_mode="save_first",
+    )
+    assert waiting_home.pending
+    assert not coordinator.needs_check(
+        {"state": "RUNNING"},
+        defer_running_check=True,
+    )
+
+    deferred = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        defer_running_check=True,
+        player_save_mode="save_first",
+    )
+
+    assert not deferred.pending
+    assert not deferred.recapture
+    assert save_reads == []
+    assert ui_reads == []
+
+    resumed = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    assert resumed.recapture
+    assert len(save_reads) == 1
+    assert ui_reads == []
+    assert logger.get_activity_scope()["latest_completed_battle"] == metadata
 
 
 def test_post_retry_history_poll_waits_for_startup_gates(

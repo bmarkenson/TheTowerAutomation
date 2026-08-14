@@ -156,6 +156,34 @@ def test_activity_scope_change_during_read_discards_bundle_before_projection():
     consumer.assert_not_called()
 
 
+def test_target_generation_change_after_read_discards_bundle_before_projection():
+    pull = Mock(return_value=b"stable-payload")
+    decode = Mock(return_value=SimpleNamespace(marker="normalized"))
+    contexts = iter((_context(generation=3), _context(generation=4)))
+    consumer = Mock()
+    scheduler = PlayerSavePassiveScheduler(
+        acquirer=StablePlayerSaveAcquirer(
+            target_snapshot_fn=lambda: SimpleNamespace(
+                target="localhost:5555",
+                generation=3,
+                owned=True,
+            ),
+            pull_fn=pull,
+            decode_fn=decode,
+        ),
+        context_fn=lambda: next(contexts),
+        consumers=(consumer,),
+        start_worker=False,
+    )
+
+    assert scheduler.acquire_once() is False
+    scheduler.close()
+
+    pull.assert_called_once_with(device_id="localhost:5555")
+    decode.assert_called_once()
+    consumer.assert_not_called()
+
+
 def test_app_applies_worker_checkpoint_only_on_matching_current_context():
     app = App.__new__(App)
     context = _context()
@@ -186,3 +214,36 @@ def test_app_discards_worker_checkpoint_after_activity_scope_changes():
     assert app._sync_perk_timeline_save_checkpoint() is None
     observer.observe_saved_checkpoint.assert_not_called()
     assert app._pending_perk_timeline_save_checkpoint is None
+
+
+def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
+    app = App.__new__(App)
+    context = _context()
+    acquisition = Mock()
+    app._perk_save_monitor = Mock()
+    app._perk_save_monitor.bound_checkpoint_evidence.return_value = None
+    app._active_run_metric_monitor = Mock()
+    app._active_run_metric_monitor.observe_bundle.return_value = (
+        "accepted_checkpoint"
+    )
+    app._active_run_metric_monitor.latest_summary.return_value = None
+    app._player_save_audit_collector = Mock()
+
+    app._consume_passive_player_save_bundle(
+        acquisition,
+        context,
+        "scheduled_interval",
+    )
+
+    app._perk_save_monitor.observe_bundle.assert_called_once_with(
+        acquisition,
+        context=context,
+    )
+    app._active_run_metric_monitor.observe_bundle.assert_called_once_with(
+        acquisition,
+        context=context,
+    )
+    app._player_save_audit_collector.observe_acquisition.assert_called_once_with(
+        acquisition,
+        reason_code="scheduled_interval",
+    )

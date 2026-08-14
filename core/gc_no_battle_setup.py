@@ -198,12 +198,21 @@ def _finish_gc_no_battle_setup(
         and result.status is not GcNoBattleSetupStatus.COMPLETE
     ):
         summary = f"{summary}; completed repairs: {repair_summary}"
+    if result.status is GcNoBattleSetupStatus.COMPLETE:
+        terminal_detail = (
+            "outcome=success result=complete "
+            f"reason={result.reason}"
+        )
+    else:
+        terminal_detail = (
+            f"outcome={result.status.value} result={result.status.value} "
+            f"failed_check={result.failed_check} reason={result.reason} "
+            f"retryable_from_home={result.retryable_from_home}"
+        )
     log_result(
         summary,
         detail=(
-            f"[GC_NO_BATTLE] result={result.status.value} "
-            f"failed_check={result.failed_check} reason={result.reason} "
-            f"retryable_from_home={result.retryable_from_home} "
+            f"[GC_NO_BATTLE] {terminal_detail} "
             f"evidence_keys={sorted(result.evidence)} "
             f"repairs={list(repairs)}"
         ),

@@ -718,9 +718,361 @@ public partial class BattleHistoryWindow : Window
                         $"{rate}/min ({confidence}% OCR)"));
                 }
             }
+            AppendActiveRunMetricRows(runtime, _reportRows);
         }
         RebuildReportSections();
     }
+
+    private static void AppendActiveRunMetricRows(
+        JsonElement runtime,
+        ICollection<ReportRow> destination)
+    {
+        if (!runtime.TryGetProperty("active_run_metrics", out var evidence)
+            || evidence.ValueKind != JsonValueKind.Object
+            || !evidence.TryGetProperty("components", out var components)
+            || components.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        destination.Add(new ReportRow(
+            "Save-backed metric status",
+            "Overall",
+            ActiveRunStatusSummary(evidence)));
+        if (evidence.TryGetProperty("terminal_relation", out var terminalRelation)
+            && terminalRelation.ValueKind == JsonValueKind.Object)
+        {
+            destination.Add(new ReportRow(
+                "Save-backed capability status",
+                "Terminal relation",
+                ActiveRunStatusSummary(terminalRelation)));
+        }
+        foreach (var component in components.EnumerateObject())
+        {
+            if (component.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            destination.Add(new ReportRow(
+                "Save-backed capability status",
+                Humanize(component.Name),
+                ActiveRunStatusSummary(component.Value)));
+        }
+        if (evidence.TryGetProperty("wave_claim", out var waveClaim)
+            && waveClaim.ValueKind == JsonValueKind.Object)
+        {
+            destination.Add(new ReportRow(
+                "Save-backed capability status",
+                "Wave-derived rates",
+                ActiveRunStatusSummary(waveClaim)));
+        }
+        destination.Add(new ReportRow(
+            "Save-backed metric interpretation",
+            "Coin sources",
+            "Counters can overlap; compare the same source across runs and do not sum rates."));
+        destination.Add(new ReportRow(
+            "Save-backed metric interpretation",
+            "Realized Coins/hour",
+            "Calculated from cumulative save coins and real time; OCR Coins/min remains separate and is never multiplied into a realized hourly result."));
+
+        if (components.TryGetProperty("economy", out var economy)
+            && economy.ValueKind == JsonValueKind.Object
+            && economy.TryGetProperty("samples", out var economySamples)
+            && economySamples.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var sample in economySamples.EnumerateArray())
+            {
+                if (sample.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+                var wave = JsonValue(sample, "saved_wave");
+                var capturedAt = JsonValue(sample, "captured_at");
+                if (sample.TryGetProperty("whole_run", out var wholeRun)
+                    && wholeRun.ValueKind == JsonValueKind.Object)
+                {
+                    destination.Add(new ReportRow(
+                        "Save-backed realized-rate progression",
+                        $"Whole run through wave {wave} at {capturedAt}",
+                        ActiveRunRateSummary(wholeRun)));
+                }
+                if (sample.TryGetProperty("interval", out var interval)
+                    && interval.ValueKind == JsonValueKind.Object)
+                {
+                    destination.Add(new ReportRow(
+                        "Save-backed realized-rate progression",
+                        $"Interval ending wave {wave} at {capturedAt}",
+                        ActiveRunRateSummary(interval)));
+                }
+            }
+        }
+
+        foreach (var component in components.EnumerateObject())
+        {
+            if (component.Value.ValueKind != JsonValueKind.Object
+                || !component.Value.TryGetProperty(
+                    "samples",
+                    out var componentSamples)
+                || componentSamples.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+            var latest = componentSamples.EnumerateArray().LastOrDefault();
+            if (latest.ValueKind != JsonValueKind.Object
+                || !latest.TryGetProperty("metrics", out var metrics)
+                || metrics.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            latest.TryGetProperty("whole_run", out var wholeRun);
+            JsonElement wholeRunPerHour = default;
+            var hasWholeRunPerHour = wholeRun.ValueKind == JsonValueKind.Object
+                && wholeRun.TryGetProperty("per_hour", out wholeRunPerHour)
+                && wholeRunPerHour.ValueKind == JsonValueKind.Object;
+            latest.TryGetProperty("interval", out var interval);
+            JsonElement perHour = default;
+            var hasPerHour = interval.ValueKind == JsonValueKind.Object
+                && interval.TryGetProperty("per_hour", out perHour)
+                && perHour.ValueKind == JsonValueKind.Object;
+            foreach (var metric in metrics.EnumerateObject())
+            {
+                var value = CompactMetric(DisplayJsonValue(metric.Value));
+                if (hasWholeRunPerHour
+                    && wholeRunPerHour.TryGetProperty(metric.Name, out var wholeRate))
+                {
+                    value += $"; whole-run {CompactMetric(DisplayJsonValue(wholeRate))}/hour";
+                }
+                if (hasPerHour && perHour.TryGetProperty(metric.Name, out var rate))
+                {
+                    value += $"; interval {CompactMetric(DisplayJsonValue(rate))}/hour";
+                }
+                destination.Add(new ReportRow(
+                    "Latest save-backed " + Humanize(component.Name),
+                    Humanize(metric.Name),
+                    value));
+            }
+        }
+
+        if (evidence.TryGetProperty("terminal", out var terminal)
+            && terminal.ValueKind == JsonValueKind.Object)
+        {
+            destination.Add(new ReportRow(
+                "Save-backed realized-rate progression",
+                "Terminal reconciliation",
+                JsonValue(terminal, "status")
+                + (JsonValue(terminal, "reason") is var reason && reason != "-"
+                    ? $" ({reason})"
+                    : string.Empty)));
+            if (terminal.TryGetProperty("wave_claim", out var terminalWaveClaim)
+                && terminalWaveClaim.ValueKind == JsonValueKind.Object)
+            {
+                destination.Add(new ReportRow(
+                    "Terminal save-backed claim status",
+                    "Wave-derived rates",
+                    ActiveRunStatusSummary(terminalWaveClaim)));
+            }
+            if (terminal.TryGetProperty("components", out var terminalComponents)
+                && terminalComponents.ValueKind == JsonValueKind.Object
+                && terminalComponents.TryGetProperty("economy", out var terminalEconomy)
+                && terminalEconomy.ValueKind == JsonValueKind.Object)
+            {
+                if (terminalEconomy.TryGetProperty("whole_run", out var wholeRun)
+                    && wholeRun.ValueKind == JsonValueKind.Object)
+                {
+                    destination.Add(new ReportRow(
+                        "Save-backed realized-rate progression",
+                        "Terminal whole run",
+                        ActiveRunRateSummary(wholeRun)));
+                }
+                if (terminalEconomy.TryGetProperty("tail_interval", out var tail)
+                    && tail.ValueKind == JsonValueKind.Object)
+                {
+                    destination.Add(new ReportRow(
+                        "Save-backed realized-rate progression",
+                        "Final checkpoint to terminal interval",
+                        ActiveRunRateSummary(tail)));
+                }
+            }
+            if (terminal.TryGetProperty("components", out terminalComponents)
+                && terminalComponents.ValueKind == JsonValueKind.Object)
+            {
+                AppendTerminalActiveRunComponentRows(
+                    terminalComponents,
+                    destination);
+            }
+        }
+    }
+
+    private static void AppendTerminalActiveRunComponentRows(
+        JsonElement terminalComponents,
+        ICollection<ReportRow> destination)
+    {
+        foreach (var component in terminalComponents.EnumerateObject())
+        {
+            if (component.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            destination.Add(new ReportRow(
+                "Terminal save-backed claim status",
+                Humanize(component.Name),
+                ActiveRunStatusSummary(
+                    component.Value,
+                    missingProperty: "missing")));
+            if (!component.Value.TryGetProperty("matched", out var matched)
+                || matched.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            component.Value.TryGetProperty("whole_run", out var wholeRun);
+            JsonElement wholePerHour = default;
+            var hasWholePerHour = wholeRun.ValueKind == JsonValueKind.Object
+                && wholeRun.TryGetProperty("per_hour", out wholePerHour)
+                && wholePerHour.ValueKind == JsonValueKind.Object;
+            component.Value.TryGetProperty("tail_interval", out var tailInterval);
+            JsonElement tailPerHour = default;
+            var hasTailPerHour = tailInterval.ValueKind == JsonValueKind.Object
+                && tailInterval.TryGetProperty("per_hour", out tailPerHour)
+                && tailPerHour.ValueKind == JsonValueKind.Object;
+            foreach (var metric in matched.EnumerateObject())
+            {
+                var value = CompactMetric(DisplayJsonValue(metric.Value));
+                if (hasWholePerHour
+                    && wholePerHour.TryGetProperty(metric.Name, out var wholeRate))
+                {
+                    value += $"; whole-run {CompactMetric(DisplayJsonValue(wholeRate))}/hour";
+                }
+                if (hasTailPerHour
+                    && tailPerHour.TryGetProperty(metric.Name, out var tailRate))
+                {
+                    value += $"; final interval {CompactMetric(DisplayJsonValue(tailRate))}/hour";
+                }
+                destination.Add(new ReportRow(
+                    "Terminal save-backed " + Humanize(component.Name),
+                    Humanize(metric.Name),
+                    value));
+            }
+        }
+    }
+
+    private static string ActiveRunStatusSummary(
+        JsonElement evidence,
+        string missingProperty = "unavailable_claims")
+    {
+        var summary = JsonValue(evidence, "status");
+        var reason = JsonValue(evidence, "reason");
+        if (reason != "-")
+        {
+            summary += $" ({reason})";
+        }
+        if (evidence.TryGetProperty(missingProperty, out var unavailable))
+        {
+            var unavailableSummary = JsonIssueSummary(unavailable);
+            if (unavailableSummary != "-")
+            {
+                var label = missingProperty == "missing"
+                    ? "missing"
+                    : "unavailable";
+                summary += $"; {label}: {unavailableSummary}";
+            }
+        }
+        if (evidence.TryGetProperty("metric_conflicts", out var metricConflicts))
+        {
+            var conflictSummary = JsonIssueSummary(metricConflicts);
+            if (conflictSummary != "-")
+            {
+                summary += $"; conflicts: {conflictSummary}";
+            }
+        }
+        else if (evidence.TryGetProperty("conflicts", out var conflicts))
+        {
+            var conflictSummary = JsonIssueSummary(conflicts);
+            if (conflictSummary != "-")
+            {
+                summary += $"; conflicts: {conflictSummary}";
+            }
+        }
+        if (evidence.TryGetProperty("claim_issues", out var claimIssues))
+        {
+            var issueSummary = JsonIssueSummary(claimIssues);
+            if (issueSummary != "-")
+            {
+                summary += $"; claim issues: {issueSummary}";
+            }
+        }
+        return summary;
+    }
+
+    private static string JsonIssueSummary(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            var items = value.EnumerateObject()
+                .Select(item => $"{Humanize(item.Name)}: {DisplayJsonValue(item.Value)}")
+                .ToArray();
+            return items.Length == 0 ? "-" : string.Join("; ", items);
+        }
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            var items = value.EnumerateArray()
+                .Select(DisplayJsonValue)
+                .Where(item => item != "-")
+                .ToArray();
+            return items.Length == 0 ? "-" : string.Join("; ", items.Select(Humanize));
+        }
+        return "-";
+    }
+
+    private static string ActiveRunRateSummary(JsonElement rates) =>
+        $"realized CPH {CompactMetric(JsonValue(rates, "coins_per_hour"))}; "
+        + $"cells {CompactMetric(JsonValue(rates, "cells_per_hour"))}/hour; "
+        + $"cash {CompactMetric(JsonValue(rates, "cash_per_hour"))}/hour; "
+        + $"waves {CompactMetric(JsonValue(rates, "waves_per_hour"))}/hour; "
+        + $"speed {MultiplierMetric(JsonValue(rates, "effective_game_speed"))}";
+
+    private static string CompactMetric(string value)
+    {
+        if (!double.TryParse(
+                value,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var number)
+            || !double.IsFinite(number))
+        {
+            return value;
+        }
+        var magnitudes = new[]
+        {
+            (1e33, "D"),
+            (1e30, "N"),
+            (1e27, "O"),
+            (1e24, "S"),
+            (1e21, "s"),
+            (1e18, "Q"),
+            (1e15, "q"),
+            (1e12, "T"),
+            (1e9, "B"),
+            (1e6, "M"),
+            (1e3, "K"),
+        };
+        foreach (var (threshold, suffix) in magnitudes)
+        {
+            if (Math.Abs(number) >= threshold)
+            {
+                return $"{number / threshold:0.##}{suffix}";
+            }
+        }
+        return $"{number:0.##}";
+    }
+
+    private static string MultiplierMetric(string value) =>
+        double.TryParse(
+            value,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out var number)
+        && double.IsFinite(number)
+            ? $"x{number:0.###}"
+            : value;
 
     private void RebuildReportSections()
     {

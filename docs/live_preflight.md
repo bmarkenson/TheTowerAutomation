@@ -1,9 +1,12 @@
 # Live Preflight
 
-Complete this preflight before process or device interaction, live validation
-or diagnosis, or a claim about current runtime state. Repository-local edits
-and retained-fixture tests do not require it. Repeat the affected checks when
-the runtime, target, control, screen, or task scope changes.
+Complete this preflight before process or device interaction, live validation,
+diagnosis that depends on current or changing runtime state, or a claim about
+current runtime state. Reading closed battle records, historical log ranges,
+retained telemetry, or retained fixtures solely as historical evidence does
+not require it and does not prove current state. Repository-local edits do not
+require it. Repeat the affected checks when the runtime, target, control,
+screen, or task scope changes.
 
 ## Required reading
 

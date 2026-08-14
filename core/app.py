@@ -89,8 +89,7 @@ from core.battle_stats import (
 )
 from core.battle_activation_tracker import BattleActivationTracker
 from core.player_save import (
-    decode_player_save_bytes,
-    pull_player_save_bytes,
+    PlayerSaveParser,
     reconcile_acquired_requirements,
 )
 from core.player_save_acquisition import (
@@ -101,11 +100,12 @@ from core.player_save_acquisition import (
     PlayerSaveNaturalBoundary,
     PlayerSaveTargetBinding,
     StablePlayerSaveAcquirer,
-    quiet_player_save_read,
 )
 from core.player_save_audit import PlayerSaveAuditCollector
 from core.player_save_passive_scheduler import PlayerSavePassiveScheduler
-from core.perk_save_monitor import PerkSaveMonitor, PerkSaveMonitorContext
+from core.active_run_metric_monitor import ActiveRunMetricMonitor
+from core.perk_save_monitor import PerkSaveMonitor
+from core.player_save_observation import PlayerSaveObservationContext
 from core.player_save_preflight import (
     CarriedEvidenceState,
     PlayerSavePreflightContext,
@@ -380,6 +380,7 @@ class App:
         self._player_save_runtime_session_id = new_operation_id()
         self._perk_save_monitor_call_lock = threading.RLock()
         self._perk_save_monitor = PerkSaveMonitor()
+        self._active_run_metric_monitor = ActiveRunMetricMonitor()
         self._player_save_preflight_session_id = ""
         self._player_save_preflight_result = None
         self._player_save_preflight_activity_scope_id = None
@@ -388,9 +389,11 @@ class App:
         runtime_mapping_main_commit = canonical_mapping_runtime_commit(
             repository_root=runtime_repository_root,
         )
+        self._player_save_parser = PlayerSaveParser()
         self._player_save_acquirer = (
             StablePlayerSaveAcquirer(
                 target_snapshot_fn=adb_target_session.snapshot,
+                parser=self._player_save_parser,
                 acquisition_start_observer=lambda started_at: (
                     canonical_mapping_decode_start(
                         runtime_main_commit=runtime_mapping_main_commit,
@@ -415,23 +418,21 @@ class App:
         )
         self._player_save_preflight_coordinator = (
             PlayerSavePreflightCoordinator(
-                target_snapshot_fn=adb_target_session.snapshot,
+                acquirer=self._player_save_acquirer,
                 context_fn=self._current_player_save_preflight_context,
                 action_guard_fn=self._runtime_action_guard,
                 capture_fn=self._capture_frame,
-                acquirer=self._player_save_acquirer,
             )
             if adb_target_session is not None
             else None
         )
         save_history_reader = (
             PlayerSaveHistoryReader(
-                target_snapshot_fn=adb_target_session.snapshot,
+                acquirer=self._player_save_acquirer,
                 capture_fn=self._capture_frame,
                 attachment_context_fn=(
                     self._current_player_save_attachment_context
                 ),
-                acquirer=self._player_save_acquirer,
             )
             if adb_target_session is not None
             else None
@@ -482,11 +483,6 @@ class App:
             self._player_save_audit_collector = PlayerSaveAuditCollector(
                 enabled=config.player_save_audit_enabled,
                 interval_seconds=config.player_save_audit_interval_seconds,
-                target_snapshot_fn=(
-                    adb_target_session.snapshot
-                    if adb_target_session is not None
-                    else None
-                ),
                 acquirer=self._player_save_acquirer,
                 acquire_internally=False,
             )
@@ -519,7 +515,7 @@ class App:
             try:
                 self._player_save_passive_scheduler = PlayerSavePassiveScheduler(
                     acquirer=self._player_save_acquirer,
-                    context_fn=self._current_perk_save_monitor_context,
+                    context_fn=self._current_player_save_observation_context,
                     consumers=(self._consume_passive_player_save_bundle,),
                     interval_seconds=config.player_save_audit_interval_seconds,
                 )
@@ -698,9 +694,9 @@ class App:
                 "DEBUG",
             )
 
-    def _current_perk_save_monitor_context(
+    def _current_player_save_observation_context(
         self,
-    ) -> Optional[PerkSaveMonitorContext]:
+    ) -> Optional[PlayerSaveObservationContext]:
         """Return the current exact active-round binding, or no authority."""
 
         runtime_session_id = str(
@@ -723,7 +719,7 @@ class App:
         if target_binding is None:
             return None
         try:
-            return PerkSaveMonitorContext(
+            return PlayerSaveObservationContext(
                 runtime_session_id=runtime_session_id,
                 activity_scope_id=scope_id,
                 target_binding=target_binding,
@@ -731,22 +727,92 @@ class App:
         except (TypeError, ValueError):
             return None
 
+    def _current_perk_save_monitor_context(
+        self,
+    ) -> Optional[PlayerSaveObservationContext]:
+        """Compatibility alias for focused callers predating the shared API."""
+
+        return self._current_player_save_observation_context()
+
     def _consume_passive_player_save_bundle(
         self,
         acquisition: PlayerSaveAcquisitionBundle,
-        context: PerkSaveMonitorContext,
+        context: PlayerSaveObservationContext,
         reason_code: str,
     ) -> None:
-        """Fan one scheduled passive read to monitoring and optional audit."""
+        """Fan one scheduled passive read through the global observation API."""
+
+        self._publish_player_save_observation(
+            acquisition,
+            context=context,
+            reason_code=reason_code,
+        )
+
+    def _publish_player_save_observation(
+        self,
+        acquisition: PlayerSaveAcquisitionBundle,
+        *,
+        context: Optional[PlayerSaveObservationContext],
+        reason_code: str,
+        observe_perks: bool = True,
+        bind_new_activity: bool = False,
+    ) -> None:
+        """Deliver one immutable parsed bundle to every eligible consumer."""
 
         monitor = getattr(self, "_perk_save_monitor", None)
-        if monitor is not None:
+        metric_monitor = getattr(self, "_active_run_metric_monitor", None)
+        if context is not None and (monitor is not None or metric_monitor is not None):
             with self._perk_save_monitor_guard():
-                monitor.observe_bundle(acquisition, context=context)
-                self._retain_perk_timeline_save_checkpoint(
-                    monitor,
-                    context,
-                )
+                if monitor is not None:
+                    try:
+                        perk_bound = bool(
+                            not bind_new_activity
+                            or monitor.bind_context(
+                                context,
+                                new_activity=True,
+                            )
+                        )
+                        if perk_bound and observe_perks:
+                            monitor.observe_bundle(
+                                acquisition,
+                                context=context,
+                            )
+                            self._retain_perk_timeline_save_checkpoint(
+                                monitor,
+                                context,
+                            )
+                    except Exception:
+                        log(
+                            "[PLAYER_SAVE_API] Perk projection rejected one "
+                            "shared observation; other consumers are unaffected",
+                            "DEBUG",
+                        )
+                if metric_monitor is not None:
+                    try:
+                        metric_bound = bool(
+                            not bind_new_activity
+                            or metric_monitor.bind_context(
+                                context,
+                                new_activity=True,
+                            )
+                        )
+                        if metric_bound:
+                            disposition = metric_monitor.observe_bundle(
+                                acquisition,
+                                context=context,
+                            )
+                            if disposition.startswith("accepted_"):
+                                self._log_active_run_metric_summary(
+                                    metric_monitor,
+                                    context,
+                                )
+                    except Exception:
+                        log(
+                            "[PLAYER_SAVE_API] Active-metric projection rejected "
+                            "one shared observation; other consumers are "
+                            "unaffected",
+                            "DEBUG",
+                        )
         self._observe_shared_acquisition_for_audit(
             acquisition,
             reason_code=reason_code,
@@ -775,16 +841,53 @@ class App:
 
     def _bind_new_perk_monitor_activity(self) -> None:
         monitor = getattr(self, "_perk_save_monitor", None)
-        context = self._current_perk_save_monitor_context()
-        if monitor is not None and context is not None:
+        metric_monitor = getattr(self, "_active_run_metric_monitor", None)
+        context = self._current_player_save_observation_context()
+        if context is not None and (
+            monitor is not None or metric_monitor is not None
+        ):
             with self._perk_save_monitor_guard():
                 self._pending_perk_timeline_save_checkpoint = None
-                monitor.bind_context(context, new_activity=True)
+                if monitor is not None:
+                    monitor.bind_context(context, new_activity=True)
+                if metric_monitor is not None:
+                    metric_monitor.bind_context(context, new_activity=True)
+
+    @staticmethod
+    def _log_active_run_metric_summary(
+        monitor: ActiveRunMetricMonitor,
+        context: PlayerSaveObservationContext,
+    ) -> None:
+        """Log one compact checkpoint without exposing arbitrary save data."""
+
+        summary = monitor.latest_summary(context)
+        if not isinstance(summary, Mapping):
+            return
+        whole_run = summary.get("whole_run")
+        interval = summary.get("interval")
+        whole_run_cph = (
+            whole_run.get("coins_per_hour")
+            if isinstance(whole_run, Mapping)
+            else None
+        )
+        interval_cph = (
+            interval.get("coins_per_hour")
+            if isinstance(interval, Mapping)
+            else None
+        )
+        log(
+            "[PLAYER_SAVE_METRICS] "
+            f"wave={summary.get('saved_wave')} "
+            f"revision={summary.get('save_revision')} "
+            f"whole_run_cph={whole_run_cph or 'unavailable'} "
+            f"interval_cph={interval_cph or 'unavailable'}",
+            "INFO",
+        )
 
     def _retain_perk_timeline_save_checkpoint(
         self,
         monitor: PerkSaveMonitor,
-        context: PerkSaveMonitorContext,
+        context: PlayerSaveObservationContext,
     ) -> None:
         """Queue one detached positive prefix while holding the monitor lock."""
 
@@ -808,7 +911,7 @@ class App:
             if not (
                 isinstance(pending, tuple)
                 and len(pending) == 2
-                and isinstance(pending[0], PerkSaveMonitorContext)
+                and isinstance(pending[0], PlayerSaveObservationContext)
                 and isinstance(pending[1], Mapping)
             ):
                 return None
@@ -841,7 +944,7 @@ class App:
 
     def _sync_perk_exhaustion_evidence(self) -> None:
         monitor = getattr(self, "_perk_save_monitor", None)
-        context = self._current_perk_save_monitor_context()
+        context = self._current_player_save_observation_context()
         if monitor is None or context is None:
             return
         evidence = self._perk_timeline().exhaustion_evidence()
@@ -1022,7 +1125,7 @@ class App:
         if terminal == "GAME_OVER":
             monitor = getattr(self, "_perk_save_monitor", None)
             monitor_context = (
-                self._current_perk_save_monitor_context()
+                self._current_player_save_observation_context()
                 if binding["status"] == "bound"
                 else None
             )
@@ -1031,6 +1134,26 @@ class App:
                     context["perk_save_monitoring"] = monitor.terminal_evidence(
                         context=monitor_context,
                         terminal_state=terminal,
+                    )
+        if binding["status"] == "bound" and terminal in {
+            "GAME_OVER",
+            "TOURNAMENT_RESULTS",
+        }:
+            metric_monitor = getattr(
+                self,
+                "_active_run_metric_monitor",
+                None,
+            )
+            metric_context = self._current_player_save_observation_context()
+            if metric_monitor is not None:
+                with self._perk_save_monitor_guard():
+                    context["active_run_metrics"] = (
+                        metric_monitor.terminal_evidence(
+                            context=metric_context,
+                            terminal_save_report=terminal_save[
+                                "terminal_save_report"
+                            ],
+                        )
                     )
         battle_conditions = terminal_save.get("battle_conditions")
         if isinstance(battle_conditions, Mapping):
@@ -1145,17 +1268,7 @@ class App:
             return unavailable("adb_target_session_unavailable")
         acquirer = getattr(self, "_player_save_acquirer", None)
         if acquirer is None:
-            # Compatibility for focused unit instances that bypass App.__init__.
-            acquirer = StablePlayerSaveAcquirer(
-                target_snapshot_fn=session.snapshot,
-                pull_fn=pull_player_save_bytes,
-                decode_fn=decode_player_save_bytes,
-                pull_options={
-                    "attempts": 3,
-                    "settle_seconds": 0.1,
-                    "read_fn": quiet_player_save_read,
-                },
-            )
+            return unavailable("shared_player_save_acquirer_unavailable")
 
         try:
             scope = get_activity_scope()
@@ -1186,29 +1299,25 @@ class App:
                 PlayerSaveAcquisitionType.PASSIVE_STABLE_READ
             )
 
-        self._observe_shared_acquisition_for_audit(
-            acquisition,
-            reason_code=(
-                "game_over"
-                if terminal == "GAME_OVER"
-                else "tournament_results"
-                if terminal == "TOURNAMENT_RESULTS"
-                else "terminal_capture"
-            ),
+        reason_code = (
+            "game_over"
+            if terminal == "GAME_OVER"
+            else "tournament_results"
+            if terminal == "TOURNAMENT_RESULTS"
+            else "terminal_capture"
         )
-        if terminal == "GAME_OVER" and run_binding.get("status") == "bound":
-            monitor_context = self._current_perk_save_monitor_context()
-            monitor = getattr(self, "_perk_save_monitor", None)
-            if monitor is not None and monitor_context is not None:
-                with self._perk_save_monitor_guard():
-                    monitor.observe_bundle(
-                        acquisition,
-                        context=monitor_context,
-                    )
-                    self._retain_perk_timeline_save_checkpoint(
-                        monitor,
-                        monitor_context,
-                    )
+        monitor_context = (
+            self._current_player_save_observation_context()
+            if terminal in {"GAME_OVER", "TOURNAMENT_RESULTS"}
+            and run_binding.get("status") == "bound"
+            else None
+        )
+        self._publish_player_save_observation(
+            acquisition,
+            context=monitor_context,
+            reason_code=reason_code,
+            observe_perks=terminal == "GAME_OVER",
+        )
 
         if not acquisition.complete or acquisition.snapshot is None:
             reason = (
@@ -3704,6 +3813,19 @@ class App:
                         "WARN",
                     )
                     return
+                terminal_evidence = manual.get("terminal_evidence")
+                if (
+                    isinstance(terminal_evidence, Mapping)
+                    and terminal_evidence.get("status") == "unavailable"
+                    and current.get("game_state") != "home_new_battle"
+                ):
+                    log(
+                        "[MANUAL_CONTROL] Return Control retained its hold "
+                        "because unavailable terminal evidence may resume "
+                        "only from a fresh exact Home New Battle boundary",
+                        "WARN",
+                    )
+                    return
                 transitioned = self._supervisor.transition_manual_control(
                     manual_id,
                     "reconciling",
@@ -4026,6 +4148,15 @@ class App:
         """Bind a capture or classify why fresh save evidence cannot bind it."""
 
         snapshot = acquisition.snapshot
+        if getattr(snapshot, "mapping_resolution", None) == (
+            "semantic_forward_revision"
+        ):
+            return (
+                None,
+                "unavailable",
+                "the forced-save capability grants metric observation only; "
+                "no setup-capture workflow or UI fallback was opened",
+            )
         runtime = getattr(snapshot, "runtime_save", None)
         game_state = str(evidence.get("game_state") or "")
         if runtime is None:
@@ -4442,7 +4573,7 @@ class App:
                 )
                 return True
             serializer = GuardedPlayerSaveSerializer(
-                target_snapshot_fn=session.snapshot,
+                acquirer=acquirer,
                 context_guard_fn=lambda: self._setup_capture_context_matches(
                     requested,
                     request_id,
@@ -4458,7 +4589,6 @@ class App:
                         stable=stable,
                     )
                 ),
-                acquirer=acquirer,
                 log_prefix="SETUP_CAPTURE",
             )
             serialized = serializer.acquire(
@@ -6949,6 +7079,7 @@ class App:
         now: Optional[float] = None,
         reason: Optional[str] = None,
         starting_evidence: Optional[Mapping[str, object]] = None,
+        owned_battle_evidence: Optional[Mapping[str, object]] = None,
         terminal_evidence: Optional[Mapping[str, object]] = None,
     ) -> Dict[str, Any]:
         lease_id = str(lease.get("lease_id") or "")
@@ -6967,11 +7098,14 @@ class App:
             "runtime": self._interactive_development_runtime_owner(),
             "updated_at": timestamp,
         }
+        if lease.get("owned_battle_start") is True:
+            acknowledgement["owned_battle_start"] = True
         for name in (
             "hold_installed_at",
             "acknowledged_at",
             "activated_at",
             "starting_evidence",
+            "owned_battle_evidence",
         ):
             if existing.get(name) is not None:
                 acknowledgement[name] = existing[name]
@@ -6985,6 +7119,10 @@ class App:
             acknowledgement.setdefault("hold_installed_at", timestamp)
         if starting_evidence is not None:
             acknowledgement["starting_evidence"] = dict(starting_evidence)
+        if owned_battle_evidence is not None:
+            acknowledgement["owned_battle_evidence"] = dict(
+                owned_battle_evidence
+            )
         if state == "active":
             acknowledgement.setdefault("hold_installed_at", timestamp)
             acknowledgement.setdefault("acknowledged_at", timestamp)
@@ -8177,13 +8315,68 @@ class App:
         battle_active: bool,
         battle_scope: Optional[str],
         observed_at: str,
+        target_generation: Optional[int] = None,
     ) -> Dict[str, object]:
-        return {
+        evidence: Dict[str, object] = {
             "screen_state": str(detection.get("state") or "UNKNOWN").upper(),
             "battle_active": bool(battle_active),
             "battle_scope": battle_scope,
             "observed_at": observed_at,
         }
+        home_control = str(
+            detection.get("home_battle_control") or ""
+        ).strip().upper()
+        if home_control:
+            evidence["home_battle_control"] = home_control
+        if type(target_generation) is int and target_generation > 0:
+            evidence["target_generation"] = target_generation
+        return evidence
+
+    @staticmethod
+    def _interactive_development_owned_battle_evidence(
+        lease: Mapping[str, object],
+        acknowledgement: object,
+        starting: Mapping[str, object],
+        current: Mapping[str, object],
+    ) -> Optional[Dict[str, object]]:
+        """Retain only one explicitly preclaimed exact Home-to-run owner."""
+
+        if lease.get("owned_battle_start") is not True:
+            return None
+        existing = (
+            acknowledgement.get("owned_battle_evidence")
+            if isinstance(acknowledgement, Mapping)
+            else None
+        )
+        current_state = str(
+            current.get("screen_state") or "UNKNOWN"
+        ).upper()
+        if current_state in {"UNKNOWN", "GAME_OVER", "TOURNAMENT_RESULTS"}:
+            return None
+        expected = existing if isinstance(existing, Mapping) else starting
+        same_binding = bool(
+            str(expected.get("battle_scope") or "")
+            and expected.get("battle_scope") == current.get("battle_scope")
+            and type(expected.get("target_generation")) is int
+            and expected.get("target_generation")
+            == current.get("target_generation")
+        )
+        if isinstance(existing, Mapping):
+            if current.get("battle_active") is True and same_binding:
+                return dict(existing)
+            return None
+        if not (
+            str(starting.get("screen_state") or "").upper()
+            == "HOME_SCREEN"
+            and str(starting.get("home_battle_control") or "").upper()
+            == "NEW_BATTLE"
+            and starting.get("battle_active") is False
+            and current_state == "RUNNING"
+            and current.get("battle_active") is True
+            and same_binding
+        ):
+            return None
+        return dict(current)
 
     @staticmethod
     def _interactive_development_boundary_reason(
@@ -8201,7 +8394,74 @@ class App:
         current_scope = str(current.get("battle_scope") or "")
         if starting_scope and current_scope and starting_scope != current_scope:
             return "the authoritative battle/session identity changed"
+        starting_generation = starting.get("target_generation")
+        current_generation = current.get("target_generation")
+        if (
+            starting_generation is not None
+            and starting_generation != current_generation
+        ):
+            return "the authoritative ADB target generation changed"
         return None
+
+    def _matching_interactive_development_owned_terminal_claim(
+        self,
+        current: object,
+    ) -> Optional[Dict[str, object]]:
+        """Return one same-process preclaimed development terminal owner."""
+
+        acknowledgement = getattr(
+            self,
+            "_interactive_development_ack",
+            None,
+        )
+        if not (
+            isinstance(current, Mapping)
+            and current.get("game_state") == "game_over"
+            and isinstance(acknowledgement, Mapping)
+            and acknowledgement.get("state") == "terminal"
+            and acknowledgement.get("owned_battle_start") is True
+            and acknowledgement.get("terminal_disposition")
+            == "natural_game_over"
+            and self._interactive_development_control_state() == "RUNNING"
+        ):
+            return None
+        runtime = acknowledgement.get("runtime")
+        owned = acknowledgement.get("owned_battle_evidence")
+        terminal = acknowledgement.get("terminal_evidence")
+        if not (
+            isinstance(runtime, Mapping)
+            and isinstance(owned, Mapping)
+            and isinstance(terminal, Mapping)
+            and terminal.get("screen_state") == "GAME_OVER"
+        ):
+            return None
+        if not all(
+            runtime.get(source) == current.get(target)
+            for source, target in (
+                ("runtime_id", "runtime_id"),
+                ("pid", "pid"),
+                ("adb_target", "adb_target"),
+            )
+        ):
+            return None
+        scope_id = str(owned.get("battle_scope") or "")
+        target_generation = owned.get("target_generation")
+        if not (
+            scope_id
+            and type(target_generation) is int
+            and target_generation > 0
+            and scope_id == terminal.get("battle_scope")
+            and scope_id == current.get("activity_scope_run_id")
+            and target_generation == terminal.get("target_generation")
+            and target_generation == current.get("target_generation")
+        ):
+            return None
+        return {
+            "schema_version": 1,
+            "lease_id": str(acknowledgement.get("lease_id") or ""),
+            "activity_scope_run_id": scope_id,
+            "target_generation": target_generation,
+        }
 
     def _sync_interactive_development_observation(
         self,
@@ -8222,11 +8482,18 @@ class App:
         observed_at = self._interactive_development_timestamp(now)
         battle_active = bool(getattr(self, "_authority_battle_active", False))
         battle_scope = self._current_run_scope_id()
+        current_workflow = self._current_control_workflow_evidence()
+        target_generation = (
+            current_workflow.get("target_generation")
+            if isinstance(current_workflow, Mapping)
+            else None
+        )
         evidence = self._interactive_development_evidence(
             detection,
             battle_active=battle_active,
             battle_scope=battle_scope,
             observed_at=observed_at,
+            target_generation=target_generation,
         )
         acknowledgement = getattr(self, "_interactive_development_ack", None)
         starting = (
@@ -8237,10 +8504,20 @@ class App:
         if not isinstance(starting, Mapping):
             candidate = lease.get("starting_evidence")
             starting = candidate if isinstance(candidate, Mapping) else {}
+        owned_battle_evidence = (
+            self._interactive_development_owned_battle_evidence(
+                lease,
+                acknowledgement,
+                starting,
+                evidence,
+            )
+        )
         boundary_reason = self._interactive_development_boundary_reason(
             starting,
             evidence,
         )
+        if owned_battle_evidence is not None:
+            boundary_reason = None
         if boundary_reason:
             disposition = (
                 "natural_game_over"
@@ -8339,11 +8616,17 @@ class App:
             if isinstance(acknowledgement, Mapping)
             else None
         )
+        if owned_battle_evidence is not None:
+            self._observed_active_battle_scope_id = str(
+                owned_battle_evidence.get("battle_scope") or ""
+            ) or None
+            self._last_unbound_terminal_signature = None
         self._set_interactive_development_ack(
             lease,
             state="active",
             now=now,
             starting_evidence=evidence,
+            owned_battle_evidence=owned_battle_evidence,
         )
         if previous_state != "active":
             log(
@@ -11817,7 +12100,7 @@ class App:
             ):
                 attachment_acquisition = None
             else:
-                monitor_context = PerkSaveMonitorContext(
+                monitor_context = PlayerSaveObservationContext(
                     runtime_session_id=(
                         attachment_bundle_context.runtime_session_id
                     ),
@@ -11826,24 +12109,11 @@ class App:
                     ),
                     target_binding=attachment_acquisition.binding,
                 )
-                monitor = getattr(self, "_perk_save_monitor", None)
-                if monitor is not None:
-                    with self._perk_save_monitor_guard():
-                        if monitor.bind_context(
-                            monitor_context,
-                            new_activity=True,
-                        ):
-                            monitor.observe_bundle(
-                                attachment_acquisition,
-                                context=monitor_context,
-                            )
-                            self._retain_perk_timeline_save_checkpoint(
-                                monitor,
-                                monitor_context,
-                            )
-                self._observe_shared_acquisition_for_audit(
+                self._publish_player_save_observation(
                     attachment_acquisition,
+                    context=monitor_context,
                     reason_code="forced_running_attachment",
+                    bind_new_activity=True,
                 )
         else:
             attachment_acquisition = None
@@ -12753,6 +13023,11 @@ class App:
                     initialization_blocks_history = (
                         self._mission_mgr.run_initialization_pending()
                     )
+                    level_skip_priority_pending = (
+                        self._level_skip_priority_pending(
+                            initialization_pending=initialization_blocks_history
+                        )
+                    )
                     session_preflight_blocks_history = bool(
                         not initialization_blocks_history
                         and self._mission_mgr.session_preflight_pending()
@@ -12778,6 +13053,7 @@ class App:
                             detection,
                             post_retry_poll_allowed=post_retry_poll_allowed,
                             defer_home_baseline=home_save_preflight_pending,
+                            defer_running_check=level_skip_priority_pending,
                         )
                     )
                     operator_workflow_hold = workflow_hold
@@ -12820,6 +13096,7 @@ class App:
                         ),
                         post_retry_poll_allowed=post_retry_poll_allowed,
                         defer_home_baseline=home_save_preflight_pending,
+                        defer_running_check=level_skip_priority_pending,
                         player_save_mode=player_save_mode,
                     )
                     continuity_pending = continuity.pending
@@ -14376,6 +14653,21 @@ class App:
             self._publish_action_authority()
         return True
 
+    def _level_skip_priority_pending(
+        self,
+        *,
+        initialization_pending: bool,
+    ) -> bool:
+        """Return whether Farm's urgent EHLS/EALS purchase still owns priority."""
+
+        if not initialization_pending:
+            return False
+        mv = self._mission_mgr.ctx.data.get("mission_vars", {})
+        level_skip_keys = {"ehls_completed", "eals_completed"}
+        if not level_skip_keys.intersection(mv):
+            return False
+        return not all(bool(mv.get(key)) for key in level_skip_keys)
+
     def _game_speed_priority_ready(
         self,
         *,
@@ -14383,13 +14675,9 @@ class App:
     ) -> bool:
         """Keep Farm's urgent EHLS/EALS purchases ahead of game speed."""
 
-        if not initialization_pending:
-            return True
-        mv = self._mission_mgr.ctx.data.get("mission_vars", {})
-        level_skip_keys = {"ehls_completed", "eals_completed"}
-        if not level_skip_keys.intersection(mv):
-            return True
-        return all(bool(mv.get(key)) for key in level_skip_keys)
+        return not self._level_skip_priority_pending(
+            initialization_pending=initialization_pending
+        )
 
     def _game_speed_control_snapshot(self) -> Dict[str, Any]:
         """Return run-scoped speed-mode experiment metadata."""
@@ -15282,6 +15570,11 @@ class App:
                 # screen; never replay collection or navigation from it.
                 return
             current_manual_evidence = self._current_control_workflow_evidence()
+            owned_development_terminal_claim = (
+                self._matching_interactive_development_owned_terminal_claim(
+                    current_manual_evidence
+                )
+            )
             manual_terminal_claim = (
                 self._matching_manual_terminal_claim(
                     manual,
@@ -15349,6 +15642,14 @@ class App:
                 log(
                     "[MANUAL_CONTROL] Terminal save evidence is unavailable; "
                     "using the supported Game Stats/Perks/More Stats UI route",
+                    "INFO",
+                    console=True,
+                )
+            if owned_development_terminal_claim is not None:
+                log(
+                    "[INTERACTIVE_DEVELOPMENT] The exact preclaimed owned "
+                    "battle reached Game Over; the supported minimal terminal "
+                    "route will return Home",
                     "INFO",
                     console=True,
                 )
@@ -15759,11 +16060,35 @@ class App:
                 if emulator_fallback
                 else None
             )
+            owned_development_disposition = (
+                {
+                    "schema_version": 1,
+                    "outcome": "interrupted",
+                    "initiator": "interactive_development_owned_battle",
+                    "collection": "minimal_terminal_save",
+                    "representative": False,
+                    "analytics": "excluded",
+                    "history": "excluded_by_default",
+                    "reason": (
+                        "an explicitly preclaimed development battle reached "
+                        "its authorized terminal cleanup"
+                    ),
+                    "provenance": {
+                        "lease_id": str(
+                            owned_development_terminal_claim.get("lease_id")
+                            or ""
+                        ),
+                    },
+                }
+                if owned_development_terminal_claim is not None
+                else None
+            )
             terminal_outcome = handle_game_over(
                 capture_stats=(
                     not isinstance(pending_terminal_route, Mapping)
                     and repair_terminal_failure_reason is None
                     and not repair_in_progress
+                    and owned_development_terminal_claim is None
                     and (
                         (
                             manual_return
@@ -15804,11 +16129,13 @@ class App:
                     or no_strategy_run
                     or degraded_home_repair
                     or emulator_fallback
+                    or owned_development_terminal_claim is not None
                 ),
                 battle_context=terminal_battle_context,
                 report_disposition=(
                     manual_full_disposition
                     or emulator_fallback_disposition
+                    or owned_development_disposition
                 ),
                 captured_at=(
                     terminal_acquisition.captured_at
@@ -15885,6 +16212,7 @@ class App:
                         or no_strategy_run
                         or degraded_home_repair
                         or emulator_fallback
+                        or owned_development_terminal_claim is not None
                         or AUTOMATION.mode is ExecMode.HOME
                         else "retry"
                     ),
@@ -15913,6 +16241,15 @@ class App:
                         "continuation",
                         "INFO",
                         console=True,
+                    )
+                if owned_development_terminal_claim is not None:
+                    log_result(
+                        "Owned development battle cleanup reached verified Home",
+                        detail=(
+                            "[INTERACTIVE_DEVELOPMENT] "
+                            "disposition=owned_battle_home_complete "
+                            f"lease_id={owned_development_terminal_claim.get('lease_id')}"
+                        ),
                     )
             if repair_terminal_failure_reason is not None:
                 self._mission_mgr.fail_session_preflight_repair(

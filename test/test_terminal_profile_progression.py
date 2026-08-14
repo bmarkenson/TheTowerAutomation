@@ -1,8 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
+
 from core.adb_target_session import AdbTargetSnapshot
 from core.app import App
+from core.player_save_acquisition import StablePlayerSaveAcquirer
 from core.player_save_serialization import quiet_player_save_read
 
 
@@ -38,6 +41,22 @@ def _normalized_progression():
     }
 
 
+def _install_shared_acquirer(app, decoded):
+    pull = Mock(return_value=b"save")
+    parse = Mock(return_value=decoded)
+    app._player_save_acquirer = StablePlayerSaveAcquirer(
+        target_snapshot_fn=app._adb_target_session.snapshot,
+        pull_fn=pull,
+        parser=SimpleNamespace(parse_bytes=parse),
+        pull_options={
+            "attempts": 3,
+            "settle_seconds": 0.1,
+            "read_fn": quiet_player_save_read,
+        },
+    )
+    return pull, parse
+
+
 def test_terminal_progression_uses_stable_exact_target_and_marks_acquisition():
     target = AdbTargetSnapshot("localhost:5555", 4, True)
     app = App.__new__(App)
@@ -47,12 +66,9 @@ def test_terminal_progression_uses_stable_exact_target_and_marks_acquisition():
         mapping_id="data-9-game-1073",
         save_revision=47316,
     )
+    pull, parse = _install_shared_acquirer(app, decoded)
 
-    with (
-        patch("core.app.pull_player_save_bytes", return_value=b"save") as pull,
-        patch("core.app.decode_player_save_bytes", return_value=decoded) as decode,
-    ):
-        result = app._capture_terminal_profile_progression()
+    result = app._capture_terminal_profile_progression()
 
     assert result["status"] == "complete"
     assert result["source"]["acquisition"]["type"] == "passive_stable_read"
@@ -62,8 +78,8 @@ def test_terminal_progression_uses_stable_exact_target_and_marks_acquisition():
         settle_seconds=0.1,
         read_fn=quiet_player_save_read,
     )
-    assert decode.call_args.args == (b"save",)
-    assert decode.call_args.kwargs["source_name"] == "playerInfo.dat"
+    assert parse.call_args.args == (b"save",)
+    assert parse.call_args.kwargs["source_name"] == "playerInfo.dat"
 
 
 def test_terminal_progression_discards_snapshot_across_target_generation_change():
@@ -77,12 +93,9 @@ def test_terminal_progression_discards_snapshot_across_target_generation_change(
         mapping_id="data-9-game-1073",
         save_revision=47316,
     )
+    _install_shared_acquirer(app, decoded)
 
-    with (
-        patch("core.app.pull_player_save_bytes", return_value=b"save"),
-        patch("core.app.decode_player_save_bytes", return_value=decoded),
-    ):
-        result = app._capture_terminal_profile_progression()
+    result = app._capture_terminal_profile_progression()
 
     assert result["status"] == "unavailable"
     assert result["reason"] == "adb_target_changed_during_terminal_capture"
@@ -104,9 +117,10 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     app._adb_target_session = _StableSession(target, target)
     app._player_save_runtime_session_id = "runtime-1"
     app._perk_save_monitor = Mock()
+    app._active_run_metric_monitor = Mock()
     app._player_save_audit_collector = Mock()
     monitor_context = object()
-    app._current_perk_save_monitor_context = Mock(
+    app._current_player_save_observation_context = Mock(
         return_value=monitor_context
     )
     decoded = SimpleNamespace(
@@ -115,6 +129,7 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
         save_revision=47316,
         checks={},
     )
+    pull, _parse = _install_shared_acquirer(app, decoded)
     report = {
         "schema_version": 1,
         "status": "complete",
@@ -130,8 +145,6 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     scope = {"schema_version": 1, "run_id": "scope-1"}
 
     with (
-        patch("core.app.pull_player_save_bytes", return_value=b"save") as pull,
-        patch("core.app.decode_player_save_bytes", return_value=decoded),
         patch("core.app.get_activity_scope", return_value=scope),
         patch(
             "core.app.terminal_history_transition_from_acquisition",
@@ -174,6 +187,9 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     monitor_call = app._perk_save_monitor.observe_bundle.call_args
     assert monitor_call.args[0] is call.args[0]
     assert monitor_call.kwargs == {"context": monitor_context}
+    metric_call = app._active_run_metric_monitor.observe_bundle.call_args
+    assert metric_call.args[0] is call.args[0]
+    assert metric_call.kwargs == {"context": monitor_context}
     audit_call = app._player_save_audit_collector.observe_acquisition.call_args
     assert audit_call.args == (call.args[0],)
     assert audit_call.kwargs == {"reason_code": "game_over"}
@@ -187,11 +203,18 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
     app._activity_continuity = SimpleNamespace(
         publish_terminal_history_handoff=Mock()
     )
+    app._perk_save_monitor = Mock()
+    app._active_run_metric_monitor = Mock()
+    monitor_context = object()
+    app._current_player_save_observation_context = Mock(
+        return_value=monitor_context
+    )
     decoded = SimpleNamespace(
         profile_progression=_normalized_progression(),
         mapping_id="data-9-game-1073",
         save_revision=47316,
     )
+    pull, parse = _install_shared_acquirer(app, decoded)
     report = {
         "schema_version": 1,
         "status": "unavailable",
@@ -221,8 +244,6 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
     }
 
     with (
-        patch("core.app.pull_player_save_bytes", return_value=b"save") as pull,
-        patch("core.app.decode_player_save_bytes", return_value=decoded) as decode,
         patch("core.app.get_activity_scope", return_value=scope),
         patch(
             "core.app.terminal_history_transition_from_acquisition",
@@ -243,7 +264,7 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
         )
 
     pull.assert_called_once()
-    decode.assert_called_once()
+    parse.assert_called_once()
     report_projector.assert_called_once()
     conditions_projector.assert_called_once()
     report_bundle = report_projector.call_args.args[0]
@@ -251,6 +272,52 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
     assert report_bundle is conditions_bundle
     assert report_bundle.snapshot is decoded
     assert result["battle_conditions"] == conditions
+    app._perk_save_monitor.observe_bundle.assert_not_called()
+    app._active_run_metric_monitor.observe_bundle.assert_called_once_with(
+        report_bundle,
+        context=monitor_context,
+    )
     app._activity_continuity.publish_terminal_history_handoff.assert_called_once_with(
         transition
+    )
+
+
+@pytest.mark.parametrize("failing_consumer", ("perk", "metric"))
+def test_shared_observation_fanout_isolates_consumer_exceptions(
+    failing_consumer,
+):
+    app = App.__new__(App)
+    app._perk_save_monitor = Mock()
+    app._active_run_metric_monitor = Mock()
+    app._player_save_audit_collector = Mock()
+    app._retain_perk_timeline_save_checkpoint = Mock()
+    app._log_active_run_metric_summary = Mock()
+    context = object()
+    acquisition = object()
+    if failing_consumer == "perk":
+        app._perk_save_monitor.observe_bundle.side_effect = RuntimeError(
+            "perk projection failed"
+        )
+    else:
+        app._active_run_metric_monitor.observe_bundle.side_effect = RuntimeError(
+            "metric projection failed"
+        )
+
+    app._publish_player_save_observation(
+        acquisition,
+        context=context,
+        reason_code="passive_interval",
+    )
+
+    app._perk_save_monitor.observe_bundle.assert_called_once_with(
+        acquisition,
+        context=context,
+    )
+    app._active_run_metric_monitor.observe_bundle.assert_called_once_with(
+        acquisition,
+        context=context,
+    )
+    app._player_save_audit_collector.observe_acquisition.assert_called_once_with(
+        acquisition,
+        reason_code="passive_interval",
     )

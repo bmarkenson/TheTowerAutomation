@@ -82,10 +82,12 @@ atomically acquired private Git ref serializes the mutable production window
 from final rereads through deployment, publication, and cleanup. Remote
 fast-forward rules remain the guard against a publisher from another clone. A
 contender waits without shared mutation, then refreshes against current
-production, reruns its complete applicable candidate gate, and retries atomic
-acquisition until the outcome promotes or reaches a reported recovery guard.
-The ref is a mutex rather than a persistent FIFO queue; losing another race
-repeats the same loop instead of abandoning the outcome.
+production, reviews the refreshed aggregate, retains only validation whose
+inputs and production baseline are proven unchanged, reruns affected checks,
+and retries atomic acquisition until the outcome promotes or reaches a
+reported recovery guard. Uncertain equivalence selects the strongest
+applicable gate. The ref is a mutex rather than a persistent FIFO queue;
+losing another race repeats the same loop instead of abandoning the outcome.
 
 Production is never switched to a feature or integration branch. Existing
 operator or parallel changes are preserved. A non-clean production checkout or

@@ -2488,6 +2488,76 @@ def test_interactive_development_status_separates_request_and_fresh_ack(
         lock_handle.close()
 
 
+def test_interactive_development_owned_battle_is_preclaimed_at_home_new(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    lock_handle = _fresh_runtime_lock(tmp_path, state="HOME_SCREEN")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=False,
+        battle_scope="run-owned",
+        primary_state="HOME_SCREEN",
+    )
+    owner = {
+        "runtime_id": "runtime-owned",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+    }
+    observation = {
+        "schema_version": 1,
+        "observation_id": "runtime-owned:1",
+        "observed_at": now.isoformat(timespec="microseconds"),
+        "primary_state": "HOME_SCREEN",
+        "home_battle_control": "NEW_BATTLE",
+        "game_state": "home_new_battle",
+        "active_battle": False,
+        "activity_scope_run_id": "run-owned",
+        "target_generation": 7,
+    }
+    RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    ).publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+        control_model={
+            "schema_version": 1,
+            "observation": observation,
+        },
+    )
+    service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
+    try:
+        response = service.apply_interactive_development_lease(
+            {
+                "operation": "request",
+                "owner_label": "owned mapping battle",
+                "owned_battle_start": True,
+            },
+            now=now.timestamp(),
+        )
+
+        lease = response["interactive_development_lease"]["request"]
+        assert lease["owned_battle_start"] is True
+        assert lease["starting_evidence"] == {
+            "screen_state": "HOME_SCREEN",
+            "battle_active": False,
+            "battle_scope": "run-owned",
+            "observed_at": now.isoformat(timespec="microseconds"),
+            "home_battle_control": "NEW_BATTLE",
+            "target_generation": 7,
+        }
+        assert "interactive_development_owned_battle_v1" in response[
+            "capabilities"
+        ]
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
 def test_interactive_development_heartbeat_rejects_stale_or_wrong_lease(
     tmp_path,
 ):
@@ -3075,6 +3145,25 @@ def test_browser_client_exposes_tournament_start_cancel_and_reminder():
     assert 'action: "resolve_tournament_launch"' in script
     assert 'resolveTournamentLaunch("start")' in script
     assert 'resolveTournamentLaunch("cancel")' in script
+
+
+def test_native_battle_history_surfaces_partial_save_metric_claims():
+    source = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+        / "BattleHistoryWindow.xaml.cs"
+    ).read_text(encoding="utf-8")
+
+    assert '"Save-backed metric status"' in source
+    assert '"Save-backed capability status"' in source
+    assert 'TryGetProperty("terminal_relation"' in source
+    assert '"Terminal relation"' in source
+    assert '"Terminal save-backed claim status"' in source
+    assert 'missingProperty: "missing"' in source
+    assert 'TryGetProperty("metric_conflicts"' in source
+    assert 'TryGetProperty("conflicts"' in source
+    assert 'component.NameEquals("economy")' not in source
 
 
 def test_browser_activity_defaults_to_operational_narrative_levels():

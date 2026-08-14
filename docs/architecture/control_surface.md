@@ -291,6 +291,8 @@ override an authoritative scope.
 | Live | paused and manual control `active` | Home New, Home Resume, active battle, or Game Over with exact target/scope binding | Return Control | remain Paused; record passive observation; await explicit Enable |
 | Live | paused and manual control `active` | Tournament Results, unknown, or incomplete exact binding | Return Control | unavailable; no save-backed Return route is advertised or substituted |
 | Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; prefer a new forced save (or a bound natural Game Over save), then automatically use the supported active/Home/terminal UI route if that save is unusable after safe restoration |
+| Live | paused, Return `awaiting_enable`, terminal semantics unavailable | fresh exact Home New Battle | Enable | permit the ordinary save-first Home reconciliation; the unavailable terminal component remains unavailable and grants no terminal input |
+| Live | paused, Return `awaiting_enable`, terminal semantics unavailable | any other boundary | Enable | retain `awaiting_enable`; send no UI or lifecycle input |
 | Live | reconciling Return | source restoration, owner, target, scope, or authority binding is lost after lifecycle input | no additional request | persist Automation Paused and terminalize that Return as failed/interrupted; do not repeat lifecycle input or open UI from an unsafe boundary |
 | Live | enabled, adopted active battle | active battle | apply selected Strategy to this battle | adopt only after explicit selection; preserve battle identity and defer new-run/Home-only gates; Surrender remains unauthorized |
 | Live | enabled, adopted active battle | recoverable configuration mismatch | no additional request | record exact degraded evidence and continue the battle; do not create a Strategy Gate, Pause, or Surrender permission |
@@ -356,6 +358,13 @@ Game Over prefers the bound natural terminal acquisition. If that save is
 absent, unsupported, structurally incompatible, or unprojectable after safe
 source restoration, the runtime automatically uses the complete supported UI
 route for that boundary and writes an exact-bound UI reconciliation receipt.
+A terminal component marked `unavailable` normally blocks Enable. The one safe
+exception is a fresh exact Home `NEW_BATTLE` observation while Return remains
+`awaiting_enable`: Home save-first reconciliation can establish its own source
+and boundary authority without pretending that the missing terminal component
+became available. The runtime rechecks that exact Home boundary immediately
+before entering reconciliation; replacement, Resume, active, terminal, stale,
+or unknown evidence keeps the hold and sends no input.
 A loss of restoration, owner, target, scope, or action authority terminates
 the exact workflow and leaves Automation Paused rather than opening UI from
 cached data. Home New terminalizes that unsafe outcome once, so later
@@ -655,22 +664,35 @@ adds no command, endpoint, or client-side authority inference.
 
 ### Interactive development lease status
 
-Server revision 26 advertises `interactive_development_lease_v1`. The additive
-`POST /api/v1/interactive-development-lease` operation model is:
+Server revision 26 advertises `interactive_development_lease_v1`; runtimes with
+the additive `interactive_development_owned_battle_v1` capability also accept
+one explicit preclaim. The `POST /api/v1/interactive-development-lease`
+operation model is:
 
 ```json
 {"operation": "request", "owner_label": "bounded task label"}
+{"operation": "request", "owner_label": "owned test", "owned_battle_start": true}
 {"operation": "heartbeat", "lease_id": "ordinary coordination ID"}
 {"operation": "release", "lease_id": "ordinary coordination ID"}
 ```
 
 There is no client-supplied runtime, PID, target, timeout, source fingerprint,
-secret, action, or command. The server derives the binding from a fresh
+secret, action, or command. `owned_battle_start` is only a boolean request for
+the server-derived current binding. The server derives the binding from a fresh
 runtime-owned authority snapshot that matches the active OS lock. A live
 conflict returns HTTP 409 with code `busy`; expired, terminal, or wrong-ID
 heartbeats and releases are rejected, and a heartbeat additionally requires
 fresh matching runtime ownership. Heartbeats extend the fixed 120-second expiry
 without adding an action-log entry.
+
+The owned-battle variant is accepted only from fresh exact Home
+`NEW_BATTLE`, inactive-battle evidence with a nonempty activity scope and
+positive target generation. The same runtime may carry that exact claim into
+one `RUNNING` battle. The lease terminalizes at Game Over, but its process-local
+claim may authorize only the existing minimal return-to-Home terminal handler;
+it cannot collect a representative battle, Retry, claim a pre-existing or
+Tournament run, or survive runtime/PID, target-generation, scope, control, or
+boundary replacement.
 
 `GET /api/v1/status` exposes `interactive_development_lease.request` from the
 control directive and `runtime_acknowledgement` from the atomic runtime-owned

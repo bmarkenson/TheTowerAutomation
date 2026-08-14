@@ -180,6 +180,21 @@ def _lock_boundary_evidence():
     }
 
 
+def _deferred_lock_boundary_evidence():
+    return {
+        "status": "unavailable_deferred",
+        "boundary": "NEW_BATTLE",
+        "required": list(FARM_FREE_UPGRADE_LOCKS),
+        "checked": False,
+        "valid": None,
+        "blocking_valid": True,
+        "reason": (
+            "attached battle has no authoritative no-battle NEW_BATTLE "
+            "lock evidence"
+        ),
+    }
+
+
 def test_game_over_observation_aborts_without_sending_input():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     static_taps = []
@@ -542,6 +557,11 @@ def test_attached_route_marks_save_only_check_unavailable_without_carrier():
         for label, toggles in ULTIMATE_REQUIREMENTS.items()
     ]
     validated = {}
+    deferred_locks = _deferred_lock_boundary_evidence()
+
+    class BoundSave:
+        def consume(self, _check_id):
+            return None
 
     def validate(**kwargs):
         validated.update(kwargs)
@@ -557,6 +577,7 @@ def test_attached_route_marks_save_only_check_unavailable_without_carrier():
             "card_recharge_modes": {
                 "Demon Mode": "auto_reactivate",
             },
+            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
         },
         capture_fn=ui.capture,
         detector=ui.detect,
@@ -571,6 +592,8 @@ def test_attached_route_marks_save_only_check_unavailable_without_carrier():
             "right": [],
         },
         ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        free_upgrade_lock_boundary_evidence=deferred_locks,
+        player_save_preflight=BoundSave(),
         stay_in_battle=True,
         sleep_fn=lambda _seconds: None,
         validate_fn=validate,
@@ -584,6 +607,7 @@ def test_attached_route_marks_save_only_check_unavailable_without_carrier():
     assert check["source"] == "ui_fallback"
     assert check["valid"] is None
     assert check["blocking"] is False
+    assert validated["free_upgrade_lock_boundary_evidence"] == deferred_locks
 
 
 def test_attached_route_uses_bound_workshop_save_evidence_without_going_home():
@@ -737,6 +761,9 @@ def test_attached_route_uses_every_complete_bound_save_fact_without_ui():
                 AssertionError("complete bound Stun facts must avoid UI")
             )
         ),
+        free_upgrade_lock_boundary_evidence=(
+            _deferred_lock_boundary_evidence()
+        ),
         player_save_preflight=bound,
         stay_in_battle=True,
         sleep_fn=lambda _seconds: None,
@@ -768,6 +795,15 @@ def test_attached_route_uses_every_complete_bound_save_fact_without_ui():
     assert module_boundary["disposition"] == "save_observation"
     assert module_boundary["fully_observed"] is True
     assert module_boundary["valid"] is False
+    assert validated["free_upgrade_lock_boundary_evidence"] == {
+        "status": "save_match",
+        "source": "bound_player_save_preflight",
+        "boundary": "NEW_BATTLE",
+        "required": list(FARM_FREE_UPGRADE_LOCKS),
+        "observed": list(FARM_FREE_UPGRADE_LOCKS),
+        "checked": False,
+        "valid": True,
+    }
     assert validated["ultimate_weapons_source"] == (
         "bound_player_save_preflight"
     )
@@ -1060,6 +1096,9 @@ def test_round_invariant_mismatches_are_nonblocking_for_running_attachment():
             (_ for _ in ()).throw(
                 AssertionError("complete bound Stun facts must avoid UI")
             )
+        ),
+        free_upgrade_lock_boundary_evidence=(
+            _deferred_lock_boundary_evidence()
         ),
         player_save_preflight=bound,
         stay_in_battle=True,

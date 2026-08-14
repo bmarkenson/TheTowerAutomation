@@ -1,9 +1,9 @@
-"""Privacy-safe exact-version projections for active and completed rounds.
+"""Privacy-safe semantic projections for active and completed rounds.
 
 This module never publishes an arbitrary decoded save mapping.  It accepts only
-the fields declared by an exact player-save version mapping and returns
-component-level evidence.  A malformed or semantically incomplete component is
-unavailable in full so callers can retain the existing UI route.
+allowlisted fields declared by resolved semantic capabilities.  Malformed leaves
+are unavailable independently, so unrelated claims and their dependents remain
+usable.
 """
 
 from __future__ import annotations
@@ -18,10 +18,13 @@ import math
 import re
 from typing import Any, Optional
 
+from core.read_only_data import deep_freeze, deep_thaw
 
-RUNTIME_SAVE_SCHEMA_VERSION = 2
+
+RUNTIME_SAVE_SCHEMA_VERSION = 3
+ACTIVE_RUN_TALLIES_SCHEMA_VERSION = 1
 HISTORY_ENTRY_SCHEMA_VERSION = 1
-HISTORY_TAIL_IDENTITY_SCHEMA_VERSION = 1
+HISTORY_TAIL_IDENTITY_SCHEMA_VERSION = 2
 DOTNET_TICKS_MASK = 0x3FFFFFFFFFFFFFFF
 DOTNET_KIND_SHIFT = 62
 DOTNET_KIND_NAMES = {
@@ -139,6 +142,138 @@ class RuntimePerkCalibration:
 
 
 @dataclass(frozen=True)
+class RuntimeTallyClaimDefinition:
+    """Semantic contract and raw binding for one allowlisted tally claim."""
+
+    unit: str
+    source_fields: tuple[str, ...]
+    derivation: str
+    semantic_id: str
+    semantic_fingerprint: str
+    terminal_source: Optional[str] = None
+    dependencies: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = {
+            "unit": self.unit,
+            "source_fields": list(self.source_fields),
+            "derivation": self.derivation,
+            "semantic_id": self.semantic_id,
+            "semantic_fingerprint": self.semantic_fingerprint,
+            "dependencies": list(self.dependencies),
+        }
+        if self.terminal_source is not None:
+            payload["terminal_source"] = self.terminal_source
+        return payload
+
+
+@dataclass(frozen=True)
+class RuntimeTallyMetric:
+    """One allowlisted cumulative or derived active-round metric."""
+
+    value_type: str
+    value: Any
+    value_decimal: str
+    unit: str
+    source_fields: tuple[str, ...]
+    derivation: str
+    semantic_id: str = ""
+    semantic_fingerprint: str = ""
+    terminal_source: Optional[str] = None
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = {
+            "value_type": self.value_type,
+            "value": self.value,
+            "value_decimal": self.value_decimal,
+            "unit": self.unit,
+            "source_fields": list(self.source_fields),
+            "derivation": self.derivation,
+            "semantic_id": self.semantic_id,
+            "semantic_fingerprint": self.semantic_fingerprint,
+        }
+        if self.terminal_source is not None:
+            payload["terminal_source"] = self.terminal_source
+        return payload
+
+
+@dataclass(frozen=True)
+class RuntimeTallyComponent:
+    """One independently normalized active-tally component."""
+
+    name: str
+    status: str
+    reason: str
+    metrics: tuple[tuple[str, RuntimeTallyMetric], ...] = ()
+    derived: tuple[tuple[str, RuntimeTallyMetric], ...] = ()
+    unavailable: tuple[tuple[str, str], ...] = ()
+    claim_definitions: tuple[
+        tuple[str, RuntimeTallyClaimDefinition], ...
+    ] = ()
+    derived_claim_definitions: tuple[
+        tuple[str, RuntimeTallyClaimDefinition], ...
+    ] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "metrics": {
+                key: metric.as_dict() for key, metric in self.metrics
+            },
+            "derived": {
+                key: metric.as_dict() for key, metric in self.derived
+            },
+            "unavailable": {
+                key: reason for key, reason in self.unavailable
+            },
+            "claim_definitions": {
+                key: definition.as_dict()
+                for key, definition in self.claim_definitions
+            },
+            "derived_claim_definitions": {
+                key: definition.as_dict()
+                for key, definition in self.derived_claim_definitions
+            },
+        }
+
+
+@dataclass(frozen=True)
+class ActiveRunTalliesSnapshot:
+    """Versioned active-round counters with component-level availability."""
+
+    status: str
+    reason: str
+    state: str
+    audit_id: str
+    evidence_level: str
+    components: tuple[RuntimeTallyComponent, ...]
+    capability_id: str = ""
+    semantic_fingerprint: str = ""
+    binding_fingerprint: str = ""
+    forward_policy: str = "none"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": ACTIVE_RUN_TALLIES_SCHEMA_VERSION,
+            "status": self.status,
+            "reason": self.reason,
+            "state": self.state,
+            "capability_id": self.capability_id,
+            "semantic_fingerprint": self.semantic_fingerprint,
+            "binding_fingerprint": self.binding_fingerprint,
+            "forward_policy": self.forward_policy,
+            "audit_id": self.audit_id,
+            "evidence_level": self.evidence_level,
+            "components": {
+                component.name: component.as_dict()
+                for component in self.components
+            },
+            "ui_action_authority": False,
+        }
+
+
+@dataclass(frozen=True)
 class MoreStatsRow:
     """One normalized More Stats row derived from allowlisted save fields."""
 
@@ -208,6 +343,9 @@ class CompletedBattleHistoryEntry:
     sections: tuple[MoreStatsSection, ...]
     fingerprint: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "battle_date", deep_freeze(self.battle_date))
+
     @property
     def row_count(self) -> int:
         return sum(len(section.rows) for section in self.sections)
@@ -248,11 +386,14 @@ class BattleHistoryTailIdentity:
     battle_date: Mapping[str, Any]
     tier: int
     wave: int
-    game_time_seconds: float
-    real_time_seconds: float
-    killed_by_id: int
+    game_time_seconds: Optional[float]
+    real_time_seconds: Optional[float]
+    killed_by_id: Optional[int]
     is_tournament: bool
     fingerprint: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "battle_date", deep_freeze(self.battle_date))
 
     def projection_dict(self) -> dict[str, Any]:
         return {
@@ -285,6 +426,19 @@ class BattleHistoryTail:
     completed_entry_status: str
     completed_entry_reason: str
     entry: Optional[CompletedBattleHistoryEntry]
+    terminal_metric_claims: Mapping[str, Any] = field(default_factory=dict)
+    terminal_identity: Optional[BattleHistoryTailIdentity] = None
+    terminal_identity_reason: str = "terminal_identity_unavailable"
+    terminal_mapping_id: Optional[str] = None
+    terminal_tail_fingerprint: Optional[str] = None
+    terminal_empty_baseline: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "terminal_metric_claims",
+            deep_freeze(self.terminal_metric_claims),
+        )
 
     @property
     def structural_fingerprint(self) -> Optional[str]:
@@ -320,19 +474,43 @@ class BattleHistoryTail:
                     self.entry.as_dict() if self.entry is not None else None
                 ),
             },
+            "terminal_metric_claims": deep_thaw(self.terminal_metric_claims),
+            "active_tally_terminal_identity": {
+                "status": (
+                    "observed"
+                    if self.terminal_identity is not None
+                    else "empty"
+                    if self.terminal_empty_baseline
+                    else "unavailable"
+                ),
+                "reason": (
+                    ""
+                    if self.terminal_identity is not None
+                    else "battle_history_empty"
+                    if self.terminal_empty_baseline
+                    else self.terminal_identity_reason
+                ),
+                "mapping_id": self.terminal_mapping_id,
+                "fingerprint": self.terminal_tail_fingerprint,
+                "identity": (
+                    self.terminal_identity.as_dict()
+                    if self.terminal_identity is not None
+                    else None
+                ),
+            },
         }
 
 
 @dataclass(frozen=True)
 class NormalizedRuntimeSave:
-    """Privacy-safe runtime fields from one exact-version decoded save."""
+    """Privacy-safe runtime claims from one decoded save."""
 
     mapping_id: str
     audit_matrix_id: str
     capture: Mapping[str, Any]
-    save_revision: int
-    round_active: bool
-    current_wave: int
+    save_revision: Optional[int]
+    round_active: Optional[bool]
+    current_wave: Optional[int]
     active_round_identity: Optional[ActiveRoundIdentity]
     perks_status: str
     perks_reason: str
@@ -342,27 +520,80 @@ class NormalizedRuntimeSave:
         default=None,
         repr=False,
     )
+    active_tallies_status: str = "unavailable"
+    active_tallies_reason: str = "mapping_unavailable"
+    active_tallies: Optional[ActiveRunTalliesSnapshot] = None
+    active_identity_status: str = "unavailable"
+    active_identity_reason: str = "identity_unavailable"
+    save_revision_status: str = "observed"
+    save_revision_reason: str = ""
+    round_state_status: str = "observed"
+    round_state_reason: str = ""
+    current_wave_status: str = "observed"
+    current_wave_reason: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "capture", deep_freeze(self.capture))
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema_version": RUNTIME_SAVE_SCHEMA_VERSION,
             "mapping_id": self.mapping_id,
             "audit_matrix_id": self.audit_matrix_id,
-            "capture": dict(self.capture),
+            "capture": deep_thaw(self.capture),
             "save_revision": self.save_revision,
             "round_active": self.round_active,
             "current_wave": self.current_wave,
+            "runtime_claims": {
+                "save_revision": {
+                    "status": self.save_revision_status,
+                    "reason": self.save_revision_reason,
+                    "value": self.save_revision,
+                },
+                "round_active": {
+                    "status": self.round_state_status,
+                    "reason": self.round_state_reason,
+                    "value": self.round_active,
+                },
+                "current_wave": {
+                    "status": self.current_wave_status,
+                    "reason": self.current_wave_reason,
+                    "value": self.current_wave,
+                },
+            },
             "active_round_identity": (
                 self.active_round_identity.as_dict()
                 if self.active_round_identity is not None
                 else None
             ),
+            "active_round_identity_evidence": {
+                "status": self.active_identity_status,
+                "reason": self.active_identity_reason,
+            },
             "perks": {
                 "status": self.perks_status,
                 "reason": self.perks_reason,
                 "fallback": "existing_ui_perks_evidence",
                 "snapshot": self.perks.as_dict() if self.perks is not None else None,
             },
+            "active_tallies": (
+                self.active_tallies.as_dict()
+                if self.active_tallies is not None
+                else {
+                    "schema_version": ACTIVE_RUN_TALLIES_SCHEMA_VERSION,
+                    "status": self.active_tallies_status,
+                    "reason": self.active_tallies_reason,
+                    "state": (
+                        "active_round"
+                        if self.round_active is True
+                        else "inactive_round"
+                        if self.round_active is False
+                        else "round_state_unavailable"
+                    ),
+                    "components": {},
+                    "ui_action_authority": False,
+                }
+            ),
             "battle_history_tail": self.battle_history_tail.as_dict(),
             "ui_action_authority": False,
         }
@@ -384,6 +615,9 @@ def normalize_runtime_save(
     audit_matrix_id = str(runtime_spec.get("audit_matrix_id") or "")
     if not audit_matrix_id:
         raise RuntimeSaveNormalizationError("runtime audit matrix is unavailable")
+    semantic_capabilities_only = bool(
+        runtime_spec.get("semantic_capabilities_only")
+    )
 
     identity = mapping.get("identity")
     if not isinstance(identity, Mapping):
@@ -392,73 +626,117 @@ def normalize_runtime_save(
     if game_version != identity.get("game_version"):
         raise RuntimeSaveNormalizationError("runtime game version mismatch")
 
-    save_revision = _required_nonnegative_int(decoded, "saveRevision")
-    round_active = _required_bool(decoded, "roundActiveBool")
-    current_tier = _required_nonnegative_int(decoded, "currentTier")
-    current_wave = _required_nonnegative_int(decoded, "currentWave")
-    round_seed = _required_nonnegative_int(decoded, "roundSeed")
-    round_counters = _required_sequence(decoded, "roundsStartedThisTier")
-    expected_counter_count = _required_positive_mapping_int(
-        runtime_spec,
-        "rounds_started_tier_count",
-    )
-    if len(round_counters) != expected_counter_count:
-        raise RuntimeSaveNormalizationError(
-            "roundsStartedThisTier changed length"
-        )
-    normalized_counters = [
-        _exact_nonnegative_int(
-            value,
-            f"roundsStartedThisTier[{index}]",
-            RuntimeSaveNormalizationError,
-        )
-        for index, value in enumerate(round_counters)
-    ]
-    if current_tier >= len(round_counters):
-        raise RuntimeSaveNormalizationError("currentTier is outside round counters")
-    counter = normalized_counters[current_tier]
-
+    try:
+        save_revision = _required_nonnegative_int(decoded, "saveRevision")
+    except RuntimeSaveNormalizationError as exc:
+        save_revision = None
+        save_revision_status = "unavailable"
+        save_revision_reason = str(exc)
+    else:
+        save_revision_status = "observed"
+        save_revision_reason = ""
+    try:
+        round_active = _required_bool(decoded, "roundActiveBool")
+    except RuntimeSaveNormalizationError as exc:
+        round_active = None
+        round_state_status = "unavailable"
+        round_state_reason = str(exc)
+    else:
+        round_state_status = "observed"
+        round_state_reason = ""
+    try:
+        current_wave = _required_nonnegative_int(decoded, "currentWave")
+    except RuntimeSaveNormalizationError as exc:
+        current_wave = None
+        current_wave_status = "unavailable"
+        current_wave_reason = str(exc)
+    else:
+        current_wave_status = "observed"
+        current_wave_reason = ""
     active_identity: Optional[ActiveRoundIdentity] = None
-    if round_active:
-        if round_seed == 0:
-            raise RuntimeSaveNormalizationError("active roundSeed is zero")
-        identity_projection = {
-            "game_version": game_version,
-            "current_tier": current_tier,
-            "rounds_started_this_tier": counter,
-            "round_seed": round_seed,
-        }
-        active_identity = ActiveRoundIdentity(
-            game_version=game_version,
-            current_tier=current_tier,
-            rounds_started_this_tier=counter,
-            round_seed=round_seed,
-            fingerprint=_fingerprint(identity_projection),
-        )
+    active_identity_status = "not_applicable"
+    active_identity_reason = "round_inactive"
+    if round_active is True:
+        try:
+            current_tier = _required_nonnegative_int(decoded, "currentTier")
+            round_seed = _required_nonnegative_int(decoded, "roundSeed")
+            round_counters = _required_sequence(
+                decoded,
+                "roundsStartedThisTier",
+            )
+            if current_tier >= len(round_counters):
+                raise RuntimeSaveNormalizationError(
+                    "currentTier is outside round counters"
+                )
+            counter = _exact_nonnegative_int(
+                round_counters[current_tier],
+                f"roundsStartedThisTier[{current_tier}]",
+                RuntimeSaveNormalizationError,
+            )
+            if round_seed == 0:
+                raise RuntimeSaveNormalizationError("active roundSeed is zero")
+        except RuntimeSaveNormalizationError as exc:
+            active_identity_status = "unavailable"
+            active_identity_reason = str(exc)
+        else:
+            identity_projection = {
+                "game_version": game_version,
+                "current_tier": current_tier,
+                "rounds_started_this_tier": counter,
+                "round_seed": round_seed,
+            }
+            active_identity = ActiveRoundIdentity(
+                game_version=game_version,
+                current_tier=current_tier,
+                rounds_started_this_tier=counter,
+                round_seed=round_seed,
+                fingerprint=_fingerprint(identity_projection),
+            )
+            active_identity_status = "observed"
+            active_identity_reason = ""
+    elif round_active is None:
+        active_identity_status = "unavailable"
+        active_identity_reason = round_state_reason
 
     perk_calibration: Optional[RuntimePerkCalibration]
-    try:
-        perk_calibration = _normalize_perk_calibration(
-            decoded,
-            mapping,
-            runtime_spec,
-            round_active=round_active,
-            current_wave=current_wave,
-        )
-    except _ComponentUnavailable as exc:
+    if semantic_capabilities_only:
         perk_calibration = None
         perks = None
         perks_status = "unavailable"
-        perks_reason = str(exc)
+        perks_reason = "legacy_perk_capability_not_declared"
+    elif round_active is None:
+        perk_calibration = None
+        perks = None
+        perks_status = "unavailable"
+        perks_reason = round_state_reason
+    elif current_wave is None:
+        perk_calibration = None
+        perks = None
+        perks_status = "unavailable"
+        perks_reason = current_wave_reason
     else:
         try:
-            perks = _map_perk_calibration(perk_calibration, {})
-            perks_status = "observed"
-            perks_reason = ""
+            perk_calibration = _normalize_perk_calibration(
+                decoded,
+                mapping,
+                runtime_spec,
+                round_active=round_active,
+                current_wave=current_wave,
+            )
         except _ComponentUnavailable as exc:
+            perk_calibration = None
             perks = None
             perks_status = "unavailable"
             perks_reason = str(exc)
+        else:
+            try:
+                perks = _map_perk_calibration(perk_calibration, {})
+                perks_status = "observed"
+                perks_reason = ""
+            except _ComponentUnavailable as exc:
+                perks = None
+                perks_status = "unavailable"
+                perks_reason = str(exc)
 
     try:
         history_tail = _normalize_history_tail(
@@ -484,7 +762,28 @@ def normalize_runtime_save(
             completed_entry_status="unavailable",
             completed_entry_reason="structural_tail_unavailable",
             entry=None,
+            terminal_identity_reason=str(exc),
+            terminal_mapping_id=str(mapping.get("mapping_id") or ""),
         )
+
+    if round_active is None:
+        active_tallies = None
+        active_tallies_status = "unavailable"
+        active_tallies_reason = round_state_reason
+    else:
+        try:
+            active_tallies = _normalize_active_run_tallies(
+                decoded,
+                runtime_spec,
+                round_active=round_active,
+            )
+        except _ComponentUnavailable as exc:
+            active_tallies = None
+            active_tallies_status = "unavailable"
+            active_tallies_reason = str(exc)
+        else:
+            active_tallies_status = active_tallies.status
+            active_tallies_reason = active_tallies.reason
 
     return NormalizedRuntimeSave(
         mapping_id=str(mapping.get("mapping_id") or ""),
@@ -499,7 +798,431 @@ def normalize_runtime_save(
         perks=perks,
         battle_history_tail=history_tail,
         perk_calibration=perk_calibration,
+        active_tallies_status=active_tallies_status,
+        active_tallies_reason=active_tallies_reason,
+        active_tallies=active_tallies,
+        active_identity_status=active_identity_status,
+        active_identity_reason=active_identity_reason,
+        save_revision_status=save_revision_status,
+        save_revision_reason=save_revision_reason,
+        round_state_status=round_state_status,
+        round_state_reason=round_state_reason,
+        current_wave_status=current_wave_status,
+        current_wave_reason=current_wave_reason,
     )
+
+
+def active_tally_contract_fingerprints(
+    tally_spec: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Return semantic and raw-binding fingerprints for one tally contract."""
+
+    capability_id = str(tally_spec.get("capability_id") or "").strip()
+    components = tally_spec.get("components")
+    if not capability_id or not isinstance(components, Mapping):
+        raise RuntimeSaveNormalizationError(
+            "active tally semantic contract is unavailable"
+        )
+    scope = tally_spec.get("scope")
+    if not isinstance(scope, Mapping):
+        raise RuntimeSaveNormalizationError(
+            "active tally scope contract is unavailable"
+        )
+    scope_semantics = scope.get("semantics")
+    scope_binding = scope.get("binding")
+    if not isinstance(scope_semantics, Mapping) or not isinstance(
+        scope_binding, Mapping
+    ):
+        raise RuntimeSaveNormalizationError(
+            "active tally scope contract changed shape"
+        )
+    semantic_components: dict[str, Any] = {}
+    binding_components: dict[str, Any] = {}
+    for component_name, component in sorted(components.items()):
+        if not isinstance(component, Mapping):
+            raise RuntimeSaveNormalizationError(
+                "active tally semantic component changed shape"
+            )
+        fields = component.get("fields")
+        derived = component.get("derived")
+        if not isinstance(fields, Mapping) or not isinstance(derived, Mapping):
+            raise RuntimeSaveNormalizationError(
+                "active tally semantic component changed shape"
+            )
+        semantic_components[str(component_name)] = {
+            "fields": {
+                str(name): {
+                    "kind": spec.get("kind"),
+                    "unit": spec.get("unit"),
+                    "monotonic": spec.get("monotonic"),
+                }
+                for name, spec in sorted(fields.items())
+                if isinstance(spec, Mapping)
+            },
+            "derived": {
+                str(name): {
+                    "derive": spec.get("derive"),
+                    "numerator": spec.get("numerator"),
+                    "denominator": spec.get("denominator"),
+                    "unit": spec.get("unit"),
+                }
+                for name, spec in sorted(derived.items())
+                if isinstance(spec, Mapping)
+            },
+        }
+        binding_components[str(component_name)] = {
+            "fields": {
+                str(name): {
+                    "source": spec.get("source"),
+                    "terminal_source": spec.get("terminal_source"),
+                }
+                for name, spec in sorted(fields.items())
+                if isinstance(spec, Mapping)
+            }
+        }
+    semantic = _fingerprint(
+        {
+            "capability_id": capability_id,
+            "scope": dict(scope_semantics),
+            "components": semantic_components,
+        }
+    )
+    binding = _fingerprint(
+        {
+            "capability_id": capability_id,
+            "scope": dict(scope_binding),
+            "components": binding_components,
+        }
+    )
+    return semantic, binding
+
+
+def _normalize_active_run_tallies(
+    decoded: Mapping[str, Any],
+    runtime_spec: Mapping[str, Any],
+    *,
+    round_active: bool,
+) -> ActiveRunTalliesSnapshot:
+    tally_spec = runtime_spec.get("active_tallies")
+    if not isinstance(tally_spec, Mapping):
+        raise _ComponentUnavailable("active_tally_mapping_unavailable")
+    if tally_spec.get("schema_version") != ACTIVE_RUN_TALLIES_SCHEMA_VERSION:
+        raise _ComponentUnavailable("active_tally_mapping_schema_changed")
+    audit_id = str(tally_spec.get("audit_id") or "")
+    evidence_level = str(tally_spec.get("evidence_level") or "")
+    capability_id = str(tally_spec.get("capability_id") or "")
+    forward_policy = str(tally_spec.get("forward_policy") or "")
+    if (
+        not audit_id
+        or evidence_level != "cross_channel"
+        or capability_id != "thetower.player_save.active_run_tallies.v1"
+        or forward_policy != "additive_dependencies"
+    ):
+        raise _ComponentUnavailable("active_tally_mapping_authority_changed")
+    semantic_fingerprint, binding_fingerprint = (
+        active_tally_contract_fingerprints(tally_spec)
+    )
+    component_specs = tally_spec.get("components")
+    if not isinstance(component_specs, Mapping) or not component_specs:
+        raise _ComponentUnavailable("active_tally_components_unavailable")
+
+    if not round_active:
+        components = tuple(
+            RuntimeTallyComponent(
+                name=str(component_name),
+                status="not_applicable",
+                reason="round_inactive",
+            )
+            for component_name in component_specs
+        )
+        return ActiveRunTalliesSnapshot(
+            status="not_applicable",
+            reason="round_inactive",
+            state="inactive_round",
+            capability_id=capability_id,
+            semantic_fingerprint=semantic_fingerprint,
+            binding_fingerprint=binding_fingerprint,
+            forward_policy=forward_policy,
+            audit_id=audit_id,
+            evidence_level=evidence_level,
+            components=components,
+        )
+
+    components: list[RuntimeTallyComponent] = []
+    for component_name, component_spec in component_specs.items():
+        try:
+            component = _normalize_active_tally_component(
+                decoded,
+                name=str(component_name),
+                spec=component_spec,
+                capability_id=capability_id,
+            )
+        except _ComponentUnavailable as exc:
+            component = RuntimeTallyComponent(
+                name=str(component_name),
+                status="unavailable",
+                reason=str(exc),
+            )
+        components.append(component)
+    available_count = sum(
+        component.status in {"observed", "partial"} for component in components
+    )
+    fully_observed_count = sum(
+        component.status == "observed" for component in components
+    )
+    if fully_observed_count == len(components):
+        status = "observed"
+        reason = ""
+    elif available_count:
+        status = "partial"
+        reason = "one_or_more_active_tally_claims_unavailable"
+    else:
+        status = "unavailable"
+        reason = "all_active_tally_components_unavailable"
+    return ActiveRunTalliesSnapshot(
+        status=status,
+        reason=reason,
+        state="active_round",
+        capability_id=capability_id,
+        semantic_fingerprint=semantic_fingerprint,
+        binding_fingerprint=binding_fingerprint,
+        forward_policy=forward_policy,
+        audit_id=audit_id,
+        evidence_level=evidence_level,
+        components=tuple(components),
+    )
+
+
+def _normalize_active_tally_component(
+    decoded: Mapping[str, Any],
+    *,
+    name: str,
+    spec: Any,
+    capability_id: str,
+) -> RuntimeTallyComponent:
+    if not isinstance(spec, Mapping):
+        raise _ComponentUnavailable(f"active_tally_component_changed:{name}")
+    field_specs = spec.get("fields")
+    derived_specs = spec.get("derived")
+    if not isinstance(field_specs, Mapping) or not isinstance(
+        derived_specs, Mapping
+    ):
+        raise _ComponentUnavailable(f"active_tally_component_changed:{name}")
+
+    metrics: list[tuple[str, RuntimeTallyMetric]] = []
+    decimals: dict[str, Decimal] = {}
+    source_names: dict[str, str] = {}
+    unavailable: list[tuple[str, str]] = []
+    claim_definitions: list[
+        tuple[str, RuntimeTallyClaimDefinition]
+    ] = []
+    for output_name, field_spec in field_specs.items():
+        key = str(output_name)
+        if not isinstance(field_spec, Mapping):
+            unavailable.append(
+                (key, f"active_tally_field_changed:{name}:{output_name}")
+            )
+            continue
+        source = str(field_spec.get("source") or "")
+        kind = str(field_spec.get("kind") or "")
+        unit = str(field_spec.get("unit") or "")
+        semantic_id = f"{capability_id}.{name}.{key}"
+        semantic_fingerprint = _fingerprint(
+            {
+                "semantic_id": semantic_id,
+                "kind": kind,
+                "unit": unit,
+                "monotonic": field_spec.get("monotonic"),
+            }
+        )
+        terminal_source = (
+            str(field_spec["terminal_source"])
+            if field_spec.get("terminal_source") is not None
+            else None
+        )
+        claim_definitions.append(
+            (
+                key,
+                RuntimeTallyClaimDefinition(
+                    unit=unit,
+                    source_fields=(source,),
+                    derivation="direct",
+                    semantic_id=semantic_id,
+                    semantic_fingerprint=semantic_fingerprint,
+                    terminal_source=terminal_source,
+                ),
+            )
+        )
+        value = decoded.get(source)
+        try:
+            decimal_value = _active_tally_decimal(
+                value,
+                kind=kind,
+                label=f"{name}:{output_name}",
+            )
+        except _ComponentUnavailable as exc:
+            unavailable.append((key, str(exc)))
+            continue
+        normalized_value: Any
+        if kind == "nonnegative_integer":
+            normalized_value = int(value)
+            value_type = "integer"
+        else:
+            normalized_value = value
+            value_type = "number"
+        metric = RuntimeTallyMetric(
+            value_type=value_type,
+            value=normalized_value,
+            value_decimal=_decimal_text(decimal_value),
+            unit=unit,
+            source_fields=(source,),
+            derivation="direct",
+            semantic_id=semantic_id,
+            semantic_fingerprint=semantic_fingerprint,
+            terminal_source=terminal_source,
+        )
+        metrics.append((key, metric))
+        decimals[key] = decimal_value
+        source_names[key] = source
+
+    derived: list[tuple[str, RuntimeTallyMetric]] = []
+    derived_claim_definitions: list[
+        tuple[str, RuntimeTallyClaimDefinition]
+    ] = []
+    for output_name, derived_spec in derived_specs.items():
+        output_key = str(output_name)
+        unavailable_key = f"derived.{output_key}"
+        if not isinstance(derived_spec, Mapping):
+            unavailable.append(
+                (
+                    unavailable_key,
+                    f"active_tally_derivation_changed:{name}:{output_name}",
+                )
+            )
+            continue
+        numerator_key = str(derived_spec.get("numerator") or "")
+        denominator_key = str(derived_spec.get("denominator") or "")
+        derive = str(derived_spec.get("derive") or "")
+        unit = str(derived_spec.get("unit") or "")
+        semantic_id = f"{capability_id}.{name}.{output_key}"
+        semantic_fingerprint = _fingerprint(
+            {
+                "semantic_id": semantic_id,
+                "derive": derive,
+                "numerator": numerator_key,
+                "denominator": denominator_key,
+                "unit": unit,
+            }
+        )
+        source_fields = tuple(
+            str((field_specs.get(key) or {}).get("source") or "")
+            for key in (numerator_key, denominator_key)
+            if isinstance(field_specs.get(key), Mapping)
+        )
+        derived_claim_definitions.append(
+            (
+                output_key,
+                RuntimeTallyClaimDefinition(
+                    unit=unit,
+                    source_fields=source_fields,
+                    derivation=derive,
+                    semantic_id=semantic_id,
+                    semantic_fingerprint=semantic_fingerprint,
+                    dependencies=(numerator_key, denominator_key),
+                ),
+            )
+        )
+        numerator = decimals.get(numerator_key)
+        denominator = decimals.get(denominator_key)
+        if numerator is None or denominator is None or denominator <= 0:
+            unavailable.append(
+                (
+                    unavailable_key,
+                    f"active_tally_derivation_unavailable:{name}:{output_name}",
+                )
+            )
+            continue
+        factor = (
+            Decimal(3600)
+            if derive == "per_real_hour"
+            else Decimal(60)
+            if derive == "per_real_minute"
+            else Decimal(1)
+            if derive == "ratio"
+            else None
+        )
+        if factor is None:
+            unavailable.append(
+                (
+                    unavailable_key,
+                    f"active_tally_derivation_changed:{name}:{output_name}",
+                )
+            )
+            continue
+        with localcontext() as context:
+            context.prec = 50
+            result = numerator * factor / denominator
+        derived.append(
+            (
+                output_key,
+                RuntimeTallyMetric(
+                    value_type="decimal",
+                    value=float(result),
+                    value_decimal=_decimal_text(result),
+                    unit=unit,
+                    source_fields=(
+                        source_names[numerator_key],
+                        source_names[denominator_key],
+                    ),
+                    derivation=derive,
+                    semantic_id=semantic_id,
+                    semantic_fingerprint=semantic_fingerprint,
+                ),
+            )
+        )
+    if metrics and not unavailable:
+        status = "observed"
+        reason = ""
+    elif metrics:
+        status = "partial"
+        reason = "one_or_more_tally_claims_unavailable"
+    else:
+        status = "unavailable"
+        reason = "all_tally_claims_unavailable"
+    return RuntimeTallyComponent(
+        name=name,
+        status=status,
+        reason=reason,
+        metrics=tuple(metrics),
+        derived=tuple(derived),
+        unavailable=tuple(unavailable),
+        claim_definitions=tuple(claim_definitions),
+        derived_claim_definitions=tuple(derived_claim_definitions),
+    )
+
+
+def _active_tally_decimal(value: Any, *, kind: str, label: str) -> Decimal:
+    if kind == "nonnegative_integer":
+        if type(value) is not int or value < 0:
+            raise _ComponentUnavailable(
+                f"active_tally_integer_invalid:{label}"
+            )
+    elif kind == "nonnegative_number":
+        if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+            raise _ComponentUnavailable(
+                f"active_tally_number_invalid:{label}"
+            )
+    else:
+        raise _ComponentUnavailable(f"active_tally_kind_changed:{label}")
+    try:
+        decimal_value = Decimal(str(value))
+    except (ValueError, ArithmeticError) as exc:
+        raise _ComponentUnavailable(
+            f"active_tally_number_invalid:{label}"
+        ) from exc
+    if not decimal_value.is_finite() or decimal_value < 0:
+        raise _ComponentUnavailable(f"active_tally_number_invalid:{label}")
+    return decimal_value
 
 
 def _normalize_perk_calibration(
@@ -549,7 +1272,7 @@ def _normalize_perk_calibration(
     for index, raw_pick in enumerate(raw_picks):
         if not isinstance(raw_pick, Mapping):
             raise _ComponentUnavailable(f"malformed_perk_pick:{index}")
-        if set(raw_pick) != expected_entry_fields:
+        if not expected_entry_fields <= set(raw_pick):
             raise _ComponentUnavailable(f"perk_pick_changed_shape:{index}")
         if raw_pick.get("__class__") != entry_class:
             raise _ComponentUnavailable(f"perk_pick_class_changed:{index}")
@@ -733,6 +1456,10 @@ def _normalize_history_tail(
     history_spec = runtime_spec.get("battle_history")
     if not isinstance(history_spec, Mapping):
         raise RuntimeSaveNormalizationError("battleHistory mapping is unavailable")
+    terminal_capability_declared = isinstance(
+        runtime_spec.get("active_tallies"),
+        Mapping,
+    )
     capacity = _required_positive_mapping_int(history_spec, "capacity")
     raw_history = decoded.get("battleHistory")
     if not _is_sequence(raw_history):
@@ -740,6 +1467,7 @@ def _normalize_history_tail(
     if len(raw_history) > capacity:
         raise _ComponentUnavailable("battle_history_exceeds_capacity")
     if not raw_history:
+        terminal_mapping_id = str(mapping.get("mapping_id") or "")
         return BattleHistoryTail(
             structural_status="empty",
             structural_reason="battle_history_empty",
@@ -749,19 +1477,87 @@ def _normalize_history_tail(
             completed_entry_status="not_applicable",
             completed_entry_reason="battle_history_empty",
             entry=None,
+            terminal_mapping_id=(
+                terminal_mapping_id if terminal_capability_declared else None
+            ),
+            terminal_tail_fingerprint=(
+                _fingerprint(
+                    {
+                        "schema_version": HISTORY_TAIL_IDENTITY_SCHEMA_VERSION,
+                        "mapping_id": terminal_mapping_id,
+                        "entry_count": 0,
+                        "capacity": capacity,
+                        "state": "empty",
+                    }
+                )
+                if terminal_capability_declared
+                else None
+            ),
+            terminal_empty_baseline=terminal_capability_declared,
         )
 
     latest_index = len(raw_history) - 1
-    latest = _validate_history_entry_shape(
-        raw_history[-1],
-        history_spec,
-        index=latest_index,
+    latest_raw = raw_history[-1]
+    if not isinstance(latest_raw, Mapping):
+        raise _ComponentUnavailable(f"malformed_history_entry:{latest_index}")
+    if latest_raw.get("__class__") != str(history_spec.get("entry_class") or ""):
+        raise _ComponentUnavailable(
+            f"history_entry_class_changed:{latest_index}"
+        )
+    terminal_metric_claims = _normalize_terminal_metric_claims(
+        latest_raw,
+        runtime_spec,
+        saved_wave=(
+            latest_raw.get("wave")
+            if type(latest_raw.get("wave")) is int
+            and latest_raw.get("wave") >= 0
+            else None
+        ),
     )
-    _validate_history_identity_values(latest, index=latest_index)
-    identity = _build_history_tail_identity(latest, mapping)
+    if runtime_spec.get("semantic_capabilities_only") is True:
+        try:
+            terminal_identity = _build_history_tail_identity(
+                latest_raw,
+                mapping,
+            )
+        except _ComponentUnavailable as exc:
+            terminal_identity = None
+            terminal_identity_reason = str(exc)
+        else:
+            terminal_identity = replace(
+                terminal_identity,
+                game_time_seconds=None,
+                real_time_seconds=None,
+                killed_by_id=None,
+            )
+            terminal_identity_reason = ""
+        return BattleHistoryTail(
+            structural_status="unavailable",
+            structural_reason="legacy_history_capability_not_declared",
+            entry_count=len(raw_history),
+            capacity=capacity,
+            identity=None,
+            completed_entry_status="unavailable",
+            completed_entry_reason="legacy_history_capability_not_declared",
+            entry=None,
+            terminal_metric_claims=terminal_metric_claims,
+            terminal_identity=terminal_identity,
+            terminal_identity_reason=terminal_identity_reason,
+            terminal_mapping_id=(
+                terminal_identity.mapping_id
+                if terminal_identity is not None
+                else str(mapping.get("mapping_id") or "")
+            ),
+            terminal_tail_fingerprint=(
+                terminal_identity.fingerprint
+                if terminal_identity is not None
+                else None
+            ),
+        )
+    identity = _build_history_tail_identity(latest_raw, mapping)
     try:
-        _validate_history_entry_values(
-            latest,
+        latest = _validate_history_entry_shape(
+            latest_raw,
             history_spec,
             index=latest_index,
         )
@@ -785,6 +1581,17 @@ def _normalize_history_tail(
         completed_entry_status=completed_status,
         completed_entry_reason=completed_reason,
         entry=completed,
+        terminal_metric_claims=terminal_metric_claims,
+        terminal_identity=(identity if terminal_capability_declared else None),
+        terminal_identity_reason=(
+            "" if terminal_capability_declared else "active_tally_capability_unavailable"
+        ),
+        terminal_mapping_id=(
+            identity.mapping_id if terminal_capability_declared else None
+        ),
+        terminal_tail_fingerprint=(
+            identity.fingerprint if terminal_capability_declared else None
+        ),
     )
 
 
@@ -792,16 +1599,47 @@ def _build_history_tail_identity(
     entry: Mapping[str, Any],
     mapping: Mapping[str, Any],
 ) -> BattleHistoryTailIdentity:
+    for field_name, kind in (
+        ("battleDate", "integer"),
+        ("tier", "integer"),
+        ("wave", "integer"),
+        ("isTournament", "boolean"),
+    ):
+        value = entry.get(field_name)
+        if kind == "boolean":
+            valid = type(value) is bool
+        elif kind == "integer":
+            valid = type(value) is int and value >= 0
+        else:
+            valid = (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+                and value >= 0
+            )
+        if not valid:
+            raise _ComponentUnavailable(
+                f"history_identity_field_invalid:{field_name}"
+            )
+    for positive_field in ("battleDate", "tier", "wave"):
+        if entry[positive_field] <= 0:
+            raise _ComponentUnavailable(
+                f"history_identity_field_invalid:{positive_field}"
+            )
     battle_date = _normalized_dotnet_datetime(entry["battleDate"])
+    game_time = _optional_nonnegative_number(entry.get("gameTime"))
+    real_time = _optional_nonnegative_number(entry.get("realTime"))
+    killed_by = (
+        entry.get("killedBy")
+        if type(entry.get("killedBy")) is int and entry.get("killedBy") >= 0
+        else None
+    )
     projection = {
         "schema_version": HISTORY_TAIL_IDENTITY_SCHEMA_VERSION,
         "mapping_id": str(mapping.get("mapping_id") or ""),
         "battle_date": battle_date,
         "tier": entry["tier"],
         "wave": entry["wave"],
-        "game_time_seconds": entry["gameTime"],
-        "real_time_seconds": entry["realTime"],
-        "killed_by_id": entry["killedBy"],
         "is_tournament": entry["isTournament"],
     }
     return BattleHistoryTailIdentity(
@@ -809,12 +1647,102 @@ def _build_history_tail_identity(
         battle_date=battle_date,
         tier=int(entry["tier"]),
         wave=int(entry["wave"]),
-        game_time_seconds=float(entry["gameTime"]),
-        real_time_seconds=float(entry["realTime"]),
-        killed_by_id=int(entry["killedBy"]),
+        game_time_seconds=game_time,
+        real_time_seconds=real_time,
+        killed_by_id=killed_by,
         is_tournament=bool(entry["isTournament"]),
         fingerprint=_fingerprint(projection),
     )
+
+
+def _normalize_terminal_metric_claims(
+    entry: Mapping[str, Any],
+    runtime_spec: Mapping[str, Any],
+    *,
+    saved_wave: Optional[int],
+) -> dict[str, Any]:
+    """Project terminal tally leaves independently of the full History report."""
+
+    tally_spec = runtime_spec.get("active_tallies")
+    if not isinstance(tally_spec, Mapping):
+        return {
+            "status": "unavailable",
+            "reason": "active_tally_capability_unavailable",
+            "claims": {},
+            "unavailable": {},
+        }
+    capability_id = str(tally_spec.get("capability_id") or "")
+    semantic_fingerprint, binding_fingerprint = (
+        active_tally_contract_fingerprints(tally_spec)
+    )
+    claims: dict[str, Any] = {}
+    unavailable: dict[str, str] = {}
+    for component_name, component in (tally_spec.get("components") or {}).items():
+        fields = component.get("fields") if isinstance(component, Mapping) else None
+        if not isinstance(fields, Mapping):
+            continue
+        for metric_name, field_spec in fields.items():
+            if not isinstance(field_spec, Mapping):
+                continue
+            terminal_source = field_spec.get("terminal_source")
+            if not isinstance(terminal_source, str) or not terminal_source:
+                continue
+            semantic_id = (
+                f"{capability_id}.{component_name}.{metric_name}"
+            )
+            try:
+                value = _active_tally_decimal(
+                    entry.get(terminal_source),
+                    kind=str(field_spec.get("kind") or ""),
+                    label=f"terminal:{component_name}:{metric_name}",
+                )
+            except _ComponentUnavailable as exc:
+                unavailable[str(terminal_source)] = str(exc)
+                continue
+            claims[str(terminal_source)] = {
+                "status": "observed",
+                "value_decimal": _decimal_text(value),
+                "unit": str(field_spec.get("unit") or ""),
+                "semantic_id": semantic_id,
+                "semantic_fingerprint": _fingerprint(
+                    {
+                        "semantic_id": semantic_id,
+                        "kind": field_spec.get("kind"),
+                        "unit": field_spec.get("unit"),
+                        "monotonic": field_spec.get("monotonic"),
+                    }
+                ),
+            }
+    if claims and not unavailable:
+        status = "observed"
+        reason = ""
+    elif claims:
+        status = "partial"
+        reason = "one_or_more_terminal_metric_claims_unavailable"
+    else:
+        status = "unavailable"
+        reason = "terminal_metric_claims_unavailable"
+    return {
+        "status": status,
+        "reason": reason,
+        "capability_id": capability_id,
+        "semantic_fingerprint": semantic_fingerprint,
+        "binding_fingerprint": binding_fingerprint,
+        "saved_wave": saved_wave,
+        "claims": claims,
+        "unavailable": unavailable,
+    }
+
+
+def _optional_nonnegative_number(value: Any) -> Optional[float]:
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and value >= 0
+    ):
+        return float(value)
+    return None
 
 
 def _validate_history_entry_shape(
@@ -827,65 +1755,15 @@ def _validate_history_entry_shape(
         raise _ComponentUnavailable(f"malformed_history_entry:{index}")
     expected_class = str(history_spec.get("entry_class") or "")
     expected_fields = _history_expected_fields(history_spec)
-    if set(raw_entry) != expected_fields:
+    if not expected_fields <= set(raw_entry):
         raise _ComponentUnavailable(f"history_entry_changed_shape:{index}")
     if raw_entry.get("__class__") != expected_class:
         raise _ComponentUnavailable(f"history_entry_class_changed:{index}")
 
-    return raw_entry
-
-
-def _validate_history_identity_values(
-    entry: Mapping[str, Any],
-    *,
-    index: int,
-) -> None:
-    """Validate only fields required for source-scoped tail continuity."""
-
-    for field in ("battleDate", "tier", "wave", "killedBy"):
-        value = entry.get(field)
-        if type(value) is not int:
-            raise _ComponentUnavailable(
-                f"history_entry_field_type_changed:{index}:{field}"
-            )
-        if value < 0:
-            raise _ComponentUnavailable(
-                f"malformed_history_entry_value:{index}:{field}"
-            )
-    for field in ("gameTime", "realTime"):
-        value = entry.get(field)
-        if type(value) is not float:
-            raise _ComponentUnavailable(
-                f"history_entry_field_type_changed:{index}:{field}"
-            )
-        if not math.isfinite(value) or value <= 0:
-            raise _ComponentUnavailable(
-                f"malformed_history_entry_value:{index}:{field}"
-            )
-    if type(entry.get("isTournament")) is not bool:
-        raise _ComponentUnavailable(
-            f"history_entry_field_type_changed:{index}:isTournament"
-        )
-    for field in ("battleDate", "tier", "wave"):
-        if entry[field] <= 0:
-            raise _ComponentUnavailable(
-                f"malformed_history_entry_value:{index}:{field}"
-            )
-
-
-def _validate_history_entry_values(
-    entry: Mapping[str, Any],
-    history_spec: Mapping[str, Any],
-    *,
-    index: int,
-) -> None:
-    """Validate the complete semantic History projection independently."""
-
-    expected_fields = _history_expected_fields(history_spec)
     integer_fields = _string_set(history_spec.get("integer_fields"))
     boolean_fields = _string_set(history_spec.get("boolean_fields"))
     for field in expected_fields - {"__class__"}:
-        value = entry.get(field)
+        value = raw_entry.get(field)
         if field in boolean_fields:
             if type(value) is not bool:
                 raise _ComponentUnavailable(
@@ -901,19 +1779,21 @@ def _validate_history_entry_values(
             raise _ComponentUnavailable(
                 f"history_entry_field_type_changed:{index}:{field}"
             )
-        # Finite signed report statistics are valid source values. The game
-        # can overflow large counters such as damageDealt into a negative
-        # number, and the More Stats UI presents that same signed value.
-        # Identity/domain fields retain their stricter checks separately.
+        # The game can persist finite negative report statistics after its own
+        # large-number overflow (observed for ``damageDealt``), and the More
+        # Stats UI displays that same signed value. Keep it as source evidence
+        # instead of discarding the independent History identity. Structural
+        # identity fields retain their positive-domain checks below.
         if not math.isfinite(float(value)):
             raise _ComponentUnavailable(
                 f"malformed_history_entry_value:{index}:{field}"
             )
     for positive_field in ("battleDate", "tier", "wave", "gameTime", "realTime"):
-        if entry.get(positive_field, 0) <= 0:
+        if raw_entry.get(positive_field, 0) <= 0:
             raise _ComponentUnavailable(
                 f"malformed_history_entry_value:{index}:{positive_field}"
             )
+    return raw_entry
 
 
 def _history_expected_fields(history_spec: Mapping[str, Any]) -> set[str]:
@@ -1318,6 +2198,7 @@ def _is_sequence(value: Any) -> bool:
 
 
 __all__ = [
+    "ActiveRunTalliesSnapshot",
     "ActiveRoundIdentity",
     "BattleHistoryTail",
     "BattleHistoryTailIdentity",
@@ -1328,6 +2209,10 @@ __all__ = [
     "RuntimePerkPick",
     "RuntimePerkSnapshot",
     "RuntimeSaveNormalizationError",
+    "RuntimeTallyClaimDefinition",
+    "RuntimeTallyComponent",
+    "RuntimeTallyMetric",
+    "active_tally_contract_fingerprints",
     "normalize_runtime_save",
     "runtime_with_perk_id_overrides",
 ]

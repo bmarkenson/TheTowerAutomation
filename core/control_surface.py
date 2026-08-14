@@ -112,6 +112,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "bluestacks_operator_restart_v1",
     "bluestacks_listener_lifetime_telemetry_v1",
     "interactive_development_lease_v1",
+    "interactive_development_owned_battle_v1",
     "managed_custom_module_presets_v1",
     "observed_game_speed",
     "persistent_adb_connection_v1",
@@ -2091,6 +2092,14 @@ class ControlSurfaceService:
                         raise ControlSurfaceRequestError(
                             "request requires owner_label"
                         )
+                    owned_battle_start = request.get(
+                        "owned_battle_start",
+                        False,
+                    )
+                    if not isinstance(owned_battle_start, bool):
+                        raise ControlSurfaceRequestError(
+                            "owned_battle_start must be a boolean"
+                        )
                     current = self.status(now=current_time)
                     current_lease = current["interactive_development_lease"]
                     requested = current_lease.get("request")
@@ -2148,6 +2157,34 @@ class ControlSurfaceService:
                             "starting screen",
                             status=409,
                         )
+                    workflow_evidence = (
+                        current.get("control_model", {}).get(
+                            "workflow_evidence"
+                        )
+                    )
+                    if owned_battle_start and not (
+                        isinstance(workflow_evidence, Mapping)
+                        and workflow_evidence.get("game_state")
+                        == "home_new_battle"
+                        and workflow_evidence.get("active_battle") is False
+                        and str(
+                            workflow_evidence.get(
+                                "activity_scope_run_id"
+                            )
+                            or ""
+                        ).strip()
+                        and type(
+                            workflow_evidence.get("target_generation")
+                        )
+                        is int
+                        and int(workflow_evidence["target_generation"]) > 0
+                    ):
+                        raise ControlSurfaceRequestError(
+                            "An owned development battle must be preclaimed "
+                            "from fresh exact Home New Battle evidence",
+                            status=409,
+                            code="owned_battle_boundary_unavailable",
+                        )
                     lease = self.control_store.request_interactive_development_lease(
                         owner_label=owner_label,
                         runtime=owner,
@@ -2158,7 +2195,18 @@ class ControlSurfaceService:
                                 "runtime_battle_scope"
                             ),
                             "observed_at": authority.get("observed_at"),
+                            "home_battle_control": (
+                                workflow_evidence.get("home_battle_control")
+                                if isinstance(workflow_evidence, Mapping)
+                                else None
+                            ),
+                            "target_generation": (
+                                workflow_evidence.get("target_generation")
+                                if isinstance(workflow_evidence, Mapping)
+                                else None
+                            ),
                         },
+                        owned_battle_start=owned_battle_start,
                         now=current_time,
                         ttl_seconds=INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
                     )
@@ -2167,7 +2215,8 @@ class ControlSurfaceService:
                         f"owner={lease['owner_label']} lease={lease['lease_id']} "
                         f"runtime={lease['runtime']['runtime_id']} "
                         f"pid={lease['runtime']['pid']} "
-                        f"target={lease['runtime']['adb_target']}"
+                        f"target={lease['runtime']['adb_target']} "
+                        f"owned_battle_start={owned_battle_start}"
                     )
                 elif operation == "heartbeat":
                     lease_id = str(request.get("lease_id") or "").strip().lower()
@@ -4466,6 +4515,8 @@ class ControlSurfaceService:
             "state": state,
             "runtime": runtime_owner,
         }
+        if value.get("owned_battle_start") is True:
+            response["owned_battle_start"] = True
         for name in (
             "requested_at",
             "heartbeat_at",
@@ -4482,7 +4533,11 @@ class ControlSurfaceService:
         ):
             if value.get(name) is not None:
                 response[name] = str(value[name])[:256]
-        for name in ("starting_evidence", "terminal_evidence"):
+        for name in (
+            "starting_evidence",
+            "owned_battle_evidence",
+            "terminal_evidence",
+        ):
             evidence = value.get(name)
             if isinstance(evidence, Mapping):
                 response[name] = {
@@ -4497,6 +4552,14 @@ class ControlSurfaceService:
                     ),
                     "observed_at": str(evidence.get("observed_at") or "")[:64],
                 }
+                home_control = str(
+                    evidence.get("home_battle_control") or ""
+                ).strip().upper()
+                if home_control:
+                    response[name]["home_battle_control"] = home_control[:64]
+                target_generation = evidence.get("target_generation")
+                if type(target_generation) is int and target_generation > 0:
+                    response[name]["target_generation"] = target_generation
         if state == "active" and not response.get("acknowledged_at"):
             return None
         if state == "terminal" and not response.get("terminal_at"):
@@ -5169,12 +5232,23 @@ class ControlSurfaceService:
             and isinstance(manual_terminal, Mapping)
             and manual_terminal.get("status") == "unavailable"
         )
+        save_first_home_return_available = bool(
+            terminal_evidence_unavailable
+            and isinstance(manual, Mapping)
+            and manual.get("status") == "awaiting_enable"
+            and isinstance(evidence, Mapping)
+            and evidence.get("game_state") == "home_new_battle"
+        )
+        terminal_evidence_blocks_enable = bool(
+            terminal_evidence_unavailable
+            and not save_first_home_return_available
+        )
         enable_available = bool(
             not control_error
             and process_live
             and state_request != "STOPPED"
             and not manual_error
-            and not terminal_evidence_unavailable
+            and not terminal_evidence_blocks_enable
             and (
                 not manual_busy
                 or manual.get("status")
@@ -5199,7 +5273,7 @@ class ControlSurfaceService:
         elif manual_error:
             enable_code = "manual_control_invalid"
             enable_reason = manual_error
-        elif terminal_evidence_unavailable:
+        elif terminal_evidence_blocks_enable:
             enable_code = "manual_terminal_evidence_unavailable"
             enable_reason = (
                 "manual terminal evidence is ambiguous; Automation remains "
@@ -5225,7 +5299,12 @@ class ControlSurfaceService:
             )
         else:
             enable_code = "available"
-            enable_reason = "explicitly permit guarded actions"
+            enable_reason = (
+                "explicitly permit save-first reconciliation from the fresh "
+                "Home New Battle boundary; terminal UI remains unauthorized"
+                if save_first_home_return_available
+                else "explicitly permit guarded actions"
+            )
 
         pause_available = bool(
             not control_error

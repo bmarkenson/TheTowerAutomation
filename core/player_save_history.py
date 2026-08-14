@@ -17,14 +17,9 @@ import re
 import time
 from typing import Any, Callable, Mapping, Optional
 
-from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import detect_home_battle_control
-from core.player_save import (
-    PlayerSaveSnapshot,
-    decode_player_save_bytes,
-    pull_player_save_bytes,
-)
+from core.player_save import PlayerSaveSnapshot
 from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
@@ -48,7 +43,8 @@ from utils.logger import get_activity_scope, log, log_input
 PLAYER_SAVE_HISTORY_SOURCE = "player_save"
 BATTLE_HISTORY_UI_SOURCE = "battle_history_ui"
 BATTLE_HISTORY_UI_MAPPING_ID = "battle-history-ui-report-v1"
-PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION = 1
+PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION = 2
+BATTLE_HISTORY_UI_IDENTITY_SCHEMA_VERSION = 1
 ACTIVITY_HISTORY_METADATA_SCHEMA_VERSION = 2
 _UI_BATTLE_DATE_PATTERN = re.compile(
     r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
@@ -207,6 +203,7 @@ def history_metadata_from_acquisition(
             "fingerprint": identity.fingerprint,
             "tier": identity.tier,
             "wave": identity.wave,
+            "is_tournament": identity.is_tournament,
             "battle_date": dict(battle_date),
             "entry_count": tail.entry_count,
             "capacity": tail.capacity,
@@ -350,7 +347,7 @@ def ui_history_bridge_eligible(metadata: Mapping[str, Any]) -> bool:
         and metadata.get("source") == BATTLE_HISTORY_UI_SOURCE
         and metadata.get("mapping_id") == BATTLE_HISTORY_UI_MAPPING_ID
         and metadata.get("identity_schema_version")
-        == PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION
+        == BATTLE_HISTORY_UI_IDENTITY_SCHEMA_VERSION
         and _positive_int(metadata.get("tier")) is not None
         and _positive_int(metadata.get("wave")) is not None
         and _parse_ui_battle_date(metadata.get("battle_date")) is not None
@@ -410,7 +407,7 @@ class PlayerSaveHistoryReader:
     def __init__(
         self,
         *,
-        target_snapshot_fn: Callable[[], AdbTargetSnapshot],
+        acquirer: StablePlayerSaveAcquirer,
         capture_fn: Callable[[], Any],
         detector: Callable[[Any], Mapping[str, Any]] = (
             detect_state_and_overlays
@@ -422,14 +419,12 @@ class PlayerSaveHistoryReader:
         ] = None,
         background_fn: Optional[Callable[[str], bool]] = None,
         foreground_fn: Optional[Callable[[str], bool]] = None,
-        pull_fn: Callable[..., bytes] = pull_player_save_bytes,
-        decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
-        acquirer: Optional[StablePlayerSaveAcquirer] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         input_log_fn: Callable[..., None] = log_input,
         debug_log_fn: Callable[..., None] = log,
     ) -> None:
-        self._target_snapshot_fn = target_snapshot_fn
+        if not isinstance(acquirer, StablePlayerSaveAcquirer):
+            raise TypeError("player-save History requires the shared acquirer")
         self._capture_fn = capture_fn
         self._detector = detector
         self._home_control_fn = home_control_fn
@@ -437,13 +432,7 @@ class PlayerSaveHistoryReader:
         self._attachment_context_fn = attachment_context_fn
         self._background_fn = background_fn
         self._foreground_fn = foreground_fn
-        self._pull_fn = pull_fn
-        self._decode_fn = decode_fn
-        self._acquirer = acquirer or StablePlayerSaveAcquirer(
-            target_snapshot_fn=target_snapshot_fn,
-            pull_fn=pull_fn,
-            decode_fn=decode_fn,
-        )
+        self._acquirer = acquirer
         self._sleep_fn = sleep_fn
         self._input_log_fn = input_log_fn
         self._debug_log_fn = debug_log_fn
@@ -538,7 +527,7 @@ class PlayerSaveHistoryReader:
             return _blocked("active_attachment_context_unverified")
 
         serializer = GuardedPlayerSaveSerializer(
-            target_snapshot_fn=self._target_snapshot_fn,
+            acquirer=self._acquirer,
             context_guard_fn=lambda: self._same_attachment_context(
                 context,
                 expected_scope_id,
@@ -552,9 +541,6 @@ class PlayerSaveHistoryReader:
             ),
             background_fn=self._background_fn,
             foreground_fn=self._foreground_fn,
-            pull_fn=self._pull_fn,
-            decode_fn=self._decode_fn,
-            acquirer=self._acquirer,
             sleep_fn=self._sleep_fn,
             input_log_fn=self._input_log_fn,
             debug_log_fn=self._debug_log_fn,

@@ -24,6 +24,32 @@ and production's installed `external_development` hold. Capture, detection,
 and status continue; production input, recovery, initialization, validation,
 strategy, handler, and lifecycle action are suppressed.
 
+### Preclaim one owned development battle
+
+When the task explicitly authorizes starting—and, if needed, Surrendering—one
+bounded test battle, request the owned variant before the verified Battle tap:
+
+```bash
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  --data '{"operation":"request","owner_label":"bounded owned test","owned_battle_start":true}' \
+  http://127.0.0.1:8787/api/v1/interactive-development-lease
+```
+
+Require capability `interactive_development_owned_battle_v1` and the ordinary
+composite `active: true` acknowledgement. The request is accepted only from a
+fresh exact Home `NEW_BATTLE` observation with no active battle, a nonempty
+activity scope, and a positive target generation. Production may then retain
+that exact same-runtime/same-target/same-scope claim through the one battle.
+
+At Game Over the input lease terminalizes, but the exact process-local claim
+may authorize only production's existing minimal return-to-Home terminal
+handler. It cannot Retry, collect a representative record, adopt a pre-existing
+or Tournament battle, or authorize a new terminal lease. Pause, Stop,
+runtime/PID/target-generation/scope replacement, an unexpected terminal, or
+ambiguous evidence cancels cleanup input. Do not use this option when the task
+authorizes observation only.
+
 Keep the exact lease ID current separately; heartbeats do not enter the action
 log:
 
@@ -83,5 +109,8 @@ Release completes only after production obtains a fresh post-release frame and
 publishes a terminal disposition. Ambiguity keeps the hold visible. Pause or
 Stop revokes immediately; Resume does not revive it. Heartbeat expiry,
 runtime/session/PID/target replacement, battle boundary, or natural Game Over
-terminates it. Request a new lease after any such boundary and never replay an
+terminates an ordinary lease. The explicitly preclaimed owned-battle variant
+may remain active through its exact Home-to-running boundary, then terminalizes
+at Game Over while production owns only the minimal Home cleanup described
+above. Request a new lease after any terminal boundary and never replay an
 uncertain command.

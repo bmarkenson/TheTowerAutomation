@@ -9,6 +9,7 @@ import pytest
 
 from core.player_save import PlayerSavePullError, SaveCheckEvidence
 from core.adb_target_session import AdbTargetSnapshot
+from core.player_save_acquisition import StablePlayerSaveAcquirer
 from core.tournament_conditions import (
     capture_current_tournament_conditions,
     derive_tournament_conditions,
@@ -22,6 +23,19 @@ MAPPING = json.loads(
         encoding="utf-8"
     )
 )
+
+
+def _acquirer(*, pull_fn, decode_fn=None, target_snapshot_fn=None):
+    target = (
+        {"target_snapshot_fn": target_snapshot_fn}
+        if target_snapshot_fn is not None
+        else {"fixed_target": "private-target"}
+    )
+    return StablePlayerSaveAcquirer(
+        **target,
+        pull_fn=pull_fn,
+        decode_fn=decode_fn,
+    )
 
 
 @pytest.mark.parametrize(
@@ -204,9 +218,10 @@ def test_capture_enriches_evidence_without_retaining_raw_save_values():
     )
 
     evidence = capture_current_tournament_conditions(
-        captured_at=datetime(2026, 8, 1, 12, tzinfo=timezone.utc),
-        pull_fn=lambda **_kwargs: b"opaque-save",
-        decode_fn=lambda *_args, **_kwargs: snapshot,
+        acquirer=_acquirer(
+            pull_fn=lambda **_kwargs: b"opaque-save",
+            decode_fn=lambda *_args, **_kwargs: snapshot,
+        ),
     )
 
     assert evidence["status"] == "complete"
@@ -219,7 +234,9 @@ def test_capture_failure_is_explicit_and_nonblocking():
     def fail_pull(**_kwargs):
         raise PlayerSavePullError("unavailable")
 
-    evidence = capture_current_tournament_conditions(pull_fn=fail_pull)
+    evidence = capture_current_tournament_conditions(
+        acquirer=_acquirer(pull_fn=fail_pull)
+    )
 
     assert evidence["status"] == "unavailable"
     assert evidence["reason"] == "save_pull_failed"
@@ -235,12 +252,13 @@ def test_standalone_capture_discards_projection_on_target_generation_change():
     )
 
     evidence = capture_current_tournament_conditions(
-        captured_at=datetime(2026, 8, 1, 12, tzinfo=timezone.utc),
-        target_snapshot_fn=lambda: next(snapshots),
-        pull_fn=lambda **_kwargs: b"opaque-save",
-        decode_fn=lambda *_args, **_kwargs: SimpleNamespace(
-            checks={},
-            mapping_id="data-9-game-1073",
+        acquirer=_acquirer(
+            target_snapshot_fn=lambda: next(snapshots),
+            pull_fn=lambda **_kwargs: b"opaque-save",
+            decode_fn=lambda *_args, **_kwargs: SimpleNamespace(
+                checks={},
+                mapping_id="data-9-game-1073",
+            ),
         ),
     )
 

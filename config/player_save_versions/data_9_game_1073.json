@@ -139,6 +139,7 @@
         "upgradeWorkshopLevel",
         "upgradeWorkshopUtilityLevel"
       ],
+      "runtime_observation": [],
       "private": [
         "bits",
         "bucketID",

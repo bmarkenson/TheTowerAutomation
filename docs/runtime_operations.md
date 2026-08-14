@@ -1,10 +1,12 @@
 # Runtime Operations
 
 This file is the routing index for live and production procedures. Before any
-process or device interaction, runtime diagnosis, live validation, or claim
-about volatile state, complete [`live_preflight.md`](live_preflight.md) unless
-it is already complete for the current task boundary. Then load only the
-matching operation.
+process or device interaction, diagnosis that depends on current or changing
+runtime state, live validation, or claim about volatile state, complete
+[`live_preflight.md`](live_preflight.md) unless it is already complete for the
+current task boundary. Historical production artifacts used only as retained
+evidence do not require this router and do not prove current state. For live
+work, load only the matching operation.
 
 | Need | Canonical procedure |
 | --- | --- |
@@ -13,7 +15,7 @@ matching operation.
 | Start/stop, attach, switch ADB targets, or change Strategy | [`operations/managed_runtime.md`](operations/managed_runtime.md) |
 | Pause, change mode or game speed, replace a process, or recover a terminal run | [`operations/process_control.md`](operations/process_control.md) |
 | Start a bounded read-only live stream for operator or worker observation | [`operations/passive_stream.md`](operations/passive_stream.md) |
-| Hold automation for development or send one leased exact-target input | [`operations/interactive_development.md`](operations/interactive_development.md) |
+| Hold automation for development, send one leased exact-target input, or preclaim one explicitly authorized owned test battle | [`operations/interactive_development.md`](operations/interactive_development.md) |
 | Run the No Strategy observation profile | [`operations/no_strategy.md`](operations/no_strategy.md) |
 | Validate or passively observe an active Tournament | [`operations/tournament_validation.md`](operations/tournament_validation.md) |
 | Enable, inspect, or stop a bounded player-save temporal-audit campaign | [`operations/player_save_audit.md`](operations/player_save_audit.md) |
