@@ -1074,6 +1074,7 @@
     ]
   },
   "orb_distance": {
+    "raw_float_tolerance": 0.1,
     "context_checks": [
       "cards_deck",
       "workshop_preset"
@@ -1088,7 +1089,7 @@
         "raw": {
           "range_basis": 0,
           "extra": 3.0,
-          "workshop": 3.8999998569488525
+          "workshop": 3.9
         },
         "context": {
           "cards_deck": "Farm",
@@ -1103,8 +1104,8 @@
       {
         "raw": {
           "range_basis": 0,
-          "extra": 3.180000066757202,
-          "workshop": 3.7199997901916504
+          "extra": 3.2,
+          "workshop": 3.7
         },
         "context": {
           "cards_deck": "Farm",
@@ -1119,24 +1120,8 @@
       {
         "raw": {
           "range_basis": 0,
-          "extra": 8.71588134765625,
-          "workshop": 8.036911010742188
-        },
-        "context": {
-          "cards_deck": "Tournament",
-          "workshop_preset": "Tourney"
-        },
-        "value": {
-          "range_basis": "98.38m",
-          "extra": "87.16m",
-          "workshop": "80.37m"
-        }
-      },
-      {
-        "raw": {
-          "range_basis": 0,
-          "extra": 8.71588134765625,
-          "workshop": 8.036909103393555
+          "extra": 8.7,
+          "workshop": 8.0
         },
         "context": {
           "cards_deck": "Tournament",

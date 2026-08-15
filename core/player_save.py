@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 import gzip
 import hashlib
 import json
@@ -3072,7 +3073,7 @@ def _orb_distance_evidence(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
 ) -> SaveCheckEvidence:
-    """Decode only complete Orb tuples observed in the same preset context."""
+    """Decode one unique Orb tuple in its exact preset context and tolerance."""
 
     expected_fields = {
         "range_basis": "rangeLevelSelected",
@@ -3086,11 +3087,20 @@ def _orb_distance_evidence(
         if isinstance(spec, Mapping)
         else ()
     )
+    raw_float_tolerance = (
+        spec.get("raw_float_tolerance")
+        if isinstance(spec, Mapping)
+        else None
+    )
     values = spec.get("values") if isinstance(spec, Mapping) else None
     if (
         not isinstance(source_fields, Mapping)
         or dict(source_fields) != expected_fields
         or context_checks != ("cards_deck", "workshop_preset")
+        or isinstance(raw_float_tolerance, bool)
+        or not isinstance(raw_float_tolerance, float)
+        or not math.isfinite(raw_float_tolerance)
+        or raw_float_tolerance <= 0.0
         or not _is_sequence(values)
         or not values
     ):
@@ -3128,10 +3138,14 @@ def _orb_distance_evidence(
     evidence_source_fields = tuple(
         dict.fromkeys((*expected_fields.values(), *context_source_fields))
     )
-    raw_to_value: dict[
-        tuple[int, float, float, tuple[str, ...]],
-        dict[str, str],
-    ] = {}
+    raw_options: list[
+        tuple[
+            tuple[int, float, float, tuple[str, ...]],
+            dict[str, str],
+        ]
+    ] = []
+    raw_keys: set[tuple[int, float, float, tuple[str, ...]]] = set()
+    raw_tolerance_decimal = Decimal(str(raw_float_tolerance))
     semantic_values: list[dict[str, str]] = []
     malformed = len(observed_context) != len(context_checks)
     for option in values:
@@ -3179,6 +3193,8 @@ def _orb_distance_evidence(
             or isinstance(workshop_raw, bool)
             or not isinstance(workshop_raw, float)
             or not math.isfinite(workshop_raw)
+            or round(extra_raw, 1) != extra_raw
+            or round(workshop_raw, 1) != workshop_raw
             or not all(semantic.values())
             or not all(normalized_context.values())
         ):
@@ -3190,13 +3206,14 @@ def _orb_distance_evidence(
             workshop_raw,
             tuple(normalized_context[key] for key in context_checks),
         )
-        if raw_key in raw_to_value:
+        if raw_key in raw_keys:
             malformed = True
             break
-        raw_to_value[raw_key] = semantic
+        raw_keys.add(raw_key)
+        raw_options.append((raw_key, semantic))
         if semantic not in semantic_values:
             semantic_values.append(semantic)
-    if malformed or not raw_to_value:
+    if malformed or not raw_options:
         return SaveCheckEvidence(
             check_id="orb_distance",
             status="unmapped",
@@ -3218,18 +3235,31 @@ def _orb_distance_evidence(
         and isinstance(workshop_raw, float)
         and math.isfinite(workshop_raw)
     )
-    observed = (
-        raw_to_value.get(
-            (
-                range_raw,
-                extra_raw,
-                workshop_raw,
-                tuple(observed_context[key] for key in context_checks),
-            )
-        )
-        if raw_valid
-        else None
+    observed_context_key = tuple(
+        observed_context[key] for key in context_checks
     )
+    matched_values: list[dict[str, str]] = []
+    if raw_valid:
+        for raw_key, semantic in raw_options:
+            expected_range, expected_extra, expected_workshop, context_key = (
+                raw_key
+            )
+            if (
+                range_raw == expected_range
+                and observed_context_key == context_key
+                and abs(
+                    Decimal(str(extra_raw)) - Decimal(str(expected_extra))
+                )
+                <= raw_tolerance_decimal
+                and abs(
+                    Decimal(str(workshop_raw))
+                    - Decimal(str(expected_workshop))
+                )
+                <= raw_tolerance_decimal
+                and semantic not in matched_values
+            ):
+                matched_values.append(semantic)
+    observed = matched_values[0] if len(matched_values) == 1 else None
     complete = observed is not None
     return SaveCheckEvidence(
         check_id="orb_distance",
@@ -3240,9 +3270,19 @@ def _orb_distance_evidence(
         reason=(
             ""
             if complete
-            else "Orb Distance tuple and preset context are not an exact mapped value"
+            else (
+                "Orb Distance raw tuple matches multiple mapped values within "
+                "tolerance"
+                if len(matched_values) > 1
+                else "Orb Distance tuple and preset context are outside the "
+                "mapped raw tolerance"
+            )
         ),
-        authority={"kind": "exact_values", "values": semantic_values},
+        authority={
+            "kind": "exact_values",
+            "values": semantic_values,
+            "raw_float_tolerance": raw_float_tolerance,
+        },
         diagnostics=(
             {}
             if complete
