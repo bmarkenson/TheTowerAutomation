@@ -129,6 +129,7 @@ BuildEnvironment = Callable[
 VerifyEnvironmentContents = Callable[
     [Path, EnvironmentConfig, InterpreterIdentity, EnvironmentFingerprint], None
 ]
+InspectCheckpointCandidate = Callable[[Path], str]
 
 
 def repository_root() -> Path:
@@ -1024,12 +1025,57 @@ def checkpoint_environment(
     return result
 
 
+def require_clean_checkpoint_candidate(repository: Path) -> str:
+    """Return exact HEAD only when every candidate input is already committed."""
+
+    def git(*arguments: str) -> str:
+        try:
+            completed = subprocess.run(
+                ["git", "-C", os.fspath(repository), *arguments],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as exc:
+            raise DevelopmentEnvironmentError(
+                f"Unable to inspect checkpoint candidate: {exc}"
+            ) from exc
+        if completed.returncode:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise DevelopmentEnvironmentError(
+                "Unable to inspect checkpoint candidate with "
+                f"git {' '.join(arguments)}: {detail}"
+            )
+        return completed.stdout
+
+    candidate = git("rev-parse", "--verify", "HEAD^{commit}").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", candidate):
+        raise DevelopmentEnvironmentError(
+            "Checkpoint requires one exact committed candidate"
+        )
+    status = git("status", "--porcelain=v1", "--untracked-files=all")
+    if status:
+        entries = status.rstrip().splitlines()
+        preview = "\n".join(entries[:10])
+        if len(entries) > 10:
+            preview += f"\n... and {len(entries) - 10} more"
+        raise DevelopmentEnvironmentError(
+            "Checkpoint requires a clean committed candidate; commit or resolve "
+            f"these worktree changes before running it:\n{preview}"
+        )
+    return candidate
+
+
 def run_checkpoint(
     config: EnvironmentConfig,
     environment: Path,
     *,
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    inspect_candidate: InspectCheckpointCandidate = require_clean_checkpoint_candidate,
 ) -> int:
+    candidate = inspect_candidate(config.repository_root)
+    print(f"[checkpoint] candidate {candidate}", flush=True)
     parent = config.repository_root / "tmp" / "development-checkpoint"
     _prepare_checkpoint_parent(config.repository_root, parent)
     state_root = Path(tempfile.mkdtemp(prefix="run-", dir=parent))
@@ -1064,7 +1110,13 @@ def run_checkpoint(
                     file=sys.stderr,
                 )
                 return int(completed.returncode)
-        print("[checkpoint] PASS")
+        observed_candidate = inspect_candidate(config.repository_root)
+        if observed_candidate != candidate:
+            raise DevelopmentEnvironmentError(
+                "Checkpoint candidate moved while the gate was running: "
+                f"started at {candidate}, finished at {observed_candidate}"
+            )
+        print(f"[checkpoint] PASS candidate={candidate}")
         return 0
     finally:
         shutil.rmtree(state_root)

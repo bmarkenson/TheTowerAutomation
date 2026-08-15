@@ -98,7 +98,10 @@ table row and additional coverage that made it necessary.
 The final candidate gate is not a pre-commit check. First create a clean exact
 candidate `V`. While its inputs are mutable, run focused checks only; do not use
 the complete checkpoint as a rehearsal. Run a selected complete checkpoint at
-most once for unchanged `V`.
+most once for unchanged `V`. The canonical `development.py checkpoint`
+entry point mechanically refuses staged, unstaged, or untracked input and
+rechecks exact `V` before it can report `PASS`; do not bypass that entry point
+with its component commands and call the aggregate a checkpoint.
 
 Repeat a complete checkpoint only when its prior run failed or was incomplete,
 a later change invalidates its production, checkpoint-machinery, or relevant

@@ -103,6 +103,26 @@ def _lock_worker(
         release.wait(5)
 
 
+def _git(repository: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(repository), *arguments],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def _committed_repository(repository: Path) -> str:
+    _git(repository, "init", "-b", "main")
+    _git(repository, "config", "user.name", "Checkpoint Guard Test")
+    _git(repository, "config", "user.email", "checkpoint@example.invalid")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-m", "Committed candidate")
+    return _git(repository, "rev-parse", "HEAD")
+
+
 def _copy_lock_contract(tmp_path: Path) -> development.EnvironmentConfig:
     config = _config(tmp_path)
     source_root = development.repository_root()
@@ -659,6 +679,45 @@ def test_checkpoint_generated_state_is_isolated_while_host_tools_are_available(
     assert "THETOWER_CHECKPOINT_EXCLUDE_HOST_TOOLS" not in result
 
 
+def test_checkpoint_candidate_guard_requires_committed_clean_inputs(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    candidate = _committed_repository(config.repository_root)
+
+    assert development.require_clean_checkpoint_candidate(
+        config.repository_root
+    ) == candidate
+
+    changed = config.repository_root / "pyproject.toml"
+    changed.write_text("uncommitted\n", encoding="utf-8")
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match="clean committed candidate",
+    ) as unstaged:
+        development.require_clean_checkpoint_candidate(config.repository_root)
+    assert " M pyproject.toml" in str(unstaged.value)
+
+    _git(config.repository_root, "add", "pyproject.toml")
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match="clean committed candidate",
+    ) as staged:
+        development.require_clean_checkpoint_candidate(config.repository_root)
+    assert "M  pyproject.toml" in str(staged.value)
+
+    _git(config.repository_root, "restore", "--staged", "pyproject.toml")
+    _git(config.repository_root, "restore", "pyproject.toml")
+    (config.repository_root / "untracked.txt").write_text(
+        "uncommitted\n", encoding="utf-8"
+    )
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match=r"\?\? untracked.txt",
+    ):
+        development.require_clean_checkpoint_candidate(config.repository_root)
+
+
 def test_checkpoint_commands_cover_full_offline_repository_gate(
     tmp_path: Path,
 ) -> None:
@@ -713,10 +772,66 @@ def test_checkpoint_stops_and_returns_failing_exit_code(
         calls.append(command)
         return subprocess.CompletedProcess(command, next(return_codes))
 
-    result = development.run_checkpoint(config, environment, run=fake_run)
+    result = development.run_checkpoint(
+        config,
+        environment,
+        run=fake_run,
+        inspect_candidate=lambda _repository: "a" * 40,
+    )
 
     assert result == 9
     assert len(calls) == 2
     assert "FAILED state definitions (exit 9)" in capsys.readouterr().err
     checkpoint_parent = config.repository_root / "tmp" / "development-checkpoint"
     assert list(checkpoint_parent.iterdir()) == []
+
+
+def test_checkpoint_rechecks_exact_candidate_before_reporting_pass(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _config(tmp_path)
+    environment = config.environment_root / "expected"
+    candidates = iter(("a" * 40, "b" * 40))
+
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match="candidate moved",
+    ):
+        development.run_checkpoint(
+            config,
+            environment,
+            run=lambda command, **_kwargs: subprocess.CompletedProcess(command, 0),
+            inspect_candidate=lambda _repository: next(candidates),
+        )
+
+    assert "[checkpoint] PASS" not in capsys.readouterr().out
+
+
+def test_checkpoint_reports_the_rechecked_exact_candidate_on_pass(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _config(tmp_path)
+    environment = config.environment_root / "expected"
+    calls: list[list[str]] = []
+
+    def successful_run(
+        command: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    candidate = "a" * 40
+    assert development.run_checkpoint(
+        config,
+        environment,
+        run=successful_run,
+        inspect_candidate=lambda _repository: candidate,
+    ) == 0
+
+    assert len(calls) == 4
+    output = capsys.readouterr().out
+    assert f"[checkpoint] candidate {candidate}" in output
+    assert f"[checkpoint] PASS candidate={candidate}" in output
