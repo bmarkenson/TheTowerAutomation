@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime
 import fcntl
 import hashlib
@@ -2311,7 +2311,12 @@ class ControlDirectiveStore:
             raise ValueError(
                 "exclusive validation launch decision must be start or cancel"
             )
-        with self._lock():
+        authority_boundary = (
+            self._dispatch_boundary()
+            if normalized_decision == "start"
+            else nullcontext()
+        )
+        with authority_boundary, self._lock():
             current = self._read_unlocked()
             ledger = _valid_exclusive_validation_ledger(
                 current.get("exclusive_validation")

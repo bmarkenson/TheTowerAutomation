@@ -374,6 +374,9 @@ class App:
         self._strategy_boundary_confirmed = False
         self._active_exclusive_validation_request_id: Optional[str] = None
         self._active_exclusive_validation_launch_request_id: Optional[str] = None
+        self._exclusive_validation_battle_dispatch_hold: Optional[str] = None
+        self._exclusive_validation_launch_dispatch_hold: Optional[str] = None
+        self._started_battle_workflow_completion: Optional[Dict[str, Any]] = None
         self._exclusive_validation_claimed_start_hold: Optional[str] = None
         self._exclusive_validation_launch_start_hold: Optional[str] = None
         self._exclusive_validation_passive_battle_hold: Optional[str] = None
@@ -2925,7 +2928,47 @@ class App:
                 )
                 and self._free_ticket_recovery_owner_current(*owner)
             )
-            return ((blocker,), True) if healthy_maintenance else (
+            maintenance_hold = AuthorityHoldState(
+                AuthorityHold.EMULATOR_MAINTENANCE,
+                "BlueStacks maintenance owns its Free Ticket recovery",
+            )
+            return ((maintenance_hold,), True) if healthy_maintenance else (
+                tuple(
+                    item
+                    for item in (competing, blocker)
+                    if item is not None
+                ),
+                False,
+            )
+        if owner is not None and owner[0] in {
+            "exclusive_validation",
+            "exclusive_validation_launch",
+        }:
+            healthy_validation = bool(
+                competing is None
+                and not setup_active
+                and self._free_ticket_recovery_owner_current(*owner)
+            )
+            validation_hold = AuthorityHoldState(
+                AuthorityHold.EXCLUSIVE_VALIDATION,
+                "exclusive validation owns its Free Ticket recovery",
+            )
+            return ((validation_hold,), True) if healthy_validation else (
+                tuple(
+                    item
+                    for item in (competing, blocker)
+                    if item is not None
+                ),
+                False,
+            )
+        if owner is not None and owner[0] == "terminal_continuation":
+            healthy_terminal = bool(
+                competing is not None
+                and competing.hold is AuthorityHold.OPERATOR_WORKFLOW
+                and not setup_active
+                and self._free_ticket_recovery_owner_current(*owner)
+            )
+            return ((competing,), True) if healthy_terminal else (
                 tuple(
                     item
                     for item in (competing, blocker)
@@ -2935,6 +2978,7 @@ class App:
             )
         healthy = bool(
             owner is not None
+            and owner[0] == "battle_workflow"
             and competing is not None
             and competing.hold is AuthorityHold.OPERATOR_WORKFLOW
             and getattr(self._supervisor, "battle_workflow_error", False)
@@ -2945,7 +2989,7 @@ class App:
             and self._free_ticket_recovery_owner_current(*owner)
         )
         if healthy:
-            return (blocker,), True
+            return (competing,), True
         holds = tuple(
             item
             for item in (competing, blocker)
@@ -3027,6 +3071,30 @@ class App:
             )
         workflow = getattr(self._supervisor, "battle_workflow", None)
         manual = getattr(self._supervisor, "manual_control", None)
+        validation_request_id = str(
+            getattr(
+                self,
+                "_exclusive_validation_battle_dispatch_hold",
+                None,
+            )
+            or ""
+        )
+        workflow_recovery_key = (
+            self._battle_workflow_recovery_key(workflow)
+            if isinstance(workflow, Mapping)
+            else ""
+        )
+        composite_persistence_retry = bool(
+            validation_request_id
+            and workflow_recovery_key
+            and int(
+                self._free_ticket_recovery_attempt_map().get(
+                    workflow_recovery_key,
+                    0,
+                )
+            )
+            >= 1
+        )
         if (
             isinstance(manual, Mapping)
             and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
@@ -3036,10 +3104,35 @@ class App:
             isinstance(workflow, Mapping)
             and workflow.get("intent") == "start_battle"
             and workflow.get("status") == "action_dispatched"
-            and str(workflow.get("request_id") or "")
-            not in getattr(self, "_uncertain_lifecycle_actions", set())
+            and (
+                str(workflow.get("request_id") or "")
+                not in getattr(self, "_uncertain_lifecycle_actions", set())
+                or composite_persistence_retry
+            )
         ):
-            return "battle_workflow", self._battle_workflow_recovery_key(workflow)
+            return "battle_workflow", workflow_recovery_key
+        if validation_request_id:
+            owner = (
+                "exclusive_validation",
+                f"exclusive-validation:{validation_request_id}",
+            )
+            if self._free_ticket_recovery_owner_current(*owner):
+                return owner
+        launch_request_id = str(
+            getattr(
+                self,
+                "_exclusive_validation_launch_dispatch_hold",
+                None,
+            )
+            or ""
+        )
+        if launch_request_id:
+            owner = (
+                "exclusive_validation_launch",
+                f"exclusive-validation-launch:{launch_request_id}",
+            )
+            if self._free_ticket_recovery_owner_current(*owner):
+                return owner
         claim = getattr(self, "_terminal_home_continuation", None)
         if (
             isinstance(claim, Mapping)
@@ -3091,6 +3184,77 @@ class App:
                 == recovery_key
                 and self._terminal_home_continuation_owner_current()
             )
+        if owner_kind == "exclusive_validation":
+            request_id = str(
+                getattr(
+                    self,
+                    "_exclusive_validation_battle_dispatch_hold",
+                    None,
+                )
+                or ""
+            )
+            receipt = (
+                self._supervisor.exclusive_validation_receipt(
+                    request_id=request_id
+                )
+                if request_id
+                else None
+            )
+            return bool(
+                request_id
+                and recovery_key == f"exclusive-validation:{request_id}"
+                and isinstance(receipt, Mapping)
+                and str(receipt.get("status") or "") == "claimed"
+                and request_id
+                == str(
+                    getattr(
+                        self,
+                        "_active_exclusive_validation_request_id",
+                        None,
+                    )
+                    or ""
+                )
+                and self._supervisor.owns_exclusive_validation(
+                    request_id,
+                    statuses=("claimed",),
+                )
+            )
+        if owner_kind == "exclusive_validation_launch":
+            request_id = str(
+                getattr(
+                    self,
+                    "_exclusive_validation_launch_dispatch_hold",
+                    None,
+                )
+                or ""
+            )
+            receipt = (
+                self._supervisor.exclusive_validation_receipt(
+                    request_id=request_id
+                )
+                if request_id
+                else None
+            )
+            launch = receipt.get("launch") if receipt else None
+            return bool(
+                request_id
+                and recovery_key
+                == f"exclusive-validation-launch:{request_id}"
+                and isinstance(launch, Mapping)
+                and str(launch.get("status") or "") == "claimed"
+                and request_id
+                == str(
+                    getattr(
+                        self,
+                        "_active_exclusive_validation_launch_request_id",
+                        None,
+                    )
+                    or ""
+                )
+                and self._supervisor.owns_exclusive_validation_launch(
+                    request_id
+                )
+            )
         if owner_kind != "battle_workflow":
             return False
         workflow = getattr(self._supervisor, "battle_workflow", None)
@@ -3106,13 +3270,61 @@ class App:
             )
         ):
             return False
+        validation_request_id = str(
+            getattr(
+                self,
+                "_exclusive_validation_battle_dispatch_hold",
+                None,
+            )
+            or ""
+        )
+        if (
+            validation_request_id
+            and int(
+                self._free_ticket_recovery_attempt_map().get(
+                    recovery_key,
+                    0,
+                )
+            )
+            >= 1
+        ):
+            # The one physical Claim budget is already consumed. A safety
+            # Pause necessarily changes the control request identity, so the
+            # original workflow acknowledgement can no longer authorize new
+            # input. It can still identify this reporting-only retry when the
+            # linked validation receipt remains the exact claimed owner.
+            return self._free_ticket_recovery_owner_current(
+                "exclusive_validation",
+                f"exclusive-validation:{validation_request_id}",
+            )
         current = self._current_control_workflow_evidence()
         if not isinstance(current, Mapping):
             return False
-        return (
-            self._workflow_dispatch_receipt_mismatch(workflow, current)
-            is None
-        )
+        if self._workflow_dispatch_receipt_mismatch(workflow, current) is not None:
+            return False
+        if validation_request_id:
+            return self._free_ticket_recovery_owner_current(
+                "exclusive_validation",
+                f"exclusive-validation:{validation_request_id}",
+            )
+        return True
+
+    @staticmethod
+    def _free_ticket_recovery_action_owner(
+        owner_kind: str,
+    ) -> AuthorityHold:
+        if owner_kind == "emulator_maintenance":
+            return AuthorityHold.EMULATOR_MAINTENANCE
+        if owner_kind in {
+            "exclusive_validation",
+            "exclusive_validation_launch",
+        }:
+            return AuthorityHold.EXCLUSIVE_VALIDATION
+        if owner_kind == "battle_workflow":
+            return AuthorityHold.OPERATOR_WORKFLOW
+        if owner_kind == "terminal_continuation":
+            return AuthorityHold.OPERATOR_WORKFLOW
+        return AuthorityHold.BLOCKING_MODAL_RECOVERY
 
     def _fail_free_ticket_recovery(
         self,
@@ -3132,6 +3344,44 @@ class App:
         if owner_kind == "terminal_continuation":
             self._clear_terminal_home_continuation(reason)
             return
+        if owner_kind == "exclusive_validation":
+            request_id = recovery_key.removeprefix(
+                "exclusive-validation:"
+            )
+            receipt = self._supervisor.exclusive_validation_receipt(
+                request_id=request_id
+            )
+            if (
+                isinstance(receipt, Mapping)
+                and str(receipt.get("status") or "") == "claimed"
+            ):
+                result = self._finish_exclusive_validation_without_cleanup(
+                    receipt,
+                    reason,
+                )
+                if result is not None:
+                    self._retain_exclusive_validation_passive_battle(
+                        request_id
+                    )
+            return
+        if owner_kind == "exclusive_validation_launch":
+            request_id = recovery_key.removeprefix(
+                "exclusive-validation-launch:"
+            )
+            result = self._supervisor.finish_exclusive_validation_launch(
+                request_id,
+                outcome="failed",
+                reason=reason,
+            )
+            if result is not None:
+                self._active_exclusive_validation_launch_request_id = None
+                self._exclusive_validation_launch_dispatch_hold = None
+                self._clear_exclusive_validation_launch_start_proof(
+                    request_id
+                )
+                self._announce_exclusive_validation_launch(result)
+                self._retain_exclusive_validation_passive_battle(request_id)
+            return
         workflow = getattr(self._supervisor, "battle_workflow", None)
         if not (
             isinstance(workflow, Mapping)
@@ -3139,17 +3389,61 @@ class App:
             and workflow.get("status") == "action_dispatched"
         ):
             return
+        validation_request_id = str(
+            getattr(
+                self,
+                "_exclusive_validation_battle_dispatch_hold",
+                None,
+            )
+            or ""
+        )
+        validation_receipt = None
+        if validation_request_id:
+            validation_key = (
+                f"exclusive-validation:{validation_request_id}"
+            )
+            # An explicit Start workflow and its validation receipt authorize
+            # one physical Battle/Claim sequence, not two retry budgets. Mark
+            # the receipt alias consumed before either durable terminal write;
+            # if one write is transiently unavailable, a later heartbeat may
+            # retry persistence but can never replay Claim under the alias.
+            attempts = self._free_ticket_recovery_attempt_map()
+            attempts[validation_key] = max(
+                1,
+                int(attempts.get(validation_key, 0)),
+            )
+            validation_receipt = self._supervisor.exclusive_validation_receipt(
+                request_id=validation_request_id
+            )
         request_id = str(workflow.get("request_id") or "")
         self._mission_mgr.revoke_initial_battle_intent(
             str(workflow.get("intent") or ""),
             request_id=request_id,
         )
-        self._supervisor.transition_battle_workflow(
+        transitioned = self._supervisor.transition_battle_workflow(
             request_id,
             "failed",
             reason=reason,
             acknowledgement=(self._current_control_workflow_evidence() or {}),
         )
+        if transitioned is None:
+            # Keep the still-claimed validation receipt intact so the same
+            # composite owner can retry only this durable workflow write on a
+            # later heartbeat. Its shared attempt budget already forbids a
+            # second Claim input.
+            return
+        if (
+            isinstance(validation_receipt, Mapping)
+            and str(validation_receipt.get("status") or "") == "claimed"
+        ):
+            result = self._finish_exclusive_validation_without_cleanup(
+                validation_receipt,
+                reason,
+            )
+            if result is not None:
+                self._retain_exclusive_validation_passive_battle(
+                    validation_request_id
+                )
 
     def _advance_blocking_primary_recovery(
         self,
@@ -3181,6 +3475,9 @@ class App:
                 )
             return True
         owner_kind, recovery_key = owner
+        recovery_action_owner = self._free_ticket_recovery_action_owner(
+            owner_kind
+        )
         attempts = self._free_ticket_recovery_attempt_map()
         if int(attempts.get(recovery_key, 0)) >= 1:
             reason = (
@@ -3197,9 +3494,9 @@ class App:
 
         def action_allowed() -> bool:
             if not self._runtime_action_guard(
-                    action_class=RuntimeActionClass.LIFECYCLE_ACTION,
-                    owner=AuthorityHold.BLOCKING_MODAL_RECOVERY,
-                ):
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                owner=recovery_action_owner,
+            ):
                 return False
             refreshed_owner = self._free_ticket_recovery_owner()
             refreshed_holds, refreshed_ready = (
@@ -6739,27 +7036,59 @@ class App:
         battle_started: bool,
         detection: Optional[Mapping[str, Any]] = None,
     ) -> bool:
-        """Complete Start only after its dispatched launch becomes a run."""
+        """Complete Start after its launch becomes a run, retrying reporting."""
 
         workflow = self._supervisor.battle_workflow
-        if not (
-            battle_started is True
+        retained = getattr(
+            self,
+            "_started_battle_workflow_completion",
+            None,
+        )
+        if (
+            retained is None
+            and battle_started is True
             and not self._tournament_battle_guard(detection or {})
             and isinstance(workflow, Mapping)
             and workflow.get("intent") == "start_battle"
             and workflow.get("status") == "action_dispatched"
         ):
+            retained = {
+                "request_id": str(workflow.get("request_id") or ""),
+                "acknowledgement": (
+                    self._current_control_workflow_evidence() or {}
+                ),
+                "semantic_completion_applied": True,
+            }
+            self._started_battle_workflow_completion = retained
+        if not isinstance(retained, Mapping):
+            return False
+        request_id = str(retained.get("request_id") or "")
+        if not (
+            request_id
+            and isinstance(workflow, Mapping)
+            and str(workflow.get("request_id") or "") == request_id
+        ):
+            self._started_battle_workflow_completion = None
+            return False
+        if workflow.get("status") == "completed":
+            self._started_battle_workflow_completion = None
+            return True
+        if workflow.get("status") != "action_dispatched":
+            self._started_battle_workflow_completion = None
             return False
         completed = self._supervisor.transition_battle_workflow(
-            str(workflow.get("request_id") or ""),
+            request_id,
             "completed",
             reason=(
                 "verified new-run Home launch crossed the normal battle "
                 "lifecycle boundary"
             ),
-            acknowledgement=(self._current_control_workflow_evidence() or {}),
+            acknowledgement=dict(retained.get("acknowledgement") or {}),
         )
-        return completed is not None and completed.get("status") == "completed"
+        if completed is None or completed.get("status") != "completed":
+            return False
+        self._started_battle_workflow_completion = None
+        return True
 
     def _bind_started_battle_player_save_preflight(
         self,
@@ -6952,8 +7281,26 @@ class App:
                 AuthorityHold.OPERATOR_WORKFLOW,
                 "a retained terminal launch is awaiting fresh battle evidence",
             )
+        workflow = self._supervisor.battle_workflow
+        started_completion = getattr(
+            self,
+            "_started_battle_workflow_completion",
+            None,
+        )
+        if (
+            isinstance(started_completion, Mapping)
+            and started_completion.get("semantic_completion_applied") is True
+            and isinstance(workflow, Mapping)
+            and workflow.get("intent") == "start_battle"
+            and workflow.get("status") == "action_dispatched"
+            and str(workflow.get("request_id") or "")
+            == str(started_completion.get("request_id") or "")
+        ):
+            # The physical new-run boundary is already consumed. A transient
+            # completed-receipt write is reporting-only and cannot retain the
+            # operator input hold over the newly active battle.
+            return None
         if self._awaiting_initial_battle_intent():
-            workflow = self._supervisor.battle_workflow
             workflow_active = bool(
                 isinstance(workflow, Mapping)
                 and workflow.get("status")
@@ -6976,7 +7323,6 @@ class App:
                     else (AuxiliaryCollector.HOME_AD_GEM,)
                 ),
             )
-        workflow = self._supervisor.battle_workflow
         attachment_claim = (
             self._running_reconciliation_claims().get(
                 str(workflow.get("request_id") or "")
@@ -7773,6 +8119,21 @@ class App:
                         console=True,
                     )
                     self._emulator_recovery_action_logged = False
+            return
+        if (
+            state == "requested"
+            and self._exclusive_validation_blocks_target_handoff()
+        ):
+            self._finish_emulator_recovery(
+                maintenance,
+                disposition="validation_authority_conflict",
+                reason=(
+                    "exclusive Tournament validation or its confirmed launch "
+                    "acquired the exact runtime after this unacknowledged "
+                    "maintenance request; no host mutation was authorized"
+                ),
+                now=now,
+            )
             return
         runtime = maintenance.get("runtime")
         current_runtime = self._runtime_status_owner()
@@ -10311,6 +10672,16 @@ class App:
             getattr(self, "_exclusive_validation_terminal_hold", None),
             getattr(
                 self,
+                "_exclusive_validation_battle_dispatch_hold",
+                None,
+            ),
+            getattr(
+                self,
+                "_exclusive_validation_launch_dispatch_hold",
+                None,
+            ),
+            getattr(
+                self,
                 "_exclusive_validation_claimed_start_hold",
                 None,
             ),
@@ -10467,6 +10838,15 @@ class App:
         )
         if result:
             self._active_exclusive_validation_request_id = None
+            if (
+                getattr(
+                    self,
+                    "_exclusive_validation_battle_dispatch_hold",
+                    None,
+                )
+                == request_id
+            ):
+                self._exclusive_validation_battle_dispatch_hold = None
             if (
                 getattr(
                     self,
@@ -10654,6 +11034,12 @@ class App:
                 else TapDispatchStatus.NOT_DISPATCHED
             )
         )
+        if launch_outcome.dispatched or launch_outcome.uncertain:
+            # A claimed receipt alone proves authorization, not that the
+            # Battle input reached its final mutation boundary. Retain this
+            # process-local fact so a following blocking modal can borrow only
+            # the exact launch that could have exposed it.
+            self._exclusive_validation_battle_dispatch_hold = request_id
         workflow = self._supervisor.battle_workflow
         if launch_outcome.dispatched:
             operator_launch = bool(
@@ -10702,10 +11088,9 @@ class App:
                 )
             else:
                 self._runtime_uncertain_mutation_result(reason)
-            self._finish_exclusive_validation_without_cleanup(
-                claimed,
-                reason + "; no Surrender or replay was attempted",
-            )
+            # Keep the claimed receipt exact while Pause is durable. A later
+            # fresh RUNNING/terminal/no-battle frame may resolve it, but the
+            # Battle input itself is never replayed.
             return True
         if (
             isinstance(workflow, Mapping)
@@ -10762,6 +11147,15 @@ class App:
             if (
                 getattr(
                     self,
+                    "_exclusive_validation_battle_dispatch_hold",
+                    None,
+                )
+                == request_id
+            ):
+                self._exclusive_validation_battle_dispatch_hold = None
+            if (
+                getattr(
+                    self,
                     "_exclusive_validation_claimed_start_hold",
                     None,
                 )
@@ -10775,6 +11169,15 @@ class App:
                 self._mission_mgr.set_exclusive_validation_battle(True)
             return
         if status != "claimed":
+            if (
+                getattr(
+                    self,
+                    "_exclusive_validation_battle_dispatch_hold",
+                    None,
+                )
+                == request_id
+            ):
+                self._exclusive_validation_battle_dispatch_hold = None
             if (
                 getattr(
                     self,
@@ -10803,6 +11206,7 @@ class App:
                 if running is None:
                     return
                 self._exclusive_validation_claimed_start_hold = None
+                self._exclusive_validation_battle_dispatch_hold = None
                 self._active_exclusive_validation_request_id = request_id
                 self._mission_mgr.set_exclusive_validation_battle(True)
                 if (
@@ -10858,6 +11262,7 @@ class App:
             if running is None:
                 return
             self._exclusive_validation_claimed_start_hold = None
+            self._exclusive_validation_battle_dispatch_hold = None
             self._active_exclusive_validation_request_id = request_id
             self._mission_mgr.set_exclusive_validation_battle(True)
             self._stage_exclusive_validation_release_without_cleanup(
@@ -10887,6 +11292,7 @@ class App:
         if running is None:
             return
         self._exclusive_validation_claimed_start_hold = None
+        self._exclusive_validation_battle_dispatch_hold = None
         self._active_exclusive_validation_request_id = request_id
         self._mission_mgr.set_exclusive_validation_battle(True)
         log(
@@ -11023,6 +11429,16 @@ class App:
                 "_exclusive_validation_passive_battle_hold",
                 None,
             )
+            or getattr(
+                self,
+                "_exclusive_validation_battle_dispatch_hold",
+                None,
+            )
+            or getattr(
+                self,
+                "_exclusive_validation_launch_dispatch_hold",
+                None,
+            )
             or getattr(self, "_exclusive_validation_ownership_hold", False)
             or getattr(
                 self,
@@ -11058,6 +11474,14 @@ class App:
             return False
         if not self._exclusive_validation_passive_release_proven(detection):
             return True
+        manager = getattr(self, "_mission_mgr", None)
+        observe_release = getattr(
+            manager,
+            "observe_exclusive_validation_passive_release",
+            None,
+        )
+        if callable(observe_release):
+            observe_release(detection)
         self._exclusive_validation_passive_battle_hold = None
         self._exclusive_validation_passive_battle_scope_id = None
         log(
@@ -11147,6 +11571,8 @@ class App:
             return "tournament_results"
         if state == "WORKSHOP":
             return "workshop_no_battle"
+        if state == "TOURNAMENT_SCREEN":
+            return "tournament_entry_no_battle"
         return None
 
     def _exclusive_validation_terminal_finalization_pending(
@@ -11378,6 +11804,9 @@ class App:
             "verified_home": "fresh verified Home NEW_BATTLE",
             "tournament_results": "fresh Tournament Results",
             "workshop_no_battle": "fresh Workshop no-battle evidence",
+            "tournament_entry_no_battle": (
+                "fresh Tournament-entry no-battle evidence"
+            ),
         }[proof_kind]
         reason += (
             f"; {proof} proved the owned battle ended before guarded "
@@ -11425,6 +11854,7 @@ class App:
                 return False
             receipt = running
             self._exclusive_validation_claimed_start_hold = None
+            self._exclusive_validation_battle_dispatch_hold = None
             self._active_exclusive_validation_request_id = request_id
             self._mission_mgr.set_exclusive_validation_battle(True)
         if (
@@ -11529,11 +11959,13 @@ class App:
         )
         later_tournament_results = state == "TOURNAMENT_RESULTS"
         later_workshop = state == "WORKSHOP"
+        later_tournament_entry = state == "TOURNAMENT_SCREEN"
         if not (
             later_running
             or later_resumable_home
             or later_tournament_results
             or later_workshop
+            or later_tournament_entry
         ):
             return False
         receipt = self._exclusive_validation_receipt()
@@ -11561,6 +11993,8 @@ class App:
             else "later Tournament Results"
             if later_tournament_results
             else "later Workshop no-battle evidence"
+            if later_workshop
+            else "later Tournament-entry no-battle evidence"
         )
         retained_outcome = str(
             getattr(self, "_exclusive_validation_terminal_outcome", None)
@@ -11602,6 +12036,8 @@ class App:
             str(getattr(self, field, None) or "").strip()
             for field in (
                 "_exclusive_validation_terminal_hold",
+                "_exclusive_validation_battle_dispatch_hold",
+                "_exclusive_validation_launch_dispatch_hold",
                 "_exclusive_validation_claimed_start_hold",
                 "_exclusive_validation_launch_start_hold",
                 "_exclusive_validation_passive_battle_hold",
@@ -11654,6 +12090,15 @@ class App:
 
         request_id = str(receipt.get("request_id") or "")
         self._active_exclusive_validation_request_id = request_id
+        if (
+            getattr(
+                self,
+                "_exclusive_validation_battle_dispatch_hold",
+                None,
+            )
+            == request_id
+        ):
+            self._exclusive_validation_battle_dispatch_hold = None
         self._exclusive_validation_terminal_hold = request_id
         self._exclusive_validation_terminal_mode = mode
         self._exclusive_validation_terminal_outcome = outcome
@@ -12083,6 +12528,9 @@ class App:
                 )
                 if failed:
                     self._active_exclusive_validation_launch_request_id = None
+                    self._clear_exclusive_validation_launch_dispatch_proof(
+                        candidate_id
+                    )
                     self._clear_exclusive_validation_launch_start_proof(
                         candidate_id
                     )
@@ -12099,6 +12547,9 @@ class App:
                     isinstance(refreshed_launch, Mapping)
                     and refreshed_launch.get("status") == "claimed"
                 ):
+                    self._clear_exclusive_validation_launch_dispatch_proof(
+                        candidate_id
+                    )
                     self._clear_exclusive_validation_launch_start_proof(
                         candidate_id
                     )
@@ -12117,6 +12568,9 @@ class App:
         request_id = str(receipt.get("request_id") or "")
         launch = receipt.get("launch")
         if not isinstance(launch, Mapping):
+            self._clear_exclusive_validation_launch_dispatch_proof(
+                request_id
+            )
             self._clear_exclusive_validation_launch_start_proof(request_id)
             if request_id == str(
                 getattr(
@@ -12163,6 +12617,7 @@ class App:
                 # launch input on this target.
                 return receipt
             self._clear_exclusive_validation_launch_start_proof(request_id)
+            self._clear_exclusive_validation_launch_dispatch_proof(request_id)
             self._active_exclusive_validation_launch_request_id = None
             self._announce_exclusive_validation_launch(failed)
             return failed
@@ -12171,6 +12626,7 @@ class App:
             "requested",
             "claimed",
         }:
+            self._clear_exclusive_validation_launch_dispatch_proof(request_id)
             self._clear_exclusive_validation_launch_start_proof(request_id)
         if launch_status != "claimed":
             if (
@@ -12277,6 +12733,7 @@ class App:
         if not request_id:
             return False
         self._exclusive_validation_launch_start_hold = request_id
+        self._clear_exclusive_validation_launch_dispatch_proof(request_id)
         if str(launch.get("status") or "") == "claimed":
             self._active_exclusive_validation_launch_request_id = request_id
         return True
@@ -12294,6 +12751,20 @@ class App:
             == str(request_id or "")
         ):
             self._exclusive_validation_launch_start_hold = None
+
+    def _clear_exclusive_validation_launch_dispatch_proof(
+        self,
+        request_id: str,
+    ) -> None:
+        if (
+            getattr(
+                self,
+                "_exclusive_validation_launch_dispatch_hold",
+                None,
+            )
+            == str(request_id or "")
+        ):
+            self._exclusive_validation_launch_dispatch_hold = None
 
     def _announce_exclusive_validation_launch(
         self,
@@ -12377,6 +12848,7 @@ class App:
                 # proof and typed owner until this receipt-only write succeeds.
                 return True
             self._clear_exclusive_validation_launch_start_proof(request_id)
+            self._clear_exclusive_validation_launch_dispatch_proof(request_id)
             if (
                 getattr(
                     self,
@@ -12411,6 +12883,7 @@ class App:
             if started is None:
                 return True
             self._clear_exclusive_validation_launch_start_proof(request_id)
+            self._clear_exclusive_validation_launch_dispatch_proof(request_id)
             self._active_exclusive_validation_launch_request_id = None
             self._announce_exclusive_validation_launch(started)
             return False
@@ -12472,11 +12945,20 @@ class App:
                     )
                 ),
             )
+            if dispatched.dispatched or dispatched.uncertain:
+                self._exclusive_validation_launch_dispatch_hold = request_id
             if dispatched.dispatched:
                 log(
                     "[TOURNAMENT_LAUNCH] Verified Tournament BATTLE dispatched "
                     f"under durable launch claim {request_id}",
                     "DEBUG",
+                )
+                return True
+            if dispatched.uncertain:
+                self._runtime_uncertain_mutation_result(
+                    dispatched.reason
+                    + "; the claimed Tournament launch remains exact and the "
+                    "OPEN/BATTLE input will not be replayed"
                 )
                 return True
             failed = self._supervisor.finish_exclusive_validation_launch(
@@ -12486,6 +12968,9 @@ class App:
             )
             if failed:
                 self._active_exclusive_validation_launch_request_id = None
+                self._clear_exclusive_validation_launch_dispatch_proof(
+                    request_id
+                )
                 self._announce_exclusive_validation_launch(failed)
             return True
 
@@ -12510,6 +12995,9 @@ class App:
             )
             if failed:
                 self._active_exclusive_validation_launch_request_id = None
+                self._clear_exclusive_validation_launch_dispatch_proof(
+                    request_id
+                )
                 self._announce_exclusive_validation_launch(failed)
                 if self._exclusive_validation_requires_passive_battle_hold(
                     detection
@@ -12530,6 +13018,9 @@ class App:
                 )
                 if started:
                     self._active_exclusive_validation_launch_request_id = None
+                    self._clear_exclusive_validation_launch_dispatch_proof(
+                        request_id
+                    )
                     self._announce_exclusive_validation_launch(started)
                     return False
                 return True
@@ -12543,6 +13034,9 @@ class App:
             )
             if failed:
                 self._active_exclusive_validation_launch_request_id = None
+                self._clear_exclusive_validation_launch_dispatch_proof(
+                    request_id
+                )
                 self._announce_exclusive_validation_launch(failed)
                 self._retain_exclusive_validation_passive_battle(request_id)
             return True
@@ -12561,6 +13055,9 @@ class App:
             )
             if failed:
                 self._active_exclusive_validation_launch_request_id = None
+                self._clear_exclusive_validation_launch_dispatch_proof(
+                    request_id
+                )
                 self._announce_exclusive_validation_launch(failed)
                 if self._exclusive_validation_requires_passive_battle_hold(
                     detection
@@ -13345,10 +13842,10 @@ class App:
                 self._exclusive_validation_ownership_hold = False
             elif control is HomeBattleControl.RESUME_BATTLE:
                 self._strategy_boundary_confirmed = False
-        elif state == "WORKSHOP":
-            # Workshop is not available from an active or resumable battle.
-            # This is authoritative no-battle evidence even when the operator
-            # navigated here manually while Pause blocks runtime actions.
+        elif state in {"WORKSHOP", "TOURNAMENT_SCREEN"}:
+            # Neither screen is an active or resumable battle. This is
+            # authoritative no-battle evidence even when dropped terminal
+            # frames or manual navigation made it the first visible boundary.
             self._strategy_boundary_confirmed = True
             self._exclusive_validation_ownership_hold = False
 
@@ -13495,6 +13992,8 @@ class App:
             self._end_no_strategy_observation_boundary()
         self._active_exclusive_validation_request_id = None
         self._active_exclusive_validation_launch_request_id = None
+        self._exclusive_validation_battle_dispatch_hold = None
+        self._exclusive_validation_launch_dispatch_hold = None
         self._exclusive_validation_claimed_start_hold = None
         self._exclusive_validation_launch_start_hold = None
         self._clear_exclusive_validation_terminal_claim()
@@ -14556,11 +15055,11 @@ class App:
                 self._cancel_pending_tournament_validation_after_boundary(
                     detection
                 )
+                self._complete_started_battle_workflow(
+                    battle_started is True,
+                    detection,
+                )
                 if battle_started is True:
-                    self._complete_started_battle_workflow(
-                        battle_started,
-                        detection,
-                    )
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)
                     self._reset_player_save_audit_perk_mapping_evidence()
@@ -16175,6 +16674,8 @@ class App:
             reporter = getattr(self, "_status_reporter", None)
             if reporter is not None:
                 reporter.request_immediate_report()
+        if self._uninstalled_durable_action_owner_pending():
+            return False
         malformed_authority = getattr(
             self._supervisor,
             "input_authority_error",
@@ -16199,6 +16700,61 @@ class App:
             self._supervisor.control_state == "RUNNING"
             and not development_requested
             and not getattr(self, "_runtime_shutting_down", False)
+        )
+
+    def _uninstalled_durable_action_owner_pending(self) -> bool:
+        """Fail closed when a new durable owner arrived between heartbeats."""
+
+        maintenance = self._supervisor.emulator_maintenance
+        maintenance_request_id = (
+            str(maintenance.get("request_id") or "")
+            if isinstance(maintenance, Mapping)
+            else ""
+        )
+        terminal_pending = getattr(
+            self,
+            "_emulator_recovery_terminal_pending",
+            None,
+        )
+        reporting_only = bool(
+            maintenance_request_id
+            and isinstance(terminal_pending, Mapping)
+            and str(terminal_pending.get("request_id") or "")
+            == maintenance_request_id
+        )
+        if (
+            isinstance(maintenance, Mapping)
+            and str(maintenance.get("state") or "") != "terminal"
+            and not getattr(
+                self,
+                "_emulator_maintenance_hold_active",
+                False,
+            )
+            and not reporting_only
+        ):
+            return True
+
+        ledger = self._supervisor.exclusive_validation
+        receipts = ledger.get("receipts")
+        request_id = str(ledger.get("current_request_id") or "")
+        receipt = (
+            receipts.get(request_id)
+            if isinstance(receipts, Mapping) and request_id
+            else None
+        )
+        launch = receipt.get("launch") if isinstance(receipt, Mapping) else None
+        return bool(
+            isinstance(launch, Mapping)
+            and str(launch.get("status") or "") == "requested"
+            and request_id
+            != str(
+                getattr(
+                    self,
+                    "_active_exclusive_validation_launch_request_id",
+                    None,
+                )
+                or ""
+            )
         )
 
     def _runtime_uncertain_mutation_result(self, reason: str) -> None:
@@ -16240,6 +16796,8 @@ class App:
 
         if self._supervisor.apply_control():
             self._status_reporter.request_immediate_report()
+        if self._uninstalled_durable_action_owner_pending():
+            return False
         refreshed_holds = self._refreshed_operator_authority_holds(
             release_stale=bool(
                 action_class is RuntimeActionClass.AUXILIARY_COLLECTION

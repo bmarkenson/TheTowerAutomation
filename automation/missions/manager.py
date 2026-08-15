@@ -810,6 +810,24 @@ class MissionManager:
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["attached_validation_requested"] = False
 
+    def observe_exclusive_validation_passive_release(
+        self,
+        detection: Detection,
+    ) -> None:
+        """Consume exact no-battle proof before releasing passive ownership."""
+
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        control = detection.get("home_battle_control", "UNKNOWN")
+        self._battle_lifecycle.observe(state, home_control=control)
+        if state in {"WORKSHOP", "TOURNAMENT_SCREEN"}:
+            # These screens are authoritative no-battle evidence even though
+            # the generic lifecycle never needed to classify them. Retire the
+            # ambiguous old battle so the next RUNNING frame emits a genuine
+            # successor boundary and re-arms its startup gates.
+            self._battle_lifecycle.active_battle_observed = False
+            self._battle_lifecycle.adopt_initial_battle = False
+            self._battle_lifecycle.last_observation_adopted = False
+
     def prepare_exclusive_validation_request(self, request_id: str) -> bool:
         """Re-arm Home evidence exactly once for one durable request."""
 

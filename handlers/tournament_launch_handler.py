@@ -11,7 +11,12 @@ import numpy as np
 
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import detect_home_battle_control
-from core.input import TapVerification, safe_tap
+from core.input import (
+    TapDispatchOutcome,
+    TapDispatchStatus,
+    TapVerification,
+    safe_tap,
+)
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.state_detector import detect_state_and_overlays
 from utils.ocr_utils import ocr_text_and_conf
@@ -40,6 +45,19 @@ def _input_guard_kwargs(
 class TournamentLaunchDispatch:
     dispatched: bool
     reason: str
+    uncertain: bool = False
+
+
+def _tap_outcome(value: object) -> TapDispatchOutcome:
+    """Normalize legacy test doubles without collapsing typed uncertainty."""
+
+    if isinstance(value, TapDispatchOutcome):
+        return value
+    return TapDispatchOutcome(
+        TapDispatchStatus.DISPATCHED
+        if value
+        else TapDispatchStatus.NOT_DISPATCHED
+    )
 
 
 def _region(frame: Frame, bounds: tuple[int, int, int, int]) -> Frame:
@@ -89,7 +107,7 @@ def tap_verified_tournament_open(
     screenshot: Frame,
     *,
     action_guard: Optional[ActionGuard] = None,
-) -> bool:
+) -> TapDispatchOutcome:
     """Enter Tournament only from fresh verified ordinary Home evidence."""
 
     return safe_tap(
@@ -101,6 +119,7 @@ def tap_verified_tournament_open(
             description="tournament_open:home_new_battle",
             verifier=tournament_open_control_visible,
         ),
+        return_dispatch_outcome=True,
         **_input_guard_kwargs(action_guard),
     )
 
@@ -109,7 +128,7 @@ def tap_verified_tournament_battle(
     screenshot: Frame,
     *,
     action_guard: Optional[ActionGuard] = None,
-) -> bool:
+) -> TapDispatchOutcome:
     """Tap only the freshly verified Tournament BATTLE control."""
 
     return safe_tap(
@@ -121,6 +140,7 @@ def tap_verified_tournament_battle(
             description="tournament_battle:tournament_screen",
             verifier=tournament_battle_control_visible,
         ),
+        return_dispatch_outcome=True,
         **_input_guard_kwargs(action_guard),
     )
 
@@ -151,10 +171,19 @@ def dispatch_tournament_launch(
                 False,
                 "launch authority was withdrawn before Tournament navigation",
             )
-        if not tap_verified_tournament_open(
-            screenshot,
-            action_guard=action_guard,
-        ):
+        open_outcome = _tap_outcome(
+            tap_verified_tournament_open(
+                screenshot,
+                action_guard=action_guard,
+            )
+        )
+        if open_outcome.uncertain:
+            return TournamentLaunchDispatch(
+                False,
+                "verified Tournament OPEN input had an uncertain outcome",
+                uncertain=True,
+            )
+        if not open_outcome.dispatched:
             return TournamentLaunchDispatch(
                 False,
                 "verified Tournament OPEN could not be tapped",
@@ -196,10 +225,19 @@ def dispatch_tournament_launch(
             False,
             "launch authority was withdrawn before Tournament BATTLE",
         )
-    if not tap_verified_tournament_battle(
-        tournament_screen,
-        action_guard=action_guard,
-    ):
+    battle_outcome = _tap_outcome(
+        tap_verified_tournament_battle(
+            tournament_screen,
+            action_guard=action_guard,
+        )
+    )
+    if battle_outcome.uncertain:
+        return TournamentLaunchDispatch(
+            False,
+            "verified Tournament BATTLE input had an uncertain outcome",
+            uncertain=True,
+        )
+    if not battle_outcome.dispatched:
         return TournamentLaunchDispatch(
             False,
             "verified Tournament BATTLE could not be tapped",

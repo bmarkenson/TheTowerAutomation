@@ -10,6 +10,7 @@ import yaml
 from automation.missions.base import MissionContext
 from automation.missions.manager import MissionManager
 from automation.strategies import get_strategy
+from core.automation_supervisor import AutomationSupervisor
 from core.action_authority import (
     ActionAuthorityDecision,
     AuthorityHold,
@@ -19,12 +20,16 @@ from core.action_authority import (
 )
 from core.action_executor import execute_actions
 from core.app import App
+from core.control_directives import ControlDirectiveStore
+from core.exclusive_validation import exclusive_validation_definition
 from core.gc_preflight_navigation import (
     GcLivePreflightResult,
     GcPreflightNavigationStatus,
 )
 from core.player_save_history import PlayerSaveAttachmentContext
 from core.run_state import AUTOMATION, ExecMode
+from core.strategy_authoring import tournament_source_to_strategy_source
+from core.strategy_profiles import StrategyProfileStore
 from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
 )
@@ -739,9 +744,14 @@ def test_tournament_main_loop_preserves_policy_after_attached_gate_releases(
     )
 
 
-def test_owned_validation_main_loop_dispatches_under_exclusive_owner():
-    strategy = get_strategy("tournament")
-    assert strategy is not None
+def _assert_owned_validation_main_loop(
+    strategy,
+    expected_actions,
+    *,
+    supervisor=None,
+    active_request_id=None,
+    pause_after_actions=None,
+):
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     running_detection = {
         "state": "RUNNING",
@@ -749,7 +759,7 @@ def test_owned_validation_main_loop_dispatches_under_exclusive_owner():
         "secondary_states": [],
         "overlays": ["MENU_CLOSED"],
     }
-    dispatched_action_types = []
+    dispatched_actions = []
     observed_owners = []
     pre_capture_holds = []
 
@@ -778,19 +788,31 @@ def test_owned_validation_main_loop_dispatches_under_exclusive_owner():
         assert len(actions) == 1
         action_type = actions[0]["type"]
         assert actions[0]["_strategy"] is True
-        dispatched_action_types.append(action_type)
+        dispatched_actions.append((action_type, actions[0].get("mode")))
         mission_vars = ctx.data["mission_vars"]
         if action_type == "damage_slider_configure":
             mission_vars["damage_slider_checked"] = True
         elif action_type == "orb_distance_configure":
-            mission_vars["orb_distance_checked"] = True
+            if actions[0].get("mode") == "observe":
+                mission_vars["orb_distance_observed"] = True
+            else:
+                mission_vars["orb_distance_checked"] = True
         else:
             assert action_type == "session_preflight"
             mission_vars["gc_session_preflight_attempted"] = True
             mission_vars["gc_session_preflight_completed"] = True
+        if (
+            len(dispatched_actions) == len(expected_actions)
+            and pause_after_actions is not None
+        ):
+            pause_after_actions()
 
     app._config = SimpleNamespace(wait_on_start=False)
-    app._supervisor = MagicMock(is_paused=False, auto_return_secs=900)
+    real_validation = supervisor is not None
+    app._supervisor = supervisor or MagicMock(
+        is_paused=False,
+        auto_return_secs=900,
+    )
     app._adb_connection_coordinator = MagicMock()
     app._adb_connection_coordinator.ensure_connected.return_value = False
     app._mission_mgr = manager
@@ -818,7 +840,7 @@ def test_owned_validation_main_loop_dispatches_under_exclusive_owner():
         pre_capture_holds.append(
             tuple(hold.hold for hold in app._authority_holds)
         )
-        if len(pre_capture_holds) <= 3:
+        if len(pre_capture_holds) <= len(expected_actions):
             return frame
         raise KeyboardInterrupt
 
@@ -829,45 +851,159 @@ def test_owned_validation_main_loop_dispatches_under_exclusive_owner():
     app._battle_activation_tracker = MagicMock()
     app._battle_activation_tracker.observe.return_value = []
     app._battle_activation_tracker.drain_evidence_captures.return_value = []
-    app._observe_exclusive_validation_battle_start = MagicMock()
-    app._exclusive_validation_in_progress = MagicMock(return_value=True)
-    app._advance_exclusive_validation = MagicMock(return_value=False)
-    app._advance_exclusive_validation_launch = MagicMock(return_value=False)
+    if real_validation:
+        app._active_exclusive_validation_request_id = active_request_id
+        app._active_exclusive_validation_launch_request_id = None
+        app._exclusive_validation_battle_dispatch_hold = None
+        app._exclusive_validation_launch_dispatch_hold = None
+        app._exclusive_validation_claimed_start_hold = None
+        app._exclusive_validation_launch_start_hold = None
+        app._exclusive_validation_passive_battle_hold = None
+        app._exclusive_validation_passive_battle_scope_id = None
+        app._exclusive_validation_terminal_hold = None
+        app._exclusive_validation_terminal_mode = None
+        app._exclusive_validation_terminal_outcome = None
+        app._exclusive_validation_terminal_reason = None
+        app._exclusive_validation_terminal_announced = None
+        app._exclusive_validation_terminal_proof_kind_value = None
+        app._exclusive_validation_ownership_hold = False
+    else:
+        app._observe_exclusive_validation_battle_start = MagicMock()
+        app._exclusive_validation_in_progress = MagicMock(return_value=True)
+        app._advance_exclusive_validation = MagicMock(return_value=False)
+        app._advance_exclusive_validation_launch = MagicMock(return_value=False)
     app._observe_strategy_request = MagicMock()
     app._handle_daily_gem_if_due = MagicMock(return_value=False)
     app._handle_mission_rewards_if_due = MagicMock(return_value=False)
     app._handle_primary_states = MagicMock()
     manager._action_guard_fn = lambda: app._runtime_action_guard()
 
-    with (
-        patch("core.app.threading.Thread"),
-        patch(
-            "core.app.detect_state_and_overlays",
-            return_value=running_detection,
-        ),
-        patch("core.app.detect_wave_number_from_image", return_value=(1, 99.0)),
-        patch("core.app.stop_blind_gem_tapper", return_value=False),
-        patch(
-            "automation.missions.manager.execute_actions",
-            side_effect=execute_validation_phase,
-        ) as execute_actions,
-        patch("core.app.time.sleep"),
-    ):
-        app.run()
+    previous_state = AUTOMATION.state
+    previous_mode = AUTOMATION.mode
+    try:
+        with (
+            patch("core.app.threading.Thread"),
+            patch(
+                "core.app.detect_state_and_overlays",
+                return_value=running_detection,
+            ),
+            patch(
+                "core.app.detect_wave_number_from_image",
+                return_value=(1, 99.0),
+            ),
+            patch("core.app.stop_blind_gem_tapper", return_value=False),
+            patch(
+                "automation.missions.manager.execute_actions",
+                side_effect=execute_validation_phase,
+            ) as execute_actions,
+            patch("core.app.time.sleep"),
+        ):
+            app.run()
+    finally:
+        AUTOMATION.state = previous_state
+        AUTOMATION.mode = previous_mode
 
-    assert execute_actions.call_count == 3
-    assert dispatched_action_types == [
-        "damage_slider_configure",
-        "orb_distance_configure",
-        "session_preflight",
-    ]
+    assert execute_actions.call_count == len(expected_actions)
+    assert dispatched_actions == expected_actions
     assert strategy.is_session_preflight_complete(manager.ctx)
-    assert observed_owners == [AuthorityHold.EXCLUSIVE_VALIDATION] * 3
+    assert observed_owners == [
+        AuthorityHold.EXCLUSIVE_VALIDATION
+    ] * len(expected_actions)
     assert pre_capture_holds == [
         (AuthorityHold.EXCLUSIVE_VALIDATION,),
-    ] * 4
+    ] * (len(expected_actions) + 1)
     assert app._active_action_authority_owner is None
     app._handle_primary_states.assert_not_called()
+
+
+def test_owned_validation_main_loop_dispatches_under_exclusive_owner():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    _assert_owned_validation_main_loop(
+        strategy,
+        [
+            ("damage_slider_configure", "enforce"),
+            ("orb_distance_configure", "enforce"),
+            ("session_preflight", None),
+        ],
+    )
+
+
+def test_custom_tournament_validation_uses_generic_exclusive_owner(
+    tmp_path,
+    monkeypatch,
+):
+    profile_directory = tmp_path / "strategy_profiles"
+    profile_store = StrategyProfileStore(
+        profile_directory=profile_directory
+    )
+    source = tournament_source_to_strategy_source(
+        _load(SOURCE_PATH),
+        display_name="Tournament Observe",
+    )
+    source.update(
+        id="tournament_observe",
+        display_name="Tournament Observe",
+    )
+    source["settings"]["modules"] = {"policy": "ignore"}
+    source["settings"]["orb_distance"]["policy"] = "observe"
+    profile_store.publish_authoring_strategy(source)
+    monkeypatch.setenv(
+        "THETOWER_STRATEGY_PROFILE_DIR",
+        str(profile_directory),
+    )
+    strategy = get_strategy("tournament_observe")
+    assert strategy is not None
+    definition = exclusive_validation_definition(strategy)
+    assert definition is not None
+
+    control_store = ControlDirectiveStore(
+        tmp_path / "automation_ctl.json",
+        strategy_profile_dir=profile_directory,
+    )
+    control_store.set_strategy("tournament_observe", source="test")
+    control_store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(
+        control_file=str(control_store.path),
+    )
+    supervisor.apply_control()
+    ledger = control_store.status()["exclusive_validation"]
+    receipt = ledger["receipts"][ledger["current_request_id"]]
+    assert receipt["strategy"] == "tournament_observe"
+    assert receipt["configuration_fingerprint"] == (
+        definition.configuration_fingerprint
+    )
+    claimed = supervisor.claim_exclusive_validation(
+        strategy_request_id=receipt["strategy_request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        timeout_seconds=definition.timeout_seconds,
+    )
+    assert claimed is not None
+    running = supervisor.mark_exclusive_validation_running(
+        claimed["request_id"]
+    )
+    assert running is not None
+
+    def pause_after_custom_phases():
+        control_store.set_state("PAUSED", source="test-boundary")
+        supervisor.apply_control()
+
+    _assert_owned_validation_main_loop(
+        strategy,
+        [
+            ("damage_slider_configure", "enforce"),
+            ("orb_distance_configure", "observe"),
+            ("session_preflight", None),
+        ],
+        supervisor=supervisor,
+        active_request_id=running["request_id"],
+        pause_after_actions=pause_after_custom_phases,
+    )
+    retained = supervisor.exclusive_validation_receipt(
+        request_id=running["request_id"]
+    )
+    assert retained is not None
+    assert retained["status"] == "running"
 
 
 def test_owned_validation_cleanup_retries_result_write_from_home():

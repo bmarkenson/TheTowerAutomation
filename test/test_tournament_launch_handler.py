@@ -5,8 +5,11 @@ import cv2
 
 from core.battle_lifecycle import HomeBattleControl
 from core.clickmap_access import get_click
+from core.input import TapDispatchOutcome, TapDispatchStatus
 from handlers.tournament_launch_handler import (
     dispatch_tournament_launch,
+    tap_verified_tournament_battle,
+    tap_verified_tournament_open,
     tournament_battle_control_visible,
     tournament_open_control_visible,
 )
@@ -156,3 +159,80 @@ def test_dispatch_fails_closed_when_authority_is_withdrawn():
     assert not result.dispatched
     assert "withdrawn" in result.reason
     battle.assert_not_called()
+
+
+def test_dispatch_preserves_uncertain_tournament_battle_input():
+    entry = _load(TOURNAMENT_ENTRY)
+    with (
+        patch(
+            "handlers.tournament_launch_handler.detect_state_and_overlays",
+            return_value={"state": "TOURNAMENT_SCREEN"},
+        ),
+        patch(
+            "handlers.tournament_launch_handler.tournament_battle_control_visible",
+            return_value=True,
+        ),
+        patch(
+            "handlers.tournament_launch_handler.tap_verified_tournament_battle",
+            return_value=TapDispatchOutcome(TapDispatchStatus.UNCERTAIN),
+        ) as battle,
+    ):
+        result = dispatch_tournament_launch(
+            entry,
+            action_guard=lambda: True,
+        )
+
+    assert not result.dispatched
+    assert result.uncertain
+    assert "uncertain" in result.reason
+    battle.assert_called_once()
+    assert callable(battle.call_args.kwargs["action_guard"])
+
+
+def test_dispatch_preserves_uncertain_tournament_open_input():
+    home = _load(HOME_OPEN)
+    with (
+        patch(
+            "handlers.tournament_launch_handler.detect_state_and_overlays",
+            return_value={"state": "HOME_SCREEN"},
+        ),
+        patch(
+            "handlers.tournament_launch_handler.tournament_open_control_visible",
+            return_value=True,
+        ),
+        patch(
+            "handlers.tournament_launch_handler.tap_verified_tournament_open",
+            return_value=TapDispatchOutcome(TapDispatchStatus.UNCERTAIN),
+        ) as open_tournament,
+        patch(
+            "handlers.tournament_launch_handler.tap_verified_tournament_battle",
+        ) as battle,
+    ):
+        result = dispatch_tournament_launch(
+            home,
+            action_guard=lambda: True,
+        )
+
+    assert not result.dispatched
+    assert result.uncertain
+    assert "uncertain" in result.reason
+    open_tournament.assert_called_once()
+    assert callable(open_tournament.call_args.kwargs["action_guard"])
+    battle.assert_not_called()
+
+
+def test_verified_tournament_taps_request_typed_dispatch_outcomes():
+    guard = lambda: True
+    uncertain = TapDispatchOutcome(TapDispatchStatus.UNCERTAIN)
+    for tapper, screenshot in (
+        (tap_verified_tournament_open, _load(HOME_OPEN)),
+        (tap_verified_tournament_battle, _load(TOURNAMENT_ENTRY)),
+    ):
+        with patch(
+            "handlers.tournament_launch_handler.safe_tap",
+            return_value=uncertain,
+        ) as safe_tap:
+            assert tapper(screenshot, action_guard=guard) is uncertain
+
+        assert safe_tap.call_args.kwargs["return_dispatch_outcome"] is True
+        assert safe_tap.call_args.kwargs["action_guard_fn"] is guard

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import threading
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -16,6 +17,7 @@ from core.action_authority import (
 )
 from core.battle_lifecycle import HomeBattleControl
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
+from core.dispatch_control_boundary import dispatch_control_boundary
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
@@ -23,6 +25,10 @@ from core.app import App
 from core.input import TapDispatchOutcome, TapDispatchStatus
 from core.run_state import AUTOMATION
 from core.runtime_failure_policy import RuntimeFailureKind
+from handlers.free_ticket_handler import (
+    FreeTicketRecoveryResult,
+    FreeTicketRecoveryStatus,
+)
 from handlers.tournament_launch_handler import TournamentLaunchDispatch
 
 
@@ -272,6 +278,70 @@ def test_ready_receipt_offers_one_durable_start_or_cancel_decision(tmp_path):
     )
     assert started is not None
     assert started["launch"]["status"] == "started"
+
+
+def test_start_tournament_decision_uses_device_dispatch_boundary(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    ready, _definition = _ready_validation(store)
+    request_started = threading.Event()
+    request_completed = threading.Event()
+    results = []
+    failures = []
+
+    def resolve_start():
+        request_started.set()
+        try:
+            results.append(
+                store.resolve_exclusive_validation_launch(
+                    ready["request_id"],
+                    "start",
+                    source="test",
+                )
+            )
+        except Exception as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+        finally:
+            request_completed.set()
+
+    request_thread = threading.Thread(target=resolve_start)
+    with dispatch_control_boundary(store.dispatch_lock_path):
+        request_thread.start()
+        assert request_started.wait(timeout=2)
+        assert not request_completed.wait(timeout=0.05)
+
+    request_thread.join(timeout=2)
+    assert not request_thread.is_alive()
+    assert failures == []
+    assert results[0] is not None
+    assert results[0]["launch"]["status"] == "requested"
+
+
+def test_new_confirmed_launch_owner_blocks_prior_route_final_guard(tmp_path):
+    app, store, _manager, ready, _definition = _app_for_ready_launch(tmp_path)
+    app._status_reporter = Mock()
+    app._runtime_shutting_down = False
+    app._authority_holds = ()
+    app._update_action_authority(
+        detection={
+            "state": "HOME_SCREEN",
+            "home_battle_control": "NEW_BATTLE",
+        },
+        holds=(),
+    )
+
+    requested = store.resolve_exclusive_validation_launch(
+        ready["request_id"],
+        "start",
+        source="test",
+    )
+
+    assert requested is not None
+    assert app._active_exclusive_validation_launch_request_id is None
+    assert not app._runtime_control_mutation_guard()
+    assert not app._runtime_action_guard(
+        action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+    )
+    app._status_reporter.request_immediate_report.assert_not_called()
 
 
 def test_cancel_consumes_launch_without_changing_validation_result(tmp_path):
@@ -1152,7 +1222,7 @@ def test_each_validation_request_rearms_home_preflight_once():
     assert manager.no_battle_setup_requirements()
 
 
-def test_explicit_start_owns_tournament_validation_launch_through_adoption(
+def _dispatch_explicit_start_validation(
     tmp_path,
     monkeypatch,
 ):
@@ -1197,6 +1267,16 @@ def test_explicit_start_owns_tournament_validation_launch_through_adoption(
     app._active_exclusive_validation_request_id = None
     app._exclusive_validation_terminal_hold = None
     app._startup_gate_waivers = {}
+    app._status_reporter = Mock()
+    app._runtime_shutting_down = False
+    app._emulator_maintenance_hold_active = False
+    app._emulator_recovery_terminal_pending = None
+    app._free_ticket_recovery_attempts = {}
+    app._free_ticket_recovery_cleared = set()
+    app._free_ticket_recovery_warnings = set()
+    app._uncertain_lifecycle_actions = set()
+    app._blocking_primary_hold_active = False
+    app._blocking_primary_state = None
     app._control_observation = {
         key: value
         for key, value in evidence.items()
@@ -1245,6 +1325,16 @@ def test_explicit_start_owns_tournament_validation_launch_through_adoption(
     launch_scope = supervisor.battle_workflow["acknowledgement"][
         "activity_scope_run_id"
     ]
+    return app, store, supervisor, manager, launch_scope
+
+
+def test_explicit_start_owns_tournament_validation_launch_through_adoption(
+    tmp_path,
+    monkeypatch,
+):
+    app, store, supervisor, manager, launch_scope = (
+        _dispatch_explicit_start_validation(tmp_path, monkeypatch)
+    )
     app._control_observation = {
         **app._control_observation,
         "activity_scope_run_id": launch_scope,
@@ -1257,8 +1347,130 @@ def test_explicit_start_owns_tournament_validation_launch_through_adoption(
     app._sync_operator_control_workflows({"state": "RUNNING"})
     battle_started = manager.maybe_run_start({"state": "RUNNING"})
     assert battle_started is True
-    assert app._complete_started_battle_workflow(battle_started) is True
+    app._observe_exclusive_validation_battle_start(
+        {"state": "RUNNING", "secondary_states": []},
+        battle_started=battle_started,
+    )
+    assert _current_receipt(store)["status"] == "running"
+    original_transition = supervisor.transition_battle_workflow
+    completion_calls = 0
+
+    def transient_completion(*args, **kwargs):
+        nonlocal completion_calls
+        if len(args) >= 2 and args[1] == "completed":
+            completion_calls += 1
+            if completion_calls == 1:
+                return None
+        return original_transition(*args, **kwargs)
+
+    supervisor.transition_battle_workflow = Mock(
+        side_effect=transient_completion
+    )
+    assert not app._complete_started_battle_workflow(
+        battle_started,
+        {"state": "RUNNING", "secondary_states": []},
+    )
+    assert app._started_battle_workflow_completion is not None
+    assert app._operator_workflow_authority_hold() is None
+    assert app._exclusive_validation_in_progress()
+    assert app._complete_started_battle_workflow(
+        False,
+        {"state": "RUNNING", "secondary_states": []},
+    )
+    assert completion_calls == 2
+    assert app._started_battle_workflow_completion is None
     assert supervisor.battle_workflow["status"] == "completed"
+
+
+def test_explicit_start_validation_free_ticket_uncertainty_retries_only_writes(
+    tmp_path,
+    monkeypatch,
+):
+    app, store, supervisor, manager, launch_scope = (
+        _dispatch_explicit_start_validation(tmp_path, monkeypatch)
+    )
+    workflow = supervisor.battle_workflow
+    assert workflow is not None
+    workflow_id = str(workflow["request_id"])
+    validation = _current_receipt(store)
+    validation_id = str(validation["request_id"])
+    assert workflow["status"] == "action_dispatched"
+    assert validation["status"] == "claimed"
+    assert app._exclusive_validation_battle_dispatch_hold == validation_id
+
+    app._control_observation = {
+        **app._control_observation,
+        "activity_scope_run_id": launch_scope,
+        "observation_id": "tournament-workflow:free-ticket",
+        "primary_state": "UNKNOWN",
+        "home_battle_control": "UNKNOWN",
+        "game_state": "unknown",
+        "active_battle": False,
+    }
+    original_transition = supervisor.transition_battle_workflow
+    failed_writes = 0
+
+    def transient_workflow_failure(*args, **kwargs):
+        nonlocal failed_writes
+        if len(args) >= 2 and args[1] == "failed":
+            failed_writes += 1
+            if failed_writes == 1:
+                return None
+        return original_transition(*args, **kwargs)
+
+    supervisor.transition_battle_workflow = Mock(
+        side_effect=transient_workflow_failure
+    )
+    recovery = FreeTicketRecoveryResult(
+        FreeTicketRecoveryStatus.UNCERTAIN,
+        True,
+        1,
+        "FREE_TICKET",
+        "Claim dispatch outcome was uncertain",
+        True,
+    )
+
+    def uncertain_claim(_frame, *, action_guard_fn, **_kwargs):
+        assert action_guard_fn()
+        return recovery
+
+    with (
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch(
+            "core.app.handle_free_ticket_modal",
+            side_effect=uncertain_claim,
+        ) as claim,
+        patch("core.app.log"),
+    ):
+        assert app._advance_blocking_primary_recovery(
+            object(),
+            {"state": "FREE_TICKET"},
+        )
+        assert claim.call_count == 1
+        assert supervisor.battle_workflow["status"] == "action_dispatched"
+        assert _current_receipt(store)["status"] == "claimed"
+        assert supervisor.is_paused
+
+        # A later heartbeat may finish the two linked durable receipts, but
+        # the already-uncertain Claim transaction is never dispatched again.
+        assert app._advance_blocking_primary_recovery(
+            object(),
+            {"state": "FREE_TICKET"},
+        )
+
+    claim.assert_called_once()
+    assert failed_writes == 2
+    assert app._free_ticket_recovery_attempts == {
+        f"battle:{workflow_id}": 1,
+        f"exclusive-validation:{validation_id}": 1,
+    }
+    assert supervisor.battle_workflow["status"] == "failed"
+    result = _current_receipt(store)
+    assert result["status"] == "result"
+    assert result["outcome"] == "failed"
+    assert app._exclusive_validation_battle_dispatch_hold is None
+    assert app._exclusive_validation_passive_battle_hold == validation_id
+    assert not manager.ctx.data.get("exclusive_validation_battle", False)
 
 
 def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
@@ -1417,8 +1629,10 @@ def test_uncertain_validation_battle_dispatch_pauses_and_never_replays(
     assert start.call_args.kwargs["return_dispatch_outcome"] is True
     assert callable(start.call_args.kwargs["action_guard_fn"])
     result = _current_receipt(store)
-    assert result["status"] == "result"
-    assert result["outcome"] == "failed"
+    assert result["status"] == "claimed"
+    assert app._exclusive_validation_battle_dispatch_hold == result[
+        "request_id"
+    ]
     assert app._supervisor.control_state == "PAUSED"
 
 
@@ -2010,6 +2224,54 @@ def test_natural_validation_game_over_finalizes_before_mission_observation(
     assert running["request_id"] == result["request_id"]
 
 
+def test_natural_validation_tournament_entry_finalizes_without_input(
+    tmp_path,
+):
+    app, store, manager = _app_for_pending_validation(tmp_path)
+    with (
+        patch("core.app.tap_verified_new_battle", return_value=True),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+    running = {"state": "RUNNING", "secondary_states": []}
+    app._observe_exclusive_validation_battle_start(
+        running,
+        battle_started=manager.maybe_run_start(running),
+    )
+    app._authority_holds = ()
+    app._status_reporter = Mock()
+    app._strategy_boundary_confirmed = False
+    app._pending_strategy_request = None
+    app._apply_pending_strategy = Mock()
+    tournament_entry = {
+        "state": "TOURNAMENT_SCREEN",
+        "secondary_states": [],
+    }
+
+    with (
+        patch("core.app.surrender_run") as surrender,
+        patch("core.app.return_home_from_game_over") as return_home,
+        patch("core.app.log"),
+        patch("core.app.log_result"),
+        patch("automation.missions.manager.start_activity_scope"),
+    ):
+        assert app._quarantine_exclusive_validation_terminal_finalization(
+            tournament_entry
+        )
+
+    surrender.assert_not_called()
+    return_home.assert_not_called()
+    result = _current_receipt(store)
+    assert result["status"] == "result"
+    assert result["outcome"] == "failed"
+    assert "fresh Tournament-entry no-battle evidence" in result["reason"]
+    assert app._exclusive_validation_terminal_hold is None
+    assert manager.ctx.data["exclusive_validation_battle"] is False
+
+
 def test_paused_natural_game_over_quarantines_later_running_successor(
     tmp_path,
 ):
@@ -2370,6 +2632,11 @@ def test_conclusive_surrender_later_running_closes_old_boundary_before_successor
             "later Workshop no-battle evidence",
             "ready",
         ),
+        (
+            {"state": "TOURNAMENT_SCREEN", "secondary_states": []},
+            "later Tournament-entry no-battle evidence",
+            "ready",
+        ),
     ),
 )
 def test_proven_game_over_departure_releases_cleanup_without_input(
@@ -2600,6 +2867,44 @@ def test_failed_surrender_result_write_retries_without_further_input(
     assert manager.run_initialization_pending()
 
 
+def test_dispatched_validation_owns_free_ticket_recovery_with_exact_receipt(
+    tmp_path,
+):
+    app, store, _manager = _app_for_pending_validation(tmp_path)
+    with (
+        patch("core.app.tap_verified_new_battle", return_value=True),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+
+    receipt = _current_receipt(store)
+    owner = (
+        "exclusive_validation",
+        f"exclusive-validation:{receipt['request_id']}",
+    )
+    assert app._free_ticket_recovery_owner() == owner
+    holds, ready = app._blocking_recovery_handoff(owner)
+    assert ready
+    assert tuple(item.hold for item in holds) == (
+        AuthorityHold.EXCLUSIVE_VALIDATION,
+    )
+    app._update_action_authority(
+        detection={"state": "FREE_TICKET"},
+        holds=holds,
+    )
+    assert app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=AuthorityHold.EXCLUSIVE_VALIDATION,
+    ).allowed
+    assert not app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=AuthorityHold.BLOCKING_MODAL_RECOVERY,
+    ).allowed
+
+
 def test_tournament_identity_never_authorizes_validation_surrender(tmp_path):
     app, store, manager = _app_for_pending_validation(tmp_path)
     with (
@@ -2683,6 +2988,75 @@ def test_passive_validation_battle_releases_only_at_real_boundary(
     assert (
         bool(app._exclusive_validation_passive_battle_scope_id) is retained
     )
+
+
+@pytest.mark.parametrize("state", ("WORKSHOP", "TOURNAMENT_SCREEN"))
+def test_passive_no_battle_release_rearms_real_successor_lifecycle(state):
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(None, strategy)
+    manager.start()
+    assert manager.maybe_run_start({"state": "RUNNING"})
+    manager.set_exclusive_validation_battle(True)
+    manager.release_exclusive_validation_battle_without_boundary()
+
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._exclusive_validation_passive_battle_hold = "validation-result"
+    app._exclusive_validation_passive_battle_scope_id = "owned-scope"
+
+    with patch("core.app.log"):
+        assert not app._observe_exclusive_validation_passive_battle_boundary(
+            {"state": state}
+        )
+
+    assert manager.maybe_run_start({"state": "RUNNING"})
+    assert manager.run_initialization_pending()
+
+
+def test_tournament_entry_applies_pending_strategy_before_successor_adoption():
+    strategy = get_strategy("tournament")
+    replacement = get_strategy("farm_t18")
+    assert strategy is not None
+    assert replacement is not None
+    manager = MissionManager(None, strategy)
+    manager.start()
+    assert manager.maybe_run_start({"state": "RUNNING"})
+    manager.set_exclusive_validation_battle(True)
+    manager.release_exclusive_validation_battle_without_boundary()
+
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._exclusive_validation_passive_battle_hold = "validation-result"
+    app._exclusive_validation_passive_battle_scope_id = "owned-scope"
+    app._exclusive_validation_ownership_hold = False
+    app._strategy_boundary_confirmed = False
+    app._pending_strategy_request = (
+        "farm_t18",
+        "replacement-request",
+        "next_boundary",
+    )
+    app._exclusive_validation_blocks_strategy_application = Mock(
+        return_value=False
+    )
+
+    def apply_replacement():
+        manager.replace_strategy_at_boundary(replacement)
+        app._pending_strategy_request = None
+        return True
+
+    app._apply_pending_strategy = Mock(side_effect=apply_replacement)
+    tournament_entry = {"state": "TOURNAMENT_SCREEN"}
+
+    with patch("core.app.log"):
+        assert not app._observe_exclusive_validation_passive_battle_boundary(
+            tournament_entry
+        )
+        app._process_strategy_boundary(tournament_entry)
+
+    app._apply_pending_strategy.assert_called_once_with()
+    assert manager.strategy is replacement
+    assert manager.maybe_run_start({"state": "RUNNING"})
 
 
 def test_tournament_identity_releases_validation_mode_without_boundary_hooks(
@@ -2886,6 +3260,18 @@ def test_confirmed_launch_starts_once_then_runs_level_skip_initialization(
 
     dispatch.assert_called_once()
     assert _current_receipt(store)["launch"]["status"] == "claimed"
+    recovery_owner = (
+        "exclusive_validation_launch",
+        f"exclusive-validation-launch:{ready['request_id']}",
+    )
+    assert app._free_ticket_recovery_owner() == recovery_owner
+    recovery_holds, recovery_ready = app._blocking_recovery_handoff(
+        recovery_owner
+    )
+    assert recovery_ready
+    assert tuple(item.hold for item in recovery_holds) == (
+        AuthorityHold.EXCLUSIVE_VALIDATION,
+    )
 
     tournament = {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]}
     battle_started = manager.maybe_run_start(tournament)
@@ -2922,6 +3308,62 @@ def test_confirmed_launch_starts_once_then_runs_level_skip_initialization(
             "launch; EHLS/EALS initialization is active"
         ),
     )
+
+
+def test_uncertain_confirmed_launch_pauses_and_never_replays(tmp_path):
+    app, store, _manager, ready, _definition = _app_for_ready_launch(tmp_path)
+    store.resolve_exclusive_validation_launch(
+        ready["request_id"],
+        "start",
+        source="test",
+    )
+    app._supervisor.apply_control()
+    home = {
+        "state": "HOME_SCREEN",
+        "home_battle_control": "NEW_BATTLE",
+        "secondary_states": [],
+    }
+    app._update_action_authority(
+        detection=home,
+        holds=(
+            AuthorityHoldState(
+                AuthorityHold.EXCLUSIVE_VALIDATION,
+                "confirmed Tournament launch owns its final input",
+            ),
+        ),
+    )
+    uncertain = TournamentLaunchDispatch(
+        False,
+        "verified Tournament BATTLE input had an uncertain outcome",
+        uncertain=True,
+    )
+
+    with (
+        patch(
+            "core.app.dispatch_tournament_launch",
+            return_value=uncertain,
+        ) as dispatch,
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._advance_exclusive_validation_launch(
+            object(),
+            home,
+            battle_started=False,
+        )
+        assert not app._advance_exclusive_validation_launch(
+            object(),
+            home,
+            battle_started=False,
+        )
+
+    dispatch.assert_called_once()
+    launch = _current_receipt(store)["launch"]
+    assert launch["status"] == "claimed"
+    assert app._exclusive_validation_launch_dispatch_hold == ready[
+        "request_id"
+    ]
+    assert app._supervisor.control_state == "PAUSED"
 
 
 def test_confirmed_launch_main_loop_installs_matching_typed_owner(tmp_path):
