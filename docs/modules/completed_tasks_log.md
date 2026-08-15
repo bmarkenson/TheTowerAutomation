@@ -80,6 +80,27 @@ resolved dossier instead of copying its detail.
   `a3227d7` is documentation-only relative to that candidate. The native
   Control Surface and Tunnel Host portable suites passed 192 and 18 tests, and
   both Release cross-builds completed with zero errors.
+- Production advanced from `9904ad5` to `ad1d645` behind rollback tag
+  `production-before-20260815T171332Z-9904ad5`. Control-surface PID `2999694`
+  and replacement automation PID `2999919` / runtime
+  `ed089f8762d84be181eec616e96020c9` were healthy on exact target
+  `localhost:5555`; the replacement acknowledged Pause and freshly observed
+  Home `NEW_BATTLE` at 10:14:42 PDT. No Start, Attach, Enable, lifecycle, or
+  device input was issued.
+- The complete native package was published from `ad1d645` at 10:15 PDT.
+  Current Control Surface is 72,489,817 bytes with SHA-256
+  `a18e3a6d20e54f3767c4abfab2be7a91a5f3f03bdda04a886390493fa2dac355`;
+  current Tunnel Host is 35,172,127 bytes with SHA-256
+  `def8cf4f9514d887ab8485f06539ab6f923adc42f76cdc5df932b439acbe7f5b`.
+  Retained slot 1 is the prior `fe77778` pair: 72,489,449-byte Control Surface
+  `a4da12427abe04a62f15cad3f00b55c3da2dfef157864cdd2e631430e15fcbbe`
+  and 35,172,102-byte Tunnel Host
+  `9a2da678ace3e52e97afd9b6ef7c7b71cd1b1d7721801263fe604f7e3354b871`.
+  Retained slot 2 is the prior `59c86a5` pair: 72,489,144-byte Control Surface
+  `0a125701f11557d3cf4b4ffbd6489afa9e8f7aedb841f53417e3d18e5253e2e5`
+  and 35,172,110-byte Tunnel Host
+  `a3be1c2cf0092af7e0f2d2c41a9dab4482f08692d2eddd278acfd6300867aa98`.
+  Cross-publication does not establish Windows WPF runtime behavior.
 
 ### 2026-08-15 Tournament save-backed one-shot confirmation
 

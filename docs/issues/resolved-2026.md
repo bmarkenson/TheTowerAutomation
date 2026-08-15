@@ -330,9 +330,24 @@ and actionable work lives in
   relative to that tested code candidate. The Control Surface and Tunnel Host
   portable suites separately passed 192 and 18 tests, and both Release
   cross-builds completed with zero errors.
+- **Final deployment:** Production advanced from `9904ad5` to `ad1d645`
+  behind rollback tag `production-before-20260815T171332Z-9904ad5`.
+  Control-surface PID `2999694` served the replacement contract; automation
+  PID `2999919`, runtime `ed089f8762d84be181eec616e96020c9`, held generation
+  1 on exact target `localhost:5555`, acknowledged current Pause, mode, and
+  Strategy requests, and freshly observed Home `NEW_BATTLE` at 10:14:42 PDT.
+  The rollout issued no Start, Attach, Enable, lifecycle, or device input.
+- **Native publication:** The complete package was published from `ad1d645` at
+  2026-08-15 10:15 PDT. Current Control Surface is 72,489,817 bytes with
+  SHA-256 `a18e3a6d20e54f3767c4abfab2be7a91a5f3f03bdda04a886390493fa2dac355`;
+  current Tunnel Host is 35,172,127 bytes with SHA-256
+  `def8cf4f9514d887ab8485f06539ab6f923adc42f76cdc5df932b439acbe7f5b`.
+  Retained slot 1 is the prior `fe77778` pair; retained slot 2 is the prior
+  `59c86a5` pair. Cross-publication does not establish Windows WPF runtime
+  behavior.
 - **Final fixed by:** `454f936`, `ddcf697`, `dfbd70e`, `0ec9e18`, `5379785`,
   `c003897`, `4e0243e`, `d01090b`, and `bcfedb5` (exact aggregate candidate
-  `a3227d7` plus its immediate completion-record successor).
+  `a3227d7`, deployed in `ad1d645`).
 
 ### Global Module save identities were incomplete and conflated with slot authority
 
