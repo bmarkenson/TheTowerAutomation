@@ -221,8 +221,9 @@ candidate cannot. Unknown names/IDs, cross-family placement, duplicate
 installed names, malformed structure, and mismatches retain the full Modules
 UI route.
 Explicit empty assignments are not identity candidates: only the versioned
-`moduleEquipped` array null or exact unlocked Assist `module=null` shape maps to
-canonical `empty`. Missing fields, missing slots, locked Assist slots, and
+`moduleEquipped` array null or exact unlocked Assist `equippedModule=null`
+shape maps to canonical `empty`. Missing fields, missing slots, locked Assist
+slots, and
 visual `not_ancestral` results are not promoted as empty evidence.
 
 The review fingerprint binds the mapping proposal, canonical target
