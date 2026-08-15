@@ -56,9 +56,16 @@ resolved dossier instead of copying its detail.
   passed 514 tests. Modified modules compiled, documentation lifecycle passed,
   and whitespace validation was clean. After current-main refresh, the combined
   save/Home/control regression slice passed 604 tests with the concurrently
-  promoted Start Battle scope fix included. Live diagnosis was read-only; the
-  isolated candidate sent no device input, changed no production process, and
-  was not deployed.
+  promoted Start Battle scope fix included. Exact candidate `4d1e3a1` then
+  passed the complete 2,696-test checkpoint in 430.92 seconds, including state
+  definitions and clickmap integrity with zero errors and 44 established
+  orphans.
+- Production advanced from `40946cb` to `4d1e3a1` behind rollback tag
+  `production-before-20260815T011412Z-40946cb`. Replacement automation PID
+  `1767202` and control surface PID `1766735` were healthy and Paused at a
+  fresh Home `NEW_BATTLE` observation on exact target `localhost:5555`. The
+  pre-existing Start Battle workflow was interrupted and not replayed; no game
+  input was sent.
 
 ### 2026-08-14 Start Battle strategy-scope continuity
 

@@ -1141,14 +1141,25 @@ and actionable work lives in
   compiled, documentation lifecycle passed both tests, and the candidate has
   no whitespace errors. After refresh onto current production, the combined
   save/Home/control regression slice passed 604 tests with the concurrently
-  promoted Start Battle scope fix included.
+  promoted Start Battle scope fix included. Exact aggregate candidate
+  `4d1e3a1` then passed compilation, state definitions, clickmap integrity with
+  zero errors and 44 established orphans, and all 2,696 tests in 430.92
+  seconds. Its development-environment fingerprint was
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 - **Safety:** This correction used only fakes and retained fixtures. It did not
   inspect or interact with the production process, systemd, ADB, emulator,
   shared live frame, or battle, and did not deploy or modify installed files.
 - **Recurrence safety:** The 2026-08-14 diagnosis completed the required live
   preflight and used only read-only status and retained action-log evidence. It
-  sent no game input, did not restart or alter production, and made all code and
-  test changes in an isolated feature worktree.
+  sent no game input and made all code and test changes in an isolated feature
+  worktree. Production was later fast-forwarded from `40946cb` to exact
+  candidate `4d1e3a1` behind rollback tag
+  `production-before-20260815T011412Z-40946cb`. Automation PID `1646204` was
+  cleanly stopped while Paused at Home; replacement PID `1767202` and control
+  surface PID `1766735` were healthy with exact target `localhost:5555`, all
+  directives acknowledged, and a fresh Home `NEW_BATTLE` observation. The
+  pending Start Battle workflow was terminally interrupted and not replayed;
+  promotion sent no game input.
 - **Fixed by:** `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b` originally;
   recurrence fix `91f8d609440308a3930609ae1b4ca3c99d328ff9`.
 
