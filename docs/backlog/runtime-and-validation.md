@@ -36,21 +36,6 @@ as checked checkpoint narrative here.
     or start a battle solely for this observation. Unknown IDs/names,
     family/structure failures, duplicate installed names, ambiguous visual
     absence, and mismatches must retain the complete UI route.
-  - [ ] Live-confirm deployed production commit `95bd630` for the exact Assist
-    assignment-member repair in
-    [ISSUE-2026-048](../issues/open-2026.md#assist-module-assignments-always-fell-back-to-modules-ui).
-    The 2026-08-15 one-shot published all eight assignments from the save, but
-    the independent `ISSUE-2026-050` carrier failure still reopened Modules in
-    session. One post-repair ordinary Home or terminal boundary must omit that
-    duplicate UI. Do not change or empty a Module solely to manufacture the
-    confirmation.
-  - [ ] Live-confirm deployed production commit `9cc4a09` for
-    [ISSUE-2026-050](../issues/open-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence).
-    The next explicitly authorized owned-validation one-shot must log an
-    accepted carried-launch binding, bind the same evidence at stable RUNNING,
-    and omit duplicate Cards, Modules, Bots, Guardians, and Workshop UI. An
-    uncertain or context-changed boundary must retain UI fallback. Do not
-    start another disposable battle without fresh operator authorization.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
@@ -291,18 +276,6 @@ as checked checkpoint narrative here.
   At an explicitly authorized natural Home boundary, select No Strategy and
   immediately Start. Confirm the workflow, activity entry, and acknowledgement
   retain `none`, with no Tournament setup or exclusive-validation receipt.
-- [ ] Live-confirm deployed production commit `f902a91` for the
-  exclusive-validation typed-authority repair recorded in
-  [ISSUE-2026-046](../issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
-  and the same-family later-battle release in
-  [ISSUE-2026-001](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
-  Use only a newly and explicitly authorized ordinary validation battle at a
-  natural safe boundary. Confirm each declared phase,
-  exactly owned Surrender when required, verified Home cleanup and authority
-  release, plus Pause or operator-workflow interruption before the next input.
-  Do not manufacture the historical later-`RUNNING` transition; if it recurs
-  naturally, confirm the old receipt fails and releases without any recovery
-  input before the successor is adopted.
 - [ ] Confirm the deployed `STOPPED` interruption at a natural Home setup
   boundary: Pause, Stop, or Take Manual Control must yield before another
   device input, and only a later same-owner Enable may attempt one bounded

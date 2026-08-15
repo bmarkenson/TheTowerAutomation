@@ -56,6 +56,24 @@ resolved dossier instead of copying its detail.
   `docs/new_thread.md` reading increased from 1,309 to 1,358 words. No live,
   service, device, or native-package action was applicable.
 
+### 2026-08-15 Tournament save-backed one-shot confirmation
+
+- An explicitly authorized ordinary Tournament-validation battle accepted its
+  Home save carrier at launch and again at stable RUNNING. Session preflight
+  consumed save-backed Cards, Bots, Guardians, Workshop, all eight Module
+  assignments, and Ultimate Weapon facts without opening their UI routes; only
+  the intentionally unmapped Orb Distance tuple used its declared UI fallback.
+- The same exact receipt completed every declared phase, dispatched exactly one
+  Surrender, proved Game Over, returned to verified Home `NEW_BATTLE`, and
+  persisted `ready`. The final Pause acknowledgement denied a raced Home
+  ad-gem input before its tap and left the runtime Paused at Home.
+- The bounded confirmation closes
+  [`ISSUE-2026-050`](../issues/resolved-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence),
+  [`ISSUE-2026-048`](../issues/resolved-2026.md#assist-module-assignments-always-fell-back-to-modules-ui),
+  [`ISSUE-2026-046`](../issues/resolved-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input),
+  and
+  [`ISSUE-2026-001`](../issues/resolved-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
+
 ### 2026-08-15 Tournament mapping callback confirmation
 
 - The operator-authorized owned validation completed its session preflight at
@@ -64,7 +82,8 @@ resolved dossier instead of copying its detail.
 - This closes
   [`ISSUE-2026-049`](../issues/resolved-2026.md#tournament-session-preflight-rejected-its-mapping-observation-callback).
   The independently diagnosed reason complete Home save facts did not suppress
-  duplicate session UI remains active as `ISSUE-2026-050`.
+  duplicate session UI was later fixed and live-confirmed under
+  [`ISSUE-2026-050`](../issues/resolved-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence).
 
 ### 2026-08-15 Default repository outcome closure
 
