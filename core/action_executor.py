@@ -647,11 +647,6 @@ def execute_actions(
                     if ctx is not None
                     else None
                 )
-                invalidate_snapshot = getattr(
-                    save_coordinator,
-                    "invalidate",
-                    None,
-                )
                 close_mapping_window = getattr(
                     save_coordinator,
                     "close_mapping_candidate_window",
@@ -659,18 +654,11 @@ def execute_actions(
                 )
 
                 def observe_level_skip_mutation() -> None:
-                    if callable(invalidate_snapshot):
-                        invalidate_snapshot(
-                            "level_skip_mutation_started",
-                            check_ids=(),
-                        )
-                    elif callable(close_mapping_window):
+                    if callable(close_mapping_window):
                         close_mapping_window("level_skip_mutation_started")
 
                 level_skip_kwargs: Dict[str, Any] = {"screenshot": screen}
-                if callable(invalidate_snapshot) or callable(
-                    close_mapping_window
-                ):
+                if callable(close_mapping_window):
                     level_skip_kwargs["mutation_observer_fn"] = (
                         observe_level_skip_mutation
                     )
@@ -807,9 +795,9 @@ def execute_actions(
                     "close_mapping_candidate_window",
                     None,
                 )
-                invalidate_snapshot = getattr(
+                fallback_save_checks = getattr(
                     save_coordinator,
-                    "invalidate",
+                    "fallback_checks",
                     None,
                 )
                 record_ui_verification = getattr(
@@ -846,12 +834,12 @@ def execute_actions(
                         )
 
                 def observe_damage_slider_repair() -> None:
-                    if callable(invalidate_snapshot):
-                        invalidate_snapshot(
+                    if callable(fallback_save_checks):
+                        fallback_save_checks(
                             "damage_slider_repair_started",
                             check_ids=("damage_slider",),
                         )
-                    elif callable(close_mapping_window):
+                    if callable(close_mapping_window):
                         close_mapping_window("damage_slider_repair_started")
 
                 damage_slider_kwargs: Dict[str, Any] = {"mode": mode}
@@ -859,7 +847,7 @@ def execute_actions(
                     damage_slider_kwargs["initial_evidence_observer_fn"] = (
                         observe_initial_damage_slider
                     )
-                if callable(invalidate_snapshot) or callable(
+                if callable(fallback_save_checks) or callable(
                     close_mapping_window
                 ):
                     damage_slider_kwargs["repair_observer_fn"] = (
@@ -1057,9 +1045,9 @@ def execute_actions(
                     "close_mapping_candidate_window",
                     None,
                 )
-                invalidate_snapshot = getattr(
+                fallback_save_checks = getattr(
                     save_coordinator,
-                    "invalidate",
+                    "fallback_checks",
                     None,
                 )
                 record_ui_verification = getattr(
@@ -1104,19 +1092,19 @@ def execute_actions(
                         )
 
                 def observe_orb_distance_repair() -> None:
-                    if callable(invalidate_snapshot):
-                        invalidate_snapshot(
+                    if callable(fallback_save_checks):
+                        fallback_save_checks(
                             "orb_distance_repair_started",
                             check_ids=("orb_distance",),
                         )
-                    elif callable(close_mapping_window):
+                    if callable(close_mapping_window):
                         close_mapping_window("orb_distance_repair_started")
 
                 if callable(record_mapping_observation):
                     orb_distance_kwargs["initial_evidence_observer_fn"] = (
                         observe_initial_orb_distance
                     )
-                if callable(invalidate_snapshot) or callable(
+                if callable(fallback_save_checks) or callable(
                     close_mapping_window
                 ):
                     orb_distance_kwargs["repair_observer_fn"] = (
@@ -1197,17 +1185,16 @@ def execute_actions(
                 def observe_target_repair() -> None:
                     nonlocal target_repaired
                     target_repaired = True
-                    invalidate_snapshot = getattr(
+                    fallback_save_checks = getattr(
                         save_coordinator,
-                        "invalidate",
+                        "fallback_checks",
                         None,
                     )
-                    if callable(invalidate_snapshot):
-                        invalidate_snapshot(
+                    if callable(fallback_save_checks):
+                        fallback_save_checks(
                             "target_priority_repair_started",
                             check_ids=("target_priority",),
                         )
-                        return
                     close_mapping_window = getattr(
                         save_coordinator,
                         "close_mapping_candidate_window",
@@ -1251,7 +1238,13 @@ def execute_actions(
                                 "DEBUG",
                             )
                 if callable(record_ui_verification) or callable(
-                    getattr(save_coordinator, "invalidate", None)
+                    getattr(save_coordinator, "fallback_checks", None)
+                ) or callable(
+                    getattr(
+                        save_coordinator,
+                        "close_mapping_candidate_window",
+                        None,
+                    )
                 ):
                     target_kwargs["repair_observer_fn"] = observe_target_repair
                 if callable(record_mapping_observation):

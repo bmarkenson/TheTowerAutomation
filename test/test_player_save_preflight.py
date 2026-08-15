@@ -427,7 +427,7 @@ def test_candidate_correlation_requires_pre_mutation_and_same_context(
     assert candidate_store.list_records() == []
 
 
-def test_ui_repair_closes_candidate_window_and_invalidates_snapshot(
+def test_ui_repair_closes_candidate_window_without_invalidating_snapshot(
     monkeypatch,
     tmp_path,
 ):
@@ -450,8 +450,8 @@ def test_ui_repair_closes_candidate_window_and_invalidates_snapshot(
     )
 
     assert coordinator.record_ui_verification("cards_deck", changed=True)
-    assert coordinator.snapshot_invalidated
-    assert coordinator._snapshot_invalidation_reason == "ui_repair:cards_deck"
+    assert not coordinator.snapshot_invalidated
+    assert coordinator._snapshot_invalidation_reason == ""
     assert coordinator.record_mapping_observation(
         "modules",
         _module_mapping_ui_evidence(),
@@ -715,7 +715,7 @@ def test_requirement_fallback_preserves_unrelated_carried_check(monkeypatch):
     assert coordinator.consume("auto_pick_perks") is True
 
 
-def test_trusted_mismatch_repair_invalidates_unrelated_carry(monkeypatch):
+def test_trusted_mismatch_repair_preserves_unrelated_carry(monkeypatch):
     coordinator = _coordinator(monkeypatch)
 
     result = coordinator.acquire(
@@ -735,10 +735,20 @@ def test_trusted_mismatch_repair_invalidates_unrelated_carry(monkeypatch):
     assert coordinator.ui_verified_checks == {
         "cards_deck": "ui_verified_repair"
     }
-    assert coordinator.snapshot_invalidated
-    assert result.carry.values == {}
-    assert result.carry.state is CarriedEvidenceState.INVALIDATED
-    assert coordinator.consume("auto_pick_perks") is None
+    assert not coordinator.snapshot_invalidated
+    assert result.carry.values == {"auto_pick_perks": True}
+    assert result.carry.state is CarriedEvidenceState.PENDING_LAUNCH
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert coordinator.bind_running(
+        battle_started=True,
+        stable_running=True,
+        continuity_verified=True,
+    )
+    assert coordinator.consume("auto_pick_perks") is True
 
 
 def test_save_mismatch_ui_already_matches_invalidates_snapshot(monkeypatch):

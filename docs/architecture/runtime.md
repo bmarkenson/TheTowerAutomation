@@ -253,19 +253,21 @@ ambiguous launch, target/context/configuration change, a wrong transition, or
 a later unrelated battle discards that transition's carry. A changed
 requirement routes only that check to UI; unsupported or incomplete evidence
 already does the same. WAIT by itself does neither. A read-only UI verification
-preserves unrelated carry, but the first actual UI mutation invalidates every
-remaining save-derived fact before dispatch.
+preserves unrelated carry. An actual configuration repair removes only the
+affected check from carry and closes pre-action mapping correlation before
+dispatch; unrelated accepted facts remain authoritative.
 
 A pre-action snapshot never confirms the result of an input. The reconciliation
 plan is frozen before setup input as independent accepted matches/observations,
 trusted mismatches, and non-authoritative UI requirements. A trusted mismatch
 selects only its existing UI path; that path must independently observe the
-current value, establish a mismatch before mutation, invalidate remaining save
-facts, repair under its normal guards, and verify the result. The repaired check
-is `ui_verified`, is not reclassified as save-confirmed, and is not added to
-save carry. Home setup restarts without save decisions when a mutation follows
-an already-materialized save check. Independently UI-verified Home sections may
-remain available only through explicit per-section UI provenance.
+current value, establish a mismatch before mutation, remove that check from
+carry, close pre-action mapping correlation, repair under its normal guards,
+and verify the result. The repaired check is `ui_verified`, is not reclassified
+as save-confirmed, and is not added to save carry. Home setup preserves
+unrelated accepted decisions rather than reopening their UI sections.
+Independently UI-verified sections remain available only through explicit
+per-section UI provenance.
 
 Acquisition, serialization, freshness, version/structure, ownership, and safe
 source-restoration failures retain their established whole-boundary block or
@@ -1407,9 +1409,9 @@ warning text in `actions.log`.
   only. Current Farm/Tournament Module placements and calibrated exact
   Damage/Orb values may omit duplicate UI; unsupported placements, requests,
   values, contexts, or structures remain UI-backed. Navigation alone does not
-  discard another accepted component, but the first actual UI mutation
-  invalidates every remaining save-derived decision. Card recharge traversal
-  checks
+  discard another accepted component. An actual repair removes only its
+  affected check and closes pre-action mapping correlation; unrelated accepted
+  decisions remain authoritative. Card recharge traversal checks
   both unresolved Cards on the initial inventory frame and after every bounded
   upward or downward swipe, validates
   whichever is visible in any order, and stops without another swipe as soon as

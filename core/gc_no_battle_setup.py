@@ -372,8 +372,6 @@ def run_gc_no_battle_setup(
     active_waivers = dict(waivers or {})
     repairs: list[str] = []
     snapshot_invalidated = False
-    materialized_save_checks: set[str] = set()
-    revalidation_required_checks: set[str] = set()
     ui_verified_checks: dict[str, str] = {}
     contradictions: list[str] = []
     mapping_candidates_recorded = 0
@@ -392,7 +390,6 @@ def run_gc_no_battle_setup(
         return check_id in active_waivers or save_accepted(check_id)
 
     def save_evidence(check_id: str) -> dict[str, Any]:
-        materialized_save_checks.add(check_id)
         decision = accepted_save_decisions[check_id]
         return {
             "status": str(decision.get("disposition") or "save_match"),
@@ -429,8 +426,6 @@ def run_gc_no_battle_setup(
 
     def record_ui_verification(check_id: str, *, changed: bool) -> None:
         was_trusted_mismatch = trusted_mismatch(check_id)
-        if changed and not snapshot_invalidated:
-            invalidate_snapshot(f"ui_repair:{check_id}", check_id)
         callback_result: bool | None = None
         if save_ui_verification_fn is not None:
             callback_result = save_ui_verification_fn(
@@ -508,8 +503,6 @@ def run_gc_no_battle_setup(
         if not mapping_observations_allowed:
             return
         mapping_observations_allowed = False
-        if not snapshot_invalidated:
-            invalidate_snapshot(reason)
         if save_mapping_window_close_fn is not None:
             try:
                 save_mapping_window_close_fn(reason)
@@ -557,12 +550,6 @@ def run_gc_no_battle_setup(
             "INFO",
             console=True,
         )
-        if materialized_save_checks:
-            revalidation_required_checks.update(materialized_save_checks)
-            raise _SetupFailure(
-                "Home repair invalidated previously used save evidence; "
-                "the complete Home setup must restart from UI evidence"
-            )
 
     evidence: dict[str, Any] = {
         "loadout_policies": {
@@ -606,12 +593,6 @@ def run_gc_no_battle_setup(
         )
         save_payload["mapping_candidates_recorded"] = (
             mapping_candidates_recorded
-        )
-        save_payload["revalidation_required_checks"] = sorted(
-            revalidation_required_checks
-        )
-        save_payload["revalidation_required"] = bool(
-            revalidation_required_checks
         )
 
     current = screenshot if screenshot is not None else capture_fn()
@@ -804,11 +785,6 @@ def run_gc_no_battle_setup(
                     )
             else:
                 current_check = "perk_configuration"
-                save_skipped_perk_fields = tuple(
-                    check_id
-                    for check_id in perk_fields
-                    if save_accepted(check_id)
-                )
                 perk_result = ensure_perk_configuration_fn(
                     requirements,
                     home_screenshot=current,
@@ -831,59 +807,6 @@ def run_gc_no_battle_setup(
                     sleep_fn=sleep_fn,
                     operator_workflow=False,
                 )
-                if (
-                    perk_result.valid
-                    and perk_result.changed
-                    and save_skipped_perk_fields
-                ):
-                    first_evidence = dict(perk_result.evidence)
-                    rechecked = ensure_perk_configuration_fn(
-                        requirements,
-                        home_screenshot=perk_result.home_screenshot,
-                        capture_fn=capture_fn,
-                        detector=detector,
-                        detect_home_control_fn=detect_home_control_fn,
-                        safe_tap_fn=safe_tap_fn,
-                        tap_visible_fn=tap_visible_fn,
-                        swipe_fn=swipe_fn,
-                        measure_selection_fn=measure_selection_fn,
-                        waived_fields=tuple(
-                            check_id
-                            for check_id in perk_fields
-                            if check_id in active_waivers
-                        ),
-                        repair_observer_fn=lambda check_id: begin_repair(
-                            f"perk_repair:{check_id}"
-                        ),
-                        sleep_fn=sleep_fn,
-                        operator_workflow=False,
-                    )
-                    merged_evidence = {
-                        str(key): (
-                            dict(value)
-                            if isinstance(value, Mapping)
-                            else value
-                        )
-                        for key, value in rechecked.evidence.items()
-                    }
-                    first_changed = {
-                        check_id
-                        for check_id in perk_fields
-                        if isinstance(first_evidence.get(check_id), Mapping)
-                        and first_evidence[check_id].get("changed") is True
-                    }
-                    for check_id in first_changed:
-                        payload = merged_evidence.get(check_id)
-                        if isinstance(payload, dict):
-                            payload["changed"] = True
-                    perk_result = HomePerkConfigurationResult(
-                        valid=rechecked.valid,
-                        changed=bool(first_changed or rechecked.changed),
-                        reason=rechecked.reason,
-                        failed_check=rechecked.failed_check,
-                        evidence=merged_evidence,
-                        home_screenshot=rechecked.home_screenshot,
-                    )
                 for check_id in perk_fields:
                     if check_id in active_waivers:
                         field_evidence = _waived_evidence(

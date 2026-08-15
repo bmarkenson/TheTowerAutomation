@@ -323,11 +323,13 @@ when all eight actual assignments and all requested reference names are
 supported; a difference is carried as `save_observation`, not a match or repair
 authorization. A complete allowlisted exact or compatible mismatch in an
 enforced check is `save_mismatch`: it queues only that check's existing guarded
-UI path while the plan remains read-only. If that path actually mutates UI, the
-first input invalidates every remaining save-derived decision; if it only
-verifies a match, unrelated decisions remain authoritative. Unsupported
-requirements, unknown IDs, incomplete per-check structure, and forced audit are
-ordinary `ui_required` dispositions rather than trusted mismatches.
+UI path while the plan remains read-only. If that path actually mutates UI, its
+first input closes the pre-action mapping-candidate window and removes only the
+affected check from carry; unrelated accepted decisions remain authoritative.
+If it only verifies a match, unrelated decisions likewise remain authoritative.
+Unsupported requirements, unknown IDs, incomplete per-check structure, and
+forced audit are ordinary `ui_required` dispositions rather than trusted
+mismatches.
 
 Operator diagnostics emit one privacy-safe record per requested check with the
 mapping ID, evidence completeness, requirement-support status, disposition,
@@ -399,13 +401,14 @@ evidence; it does not quarantine the snapshot. Restart/Stop, attachment,
 strategy/configuration/target change, a competing workflow, manual or ambiguous
 launch, wrong transition, or an unrelated later battle discards the carrier.
 A requirement change, unsupported mapping, or incomplete component routes only
-the affected check to UI before input. Any first actual UI mutation—including
-Home setup, Target Priority, Poison Swamp Stun, Damage Slider, Orb Distance, or
-level-skip input—invalidates every remaining snapshot-derived decision before
-the tap. Home setup restarts without save decisions if an already-materialized
-save check preceded the repair. Independently UI-verified Home sections may be
-retained with explicit per-section UI provenance; they are never relabeled as
-save-backed. A read-only UI match preserves carry, while a save/UI
+the affected check to UI before input. An actual configuration mutation at
+Home, Target Priority, Poison Swamp Stun, Damage Slider, or Orb Distance closes
+the pre-action mapping-candidate window and removes only that setting's save
+authority before the tap. Level-skip input closes the same correlation window
+without discarding independent configuration decisions. Home setup continues
+with unrelated accepted decisions instead of reopening their UI sections.
+Independently UI-verified sections retain explicit UI provenance; they are never
+relabeled as save-backed. A read-only UI match preserves carry, while a save/UI
 contradiction fails closed globally. The repaired check stays supported only by
 its UI evidence unless a genuinely new authoritative snapshot is acquired.
 Save evidence never authorizes a tap, repair, launch, lifecycle transition,
@@ -745,7 +748,7 @@ inherited claims continue to cite their originating authority.
 | `V1073-PROFILE-006` equipped Module progression | Eight equipped Primary/Assist items with `infoIndex`, rarity, level, indexed effects/locks, and Assist efficiency levels | **Structural and implemented for completed-run comparison.** GUIDs, costs, reroll counters, inventory records, and the 150-item inventory remain excluded. | Decode effect IDs, rarity/stars, levels, and efficiency formulas across naturally occurring loadouts before claiming effective values. The slot-name CFG row remains independently value-scoped. |
 | `V1073-PROFILE-007` passive account, Theme, and relic progression | Pack/ad unlock booleans; `towerUnlocked[100]`, `backgroundUnlocked[100]`, `menuUnlocked[100]`, matching Dice vectors, `totalSkinsBought`; `relicsUnlocked[305]`, `profileRelics[5]` | **Structural and implemented for completed-run comparison.** Exact ownership vectors, counts, and changed indices are retained. The three Theme ownership counts are not forced to equal `totalSkinsBought`. | Map individual Theme/relic IDs and effective coin/health/damage bonuses before attributing a run delta to a specific formula. Account balances and purchase histories remain excluded. |
 | `V1073-RUNTIME-001` guarded save-first Home acquisition | Proven Android-Home flush, two identical exact-target reads, exact decoder, stable restored `NEW_BATTLE` | **Shortcut-ready and implemented.** One runtime/preflight/configuration/target generation owns the lifecycle workflow and retains only normalized redacted provenance. | `save_first` uses this path; acquisition/decode uncertainty safely restored to Home runs UI, while restoration/ownership/control/boundary uncertainty blocks input. The optional audit collector is not an authority source. |
-| `V1073-RUNTIME-002` atomic per-check suppression and exact-next-battle carry | Resolved configuration fingerprint, per-component decisions, runtime-owned launch, first stable `RUNNING` | **Shortcut-ready and implemented** for all currently allowlisted Home/session components together, including Damage Slider and Orb Distance. | `force_ui` preserves complete UI behavior; `comparison_audit` collects normalized comparison evidence while UI remains authoritative. A trusted exact mismatch initially queues only its guarded UI path, but the first actual UI mutation invalidates every remaining save-derived decision before input. Independently UI-verified Home sections retain explicit UI provenance. Trust, continuity, requirement, and save/UI-contradiction failures reject carry. Future comparisons never self-promote a manifest. |
+| `V1073-RUNTIME-002` atomic per-check suppression and exact-next-battle carry | Resolved configuration fingerprint, per-component decisions, runtime-owned launch, first stable `RUNNING` | **Shortcut-ready and implemented** for all currently allowlisted Home/session components together, including Damage Slider and Orb Distance. | `force_ui` preserves complete UI behavior; `comparison_audit` collects normalized comparison evidence while UI remains authoritative. A trusted exact mismatch queues only its guarded UI path; an actual repair removes only that check and closes pre-action mapping correlation, while unrelated accepted decisions remain authoritative. Independently UI-verified sections retain explicit UI provenance. Global trust, continuity, and save/UI-contradiction failures reject carry; a requirement-specific failure rejects only its check. Future comparisons never self-promote a manifest. |
 | `V1073-RUNTIME-003` active round identity | `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)` | **Causal.** A known Home boundary preceded the first stable Tier 22 active projection with a new per-tier counter and round seed; subsequent stable revisions retained that exact identity through wave 710. No finer wall-clock latency is claimed. | The guarded replacement-process Current-run comparison requires this identity after forced serialization and stable `RUNNING` restoration; it does not manufacture terminal binding or process-local evidence. `V1073-RUNTIME-013` still uses the tuple only for observation receipts. |
 | `V1073-RUNTIME-004` approximately five-minute save freshness | `saveRevision`, capture time, stable source hash, active identity/wave | **Structural.** Multiple ordinary-foreground stable revisions advanced under the same Tier 22 identity through wave 710, corroborating periodic usable writes without retaining exact timestamps. The whole row is not promoted because UI-to-save lag, jitter, unchanged intervals, write-collision behavior, and a runtime staleness threshold were not measured. | The default-300-second observation-only shared polling cadence is implemented with 30–3600-second bounds independently of audit opt-in. It can retain positive lag-tolerant facts but does not make a freshness claim. Pause/background behavior and tighter characterization may be measured during ordinary future use; no capture time, source hash, receipt timing, or `saveRevision` authorizes navigation or claims an exact write time. |
 | `V1073-RUNTIME-005` in-battle Perk inventory | `perkLevel[50]`, `perksPickedCount`, ordered `PerkPick(wave, perk)` list, versioned Perk IDs | **Shortcut-ready** for a complete exact-version snapshot. The final Tier 22 active projection contained 15 internally exact picks; all mapped picks, levels, and order agreed with the terminal UI's 11 collapsed rows. During the first enabled Tier 19 sequence, seven additional IDs were cross-channel calibrated from stable pick waves/levels and the same-round UI timeline; the repaired decoder then accepted all 56 active picks spanning 27 semantic keys. Synthetic unknown-ID, shape, count, level, and non-monotonic-order inconsistencies still publish no snapshot. | The normal run timeline now consumes the monitor's exact bound prefix: each saved pick retains oldest-first sequence, saved wave, semantic key, ID, and level-after. Stable top-bar transitions request a passive checkpoint but never open the in-battle Perks panel and never force serialization. A later failure retains already-proved positive picks; an identical or strict prefix extension may advance the timeline, while regression, mutation, identity, mapping, scope, or target conflict cannot. Structurally valid unknown IDs remain unavailable in normal runtime rather than reopening Perks for calibration. The bounded static calibration is retained in `test/fixtures/player_save_perk_id_calibration_v1073.json`. |
@@ -1178,10 +1181,10 @@ action authority remain unchanged.
 | One missing, malformed, renamed, or changed dependency | Mark that leaf and its derived dependents unavailable; preserve unrelated claims. |
 | Candidate mapping, check not explicitly validated | Report comparison results and run the existing UI check. |
 | Explicitly validated check, complete exact match, and verified serialization boundary | The caller may accept save evidence for that check unless an audit is due. |
-| Explicitly validated check, complete exact mismatch, and globally trusted snapshot | Queue only that check's existing guarded UI verification/repair before input; a read-only UI match preserves other decisions, while an actual repair invalidates every remaining save-derived decision before its first mutation. |
+| Explicitly validated check, complete exact mismatch, and globally trusted snapshot | Queue only that check's existing guarded UI verification/repair before input; a read-only UI match preserves other decisions, while an actual repair removes only the affected check and closes pre-action mapping correlation before its first mutation. |
 | No verified serialization boundary for a current-configuration claim | Treat the pull as potentially stale and use the existing UI check. Positive facts with a separately declared lag-tolerant temporal class remain governed by that class. |
 | Missing, incomplete, stale, unsupported, or forced-audit value | Use the existing UI check for that setting without treating it as a trusted mismatch. |
-| UI automation changes a setting | Invalidate every remaining save-derived decision before the first mutation, verify the result in UI, retain only independently UI-proven sections with UI provenance, and never treat the pre-action save as confirmation. |
+| UI automation changes a setting | Remove that setting's save authority and close pre-action mapping correlation before the first mutation, verify the result in UI, preserve unrelated accepted decisions, and never treat the pre-action save as confirmation of the repair. |
 | Authoritative UI contradicts a save match or finds a trusted mismatch already matching | Invalidate the complete snapshot and fail closed. |
 
 Tournament identity is not a recently changed profile setting. Its terminal
