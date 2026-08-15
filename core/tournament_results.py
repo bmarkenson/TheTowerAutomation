@@ -21,6 +21,7 @@ from core.battle_stats import (
     parse_tower_number,
     render_active_run_metrics_markdown,
     render_coin_rate_samples_markdown,
+    render_emulator_location_markdown,
     render_perk_selection_timeline_markdown,
     render_survival_ability_activations_markdown,
 )
@@ -590,6 +591,11 @@ def render_tournament_markdown(record: Mapping[str, Any]) -> str:
     lines.extend(
         render_coin_rate_samples_markdown(
             record.get("runtime", {}).get("coin_rate_samples", [])
+        )
+    )
+    lines.extend(
+        render_emulator_location_markdown(
+            record.get("runtime", {}).get("emulator_location")
         )
     )
     lines.extend(

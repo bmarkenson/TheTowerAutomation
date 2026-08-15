@@ -8,6 +8,24 @@ from core.app import App
 from core.ss_capture import ScreenshotCaptureResult, ScreenshotFailure
 
 
+def _emulator_location(host_id: str, host_name: str, process_id: int) -> dict:
+    return {
+        "schema_version": 1,
+        "host_id": host_id,
+        "host_name": host_name,
+        "linux_adb_port": 5555,
+        "request_id": f"request-{process_id}",
+        "selected_at": "2026-08-15T20:00:00+00:00",
+        "bluestacks_listener": {
+            "adb_port": 5565,
+            "process_id": process_id,
+            "process_started_at": f"2026-08-15T{process_id % 24:02d}:00:00+00:00",
+            "executable_path": r"C:\BlueStacks\HD-Player.exe",
+            "instance_name": "Nougat32",
+        },
+    }
+
+
 def test_control_is_synchronized_before_each_capture_attempt():
     events = []
     supervisor = MagicMock()
@@ -200,6 +218,78 @@ def test_paused_target_handoff_forces_validation_and_records_fresh_capture():
         force=True
     )
     app._adb_connection_coordinator.record_capture_success.assert_called_once()
+
+
+def test_emulator_location_timeline_marks_mixed_host_battles_out_of_cph_cohort():
+    host_a = _emulator_location(
+        "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686",
+        "MAIN-PC",
+        101,
+    )
+    host_b = _emulator_location(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "WORKSTATION-B",
+        202,
+    )
+    app = App.__new__(App)
+    app._adb_target_session = MagicMock()
+    app._adb_target_session.snapshot.return_value = SimpleNamespace(
+        generation=7,
+        owned=True,
+    )
+    app._emulator_location_binding = host_a
+    app._emulator_location_round = None
+
+    app._begin_emulator_location_round("battle-a")
+    complete = app._terminal_emulator_location("battle-a")
+    assert complete["status"] == "complete"
+    assert complete["analytics_host_id"] == host_a["host_id"]
+
+    app._record_emulator_location(host_b, active_round_identity="battle-a")
+    app._record_emulator_location(host_a, active_round_identity="battle-a")
+    mixed = app._terminal_emulator_location("battle-a")
+
+    assert mixed["status"] == "mixed_hosts"
+    assert mixed["coverage_complete"] is True
+    assert mixed["host_change_count"] == 2
+    assert mixed["listener_lifetime_count"] == 2
+    assert mixed["analytics_host_id"] is None
+    assert [item["host_name"] for item in mixed["locations"]] == [
+        "MAIN-PC",
+        "WORKSTATION-B",
+        "MAIN-PC",
+    ]
+
+
+def test_paused_same_port_host_handoff_keeps_observed_battle_attribution():
+    host_a = _emulator_location(
+        "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686",
+        "MAIN-PC",
+        101,
+    )
+    host_b = _emulator_location(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "WORKSTATION-B",
+        202,
+    )
+    app = App.__new__(App)
+    app._adb_target_session = None
+    app._emulator_location_binding = host_a
+    app._emulator_location_round = None
+    app._observed_active_round_identity_fingerprint = "battle-a"
+    app._current_player_save_observation_context = lambda: None
+    app._handoff_adb_port = MagicMock(return_value=True)
+    app._begin_emulator_location_round("battle-a")
+
+    assert app._handoff_emulator_location(5555, host_b)
+
+    app._handoff_adb_port.assert_called_once_with(
+        5555,
+        revalidate_current=True,
+    )
+    evidence = app._terminal_emulator_location("battle-a")
+    assert evidence["status"] == "mixed_hosts"
+    assert evidence["host_change_count"] == 1
 
 
 def test_paused_target_handoff_waits_for_validation_terminal_claim():

@@ -33,6 +33,7 @@ from core.control_directives import (
     INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
     MAXIMUM_GAME_SPEED_TARGET,
     normalize_automation_mode,
+    normalize_emulator_location_request,
 )
 from core.control_model import (
     BATTLE_WORKFLOW_TERMINAL_STATUSES,
@@ -96,7 +97,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 44
+CONTROL_SURFACE_REVISION = 45
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -107,6 +108,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "current_battle_perks_v1",
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
+    "emulator_host_selection_v1",
     "explicit_strategy_disposition",
     "game_speed_target",
     "host_performance_gpu_v1",
@@ -1311,6 +1313,8 @@ class ControlSurfaceService:
                 "mode_request_id": None,
                 "adb_port_updated_at": None,
                 "adb_port_request_id": None,
+                "emulator_location": None,
+                "emulator_location_error": None,
                 "strategy": None,
                 "strategy_apply_mode": "next_boundary",
                 "strategy_updated_at": None,
@@ -1644,6 +1648,28 @@ class ControlSurfaceService:
             )
             else None
         )
+        emulator_location_round = (
+            control_model.get("emulator_location_round")
+            if isinstance(control_model, Mapping)
+            and isinstance(
+                control_model.get("emulator_location_round"), Mapping
+            )
+            else None
+        )
+        if emulator_location_round is not None and (
+            emulator_location_round.get("coverage_complete") is not True
+            or emulator_location_round.get("mixed_hosts") is True
+        ):
+            # The completed-run lanes remain available, but a partial or
+            # mixed-host current battle cannot train or trigger the in-run
+            # performance lane.
+            active_run_performance = None
+        selected_location = control.get("emulator_location")
+        selected_host_id = (
+            str(selected_location.get("host_id") or "").strip() or None
+            if isinstance(selected_location, Mapping)
+            else None
+        )
         # ``current_run`` is a mutable action-log segment.  Host telemetry and
         # automatic maintenance must correlate to the canonical save identity.
         run_id = str(
@@ -1665,6 +1691,7 @@ class ControlSurfaceService:
             listener_marker = (
                 self.host_performance_store.current_bluestacks_lifetime_marker(
                     current_run_id=run_id,
+                    host_id=selected_host_id,
                 )
             )
         except (OSError, HostPerformanceStorageError) as exc:
@@ -1694,6 +1721,14 @@ class ControlSurfaceService:
         cache_key = (
             run_id,
             current_strategy,
+            selected_host_id,
+            (
+                emulator_location_round.get("selection_count"),
+                emulator_location_round.get("coverage_complete"),
+                emulator_location_round.get("mixed_hosts"),
+            )
+            if emulator_location_round is not None
+            else None,
             listener_marker,
             performance_marker,
         )
@@ -1731,11 +1766,13 @@ class ControlSurfaceService:
                         self.host_performance_store.recent_bluestacks_lifetime_aggregates(
                             current_run_id=run_id,
                             since=assessed_at - timedelta(minutes=30),
+                            host_id=selected_host_id,
                         )
                     )
                     lifetime_handle_summary = (
                         self.host_performance_store.bluestacks_lifetime_handle_summary(
                             current_run_id=run_id,
+                            host_id=selected_host_id,
                         )
                     )
                 except (OSError, HostPerformanceStorageError) as exc:
@@ -3555,6 +3592,28 @@ class ControlSurfaceService:
                     raise ControlSurfaceRequestError(
                         "adb_port must be between 1 and 65535"
                     )
+                raw_emulator_location = request.get("emulator_location")
+                emulator_location = (
+                    normalize_emulator_location_request(
+                        raw_emulator_location
+                    )
+                    if raw_emulator_location is not None
+                    else None
+                )
+                if (
+                    raw_emulator_location is not None
+                    and emulator_location is None
+                ):
+                    raise ControlSurfaceRequestError(
+                        "emulator_location is malformed"
+                    )
+                if (
+                    emulator_location is not None
+                    and emulator_location.get("linux_adb_port") != adb_port
+                ):
+                    raise ControlSurfaceRequestError(
+                        "emulator_location linux_adb_port must match adb_port"
+                    )
                 try:
                     if process_active:
                         live_status = self.status()
@@ -3568,7 +3627,7 @@ class ControlSurfaceService:
                             raise ControlSurfaceRequestError(
                                 "Indefinitely pause automation and wait for the "
                                 "runtime to acknowledge PAUSED before changing "
-                                "its live ADB port",
+                                "its live ADB target or emulator host",
                                 status=409,
                             )
                         manager.persist_adb_port(adb_port)
@@ -3581,6 +3640,7 @@ class ControlSurfaceService:
                         )
                     self.control_store.set_adb_port(
                         adb_port,
+                        emulator_location=emulator_location,
                         source="control-surface-adb-handoff",
                     )
                 except ControlSurfaceRequestError:
@@ -3589,8 +3649,18 @@ class ControlSurfaceService:
                     self._append_audit(f"Failed to configure ADB port: {exc}")
                     raise ControlSurfaceRequestError(str(exc), status=409) from exc
                 audit = (
-                    f"Requested paused live ADB target handoff to localhost:{adb_port}"
+                    (
+                        "Requested paused live emulator handoff to "
+                        f"{emulator_location['host_name']} at localhost:{adb_port}"
+                    )
+                    if process_active and emulator_location is not None
+                    else f"Requested paused live ADB target handoff to localhost:{adb_port}"
                     if process_active
+                    else (
+                        "Configured automation emulator host "
+                        f"{emulator_location['host_name']} at localhost:{adb_port}"
+                    )
+                    if emulator_location is not None
                     else f"Configured automation ADB target localhost:{adb_port}"
                 )
             else:
@@ -3705,6 +3775,8 @@ class ControlSurfaceService:
             response["request"].update(restart)
         elif action == "set_adb_port":
             response["request"]["adb_port"] = adb_port
+            if emulator_location is not None:
+                response["request"]["emulator_location"] = emulator_location
         elif action == "set_strategy":
             response["request"]["strategy"] = strategy
             if apply_to_active_run:

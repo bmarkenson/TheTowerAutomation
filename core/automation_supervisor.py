@@ -39,6 +39,7 @@ from core.control_directives import (
     ControlDirectiveStore,
     MAXIMUM_GAME_SPEED_TARGET,
     normalize_automation_mode,
+    normalize_emulator_location,
     normalize_emulator_maintenance,
     normalize_game_speed_target,
     normalize_interactive_development_lease,
@@ -92,6 +93,9 @@ class AutomationSupervisor:
         coins_max_jump_factor: float = 8.0,
         coins_jump_conf_floor: float = 90.0,
         adb_port_handoff: Optional[Callable[[int], bool]] = None,
+        emulator_location_handoff: Optional[
+            Callable[[int, Mapping[str, object]], bool]
+        ] = None,
     ) -> None:
         self.control_file = Path(control_file)
         self._control_store = ControlDirectiveStore(self.control_file)
@@ -196,6 +200,8 @@ class AutomationSupervisor:
         self.coins_max_jump_factor = Decimal(str(coins_max_jump_factor))
         self.coins_jump_conf_floor = float(coins_jump_conf_floor)
         self._adb_port_handoff = adb_port_handoff
+        self._emulator_location_handoff = emulator_location_handoff
+        self._applied_emulator_location: Optional[Dict[str, object]] = None
 
         # Internal state
         self._last_applied_state: Optional[str] = None
@@ -208,6 +214,7 @@ class AutomationSupervisor:
         self._last_invalid_resume_at: object = None
         self._last_applied_adb_request: Optional[Tuple[int, object]] = None
         self._last_deferred_adb_request: Optional[Tuple[int, object]] = None
+        self._last_invalid_emulator_location_request: object = None
         self._next_adb_handoff_attempt_at = 0.0
         self._unexpected_manual_yield_emergency = False
         self._control_acknowledgements: Dict[
@@ -409,6 +416,12 @@ class AutomationSupervisor:
             "schema_version": 1,
             **deepcopy(self._control_acknowledgements),
         }
+
+    @property
+    def emulator_location(self) -> Optional[Dict[str, object]]:
+        """Return the exact Windows emulator location applied by this runtime."""
+
+        return deepcopy(self._applied_emulator_location)
 
     def acknowledge_strategy(
         self,
@@ -687,6 +700,7 @@ class AutomationSupervisor:
                 directives.get("adb_port"),
                 directives.get("adb_port_updated_at"),
                 request_id=directives.get("adb_port_request_id"),
+                emulator_location=directives.get("emulator_location"),
             )
 
         if self._unexpected_manual_yield_emergency:
@@ -2164,17 +2178,44 @@ class AutomationSupervisor:
         updated_at: object,
         *,
         request_id: object = None,
+        emulator_location: object = None,
     ) -> None:
         if isinstance(port, bool) or not isinstance(port, int):
             return
-        if not 1 <= port <= 65535 or self._adb_port_handoff is None:
+        if not 1 <= port <= 65535:
             return
 
-        request = (port, request_id or updated_at)
+        location = normalize_emulator_location(emulator_location)
+        request_identity = request_id or updated_at
+        if emulator_location is not None and (
+            location is None
+            or location.get("linux_adb_port") != port
+            or str(location.get("request_id") or "")
+            != str(request_id or "")
+        ):
+            if request_identity != self._last_invalid_emulator_location_request:
+                log(
+                    "[CTRL] Emulator location request is malformed or does "
+                    "not match its ADB-port request; retaining the current "
+                    "target",
+                    "WARN",
+                    console=True,
+                )
+                self._last_invalid_emulator_location_request = request_identity
+            return
+        callback_available = (
+            self._emulator_location_handoff is not None
+            if location is not None
+            else self._adb_port_handoff is not None
+        )
+        if not callback_available:
+            return
+
+        request = (port, request_identity)
         if request == self._last_applied_adb_request:
             return
         target = f"localhost:{port}"
-        if os.getenv("ADB_DEVICE") == target:
+        if os.getenv("ADB_DEVICE") == target and location is None:
             self._last_applied_adb_request = request
             log(
                 f"[CTRL] ADB target set to {target} via control file",
@@ -2205,11 +2246,25 @@ class AutomationSupervisor:
         ):
             return
         self._last_deferred_adb_request = request
-        if self._adb_port_handoff(port):
+        if location is not None:
+            assert self._emulator_location_handoff is not None
+            applied = self._emulator_location_handoff(port, location)
+        else:
+            assert self._adb_port_handoff is not None
+            applied = self._adb_port_handoff(port)
+        if applied:
             self._last_applied_adb_request = request
             self._next_adb_handoff_attempt_at = 0.0
+            self._applied_emulator_location = (
+                deepcopy(location) if location is not None else None
+            )
             log(
-                f"[CTRL] ADB target set to {target} via control file",
+                (
+                    f"[CTRL] Emulator location set to "
+                    f"{location['host_name']} at {target} via control file"
+                    if location is not None
+                    else f"[CTRL] ADB target set to {target} via control file"
+                ),
                 "INFO",
                 console=True,
             )
@@ -2222,7 +2277,7 @@ class AutomationSupervisor:
 
         self._next_adb_handoff_attempt_at = now + 10.0
         log(
-            f"[CTRL] ADB target handoff to localhost:{port} failed; "
+            f"[CTRL] ADB target handoff to {target} failed; "
             "remaining PAUSED and retaining the previous target",
             "WARN",
             console=True,

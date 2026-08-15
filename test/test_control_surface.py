@@ -1686,6 +1686,77 @@ def _host_maintenance_context(
     )
 
 
+def test_degradation_status_excludes_mixed_host_active_run_intervals(tmp_path):
+    service = _service(tmp_path)
+    host_id = "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686"
+    assessment = {
+        "schema_version": 1,
+        "assessed_at": "2026-08-15T20:00:00+00:00",
+        "status": "insufficient_history",
+        "automatic_ready": False,
+        "reason": "not enough history",
+        "candidate_battle_ids": [],
+        "baseline_battle_ids": [],
+    }
+    runtime_authority = {
+        "runtime_battle_identity": "battle-a",
+        "control_model": {
+            "strategy_scope": {"active_battle": "farm_t18"},
+            "active_run_performance": {
+                "checkpoints": [
+                    {"captured_at": "2026-08-15T19:55:00+00:00"}
+                ]
+            },
+            "emulator_location_round": {
+                "selection_count": 2,
+                "coverage_complete": True,
+                "mixed_hosts": True,
+            },
+        },
+    }
+    control = {
+        "state": "RUNNING",
+        "emulator_location": {
+            "host_id": host_id,
+        },
+    }
+
+    with (
+        patch.object(
+            service.host_performance_store,
+            "current_bluestacks_lifetime_marker",
+            return_value=None,
+        ) as marker,
+        patch.object(
+            service.host_performance_store,
+            "recent_bluestacks_lifetime_aggregates",
+            return_value=[],
+        ),
+        patch.object(
+            service.host_performance_store,
+            "bluestacks_lifetime_handle_summary",
+            return_value=None,
+        ),
+        patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=assessment,
+        ) as assess,
+    ):
+        service._emulator_degradation_status(
+            control=control,
+            runtime_authority=runtime_authority,
+            current_run=None,
+            host_maintenance={},
+            now=datetime(2026, 8, 15, 20, 0, tzinfo=timezone.utc).timestamp(),
+        )
+
+    marker.assert_called_once_with(
+        current_run_id="battle-a",
+        host_id=host_id,
+    )
+    assert assess.call_args.kwargs["active_run_performance"] is None
+
+
 def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
     now = datetime.now().astimezone().replace(microsecond=0)
     run_id = "run-emulator-recovery"
@@ -3580,7 +3651,12 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 44" in native_compatibility
+    assert "MinimumServerRevision = 45" in native_compatibility
+    assert '"emulator_host_selection_v1"' in native_compatibility
+    assert "emulator_host_selection_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert 'x:Name="UseThisEmulatorButton"' in native_xaml
+    assert 'Click="UseThisEmulator_Click"' in native_xaml
+    assert 'JsonPropertyName("emulator_location")' in native_models
     assert '"bluestacks_maintenance_v1"' not in native_compatibility
     assert '"bluestacks_maintenance_v2"' in native_compatibility
     assert '"bluestacks_operator_restart_v1"' in native_compatibility

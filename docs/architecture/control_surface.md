@@ -273,6 +273,9 @@ generation, rotated log, or stale snapshot cannot acknowledge a current
 request. At startup the runtime atomically adds missing IDs to legacy fields
 and materializes the already-established implicit state, mode, and speed
 defaults, without requiring a display-refresh control request.
+An optional schema-1 `emulator_location` is coupled to the ADB directive's same
+request ID. It is acknowledged only after the declared-host callback completes;
+an unchanged target string does not short-circuit that callback.
 
 Status considers a receipt current only when both its value and request ID
 match the current directive. A same-value replacement therefore reports
@@ -439,7 +442,19 @@ ssh -N -R 127.0.0.1:5555:127.0.0.1:5555 <linux-user>@<linux-host>
 The reverse listener address is fixed to Linux loopback. Its Linux port and
 Windows BlueStacks port are separate settings, both defaulting to 5555, so
 multiple PCs can expose distinct Linux ports without changing their local
-listeners. The independent process boundary keeps an ADB bind conflict or
+listeners. A PC may also reuse a former PC's Linux port after the former
+reverse forward releases it. **System > Services > Use this PC's emulator**
+submits the active forward's actual Linux and Windows ports, the client's
+stable local host ID and name, and any exact listener process identity the
+client can inspect. The Linux runtime treats that declaration as a host
+handoff even when its `localhost:<port>` text is unchanged: acknowledged
+indefinite Pause is required, the current endpoint must produce a supported
+fresh frame, and success advances the target generation before acknowledgement.
+The client never terminates or adopts another PC's tunnel. If that tunnel still
+owns the requested Linux listener, the new tunnel remains in visible conflict
+until the operator stops or reconfigures the former forward.
+
+The independent process boundary keeps an ADB bind conflict or
 reconnect cycle from interrupting API control. Accepted forwarding, local
 Windows-listener detection, conflicts, and bounded automatic reconnect are
 reported separately in the GUI. Both supervisors preserve desired state while
@@ -533,7 +548,7 @@ memory only. The API deliberately sends no CORS permission.
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/interactive-development-lease` | Request, heartbeat, or release the one cooperative development lease; never dispatch device input |
 | `POST` | `/api/v1/host-maintenance` | Create or advance the typed BlueStacks restart handshake; automatic creation requires exact detector lifetime evidence, operator creation bypasses only that decision, both require fresh runtime authority and a durable exact Windows target, and acknowledgement/completion prove the old and replacement identities |
-| `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit independently of battle intent, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
+| `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit independently of battle intent, save/queue/adopt a bundled or published custom strategy, configure/safely hand off its ADB port, or bind the active forward to a typed Windows emulator host |
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
 | `POST` | `/api/v1/strategy-profiles` | Validate a constrained Farm draft or atomically publish its source and generated plan |
@@ -1124,6 +1139,10 @@ cross-session stitching. This keeps a GUI close/reopen from erasing the aging
 trend while a BlueStacks process remains alive, but resets the trend on any
 listener replacement, PID reuse with a new start time, target edit, or active
 multi-instance ambiguity.
+Server revision 45 adds `emulator_host_selection_v1`. Once a Windows host is
+explicitly selected, current listener-lifetime queries are constrained to that
+stable host ID; a former client still publishing the same run and Linux port
+cannot become the selected host's degradation evidence.
 
 The no-frame-telemetry target is below 0.5% average host CPU. Aggregate fields
 include control-surface CPU and sampling duration so the Windows deployment can
@@ -1178,16 +1197,23 @@ continues while every automatic option is disabled. It exposes three lanes:
   300-second cadence without claiming save freshness. Three fresh consecutive
   intervals must each be at or below 60% of a
   conservative lower envelope built from at least six intervals across two
-  completed runs in the same Strategy, exact run configuration, save-mapping
-  semantics, and broad 1,000-wave band. Effective speed must remain at least
+  completed runs on the same explicitly attributed Windows host, in the same
+  Strategy, exact run configuration, save-mapping semantics, and broad
+  1,000-wave band. Effective speed must remain at least
   97% of its comparable baseline and sustained handle growth must also be
   present. Missing history, a changed loadout/configuration, ordinary variance,
-  or partial attribution therefore cannot trigger this lane.
+  or partial attribution therefore cannot trigger this lane. The current-run
+  lane is disabled immediately when that battle's host timeline is partial or
+  mixed, so intervals collected before and after a PC move are not treated as
+  one performance regime.
 - **Completed-run confirmation.** The legacy conservative detector compares
   the newest two representative completed Farm runs with the preceding three
-  to five exact-configuration runs. Both candidates must be at or below 93% of
-  baseline, their median at or below 90%, and effective speed at least 97% of
-  baseline, with sustained handle growth.
+  to five exact-configuration runs from the same explicitly attributed Windows
+  host. Both candidates must be at or below 93% of baseline, their median at or
+  below 90%, and effective speed at least 97% of baseline, with sustained
+  handle growth. Legacy unattributed history remains usable only until any
+  completed record carries host tracking; after that transition, partial and
+  mixed-host records are excluded and five same-host records are required.
 
 Recent CPU, GPU, memory, available-memory, and clock evidence is evaluated over
 the current host window. Sustained load outside BlueStacks is reported as
@@ -1477,6 +1503,12 @@ Process request examples:
   apply authority and accepts only an integer TCP port; its validated handoff
   keeps Pause and the former target if new-target connection or screenshot
   validation fails.
+- Explicit **Use this PC's emulator** selection from an active ADB reverse
+  forward. This supports a different Windows client reusing the same Linux
+  port, forces same-port runtime revalidation, and durably attributes completed
+  battle CPH to one host or marks the battle partial/mixed. Battle History shows
+  each selected host and endpoint; mixed-host and partial runs never enter a
+  host-specific CPH cohort.
 - Validated strategy selection (`farm_t18`, `farm_t19`, `tournament`, or
   `none`). For an active process, a genuine dropdown change immediately submits
   one ordinary next-boundary request. Programmatic polling/render changes never

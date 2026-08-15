@@ -25,6 +25,19 @@ from core.control_surface import ControlSurfaceRequestError, ControlSurfaceServi
 from tools.control_surface_server import _persistent_adb_target_provider
 
 
+def _emulator_location(*, linux_port: int = 5555) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "host_id": "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686",
+        "host_name": "WORKSTATION-B",
+        "linux_adb_port": linux_port,
+        "bluestacks_listener": {
+            "adb_port": 5565,
+            "instance_name": "Nougat32",
+        },
+    }
+
+
 class FakeManager:
     def __init__(
         self,
@@ -1349,6 +1362,74 @@ def test_control_surface_requests_live_adb_handoff_only_after_pause_ack(tmp_path
     assert connection_manager.calls == [("localhost:5575", True)]
     assert service.control_store.read()["adb_port"] == 5575
     assert response["request"]["adb_port"] == 5575
+
+
+def test_control_surface_records_explicit_windows_emulator_host(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+
+    response = service.apply_process_action(
+        {
+            "action": "set_adb_port",
+            "adb_port": 5555,
+            "emulator_location": _emulator_location(),
+        }
+    )
+
+    assert manager.calls == ["set_adb_port:5555"]
+    assert response["request"]["emulator_location"]["host_name"] == (
+        "WORKSTATION-B"
+    )
+    control = service.control_store.status()
+    assert control["emulator_location"]["host_id"] == (
+        "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686"
+    )
+    assert control["emulator_location"]["request_id"] == (
+        control["adb_port_request_id"]
+    )
+
+
+def test_control_surface_live_same_port_host_handoff_requires_pause_ack(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    request = {
+        "action": "set_adb_port",
+        "adb_port": 5555,
+        "emulator_location": _emulator_location(),
+    }
+
+    with pytest.raises(ControlSurfaceRequestError, match="Indefinitely pause"):
+        service.apply_process_action(request)
+
+    service.apply_control({"action": "pause"})
+    control = service.control_store.read()
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
+    )
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        response = service.apply_process_action(request)
+
+    assert manager.calls == ["persist_adb_port:5555"]
+    assert response["request"]["emulator_location"]["host_name"] == (
+        "WORKSTATION-B"
+    )
+
+
+def test_control_surface_rejects_mismatched_emulator_host_port(tmp_path):
+    with pytest.raises(
+        ControlSurfaceRequestError,
+        match="linux_adb_port must match adb_port",
+    ):
+        _service(tmp_path, FakeManager()).apply_process_action(
+            {
+                "action": "set_adb_port",
+                "adb_port": 5575,
+                "emulator_location": _emulator_location(linux_port=5555),
+            }
+        )
 
 
 def test_control_surface_rejects_live_handoff_under_timed_pause(tmp_path):

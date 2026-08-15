@@ -323,6 +323,46 @@ public sealed class ControlSurfaceCompatibilityTests
     }
 
     [Fact]
+    public void StatusDeserializesSelectedEmulatorLocation()
+    {
+        var response = System.Text.Json.JsonSerializer.Deserialize<StatusResponse>(
+            """
+            {
+              "api_version": 1,
+              "server_revision": 45,
+              "control": {
+                "emulator_location": {
+                  "schema_version": 1,
+                  "host_id": "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686",
+                  "host_name": "WORKSTATION-B",
+                  "linux_adb_port": 5555,
+                  "request_id": "selection-1",
+                  "selected_at": "2026-08-15T20:00:00+00:00",
+                  "bluestacks_listener": {
+                    "adb_port": 5565,
+                    "process_id": 4242,
+                    "process_started_at": "2026-08-15T19:00:00+00:00",
+                    "executable_path": "C:\\\\BlueStacks\\\\HD-Player.exe",
+                    "instance_name": "Nougat32"
+                  }
+                }
+              }
+            }
+            """);
+
+        Assert.NotNull(response?.Control.EmulatorLocation);
+        Assert.Equal(
+            "WORKSTATION-B",
+            response!.Control.EmulatorLocation!.HostName);
+        Assert.Equal(
+            5565,
+            response.Control.EmulatorLocation.BlueStacksListener.AdbPort);
+        Assert.Equal(
+            4242,
+            response.Control.EmulatorLocation.BlueStacksListener.ProcessId);
+    }
+
+    [Fact]
     public void ReadyCaptureCannotBypassServerCompatibility()
     {
         var oldServer = ControlSurfaceCompatibility.Evaluate(
@@ -362,6 +402,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "current_battle_perks_v1",
                 "current_run_activity_scope",
                 "exclusive_strategy_validation_status",
+                "emulator_host_selection_v1",
                 "explicit_strategy_disposition",
                 "game_speed_target",
                 "host_performance_gpu_v1",

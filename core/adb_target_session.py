@@ -77,16 +77,54 @@ class AdbTargetSession:
             self._instance_lock = instance_lock
             self._generation = next_generation
 
-    def handoff(self, target: str, *, validate: Callable[[], bool]) -> bool:
-        """Adopt ``target`` only after exclusive ownership and validation."""
+    def handoff(
+        self,
+        target: str,
+        *,
+        validate: Callable[[], bool],
+        revalidate_current: bool = False,
+    ) -> bool:
+        """Adopt ``target`` only after exclusive ownership and validation.
+
+        ``revalidate_current`` creates a fresh target generation even when a
+        different Windows host has replaced the emulator behind the same
+        localhost forward.
+        """
 
         requested = str(target)
         with ADB_TARGET_OPERATION_LOCK:
             current_lock = self._instance_lock
             if current_lock is None:
                 raise RuntimeError("ADB target session is not acquired")
-            if requested == self.target:
+            if requested == self.target and not revalidate_current:
                 os.environ["ADB_DEVICE"] = requested
+                return True
+            if requested == self.target:
+                previous_environment = os.environ.get("ADB_DEVICE")
+                os.environ["ADB_DEVICE"] = requested
+                try:
+                    valid = bool(validate())
+                except Exception:
+                    valid = False
+                if not valid:
+                    if previous_environment is None:
+                        os.environ.pop("ADB_DEVICE", None)
+                    else:
+                        os.environ["ADB_DEVICE"] = previous_environment
+                    return False
+                next_generation = self._generation + 1
+                try:
+                    current_lock.bind_runtime_owner(
+                        runtime_id=self._runtime_id,
+                        target_generation=next_generation,
+                    )
+                except Exception:
+                    if previous_environment is None:
+                        os.environ.pop("ADB_DEVICE", None)
+                    else:
+                        os.environ["ADB_DEVICE"] = previous_environment
+                    raise
+                self._generation = next_generation
                 return True
 
             replacement = self._lock_factory(requested)

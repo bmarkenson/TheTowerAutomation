@@ -42,6 +42,8 @@ from handlers.game_restarted_handler import (
 REQUEST_ID = "0123456789abcdef0123456789abcdef"
 ACTIVE_BATTLE_IDENTITY = "a" * 64
 REPLACEMENT_BATTLE_IDENTITY = "b" * 64
+PERFORMANCE_HOST_ID = "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686"
+OTHER_PERFORMANCE_HOST_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 RUNTIME = {
     "runtime_id": "runtime-recovery",
     "pid": 1234,
@@ -401,14 +403,23 @@ def _battle(
     *,
     speed: str = "6.0",
     fingerprint: str = "same-config",
+    host_id: str | None = None,
 ) -> dict:
-    return {
+    record = {
         "battle_id": battle_id,
         "strategy": "farm_t18",
         "configuration_fingerprint": fingerprint,
         "coins_per_hour": cph,
         "effective_game_speed": speed,
     }
+    if host_id is not None:
+        record.update(
+            {
+                "emulator_host_tracking_status": "complete",
+                "emulator_host_id": host_id,
+            }
+        )
+    return record
 
 
 def _host_aggregates(
@@ -421,6 +432,8 @@ def _host_aggregates(
         handles = 1_000 if index == 0 else 6_000
         aggregates.append(
             {
+                "host_id": PERFORMANCE_HOST_ID,
+                "host_name": "WORKSTATION-B",
                 "session_id": "sampler-a" if index < 60 else "sampler-b",
                 "sample_count": 10,
                 "sample_interval_ms": 1_000,
@@ -552,6 +565,44 @@ def test_degradation_requires_sampled_coverage_not_partial_window_count():
     assert assessment["status"] == "recommend"
     assert assessment["host_evidence"]["status"] == "insufficient"
     assert assessment["host_evidence"]["sampled_coverage_seconds"] == 121.0
+
+
+def test_completed_run_degradation_uses_only_same_windows_host_cohort():
+    now = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
+    same_host = [
+        _battle("candidate-1", "80", host_id=PERFORMANCE_HOST_ID),
+        _battle("candidate-2", "82", host_id=PERFORMANCE_HOST_ID),
+        _battle("baseline-1", "100", host_id=PERFORMANCE_HOST_ID),
+        _battle("baseline-2", "101", host_id=PERFORMANCE_HOST_ID),
+        _battle("baseline-3", "99", host_id=PERFORMANCE_HOST_ID),
+    ]
+    foreign = [
+        _battle("foreign-1", "5", host_id=OTHER_PERFORMANCE_HOST_ID),
+        _battle("foreign-2", "500", host_id=OTHER_PERFORMANCE_HOST_ID),
+    ]
+
+    assessment = assess_emulator_degradation(
+        [foreign[0], *same_host, foreign[1]],
+        _host_aggregates(now),
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        assessed_at=now,
+    )
+    insufficient = assess_emulator_degradation(
+        [*same_host[:4], *foreign],
+        _host_aggregates(now),
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        assessed_at=now,
+    )
+
+    assert assessment["emulator_host_scope"] == "exact_emulator_host"
+    assert assessment["candidate_battle_ids"] == [
+        "candidate-1",
+        "candidate-2",
+    ]
+    assert insufficient["status"] == "insufficient_history"
+    assert "same-Windows-host" in insufficient["reason"]
 
 
 def _attributed_host_aggregates(
@@ -832,7 +883,16 @@ def test_completed_recovery_runs_do_not_calibrate_degradation(tmp_path):
             "runtime": (
                 {"emulator_recovery": {"request_id": REQUEST_ID}}
                 if recovered
-                else {}
+                else {
+                    "emulator_location": {
+                        "schema_version": 1,
+                        "status": "complete",
+                        "coverage_complete": True,
+                        "mixed_hosts": False,
+                        "analytics_host_id": PERFORMANCE_HOST_ID,
+                        "locations": [],
+                    }
+                }
             ),
         }
         (battles_dir / f"{name}.json").write_text(
@@ -853,6 +913,8 @@ def test_completed_recovery_runs_do_not_calibrate_degradation(tmp_path):
         "Battle20260809T010000+0000"
     ]
     assert loaded[0]["coins_per_hour"] == 1_250_000_000_000_000_000
+    assert loaded[0]["emulator_host_tracking_status"] == "complete"
+    assert loaded[0]["emulator_host_id"] == PERFORMANCE_HOST_ID
 
 
 def _maintenance(state: str = "host_restarted") -> dict:

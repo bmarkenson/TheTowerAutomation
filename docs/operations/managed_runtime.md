@@ -261,6 +261,28 @@ A failed handoff remains Paused and retains the old runtime target while the
 control service may continue bounded registration retries for the saved next-
 start target.
 
+### Move to another Windows PC while reusing the Linux port
+
+1. On the former PC, stop its ADB reverse forward (or change its Linux forward
+   port). The new client will not kill or adopt that tunnel.
+2. On the new PC, configure its Windows BlueStacks listener and the desired old
+   Linux port, then start the ADB forward. If Connections reports a remote bind
+   conflict, the former forward or another listener still owns that port;
+   resolve it and select Retry/Restart.
+3. Select indefinite Pause and wait for the runtime acknowledgement.
+4. Under **System > Services**, select **Use this PC's emulator**. This submits
+   the active forward rather than merely saving Preferences.
+5. Wait for the displayed host selection and ADB target to show acknowledged.
+   Same-port selection still requires a fresh supported frame and advances the
+   target generation.
+6. Verify the fresh screen, then select **Automation Enabled** only when
+   appropriate.
+
+Completed Battle History records the Windows host selections for the battle.
+A battle spanning more than one host remains visible with both transitions but
+is excluded from host-specific CPH comparison; a battle without attribution
+from its beginning is marked partial.
+
 ## Change Strategy at a boundary
 
 The GUI reports accepted request, current Strategy, pending Strategy, and live

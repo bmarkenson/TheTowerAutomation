@@ -54,6 +54,8 @@ public sealed class HostPerformanceTracker : IDisposable
 
     public event EventHandler<HostPerformanceSnapshot>? SnapshotUpdated;
 
+    public string HostId => _spool.HostId;
+
     public bool SamplingEnabled
     {
         get

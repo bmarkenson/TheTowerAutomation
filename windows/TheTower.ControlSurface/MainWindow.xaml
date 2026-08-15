@@ -1212,6 +1212,19 @@
                                FontSize="10"
                                ToolTipService.ShowDuration="30000"
                                Margin="6,3,6,2" />
+                    <Button x:Name="UseThisEmulatorButton"
+                            Content="Use this PC's emulator"
+                            Click="UseThisEmulator_Click"
+                            Style="{StaticResource PrimaryButton}"
+                            IsEnabled="False"
+                            Margin="4,6,4,2"
+                            ToolTip="Bind Linux automation to this client's active ADB forward and record the Windows host for CPH attribution." />
+                    <TextBlock x:Name="EmulatorSelectionStatusText"
+                               Text="No Windows emulator host has been selected."
+                               TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedBrush}"
+                               FontSize="10"
+                               Margin="6,2,6,0" />
                   </StackPanel>
                 </Border>
               </Grid>

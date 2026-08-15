@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private const string DiagnosticsSystemPageId = "diagnostics";
     private readonly ControlSurfaceApi _api = new();
     private readonly HostPerformanceTracker _hostPerformance;
+    private readonly BlueStacksInstanceController _blueStacksController;
     private readonly BlueStacksMaintenanceCoordinator _blueStacksMaintenance;
     private readonly TunnelHostConnection _tunnelHost = new();
     private readonly ClientSettings _settings;
@@ -85,12 +86,14 @@ public partial class MainWindow : Window
     private bool _updatingAdbPortDraft;
     private bool _adbPortDraftDirty;
     private bool _adbPortRequestInFlight;
+    private bool _emulatorSelectionInFlight;
     private int? _configuredAdbPort;
     private int? _requestedAdbPort;
     private string? _activeAdbTarget;
     private bool _adbLifecycleAvailable;
     private bool _adbProcessActive;
     private bool _adbPausedAndAcknowledged;
+    private EmulatorLocationStatus? _requestedEmulatorLocation;
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
         = new Dictionary<string, StartupGateWaiverStatus>();
@@ -122,10 +125,10 @@ public partial class MainWindow : Window
         WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
         RestoreMainWindowLayout();
         _api.Configure(_settings.BaseUrl, _apiToken);
-        var blueStacksController = new BlueStacksInstanceController();
+        _blueStacksController = new BlueStacksInstanceController();
         _blueStacksMaintenance = new BlueStacksMaintenanceCoordinator(
             _api,
-            blueStacksController,
+            _blueStacksController,
             () => _settings);
         _blueStacksMaintenance.StateChanged += (_, message) =>
         {
@@ -137,7 +140,7 @@ public partial class MainWindow : Window
         };
         _hostPerformance = new HostPerformanceTracker(
             _api,
-            blueStacksController);
+            _blueStacksController);
         _blueStacksMaintenance.RestartBoundaryCrossed += (_, _) =>
             _hostPerformance.ResetSamplerRateBaselines();
         _hostPerformance.SetSamplingEnabled(
@@ -762,6 +765,7 @@ public partial class MainWindow : Window
         StopTunnelButton.IsEnabled = false;
         StartAdbForwardButton.IsEnabled = false;
         StopAdbForwardButton.IsEnabled = false;
+        UpdateEmulatorSelectionControls();
         UpdateControlSurfaceServiceControls();
         UpdateRestartSshControls();
     }
@@ -786,6 +790,7 @@ public partial class MainWindow : Window
         StopTunnelButton.IsEnabled = false;
         StartAdbForwardButton.IsEnabled = false;
         StopAdbForwardButton.IsEnabled = false;
+        UpdateEmulatorSelectionControls();
         UpdateControlSurfaceServiceControls();
         UpdateRestartSshControls();
     }
@@ -1512,6 +1517,128 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void UseThisEmulator_Click(object sender, RoutedEventArgs e)
+    {
+        if (_emulatorSelectionInFlight)
+        {
+            return;
+        }
+        if (!TryGetActiveAdbForward(out var endpoint))
+        {
+            ShowError(new InvalidOperationException(
+                "Start this PC's ADB reverse forward before selecting its emulator."));
+            return;
+        }
+        if (_adbProcessActive && !_adbPausedAndAcknowledged)
+        {
+            ShowError(new InvalidOperationException(
+                "Indefinitely pause automation and wait for acknowledgement "
+                + "before selecting a Windows emulator host."));
+            return;
+        }
+
+        _emulatorSelectionInFlight = true;
+        UpdateEmulatorSelectionControls();
+        try
+        {
+            if (!IsWindowsLoopbackPortListening(endpoint.DestinationPort))
+            {
+                throw new InvalidOperationException(
+                    "BlueStacks is not listening on Windows localhost:"
+                    + $"{endpoint.DestinationPort}.");
+            }
+            var listener = new Dictionary<string, object>
+            {
+                ["adb_port"] = endpoint.DestinationPort,
+                ["instance_name"] = _settings.BlueStacksInstanceName,
+            };
+            try
+            {
+                var target = BlueStacksRecoveryTarget.Create(
+                    _settings.BlueStacksPlayerExecutablePath,
+                    _settings.BlueStacksInstanceName,
+                    endpoint.DestinationPort);
+                var identity = _blueStacksController.Inspect(target);
+                listener["process_id"] = identity.ProcessId;
+                listener["process_started_at"] = identity.ProcessStartedAtText;
+                listener["executable_path"] = identity.ExecutablePath;
+            }
+            catch (Exception exception) when (
+                exception is ArgumentException
+                    or InvalidOperationException
+                    or System.ComponentModel.Win32Exception)
+            {
+                // The runtime still validates a fresh frame. Exact process-
+                // lifetime telemetry remains independently diagnostic.
+            }
+            var emulatorLocation = new
+            {
+                schema_version = 1,
+                host_id = _hostPerformance.HostId,
+                host_name = Environment.MachineName,
+                linux_adb_port = endpoint.SourcePort,
+                bluestacks_listener = listener,
+            };
+            EmulatorSelectionStatusText.Text =
+                $"Requesting {Environment.MachineName} on localhost:"
+                + $"{endpoint.SourcePort}…";
+            var response = await _api.PostProcessAsync(
+                new
+                {
+                    action = "set_adb_port",
+                    adb_port = endpoint.SourcePort,
+                    emulator_location = emulatorLocation,
+                },
+                CancellationToken.None);
+            RenderStatus(response);
+            await RefreshActivityAsync(force: true);
+        }
+        catch (Exception exc)
+        {
+            ShowError(exc);
+            await RefreshStatusAsync(force: true);
+        }
+        finally
+        {
+            _emulatorSelectionInFlight = false;
+            UpdateEmulatorSelectionControls();
+        }
+    }
+
+    private bool TryGetActiveAdbForward(out TunnelEndpoint endpoint)
+    {
+        var state = _tunnelHostSnapshot?.AdbTunnel;
+        if (state?.ObservedState == TunnelObservedState.Running
+            && state.ActiveEndpoint is { } active)
+        {
+            endpoint = active;
+            return true;
+        }
+        endpoint = new TunnelEndpoint();
+        return false;
+    }
+
+    private void UpdateEmulatorSelectionControls()
+    {
+        var tunnelReady = TryGetActiveAdbForward(out _);
+        var runtimeReady = !_adbProcessActive || _adbPausedAndAcknowledged;
+        var compatible = _serverCompatibility?.IsCompatible == true;
+        UseThisEmulatorButton.IsEnabled = !_emulatorSelectionInFlight
+            && tunnelReady
+            && runtimeReady
+            && _adbLifecycleAvailable
+            && compatible;
+        UseThisEmulatorButton.ToolTip = _emulatorSelectionInFlight
+            ? "The emulator-host selection is being applied."
+            : !tunnelReady
+                ? "Start this PC's ADB reverse forward first."
+                : !runtimeReady
+                    ? "Indefinitely pause automation and wait for acknowledgement first."
+                    : !compatible
+                        ? "The Linux API must support emulator-host selection."
+                        : "Revalidate this PC's forwarded emulator, even when the Linux port is unchanged, and record its host identity for CPH attribution.";
+    }
+
     private void RenderApiTunnelState(TunnelStateSnapshot state)
     {
         var (summary, color) = TunnelStatePresentation(state);
@@ -1551,6 +1678,7 @@ public partial class MainWindow : Window
         StopAdbForwardButton.IsEnabled = !_adbForwardStarting
             && !_adbTunnelRestartInFlight
             && state.Desired;
+        UpdateEmulatorSelectionControls();
     }
 
     private (string Summary, Brush Color) TunnelStatePresentation(
@@ -3233,6 +3361,7 @@ public partial class MainWindow : Window
         _adbLifecycleAvailable = lifecycleAvailable;
         _adbProcessActive = processActive;
         _adbPausedAndAcknowledged = pausedAndAcknowledged;
+        _requestedEmulatorLocation = status.Control.EmulatorLocation;
         ConfiguredAdbTargetText.Text = service?.AdbTarget
             ?? (_configuredAdbPort is int configuredPort
                 ? $"localhost:{configuredPort}"
@@ -3249,6 +3378,31 @@ public partial class MainWindow : Window
             : string.IsNullOrWhiteSpace(_activeAdbTarget)
                 ? "Awaiting runtime evidence"
                 : _activeAdbTarget;
+        var locationAcknowledged = !processActive
+            || status.Acknowledgements.AdbTarget is
+                { AcknowledgesCurrent: true } adbAcknowledgement
+            && string.Equals(
+                adbAcknowledgement.RequestId,
+                _requestedEmulatorLocation?.RequestId,
+                StringComparison.Ordinal);
+        EmulatorSelectionStatusText.Text = !string.IsNullOrWhiteSpace(
+                status.Control.EmulatorLocationError)
+            ? status.Control.EmulatorLocationError
+            : _requestedEmulatorLocation is null
+                ? "No Windows emulator host has been selected."
+                : $"{_requestedEmulatorLocation.HostName} · Linux localhost:"
+                    + $"{_requestedEmulatorLocation.LinuxAdbPort} → Windows "
+                    + $"localhost:{_requestedEmulatorLocation.BlueStacksListener.AdbPort}"
+                    + (locationAcknowledged
+                        ? processActive ? " · acknowledged" : " · saved"
+                        : " · awaiting runtime validation");
+        EmulatorSelectionStatusText.Foreground =
+            _requestedEmulatorLocation is not null && locationAcknowledged
+                ? new SolidColorBrush(Color.FromRgb(73, 214, 157))
+                : !string.IsNullOrWhiteSpace(
+                    status.Control.EmulatorLocationError)
+                    ? new SolidColorBrush(Color.FromRgb(255, 113, 135))
+                    : (Brush)FindResource("MutedBrush");
         AdbPortHelpText.Text = !processActive
             ? "Applying a valid draft changes only the configured target for the next managed start."
             : pausedAndAcknowledged
@@ -3265,6 +3419,7 @@ public partial class MainWindow : Window
             SetAdbPortDraftText(_configuredAdbPort);
         }
         UpdateAdbPortDraftControls();
+        UpdateEmulatorSelectionControls();
         var statePending = processActive
             && status.Acknowledgements.State is not { AcknowledgesCurrent: true };
         var modePending = processActive

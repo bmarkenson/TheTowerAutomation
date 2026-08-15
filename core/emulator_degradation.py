@@ -45,6 +45,61 @@ EXTERNAL_GPU_PERCENT = Decimal("30")
 EXTERNAL_MEMORY_PERCENT = Decimal("75")
 
 
+def _emulator_location_scope(record: Mapping[str, Any]) -> dict[str, Any]:
+    runtime = record.get("runtime")
+    location = (
+        runtime.get("emulator_location")
+        if isinstance(runtime, Mapping)
+        else None
+    )
+    if not isinstance(location, Mapping) or location.get("schema_version") != 1:
+        return {
+            "emulator_host_tracking_status": "unavailable",
+            "emulator_host_id": None,
+        }
+    status = str(location.get("status") or "unavailable").strip().lower()
+    host_id = str(location.get("analytics_host_id") or "").strip() or None
+    if (
+        status != "complete"
+        or location.get("coverage_complete") is not True
+        or location.get("mixed_hosts") is True
+        or host_id is None
+    ):
+        host_id = None
+    return {
+        "emulator_host_tracking_status": status,
+        "emulator_host_id": host_id,
+    }
+
+
+def _host_scoped_battles(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    current_host_id: object,
+) -> tuple[list[Mapping[str, Any]], str]:
+    """Use exact host cohorts once completed records carry host identity."""
+
+    copied = list(records)
+    tracked = any(
+        str(record.get("emulator_host_tracking_status") or "unavailable")
+        != "unavailable"
+        for record in copied
+    )
+    host_id = str(current_host_id or "").strip()
+    if not tracked:
+        return copied, "legacy_unattributed"
+    if not host_id:
+        return [], "current_emulator_host_unavailable"
+    return (
+        [
+            record
+            for record in copied
+            if str(record.get("emulator_host_id") or "") == host_id
+        ],
+        "exact_emulator_host",
+    )
+
+
 def load_comparable_battles(
     battles_dir: Path,
     *,
@@ -96,6 +151,7 @@ def load_comparable_battles(
                 )
                 if isinstance(runtime, Mapping)
                 else "",
+                **_emulator_location_scope(payload),
                 **_active_run_interval_history(payload),
             }
         )
@@ -199,11 +255,22 @@ def _assess_completed_run_degradation(
         for record in battles
         if str(record.get("strategy") or "").lower() == strategy
     ]
+    exact, host_scope = _host_scoped_battles(
+        exact,
+        current_host_id=host.get("host_id"),
+    )
     if len(exact) < CANDIDATE_RUNS + MINIMUM_BASELINE_RUNS:
         return {
             **base,
             "status": "insufficient_history",
-            "reason": "at least five comparable completed Farm runs are required",
+            "emulator_host_scope": host_scope,
+            "reason": (
+                "at least five same-Windows-host completed Farm runs are required"
+                if host_scope == "exact_emulator_host"
+                else "current Windows host telemetry is required"
+                if host_scope == "current_emulator_host_unavailable"
+                else "at least five comparable completed Farm runs are required"
+            ),
         }
     fingerprint = str(exact[0].get("configuration_fingerprint") or "")
     exact = [
@@ -215,6 +282,7 @@ def _assess_completed_run_degradation(
         return {
             **base,
             "status": "insufficient_history",
+            "emulator_host_scope": host_scope,
             "reason": "exact run-configuration history is too small",
         }
     candidates = exact[:CANDIDATE_RUNS]
@@ -237,6 +305,7 @@ def _assess_completed_run_degradation(
         return {
             **base,
             "status": "insufficient_history",
+            "emulator_host_scope": host_scope,
             "reason": "comparable CPH or effective-speed evidence is unavailable",
         }
     assert baseline_cph is not None
@@ -258,6 +327,8 @@ def _assess_completed_run_degradation(
             str(record.get("battle_id") or "") for record in baselines
         ],
         "configuration_fingerprint": fingerprint,
+        "emulator_host_scope": host_scope,
+        "emulator_host_id": host.get("host_id"),
         "baseline_coins_per_hour": str(baseline_cph),
         "candidate_coins_per_hour": str(candidate_cph),
         "candidate_cph_ratio": float(pair_ratio),
@@ -501,6 +572,10 @@ def _severe_in_run_lane(
             == definition
         )
     ]
+    comparable, host_scope = _host_scoped_battles(
+        comparable,
+        current_host_id=host.get("host_id"),
+    )
     ratios: list[Decimal] = []
     speed_ratios: list[Decimal] = []
     baseline_floors: list[Decimal] = []
@@ -526,6 +601,7 @@ def _severe_in_run_lane(
             return {
                 "status": "insufficient_baseline",
                 "ready": False,
+                "emulator_host_scope": host_scope,
                 "wave_band": band,
                 "baseline_sample_count": len(baseline),
                 "baseline_run_count": len(band_run_ids),
@@ -552,6 +628,8 @@ def _severe_in_run_lane(
         ],
         "severe_cph_ratio": float(SEVERE_CPH_RATIO),
         "wave_band_size": SEVERE_WAVE_BAND_SIZE,
+        "emulator_host_scope": host_scope,
+        "emulator_host_id": host.get("host_id"),
     }
     if any(value < MINIMUM_SPEED_RATIO for value in speed_ratios):
         return {
@@ -888,10 +966,20 @@ def _host_evidence(
     when: datetime,
     lifetime_handle_summary: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
+    host_ids = {
+        str(aggregate.get("host_id") or "").strip()
+        for aggregate in aggregates
+        if str(aggregate.get("host_id") or "").strip()
+    }
+    host_names = {
+        str(aggregate.get("host_name") or "").strip()
+        for aggregate in aggregates
+        if str(aggregate.get("host_name") or "").strip()
+    }
     listener_identities = [
         _listener_identity(aggregate) for aggregate in aggregates
     ]
-    if not aggregates or any(
+    if not aggregates or len(host_ids) != 1 or any(
         identity is None for identity in listener_identities
     ):
         return {
@@ -931,6 +1019,8 @@ def _host_evidence(
     )
     common = {
         "identity_scope": "exact_listener_lifetime",
+        "host_id": next(iter(host_ids)),
+        "host_name": next(iter(host_names)) if len(host_names) == 1 else None,
         "listener_identity": listener_identity,
         "sampler_session_count": max(
             len(

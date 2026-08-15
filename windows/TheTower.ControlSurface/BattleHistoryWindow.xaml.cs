@@ -699,6 +699,7 @@ public partial class BattleHistoryWindow : Window
                     "Game speed control",
                     _settingsRows);
             }
+            AppendEmulatorLocationRows(runtime, _settingsRows);
             AppendSurvivalAbilityActivationRows(runtime, _reportRows);
             if (runtime.TryGetProperty("coin_rate_samples", out var rateSamples)
                 && rateSamples.ValueKind == JsonValueKind.Array)
@@ -721,6 +722,73 @@ public partial class BattleHistoryWindow : Window
             AppendActiveRunMetricRows(runtime, _reportRows);
         }
         RebuildReportSections();
+    }
+
+    private static void AppendEmulatorLocationRows(
+        JsonElement runtime,
+        ICollection<ReportRow> destination)
+    {
+        if (!runtime.TryGetProperty("emulator_location", out var evidence)
+            || evidence.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        destination.Add(new ReportRow(
+            "Emulator location",
+            "Attribution",
+            Humanize(JsonValue(evidence, "status"))));
+        destination.Add(new ReportRow(
+            "Emulator location",
+            "CPH cohort",
+            JsonValue(evidence, "analytics_host_id") == "-"
+                ? "Excluded from host-specific comparison"
+                : "Single Windows host"));
+        if (evidence.TryGetProperty("locations_truncated", out var truncated)
+            && truncated.ValueKind == JsonValueKind.True)
+        {
+            destination.Add(new ReportRow(
+                "Emulator location",
+                "Selections",
+                $"{JsonValue(evidence, "selection_count")} total; "
+                + "bounded location detail was truncated"));
+        }
+        if (!evidence.TryGetProperty("locations", out var locations)
+            || locations.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        var sequence = 1;
+        foreach (var location in locations.EnumerateArray())
+        {
+            if (location.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            var listener = location.TryGetProperty(
+                "bluestacks_listener",
+                out var candidate)
+                && candidate.ValueKind == JsonValueKind.Object
+                    ? candidate
+                    : default;
+            var host = JsonValue(location, "host_name");
+            var linuxPort = JsonValue(location, "linux_adb_port");
+            var windowsPort = listener.ValueKind == JsonValueKind.Object
+                ? JsonValue(listener, "adb_port")
+                : "-";
+            var instance = listener.ValueKind == JsonValueKind.Object
+                ? JsonValue(listener, "instance_name")
+                : "-";
+            var processId = listener.ValueKind == JsonValueKind.Object
+                ? JsonValue(listener, "process_id")
+                : "-";
+            var applied = JsonValue(location, "applied_at");
+            destination.Add(new ReportRow(
+                "Emulator location",
+                $"Selection {sequence}",
+                $"{host} at {applied}; Linux localhost:{linuxPort} → "
+                + $"Windows localhost:{windowsPort}; {instance}; PID {processId}"));
+            sequence++;
+        }
     }
 
     private static void AppendActiveRunMetricRows(

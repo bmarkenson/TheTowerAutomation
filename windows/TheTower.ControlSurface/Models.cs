@@ -1285,6 +1285,12 @@ public sealed class ControlStatus
     [JsonPropertyName("adb_port_request_id")]
     public string? AdbPortRequestId { get; set; }
 
+    [JsonPropertyName("emulator_location")]
+    public EmulatorLocationStatus? EmulatorLocation { get; set; }
+
+    [JsonPropertyName("emulator_location_error")]
+    public string? EmulatorLocationError { get; set; }
+
     [JsonPropertyName("strategy")]
     public string? Strategy { get; set; }
 
@@ -1311,6 +1317,48 @@ public sealed class ControlStatus
 
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+}
+
+public sealed class EmulatorLocationStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("host_id")]
+    public string HostId { get; set; } = "";
+
+    [JsonPropertyName("host_name")]
+    public string HostName { get; set; } = "";
+
+    [JsonPropertyName("linux_adb_port")]
+    public int LinuxAdbPort { get; set; }
+
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("selected_at")]
+    public string SelectedAt { get; set; } = "";
+
+    [JsonPropertyName("bluestacks_listener")]
+    public EmulatorLocationListenerStatus BlueStacksListener { get; set; } = new();
+}
+
+public sealed class EmulatorLocationListenerStatus
+{
+    [JsonPropertyName("adb_port")]
+    public int AdbPort { get; set; }
+
+    [JsonPropertyName("process_id")]
+    public int? ProcessId { get; set; }
+
+    [JsonPropertyName("process_started_at")]
+    public string? ProcessStartedAt { get; set; }
+
+    [JsonPropertyName("executable_path")]
+    public string? ExecutablePath { get; set; }
+
+    [JsonPropertyName("instance_name")]
+    public string InstanceName { get; set; } = "";
 }
 
 public sealed class ExclusiveValidationLedgerStatus

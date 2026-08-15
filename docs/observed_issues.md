@@ -289,9 +289,12 @@ current runtime state.
 - Saving a port did not move a running process, and
   lost capture delayed Pause acknowledgement; live handoff requires acknowledged
   indefinite Pause, new-target validation, and failure rollback to the old target.
+  The explicit Windows host selector also revalidates an unchanged port, records
+  host transitions, and excludes partial/mixed-host runs from host-specific CPH.
 - Load the [dossier](issues/open-2026.md#live-adb-target-move-could-not-be-applied-by-a-paused-runtime)
   before a real move, recurrence, or handoff change. Next: deploy and verify one
-  emulator move; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
+  explicitly selected emulator move, including same-port reuse when applicable;
+  [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
 
 ### Saved GUI ADB port was ignored by an outdated installed systemd unit
 

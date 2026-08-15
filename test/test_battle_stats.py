@@ -22,6 +22,7 @@ from core.battle_stats import (
     persist_battle_record,
     render_active_run_metrics_markdown,
     render_battle_markdown,
+    render_emulator_location_markdown,
     render_perk_selection_timeline_markdown,
     render_survival_ability_activations_markdown,
 )
@@ -529,6 +530,37 @@ def test_survival_activation_markdown_distinguishes_legacy_and_observed_none():
 
     assert not any("Second Wind" in line for line in legacy)
     assert "- Second Wind activations: none observed" in observed_none
+
+
+def test_emulator_location_markdown_exposes_host_and_cph_attribution():
+    lines = render_emulator_location_markdown(
+        {
+            "schema_version": 1,
+            "status": "complete",
+            "coverage_complete": True,
+            "mixed_hosts": False,
+            "analytics_host_id": "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686",
+            "locations": [
+                {
+                    "host_name": "WORKSTATION-B",
+                    "linux_adb_port": 5555,
+                    "applied_at": "2026-08-15T13:00:00-07:00",
+                    "bluestacks_listener": {
+                        "adb_port": 5565,
+                        "process_id": 4242,
+                        "instance_name": "Nougat32",
+                    },
+                }
+            ],
+        }
+    )
+
+    markdown = "\n".join(lines)
+    assert "## Emulator location" in markdown
+    assert "CPH cohort: single Windows host" in markdown
+    assert "WORKSTATION-B" in markdown
+    assert "localhost:5555" in markdown
+    assert "localhost:5565 (PID 4242)" in markdown
 
 
 def test_active_run_metric_markdown_distinguishes_average_and_interval_cph():

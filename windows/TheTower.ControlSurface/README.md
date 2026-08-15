@@ -121,6 +121,15 @@ until the operator changes the port or policy and selects Retry/Restart. Other
 unexpected exits retry independently after 5, 10, 20, then at most 30 seconds.
 An explicit Stop clears only that tunnel's desired state and cancels its retry.
 
+To move the emulator to this PC while reusing another PC's Linux port, first
+stop or reconfigure the former PC's ADB forward, then start this PC's forward.
+The client does not terminate another tunnel; a remaining owner is reported as
+a bind conflict. With automation indefinitely Paused and acknowledged, use
+**System > Services > Use this PC's emulator**. The command submits the active
+forward's actual endpoint plus this client's stable host identity, so Linux
+revalidates the emulator even when the target remains `localhost:5555`.
+Changing Preferences alone does not perform that runtime handoff.
+
 The host joins itself to a Windows Job Object configured with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` before it starts any SSH process. Its
 forwarding and fixed-service-query children inherit that job, so a host crash,
@@ -232,7 +241,11 @@ never displayed. Second Wind rows also show
 the approximate 400-wave re-arm estimate recorded from each observed activation.
 Expanded sections use high-contrast, table-style Stat/Value rows.
 Separate tabs retain the captured perk order, resolved run settings, and
-observed runtime/preflight evidence.
+observed runtime/preflight evidence. Explicit emulator-host selections appear
+in the resolved settings, including each Windows host and Linux/Windows port
+transition. Complete single-host runs form that host's CPH cohort; partial or
+mixed-host runs remain reportable but are excluded from host-specific CPH
+comparison.
 The battle list can export the currently filtered rows as an Excel-compatible
 UTF-8 CSV without requesting any additional Linux-side authority.
 **Discard selected...** confirms the exact record identity, then moves its JSON
@@ -257,7 +270,8 @@ a useful type/Tier/wave/coins summary and its History route. Activity and Perks
 receive the full data width and retain their independent refresh and scroll
 behavior. System divides infrastructure into
 **Services**, **Connections**, and **Diagnostics**: process lifecycle and ADB
-runtime target; API/SSH transport and tunnel host; then optional prior-screen,
+runtime target plus the explicit **Use this PC's emulator** handoff;
+API/SSH transport and tunnel host; then optional prior-screen,
 runtime, and host-performance evidence. When Host Health is expanded,
 Diagnostics places its complete local telemetry card ahead of the verbose
 evidence and presents the remainder in two columns: service/configuration and
@@ -1065,9 +1079,10 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 44, `current_battle_perks_v1`,
+current Windows build requires revision 45, `current_battle_perks_v1`,
 `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,
+`emulator_host_selection_v1`,
 `save_backed_setup_capture_v2`, `save_mapping_staged_candidate_v1`,
 `save_mapping_candidate_disposition_v1`,
 `save_mapping_review_status_v2`, `confirmed_local_mapping_status_v2`,

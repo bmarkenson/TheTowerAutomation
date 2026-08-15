@@ -1860,6 +1860,17 @@ before persisting the terminal receipt. A receipt-write failure is reporting
 degradation only: later heartbeats retry that receipt without reacquiring the
 hold or replaying input.
 
+Completed Battle and Tournament records may also carry
+`runtime.emulator_location`. A location timeline begins when a forced battle
+identity is bound and records every explicit Windows-host selection applied
+during that identity, including stable host ID/name, Linux target, Windows
+listener/instance, target generation, and exact process lifetime when
+available. Complete single-host coverage supplies `analytics_host_id`; a
+mid-run host change is retained as a transition and marks the record
+`mixed_hosts`, while a battle that began before explicit attribution is
+`partial`. Only complete single-host records are eligible for host-specific
+CPH baselines.
+
 - The native Windows control surface owns API local forwarding and ADB reverse
   forwarding as separate OpenSSH processes. The ADB process requests only
   `127.0.0.1:<linux-port>` and targets the independently configured Windows
@@ -1878,6 +1889,11 @@ hold or replaying input.
   the directive. Failure restores the previous runtime target and Pause while
   bounded registration retries continue for the saved next-start target.
   Existing mission, strategy, and gate state stays in memory throughout.
+  An explicit Windows-host declaration uses the same validation path even when
+  the requested target string is unchanged. Successful same-port revalidation
+  advances the target generation so cached screen/input authority cannot cross
+  the host replacement; failure retains the former generation, target, and
+  Pause.
 - Process startup has an explicit gate policy. `immediate` retains the normal
   behavior in which the first observed active battle is a new-run boundary.
   `next_run` adopts the first active/resumable battle and structurally
@@ -1961,9 +1977,13 @@ hold or replaying input.
   signals the unit.
   A stopped request may persist one validated localhost ADB TCP port and one
   validated startup-gate policy for the next start; an acknowledged paused
-  runtime may apply that same restricted port as a live target handoff. Remote
-  requests cannot supply a PID, unit name, executable, host, path, or shell
-  command.
+  runtime may apply that same restricted port as a live target handoff. The
+  typed emulator-selection extension may additionally carry the trusted
+  Windows client's stable UUID/name and bounded BlueStacks listener identity
+  solely for handoff validation, telemetry correlation, and report
+  attribution. It never grants Windows process mutation. Remote requests still
+  cannot select a systemd unit, Linux executable/path, shell command, or
+  arbitrary ADB operation.
 
 ## Planned evolution
 

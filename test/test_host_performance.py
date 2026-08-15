@@ -276,6 +276,67 @@ def test_exact_listener_lifetime_crosses_windows_gui_sessions(tmp_path):
     )
 
 
+def test_listener_queries_honor_explicit_selected_windows_host(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    selected_host = "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686"
+    other_host = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    selected = _aggregate(
+        aggregate_id="55111111-1111-4111-8111-111111111111",
+        host_id=selected_host,
+        host_name="WORKSTATION-B",
+        run_id="current-run",
+        window_start_utc="2026-07-30T15:00:00+00:00",
+        window_end_utc="2026-07-30T15:00:09+00:00",
+        bluestacks_listener=_listener(),
+        metrics={
+            **_aggregate()["metrics"],
+            "bluestacks_handle_count_avg": 3_100,
+        },
+    )
+    other = _aggregate(
+        aggregate_id="55444444-4444-4444-8444-444444444444",
+        host_id=other_host,
+        host_name="OLD-PC",
+        run_id="current-run",
+        window_start_utc="2026-07-30T15:01:00+00:00",
+        window_end_utc="2026-07-30T15:01:09+00:00",
+        bluestacks_listener=_listener(process_id=9000),
+    )
+    service.publish_host_performance(_request(selected, other))
+
+    unfiltered = (
+        service.host_performance_store.current_bluestacks_lifetime_marker(
+            current_run_id="current-run"
+        )
+    )
+    filtered = (
+        service.host_performance_store.current_bluestacks_lifetime_marker(
+            current_run_id="current-run",
+            host_id=selected_host,
+        )
+    )
+    history = (
+        service.host_performance_store.recent_bluestacks_lifetime_aggregates(
+            current_run_id="current-run",
+            host_id=selected_host,
+            since=datetime(2026, 7, 30, 14, 58, tzinfo=timezone.utc),
+        )
+    )
+    summary = service.host_performance_store.bluestacks_lifetime_handle_summary(
+        current_run_id="current-run",
+        host_id=selected_host,
+    )
+
+    assert unfiltered is not None and unfiltered[0] == other_host
+    assert filtered is not None and filtered[0] == selected_host
+    assert filtered[4] == 4242
+    assert [item["aggregate_id"] for item in history] == [
+        selected["aggregate_id"]
+    ]
+    assert summary is not None
+    assert summary["handle_low_water"] == 3_100
+
+
 @pytest.mark.parametrize(
     ("location", "field", "value"),
     [

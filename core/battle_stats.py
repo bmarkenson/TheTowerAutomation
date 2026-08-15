@@ -1557,6 +1557,11 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
         )
     )
     lines.extend(
+        render_emulator_location_markdown(
+            record.get("runtime", {}).get("emulator_location")
+        )
+    )
+    lines.extend(
         render_active_run_metrics_markdown(
             record.get("runtime", {}).get("active_run_metrics")
         )
@@ -2023,6 +2028,61 @@ def render_active_run_metrics_markdown(evidence: Any) -> list[str]:
                 f"{interval_rate} |"
                 for component, metric, value, whole_rate, interval_rate in terminal_rows
             )
+    return lines
+
+
+def render_emulator_location_markdown(evidence: Any) -> list[str]:
+    """Render explicit Windows-host selections for one completed run."""
+
+    if not isinstance(evidence, Mapping):
+        return []
+    locations = evidence.get("locations")
+    if not isinstance(locations, list) or not locations:
+        return []
+    status = str(evidence.get("status") or "unavailable").replace("_", " ")
+    lines = [
+        "",
+        "## Emulator location",
+        "",
+        f"- Attribution: {status}",
+        "- CPH cohort: "
+        + (
+            "single Windows host"
+            if evidence.get("analytics_host_id")
+            else "excluded from host-specific comparison"
+        ),
+    ]
+    if evidence.get("locations_truncated") is True:
+        lines.append(
+            f"- Detail: {evidence.get('selection_count', len(locations))} "
+            "selections occurred; the bounded table is truncated"
+        )
+    lines.extend(
+        (
+            "",
+            "| Applied | Windows host | Linux target | Windows listener | Instance |",
+            "| --- | --- | --- | --- | --- |",
+        )
+    )
+    for item in locations:
+        if not isinstance(item, Mapping):
+            continue
+        listener = item.get("bluestacks_listener")
+        listener = listener if isinstance(listener, Mapping) else {}
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    str(item.get("applied_at") or item.get("selected_at") or "—"),
+                    str(item.get("host_name") or item.get("host_id") or "—"),
+                    f"localhost:{item.get('linux_adb_port', '—')}",
+                    f"localhost:{listener.get('adb_port', '—')} "
+                    f"(PID {listener.get('process_id', '—')})",
+                    str(listener.get("instance_name") or "—"),
+                )
+            )
+            + " |"
+        )
     return lines
 
 
@@ -3356,6 +3416,7 @@ __all__ = [
     "render_battle_markdown",
     "render_active_run_metrics_markdown",
     "render_coin_rate_samples_markdown",
+    "render_emulator_location_markdown",
     "render_perk_selection_timeline_markdown",
     "render_save_backed_perks_markdown",
     "render_survival_ability_activations_markdown",

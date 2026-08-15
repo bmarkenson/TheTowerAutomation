@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import tempfile
 from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from core.gate_decisions import (
     STARTUP_GATE_CHECK_LABELS,
@@ -85,6 +85,140 @@ INTERACTIVE_DEVELOPMENT_REQUEST_STATES = frozenset(
     {"requested", "release_requested", "terminal"}
 )
 _MAX_EXCLUSIVE_VALIDATION_RECEIPTS = 12
+EMULATOR_LOCATION_SCHEMA_VERSION = 1
+
+
+def _emulator_location_text(value: object, maximum: int) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if (
+        not normalized
+        or len(normalized) > maximum
+        or any(ord(character) < 32 for character in normalized)
+    ):
+        return None
+    return normalized
+
+
+def _normalize_emulator_location_identity(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    """Validate one Windows host plus its exact local BlueStacks listener."""
+
+    if not isinstance(value, Mapping):
+        return None
+    schema_version = value.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or schema_version != EMULATOR_LOCATION_SCHEMA_VERSION
+    ):
+        return None
+    raw_host_id = _emulator_location_text(value.get("host_id"), 64)
+    if raw_host_id is None:
+        return None
+    try:
+        host_id = str(UUID(raw_host_id))
+    except (TypeError, ValueError):
+        return None
+    host_name = _emulator_location_text(value.get("host_name"), 128)
+    linux_adb_port = _valid_port(value.get("linux_adb_port"))
+    listener = value.get("bluestacks_listener")
+    if (
+        not host_name
+        or linux_adb_port is None
+        or not isinstance(listener, Mapping)
+    ):
+        return None
+    windows_adb_port = _valid_port(listener.get("adb_port"))
+    process_id = listener.get("process_id")
+    raw_process_started_at = listener.get("process_started_at")
+    raw_executable_path = listener.get("executable_path")
+    process_started_at = _emulator_location_text(
+        raw_process_started_at,
+        64,
+    )
+    executable_path = _emulator_location_text(raw_executable_path, 1024)
+    instance_name = _emulator_location_text(
+        listener.get("instance_name"), 64
+    )
+    if windows_adb_port is None or not instance_name:
+        return None
+    process_fields_present = any(
+        candidate is not None and candidate != ""
+        for candidate in (
+            process_id,
+            raw_process_started_at,
+            raw_executable_path,
+        )
+    )
+    if process_fields_present:
+        try:
+            _timestamp_value(process_started_at)
+        except (TypeError, ValueError):
+            return None
+        if (
+            isinstance(process_id, bool)
+            or not isinstance(process_id, int)
+            or process_id <= 0
+            or not executable_path
+        ):
+            return None
+    normalized_listener: dict[str, Any] = {
+        "adb_port": windows_adb_port,
+        "instance_name": instance_name,
+    }
+    if process_fields_present:
+        normalized_listener.update(
+            {
+                "process_id": process_id,
+                "process_started_at": process_started_at,
+                "executable_path": executable_path,
+            }
+        )
+    return {
+        "schema_version": EMULATOR_LOCATION_SCHEMA_VERSION,
+        "host_id": host_id,
+        "host_name": host_name,
+        "linux_adb_port": linux_adb_port,
+        "bluestacks_listener": normalized_listener,
+    }
+
+
+def normalize_emulator_location(value: object) -> Optional[dict[str, Any]]:
+    """Return one durable, exact Windows-emulator selection."""
+
+    normalized = _normalize_emulator_location_identity(value)
+    if normalized is None or not isinstance(value, Mapping):
+        return None
+    request_id = _emulator_location_text(value.get("request_id"), 128)
+    selected_at = _emulator_location_text(value.get("selected_at"), 64)
+    if (
+        not request_id
+        or any(
+            not character.isascii()
+            or not (character.isalnum() or character in "._:-")
+            for character in request_id
+        )
+    ):
+        return None
+    try:
+        _timestamp_value(selected_at)
+    except (TypeError, ValueError):
+        return None
+    return {
+        **normalized,
+        "request_id": request_id,
+        "selected_at": selected_at,
+    }
+
+
+def normalize_emulator_location_request(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    """Return the identity portion supplied by a Windows selection request."""
+
+    return _normalize_emulator_location_identity(value)
 
 
 def normalize_automation_mode(value: object) -> str:
@@ -137,6 +271,9 @@ class ControlDirectiveStore:
         state = str(data.get("state") or "PAUSED").upper()
         mode = str(data.get("mode") or "NEXT_BATTLE").upper()
         resume_at = _finite_number(data.get("resume_at"))
+        emulator_location = normalize_emulator_location(
+            data.get("emulator_location")
+        )
         current_time = float(now) if now is not None else datetime.now().timestamp()
         remaining_seconds = None
         if resume_at is not None:
@@ -164,6 +301,13 @@ class ControlDirectiveStore:
             ),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
             "adb_port_request_id": data.get("adb_port_request_id"),
+            "emulator_location": emulator_location,
+            "emulator_location_error": (
+                "emulator location directive is malformed"
+                if data.get("emulator_location") is not None
+                and emulator_location is None
+                else None
+            ),
             "strategy": self._valid_strategy(data.get("strategy")),
             "strategy_apply_mode": _valid_strategy_apply_mode(
                 data.get("strategy_apply_mode")
@@ -2049,6 +2193,7 @@ class ControlDirectiveStore:
         self,
         port: int,
         *,
+        emulator_location: Optional[Mapping[str, object]] = None,
         source: Optional[str] = None,
     ) -> dict[str, Any]:
         """Persist a validated localhost ADB-port handoff request."""
@@ -2057,13 +2202,49 @@ class ControlDirectiveStore:
             raise ValueError("ADB port must be an integer")
         if not 1 <= port <= 65535:
             raise ValueError("ADB port must be between 1 and 65535")
+        normalized_location = (
+            _normalize_emulator_location_identity(emulator_location)
+            if emulator_location is not None
+            else None
+        )
+        if emulator_location is not None and normalized_location is None:
+            raise ValueError("emulator_location is malformed")
+        if (
+            normalized_location is not None
+            and normalized_location["linux_adb_port"] != port
+        ):
+            raise ValueError(
+                "emulator_location linux_adb_port must match adb_port"
+            )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
+            request_id = uuid4().hex
             data["adb_port"] = port
             data["updated_at"] = timestamp
             data["adb_port_updated_at"] = timestamp
-            data["adb_port_request_id"] = uuid4().hex
+            data["adb_port_request_id"] = request_id
+            if normalized_location is not None:
+                data["emulator_location"] = {
+                    **normalized_location,
+                    "request_id": request_id,
+                    "selected_at": timestamp,
+                }
+            else:
+                existing = normalize_emulator_location(
+                    data.get("emulator_location")
+                )
+                if (
+                    existing is not None
+                    and existing.get("linux_adb_port") == port
+                ):
+                    data["emulator_location"] = {
+                        **existing,
+                        "request_id": request_id,
+                        "selected_at": timestamp,
+                    }
+                else:
+                    data.pop("emulator_location", None)
             if source:
                 data["updated_by"] = source
             return data
@@ -4198,6 +4379,7 @@ def _updated_at() -> str:
 __all__ = [
     "ControlDirectiveError",
     "ControlDirectiveStore",
+    "EMULATOR_LOCATION_SCHEMA_VERSION",
     "EXCLUSIVE_VALIDATION_OUTCOMES",
     "EXCLUSIVE_VALIDATION_STATUSES",
     "GATE_DECISION_STATUSES",
@@ -4210,6 +4392,8 @@ __all__ = [
     "VALID_MODES",
     "VALID_STATES",
     "normalize_automation_mode",
+    "normalize_emulator_location",
+    "normalize_emulator_location_request",
     "normalize_game_speed_target",
     "normalize_emulator_maintenance",
     "normalize_interactive_development_lease",

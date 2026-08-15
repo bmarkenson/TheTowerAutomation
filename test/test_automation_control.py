@@ -47,6 +47,24 @@ def _supervisor(control_file: Path) -> AutomationSupervisor:
     )
 
 
+def _emulator_location(*, port: int = 5555) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "host_id": "13f12ca2-13af-41fc-a8bf-f4fb2fd6e686",
+        "host_name": "WORKSTATION-B",
+        "linux_adb_port": port,
+        "bluestacks_listener": {
+            "adb_port": 5565,
+            "process_id": 4242,
+            "process_started_at": "2026-08-15T20:00:00+00:00",
+            "executable_path": (
+                r"C:\Program Files\BlueStacks_nxt\HD-Player.exe"
+            ),
+            "instance_name": "Nougat32",
+        },
+    }
+
+
 def _route_cli_to_live_service(monkeypatch, tmp_path) -> None:
     def service_for(path: str) -> ControlSurfaceService:
         control_path = Path(path)
@@ -1020,6 +1038,106 @@ def test_runtime_publishes_exact_receipts_for_every_control_dimension(
     assert supervisor.control_acknowledgements["strategy"]["request_id"] == (
         strategy["strategy_request_id"]
     )
+
+
+def test_control_store_keeps_emulator_location_coupled_to_adb_request(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+
+    selected = store.set_adb_port(
+        5555,
+        emulator_location=_emulator_location(),
+        source="test",
+    )
+    location = store.status()["emulator_location"]
+    assert location["request_id"] == selected["adb_port_request_id"]
+    assert location["host_name"] == "WORKSTATION-B"
+    assert location["bluestacks_listener"]["adb_port"] == 5565
+
+    reasserted = store.set_adb_port(5555, source="test")
+    assert reasserted["emulator_location"]["request_id"] == (
+        reasserted["adb_port_request_id"]
+    )
+    moved = store.set_adb_port(5575, source="test")
+    assert "emulator_location" not in moved
+
+    malformed = _emulator_location()
+    malformed["bluestacks_listener"] = {
+        "adb_port": 5565,
+        "instance_name": "Nougat32",
+        "process_started_at": {"not": "a timestamp"},
+    }
+    with pytest.raises(ValueError, match="emulator_location is malformed"):
+        store.set_adb_port(
+            5555,
+            emulator_location=malformed,
+            source="test",
+        )
+
+
+def test_paused_runtime_revalidates_declared_host_on_unchanged_port(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("PAUSED", source="test")
+    selected = store.set_adb_port(
+        5555,
+        emulator_location=_emulator_location(),
+        source="test",
+    )
+    handoffs = []
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+        adb_port_handoff=lambda _port: pytest.fail(
+            "plain port callback must not own a declared-host handoff"
+        ),
+        emulator_location_handoff=(
+            lambda port, location: handoffs.append((port, location)) or True
+        ),
+    )
+
+    supervisor.apply_control()
+
+    assert len(handoffs) == 1
+    assert handoffs[0][0] == 5555
+    assert handoffs[0][1]["host_name"] == "WORKSTATION-B"
+    assert supervisor.emulator_location == selected["emulator_location"]
+    receipt = supervisor.control_acknowledgements["adb_target"]
+    assert receipt["request_id"] == selected["adb_port_request_id"]
+
+
+def test_running_runtime_defers_declared_host_even_on_unchanged_port(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    store.set_adb_port(
+        5555,
+        emulator_location=_emulator_location(),
+        source="test",
+    )
+    handoffs = []
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+        emulator_location_handoff=(
+            lambda port, location: handoffs.append((port, location)) or True
+        ),
+    )
+
+    supervisor.apply_control()
+    assert handoffs == []
+
+    store.set_state("PAUSED", source="test")
+    supervisor.apply_control()
+    assert len(handoffs) == 1
 
 
 def test_legacy_directives_gain_exact_ids_without_operator_refresh(

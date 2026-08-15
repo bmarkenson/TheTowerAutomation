@@ -285,6 +285,7 @@ HOME_SETUP_MAX_ATTEMPTS = 3
 BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS = 20.0
 MAX_FORCED_BATTLE_IDENTITY_ATTEMPTS = 2
 FORCED_BATTLE_IDENTITY_RETRY_COOLDOWN_SECONDS = 30.0
+MAX_EMULATOR_LOCATION_ENTRIES = 64
 _BATTLE_SCOPE_UNSET = object()
 _REPORT_SCOPE_UNAVAILABLE = "report-scope-unavailable"
 _GENERIC_SESSION_PREFLIGHT_REASONS = frozenset(
@@ -360,6 +361,11 @@ class App:
             coins_jump_conf_floor=config.coins_jump_conf_floor,
             adb_port_handoff=(
                 self._handoff_adb_port if adb_target_session is not None else None
+            ),
+            emulator_location_handoff=(
+                self._handoff_emulator_location
+                if adb_target_session is not None
+                else None
             ),
         )
         if adb_target_session is not None:
@@ -681,6 +687,8 @@ class App:
         self._last_screenshot_capture_result = None
         self._control_observation_sequence = 0
         self._control_observation: Optional[Dict[str, Any]] = None
+        self._emulator_location_binding: Optional[Dict[str, Any]] = None
+        self._emulator_location_round: Optional[Dict[str, Any]] = None
         self._terminal_home_continuation: Optional[Dict[str, Any]] = None
         self._action_circuit_breaker = ActionCircuitBreaker(failure_limit=1)
         self._home_ad_gem_absence_candidate: Optional[
@@ -1355,6 +1363,7 @@ class App:
             self._active_round_identity_fingerprint = (
                 result.identity.fingerprint
             )
+            self._begin_emulator_location_round(result.identity.fingerprint)
             self._battle_identity_reconciliation_required = False
             self._bind_forced_identity_to_control_observation(
                 result.identity.fingerprint
@@ -1954,6 +1963,10 @@ class App:
             "profile_progression": terminal_save["profile_progression"],
             "terminal_save_report": terminal_save["terminal_save_report"],
         }
+        if binding["status"] == "bound":
+            context["emulator_location"] = self._terminal_emulator_location(
+                binding.get("active_round_identity_fingerprint")
+            )
         replay = getattr(self, "_emulator_replay_window", None)
         if (
             isinstance(replay, RestartReplayWindow)
@@ -2844,6 +2857,12 @@ class App:
             ),
             control_model={
                 "schema_version": 1,
+                "emulator_location": copy.deepcopy(
+                    getattr(self, "_emulator_location_binding", None)
+                ),
+                "emulator_location_round": copy.deepcopy(
+                    getattr(self, "_emulator_location_round", None)
+                ),
                 "emulator_maintenance": copy.deepcopy(
                     getattr(self, "_emulator_recovery_ack", None)
                 ),
@@ -17632,7 +17651,290 @@ class App:
 
         raise AssertionError("Home setup retry loop did not return")
 
-    def _handoff_adb_port(self, port: int) -> bool:
+    def _begin_emulator_location_round(self, identity: str) -> None:
+        """Start one host-location timeline at a forced battle identity."""
+
+        fingerprint = str(identity or "").strip()
+        if not fingerprint:
+            return
+        timeline = getattr(self, "_emulator_location_round", None)
+        if (
+            isinstance(timeline, Mapping)
+            and timeline.get(
+                "active_round_identity_fingerprint"
+            )
+            == fingerprint
+        ):
+            return
+        locations: list[dict[str, Any]] = []
+        binding = getattr(self, "_emulator_location_binding", None)
+        if isinstance(binding, Mapping):
+            locations.append(
+                self._emulator_location_entry(
+                    binding,
+                    source="battle_identity_bound",
+                )
+            )
+        self._emulator_location_round = {
+            "active_round_identity_fingerprint": fingerprint,
+            "coverage_complete": bool(locations),
+            "locations": locations,
+            "selection_count": len(locations),
+            "locations_truncated": False,
+            "last_host_id": (
+                str(locations[-1].get("host_id") or "")
+                if locations
+                else None
+            ),
+            "host_change_count": 0,
+            "mixed_hosts": False,
+        }
+
+    def _emulator_location_entry(
+        self,
+        location: Mapping[str, Any],
+        *,
+        source: str,
+    ) -> dict[str, Any]:
+        session = getattr(self, "_adb_target_session", None)
+        try:
+            target = session.snapshot() if session is not None else None
+        except Exception:
+            target = None
+        return {
+            **copy.deepcopy(dict(location)),
+            "applied_at": datetime.now(timezone.utc)
+            .astimezone()
+            .isoformat(timespec="seconds"),
+            "target_generation": (
+                target.generation
+                if target is not None and target.owned
+                else None
+            ),
+            "source": source,
+        }
+
+    def _record_emulator_location(
+        self,
+        location: Mapping[str, Any],
+        *,
+        active_round_identity: Optional[str],
+    ) -> None:
+        normalized = copy.deepcopy(dict(location))
+        previous = getattr(self, "_emulator_location_binding", None)
+        fingerprint = str(active_round_identity or "").strip()
+        if fingerprint:
+            timeline = getattr(self, "_emulator_location_round", None)
+            if (
+                not isinstance(timeline, Mapping)
+                or timeline.get(
+                    "active_round_identity_fingerprint"
+                )
+                != fingerprint
+            ):
+                initial: list[dict[str, Any]] = []
+                if isinstance(previous, Mapping):
+                    initial.append(
+                        self._emulator_location_entry(
+                            previous,
+                            source="observed_before_host_handoff",
+                        )
+                    )
+                self._emulator_location_round = {
+                    "active_round_identity_fingerprint": fingerprint,
+                    "coverage_complete": bool(initial),
+                    "locations": initial,
+                    "selection_count": len(initial),
+                    "locations_truncated": False,
+                    "last_host_id": (
+                        str(initial[-1].get("host_id") or "")
+                        if initial
+                        else None
+                    ),
+                    "host_change_count": 0,
+                    "mixed_hosts": False,
+                }
+            timeline = self._emulator_location_round
+            new_host_id = str(normalized.get("host_id") or "")
+            previous_host_id = str(timeline.get("last_host_id") or "")
+            if (
+                new_host_id
+                and previous_host_id
+                and new_host_id != previous_host_id
+            ):
+                timeline["host_change_count"] = int(
+                    timeline.get("host_change_count") or 0
+                ) + 1
+                timeline["mixed_hosts"] = True
+            timeline["last_host_id"] = new_host_id or None
+            timeline["selection_count"] = int(
+                timeline.get("selection_count") or 0
+            ) + 1
+            locations = timeline.get("locations")
+            if isinstance(locations, list):
+                entry = self._emulator_location_entry(
+                    normalized,
+                    source="operator_host_selection",
+                )
+                if len(locations) < MAX_EMULATOR_LOCATION_ENTRIES:
+                    locations.append(entry)
+                else:
+                    timeline["locations_truncated"] = True
+                    timeline["coverage_complete"] = False
+                    locations[-1] = entry
+        self._emulator_location_binding = normalized
+
+    def _terminal_emulator_location(
+        self,
+        active_round_identity: object,
+    ) -> dict[str, Any]:
+        """Return bounded host spans for completed-run attribution."""
+
+        fingerprint = str(active_round_identity or "").strip()
+        timeline = getattr(self, "_emulator_location_round", None)
+        locations: list[dict[str, Any]] = []
+        coverage_complete = False
+        locations_truncated = False
+        selection_count = 0
+        timeline_host_change_count: Optional[int] = None
+        timeline_mixed_hosts = False
+        binding = getattr(self, "_emulator_location_binding", None)
+        if (
+            fingerprint
+            and isinstance(timeline, Mapping)
+            and timeline.get("active_round_identity_fingerprint")
+            == fingerprint
+        ):
+            locations = [
+                copy.deepcopy(dict(item))
+                for item in timeline.get("locations", [])
+                if isinstance(item, Mapping)
+            ]
+            coverage_complete = bool(timeline.get("coverage_complete"))
+            locations_truncated = bool(timeline.get("locations_truncated"))
+            selection_count = int(
+                timeline.get("selection_count") or len(locations)
+            )
+            timeline_host_change_count = int(
+                timeline.get("host_change_count") or 0
+            )
+            timeline_mixed_hosts = bool(timeline.get("mixed_hosts"))
+        elif isinstance(binding, Mapping):
+            locations = [
+                self._emulator_location_entry(
+                    binding,
+                    source="terminal_current_only",
+                )
+            ]
+            selection_count = 1
+        host_ids = list(
+            dict.fromkeys(
+                str(item.get("host_id") or "")
+                for item in locations
+                if str(item.get("host_id") or "")
+            )
+        )
+        host_sequence = [
+            str(item.get("host_id") or "")
+            for item in locations
+            if str(item.get("host_id") or "")
+        ]
+        host_change_count = (
+            timeline_host_change_count
+            if timeline_host_change_count is not None
+            else sum(
+                current != previous
+                for previous, current in zip(
+                    host_sequence,
+                    host_sequence[1:],
+                )
+            )
+        )
+        mixed_hosts = timeline_mixed_hosts or len(host_ids) > 1
+        listener_lifetimes = {
+            (
+                str(item.get("host_id") or ""),
+                str(
+                    (item.get("bluestacks_listener") or {}).get(
+                        "process_started_at"
+                    )
+                    or ""
+                ),
+                (item.get("bluestacks_listener") or {}).get("process_id"),
+            )
+            for item in locations
+            if isinstance(item.get("bluestacks_listener"), Mapping)
+            and (item.get("bluestacks_listener") or {}).get("process_id")
+            is not None
+            and str(
+                (item.get("bluestacks_listener") or {}).get(
+                    "process_started_at"
+                )
+                or ""
+            )
+        }
+        analytics_host_id = (
+            host_ids[0]
+            if coverage_complete and not mixed_hosts and len(host_ids) == 1
+            else None
+        )
+        return {
+            "schema_version": 1,
+            "status": (
+                "complete"
+                if analytics_host_id is not None
+                else "mixed_hosts"
+                if mixed_hosts
+                else "partial"
+                if locations
+                else "unavailable"
+            ),
+            "coverage_complete": coverage_complete,
+            "mixed_hosts": mixed_hosts,
+            "host_change_count": host_change_count,
+            "selection_count": selection_count,
+            "locations_truncated": locations_truncated,
+            "listener_lifetime_count": len(listener_lifetimes),
+            "analytics_host_id": analytics_host_id,
+            "locations": locations,
+        }
+
+    def _handoff_emulator_location(
+        self,
+        port: int,
+        location: Mapping[str, object],
+    ) -> bool:
+        """Revalidate a declared Windows host even when its port is unchanged."""
+
+        context = self._current_player_save_observation_context()
+        if context is not None:
+            active_round_identity = context.active_round_identity_fingerprint
+        else:
+            active_round_identity = (
+                str(
+                    getattr(
+                        self,
+                        "_observed_active_round_identity_fingerprint",
+                        None,
+                    )
+                    or ""
+                ).strip()
+                or None
+            )
+        if not self._handoff_adb_port(port, revalidate_current=True):
+            return False
+        self._record_emulator_location(
+            location,
+            active_round_identity=active_round_identity,
+        )
+        return True
+
+    def _handoff_adb_port(
+        self,
+        port: int,
+        *,
+        revalidate_current: bool = False,
+    ) -> bool:
         """Move a paused live runtime to another localhost ADB endpoint."""
 
         session = self._adb_target_session
@@ -17666,7 +17968,21 @@ class App:
             return True
 
         try:
-            return session.handoff(target, validate=validate)
+            if revalidate_current:
+                moved = session.handoff(
+                    target,
+                    validate=validate,
+                    revalidate_current=True,
+                )
+            else:
+                moved = session.handoff(target, validate=validate)
+            if moved and not revalidate_current:
+                self._emulator_location_binding = None
+                if isinstance(
+                    getattr(self, "_emulator_location_round", None), dict
+                ):
+                    self._emulator_location_round["coverage_complete"] = False
+            return moved
         except Exception as exc:
             log(f"[CTRL] Unable to hand off ADB target to {target}: {exc}", "WARN")
             return False

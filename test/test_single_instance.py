@@ -99,6 +99,41 @@ def test_adb_target_session_failed_validation_retains_old_target(
             pass
 
 
+def test_adb_target_session_revalidates_same_port_as_new_generation(
+    tmp_path,
+    monkeypatch,
+):
+    lock_path = tmp_path / "automation-5555.lock"
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    session = AdbTargetSession(
+        "localhost:5555",
+        lock_factory=lambda target: SingleInstanceLock(target, lock_path),
+    )
+    validations = []
+
+    with session:
+        initial = session.snapshot()
+        assert not session.handoff(
+            "localhost:5555",
+            validate=lambda: validations.append("failed") or False,
+            revalidate_current=True,
+        )
+        assert session.snapshot() == initial
+
+        assert session.handoff(
+            "localhost:5555",
+            validate=lambda: validations.append("passed") or True,
+            revalidate_current=True,
+        )
+        rebound = session.snapshot()
+
+    assert validations == ["failed", "passed"]
+    assert rebound.target == initial.target == "localhost:5555"
+    assert rebound.generation == initial.generation + 1
+    metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert metadata["target_generation"] == rebound.generation
+
+
 def test_adb_target_snapshot_tracks_ownership_handoffs_and_release(
     tmp_path,
     monkeypatch,

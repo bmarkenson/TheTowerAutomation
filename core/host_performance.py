@@ -314,12 +314,18 @@ class HostPerformanceStore:
         self,
         *,
         current_run_id: str,
+        host_id: Optional[str] = None,
     ) -> Optional[tuple[object, ...]]:
         """Return the exact listener lifetime in the newest current-run row."""
 
         normalized_run_id = _optional_run_id(
             current_run_id,
             field="current_run_id",
+        )
+        normalized_host_id = (
+            _uuid_text(host_id, field="host_id")
+            if host_id is not None
+            else None
         )
         if normalized_run_id is None or not self.path.exists():
             return None
@@ -329,6 +335,7 @@ class HostPerformanceStore:
                     selected = self._current_run_listener_row(
                         connection,
                         normalized_run_id,
+                        normalized_host_id,
                     )
         except sqlite3.Error as exc:
             raise HostPerformanceStorageError(str(exc)) from exc
@@ -364,6 +371,7 @@ class HostPerformanceStore:
         current_run_id: str,
         since: datetime,
         limit: int = 8192,
+        host_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Return history for the current exact BlueStacks listener lifetime.
 
@@ -376,6 +384,11 @@ class HostPerformanceStore:
             current_run_id,
             field="current_run_id",
         )
+        normalized_host_id = (
+            _uuid_text(host_id, field="host_id")
+            if host_id is not None
+            else None
+        )
         if normalized_run_id is None or not self.path.exists():
             return []
         bounded_limit = max(1, min(int(limit), 8192))
@@ -386,6 +399,7 @@ class HostPerformanceStore:
                     selected = self._current_run_listener_row(
                         connection,
                         normalized_run_id,
+                        normalized_host_id,
                     )
                     if selected is None:
                         return []
@@ -441,6 +455,7 @@ class HostPerformanceStore:
         self,
         *,
         current_run_id: str,
+        host_id: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Summarize handles across the retained exact listener lifetime.
 
@@ -453,6 +468,11 @@ class HostPerformanceStore:
             current_run_id,
             field="current_run_id",
         )
+        normalized_host_id = (
+            _uuid_text(host_id, field="host_id")
+            if host_id is not None
+            else None
+        )
         if normalized_run_id is None or not self.path.exists():
             return None
         try:
@@ -461,6 +481,7 @@ class HostPerformanceStore:
                     selected = self._current_run_listener_row(
                         connection,
                         normalized_run_id,
+                        normalized_host_id,
                     )
                     if selected is None:
                         return None
@@ -604,16 +625,18 @@ class HostPerformanceStore:
     def _current_run_listener_row(
         connection: sqlite3.Connection,
         current_run_id: str,
+        host_id: Optional[str],
     ) -> Optional[tuple[object, object, object]]:
         return connection.execute(
             """
             SELECT host_id, adb_port, payload_json
             FROM host_performance_aggregates
             WHERE run_id = ?
+              AND (? IS NULL OR host_id = ?)
             ORDER BY window_end_utc DESC, ingested_at_utc DESC, rowid DESC
             LIMIT 1
             """,
-            (current_run_id,),
+            (current_run_id, host_id, host_id),
         ).fetchone()
 
     @staticmethod
