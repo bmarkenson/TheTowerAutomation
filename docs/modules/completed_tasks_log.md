@@ -39,6 +39,22 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Exact committed-candidate checkpoint guard
+
+- Exact process candidate `d472548` closes the gap that allowed a complete
+  checkpoint to start before its candidate was committed. The canonical
+  `development.py checkpoint` entry point now refuses staged, unstaged, and
+  untracked inputs before allocating checkpoint state or running any component;
+  after the components finish, it rechecks the same exact commit before it can
+  report `PASS` and prints that commit in the receipt.
+- The real dirty-worktree smoke refused the command in 0.6 seconds before
+  compilation or pytest. On committed `d472548`, all 28 focused development-
+  environment and documentation-lifecycle tests passed in 0.63 seconds; its
+  Python compilation, aggregate whitespace check, and real-worktree clean-
+  candidate inspection also passed. The already valid complete checkpoint at
+  runtime candidate `556f9c0` was retained under the invalidation rule and was
+  not repeated for this bounded, non-runtime process correction.
+
 ### 2026-08-15 Resolvable save-mapping observations
 
 - Exact production candidate `556f9c0` (implementation commit `58f656a`) makes
