@@ -247,15 +247,17 @@ The currently mapped profile checks are:
 
 Card recharge modes are mapped and validated. Damage Slider has exact authority
 for raw `6=1E-22%`, `9=1E-19%`, `10=1E-18%`, and `30=1E2%`. Orb Distance has
-exact context-bound authority for Farm `30.00m/30.00m/39.00m`, Farm
-`30.00m/31.80m/37.20m`, and Tournament
-`98.38m/87.16m/80.37m`; no formula or tolerance is inferred. The current Farm
-and `tournament_standard` eight-slot Module assignments are fully supported.
-The Tournament tuple enumerates both observed exact `workshopOrbDistance`
-encodings, `8.036911010742188` and `8.036909103393555`. The latter was paired
-[twice on version 1101](../issues/evidence/tournament-orb-distance-save-alias-2026-08-15.md)
-with the same visible `80.37m` value and unchanged Tournament Cards/Workshop
-context. These are explicit aliases, not a numeric tolerance.
+context-bound authority for Farm `30.00m/30.00m/39.00m`, Farm
+`30.00m/31.80m/37.20m`, and Tournament `98.38m/87.16m/80.37m`. Its
+`innerOrbDistance` and `workshopOrbDistance` mapping centers use one decimal
+place and each accept an absolute raw variance of `0.1`; `rangeLevelSelected`
+and the Cards/Workshop context remain exact. The decoder requires one unique
+semantic match, so an overlap between different tuple windows retains UI.
+The [two version-1101 Tournament pairings](../issues/evidence/tournament-orb-distance-save-alias-2026-08-15.md)
+both fall within the canonical Workshop center `8.0 ± 0.1`. This bounded raw
+noise policy does not infer a distance formula, interpolate a new semantic
+tuple, or relax context matching. The current Farm and `tournament_standard`
+eight-slot Module assignments are fully supported.
 Any other canonical Module is also supported in either exact same-family role,
 and an explicit nil assignment is supported as canonical `empty`. An unknown
 requested name or slot `infoIndex`, a family mismatch, duplicate installed
@@ -768,7 +770,7 @@ inherited claims continue to cite their originating authority.
 | `V1073-CFG-013` Legend Tournament conditions | Tournament identity fields plus exact-version generator | **Shortcut-ready.** Seventeen consecutive event sets agreed with historical/live UI evidence. | Retain Heat/Overheat audits; validate every additional league and new exact game version independently. |
 | `V1073-CFG-014` Modules | Four-entry `moduleEquipped` plus four typed `assistModuleSlots`; each exact assignment is one `ModuleItem` or explicit nil | **Shortcut-ready, exact-slot/family-scoped.** The canonical `module_info_indices` catalog contains all 24 current ID/name/family identities, six per family. `module_loadout` binds four exact Primary indices and four typed Assist slots to their families, identifies the Assist `equippedModule` field, grants `canonical_global_same_family` requirement authority, and maps only explicit nil to `empty`. The retained Farm, Tournament, and armor-variation placements are calibration evidence, not per-role allowlists. | Require all eight exact slot/family/role assignments, four unlocked exact-boolean Assist slots, and complete structure. Each assignment must be one canonical same-family name or explicit `empty`; installed names remain unique while `empty` may repeat. `enforce` requires equality; `observe` publishes any complete supported assignment without repair. Unknown IDs/names, cross-family values, duplicate installed names, missing arrays/slots/Assist item fields, locked Assist slots, changed types, ambiguous visual absence, unsupported authority scope, or enforced mismatch retain the full UI path. A new unknown ID generates global identity-review evidence; a local confirmation remains diagnostic until canonical integration. No rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
 | `V1073-CFG-015` Damage Slider | `damageAdjustmentLog`, exact calibrated value table | **Shortcut-ready, exact-value-scoped** for raw `6=1E-22%`, `9=1E-19%`, `10=1E-18%`, and `30=1E2%`. | Matching canonical requirements may omit UI. Unknown raw values, unsupported requested values, malformed data, invalid action modes, `force_ui`, and audit retain the complete slider route. No logarithmic formula, neighboring value, or tolerance is inferred. |
-| `V1073-CFG-016` Orb Distance | `rangeLevelSelected`, `innerOrbDistance`, `workshopOrbDistance`, plus Cards/Workshop context | **Shortcut-ready, exact-tuple-scoped** for Farm `30.00m/30.00m/39.00m`, Farm `30.00m/31.80m/37.20m`, and Tournament `98.38m/87.16m/80.37m`. The Tournament value enumerates two exact observed `workshopOrbDistance` encodings; both normalize to `80.37m` only in the same complete Tournament context. | Matching context and one enumerated exact tuple may omit UI; allowed range presets remain generic UI policy. Changed context, unknown tuple, malformed data, unsupported requirement, `force_ui`, or audit retains the complete route. `savedWorkshopOrbDistance` is not authoritative and no formula/tolerance is inferred. |
+| `V1073-CFG-016` Orb Distance | Exact `rangeLevelSelected` and Cards/Workshop context; one-decimal `innerOrbDistance` and `workshopOrbDistance` centers with absolute raw tolerance `0.1` | **Shortcut-ready, unique-tuple-scoped** for Farm `30.00m/30.00m/39.00m`, Farm `30.00m/31.80m/37.20m`, and Tournament `98.38m/87.16m/80.37m`. | One unique tolerance match in the exact context may omit UI; allowed range presets remain generic UI policy. An overlap between different semantic tuples, changed context, out-of-range raw value, malformed data, unsupported requirement, `force_ui`, or audit retains the complete route. `savedWorkshopOrbDistance` is not authoritative, and no distance formula or new semantic tuple is inferred from the tolerance. |
 | `V1073-PROFILE-001` card ownership, levels, mastery unlocks, and five 28-slot decks | `cardUnlocked`, `cardLevel`, `cardMasteryUnlocked`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | **Structural and implemented for completed-run comparison.** Exact vectors, source fields, and changed indices are retained; base/effective width remains distinct. | Build the complete card-ID and mastery-effect map before assigning names or effects to indices. The snapshot never suppresses Cards UI. |
 | `V1073-PROFILE-002` Workshop and Enhancements | Active Attack/Defense/Utility Workshop and Enhancement level/unlock arrays | **Structural and implemented for completed-run comparison.** Exact source-index levels and changed indices are retained. | Map every index; verify zero, nonzero, maxed, unlocked, and special-level semantics before naming an index or claiming an effective multiplier. |
 | `V1073-PROFILE-003` Research and Labs | `researchLevel`, `labLevel`, `labsUnlocked` | **Structural and implemented for completed-run comparison.** Exact level vectors and changed indices are retained. | Map Research IDs/levels; keep active queue, duration, completion time, and effective-value formulas independent until validated. |

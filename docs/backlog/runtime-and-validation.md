@@ -124,11 +124,14 @@ as checked checkpoint narrative here.
     for future bounded normalized candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.
     - [ ] Extend Damage Slider and Orb Distance only when a natural UI fallback
-      supplies one unique exact normalized value/tuple and the reviewed mapping
-      workflow accepts it. Current Farm/Tournament values are save-backed;
+      supplies one unique normalized value/tuple and the reviewed mapping
+      workflow accepts it. Damage Slider remains exact. Orb Distance permits
+      only its configured one-decimal raw centers with independent `±0.1`
+      variance after exact Range and Cards/Workshop context matching; ambiguous
+      overlap retains UI. Current Farm/Tournament values are save-backed;
       incompatible versions or shapes and unknown/unsupported values retain the
-      complete UI route. Do not infer neighboring slider values, an Orb formula,
-      or a tolerance from the calibrated points.
+      complete UI route. Do not infer neighboring slider values, an Orb
+      distance formula, or a new semantic tuple from the raw tolerance.
     - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
       weapon index's off/on polarity at a time with normalized
       before/change/restore evidence. Validate Spotlight Missiles off through

@@ -1974,7 +1974,7 @@ def test_v1101_exact_t18_damage_value_is_save_backed(monkeypatch):
         ),
     ),
 )
-def test_orb_distance_exact_farm_tuples_are_save_backed(
+def test_orb_distance_tenths_tolerance_maps_farm_tuples(
     monkeypatch,
     extra_raw,
     workshop_raw,
@@ -1992,16 +1992,24 @@ def test_orb_distance_exact_farm_tuples_are_save_backed(
     assert evidence.complete is True
     assert evidence.value == semantic_value
     assert evidence.diagnostics == {}
+    assert evidence.authority["raw_float_tolerance"] == 0.1
 
 
 @pytest.mark.parametrize("snapshot_fn", (_snapshot, _snapshot_v1101))
 @pytest.mark.parametrize(
-    "workshop_raw",
-    (8.036911010742188, 8.036909103393555),
+    ("extra_raw", "workshop_raw"),
+    (
+        (8.71588134765625, 8.036911010742188),
+        (8.71588134765625, 8.036909103393555),
+        (8.6, 7.9),
+        (8.7, 8.0),
+        (8.8, 8.1),
+    ),
 )
-def test_orb_distance_exact_tournament_tuple_is_save_backed(
+def test_orb_distance_tenths_tolerance_maps_tournament_tuple(
     monkeypatch,
     snapshot_fn,
+    extra_raw,
     workshop_raw,
 ):
     decoded = (
@@ -2013,7 +2021,7 @@ def test_orb_distance_exact_tournament_tuple_is_save_backed(
         currentPreset=1,
         currentWorkshopPreset=1,
         rangeLevelSelected=0,
-        innerOrbDistance=8.71588134765625,
+        innerOrbDistance=extra_raw,
         workshopOrbDistance=workshop_raw,
     )
 
@@ -2027,6 +2035,7 @@ def test_orb_distance_exact_tournament_tuple_is_save_backed(
         "workshop": "80.37m",
     }
     assert evidence.diagnostics == {}
+    assert evidence.authority["raw_float_tolerance"] == 0.1
 
 
 def test_orb_distance_save_match_selects_observed_range_preset(monkeypatch):
@@ -2217,10 +2226,12 @@ def test_malformed_damage_slider_mapping_fails_closed(mutation):
         lambda decoded: decoded.update(rangeLevelSelected=True),
         lambda decoded: decoded.update(innerOrbDistance=3),
         lambda decoded: decoded.update(workshopOrbDistance=float("inf")),
-        lambda decoded: decoded.update(innerOrbDistance=3.0000000000000004),
+        lambda decoded: decoded.update(innerOrbDistance=2.89),
+        lambda decoded: decoded.update(workshopOrbDistance=4.01),
+        lambda decoded: decoded.update(innerOrbDistance=3.11),
     ),
 )
-def test_orb_distance_changed_or_drifted_raw_tuple_fails_closed(mutation):
+def test_orb_distance_invalid_or_outside_tolerance_fails_closed(mutation):
     decoded = _decoded_save()
     decoded.update(
         rangeLevelSelected=0,
@@ -2235,6 +2246,23 @@ def test_orb_distance_changed_or_drifted_raw_tuple_fails_closed(mutation):
     assert evidence.value is None
 
 
+def test_orb_distance_ambiguous_tolerance_overlap_fails_closed():
+    decoded = _decoded_save()
+    decoded.update(
+        rangeLevelSelected=0,
+        innerOrbDistance=3.1,
+        workshopOrbDistance=3.8,
+    )
+
+    evidence = _orb_distance_evidence(decoded, VERSION_MAPPING)
+
+    assert evidence.status == "unmapped"
+    assert evidence.value is None
+    assert evidence.reason == (
+        "Orb Distance raw tuple matches multiple mapped values within tolerance"
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -2243,6 +2271,9 @@ def test_orb_distance_changed_or_drifted_raw_tuple_fails_closed(mutation):
         ),
         lambda mapping: mapping["orb_distance"]["values"][0]["raw"].update(
             extra=float("nan")
+        ),
+        lambda mapping: mapping["orb_distance"]["values"][0]["raw"].update(
+            extra=3.18
         ),
         lambda mapping: mapping["orb_distance"]["values"].append(
             copy.deepcopy(mapping["orb_distance"]["values"][0])
@@ -2263,6 +2294,22 @@ def test_malformed_orb_distance_mapping_fails_closed(mutation):
 
     assert evidence.status == "unmapped"
     assert evidence.reason == "Orb Distance mapping values are malformed"
+
+
+@pytest.mark.parametrize(
+    "raw_float_tolerance",
+    (True, 1, 0.0, float("inf")),
+)
+def test_malformed_orb_distance_tolerance_fails_closed(
+    raw_float_tolerance,
+):
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    mapping["orb_distance"]["raw_float_tolerance"] = raw_float_tolerance
+
+    evidence = _orb_distance_evidence(_decoded_save(), mapping)
+
+    assert evidence.status == "unmapped"
+    assert evidence.reason == "Orb Distance mapping is malformed"
 
 
 @pytest.mark.parametrize(

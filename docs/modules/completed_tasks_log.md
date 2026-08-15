@@ -57,6 +57,19 @@ resolved dossier instead of copying its detail.
   tests in 454.66 seconds using development-environment fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 
+### 2026-08-15 Orb Distance tenths-tolerance policy
+
+- Operator policy now treats one decimal place as sufficient for the raw
+  `innerOrbDistance` and `workshopOrbDistance` save fields and accepts an
+  independent `±0.1` variance around each configured center. Range and
+  Cards/Workshop context remain exact, and any overlap between different
+  semantic tuples retains UI rather than guessing.
+- Exact candidate `3b603c7` passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,858 repository tests in 423.44 seconds using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-15 Tournament attachment Orb Distance save alias
 
 - [`ISSUE-2026-051`](../issues/resolved-2026.md#tournament-attachment-reopened-orb-distance-despite-a-bound-save)
