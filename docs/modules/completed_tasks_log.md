@@ -39,6 +39,51 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 proactive BlueStacks maintenance policy
+
+- Code commit `5744255`, integrated at exact candidate `2c8d842`, adds three
+  independently toggleable automatic restart lanes behind the existing
+  default-off master option. The new proactive handle and severe in-run lanes
+  default off; completed-run confirmation retains the prior child behavior;
+  preventive deferral during external contention defaults on. Manual restart
+  remains independent, and accepted durable requests always reconcile even if
+  Preferences change later.
+- The preventive lane requires a ten-minute recent median of at least 25,000
+  OS handles and at least +10,000 over the retained low-water of the exact
+  BlueStacks listener lifetime, with a stable process set. The severe lane
+  reuses the passive five-minute save scheduler and requires three intervals at
+  or below 60% of a lower envelope drawn from at least two same-regime runs in
+  a broad 1,000-wave band, normal effective speed, sustained handle growth,
+  and clear host attribution. These are conservative maintenance thresholds,
+  not a claim that handle count alone proves causation.
+- Exact candidate `2c8d842` passed the complete checkpoint: state definitions,
+  clickmap integrity with zero errors and 44 established informational orphans,
+  and all 2,703 Python tests in 434.52 seconds. Portable native contracts passed
+  191 tests, and the WPF Release cross-build completed with zero errors. The
+  read-only NuGet vulnerability-cache warning did not affect compilation.
+- Production advanced from `66a460e` to `2c8d842` behind rollback tag
+  `production-before-20260815T014747Z-66a460e`. Updated control-surface PID
+  `1813955` served API revision 43 with
+  `bluestacks_maintenance_policy_v1`; automation PID `1814646` owned the exact
+  `localhost:5555` lock and freshly acknowledged `PAUSED` at Home. Deployment
+  sent no device or battle input.
+- The complete native package was published from `2c8d842` at
+  `2026-08-15T01:50:00Z`. Current Control Surface is 72,488,788 bytes with
+  SHA-256
+  `9ac69dbbe2d52d57c8af076f16553aa19beed3a1fd2b51ae24da76fdaf91fc8b`;
+  current Tunnel Host is 35,172,127 bytes with SHA-256
+  `f8354c3bd5f6a579395c831f4ebaaefad2387397902758ad4c23a161eaeae28d`.
+  Retained slot 1 is the prior `f01e050` pair (72,481,195-byte Control Surface
+  `f48d3cf595673dcee397d12ba3c3db942234fc2a42d43fe4c79349ae08fd7a5e`;
+  35,172,119-byte Tunnel Host
+  `5e313c2d90bb33c2f443abe9d1b6ecc6dda41517d54da6181f45fee03e88905c`).
+  Retained slot 2 is the prior `5d83b79` pair (72,481,183-byte Control Surface
+  `6564152e1e065f37ca7255a2a0c1c84d06723d1387b2a3c6e34fc91facf9497d`;
+  35,172,099-byte Tunnel Host
+  `9985212d9285da747063a267bbf0c55842cb59295e62dbad739b3115fbe5059b`).
+  Cross-publication does not establish Windows runtime behavior; operator-side
+  WPF lifecycle and policy-display validation remain pending.
+
 ### 2026-08-14 check-local save repair authority
 
 - Commit `91f8d60` resolves the recurrence of
