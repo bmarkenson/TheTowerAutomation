@@ -468,6 +468,9 @@ class App:
             if self._player_save_acquirer is not None
             else None
         )
+        self._mission_mgr.configure_battle_identity_persistence(
+            self._battle_identity_store.record_session_preflight
+        )
         self._player_save_preflight_coordinator = (
             PlayerSavePreflightCoordinator(
                 acquirer=self._player_save_acquirer,
@@ -12823,9 +12826,26 @@ class App:
             None,
         )
         if confirmed_scope_id:
-            self._mission_mgr.reuse_session_preflight_for_confirmed_attachment(
-                str(confirmed_scope_id)
-            )
+            identity_fingerprint = str(
+                getattr(self, "_active_round_identity_fingerprint", None)
+                or ""
+            ).strip()
+            receipt = None
+            store = getattr(self, "_battle_identity_store", None)
+            try:
+                record = store.active() if store is not None else None
+            except BattleIdentityStoreError:
+                record = None
+            if (
+                record is not None
+                and record.fingerprint == identity_fingerprint
+            ):
+                receipt = record.session_preflight
+            if identity_fingerprint and receipt is not None:
+                self._mission_mgr.reuse_session_preflight_for_confirmed_attachment(
+                    identity_fingerprint,
+                    receipt,
+                )
             if getattr(self, "_exclusive_validation_ownership_hold", False):
                 self._exclusive_validation_ownership_hold = False
                 log(

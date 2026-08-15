@@ -5,11 +5,9 @@ from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 from utils.logger import (
-    get_activity_scope,
     log,
     log_mission,
     normalize_session_preflight_report_evidence,
-    record_activity_scope_session_preflight,
     start_activity_scope,
 )
 from automation.missions.base import BaseMission, MissionContext
@@ -85,56 +83,33 @@ def _validated_complete_session_preflight_report(
 def _validated_session_preflight_receipt(
     receipt: object,
     *,
-    run_id: str,
+    identity_fingerprint: str,
     strategy: str,
     configuration_fingerprint: str,
-) -> Optional[tuple[int, Optional[dict[str, object]]]]:
-    """Return a matching receipt version and its report-only evidence."""
+) -> Optional[dict[str, object]]:
+    """Return evidence bound to one exact save-backed battle identity."""
 
     if not isinstance(receipt, Mapping):
         return None
-    schema_version = receipt.get("schema_version")
-    if type(schema_version) is not int or schema_version not in {1, 2}:
-        return None
     if not (
-        receipt.get("status") == "completed"
+        receipt.get("schema_version") == 1
+        and str(receipt.get("identity_fingerprint") or "")
+        == identity_fingerprint
         and str(receipt.get("strategy") or "") == strategy
         and str(receipt.get("configuration_fingerprint") or "")
         == configuration_fingerprint
     ):
         return None
-    if schema_version == 1:
-        return 1, None
-
     completed_at = str(receipt.get("completed_at") or "").strip()
     try:
         parsed_completed_at = datetime.fromisoformat(completed_at)
     except ValueError:
         return None
-    if (
-        parsed_completed_at.tzinfo is None
-        or str(receipt.get("activity_scope_run_id") or "") != run_id
-    ):
+    if parsed_completed_at.tzinfo is None:
         return None
-    envelope = receipt.get("evidence")
-    if not isinstance(envelope, Mapping):
-        return None
-    if not (
-        type(envelope.get("schema_version")) is int
-        and envelope.get("schema_version") == 1
-        and envelope.get("status") == "available"
-        and str(envelope.get("activity_scope_run_id") or "") == run_id
-        and str(envelope.get("strategy") or "") == strategy
-        and str(envelope.get("configuration_fingerprint") or "")
-        == configuration_fingerprint
-    ):
-        return None
-    normalized = _validated_complete_session_preflight_report(
-        envelope.get("payload")
+    return _validated_complete_session_preflight_report(
+        receipt.get("evidence")
     )
-    if normalized is None:
-        return None
-    return 2, normalized
 
 
 class MissionManager:
@@ -167,6 +142,9 @@ class MissionManager:
         self._session_preflight_receipt_key: Optional[tuple[str, str]] = None
         self._session_preflight_receipt_warning_key: Optional[
             tuple[str, str]
+        ] = None
+        self._persist_identity_session_preflight_fn: Optional[
+            Callable[..., bool]
         ] = None
         self._battle_lifecycle = BattleLifecycle(
             adopt_initial_battle=self._startup_gates_deferred,
@@ -438,8 +416,18 @@ class MissionManager:
             return None
         return strategy_name, fingerprint
 
+    def configure_battle_identity_persistence(
+        self,
+        persist_fn: Callable[..., bool],
+    ) -> None:
+        """Bind battle-local receipt persistence without owning its storage."""
+
+        if not callable(persist_fn):
+            raise TypeError("battle identity persistence must be callable")
+        self._persist_identity_session_preflight_fn = persist_fn
+
     def persist_session_preflight_completion(self) -> bool:
-        """Persist a scope-bound receipt after the configured checks finish."""
+        """Persist completed checks under the forced active-round identity."""
 
         if self._session_preflight_receipt_key is not None:
             return False
@@ -465,14 +453,14 @@ class MissionManager:
         identity = self._session_preflight_identity()
         if identity is None:
             return False
-        scope = get_activity_scope()
-        if scope is None:
-            return False
-        run_id = str(scope.get("run_id") or "").strip()
-        if not run_id:
+        active_round_identity = str(
+            self.ctx.data.get("active_round_identity_fingerprint") or ""
+        ).strip()
+        persist_fn = self._persist_identity_session_preflight_fn
+        if not active_round_identity or persist_fn is None:
             return False
         strategy_name, fingerprint = identity
-        receipt_key = (run_id, fingerprint)
+        receipt_key = (active_round_identity, fingerprint)
         if self._session_preflight_receipt_key == receipt_key:
             return False
         evidence = _validated_complete_session_preflight_report(
@@ -488,23 +476,14 @@ class MissionManager:
                 )
                 self._session_preflight_receipt_warning_key = receipt_key
             return False
-        existing = _validated_session_preflight_receipt(
-            scope.get("session_preflight"),
-            run_id=run_id,
-            strategy=strategy_name,
-            configuration_fingerprint=fingerprint,
-        )
-        if existing is not None and existing[0] == 2:
-            self._session_preflight_receipt_key = receipt_key
-            return False
         try:
-            updated = record_activity_scope_session_preflight(
-                run_id=run_id,
+            updated = persist_fn(
+                identity_fingerprint=active_round_identity,
                 strategy=strategy_name,
                 configuration_fingerprint=fingerprint,
                 evidence=evidence,
             )
-        except ValueError as exc:
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
             if self._session_preflight_receipt_warning_key != receipt_key:
                 log(
                     "[SESSION_PREFLIGHT] Detailed report evidence could not "
@@ -513,81 +492,59 @@ class MissionManager:
                 )
                 self._session_preflight_receipt_warning_key = receipt_key
             return False
-        if updated is None:
+        if updated is not True:
             return False
         self._session_preflight_receipt_key = receipt_key
         self._session_preflight_receipt_warning_key = None
         log(
             "[SESSION_PREFLIGHT] Completed configuration checks and detailed "
-            f"report evidence saved for current run scope={run_id}",
+            "report evidence saved for active battle identity="
+            f"{active_round_identity[:16]}",
             "DEBUG",
         )
         return True
 
     def reuse_session_preflight_for_confirmed_attachment(
         self,
-        run_id: str,
+        identity_fingerprint: str,
+        receipt: object,
     ) -> bool:
         """Suppress repeated checks only for a proven same-battle receipt."""
 
-        expected_run_id = str(run_id or "").strip()
+        expected_identity = str(identity_fingerprint or "").strip()
         identity = self._session_preflight_identity()
         if (
-            not expected_run_id
+            not expected_identity
             or identity is None
             or not self._startup_gates_deferred
             or not self._battle_lifecycle.active_battle_observed
-        ):
-            return False
-        scope = get_activity_scope()
-        if (
-            scope is None
-            or str(scope.get("run_id") or "") != expected_run_id
+            or str(
+                self.ctx.data.get("active_round_identity_fingerprint") or ""
+            ).strip()
+            != expected_identity
         ):
             return False
         strategy_name, fingerprint = identity
-        receipt = scope.get("session_preflight")
-        validated = _validated_session_preflight_receipt(
+        restored_evidence = _validated_session_preflight_receipt(
             receipt,
-            run_id=expected_run_id,
+            identity_fingerprint=expected_identity,
             strategy=strategy_name,
             configuration_fingerprint=fingerprint,
         )
-        if validated is None:
+        if restored_evidence is None:
             return False
-        receipt_schema, restored_evidence = validated
 
         self.ctx.data["attached_session_preflight_reused"] = True
         self.ctx.data["attached_validation_requested"] = False
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["attached_validation_requested"] = False
         mv["gc_session_preflight_restart_available"] = False
-        self._session_preflight_receipt_key = (expected_run_id, fingerprint)
-        if restored_evidence is not None:
-            self.ctx.data[RESTORED_SESSION_PREFLIGHT_REPORT_KEY] = (
-                restored_evidence
-            )
-            evidence_summary = "; detailed report evidence restored"
-        else:
-            legacy_report: dict[str, object] = {
-                "schema_version": 1,
-                "status": "unavailable",
-                "reason": "legacy_completed_receipt_has_no_report_evidence",
-                "source": "activity_scope_session_preflight",
-                "receipt_schema_version": receipt_schema,
-                "activity_scope_run_id": expected_run_id,
-                "strategy": strategy_name,
-                "configuration_fingerprint": fingerprint,
-            }
-            if isinstance(receipt, Mapping):
-                completed_at = str(receipt.get("completed_at") or "").strip()
-                if completed_at:
-                    legacy_report["completed_at"] = completed_at
-            self.ctx.data[RESTORED_SESSION_PREFLIGHT_REPORT_KEY] = legacy_report
-            evidence_summary = "; legacy receipt has no detailed report evidence"
+        self._session_preflight_receipt_key = (expected_identity, fingerprint)
+        self.ctx.data[RESTORED_SESSION_PREFLIGHT_REPORT_KEY] = restored_evidence
         log(
             "[SESSION_PREFLIGHT] Reusing completed configuration checks for "
-            "the continuity-confirmed attached battle" + evidence_summary,
+            "the save-identity-confirmed attached battle; detailed report "
+            "evidence restored",
             "INFO",
             console=True,
         )
