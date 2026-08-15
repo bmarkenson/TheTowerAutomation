@@ -39,6 +39,23 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Minimum-sufficient validation gates
+
+- Exact candidate `16e7e2d` makes validation risk-driven and composable. A
+  complete checkpoint is selected only when its additional compilation,
+  state-definition, clickmap, and full-suite coverage addresses a named risk;
+  it is never a generic pre-commit, confidence, closeout, or cleanup step.
+- Documentation, ordinary test-only changes, and transient test output do not
+  independently select or invalidate a complete checkpoint. Prior component
+  results carry across reviewed unaffected deltas, while failed, incomplete,
+  or invalidated coverage and explicit diagnostic requests retain their
+  necessary rerun paths.
+- The exact documentation/test-only gate passed all 3 lifecycle tests,
+  whitespace validation, and the changed anchor check without running a full
+  checkpoint or creating ignored runtime evidence. Mandatory `AGENTS.md` plus
+  `docs/new_thread.md` reading increased from 1,309 to 1,358 words. No live,
+  service, device, or native-package action was applicable.
+
 ### 2026-08-15 Default repository outcome closure
 
 - Policy commit `9d4466d` makes every repository-changing coordinator the
