@@ -36,6 +36,11 @@ as checked checkpoint narrative here.
     or start a battle solely for this observation. Unknown IDs/names,
     family/structure failures, duplicate installed names, ambiguous visual
     absence, and mismatches must retain the complete UI route.
+  - [ ] Deploy and confirm the exact Assist assignment-member repair in
+    [ISSUE-2026-048](../issues/open-2026.md#assist-module-assignments-always-fell-back-to-modules-ui).
+    One fresh ordinary Home or terminal boundary must publish all eight Module
+    assignments from the save and omit Modules UI. Do not change or empty a
+    Module solely to manufacture the confirmation.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping

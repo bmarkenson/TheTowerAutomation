@@ -96,3 +96,24 @@ Workshop, or Tournament-entry evidence releases it.
 The feature-worktree checkpoint passed compilation, state/clickmap validation,
 and all 2,430 repository tests in 378.10 seconds. This is repository evidence
 only; deployment and explicitly authorized live confirmation remain pending.
+
+## 2026-08-15 recurrence
+
+The same production implementation repeated the defect during the next
+operator-requested one-shot Tournament validation. The source was the same
+production `logs/actions.log`, read without writes on 2026-08-15. The bounded
+read-only extraction selected lines 112305–112348.
+
+| Local timestamp (PDT) | Retained record |
+| --- | --- |
+| 01:26:38 | The runtime created ordinary-validation request `8f9a5bf1e0de4d67afc35d851dd3ec3c`. |
+| 01:26:41 | The verified Home `NEW_BATTLE` input was dispatched after the durable claim. |
+| 01:26:48 | The owned battle reached `RUNNING`; the runtime announced active Damage Slider and Ultimate Weapon validation. |
+| 01:26:48–01:31:37 | The battle advanced to wave 330 at x5.0 with no validation `INPUT`. |
+| 01:31:44–01:31:57 | The five-minute timeout opened Menu and Exit Battle, then dispatched exactly one owned Surrender. |
+| 01:32:00 | The owned battle reached Game Over. No verified Home cleanup input followed. |
+| 01:32:47–01:32:53 | Operator navigation changed the observed screen from Game Over to Modules and then Workshop; these transitions had no automation `INPUT` row. |
+
+This recurrence confirms that the 2026-08-12 authority and cleanup defects
+were still deployed. The operator's later manual navigation is not evidence
+that automation completed cleanup.

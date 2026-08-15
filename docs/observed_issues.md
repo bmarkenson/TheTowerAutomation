@@ -237,6 +237,21 @@ current runtime state.
 
 ## Repairs awaiting confirmation
 
+### Assist module assignments always fell back to Modules UI
+
+**Stable ID:** `ISSUE-2026-048` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- The deployed version-1073/1101 mappings named the Assist assignment member
+  `module`, while stable version-1101 saves expose `equippedModule`; the
+  synthetic fixture repeated the wrong name. Complete assignments therefore
+  became `ui_required`, and Tournament's observation-only policy correctly
+  inspected but did not repair them.
+- Load the [dossier](issues/open-2026.md#assist-module-assignments-always-fell-back-to-modules-ui)
+  before changing Module save shape, exact empty-slot semantics, or the
+  save/UI fallback. Next: deploy the exact-field repair and confirm one fresh
+  ordinary boundary reports complete save-backed Modules without opening the
+  Modules UI; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Farm Bot preset switch required more Event medals than were available
 
 **Stable ID:** `ISSUE-2026-008` · **Lifecycle:** `repair_awaiting_confirmation`

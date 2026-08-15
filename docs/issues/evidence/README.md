@@ -4,6 +4,13 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-15 Assist module assignment field mismatch
+
+[`assist-module-assignment-field-2026-08-15.md`](assist-module-assignment-field-2026-08-15.md)
+preserves the two post-deployment save failures, the resulting observation-only
+Modules UI fallback, and a value-redacted exact-target shape inspection that
+established `ISSUE-2026-048`.
+
 ## 2026-08-14 Start Battle strategy linearization failure
 
 [`start-battle-strategy-linearization-2026-08-14.md`](start-battle-strategy-linearization-2026-08-14.md)
