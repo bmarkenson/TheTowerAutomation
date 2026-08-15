@@ -929,8 +929,14 @@ BlueStacks process; restarting or retargeting BlueStacks resets it. Unbound,
 legacy, or multi-instance-ambiguous telemetry remains visible but cannot
 authorize automatic recovery.
 
-**Preferences > BlueStacks Recovery** is a default-off opt-in for automatic
-restart after Linux confirms a sustained emulator-degradation signature.
+**Preferences > BlueStacks Recovery** has a default-off master option for
+automatic coordinated restarts. Its retained child options independently
+enable the preventive handle ceiling, severe save-backed in-run loss, and
+completed-run confirmation, plus default-on deferral of preventive restarts
+during external host contention. Detection and Diagnostics remain active while
+any option is disabled, including an explicit **would trigger (disabled)**
+state. The two proactive lanes default off on upgrade; the completed-run child
+retains the prior automatic behavior if the master was already enabled.
 **System > Diagnostics > Restart BlueStacks…** is the confirmed on-demand path
 through the same recovery coordinator and does not require the detector or
 automatic opt-in. Before using either path:
@@ -987,8 +993,16 @@ handles plus the detector's recent median, low-water, ratio, delta, stable
 window count, exact PID, and contributing GUI-session count separately from
 coordinator progress. The confirmation explains the possible non-earning
 replay through the old high-water and the End run/New Battle fallback. The
-thresholds, cooldown,
-and exact authority handshake are specified in the
+revision-43 preventive lane requires a ten-minute recent median of at least
+25,000 handles and at least +10,000 from the retained low-water of the exact
+listener lifetime. The severe in-run lane requires three consecutive passive
+save intervals at or below 60% of a tolerant lower envelope from the same
+strategy/configuration, save mapping, and broad wave band, at normal effective
+speed with handle corroboration. Sustained other-process CPU/GPU or memory
+pressure defers the preventive lane by default and always invalidates
+performance attribution. These thresholds are a conservative maintenance
+policy, not proof that handle count is itself causal. The cooldown and exact
+authority handshake are specified in the
 [control-surface architecture](../../docs/architecture/control_surface.md#automatic-bluestacks-degradation-recovery).
 
 BlueStacks Home can report the screen as landscape before The Tower launches.
@@ -1041,7 +1055,7 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 42, `current_battle_perks_v1`,
+current Windows build requires revision 43, `current_battle_perks_v1`,
 `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,
 `save_backed_setup_capture_v2`, `save_mapping_staged_candidate_v1`,
@@ -1050,6 +1064,7 @@ current Windows build requires revision 42, `current_battle_perks_v1`,
 `terminal_dispositions_v2`,
 `bluestacks_maintenance_v2`, `bluestacks_operator_restart_v1`,
 `bluestacks_listener_lifetime_telemetry_v1`,
+`bluestacks_maintenance_policy_v1`,
 `managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`,
 `strategy_authoring_preset_local_copy_v1`, and

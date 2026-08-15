@@ -92,7 +92,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 42
+CONTROL_SURFACE_REVISION = 43
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -111,6 +111,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "bluestacks_maintenance_v2",
     "bluestacks_operator_restart_v1",
     "bluestacks_listener_lifetime_telemetry_v1",
+    "bluestacks_maintenance_policy_v1",
     "interactive_development_lease_v1",
     "interactive_development_owned_battle_v1",
     "managed_custom_module_presets_v1",
@@ -1563,6 +1564,14 @@ class ControlSurfaceService:
             if isinstance(strategy_scope, Mapping)
             else ""
         )
+        active_run_performance = (
+            control_model.get("active_run_performance")
+            if isinstance(control_model, Mapping)
+            and isinstance(
+                control_model.get("active_run_performance"), Mapping
+            )
+            else None
+        )
         run_id = (
             str(current_run.get("run_id") or "").strip()
             if isinstance(current_run, Mapping)
@@ -1598,7 +1607,24 @@ class ControlSurfaceService:
                 "candidate_battle_ids": [],
                 "baseline_battle_ids": [],
             }
-        cache_key = (run_id, current_strategy, listener_marker)
+        checkpoints = (
+            active_run_performance.get("checkpoints")
+            if isinstance(active_run_performance, Mapping)
+            else None
+        )
+        performance_marker = (
+            str(checkpoints[-1].get("captured_at") or "")
+            if isinstance(checkpoints, list)
+            and checkpoints
+            and isinstance(checkpoints[-1], Mapping)
+            else ""
+        )
+        cache_key = (
+            run_id,
+            current_strategy,
+            listener_marker,
+            performance_marker,
+        )
         with self._emulator_degradation_cache_lock:
             cached = self._emulator_degradation_cache
             if (
@@ -1632,7 +1658,12 @@ class ControlSurfaceService:
                     aggregates = (
                         self.host_performance_store.recent_bluestacks_lifetime_aggregates(
                             current_run_id=run_id,
-                            since=assessed_at - timedelta(hours=12),
+                            since=assessed_at - timedelta(minutes=30),
+                        )
+                    )
+                    lifetime_handle_summary = (
+                        self.host_performance_store.bluestacks_lifetime_handle_summary(
+                            current_run_id=run_id,
                         )
                     )
                 except (OSError, HostPerformanceStorageError) as exc:
@@ -1652,6 +1683,8 @@ class ControlSurfaceService:
                     aggregates,
                     current_strategy=current_strategy,
                     current_run_id=run_id,
+                    active_run_performance=active_run_performance,
+                    lifetime_handle_summary=lifetime_handle_summary,
                     assessed_at=assessed_at,
                 )
                 self._emulator_degradation_cache = (
@@ -1663,13 +1696,29 @@ class ControlSurfaceService:
             AUTOMATIC_RESTART_COOLDOWN.total_seconds()
         )
 
-        def suppress(status: str, reason: str) -> dict[str, Any]:
+        def gated(
+            value: Mapping[str, Any],
+            *,
+            available: bool,
+            code: str,
+            reason: str,
+        ) -> dict[str, Any]:
             return {
+                **dict(value),
+                "automatic_request_gate": {
+                    "available": available,
+                    "code": code,
+                    "reason": reason,
+                },
+            }
+
+        def suppress(status: str, reason: str) -> dict[str, Any]:
+            return gated({
                 **assessment,
                 "status": status,
                 "automatic_ready": False,
                 "reason": reason,
-            }
+            }, available=False, code=status, reason=reason)
 
         if control.get("emulator_maintenance_error"):
             return suppress(
@@ -1708,8 +1757,22 @@ class ControlSurfaceService:
                     remaining.total_seconds()
                 )
                 return blocked
-        if assessment.get("automatic_ready") is not True:
-            return assessment
+        triggers = assessment.get("automatic_triggers")
+        any_policy_ready = bool(
+            isinstance(triggers, Mapping)
+            and any(
+                isinstance(trigger, Mapping)
+                and trigger.get("ready") is True
+                for trigger in triggers.values()
+            )
+        )
+        if not any_policy_ready:
+            return gated(
+                assessment,
+                available=False,
+                code="no_trigger_ready",
+                reason="no automatic BlueStacks restart trigger is ready",
+            )
         if control.get("state") != "RUNNING":
             return suppress(
                 "control_not_running",
@@ -1739,7 +1802,12 @@ class ControlSurfaceService:
                 "runtime_not_ready",
                 "fresh unheld RUNNING battle authority is required",
             )
-        return assessment
+        return gated(
+            assessment,
+            available=True,
+            code="available",
+            reason="fresh unheld RUNNING battle authority is available",
+        )
 
     def apply_host_maintenance(
         self,
@@ -1766,19 +1834,29 @@ class ControlSurfaceService:
         request_id = str(request.get("request_id") or "").strip().lower()
         if operation not in {
             "request",
+            "request_automatic",
             "request_operator",
             "acknowledge",
             "complete",
             "fail",
         }:
             raise ControlSurfaceRequestError(
-                "operation must be request, request_operator, acknowledge, "
-                "complete, or fail"
+                "operation must be request, request_automatic, "
+                "request_operator, acknowledge, complete, or fail"
             )
         if operation == "request":
             return self._request_emulator_maintenance(
                 request,
                 initiator="automatic_detector",
+                now=now,
+            )
+        if operation == "request_automatic":
+            return self._request_emulator_maintenance(
+                request,
+                initiator="automatic_detector",
+                automatic_trigger_kind=str(
+                    request.get("trigger_kind") or ""
+                ).strip().lower(),
                 now=now,
             )
         if operation == "request_operator":
@@ -1909,6 +1987,7 @@ class ControlSurfaceService:
         request: Mapping[str, Any],
         *,
         initiator: str,
+        automatic_trigger_kind: Optional[str] = None,
         now: Optional[float],
     ) -> dict[str, Any]:
         """Create one detector or operator request bound before the hold."""
@@ -1916,17 +1995,85 @@ class ControlSurfaceService:
         current = self.status(now=now)
         assessment = current.get("emulator_degradation") or {}
         maintenance = current.get("host_maintenance") or {}
-        if initiator == "automatic_detector" and (
-            assessment.get("automatic_ready") is not True
-        ):
-            raise ControlSurfaceRequestError(
-                str(
-                    assessment.get("reason")
-                    or "automatic BlueStacks recovery is not ready"
-                ),
-                status=409,
-                code="emulator_degradation_not_ready",
-            )
+        selected_trigger: Optional[Mapping[str, Any]] = None
+        if initiator == "automatic_detector":
+            if automatic_trigger_kind is None:
+                if assessment.get("automatic_ready") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(
+                            assessment.get("reason")
+                            or "automatic BlueStacks recovery is not ready"
+                        ),
+                        status=409,
+                        code="emulator_degradation_not_ready",
+                    )
+            else:
+                supported = {
+                    "preventive_handle_ceiling",
+                    "severe_in_run_loss",
+                    "completed_run_degradation",
+                }
+                if automatic_trigger_kind not in supported:
+                    raise ControlSurfaceRequestError(
+                        "request_automatic requires a supported trigger_kind",
+                        status=400,
+                        code="automatic_trigger_invalid",
+                    )
+                gate = assessment.get("automatic_request_gate")
+                if (
+                    not isinstance(gate, Mapping)
+                    or gate.get("available") is not True
+                ):
+                    raise ControlSurfaceRequestError(
+                        str(
+                            gate.get("reason")
+                            if isinstance(gate, Mapping)
+                            else "automatic restart authority is unavailable"
+                        ),
+                        status=409,
+                        code=str(
+                            gate.get("code")
+                            if isinstance(gate, Mapping)
+                            else "automatic_restart_unavailable"
+                        ),
+                    )
+                triggers = assessment.get("automatic_triggers")
+                selected = (
+                    triggers.get(automatic_trigger_kind)
+                    if isinstance(triggers, Mapping)
+                    else None
+                )
+                if not isinstance(selected, Mapping) or selected.get("ready") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(
+                            selected.get("reason")
+                            if isinstance(selected, Mapping)
+                            else "the selected automatic trigger is not ready"
+                        ),
+                        status=409,
+                        code="automatic_trigger_not_ready",
+                    )
+                defer_contention = request.get(
+                    "defer_during_external_contention",
+                    True,
+                )
+                if not isinstance(defer_contention, bool):
+                    raise ControlSurfaceRequestError(
+                        "defer_during_external_contention must be a boolean",
+                        status=400,
+                        code="automatic_policy_invalid",
+                    )
+                if (
+                    automatic_trigger_kind == "preventive_handle_ceiling"
+                    and defer_contention
+                    and selected.get("deferred_by_contention") is True
+                ):
+                    raise ControlSurfaceRequestError(
+                        str(selected.get("reason") or "host contention is present"),
+                        status=409,
+                        code="host_contention_deferred",
+                    )
+                selected_trigger = selected
         if initiator == "operator":
             availability = maintenance.get("operator_restart") or {}
             if availability.get("available") is not True:
@@ -1999,6 +2146,7 @@ class ControlSurfaceService:
                 )
         trigger = {
             "request_kind": initiator,
+            "trigger_kind": automatic_trigger_kind,
             "schema_version": assessment.get("schema_version"),
             "assessed_at": assessment.get("assessed_at"),
             "candidate_battle_ids": assessment.get("candidate_battle_ids", []),
@@ -2019,6 +2167,16 @@ class ControlSurfaceService:
             "handle_delta": (
                 host.get("handle_delta") if isinstance(host, Mapping) else None
             ),
+            "policy_status": (
+                selected_trigger.get("status")
+                if isinstance(selected_trigger, Mapping)
+                else None
+            ),
+            "defer_during_external_contention": request.get(
+                "defer_during_external_contention"
+            )
+            if automatic_trigger_kind is not None
+            else None,
         }
         runtime = {
             "runtime_id": str(owner.get("runtime_id") or ""),
@@ -2034,6 +2192,8 @@ class ControlSurfaceService:
                 reason=(
                     "operator requested a coordinated BlueStacks restart"
                     if initiator == "operator"
+                    else str(selected_trigger.get("reason"))
+                    if isinstance(selected_trigger, Mapping)
                     else str(
                         assessment.get("reason") or "degradation detected"
                     )
@@ -2041,6 +2201,8 @@ class ControlSurfaceService:
                 source=(
                     "windows-control-surface-operator"
                     if initiator == "operator"
+                    else "windows-control-surface-policy"
+                    if automatic_trigger_kind is not None
                     else "windows-control-surface"
                 ),
                 runtime=runtime,

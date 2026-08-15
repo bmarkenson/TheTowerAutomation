@@ -8,6 +8,10 @@ internal sealed record BlueStacksOperatorRestartPreview(
     BlueStacksRecoveryTarget Target,
     BlueStacksProcessIdentity Identity);
 
+internal sealed record BlueStacksAutomaticTriggerSelection(
+    string Kind,
+    EmulatorAutomaticTriggerStatus Evidence);
+
 internal sealed class BlueStacksMaintenanceCoordinator
 {
     private readonly IHostMaintenanceApi _api;
@@ -225,7 +229,7 @@ internal sealed class BlueStacksMaintenanceCoordinator
         {
             SetRequestOutcomeUnknown(false);
             SetActiveRequest(null);
-            if (allowRequestCreation)
+            if (allowRequestCreation && HasAutomaticPolicyContract(status))
             {
                 await RequestIfReadyAsync(
                     status.EmulatorDegradation,
@@ -253,7 +257,7 @@ internal sealed class BlueStacksMaintenanceCoordinator
             StateChanged?.Invoke(
                 this,
                 $"BlueStacks recovery {terminalDisposition} · {terminalReason}");
-            if (allowRequestCreation)
+            if (allowRequestCreation && HasAutomaticPolicyContract(status))
             {
                 await RequestIfReadyAsync(
                     status.EmulatorDegradation,
@@ -289,12 +293,17 @@ internal sealed class BlueStacksMaintenanceCoordinator
         ClientSettings settings,
         CancellationToken cancellationToken)
     {
+        var selected = SelectAutomaticTrigger(degradation, settings);
+        var requestKey = selected is null
+            ? null
+            : $"{degradation.AssessedAt}|{selected.Kind}";
         if (!settings.BlueStacksAutomaticRecoveryEnabled
-            || !degradation.AutomaticReady
+            || degradation.AutomaticRequestGate.Available is not true
+            || selected is null
             || string.IsNullOrWhiteSpace(degradation.AssessedAt)
             || string.Equals(
                 _lastRequestedAssessmentAt,
-                degradation.AssessedAt,
+                requestKey,
                 StringComparison.Ordinal))
         {
             return;
@@ -311,7 +320,7 @@ internal sealed class BlueStacksMaintenanceCoordinator
             RequireDetectorIdentity(degradation, identity, target);
             StateChanged?.Invoke(
                 this,
-                $"BlueStacks degradation confirmed · target "
+                $"BlueStacks {FormatTriggerKind(selected.Kind)} confirmed · target "
                     + $"{target.InstanceName} on {target.AdbPort}, PID "
                     + $"{identity.ProcessId}");
             StatusResponse response;
@@ -320,7 +329,10 @@ internal sealed class BlueStacksMaintenanceCoordinator
                 response = await _api.PostHostMaintenanceAsync(
                     new
                     {
-                        operation = "request",
+                        operation = "request_automatic",
+                        trigger_kind = selected.Kind,
+                        defer_during_external_contention =
+                            settings.BlueStacksDeferDuringExternalContention,
                         host_id = identity.HostId,
                         adb_port = target.AdbPort,
                         process_id = identity.ProcessId,
@@ -355,7 +367,7 @@ internal sealed class BlueStacksMaintenanceCoordinator
             _requestTargets[request.RequestId] = target;
             SetRequestOutcomeUnknown(false);
             SetActiveRequest(request.RequestId);
-            _lastRequestedAssessmentAt = degradation.AssessedAt;
+            _lastRequestedAssessmentAt = requestKey;
             StateChanged?.Invoke(
                 this,
                 $"BlueStacks recovery requested · {request.RequestId} · "
@@ -377,6 +389,45 @@ internal sealed class BlueStacksMaintenanceCoordinator
             _gate.Release();
         }
     }
+
+    internal static BlueStacksAutomaticTriggerSelection? SelectAutomaticTrigger(
+        EmulatorDegradationStatus degradation,
+        ClientSettings settings)
+    {
+        var triggers = degradation.AutomaticTriggers;
+        if (settings.BlueStacksInRunPerformanceRecoveryEnabled
+            && triggers.SevereInRunLoss.Ready)
+        {
+            return new(
+                "severe_in_run_loss",
+                triggers.SevereInRunLoss);
+        }
+        if (settings.BlueStacksPreventiveHandleRecoveryEnabled
+            && triggers.PreventiveHandleCeiling.Ready
+            && (!settings.BlueStacksDeferDuringExternalContention
+                || !triggers.PreventiveHandleCeiling.DeferredByContention))
+        {
+            return new(
+                "preventive_handle_ceiling",
+                triggers.PreventiveHandleCeiling);
+        }
+        if (settings.BlueStacksCompletedRunRecoveryEnabled
+            && triggers.CompletedRunDegradation.Ready)
+        {
+            return new(
+                "completed_run_degradation",
+                triggers.CompletedRunDegradation);
+        }
+        return null;
+    }
+
+    private static string FormatTriggerKind(string value) => value switch
+    {
+        "severe_in_run_loss" => "severe in-run loss",
+        "preventive_handle_ceiling" => "preventive handle ceiling",
+        "completed_run_degradation" => "completed-run degradation",
+        _ => "automatic recovery",
+    };
 
     private async Task AdvanceAsync(
         HostMaintenanceStatus maintenance,
@@ -726,6 +777,10 @@ internal sealed class BlueStacksMaintenanceCoordinator
     internal static bool HasOperatorRestartContract(StatusResponse status) =>
         HasMaintenanceReconciliationContract(status)
         && HasCapability(status, "bluestacks_operator_restart_v1");
+
+    internal static bool HasAutomaticPolicyContract(StatusResponse status) =>
+        HasMaintenanceReconciliationContract(status)
+        && HasCapability(status, "bluestacks_maintenance_policy_v1");
 
     internal static bool HasMaintenanceReconciliationContract(
         StatusResponse status) =>

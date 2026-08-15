@@ -88,8 +88,11 @@ current runtime state.
   aging continuity across GUI sessions. The first operator transaction proved
   exact `Pie64` replacement and downstream Welcome Back/catch-up; its landscape
   launcher gap is repaired in `7ce123c` and awaits one hands-free repeat. Next:
-  verify that launch plus sampler/client reconciliation and one detector
-  decision, while pairing any recurrence with exact loadout/locks and host
+  verify that launch plus sampler/client reconciliation. Revision 43 adds
+  default-off preventive and severe in-run policy lanes, retains the exact-
+  process low-water across GUI sessions, and separates external contention
+  from BlueStacks load. Next: verify one hands-free policy decision, while
+  pairing any recurrence with exact loadout/locks and host
   counters; see the
   [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 

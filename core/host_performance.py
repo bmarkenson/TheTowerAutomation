@@ -437,6 +437,169 @@ class HostPerformanceStore:
                 result.append(payload)
         return result
 
+    def bluestacks_lifetime_handle_summary(
+        self,
+        *,
+        current_run_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """Summarize handles across the retained exact listener lifetime.
+
+        Windows sampler sessions are intentionally allowed to change.  The
+        exact listener identity, durable host, and Linux runtime target remain
+        fixed, so a GUI restart cannot erase the observed low-water mark.
+        """
+
+        normalized_run_id = _optional_run_id(
+            current_run_id,
+            field="current_run_id",
+        )
+        if normalized_run_id is None or not self.path.exists():
+            return None
+        try:
+            with self._write_lock:
+                with sqlite3.connect(self.path, timeout=5.0) as connection:
+                    selected = self._current_run_listener_row(
+                        connection,
+                        normalized_run_id,
+                    )
+                    if selected is None:
+                        return None
+                    host_id, adb_port, selected_raw = selected
+                    runtime_adb_port = _valid_adb_port(adb_port)
+                    if runtime_adb_port is None:
+                        return None
+                    try:
+                        selected_payload = json.loads(selected_raw)
+                    except (TypeError, ValueError):
+                        return None
+                    if not isinstance(selected_payload, Mapping):
+                        return None
+                    selected_listener = selected_payload.get(
+                        "bluestacks_listener"
+                    )
+                    if not isinstance(selected_listener, Mapping):
+                        return None
+                    listener = dict(selected_listener)
+                    try:
+                        started_at = _utc_datetime(
+                            datetime.fromisoformat(
+                                str(listener.get("process_started_at") or "")
+                            )
+                        )
+                    except (TypeError, ValueError):
+                        return None
+                    cursor = connection.execute(
+                        """
+                        SELECT payload_json
+                        FROM host_performance_aggregates
+                        WHERE window_end_utc >= ?
+                          AND host_id = ?
+                          AND adb_port IS ?
+                        ORDER BY window_end_utc ASC, ingested_at_utc ASC,
+                                 rowid ASC
+                        """,
+                        (
+                            started_at.isoformat(timespec="milliseconds"),
+                            host_id,
+                            runtime_adb_port,
+                        ),
+                    )
+                    handle_low_water: Optional[float] = None
+                    low_water_by_process_count: dict[str, float] = {}
+                    first_observed: Optional[str] = None
+                    last_observed: Optional[str] = None
+                    aggregate_count = 0
+                    sampled_seconds = 0.0
+                    sampler_sessions: set[str] = set()
+                    while True:
+                        rows = cursor.fetchmany(512)
+                        if not rows:
+                            break
+                        for (raw,) in rows:
+                            try:
+                                payload = json.loads(raw)
+                            except (TypeError, ValueError):
+                                continue
+                            if (
+                                not isinstance(payload, Mapping)
+                                or payload.get("bluestacks_listener") != listener
+                            ):
+                                continue
+                            metrics = payload.get("metrics")
+                            if not isinstance(metrics, Mapping):
+                                continue
+                            handles = metrics.get(
+                                "bluestacks_handle_count_avg"
+                            )
+                            process_min = metrics.get(
+                                "bluestacks_process_count_min"
+                            )
+                            process_max = metrics.get(
+                                "bluestacks_process_count_max"
+                            )
+                            try:
+                                handles_value = float(handles)
+                                process_min_value = float(process_min)
+                                process_max_value = float(process_max)
+                                coverage = (
+                                    float(payload.get("sample_count"))
+                                    * float(payload.get("sample_interval_ms"))
+                                    / 1000.0
+                                )
+                            except (TypeError, ValueError):
+                                continue
+                            if (
+                                not math.isfinite(handles_value)
+                                or not math.isfinite(process_min_value)
+                                or not math.isfinite(process_max_value)
+                                or not math.isfinite(coverage)
+                                or handles_value < 0
+                                or process_min_value <= 0
+                                or process_max_value <= 0
+                                or process_min_value != process_max_value
+                                or not process_min_value.is_integer()
+                                or coverage <= 0
+                            ):
+                                continue
+                            ended = str(payload.get("window_end_utc") or "")
+                            if not ended:
+                                continue
+                            aggregate_count += 1
+                            sampled_seconds += coverage
+                            first_observed = first_observed or ended
+                            last_observed = ended
+                            session_id = str(payload.get("session_id") or "")
+                            if session_id:
+                                sampler_sessions.add(session_id)
+                            handle_low_water = (
+                                handles_value
+                                if handle_low_water is None
+                                else min(handle_low_water, handles_value)
+                            )
+                            process_count_key = str(int(process_min_value))
+                            low_water_by_process_count[process_count_key] = min(
+                                handles_value,
+                                low_water_by_process_count.get(
+                                    process_count_key,
+                                    handles_value,
+                                ),
+                            )
+        except sqlite3.Error as exc:
+            raise HostPerformanceStorageError(str(exc)) from exc
+        if handle_low_water is None:
+            return None
+        return {
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "handle_low_water": handle_low_water,
+            "handle_low_water_by_process_count": low_water_by_process_count,
+            "aggregate_count": aggregate_count,
+            "sampled_coverage_seconds": sampled_seconds,
+            "first_observed_at": first_observed,
+            "last_observed_at": last_observed,
+            "sampler_session_count": len(sampler_sessions),
+        }
+
     @staticmethod
     def _current_run_listener_row(
         connection: sqlite3.Connection,

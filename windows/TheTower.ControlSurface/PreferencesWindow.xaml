@@ -57,8 +57,25 @@
                        FontWeight="Bold"
                        Margin="4,0,4,7" />
             <CheckBox x:Name="BlueStacksAutomaticRecoveryBox"
-                      Content="Allow automatic restart after confirmed degradation"
+                      Content="Allow automatic coordinated BlueStacks restarts"
                       Margin="4,3" />
+            <StackPanel Margin="22,2,4,3">
+              <CheckBox x:Name="BlueStacksPreventiveHandleRecoveryBox"
+                        Content="Preventive restart at the sustained handle ceiling"
+                        Margin="4,3" />
+              <CheckBox x:Name="BlueStacksInRunPerformanceRecoveryBox"
+                        Content="Restart after severe save-backed in-run performance loss"
+                        Margin="4,3" />
+              <CheckBox x:Name="BlueStacksCompletedRunRecoveryBox"
+                        Content="Restart after completed-run degradation confirmation"
+                        Margin="4,3" />
+              <CheckBox x:Name="BlueStacksDeferDuringExternalContentionBox"
+                        Content="Defer preventive restart during external host contention"
+                        Margin="4,3" />
+            </StackPanel>
+            <TextBlock Text="Each detector continues observing while disabled. Severe in-run loss always requires clear host attribution; ambiguous evidence cannot authorize a performance restart."
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="10" TextWrapping="Wrap" Margin="6,3,6,0" />
             <TextBlock Text="HD-Player.exe path"
                        Foreground="{StaticResource MutedBrush}"
                        FontSize="10" Margin="4,8,4,2" />

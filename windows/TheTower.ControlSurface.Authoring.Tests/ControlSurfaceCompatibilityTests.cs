@@ -345,7 +345,7 @@ public sealed class ControlSurfaceCompatibilityTests
     {
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
-                42,
+                ControlSurfaceCompatibility.MinimumServerRevision,
                 "active_battle_strategy_adoption",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
@@ -353,6 +353,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "bluestacks_maintenance_v2",
                 "bluestacks_operator_restart_v1",
                 "bluestacks_listener_lifetime_telemetry_v1",
+                "bluestacks_maintenance_policy_v1",
                 "completed_battle_discard",
                 "confirmed_local_mapping_status_v2",
                 "current_battle_perks_v1",
@@ -617,6 +618,41 @@ public sealed class ControlSurfaceCompatibilityTests
                     "instance_name": "Nougat32"
                   },
                   "reason": "sustained handle growth confirmed"
+                },
+                "host_contention": {
+                  "status": "clear",
+                  "reason": "no sustained external contention",
+                  "other_cpu_percent_median": 18.5,
+                  "other_gpu_percent_median": 7.0
+                },
+                "automatic_request_gate": {
+                  "available": true,
+                  "code": "available",
+                  "reason": "fresh authority"
+                },
+                "automatic_triggers": {
+                  "preventive_handle_ceiling": {
+                    "status": "ready",
+                    "ready": true,
+                    "deferred_by_contention": false,
+                    "handle_recent_median": 25297,
+                    "handle_low_water": 3884,
+                    "handle_delta": 21413,
+                    "sampled_coverage_seconds": 610,
+                    "reason": "ceiling met"
+                  },
+                  "severe_in_run_loss": {
+                    "status": "within_relaxed_band",
+                    "ready": false,
+                    "interval_count": 3,
+                    "interval_cph_ratios": [0.81, 0.84, 0.79],
+                    "reason": "healthy enough"
+                  },
+                  "completed_run_degradation": {
+                    "status": "ready",
+                    "ready": true,
+                    "reason": "completed evidence"
+                  }
                 }
               },
               "host_maintenance": {
@@ -655,6 +691,20 @@ public sealed class ControlSurfaceCompatibilityTests
             response.EmulatorDegradation.HostEvidence!.IdentityScope);
         Assert.Equal(25297, response.EmulatorDegradation.HostEvidence.HandleRecentMedian);
         Assert.Equal(3, response.EmulatorDegradation.HostEvidence.SamplerSessionCount);
+        Assert.Equal(
+            "clear",
+            response.EmulatorDegradation.HostContention!.Status);
+        Assert.Equal(
+            18.5,
+            response.EmulatorDegradation.HostContention.OtherCpuPercentMedian);
+        Assert.True(response.EmulatorDegradation.AutomaticRequestGate.Available);
+        Assert.True(
+            response.EmulatorDegradation.AutomaticTriggers
+                .PreventiveHandleCeiling.Ready);
+        Assert.Equal(
+            [0.81, 0.84, 0.79],
+            response.EmulatorDegradation.AutomaticTriggers
+                .SevereInRunLoss.IntervalCphRatios);
         Assert.Equal(
             "2026-08-10T10:00:00.1234567+00:00",
             response.EmulatorDegradation.HostEvidence.ListenerIdentity!
