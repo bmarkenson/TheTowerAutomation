@@ -39,6 +39,22 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Passive natural-save observation restoration
+
+- Restored the independent 300-second `passive_stable_read` cadence so normal
+  game writes are consumed opportunistically by the Perk, active-metric, and
+  optional audit projectors. Forced serialization and prompt Perk reads do not
+  postpone that deadline; unchanged snapshots remain harmless duplicates.
+- Perk selection/exhaustion requests remain passive reads of the game's last
+  serialized save. They do not background the game, request a write, claim
+  freshness, or affect the guarded forced-save workflows that require current
+  battle identity or configuration evidence.
+- Exact code/test candidate `c1fed4b` passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,864 repository tests in 440.94 seconds using development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-15 Orb Distance tenths-tolerance policy
 
 - Operator policy now treats one decimal place as sufficient for the raw
