@@ -39,6 +39,25 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Coordinated outcome retirement guard
+
+- Exact code/test candidate `7577294` adds one atomic JSON inventory in the
+  common Git directory for every coordinated outcome. It binds `M`, `D`, and
+  each declared delegated branch/worktree/tip; a read-only `git cherry` scan
+  also adds exact ancestry and patches newly represented in `M..D` under changed
+  commit hashes.
+- Every source remains pending until explicitly integrated, archived as
+  superseded, or retained with an owner and remaining work. The guarded close
+  refuses to release `refs/thetower/promotion-owner` until retired pairs are
+  absent and retained pairs still preserve their inventoried tips. It never
+  cleans unrelated worktrees or their dirty state.
+- The real-Git regression reproduced aggregate-first retirement and detected
+  all three prior save-identity source tips (`b4331e3`, `2093681`, and
+  `6a1d5d1`) after their patches appeared under new hashes. All 10 focused
+  retirement/documentation tests, compilation, whitespace, changed-anchor, and
+  historical patch checks passed using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-15 Passive natural-save observation restoration
 
 - Restored the independent 300-second `passive_stable_read` cadence so normal
