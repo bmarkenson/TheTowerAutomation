@@ -596,8 +596,9 @@ validation or compatibility allowlist enter `settings`. Unmapped, incomplete,
 unsupported, or not-yet-authorable values remain explicit `unresolved` rows
 with their source check IDs and safe observed value where available. The
 preview includes redacted acquisition timing and binding fingerprints plus
-process/scope/round workflow binding; cached or passive reads cannot be
-relabelled as a capture.
+process/operation/target and, where active, canonical-round workflow binding;
+activity scope is optional report provenance only. Cached or passive reads
+cannot be relabelled as a capture.
 It also fingerprints bounded capture-origin metadata. That origin is review
 provenance only and cannot replay the acquisition or grant action authority.
 

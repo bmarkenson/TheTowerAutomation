@@ -268,10 +268,13 @@ as checked checkpoint narrative here.
 
 ## Runtime control
 
-- [ ] Live-confirm the deployed paused Home manual-start repair from `8cf5548`:
+- [ ] Live-confirm the paused Home manual-start repair, now superseded by the
+  [ISSUE-2026-045 save-identity model](../issues/resolved-2026.md#start-battle-intent-was-rejected-after-its-strategy-applied-at-home):
   from verified `NEW_BATTLE`, keep Pause through
-  the manual start, require visual `RUNNING`, then Resume. Confirm zero save/UI
-  input while Paused followed by one guarded forced serialization after Enable;
+  the manual start, require visual `RUNNING`, then Resume. Confirm zero forced
+  identity/History/UI or device input while Paused, allowing only an
+  independently triggered explicit Perk checkpoint, followed by one guarded
+  forced serialization after Enable;
   require its `ActiveRoundIdentity` to adopt the manually started battle with
   no History read/poll loop, then open only genuinely unresolved configuration
   sections. An

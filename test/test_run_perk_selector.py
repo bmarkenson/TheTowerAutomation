@@ -216,3 +216,31 @@ def test_selector_refuses_choices_when_auto_pick_is_enabled(tmp_path):
     assert handled is True
     assert taps == ["navigation.open_perks", "buttons.close:perks"]
     assert "selections" not in json.loads(state_path.read_text(encoding="utf-8"))
+
+
+def test_force_proven_battle_boundary_retires_enabled_selector(tmp_path):
+    state_path = tmp_path / "selector.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "enabled": True,
+                "strict": True,
+                "allowed_families": ["damage"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    selector = RunScopedPerkSelector(state_path)
+
+    assert selector.retire("active_round_identity_changed") is True
+
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved["enabled"] is False
+    assert saved["completion_reason"] == "active_round_identity_changed"
+    assert selector.handle(
+        _frame(),
+        {"state": "RUNNING"},
+        action_guard_fn=lambda: True,
+        new_perk_fn=lambda _frame: True,
+    ) is False

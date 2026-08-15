@@ -6163,7 +6163,6 @@ def test_return_control_is_unavailable_if_indefinite_pause_was_superseded(
     (
         ("target_generation", None),
         ("target_generation", 0),
-        ("activity_scope_run_id", ""),
     ),
 )
 def test_return_control_requires_an_exact_current_binding(
@@ -6195,6 +6194,38 @@ def test_return_control_requires_an_exact_current_binding(
     with pytest.raises(ControlSurfaceRequestError) as unavailable:
         service.apply_control({"action": "return_control"})
     assert unavailable.value.code == "exact_return_binding_unavailable"
+
+
+@pytest.mark.parametrize("scope", ("", "x" * 129))
+def test_return_control_ignores_invalid_activity_scope_metadata(
+    tmp_path,
+    scope,
+):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    starting = _evidence(game_state="active_battle")
+    manual = service.control_store.request_manual_control(
+        evidence=starting,
+        source="test",
+    )
+    service.control_store.transition_manual_control(
+        manual["manual_control_id"],
+        "active",
+        pause_acknowledgement=starting,
+    )
+    current = _evidence(game_state="active_battle")
+    current["activity_scope_run_id"] = scope
+    _publish_runtime_observation(service, current, paused=True)
+
+    availability = service.status()["control_model"]["actions"][
+        "return_control"
+    ]
+
+    assert availability["available"] is True
+    assert availability["code"] == "available"
+    returned = service.apply_control({"action": "return_control"})
+    assert returned["control_model"]["manual_control"]["status"] == (
+        "return_requested"
+    )
 
 
 @pytest.mark.parametrize("game_state", ("tournament_results", "unknown"))

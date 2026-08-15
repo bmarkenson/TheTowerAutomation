@@ -345,20 +345,24 @@ log cannot turn a healthy long-running runtime into false `pending` state.
 only after the visible Strategy selection has been accepted by Linux. A dirty
 selection or an in-flight Strategy request disables Attach so the operator can
 never request one profile while the server snapshots another.
-Linux revalidates the exact runtime, target, activity scope, and boundary and
-reports unavailable, requested, awaiting-enable, acknowledged, rejected, or
-interrupted state. A verified Home tap appears as `action_dispatched` and keeps
-unrelated automation suppressed until battle adoption or a bounded failure.
+Linux revalidates the exact runtime, target/generation, workflow operation, and
+visible boundary and reports unavailable, requested, awaiting-enable,
+acknowledged, rejected, or interrupted state. Activity scope is display/report
+metadata and cannot reject the operation. A verified Home tap appears as
+`action_dispatched` and keeps unrelated automation suppressed until battle
+adoption or a bounded failure.
 **Take Manual Control** first obtains an acknowledged
 indefinite Pause. **Return Control** stays Paused until an explicit Enable and
 exclusive reconciliation complete. Attach and running Return use a newly
-forced exact-target save, same-round identity, and final activity scope before
-any unresolved allowlisted configuration UI can open. A post-background
-restoration or authority loss leaves Automation Paused. Return is unavailable
-at Tournament Results, unknown state, or without exact target/scope binding
-rather than advertising an incomplete workflow. A failed Home New refresh is
-recorded once as failed/interrupted and does not repeat background/foreground
-input on later status frames.
+forced exact-target save and canonical active-round identity before any
+unresolved allowlisted configuration UI can open. From Home Resume, Linux first
+forces identity to prove the Resume target, then rearms and forces again on the
+first stable Running frame before adoption. A post-background restoration or
+authority loss leaves Automation Paused. Return is unavailable at Tournament
+Results, unknown state, or without exact runtime/target/battle binding rather
+than advertising an incomplete workflow. A failed Home New refresh is recorded
+once as failed/interrupted and does not repeat background/foreground input on
+later status frames.
 A Home UI repair that exhausts after a successful save appears as degraded
 with the failed check and reason, then releases automation. A later safe Home
 boundary can retry normal profile setup. Pause, Stop, or Take Manual Control
@@ -807,18 +811,17 @@ is reported as deferred unless exact bound save evidence is already available.
 Recent Activity refreshes independently once per second, follows the newest
 entry, and defaults to the concise `ACTION`, `RESULT`, `WARN`, `ERROR`, and
 `FAIL` **Operational** levels. Periodic `STATUS` and general `INFO` entries stay
-out of that narrative. **Current run** is the default activity scope. It
-survives an automation stop/restart, and verified Home `NEW_BATTLE` preflight
-replaces it so the Home setup and its battle remain together. The runtime
-fingerprints the newest copied in-game Battle History report before launch and
-compares it when attaching later. If a battle completed while automation was
-stopped—even when the next battle was started manually—the changed report
-automatically starts the correct Current run scope; an unchanged report
-preserves the existing activity. This uses the existing activity API, so it
-does not require a native-client rebuild. **All recent** restores the rolling
-log tail. **Clear view** records a local cursor and hides only entries already
-displayed; it never deletes or truncates Linux logs, and **Show
-cleared** restores them. A new run or log rotation resets that local cutoff.
+out of that narrative. **Current run** is the default activity-log report
+segment. It may survive an automation stop/restart, and verified Home
+`NEW_BATTLE`, direct Retry, or a forced different battle identity may replace
+it so related setup and report entries remain grouped. Already-acquired Battle
+History projections may enrich that segment as best-effort metadata, but they
+never trigger a save read or UI inspection and never decide whether a battle
+is the same or later. Linux uses the forced save's `ActiveRoundIdentity` for
+that decision. **All recent** restores the rolling log tail. **Clear view**
+records a local cursor and hides only entries already displayed; it never
+deletes or truncates Linux logs, and **Show cleared** restores them. A new
+report segment or log rotation resets that local cutoff.
 
 The live banner labels the latest status explicitly and gives the most recent
 earlier distinct state its own visible row. Use **Status only** for complete

@@ -20,6 +20,9 @@ from core.battle_identity import (
     BattleIdentityStore,
     BattleIdentityStoreError,
 )
+from core.battle_lifecycle import HomeBattleControl
+from core.home_battle import HomeBattleEvidence
+from core.input import TapDispatchOutcome, TapDispatchStatus
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
@@ -441,6 +444,7 @@ def test_home_start_retries_forced_serialization_then_accepts_inactive_save(
     app._runtime_policy = Mock(return_value={})
     app._flag_recoverable_runtime_failure = Mock()
     app._activity_history_reporter = None
+    app._run_perk_selector = Mock()
 
     first = app._acquire_player_save_home_preflight({}, screenshot=object())
     second = app._acquire_player_save_home_preflight({}, screenshot=object())
@@ -453,6 +457,9 @@ def test_home_start_retries_forced_serialization_then_accepts_inactive_save(
     )
     assert app._battle_identity_home_failed_attempt_key is None
     assert app._battle_identity_home_attempt_count == 0
+    app._run_perk_selector.retire.assert_called_once_with(
+        "home_inactive_round_proven"
+    )
 
 
 def test_home_start_exhaustion_is_retryable_instead_of_wedging(tmp_path):
@@ -549,7 +556,19 @@ def test_running_start_binds_forced_identity_before_completion(tmp_path):
     )
     app._update_action_authority = Mock()
     app._runtime_action_guard = Mock(return_value=True)
-    app._publish_forced_battle_identity_bundle = Mock()
+    app._control_observation = {
+        "game_state": "active_battle",
+        "active_battle": True,
+    }
+
+    def _assert_identity_precedes_projection(*_args, **_kwargs):
+        assert app._control_observation[
+            "active_round_identity_fingerprint"
+        ] == identity.fingerprint
+
+    app._publish_forced_battle_identity_bundle = Mock(
+        side_effect=_assert_identity_precedes_projection
+    )
     app._battle_identity_reconciliation_required = True
     app._active_round_identity_fingerprint = None
 
@@ -570,6 +589,101 @@ def test_running_start_binds_forced_identity_before_completion(tmp_path):
         relation=BattleIdentityRelation.FIRST_OBSERVATION,
         identity_fingerprint=identity.fingerprint,
     )
+
+
+def test_home_resume_dispatch_makes_identity_non_authoritative_until_running():
+    app = App.__new__(App)
+    retained = object()
+    observed = "a" * 64
+    app._retained_battle_identity_record = retained
+    app._observed_active_round_identity_fingerprint = observed
+    app._active_round_identity = _identity()
+    app._active_round_identity_fingerprint = observed
+    app._terminal_round_identity_fingerprint = observed
+    app._battle_identity_reconciliation_required = False
+    app._battle_identity_operation_id = "return-1"
+    app._battle_identity_operation_kind = "manual_return"
+    app._battle_identity_failed_attempt_key = ("failed",)
+    app._battle_identity_attempt_key = ("attempt",)
+    app._battle_identity_attempt_count = 1
+    app._battle_identity_retry_after = 42.0
+
+    app._rearm_battle_identity_after_home_resume_dispatch()
+
+    assert app._retained_battle_identity_record is retained
+    assert app._observed_active_round_identity_fingerprint == observed
+    assert app._active_round_identity is None
+    assert app._active_round_identity_fingerprint is None
+    assert app._terminal_round_identity_fingerprint is None
+    assert app._battle_identity_reconciliation_required is True
+    assert app._battle_identity_operation_id is None
+    assert app._battle_identity_operation_kind is None
+    assert app._battle_identity_failed_attempt_key is None
+    assert app._battle_identity_attempt_key is None
+    assert app._battle_identity_attempt_count == 0
+    assert app._battle_identity_retry_after == 0.0
+
+
+def test_verified_home_resume_dispatch_rearms_forced_running_identity():
+    frame = object()
+    app = App.__new__(App)
+    app._operator_battle_intent_required = True
+    app._auto_start_enabled = True
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._mission_mgr = Mock()
+    app._mission_mgr.awaiting_initial_battle_intent.return_value = False
+    app._mission_mgr.no_battle_setup_requirements.return_value = {}
+    app._supervisor = Mock()
+    app._supervisor.battle_workflow = {
+        "request_id": "attach-1",
+        "intent": "attach_battle",
+        "status": "validating_save",
+    }
+    app._supervisor.manual_control = None
+    app._supervisor.emulator_maintenance = None
+    app._handle_home_return_reconciliation = Mock(return_value=False)
+    app._handler_enabled = Mock(side_effect=lambda name: name == "home")
+    app._exclusive_validation_definition = Mock(return_value=None)
+    app._maybe_start_exclusive_validation = Mock(return_value=False)
+    app._report_home_policy = Mock()
+    app._player_save_preflight_coordinator = None
+    app._current_control_workflow_evidence = Mock(
+        return_value={"observation_id": "runtime-1:home"}
+    )
+    app._home_launch_authority_matches = Mock(return_value=True)
+    app._mark_operator_battle_action_dispatched = Mock(return_value=True)
+    app._rearm_battle_identity_after_home_resume_dispatch = Mock()
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.RESUME_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch(
+            "core.app.handle_home_screen",
+            return_value=TapDispatchOutcome(
+                TapDispatchStatus.DISPATCHED
+            ),
+        ) as handle_home,
+    ):
+        app._handle_primary_states(
+            "HOME_SCREEN",
+            set(),
+            frame,
+            operator_workflow_only=True,
+        )
+
+    handle_home.assert_called_once()
+    assert handle_home.call_args.kwargs["require_resume_battle"] is True
+    app._mark_operator_battle_action_dispatched.assert_called_once_with(True)
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_called_once_with()
 
 
 def test_running_changed_identity_repairs_a_boundary_hidden_during_pause(
@@ -617,6 +731,7 @@ def test_running_changed_identity_repairs_a_boundary_hidden_during_pause(
     app._update_action_authority = Mock()
     app._runtime_action_guard = Mock(return_value=True)
     app._publish_forced_battle_identity_bundle = Mock()
+    app._run_perk_selector = Mock()
     app._battle_identity_reconciliation_required = True
     app._active_round_identity_fingerprint = _identity().fingerprint
 
@@ -631,6 +746,9 @@ def test_running_changed_identity_repairs_a_boundary_hidden_during_pause(
         changed_from_retained=True,
     )
     rotate_scope.assert_called_once()
+    app._run_perk_selector.retire.assert_called_once_with(
+        "active_round_identity_changed"
+    )
     assert app._active_round_identity_fingerprint == identity.fingerprint
 
 

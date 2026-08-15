@@ -924,7 +924,7 @@ def test_forced_attachment_projection_ignores_report_scope_rotation():
     assert app._current_player_save_attachment_context.call_args_list == [
         call(),
         call(
-            transition_source_activity_scope_id="scope-before-report-rotation"
+            transition_source_activity_scope_id="scope-before-continuity"
         ),
     ]
     cards = app._no_strategy_observer.snapshot()["fields"]["cards_deck"]

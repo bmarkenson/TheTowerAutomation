@@ -210,9 +210,9 @@ def validate_observation(value: object) -> Optional[dict[str, Any]]:
         type(target_generation) is not int or target_generation < 0
     ):
         return None
+    # Activity scope is log/report segmentation only.  Malformed optional
+    # metadata must never discard otherwise valid runtime authority evidence.
     scope = _optional_bounded(value.get("activity_scope_run_id"), 128)
-    if value.get("activity_scope_run_id") is not None and scope is None:
-        return None
     active_round_identity = value.get(
         "active_round_identity_fingerprint"
     )

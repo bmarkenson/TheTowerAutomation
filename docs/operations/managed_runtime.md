@@ -99,9 +99,13 @@ not adopt the observed battle merely because the intent was accepted. The
 runtime first revalidates the exact PID, ADB target/generation, workflow
 operation, and observed boundary.
 
-The runtime remains input-blocked in `validating_save` while it attempts one
-guarded exact-target serialization and restores the source. A usable save
-must provide `ActiveRoundIdentity`. With no prior identity it is adopted; an
+The runtime remains input-blocked in `validating_save` while it performs the
+guarded exact-target serialization required by the observed boundary and
+restores the source. Active-battle Attach needs one proof. Home Resume needs
+two: one forced save identifies the Resume target before the tap; a definite
+tap rearms identity, and the first stable Running frame forces again before
+adoption. A usable save must provide `ActiveRoundIdentity`. With no prior
+identity it is adopted; an
 equal ID proves the same battle; a different ID proves a later battle and
 discards old battle-local state. Battle History, timestamps, visual similarity,
 and activity scope never substitute. A safely restored transient failure gets
@@ -155,9 +159,11 @@ command to announce in advance.
 force; it does not read or serialize the save. It is available only at Home
 New, Home Resume, active battle, or bound Game Over evidence. Explicit
 **Enable Automation** then authorizes only reconciliation. At Home New the
-runtime forces an inactive proof and closes the retained ID. At Home Resume or
-active battle it forces `ActiveRoundIdentity`: equal resumes the same battle;
-different discards old battle-local state and adopts the manually started
+runtime forces an inactive proof and closes the retained ID. At active battle
+it forces `ActiveRoundIdentity`. At Home Resume it forces once before the tap,
+then rearms and forces again on the first stable Running frame before adoption.
+In either active result, equal resumes the same battle; different discards old
+battle-local state and adopts the manually started
 successor before configuration checks run. Game Over consumes its lifecycle-
 issued natural bundle. No path waits for a save, polls History, or treats log
 scope as identity. Once identity succeeds, an unavailable configuration/report

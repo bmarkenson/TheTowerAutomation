@@ -369,16 +369,35 @@ class RunScopedPerkSelector:
 
         if state not in TERMINAL_STATES:
             return
+        self.retire(state)
+
+    def retire(self, reason: str) -> bool:
+        """Retire local battle state at any force-proven battle boundary."""
+
         config = self._load_active_config()
         if config is None:
-            return
+            return False
         config["enabled"] = False
         config["completed_at"] = datetime.now().astimezone().isoformat(
             timespec="seconds"
         )
-        config["completion_reason"] = state
-        self._write_config(config)
-        log(f"[PERK_SELECTOR] Disabled strict whitelist at {state}", "INFO")
+        config["completion_reason"] = str(reason or "battle_boundary")[:128]
+        try:
+            self._write_config(config)
+        except OSError as exc:
+            log(
+                "[PERK_SELECTOR] Could not retire the strict whitelist at "
+                f"the battle boundary: {exc}",
+                "WARN",
+            )
+            return False
+        self._route_open = False
+        log(
+            "[PERK_SELECTOR] Disabled strict whitelist at "
+            f"{config['completion_reason']}",
+            "INFO",
+        )
+        return True
 
     def _load_active_config(self) -> Optional[dict[str, Any]]:
         try:

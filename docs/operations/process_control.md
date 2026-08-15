@@ -51,10 +51,13 @@ Automation always launches Paused and waits for explicit battle intent.
 Start Battle is accepted only with fresh verified Home `NEW_BATTLE` evidence;
 Attach to Battle requires fresh Home `RESUME_BATTLE` or active-battle evidence.
 Unavailable, stale, and mismatched requests fail without substituting the
-other route. Attach remains input-blocked at `validating_save` until one
-guarded exact-target serialization proves source restoration and binds a valid
-`ActiveRoundIdentity`. There is no Battle History or log-scope fallback for
-battle identity. After identity succeeds, unsupported configuration/report
+other route. Start first forces an inactive Home proof, then remains
+input-blocked after its tap until the first stable Running save binds the
+successor `ActiveRoundIdentity`. Active Attach remains input-blocked at
+`validating_save` until one guarded exact-target serialization proves source
+restoration and binds a valid identity. Home Resume Attach forces before the
+tap and again on the first stable Running frame. There is no Battle History or
+log-scope fallback for battle identity. After identity succeeds, unsupported configuration/report
 projections may still use their supported UI monitoring. Attach freezes the
 accepted selected Strategy definition with the request. No Strategy becomes an
 intentional observer; a proven

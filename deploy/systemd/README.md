@@ -46,10 +46,13 @@ arguments continue to override these defaults.
 The unit also reads the separate optional
 `~/.config/thetower/player-save-audit.env`. It is intentionally not rewritten
 by the control surface. The file can explicitly enable the observation-only
-player-save collector and set its bounded cadence; see
+player-save projector. It consumes only bundles already acquired by a forced
+lifecycle boundary, a natural terminal boundary, or an explicit Perk
+selection/exhaustion checkpoint; it has no cadence or independent acquisition
+setting. See
 [`docs/operations/player_save_audit.md`](../../docs/operations/player_save_audit.md)
 for the exact interface, receipt path, and authority limits. Absence leaves the
-collector disabled.
+projector disabled.
 
 An API bearer token is optional on the loopback-only SSH transport. To require
 one, create `~/.config/thetower/control-surface.env` with permissions `0600`:

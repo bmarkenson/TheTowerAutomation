@@ -337,7 +337,7 @@ independent projections:
 | Boundary | Acquisition or reuse | Consumers | Failure policy |
 | --- | --- | --- | --- |
 | Home `NEW_BATTLE` before Start/Return | Perform one guarded `forced_serialization`, even when the configuration requirement set is empty; a report handoff may also be consumed from the same boundary. | The inactive runtime projection authorizes clearing retained battle identity; the same bundle supplies configuration and report projections. | An inactive proof is mandatory before Start. A safely restored transient failure is bounded and retryable; restoration, ownership, target, context, or control ambiguity blocks later input. |
-| First stable `RUNNING`/Home Resume after Start, Retry, Enable, or Attach | Perform one guarded `forced_serialization` and compare its exact `ActiveRoundIdentity` with the durable battle-identity record. | `SAME_BATTLE` restores eligible identity-bound state; `LATER_BATTLE` discards old battle-local state and adopts the successor; the bundle also supplies actual-loadout, Perk-prefix, metric, audit, and report projections. | There is no History/UI substitute for battle identity. A safely restored transient failure is bounded and retryable; an active source without identity remains input-blocked. Restoration, owner, target, control, or uncertain-input ambiguity is catastrophic and may Pause. |
+| First stable `RUNNING` after Start, Retry, Enable, or Attach | Perform one guarded `forced_serialization` and compare its exact `ActiveRoundIdentity` with the durable battle-identity record. Home Resume is a two-proof route: force once before the Resume tap to identify its target, then rearm and force again on the first stable `RUNNING` frame before adoption. | `SAME_BATTLE` restores eligible identity-bound state; `LATER_BATTLE` discards old battle-local state and adopts the successor; the bundle also supplies actual-loadout, Perk-prefix, metric, audit, and report projections. | There is no History/UI substitute for battle identity. A safely restored transient failure is bounded and retryable; an active source without identity remains input-blocked. Restoration, owner, target, control, or uncertain-input ambiguity is catastrophic and may Pause. |
 | `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, optional audit projection, and Tournament conditions. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
 | Perk selection or exhaustion checkpoint | One coalesced `passive_stable_read` explicitly requested by the stable Perk top-bar observer. There is no timer or general monitoring cadence. | The Perk monitor is the acquisition cause; active-run metrics and optional audit receipts consume the same read-only bundle without requesting another read. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
@@ -449,7 +449,7 @@ boundary, the last complete active snapshot contained 15 internally consistent
 ordered picks that exactly represented the terminal UI's 11 collapsed rows,
 and the immediate stable post-death projection was inactive/cleared. The
 implemented navigation decision remains fail-closed: it requires exact
-process/scope/target/round binding, stable high-confidence `View Perks`
+process/target/`ActiveRoundIdentity` binding, stable high-confidence `View Perks`
 exhaustion evidence, a nonempty complete checkpoint captured afterward whose
 saved wave includes the exhaustion wave, and a later bound natural Game Over
 clear. Normal in-battle timeline collection now uses those exact monitor
@@ -479,8 +479,9 @@ allowlist and retained evidence are in
 
 `ActiveRunMetricMonitor` consumes the same typed stable bundle already acquired
 for the Perk monitor and optional campaign auditor; it never requests a save
-read or sends input. It binds each accepted component to process, activity
-scope, ADB target generation, active-round identity, mapping, and audit ID.
+read or sends input. It binds each accepted component to process, ADB target
+generation, active-round identity, mapping, and audit ID. Activity scope may be
+carried as report metadata, but it does not participate in equality or authority.
 `saveRevision` remains diagnostic only. Capture order, source identity, wave,
 and nondecreasing cumulative values own monotonic acceptance. Every direct leaf
 retains its own definition and latest valid timed baseline. A malformed or
@@ -498,7 +499,8 @@ for every published source. These realized save rates are separate from OCR
 and relabeled as realized CPH.
 
 The causally bound natural terminal reuses the existing terminal bundle and
-checks terminal kind plus exact process/activity/target/round/window provenance.
+checks terminal kind plus exact process/target/round/window provenance.
+Activity scope remains optional report provenance only.
 Every expected terminal-linked leaf is matched, missing, or conflicted—even if
 that leaf was malformed at every active checkpoint. Unrelated malformed cause
 or time leaves do not erase terminal totals; time/wave-dependent rates alone
@@ -695,15 +697,14 @@ runtime does not use them to make a decision. A human inspects them after the
 campaign. It is not a save-acquisition service, an unknown-field discovery
 system, or a normal-runtime evidence consumer.
 
-When a campaign is enabled, the normal App supplies the same typed stable-save
-bundles already acquired for passive monitoring and natural boundaries. The
-legacy standalone path still bounds its own work to one daemon acquisition at a
-time. In either mode, a slow or failed read cannot delay the App heartbeat. The
-auditor never pauses or backgrounds the game, navigates, taps, dispatches a
-handler, changes a lifecycle decision, or suppresses UI. It reads only the
-exact target owned by the current `AdbTargetSession`; a handoff or release
-generation change discards the result. Capture and detection continue to feed
-it while global Pause blocks actions.
+When a campaign is enabled, the normal App supplies typed bundles already
+acquired by a forced lifecycle transaction, a natural terminal boundary, or an
+explicit stable Perk selection/exhaustion checkpoint. The auditor has no
+independent acquisition, timer, or scheduler. A slow or failed projection
+cannot delay the App heartbeat. The auditor never pauses or backgrounds the
+game, navigates, taps, dispatches a handler, changes a lifecycle decision, or
+suppresses UI. A target-generation change discards the supplied result.
+Capture and detection continue to feed it while global Pause blocks actions.
 
 Compatibility is granted by the decoder, not by matching the manifest's game
 version literally. The decoder must resolve a supported, shape-valid exact or
@@ -752,7 +753,7 @@ cross this queue. The resolver restores a semantic projection only when exact
 wave correspondence and singleton constraint propagation make every needed
 assignment unique, each semantic family is already allowlisted at at least 80%
 confidence, and the bounded calibration receipt is successfully appended.
-Ordinary passive monitoring does not open Perks to create such evidence; an
+Ordinary observation does not open Perks to create such evidence; an
 unknown ID therefore remains unavailable and preserves terminal fallback.
 Ambiguous or conflicting evidence stays unavailable, and the static mapping
 manifest is never rewritten.
@@ -936,14 +937,15 @@ Home `NEW_BATTLE` frame when its first cleanup observation was missed. If Home
 cleanup fails and a later `RUNNING` frame appears, that fresh frame cannot be
 trusted as the old battle: the runtime performs no further input, persists a
 failed old receipt, consumes its proven Game Over lifecycle boundary, rotates
-the activity scope, and permits only a subsequent heartbeat to adopt the
-successor. Process replacement cannot inherit that receipt: owner mismatch
+the report segment, and permits only a subsequent forced save identity to
+authorize adoption of the successor. Process replacement cannot inherit that
+receipt: owner mismatch
 fails it closed without input. The mission boundary and pending Strategy
 release only after the result is durable. A queued successor Start or confirmed
 Tournament launch waits behind that receipt-only finalization. Capture and
 detection remain live during Pause, but workflow synchronization, mission
-observation, run adoption, and activity continuity are quarantined while the
-exact terminal claim remains. If the operator manually starts a successor
+observation, run adoption, and battle-identity reconciliation are quarantined
+while the exact terminal claim remains. If the operator manually starts a successor
 during that Pause, Resume finalizes the old boundary before a later heartbeat
 adopts the successor. A requested ADB target handoff is likewise deferred until
 active validation, terminal finalization, or an awaiting/requested/claimed
@@ -956,8 +958,8 @@ closed without inheriting Surrender authority.
 
 A fresh validation or confirmed-launch battle boundary is process-local proof
 that must survive its single observation frame. The runtime records that proof
-immediately after lifecycle adoption and before activity continuity can request
-a recapture. If the claimed-validation `running` write or the launch-result
+immediately after lifecycle adoption and before any other route can recapture.
+If the claimed-validation `running` write or the launch-result
 write is temporarily unavailable, the exact receipt remains the sole typed
 owner and later heartbeats retry only that write; they do not reinterpret the
 absence of a second fresh boundary as failure. Pause preserves the proof while
@@ -967,7 +969,7 @@ and release validation mode. If an owned running validation instead reaches
 fresh Game Over, verified Home `NEW_BATTLE`, Tournament Results, or Workshop
 before guarded Surrender—or Tournament entry is the first fresh authoritative
 no-battle frame after dropped terminal observations—that proof is retained
-before any fallible ownership/write step and before mission or continuity
+before any fallible ownership/write step and before mission or successor
 observation. Resume can then finish the exact receipt and old lifecycle
 boundary without touching a successor.
 
@@ -978,8 +980,9 @@ heartbeats under `EXCLUSIVE_VALIDATION`; once durable, validation-battle mode is
 released without calling Game Over hooks or applying a next-boundary Strategy
 against the still-running battle. Run initialization and session preflight stay
 deferred for that battle's remainder, and a distinct suppressive
-`EXCLUSIVE_OWNERSHIP` hold denies strategy, handler, workflow, continuity,
-background, target-handoff, and Strategy-replacement input. The hold releases
+`EXCLUSIVE_OWNERSHIP` hold denies strategy, handler, workflow, battle-identity
+reconciliation, background, target-handoff, and Strategy-replacement input.
+The hold releases
 only on fresh Game Over, Tournament Results, Workshop, Tournament entry, or
 verified Home `NEW_BATTLE`; Home `RESUME_BATTLE`, `RUNNING`, `UNKNOWN`,
 incomplete Home classification, and every other non-authoritative screen
@@ -996,8 +999,8 @@ battle-only strategy tick, timeout Surrender, Game Over cleanup, and confirmed
 Tournament launch, including proof-backed cleanup-result persistence; ordinary
 attached preflight continues to use
 `SESSION_PREFLIGHT`. Exact receipt-only finalization precedes successor
-lifecycle adoption. During an input-capable phase, operator workflow,
-activity-continuity, or unresolved-ownership holds take priority and therefore
+lifecycle adoption. During an input-capable phase, operator-workflow,
+`BATTLE_IDENTITY`, or unresolved-ownership holds take priority and therefore
 stop validation before its next final input. Passive capture preserves the
 preceding durable hold until fresh detection selects the next owner. The
 control surface rejects a new interactive-development lease while any
@@ -1475,7 +1478,8 @@ boundary handler can take ownership.
 `RuntimeActionAuthorityPublisher` atomically refreshes
 `logs/strategy_action_gate.json`. Schema version 1 includes runtime/ADB/PID
 ownership, observation time, runtime-active flag, staleness threshold, active
-gate and run scope, current battle-active/scope evidence, strategy,
+gate and canonical battle identity, current battle-active/identity evidence,
+optional report-scope telemetry, strategy,
 source/phase, failed checks, reason, activation and update times,
 Pause/Stop/hold context, an optional collector allowlist on a hold, all four
 authority decisions, currently allowed collectors, any auxiliary-route lease,
@@ -1691,12 +1695,15 @@ warning text in `actions.log`.
   runtime/PID/target replacement, or an authoritative battle boundary normally
   makes status inactive and terminates the lease. Resume never revives the
   terminal request. One explicit `owned_battle_start=true` request is accepted
-  only from fresh exact Home `NEW_BATTLE` with a nonempty scope and target
-  generation. It may retain the same process-local scope/target claim through
-  that one run. At Game Over the lease itself terminalizes, while the claim may
-  authorize only the supported minimal return-to-Home terminal route. A
-  replacement scope, target generation, runtime/PID, terminal type, Pause, or
-  Stop performs no cleanup input. The development input helper consumes that
+  only from fresh exact Home `NEW_BATTLE` with force-proven inactive state and
+  a positive target generation. The Home preclaim is provisional: activity
+  scope is irrelevant, and guarded terminal cleanup additionally requires a
+  force-bound non-Tournament `ActiveRoundIdentity` matching the terminal. If
+  the suppressive lease prevents that checkpoint, production declines cleanup.
+  At Game Over the lease itself terminalizes, while the proven claim may
+  authorize only the supported minimal return-to-Home terminal route. Target,
+  battle-identity, runtime/PID, terminal-type, Pause, or Stop replacement
+  performs no cleanup input. The development input helper consumes that
   composite `active`
   decision instead of duplicating the production authority calculation, while
   separately binding its one command to the matching lease, runtime, exact
@@ -1864,8 +1871,11 @@ hold or replaying input.
   segmentation. Home `NEW_BATTLE` forces a save and must prove an inactive
   round before launch. The first stable `RUNNING` after Start, direct Retry,
   Enable, or a terminal Home continuation forces another save and binds the
-  exact `ActiveRoundIdentity` before any battle-bound work. Attach and Home
-  Resume use the same active-boundary transaction. The serializer binds the
+  exact `ActiveRoundIdentity` before any battle-bound work. Active Attach uses
+  that transaction directly. Home Resume is deliberately two-proof: a first
+  forced save identifies the Resume target before the tap; dispatch then makes
+  that proof non-authoritative, and the first stable `RUNNING` frame forces
+  again before adoption. The serializer binds the
   exact runtime operation, target generation, visible source, control, and
   source restoration; log-scope creation or rotation is irrelevant.
 - `BattleIdentityStore` retains the last force-proven identity across process

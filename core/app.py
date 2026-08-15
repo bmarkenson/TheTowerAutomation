@@ -801,6 +801,24 @@ class App:
             self._battle_identity_home_attempt_count = 0
             self._battle_identity_home_failed_result = None
 
+    def _rearm_battle_identity_after_home_resume_dispatch(self) -> None:
+        """Require a fresh forced identity after leaving resumable Home."""
+
+        # The Home serialization proves which battle the Resume input targets.
+        # It does not prove the post-dispatch RUNNING boundary.  Retain the
+        # durable store record only for comparison and force again before any
+        # running projection, lifecycle adoption, or battle-bound action.
+        self._active_round_identity = None
+        self._active_round_identity_fingerprint = None
+        self._terminal_round_identity_fingerprint = None
+        self._battle_identity_reconciliation_required = True
+        self._battle_identity_operation_id = None
+        self._battle_identity_operation_kind = None
+        self._battle_identity_failed_attempt_key = None
+        self._battle_identity_attempt_key = None
+        self._battle_identity_attempt_count = 0
+        self._battle_identity_retry_after = 0.0
+
     def _observe_battle_identity_ui_boundary(
         self,
         detection: Mapping[str, Any],
@@ -1306,6 +1324,9 @@ class App:
                     event=StrategyGateExitEvent.BATTLE_IDENTITY_CHANGE,
                     reason="the forced save proved a different battle",
                 )
+                selector = getattr(self, "_run_perk_selector", None)
+                if selector is not None:
+                    selector.retire("active_round_identity_changed")
             if identity_changed and manager_was_active:
                 start_activity_scope(
                     reason="save_active_round_identity_changed",
@@ -1316,6 +1337,9 @@ class App:
                 result.identity.fingerprint
             )
             self._battle_identity_reconciliation_required = False
+            self._bind_forced_identity_to_control_observation(
+                result.identity.fingerprint
+            )
             self._battle_identity_failed_attempt_key = None
             self._battle_identity_attempt_key = None
             self._battle_identity_attempt_count = 0
@@ -3005,6 +3029,27 @@ class App:
         )
         self._control_observation = observation
         return dict(observation)
+
+    def _bind_forced_identity_to_control_observation(
+        self,
+        identity_fingerprint: str,
+    ) -> bool:
+        """Augment the current active-source observation with forced proof."""
+
+        identity = str(identity_fingerprint or "").strip()
+        observation = getattr(self, "_control_observation", None)
+        if not (
+            identity
+            and isinstance(observation, Mapping)
+            and observation.get("active_battle") is True
+            and observation.get("game_state")
+            in {"active_battle", "home_resume_battle"}
+        ):
+            return False
+        bound = dict(observation)
+        bound["active_round_identity_fingerprint"] = identity
+        self._control_observation = bound
+        return True
 
     def _yield_on_unexpected_manual_activity(self) -> bool:
         """Pause instead of competing after an unowned active-to-Home change."""
@@ -10434,6 +10479,9 @@ class App:
                 self._retained_battle_identity_record = None
                 self._active_round_identity = None
                 self._active_round_identity_fingerprint = None
+                selector = getattr(self, "_run_perk_selector", None)
+                if selector is not None:
+                    selector.retire("home_inactive_round_proven")
                 self._battle_identity_reconciliation_required = True
                 self._battle_identity_home_verified_preflight_id = str(
                     getattr(self, "_player_save_preflight_session_id", "")
@@ -16949,7 +16997,7 @@ class App:
             self._pending_home_setup_recovery = None
             log(
                 "[GC_NO_BATTLE] Discarded yielded Home recovery after its "
-                "runtime, scope, or workflow owner changed",
+                "runtime, target, or workflow owner changed",
                 "INFO",
             )
             return False
@@ -20407,6 +20455,12 @@ class App:
                             ),
                         )
                         self._publish_action_authority()
+                if (
+                    launched
+                    and home_control is HomeBattleControl.RESUME_BATTLE
+                    and not emulator_recovery_launch
+                ):
+                    self._rearm_battle_identity_after_home_resume_dispatch()
                 if carry_pending:
                     if launch_outcome.uncertain:
                         save_coordinator.suspend_carry(

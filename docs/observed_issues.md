@@ -402,8 +402,9 @@ current runtime state.
   ID instead.
 - Load the [dossier](issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle)
   before changing paused manual-start identity reconciliation or on recurrence.
-  Next: observe one natural paused manual start with zero reads/input during
-  Pause and one forced identity transaction after Enable; the
-  replacement attachment and lease replay follow-ons are resolved in
+  Next: observe one natural paused manual start with zero forced identity,
+  History, UI, or device input during Pause (an independent explicit Perk
+  checkpoint remains allowed) and one forced identity transaction after Enable;
+  the replacement attachment and lease replay follow-ons are resolved in
   [2026 history](issues/resolved-2026.md#running-attachment-used-battle-history-and-repeated-save-backed-configuration-ui).
   [Runtime backlog](backlog/runtime-and-validation.md#runtime-control).
