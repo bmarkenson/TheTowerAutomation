@@ -28,10 +28,8 @@ Completed and superseded detail remains in the
   - Allow pause, cancellation, and extension through CLI/GUI controls.
   - Do not interrupt an automation action making expected progress.
   - Attempt the least destructive route back to the game first.
-  - Promote checkpointed aggregate candidate `240b63f`, which contains
-    cross-owner hardening code commit `f3cf804`, then confirm the resulting
-    production commit for `ISSUE-2026-041` at one natural completed-battle
-    Home launch: Free Ticket
+  - Live-confirm deployed production commit `f902a91` for `ISSUE-2026-041` at
+    one natural completed-battle Home launch: Free Ticket
     may be claimed only by the exact retained launch, at most one verified
     Battle retry may follow two stable fresh Home `NEW_BATTLE` observations,
     and an
