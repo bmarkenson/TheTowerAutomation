@@ -77,6 +77,23 @@ resolved dossier instead of copying its detail.
   build, cache, and reproducible test-artifact entries. Their tracked commits
   remain on `main`.
 
+### 2026-08-15 Guarded Codex main publication
+
+- Commit `2795aa8` adds a project-local Codex execution rule for the production
+  procedure's explicit
+  `git push origin refs/heads/main:refs/heads/main` publication command. The
+  rule allows that guarded path without a separate external-action approval;
+  the tested force-first, tag-only, and alternate-remote forms remain
+  unmatched.
+- The rule stays under the existing trusted `.codex/` project layer, so it adds
+  no repository startup-document reading. Codex loads it only in a new session
+  after restart; it does not alter the permissions of the session that created
+  it.
+- Codex exec-policy checks selected `allow` for the standard publication and no
+  rule for the three excluded forms. Documentation lifecycle and whitespace
+  validation passed. No TheTower service, device, or native-package action was
+  applicable.
+
 ### 2026-08-14 Tournament loadout authoring
 
 - This commit makes the immutable bundled Tournament source inspectable and
