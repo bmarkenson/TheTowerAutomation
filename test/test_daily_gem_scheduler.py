@@ -76,6 +76,7 @@ def test_app_dispatches_scheduled_probe_without_badge_and_records_result():
     app._blind_tapper_suspended = False
     app._authority_battle_active = True
     app._authority_primary_state = "RUNNING"
+    app._active_round_identity_fingerprint = "a" * 64
     app._authority_holds = ()
     app._supervisor = Mock(is_paused=False)
     app._supervisor.apply_control.return_value = False

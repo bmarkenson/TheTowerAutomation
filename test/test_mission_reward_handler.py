@@ -1027,6 +1027,7 @@ def test_app_dispatches_alert_probe_and_records_success():
     app._blind_tapper_suspended = False
     app._authority_battle_active = True
     app._authority_primary_state = "RUNNING"
+    app._active_round_identity_fingerprint = "a" * 64
     app._authority_holds = ()
     app._supervisor = Mock(is_paused=False)
     app._supervisor.apply_control.return_value = False
@@ -1083,6 +1084,7 @@ def test_app_dispatches_reward_probe_from_verified_open_menu_badge():
     app._blind_tapper_suspended = False
     app._authority_battle_active = True
     app._authority_primary_state = "RUNNING"
+    app._active_round_identity_fingerprint = "a" * 64
     app._authority_holds = ()
     app._supervisor = Mock(is_paused=False)
     app._supervisor.apply_control.return_value = False

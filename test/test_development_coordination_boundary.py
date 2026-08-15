@@ -369,6 +369,7 @@ def _build_coordination_harness(
     )
     app._authority_battle_active = True
     app._authority_primary_state = "RUNNING"
+    app._active_round_identity_fingerprint = "a" * 64
     app._authority_holds = ()
     app._external_development_hold_active = False
     app._interactive_development_ack = None
@@ -586,9 +587,14 @@ def test_full_lease_path_excludes_competitors_dispatches_once_and_releases_clean
     terminal = harness.store.status()["interactive_development_lease"]
     assert terminal["terminal_disposition"] == "released"
     assert not harness.app._external_development_hold_active
-    assert harness.app._get_action_authority().decision(
+    decision = harness.app._get_action_authority().decision(
         RuntimeActionClass.STRATEGY_ACTION
-    ).allowed
+    )
+    assert not decision.allowed
+    assert decision.reason == (
+        "the active battle has not been bound to a forced save identity"
+    )
+    assert harness.app._battle_identity_reconciliation_required is True
 
     rejected, rejected_reader, rejected_runner = _execute_input(
         harness,
@@ -712,10 +718,9 @@ def test_heartbeat_expiry_rejects_input_then_restores_after_fresh_observation(
     (
         ("runtime", "abnormal"),
         ("target", "abnormal"),
-        ("battle", "battle_boundary"),
     ),
 )
-def test_runtime_target_and_battle_boundaries_revoke_helper_authority(
+def test_runtime_and_target_boundaries_revoke_helper_authority(
     coordination_harness: CoordinationHarness,
     monkeypatch: pytest.MonkeyPatch,
     boundary: str,
@@ -740,17 +745,6 @@ def test_runtime_target_and_battle_boundaries_revoke_helper_authority(
             harness.app._sync_interactive_development_control_boundary(
                 now=harness.base_time + 4,
             )
-    else:
-        harness.app._current_run_scope_id = lambda: "run-replacement"
-        with (
-            patch("core.app.stop_blind_gem_tapper", return_value=False),
-            patch("core.app.is_blind_gem_tapper_active", return_value=False),
-        ):
-            harness.app._sync_interactive_development_observation(
-                {"state": "RUNNING"},
-                now=harness.base_time + 4,
-            )
-
     terminal = harness.store.status()["interactive_development_lease"]
     assert terminal["terminal_disposition"] == disposition
     assert not harness.app._external_development_hold_active

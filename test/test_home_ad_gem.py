@@ -670,6 +670,7 @@ def test_global_pause_stops_floating_gem_scan_before_its_next_tap():
             global_pause=paused,
             active_battle=True,
             battle_scope="run-1",
+            battle_identity="a" * 64,
             primary_state="RUNNING",
         )
 

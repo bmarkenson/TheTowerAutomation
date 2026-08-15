@@ -47,6 +47,17 @@ PREFLIGHT_REQUIREMENTS = {
 }
 
 
+def _attachment_context():
+    return SimpleNamespace(
+        runtime_session_id="runtime-1",
+        activity_scope_id="scope-1",
+        active_round_identity_fingerprint="active-round-fingerprint",
+        target="private-target",
+        target_generation=3,
+        active_battle_observed=True,
+    )
+
+
 def _ui_boundary_token(section, verification="ui_verified"):
     spec = GC_SECTION_SPECS[section]
     return {
@@ -705,13 +716,7 @@ def test_attached_route_uses_every_complete_bound_save_fact_without_ui():
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
 
     validated = {}
@@ -951,13 +956,7 @@ def test_attached_route_reports_immutable_mismatches_without_ui():
 
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
 
     validated = {}
@@ -1056,13 +1055,7 @@ def test_round_invariant_mismatches_are_nonblocking_for_running_attachment():
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
 
     result = run_read_only_gc_preflight(
@@ -1161,13 +1154,7 @@ def test_running_attachment_does_not_evaluate_waived_save_only_check():
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
 
     result = run_read_only_gc_preflight(
@@ -1235,13 +1222,7 @@ def test_unparsed_module_fact_uses_ui_but_still_reports_immutable_mismatch():
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
 
     with patch(
@@ -1306,13 +1287,7 @@ def test_complete_mutable_save_mismatch_blocks_without_confirmation_ui():
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
 
     result = run_read_only_gc_preflight(
@@ -1370,13 +1345,7 @@ def test_saved_poison_stun_mismatch_is_reported_without_attached_repair():
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
     boxes = [
         UpgradeBox(
@@ -1448,13 +1417,7 @@ def test_saved_spotlight_missiles_off_blocks_without_confirmation_ui():
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
 
     result = run_read_only_gc_preflight(
@@ -1511,13 +1474,7 @@ def test_saved_auto_pick_mismatch_is_measured_without_attached_repair():
     }
     bound = BoundRunningAttachmentSaveEvidence(
         running_attachment_observations(carried),
-        lambda: SimpleNamespace(
-            runtime_session_id="runtime-1",
-            activity_scope_id="scope-1",
-            target="private-target",
-            target_generation=3,
-            active_battle_observed=True,
-        ),
+        _attachment_context,
     )
 
     def measure(frame):
