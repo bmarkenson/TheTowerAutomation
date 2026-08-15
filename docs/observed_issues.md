@@ -42,8 +42,9 @@ current runtime state.
   battle. The missing same-battle Game Over dispatch and the fail-closed later-
   `RUNNING` release now have one repository repair under `ISSUE-2026-046`; the
   source of the historical later transition remains unknown. Production
-  commit `95bd630` contains the repair. Next: safely confirm it without
-  manufacturing a battle transition;
+  commit `95bd630` contains the base repair, and current-main code candidate
+  `93a2781` adds cross-owner hardening. Next: promote that hardening and safely
+  confirm without manufacturing a battle transition;
   [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Exclusive validation denied its own strategy and cleanup input
@@ -60,13 +61,17 @@ current runtime state.
   Strategy replacement, and target handoff until the old boundary is durably
   released. Unknown and incompletely classified post-dispatch screens retain
   that suppressive boundary; they are not treated as proof that no battle
-  started.
+  started. The same exact-owner handoff now covers a Free Ticket blocker,
+  typed Tournament-launch uncertainty, and durable owners that arrive between
+  a heartbeat and the next final input guard.
 - Load the [dossier](issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
   before running or changing exclusive validation, confirmed Tournament launch,
-  or typed action-authority routing. Production commit `95bd630` contains the
-  repair. Next: confirm the complete multi-phase validation and verified Home
-  cleanup at an explicitly authorized safe boundary;
-  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+  Free Ticket recovery, or typed action-authority routing. Production commit
+  `95bd630` contains the base repair; current-main code candidate `93a2781`
+  adds cross-owner hardening. Next: checkpoint, promote, and confirm the
+  multi-phase validation and verified Home cleanup at an explicitly authorized
+  safe boundary; [runtime
+  backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Start Battle replaced a newer No Strategy selection with stale Tournament state
 

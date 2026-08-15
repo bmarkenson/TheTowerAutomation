@@ -874,7 +874,9 @@ preset snapshots or profile-local definitions. `enforce` changes the setting
 at its existing authorized boundary, `observe` only compares and reports, and
 `ignore` preserves it. Every other Tournament requirement and every generated
 validation, launch, initialization, handler, and attachment rule remains the
-same protected builder output. Tournament variants remain tierless.
+same protected builder output. Tournament variants remain tierless and enter
+the same fingerprinted exclusive-validation ledger and generic main-loop owner
+path as the bundled profile.
 
 Every explicit Tournament selection or managed process Start creates a durable
 validation request tied to the strategy request identity and the complete
@@ -958,10 +960,11 @@ denying the write and every input. A retained validation start seen later at
 Home `RESUME_BATTLE` is advanced only far enough to persist a no-input failure
 and release validation mode. If an owned running validation instead reaches
 fresh Game Over, verified Home `NEW_BATTLE`, Tournament Results, or Workshop
-before guarded Surrender, that terminal proof is retained before any fallible
-ownership/write step and before mission or continuity observation. Resume can
-then finish the exact receipt and old lifecycle boundary without touching a
-successor.
+before guarded Surrender—or Tournament entry is the first fresh authoritative
+no-battle frame after dropped terminal observations—that proof is retained
+before any fallible ownership/write step and before mission or continuity
+observation. Resume can then finish the exact receipt and old lifecycle
+boundary without touching a successor.
 
 If guarded Surrender does not conclusively reach Game Over, the runtime stages
 a distinct exact `release_without_cleanup` result. It never retries Surrender,
@@ -972,10 +975,13 @@ against the still-running battle. Run initialization and session preflight stay
 deferred for that battle's remainder, and a distinct suppressive
 `EXCLUSIVE_OWNERSHIP` hold denies strategy, handler, workflow, continuity,
 background, target-handoff, and Strategy-replacement input. The hold releases
-only on fresh Game Over, Tournament Results, Workshop, or verified Home
-`NEW_BATTLE`; Home `RESUME_BATTLE`, `RUNNING`, `UNKNOWN`, incomplete Home
-classification, and every other non-authoritative screen retain it.
-The genuine terminal/fresh-Home boundary then rearms the next run normally.
+only on fresh Game Over, Tournament Results, Workshop, Tournament entry, or
+verified Home `NEW_BATTLE`; Home `RESUME_BATTLE`, `RUNNING`, `UNKNOWN`,
+incomplete Home classification, and every other non-authoritative screen
+retain it. Workshop and Tournament-entry release explicitly retire the old
+mission lifecycle so the next `RUNNING` frame is adopted once as a successor;
+a queued next-boundary Strategy is applied before that adoption. The genuine
+terminal/fresh-Home boundary then rearms the next run normally.
 
 The verified `NEW_BATTLE` launch composes the newly claimed receipt with the
 typed owner that authorized its Home route: `OPERATOR_WORKFLOW` for an explicit
@@ -1003,6 +1009,24 @@ transition. Strategy replacement after finalization preserves the already
 consumed Home/Game Over marker, so the next Home frame does not rotate the same
 activity boundary twice.
 
+The known Free Ticket blocking-primary state borrows no ambient recovery
+authority. It may run one bounded Claim transaction only for the exact durable
+source that dispatched the obscured launch: `OPERATOR_WORKFLOW` for Start or a
+retained terminal continuation, `EMULATOR_MAINTENANCE` for replacement-battle
+recovery, or `EXCLUSIVE_VALIDATION` for an ordinary validation or confirmed
+Tournament launch. Explicit Start plus its linked validation receipt share one
+physical Claim budget. A partial terminal write is receipt-only retry work;
+typed input uncertainty Pauses and cannot fall through to another source alias
+or replay Claim.
+
+A durable owner accepted between heartbeat selection and the next mutation is
+also visible at the final guard. In particular, an uninstalled BlueStacks
+maintenance request or newly requested confirmed Tournament launch blocks an
+unrelated route before input, and Start-Tournament acquisition shares the
+cross-process dispatch boundary. If an unacknowledged maintenance request races
+an already exact validation owner, it terminates without host mutation instead
+of stacking two actionable owners.
+
 After a ready result, the control surface publishes a one-shot operator launch
 prompt tied to that exact ready receipt and configuration fingerprint. The
 prompt reminds the operator to set Target Priorities for the displayed
@@ -1022,7 +1046,10 @@ input. From Home it taps only a verified `NEW_BATTLE` control followed by the
 OCR-confirmed Tournament `OPEN` control; from a verified Tournament entry it
 continues directly. It starts the battle only through the OCR-confirmed
 Tournament `BATTLE` control. Ownership, Pause, and current-request identity are
-rechecked before every tap. Timeout, process replacement, owner mismatch,
+rechecked before every tap. Both `OPEN` and `BATTLE` retain the typed dispatch
+outcome from the final ADB boundary. An uncertain result Pauses, retains the
+post-dispatch suppressive boundary, and is never treated as a proven miss or
+replayed. Timeout, process replacement, owner mismatch,
 supersession, unexpected battle identity, or any ambiguous transition fails
 closed without further input. Once the verified `BATTLE` tap has been
 dispatched, a timeout or supersession on `UNKNOWN`, Home with an unknown or
@@ -1229,6 +1256,12 @@ for continued battle retry.
   button match, synchronizes current control and operator-workflow ownership,
   rechecks typed authority at the final input boundary, verifies dismissal,
   and never starts the in-battle floating-gem tapper.
+- `FREE_TICKET` is a blocking-primary state with priority over the obscured
+  Home or battle screen. Capture and detection continue, but no collector,
+  mission, Strategy, lifecycle, or ordinary recovery route runs behind it.
+  Only the exact dispatched source described in the Tournament and emulator
+  contracts may borrow one bounded Claim transaction under that source's typed
+  owner; an unowned or conflicting modal remains suppressive without input.
 - Transient `UNKNOWN` observations preserve an owned, incomplete startup gate.
   Initialization completion depends on the strategy assertion, not merely the
   current primary screen.
@@ -1344,6 +1377,10 @@ capture, and watchdog prechecks do not hold this boundary, so Pause can persist
 while they run. Once a lifecycle transaction has sent input, it retains the
 boundary only through mandatory source restoration; this prevents Pause from
 stranding the game backgrounded or on Android Home.
+The final runtime guard also synthesizes a newly durable maintenance or
+confirmed-launch owner before its normal heartbeat hold is installed, so those
+transactions cannot acquire authority in the gap between a route check and its
+next input.
 
 All low-level ADB subprocesses used by runtime observation or mutation are
 bounded. Mutations return typed `attempted` and `uncertain` outcomes. A plain

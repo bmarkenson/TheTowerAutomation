@@ -59,44 +59,6 @@ Strict typed matching entered in
 Over without verified Home cleanup—are consistent with both defects, but that
 historical inference does not explain its later unlogged `RUNNING` transition.
 
-## Regression boundary
-
-Main-routing regressions traverse actual `App.run` heartbeats. Successive owned
-`RUNNING` heartbeats must dispatch Damage Slider, Orb Distance, and session
-preflight under `EXCLUSIVE_VALIDATION`; a deadline-expired heartbeat must issue
-exactly one owned Surrender, and the following `GAME_OVER` heartbeat must finish
-verified Home cleanup under the same owner. If its first result write fails, a
-following Home heartbeat must retry only persistence and then release the
-boundary before a queued Start, without repeating the terminal tap. A failed
-Surrender result write must retry from a later running heartbeat without further
-input. A conclusive Surrender followed by failed Home cleanup and then a later
-`RUNNING` frame must quarantine that transition, persist a failed old receipt,
-consume its Game Over/activity boundary without another input, and adopt the
-successor only on a subsequent heartbeat. A confirmed-launch Home heartbeat
-must install `EXCLUSIVE_VALIDATION` before dispatch, ordinary attached preflight
-must retain `SESSION_PREFLIGHT`, and a paused manually started successor must
-not be adopted until the old result finalizes. Separate regressions cover
-interactive-development lease admission, failed-Home retention, same-runtime
-fresh-Home recovery, confirmed-launch finalization ordering, new-Strategy
-ordering, target-handoff deferral, launch conflict denial, transient
-validation/launch ownership rereads, terminal Setup Capture admission, initial
-validation-launch takeover, asynchronous guard transport, final nested-input
-guard evaluation, and interruption by a newly accepted Setup Capture workflow.
-They also retain one-frame validation/launch start proof across Pause,
-continuity recapture, transient receipt writes, and queued active-battle
-Strategy replacement; bind confirmed launch to its validated ADB target;
-consume natural terminal proof before mission observation; close proven Game
-Over cleanup from later Running, resumable Home, Tournament Results, or
-Workshop without input; and keep an inconclusive-Surrender battle under a
-suppressive no-input hold until a genuine terminal/no-battle boundary.
-Post-dispatch timeout and supersession matrices require `UNKNOWN` and
-Home-control `UNKNOWN` to retain that hold; only exact Home, terminal,
-Workshop, or Tournament-entry evidence releases it.
-
-The feature-worktree checkpoint passed compilation, state/clickmap validation,
-and all 2,430 repository tests in 378.10 seconds. This is repository evidence
-only; deployment and explicitly authorized live confirmation remain pending.
-
 ## 2026-08-15 recurrence
 
 The same production implementation repeated the defect during the next

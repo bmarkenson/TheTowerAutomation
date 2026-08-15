@@ -49,17 +49,27 @@ observation remain bound to the ADB target on which validation completed.
 If Surrender never proves Game Over, durable failure releases the receipt but
 leaves a separate suppressive battle hold. No strategy, handler, workflow,
 continuity, background, target-handoff, or Strategy-replacement input is
-allowed until fresh Game Over, Tournament Results, Workshop, or verified Home
-`NEW_BATTLE` proves the real boundary; resumable Home, continued Running,
-unknown state, and incomplete Home-control evidence do not release it. A
-dispatched confirmed Tournament launch follows the same rule if its receipt
-times out or is superseded before fresh start proof.
+allowed until fresh Game Over, Tournament Results, Workshop, Tournament entry,
+or verified Home `NEW_BATTLE` proves the real boundary; resumable Home,
+continued Running, unknown state, and incomplete Home-control evidence do not
+release it. A dispatched confirmed Tournament launch follows the same rule if
+its receipt times out or is superseded before fresh start proof. Its verified
+OPEN/BATTLE helpers preserve typed dispatch uncertainty: an uncertain input
+Pauses, retains suppressive ownership, and is never replayed as a proven miss.
 
 A failed fresh receipt-ownership reread is uncertainty, not release. The
 runtime retains its cached exact validation or confirmed-launch identity as a
 suppressive hold, blocks ordinary input and ADB target handoff, and waits for a
 fresh exact-owner read or a durable orphan transition. Setup Capture and new
 interactive-development lease admission cannot displace that boundary.
+
+A Free Ticket blocker grants no independent authority. It may Claim once only
+under the exact typed source that dispatched the obscured launch. Explicit
+Start and a linked validation receipt share that one physical budget; a
+transient result-write failure may retry persistence but cannot switch aliases
+or dispatch Claim again. A newly durable maintenance or confirmed-launch owner
+that appears before the next final mutation guard blocks the older route even
+before its normal heartbeat hold is installed.
 
 An explicitly authorized interactive-development test may instead preclaim one
 ordinary battle with `owned_battle_start=true` while a fresh exact Home

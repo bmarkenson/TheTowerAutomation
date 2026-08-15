@@ -279,12 +279,6 @@ as checked checkpoint narrative here.
   replacement attachment and terminal-lease replay were confirmed during
   promotion of `ab84a3c`; track only
   [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle).
-- [ ] Close an owned exclusive-validation `cleanup` receipt when the same
-  runtime has already proved that its validation battle reached Game Over and
-  later observes `RUNNING` before verified Home cleanup. Fail closed, release
-  action authority, and perform no Retry, Surrender, or other recovery input,
-  as recorded in
-  [open issue dossier](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
 - [ ] Live-confirm deployed production commit `95bd630` for atomic Start Battle
   Strategy selection from
   [ISSUE-2026-047](../issues/open-2026.md#start-battle-replaced-a-newer-no-strategy-selection-with-stale-tournament-state).
@@ -296,8 +290,9 @@ as checked checkpoint narrative here.
   [ISSUE-2026-046](../issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
   and the same-family later-battle release in
   [ISSUE-2026-001](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
-  Use only a newly and explicitly authorized ordinary validation battle at a
-  natural safe boundary. Confirm each declared phase,
+  Promote the current-main cross-owner hardening before live confirmation,
+  then use only a newly and explicitly authorized ordinary validation battle
+  at a natural safe boundary. Confirm each declared phase,
   exactly owned Surrender when required, verified Home cleanup and authority
   release, plus Pause or operator-workflow interruption before the next input.
   Do not manufacture the historical later-`RUNNING` transition; if it recurs
