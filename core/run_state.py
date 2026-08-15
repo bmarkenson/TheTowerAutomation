@@ -230,11 +230,23 @@ class AutomationControl:
     ) -> bool:
         """Evaluate runtime and workflow guards with fail-closed reporting."""
 
-        guards = tuple(
-            (guard, guard is self._mutation_guard)
-            for guard in (self._mutation_guard, action_guard)
+        scoped_guards = tuple(
+            guard
+            for guard in getattr(
+                self._mutation_local,
+                "scoped_action_guards",
+                (),
+            )
             if guard is not None
         )
+        guards_list: list[tuple[Callable[[], bool], bool]] = []
+        seen: set[int] = set()
+        for guard in (self._mutation_guard, *scoped_guards, action_guard):
+            if guard is None or id(guard) in seen:
+                continue
+            seen.add(id(guard))
+            guards_list.append((guard, guard is self._mutation_guard))
+        guards = tuple(guards_list)
         allowed = not self._mutations_shutdown
         for guard, runtime_owned in guards:
             if not allowed:
@@ -265,6 +277,30 @@ class AutomationControl:
             with self._lock:
                 allowed = allowed and self._state is RunState.RUNNING
         return allowed
+
+    @contextmanager
+    def action_guard_scope(
+        self,
+        action_guard: Optional[Callable[[], bool]],
+    ) -> Iterator[None]:
+        """Bind a final-mutation guard to every input in the current route.
+
+        This scope does not hold the mutation or cross-process dispatch lock.
+        Each low-level input still opens its own short transaction and rechecks
+        all scoped guards immediately before dispatch.
+        """
+
+        previous = tuple(
+            getattr(self._mutation_local, "scoped_action_guards", ())
+        )
+        if action_guard is not None:
+            self._mutation_local.scoped_action_guards = previous + (
+                action_guard,
+            )
+        try:
+            yield
+        finally:
+            self._mutation_local.scoped_action_guards = previous
 
     def _acquire_transaction_dispatch_boundary(self) -> bool:
         """Acquire the shared boundary at the transaction's first input."""
@@ -448,6 +484,7 @@ class AutomationControl:
             self._mutation_local.defer_dispatch_boundary = False
             self._mutation_local.dispatch_boundary = None
             self._mutation_local.dispatch_boundary_acquired = False
+            self._mutation_local.scoped_action_guards = ()
             with self._lock:
                 self._state = RunState.RUNNING
                 self._mode = ExecMode.NEXT_BATTLE

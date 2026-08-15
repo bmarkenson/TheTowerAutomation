@@ -4,12 +4,26 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-14 Start Battle strategy linearization failure
+
+[`start-battle-strategy-linearization-2026-08-14.md`](start-battle-strategy-linearization-2026-08-14.md)
+preserves two consecutive No Strategy selections that immediate Start Battle
+rewrote to Tournament, plus the first resulting disposable validation battle
+and the second workflow's pre-input rejection, for `ISSUE-2026-047`.
+
 ## 2026-08-08–13 Home Perk repair confirmation
 
 [`perk-repair-confirmation-2026-08-08-13.md`](perk-repair-confirmation-2026-08-08-13.md)
 preserves the first successful post-deployment Auto Pick correction and later
 exact Ban/Auto Pick save matches used to close the original live-confirmation
 limitation in `ISSUE-2026-033`.
+
+## 2026-08-12 exclusive-validation authority mismatch
+
+[`exclusive-validation-authority-mismatch-2026-08-12.md`](exclusive-validation-authority-mismatch-2026-08-12.md)
+preserves the bounded production action sequence and repository cause that
+established `ISSUE-2026-046`. It distinguishes the validation-dispatch defect
+from the still-unexplained later-battle transition in `ISSUE-2026-001`.
 
 ## 2026-08-07 Utility Dissonance production confirmation
 

@@ -1088,6 +1088,7 @@ class AutomationSupervisor:
             receipt = (
                 self._control_store.record_manual_exclusive_validation_launch(
                     request_id,
+                    observer=self.current_exclusive_validation_owner(),
                     reason=reason,
                 )
             )

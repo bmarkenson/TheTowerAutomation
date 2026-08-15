@@ -2155,6 +2155,37 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     manager.on_home.assert_called_once_with()
 
 
+def test_app_scopes_home_setup_guard_through_nested_final_input():
+    app = App.__new__(App)
+    guard = Mock(side_effect=(True, False))
+    app._runtime_action_guard = guard
+    denied = []
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {},
+    )
+
+    def nested_setup(_requirements, **_kwargs):
+        assert _kwargs["action_guard_fn"]()
+        with AUTOMATION.authorize_mutation() as allowed:
+            denied.append(not allowed)
+        return setup
+
+    with patch(
+        "core.app.run_gc_no_battle_setup",
+        side_effect=nested_setup,
+    ):
+        result = app._run_home_setup_attempts(
+            REQUIREMENTS,
+            screenshot=object(),
+        )
+
+    assert result is setup
+    assert denied == [True]
+    assert guard.call_count == 2
+
+
 def test_degraded_terminal_continuation_repairs_before_next_battle_launch():
     frame = object()
     manager = Mock()

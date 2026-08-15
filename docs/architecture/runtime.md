@@ -907,10 +907,88 @@ conclusive pass or failure, or the bounded timeout, moves the same receipt to
 cleanup before any terminal input. Surrender is allowed only while the current
 runtime/ADB owner still matches and fresh `RUNNING` evidence excludes
 Tournament identity. Cleanup must reach Game Over and verified Home
-`NEW_BATTLE` before the receipt reports ready or the failure reason. Process
-replacement, owner mismatch, Tournament identity, a resumed/pre-existing
-battle, or an ambiguous transition fails closed without inheriting Surrender
-authority.
+`NEW_BATTLE` before a normal receipt reports ready or its failure reason.
+Successful guarded Surrender retains exact process-local Game Over proof. If
+the result write fails after verified Home, that cleanup proof retains
+`EXCLUSIVE_VALIDATION`; later heartbeats retry only persistence and never repeat
+the Home tap. The same owning runtime can also recover from a fresh verified
+Home `NEW_BATTLE` frame when its first cleanup observation was missed. If Home
+cleanup fails and a later `RUNNING` frame appears, that fresh frame cannot be
+trusted as the old battle: the runtime performs no further input, persists a
+failed old receipt, consumes its proven Game Over lifecycle boundary, rotates
+the activity scope, and permits only a subsequent heartbeat to adopt the
+successor. Process replacement cannot inherit that receipt: owner mismatch
+fails it closed without input. The mission boundary and pending Strategy
+release only after the result is durable. A queued successor Start or confirmed
+Tournament launch waits behind that receipt-only finalization. Capture and
+detection remain live during Pause, but workflow synchronization, mission
+observation, run adoption, and activity continuity are quarantined while the
+exact terminal claim remains. If the operator manually starts a successor
+during that Pause, Resume finalizes the old boundary before a later heartbeat
+adopts the successor. A requested ADB target handoff is likewise deferred until
+active validation, terminal finalization, or an awaiting/requested/claimed
+confirmed launch releases its current target. The ready launch receipt also
+retains the ADB target on which validation completed: a different-target
+runtime retires an unclaimed prompt without input, and neither automatic claim
+nor manual-start observation can transplant it to that target. Tournament
+identity, a resumed/pre-existing battle, or an ambiguous transition fails
+closed without inheriting Surrender authority.
+
+A fresh validation or confirmed-launch battle boundary is process-local proof
+that must survive its single observation frame. The runtime records that proof
+immediately after lifecycle adoption and before activity continuity can request
+a recapture. If the claimed-validation `running` write or the launch-result
+write is temporarily unavailable, the exact receipt remains the sole typed
+owner and later heartbeats retry only that write; they do not reinterpret the
+absence of a second fresh boundary as failure. Pause preserves the proof while
+denying the write and every input. A retained validation start seen later at
+Home `RESUME_BATTLE` is advanced only far enough to persist a no-input failure
+and release validation mode. If an owned running validation instead reaches
+fresh Game Over, verified Home `NEW_BATTLE`, Tournament Results, or Workshop
+before guarded Surrender, that terminal proof is retained before any fallible
+ownership/write step and before mission or continuity observation. Resume can
+then finish the exact receipt and old lifecycle boundary without touching a
+successor.
+
+If guarded Surrender does not conclusively reach Game Over, the runtime stages
+a distinct exact `release_without_cleanup` result. It never retries Surrender,
+Home, or another battle action. A failed result write is retried from later
+heartbeats under `EXCLUSIVE_VALIDATION`; once durable, validation-battle mode is
+released without calling Game Over hooks or applying a next-boundary Strategy
+against the still-running battle. Run initialization and session preflight stay
+deferred for that battle's remainder, and a distinct suppressive
+`EXCLUSIVE_OWNERSHIP` hold denies strategy, handler, workflow, continuity,
+background, target-handoff, and Strategy-replacement input. The hold releases
+only on fresh Game Over, Tournament Results, Workshop, or verified Home
+`NEW_BATTLE`; Home `RESUME_BATTLE`, `RUNNING`, `UNKNOWN`, incomplete Home
+classification, and every other non-authoritative screen retain it.
+The genuine terminal/fresh-Home boundary then rearms the next run normally.
+
+The verified `NEW_BATTLE` launch composes the newly claimed receipt with the
+typed owner that authorized its Home route: `OPERATOR_WORKFLOW` for an explicit
+Start workflow, otherwise `EXCLUSIVE_VALIDATION`. It rechecks both at the final
+tap. After the owned battle boundary, `EXCLUSIVE_VALIDATION` drives every
+battle-only strategy tick, timeout Surrender, Game Over cleanup, and confirmed
+Tournament launch, including proof-backed cleanup-result persistence; ordinary
+attached preflight continues to use
+`SESSION_PREFLIGHT`. Exact receipt-only finalization precedes successor
+lifecycle adoption. During an input-capable phase, operator workflow,
+activity-continuity, or unresolved-ownership holds take priority and therefore
+stop validation before its next final input. Passive capture preserves the
+preceding durable hold until fresh detection selects the next owner. The
+control surface rejects a new interactive-development lease while any
+non-external typed hold is published, so an external lease cannot interleave
+with and strand a terminal validation claim. Setup Capture is unavailable
+while validation owns the runtime. A successor operator workflow may remain
+queued, but a retained terminal claim does not merge that future owner into
+its final Home/result guard; Pause and Stop still deny globally. A failed fresh
+durable-ownership reread also cannot make cached validation or confirmed-launch
+work disappear: the exact local identity retains suppressive
+`EXCLUSIVE_OWNERSHIP`, blocks ordinary dispatch and ADB handoff, and becomes
+actionable again only after a fresh exact-owner read or a durable orphan
+transition. Strategy replacement after finalization preserves the already
+consumed Home/Game Over marker, so the next Home frame does not rotate the same
+activity boundary twice.
 
 After a ready result, the control surface publishes a one-shot operator launch
 prompt tied to that exact ready receipt and configuration fingerprint. The
@@ -933,9 +1011,14 @@ continues directly. It starts the battle only through the OCR-confirmed
 Tournament `BATTLE` control. Ownership, Pause, and current-request identity are
 rechecked before every tap. Timeout, process replacement, owner mismatch,
 supersession, unexpected battle identity, or any ambiguous transition fails
-closed without further input. If the operator starts the Tournament manually
-while the offer is pending, the runtime consumes the offer as a manual start
-and continues observing normally.
+closed without further input. Once the verified `BATTLE` tap has been
+dispatched, a timeout or supersession on `UNKNOWN`, Home with an unknown or
+resumable battle control, `RUNNING`, or any other non-authoritative screen
+retains suppressive `EXCLUSIVE_OWNERSHIP`; only fresh Game Over, Tournament
+Results, Workshop, verified Home `NEW_BATTLE`, or the Tournament entry screen
+proves release safe. If the operator starts the Tournament manually while the
+offer is pending, the runtime consumes the offer as a manual start and
+continues observing normally.
 
 The genuine Tournament run performs the standard run-initialization route at
 its fresh boundary, maxing EHLS first and EALS second. Its battle-only session
@@ -1138,7 +1221,15 @@ for continued battle retry.
   current primary screen.
 - While paused or exclusively gated, capture, detection, lifecycle observation,
   and read-only status reporting continue. Strategy, handler, mission,
-  recovery, and blind-tapper actions remain blocked.
+  recovery, and blind-tapper actions remain blocked. The exact validation
+  terminal claim above is the narrow exception: detection continues, but
+  successor lifecycle observation waits until the old boundary finalizes.
+- A compound Strategy route binds its selected typed action guard for the
+  entire synchronous route without holding the mutation lock. Each nested tap
+  or swipe opens its own short dispatch transaction and rechecks global
+  control, durable workflow ownership, and the scoped guard at the final input
+  boundary. A newly accepted operator workflow therefore stops the next input,
+  even when a helper does not expose a separate guard parameter.
 
 ## Completed-run records and evidence
 

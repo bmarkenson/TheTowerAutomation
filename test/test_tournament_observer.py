@@ -12,6 +12,8 @@ from automation.missions.manager import MissionManager
 from automation.strategies import get_strategy
 from core.action_authority import (
     ActionAuthorityDecision,
+    AuthorityHold,
+    AuthorityHoldState,
     AuxiliaryCollector,
     RuntimeActionClass,
 )
@@ -650,6 +652,7 @@ def test_tournament_main_loop_preserves_policy_after_attached_gate_releases(
     assert strategy is not None
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     gate_complete = False
+    preflight_owners = []
 
     manager = MagicMock()
     manager.strategy = strategy
@@ -662,6 +665,11 @@ def test_tournament_main_loop_preserves_policy_after_attached_gate_releases(
     def complete_attached_gate(*_args, strategy_only=False, **_kwargs):
         nonlocal gate_complete
         if strategy_only:
+            preflight_owners.append(app._active_action_authority_owner)
+            assert app._runtime_action_guard()
+            assert not app._runtime_action_guard(
+                owner=AuthorityHold.EXCLUSIVE_VALIDATION
+            )
             gate_complete = True
 
     manager.tick.side_effect = complete_attached_gate
@@ -723,11 +731,502 @@ def test_tournament_main_loop_preserves_policy_after_attached_gate_releases(
         AUTOMATION.mode = previous_mode
 
     assert gate_complete
+    assert preflight_owners == [AuthorityHold.SESSION_PREFLIGHT]
     handle_ad_gem.assert_called_once()
     assert callable(handle_ad_gem.call_args.kwargs["action_guard_fn"])
     assert callable(
         handle_ad_gem.call_args.kwargs["floating_action_guard_fn"]
     )
+
+
+def test_owned_validation_main_loop_dispatches_under_exclusive_owner():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    running_detection = {
+        "state": "RUNNING",
+        "menu": "ATTACK_MENU",
+        "secondary_states": [],
+        "overlays": ["MENU_CLOSED"],
+    }
+    dispatched_action_types = []
+    observed_owners = []
+    pre_capture_holds = []
+
+    manager = MissionManager(None, strategy)
+    manager.start()
+    assert manager.maybe_run_start(running_detection)
+    manager.set_exclusive_validation_battle(True)
+    assert manager.session_preflight_pending()
+
+    app = App.__new__(App)
+
+    def execute_validation_phase(
+        screen,
+        actions,
+        ctx,
+        *,
+        action_guard_fn,
+    ):
+        assert screen is frame
+        assert action_guard_fn()
+        observed_owners.append(app._active_action_authority_owner)
+        assert app._runtime_action_guard()
+        assert not app._runtime_action_guard(
+            owner=AuthorityHold.SESSION_PREFLIGHT
+        )
+        assert len(actions) == 1
+        action_type = actions[0]["type"]
+        assert actions[0]["_strategy"] is True
+        dispatched_action_types.append(action_type)
+        mission_vars = ctx.data["mission_vars"]
+        if action_type == "damage_slider_configure":
+            mission_vars["damage_slider_checked"] = True
+        elif action_type == "orb_distance_configure":
+            mission_vars["orb_distance_checked"] = True
+        else:
+            assert action_type == "session_preflight"
+            mission_vars["gc_session_preflight_attempted"] = True
+            mission_vars["gc_session_preflight_completed"] = True
+
+    app._config = SimpleNamespace(wait_on_start=False)
+    app._supervisor = MagicMock(is_paused=False, auto_return_secs=900)
+    app._adb_connection_coordinator = MagicMock()
+    app._adb_connection_coordinator.ensure_connected.return_value = False
+    app._mission_mgr = manager
+    app._state_tracker = MagicMock()
+    app._status_reporter = MagicMock()
+    app._event_mission_tracker = MagicMock()
+    app._match_trace = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._last_wave_ts = 0.0
+    app._blind_tapper_suspended = False
+    app._run_initialization_gate_logged = False
+    app._session_preflight_gate_logged = False
+    app._session_preflight_terminal_blocked_logged = False
+    app._session_preflight_repair_denial_logged = False
+    app._steady_run_entry_pending = False
+    app._authority_holds = (
+        AuthorityHoldState(
+            AuthorityHold.EXCLUSIVE_VALIDATION,
+            "validation owns capture-adjacent input",
+        ),
+    )
+
+    def capture_frame():
+        pre_capture_holds.append(
+            tuple(hold.hold for hold in app._authority_holds)
+        )
+        if len(pre_capture_holds) <= 3:
+            return frame
+        raise KeyboardInterrupt
+
+    app._capture_frame = MagicMock(side_effect=capture_frame)
+    app._resolve_upgrade_detail_overlay = MagicMock()
+    app._run_perk_selector = MagicMock()
+    app._run_perk_selector.handle.return_value = False
+    app._battle_activation_tracker = MagicMock()
+    app._battle_activation_tracker.observe.return_value = []
+    app._battle_activation_tracker.drain_evidence_captures.return_value = []
+    app._observe_exclusive_validation_battle_start = MagicMock()
+    app._exclusive_validation_in_progress = MagicMock(return_value=True)
+    app._advance_exclusive_validation = MagicMock(return_value=False)
+    app._advance_exclusive_validation_launch = MagicMock(return_value=False)
+    app._observe_strategy_request = MagicMock()
+    app._handle_daily_gem_if_due = MagicMock(return_value=False)
+    app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+    app._handle_primary_states = MagicMock()
+    manager._action_guard_fn = lambda: app._runtime_action_guard()
+
+    with (
+        patch("core.app.threading.Thread"),
+        patch(
+            "core.app.detect_state_and_overlays",
+            return_value=running_detection,
+        ),
+        patch("core.app.detect_wave_number_from_image", return_value=(1, 99.0)),
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch(
+            "automation.missions.manager.execute_actions",
+            side_effect=execute_validation_phase,
+        ) as execute_actions,
+        patch("core.app.time.sleep"),
+    ):
+        app.run()
+
+    assert execute_actions.call_count == 3
+    assert dispatched_action_types == [
+        "damage_slider_configure",
+        "orb_distance_configure",
+        "session_preflight",
+    ]
+    assert strategy.is_session_preflight_complete(manager.ctx)
+    assert observed_owners == [AuthorityHold.EXCLUSIVE_VALIDATION] * 3
+    assert pre_capture_holds == [
+        (AuthorityHold.EXCLUSIVE_VALIDATION,),
+    ] * 4
+    assert app._active_action_authority_owner is None
+    app._handle_primary_states.assert_not_called()
+
+
+def test_owned_validation_cleanup_retries_result_write_from_home():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    observed_owners = []
+    receipt = {
+        "request_id": "owned-cleanup",
+        "status": "cleanup",
+        "pending_outcome": "failed",
+        "pending_reason": "validation failed",
+    }
+    result = {
+        **receipt,
+        "status": "result",
+        "outcome": "failed",
+        "reason": "validation failed",
+    }
+
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx = MissionContext(
+        data={
+            "exclusive_validation_battle": True,
+            "mission_vars": {"exclusive_validation_battle": True},
+        }
+    )
+    manager.run_initialization_pending.return_value = False
+    manager.session_preflight_pending.return_value = False
+    manager.session_preflight_terminally_blocked.return_value = False
+
+    app = App.__new__(App)
+    app._config = SimpleNamespace(wait_on_start=False)
+    app._supervisor = MagicMock(is_paused=False, auto_return_secs=900)
+    app._supervisor.apply_control.return_value = False
+    app._supervisor.owns_exclusive_validation.return_value = True
+    finish_attempts = 0
+    finish_owners = []
+
+    def finish_result(*_args, **_kwargs):
+        nonlocal finish_attempts
+        finish_attempts += 1
+        finish_owners.append(app._active_action_authority_owner)
+        # The first result write fails after physical Home cleanup. The
+        # validation boundary must remain installed until a later heartbeat
+        # persists the result without tapping Home again.
+        assert (
+            manager.finalize_exclusive_validation_game_over_boundary.call_count
+            == 0
+        )
+        if finish_attempts == 1:
+            app._supervisor.battle_workflow = {
+                "request_id": "queued-successor",
+                "intent": "start_battle",
+                "status": "acknowledged",
+            }
+            return None
+        return result
+
+    app._supervisor.finish_exclusive_validation.side_effect = finish_result
+    app._adb_connection_coordinator = MagicMock()
+    app._adb_connection_coordinator.ensure_connected.return_value = False
+    app._mission_mgr = manager
+    app._state_tracker = MagicMock()
+    app._status_reporter = MagicMock()
+    app._event_mission_tracker = MagicMock()
+    app._match_trace = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._last_wave_ts = 0.0
+    app._blind_tapper_suspended = False
+    app._run_initialization_gate_logged = False
+    app._session_preflight_gate_logged = False
+    app._session_preflight_terminal_blocked_logged = False
+    app._session_preflight_repair_denial_logged = False
+    app._steady_run_entry_pending = False
+    app._exclusive_validation_terminal_hold = None
+    app._active_exclusive_validation_request_id = receipt["request_id"]
+    app._capture_frame = MagicMock(
+        side_effect=[frame, frame, KeyboardInterrupt]
+    )
+    app._resolve_upgrade_detail_overlay = MagicMock()
+    app._run_perk_selector = MagicMock()
+    app._run_perk_selector.handle.return_value = False
+    app._battle_activation_tracker = MagicMock()
+    app._battle_activation_tracker.observe.return_value = []
+    app._battle_activation_tracker.drain_evidence_captures.return_value = []
+    app._observe_exclusive_validation_battle_start = MagicMock()
+    app._exclusive_validation_in_progress = MagicMock(return_value=True)
+    app._exclusive_validation_cleanup_in_progress = MagicMock(return_value=True)
+    app._reconcile_exclusive_validation = MagicMock(
+        side_effect=lambda: result if finish_attempts >= 2 else receipt
+    )
+    app._exclusive_validation_receipt = MagicMock(return_value=receipt)
+    app._advance_exclusive_validation = MagicMock(return_value=False)
+    app._advance_exclusive_validation_launch = MagicMock(return_value=False)
+    app._observe_strategy_request = MagicMock()
+    app._process_strategy_boundary = MagicMock()
+    app._handle_daily_gem_if_due = MagicMock(return_value=False)
+    app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+    app._handle_primary_states = MagicMock()
+    app._apply_pending_strategy = MagicMock()
+    app._announce_exclusive_validation_result = MagicMock()
+
+    def return_home_under_exclusive_owner(*, action_guard, **_kwargs):
+        observed_owners.append(app._active_action_authority_owner)
+        assert action_guard()
+        assert app._runtime_action_guard(
+            action_class=RuntimeActionClass.LIFECYCLE_ACTION
+        )
+        return True
+
+    game_over = {
+        "state": "GAME_OVER",
+        "menu": "UNKNOWN",
+        "secondary_states": [],
+        "overlays": [],
+    }
+    home = {
+        "state": "HOME_SCREEN",
+        "home_battle_control": "NEW_BATTLE",
+        "menu": "UNKNOWN",
+        "secondary_states": [],
+        "overlays": [],
+    }
+    app._annotate_home_battle_control = MagicMock()
+
+    with (
+        patch("core.app.threading.Thread"),
+        patch(
+            "core.app.detect_state_and_overlays",
+            side_effect=(game_over, home),
+        ),
+        patch("core.app.detect_wave_number_from_image", return_value=(None, -1.0)),
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch(
+            "core.app.return_home_from_game_over",
+            side_effect=return_home_under_exclusive_owner,
+        ) as return_home,
+        patch("core.app.time.sleep"),
+    ):
+        app.run()
+
+    manager.tick.assert_not_called()
+    app._handle_primary_states.assert_not_called()
+    assert app._supervisor.battle_workflow["request_id"] == (
+        "queued-successor"
+    )
+    return_home.assert_called_once()
+    assert app._supervisor.finish_exclusive_validation.call_count == 2
+    for call in app._supervisor.finish_exclusive_validation.call_args_list:
+        assert call.args == (receipt["request_id"],)
+        assert call.kwargs == {
+            "outcome": "failed",
+            "reason": "validation failed",
+            "allowed_statuses": ("cleanup",),
+        }
+    app._announce_exclusive_validation_result.assert_called_once_with(result)
+    manager.finalize_exclusive_validation_game_over_boundary.assert_called_once()
+    manager.set_exclusive_validation_battle.assert_called_once_with(False)
+    app._status_reporter.reset_coin_rate_samples.assert_called_once()
+    app._apply_pending_strategy.assert_called_once()
+    assert observed_owners == [AuthorityHold.EXCLUSIVE_VALIDATION]
+    assert finish_attempts == 2
+    assert finish_owners == [AuthorityHold.EXCLUSIVE_VALIDATION] * 2
+    assert app._exclusive_validation_terminal_hold is None
+    assert app._active_action_authority_owner is None
+
+
+def test_paused_manual_successor_waits_for_validation_finalization():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    running = {
+        "state": "RUNNING",
+        "menu": "ATTACK_MENU",
+        "secondary_states": [],
+        "overlays": ["MENU_CLOSED"],
+    }
+    cleanup = {
+        "request_id": "finished-validation",
+        "status": "cleanup",
+        "pending_outcome": "failed",
+        "pending_reason": "validation cleanup persisted",
+    }
+    result = {
+        **cleanup,
+        "status": "result",
+        "outcome": "failed",
+        "reason": "validation cleanup persisted",
+    }
+    events = []
+    app = App.__new__(App)
+    app._config = SimpleNamespace(wait_on_start=False)
+    app._supervisor = MagicMock(auto_return_secs=900)
+    apply_count = 0
+
+    def apply_control():
+        nonlocal apply_count
+        apply_count += 1
+        # Startup and the first visible successor frame remain paused. Resume
+        # permits receipt-only finalization on the second frame.
+        app._supervisor.is_paused = apply_count < 3
+        return False
+
+    app._supervisor.apply_control.side_effect = apply_control
+    finish_persisted = False
+
+    def finish_result(*_args, **_kwargs):
+        nonlocal finish_persisted
+        finish_persisted = True
+        return result
+
+    app._supervisor.finish_exclusive_validation.side_effect = finish_result
+    app._supervisor.owns_exclusive_validation.return_value = True
+    app._adb_connection_coordinator = MagicMock()
+    app._adb_connection_coordinator.ensure_connected.return_value = False
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(None, strategy)
+    manager.start()
+    assert manager.maybe_run_start(running)
+    manager.set_exclusive_validation_battle(True)
+    finalize_old = manager.finalize_exclusive_validation_game_over_boundary
+
+    def finalize_validation_boundary():
+        finalize_old()
+        events.append("finalize-old")
+
+    manager.finalize_exclusive_validation_game_over_boundary = MagicMock(
+        side_effect=finalize_validation_boundary
+    )
+    observe_successor = manager.maybe_run_start
+
+    def adopt_successor(_detection):
+        assert observe_successor(_detection) is True
+        events.append("adopt-successor")
+        raise KeyboardInterrupt
+
+    manager.maybe_run_start = MagicMock(side_effect=adopt_successor)
+    app._mission_mgr = manager
+    app._status_reporter = MagicMock()
+    app._state_tracker = MagicMock()
+    app._event_mission_tracker = MagicMock()
+    app._match_trace = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._last_wave_ts = 0.0
+    app._blind_tapper_suspended = False
+    app._authority_holds = ()
+    app._active_exclusive_validation_request_id = result["request_id"]
+    app._exclusive_validation_terminal_hold = result["request_id"]
+    app._exclusive_validation_terminal_mode = "home_cleanup"
+    app._exclusive_validation_terminal_outcome = "failed"
+    app._exclusive_validation_terminal_reason = cleanup["pending_reason"]
+    app._exclusive_validation_terminal_announced = None
+    app._exclusive_validation_receipt = MagicMock(
+        side_effect=lambda: result if finish_persisted else cleanup
+    )
+    app._reconcile_exclusive_validation = MagicMock(
+        side_effect=lambda: result if finish_persisted else cleanup
+    )
+    app._apply_pending_strategy = MagicMock()
+    app._announce_exclusive_validation_result = MagicMock()
+    app._refreshed_operator_authority_holds = MagicMock(return_value=())
+    app._observe_strategy_request = MagicMock()
+    app._sync_interactive_development_control_boundary = MagicMock()
+    app._annotate_home_battle_control = MagicMock()
+    app._record_control_observation = MagicMock()
+    app._yield_on_unexpected_manual_activity = MagicMock()
+    app._sync_operator_control_workflows = MagicMock()
+    app._operator_workflow_authority_hold = MagicMock(return_value=None)
+    app._advance_pending_home_setup_recovery = MagicMock(return_value=False)
+    app._observe_player_save_audit_screen = MagicMock()
+    app._sync_interactive_development_observation = MagicMock()
+    app._observe_no_strategy_frame = MagicMock()
+    app._process_strategy_boundary = MagicMock()
+    app._observe_strategy_gate_boundary = MagicMock()
+    app._capture_frame = MagicMock(return_value=frame)
+
+    previous_state = AUTOMATION.state
+    try:
+        AUTOMATION.state = "RUNNING"
+        with (
+            patch("core.app.threading.Thread"),
+            patch("core.app.detect_state_and_overlays", return_value=running),
+            patch("core.app.stop_blind_gem_tapper", return_value=False),
+            patch("core.app.return_home_from_game_over") as return_home,
+            patch(
+                "automation.missions.manager.start_activity_scope"
+            ) as start_scope,
+            patch("core.app.time.sleep") as sleep,
+        ):
+            app.run()
+    finally:
+        AUTOMATION.state = previous_state
+
+    assert events == ["finalize-old", "adopt-successor"]
+    assert manager.ctx.data["last_detection_state"] == "RUNNING"
+    assert manager.maybe_run_start.call_count == 1
+    # Neither the paused frame nor the resumed finalization frame was allowed
+    # to acknowledge a workflow or mutate the successor's lifecycle.
+    assert app._sync_operator_control_workflows.call_count == 1
+    return_home.assert_not_called()
+    app._supervisor.finish_exclusive_validation.assert_called_once_with(
+        cleanup["request_id"],
+        outcome="failed",
+        reason=cleanup["pending_reason"],
+        allowed_statuses=("cleanup",),
+    )
+    app._announce_exclusive_validation_result.assert_called_once_with(result)
+    manager.finalize_exclusive_validation_game_over_boundary.assert_called_once()
+    start_scope.assert_called_once_with(
+        reason="exclusive_validation_game_over_boundary",
+        carry_terminal_history_handoff=True,
+    )
+    assert manager.ctx.data["exclusive_validation_battle"] is False
+    app._apply_pending_strategy.assert_called_once()
+    assert app._exclusive_validation_terminal_hold is None
+    assert sleep.call_count == 2
+    assert all(item.args == (1.0,) for item in sleep.call_args_list)
+
+
+def test_owned_validation_cleanup_retries_before_releasing_boundary():
+    app = App.__new__(App)
+    cleanup = {
+        "request_id": "owned-cleanup",
+        "status": "cleanup",
+    }
+    result = {
+        **cleanup,
+        "status": "result",
+        "outcome": "ready",
+    }
+    app._mission_mgr = MagicMock()
+    app._status_reporter = MagicMock()
+    app._apply_pending_strategy = MagicMock()
+    app._exclusive_validation_terminal_hold = cleanup["request_id"]
+    app._handle_exclusive_validation_game_over = MagicMock(return_value=True)
+    app._reconcile_exclusive_validation = MagicMock(
+        side_effect=(cleanup, cleanup, result)
+    )
+
+    assert app._dispatch_exclusive_validation_game_over()
+    app._mission_mgr.finalize_exclusive_validation_game_over_boundary.assert_not_called()
+    app._mission_mgr.set_exclusive_validation_battle.assert_not_called()
+    app._status_reporter.reset_coin_rate_samples.assert_not_called()
+    app._apply_pending_strategy.assert_not_called()
+
+    assert app._dispatch_exclusive_validation_game_over()
+    app._mission_mgr.finalize_exclusive_validation_game_over_boundary.assert_called_once()
+    app._mission_mgr.set_exclusive_validation_battle.assert_called_once_with(
+        False
+    )
+    app._status_reporter.reset_coin_rate_samples.assert_called_once()
+    app._apply_pending_strategy.assert_called_once()
+    app._handle_exclusive_validation_game_over.assert_called_once_with(
+        home_cleanup_verified=False
+    )
+    assert app._exclusive_validation_terminal_hold is None
 
 
 def test_tournament_running_handler_checks_guarded_rewards_before_visible_ad_gem():

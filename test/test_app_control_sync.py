@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
 from core.adb_connection import AdbConnectionCoordinator
 from core.app import App
 from core.ss_capture import ScreenshotCaptureResult, ScreenshotFailure
@@ -198,3 +200,98 @@ def test_paused_target_handoff_forces_validation_and_records_fresh_capture():
         force=True
     )
     app._adb_connection_coordinator.record_capture_success.assert_called_once()
+
+
+def test_paused_target_handoff_waits_for_validation_terminal_claim():
+    app = App.__new__(App)
+    app._blind_tapper_suspended = False
+    app._adb_connection_coordinator = MagicMock()
+    app._adb_connection_coordinator.ensure_connected.return_value = True
+    session = MagicMock()
+    session.handoff.side_effect = lambda _target, *, validate: validate()
+    app._adb_target_session = session
+    app._exclusive_validation_terminal_hold = "validation-cleanup"
+    frame = object()
+
+    with (
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch("core.app.time.sleep"),
+        patch(
+            "core.app.capture_and_save_screenshot_result",
+            return_value=ScreenshotCaptureResult(frame),
+        ),
+        patch("core.app.log") as runtime_log,
+    ):
+        assert not app._handoff_adb_port(5565)
+        session.handoff.assert_not_called()
+        app._adb_connection_coordinator.ensure_connected.assert_not_called()
+
+        app._exclusive_validation_terminal_hold = None
+        assert app._handoff_adb_port(5565)
+
+    session.handoff.assert_called_once()
+    assert any(
+        call.args
+        and "Deferring paused ADB target handoff" in call.args[0]
+        for call in runtime_log.call_args_list
+    )
+
+
+@pytest.mark.parametrize(
+    ("validation_active", "launch_active"),
+    ((True, False), (False, True)),
+)
+def test_paused_target_handoff_waits_for_active_validation_route(
+    validation_active,
+    launch_active,
+):
+    app = App.__new__(App)
+    app._adb_target_session = MagicMock()
+    app._supervisor = MagicMock()
+    app._mission_mgr = MagicMock()
+    app._exclusive_validation_terminal_hold = None
+    app._exclusive_validation_in_progress = MagicMock(
+        return_value=validation_active
+    )
+    app._exclusive_validation_launch_in_progress = MagicMock(
+        return_value=launch_active
+    )
+
+    with patch("core.app.log"):
+        assert not app._handoff_adb_port(5565)
+
+    app._adb_target_session.handoff.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "active_field",
+    (
+        "_active_exclusive_validation_request_id",
+        "_active_exclusive_validation_launch_request_id",
+        "_exclusive_validation_passive_battle_hold",
+    ),
+)
+def test_paused_target_handoff_fails_closed_on_cached_validation_identity(
+    active_field,
+):
+    app = App.__new__(App)
+    app._adb_target_session = MagicMock()
+    app._supervisor = MagicMock()
+    app._mission_mgr = MagicMock()
+    app._exclusive_validation_terminal_hold = None
+    app._active_exclusive_validation_request_id = None
+    app._active_exclusive_validation_launch_request_id = None
+    app._exclusive_validation_passive_battle_hold = None
+    app._exclusive_validation_ownership_hold = False
+    setattr(app, active_field, "cached-validation-owner")
+    app._exclusive_validation_in_progress = MagicMock(return_value=False)
+    app._exclusive_validation_launch_in_progress = MagicMock(
+        return_value=False
+    )
+
+    with patch("core.app.log"):
+        assert not app._handoff_adb_port(5565)
+
+    app._adb_target_session.handoff.assert_not_called()
+    app._exclusive_validation_in_progress.assert_not_called()
+    app._exclusive_validation_launch_in_progress.assert_not_called()
