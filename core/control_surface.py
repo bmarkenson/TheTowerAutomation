@@ -42,7 +42,9 @@ from core.control_model import (
     validate_battle_workflow,
     validate_manual_control,
     validate_observation,
+    validate_process_restart_handoff,
     validate_setup_capture,
+    validate_workflow_evidence,
     workflow_evidence_from_authority,
 )
 from core.gate_decisions import startup_gate_context_for_strategy
@@ -121,6 +123,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "runtime_control_acknowledgements_v1",
     "save_backed_setup_capture_v1",
     "save_backed_setup_capture_v2",
+    "same_battle_process_restart_reattachment_v1",
     SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
     "selected_strategy_process_start",
@@ -1265,6 +1268,8 @@ class ControlSurfaceService:
                 "emulator_maintenance_error": None,
                 "battle_workflow": None,
                 "battle_workflow_error": None,
+                "process_restart_handoff": None,
+                "process_restart_handoff_error": None,
                 "manual_control": None,
                 "manual_control_error": None,
                 "setup_capture": None,
@@ -3164,6 +3169,65 @@ class ControlSurfaceService:
         except (OSError, TypeError, ValueError):
             return {"strategy": strategy, "checks": []}
 
+    @staticmethod
+    def _stoppable_owned_battle_evidence(
+        status: Mapping[str, Any],
+        process: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Return exact evidence only for the battle this runtime owns."""
+
+        control = status.get("control") or {}
+        model = status.get("control_model") or {}
+        actions = model.get("actions") or {}
+        authority = model.get("action_authority") or {}
+        evidence = validate_workflow_evidence(model.get("workflow_evidence"))
+        main_pid = process.get("main_pid")
+        runtime = status.get("runtime") or {}
+        exact_lock = (
+            any(
+                isinstance(instance, Mapping)
+                and instance.get("active") is True
+                and instance.get("pid") == main_pid
+                and instance.get("target") == evidence.get("adb_target")
+                for instance in runtime.get("instances", [])
+            )
+            if evidence is not None
+            else False
+        )
+        if not (
+            process.get("active") is True
+            and isinstance(main_pid, int)
+            and main_pid > 0
+            and control.get("state") == "RUNNING"
+            and authority.get("effective") == "enabled"
+            and actions.get("manage_active_battle", {}).get("available")
+            is True
+            and evidence is not None
+            and evidence.get("pid") == main_pid
+            and exact_lock
+        ):
+            return None
+        return dict(evidence)
+
+    @staticmethod
+    def _pending_same_battle_restart_handoff(
+        control: Mapping[str, Any],
+        process: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Select an exact pending handoff only for an unchanged target."""
+
+        handoff = validate_process_restart_handoff(
+            control.get("process_restart_handoff")
+        )
+        if not (
+            handoff is not None
+            and handoff.get("status") == "pending"
+            and handoff.get("source_evidence", {}).get("adb_target")
+            == process.get("adb_target")
+        ):
+            return None
+        return handoff
+
     def apply_process_action(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Start or stop the configured automation service at a safe boundary."""
 
@@ -3184,6 +3248,8 @@ class ControlSurfaceService:
 
         action = str(request.get("action") or "").strip().lower()
         disposition = "completed"
+        restart_handoff: Optional[dict[str, Any]] = None
+        automatic_reattachment = False
         if action == "start":
             obsolete = {
                 name
@@ -3226,11 +3292,48 @@ class ControlSurfaceService:
                     "strategy",
                     status=409,
                 )
-            requested_gate_policy = "operator"
+            try:
+                control_before = (
+                    self.control_store.status()
+                    if not before.get("active")
+                    else {}
+                )
+            except ControlDirectiveError as exc:
+                raise ControlSurfaceRequestError(
+                    str(exc),
+                    status=503,
+                ) from exc
+            restart_handoff = self._pending_same_battle_restart_handoff(
+                control_before,
+                before,
+            )
+            automatic_reattachment = bool(
+                not before.get("active") and restart_handoff is not None
+            )
+            requested_gate_policy = (
+                "next_run" if automatic_reattachment else "operator"
+            )
             try:
                 if before.get("active"):
                     disposition = "no_op"
                 else:
+                    pending_handoff = validate_process_restart_handoff(
+                        control_before.get("process_restart_handoff")
+                    )
+                    if (
+                        pending_handoff is not None
+                        and pending_handoff.get("status") == "pending"
+                        and not automatic_reattachment
+                    ):
+                        self.control_store.finish_process_restart_handoff(
+                            str(pending_handoff.get("handoff_id") or ""),
+                            "cancelled",
+                            reason=(
+                                "Start selected a different ADB target, so "
+                                "explicit battle intent is required"
+                            ),
+                            source="control-surface-process-start",
+                        )
                     manager.set_startup_gate_policy(requested_gate_policy)
                     if requested_strategy is not None:
                         manager.set_strategy(requested_strategy)
@@ -3250,7 +3353,49 @@ class ControlSurfaceService:
                             before.get("adb_target"),
                             force=True,
                         )
-                    manager.start()
+                    started = manager.start()
+                    if automatic_reattachment:
+                        restore_error = self._restore_startup_gate_policy(
+                            manager,
+                            "operator",
+                        )
+                        if restore_error:
+                            raise AutomationProcessError(
+                                "Replacement started Paused, but the normal "
+                                "startup policy could not be restored: "
+                                f"{restore_error}"
+                            )
+                        replacement_pid = started.get("main_pid")
+                        if not (
+                            isinstance(replacement_pid, int)
+                            and replacement_pid > 0
+                        ):
+                            raise AutomationProcessError(
+                                "systemd did not report the replacement MainPID"
+                            )
+                        self._wait_for_replacement_runtime(
+                            replacement_pid=replacement_pid,
+                        )
+                        with self._control_mutation_lock:
+                            self.control_store.set_state(
+                                "RUNNING",
+                                source=(
+                                    "control-surface-process-restart-reattach"
+                                ),
+                            )
+                        self._wait_for_same_battle_reattachment(
+                            replacement_pid=replacement_pid,
+                            handoff_id=str(
+                                restart_handoff.get("handoff_id") or ""
+                            ),
+                            expected_identity=str(
+                                restart_handoff.get(
+                                    "expected_active_round_identity_fingerprint"
+                                )
+                                or ""
+                            ),
+                        )
+                        disposition = "same_battle_reattached"
             except (
                 AutomationProcessError,
                 ControlDirectiveError,
@@ -3258,10 +3403,21 @@ class ControlSurfaceService:
             ) as exc:
                 after = manager.status()
                 if not after.get("active"):
+                    if automatic_reattachment:
+                        self._restore_startup_gate_policy(manager, "operator")
                     try:
                         with self._control_mutation_lock:
                             self.control_store.set_state(
                                 "STOPPED",
+                                source="control-surface-start-failure",
+                            )
+                    except ControlDirectiveError:
+                        pass
+                else:
+                    try:
+                        with self._control_mutation_lock:
+                            self.control_store.set_state(
+                                "PAUSED",
                                 source="control-surface-start-failure",
                             )
                     except ControlDirectiveError:
@@ -3271,6 +3427,8 @@ class ControlSurfaceService:
             audit = (
                 "Automation service is already live"
                 if disposition == "no_op"
+                else "Started automation and reattached to the same battle"
+                if disposition == "same_battle_reattached"
                 else "Started automation service Paused for explicit battle intent"
             )
             if requested_strategy is not None:
@@ -3281,13 +3439,22 @@ class ControlSurfaceService:
                 if not before.get("active"):
                     disposition = "no_op"
                 else:
+                    live_before = self.status()
+                    restart_evidence = self._stoppable_owned_battle_evidence(
+                        live_before,
+                        before,
+                    )
                     # Persist intent before systemd signals the process so any live
                     # loop that observes the transition stops dispatching actions.
                     with self._control_mutation_lock:
-                        self.control_store.set_state_and_interrupt_operator_workflows(
+                        stopped_directives = self.control_store.set_state_and_interrupt_operator_workflows(
                             "STOPPED",
                             "automation process stopped",
                             source="control-surface-process-stop",
+                            restart_handoff_evidence=restart_evidence,
+                        )
+                        restart_handoff = validate_process_restart_handoff(
+                            stopped_directives.get("process_restart_handoff")
                         )
                         stopped = manager.stop()
                     if self.adb_connection_manager is not None:
@@ -3301,14 +3468,20 @@ class ControlSurfaceService:
             audit = (
                 "Automation service is already stopped"
                 if disposition == "no_op"
+                else (
+                    "Stopped automation service and retained its exact battle "
+                    "for automatic reattachment on Start"
+                )
+                if restart_handoff is not None
+                and restart_handoff.get("status") == "pending"
                 else "Stopped automation service"
             )
         elif action == "restart_attached":
             raise ControlSurfaceRequestError(
-                "Attached restart is no longer an implicit workflow; Stop and "
-                "Start Automation, then use explicit Attach to Battle",
+                "Use Stop and Start Automation; an exact battle owned at Stop "
+                "is automatically reattached after Start",
                 status=409,
-                code="explicit_attach_required",
+                code="stop_start_required",
             )
         elif action in {"set_adb_port", "set_strategy"}:
             runtime_active = self._runtime_evidence()["active"]
@@ -3450,9 +3623,22 @@ class ControlSurfaceService:
                 response.get("control_model", {})
                 .get("action_authority", {})
                 .get("effective", "unknown")
-                if disposition == "no_op"
+                if disposition in {"no_op", "same_battle_reattached"}
                 else "paused"
             )
+            if automatic_reattachment and restart_handoff is not None:
+                response["request"]["restart_handoff_id"] = (
+                    restart_handoff["handoff_id"]
+                )
+                response["request"]["battle_identity"] = restart_handoff[
+                    "expected_active_round_identity_fingerprint"
+                ]
+        elif action == "stop" and restart_handoff is not None:
+            if restart_handoff.get("status") == "pending":
+                response["request"]["reattach_on_start"] = True
+                response["request"]["restart_handoff_id"] = (
+                    restart_handoff["handoff_id"]
+                )
         if action == "start" and requested_strategy is not None:
             response["request"]["strategy"] = requested_strategy
         elif action == "restart_attached":
@@ -3774,6 +3960,111 @@ class ControlSurfaceService:
                 raise AutomationProcessError(
                     "Replacement remained paused but readiness verification timed "
                     "out waiting for: " + ", ".join(last_missing)
+                )
+            time.sleep(ATTACHED_RESTART_POLL_SECONDS)
+
+    def _wait_for_same_battle_reattachment(
+        self,
+        *,
+        replacement_pid: int,
+        handoff_id: str,
+        expected_identity: str,
+    ) -> dict[str, Any]:
+        """Wait for fresh Attach completion and exact same-battle proof."""
+
+        deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
+        last_missing: list[str] = []
+        while True:
+            status = self.status()
+            process = status.get("process_service") or {}
+            runtime = status.get("runtime") or {}
+            control = status.get("control") or {}
+            model = status.get("control_model") or {}
+            observation = model.get("observation") or {}
+            handoff = validate_process_restart_handoff(
+                control.get("process_restart_handoff")
+            )
+            if (
+                handoff is not None
+                and handoff.get("handoff_id") == handoff_id
+                and handoff.get("status") in {"failed", "cancelled"}
+            ):
+                raise AutomationProcessError(
+                    str(
+                        handoff.get("reason")
+                        or "same-battle reattachment was rejected"
+                    )
+                )
+            actual_identity = str(
+                observation.get("active_round_identity_fingerprint") or ""
+            ).strip()
+            if actual_identity and actual_identity != expected_identity:
+                raise AutomationProcessError(
+                    "The replacement runtime proved a different battle; "
+                    "Automation remains Paused"
+                )
+            game_state = str(observation.get("game_state") or "unknown")
+            if game_state in {
+                "home_new_battle",
+                "game_over",
+                "tournament_results",
+            }:
+                raise AutomationProcessError(
+                    "The retained battle ended before automatic reattachment; "
+                    "Automation remains Paused"
+                )
+            matching_owner = any(
+                isinstance(instance, Mapping)
+                and instance.get("active") is True
+                and instance.get("pid") == replacement_pid
+                for instance in runtime.get("instances", [])
+            )
+            workflow = validate_battle_workflow(control.get("battle_workflow"))
+            completed = bool(
+                handoff is not None
+                and handoff.get("handoff_id") == handoff_id
+                and handoff.get("status") == "completed"
+                and handoff.get(
+                    "expected_active_round_identity_fingerprint"
+                )
+                == expected_identity
+                and handoff.get(
+                    "actual_active_round_identity_fingerprint"
+                )
+                == expected_identity
+                and workflow is not None
+                and workflow.get("request_id") == handoff.get("workflow_id")
+                and workflow.get("status") == "completed"
+            )
+            authority_enabled = bool(
+                model.get("action_authority", {}).get("effective") == "enabled"
+            )
+            attachment_available = bool(
+                model.get("actions", {})
+                .get("manage_active_battle", {})
+                .get("available")
+                is True
+            )
+            last_missing = []
+            if not (
+                process.get("active") is True
+                and process.get("main_pid") == replacement_pid
+            ):
+                last_missing.append("replacement MainPID")
+            if not matching_owner:
+                last_missing.append("replacement ADB lock")
+            if not completed:
+                last_missing.append("forced-save same-battle Attach completion")
+            if not authority_enabled:
+                last_missing.append("Enabled action authority")
+            if not attachment_available:
+                last_missing.append("adopted active-battle lifecycle")
+            if not last_missing:
+                return status
+            if time.monotonic() >= deadline:
+                raise AutomationProcessError(
+                    "Replacement remained safe but same-battle reattachment "
+                    "timed out waiting for: " + ", ".join(last_missing)
                 )
             time.sleep(ATTACHED_RESTART_POLL_SECONDS)
 

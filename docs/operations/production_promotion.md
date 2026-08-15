@@ -184,9 +184,10 @@ separately guards publishers from another clone.
    gate path; never repoint an active ownership ref.
 5. If the recorded owner cannot finish, only an explicitly assigned recovery
    owner may inspect candidate, production, remote, deployment, and cleanup
-   state, bring them to a recorded coherent boundary, and compare-delete the
-   exact ref. Never auto-clear it or delete it merely to unblock another
-   promotion.
+   state, bring them to a recorded coherent boundary, resolve the retirement
+   inventory, and use its guarded close. A missing or corrupt legacy inventory
+   is recovery evidence, not permission to skip source-topology reconciliation.
+   Never auto-clear the ref or delete it merely to unblock another promotion.
 
 ## Promote one exact candidate
 
@@ -198,7 +199,26 @@ Enter this section only while `refs/thetower/promotion-owner` names exact `D`.
    every accepted source branch and exact source tip.
 2. Record production commit `M` and candidate commit `D`. Recheck both refs and
    prove that `M` is an ancestor of `D`.
-3. Review all `M..D` commits and the aggregate diff. Verify the applicable
+3. Before any production mutation, create the exact candidate's durable
+   retirement inventory. Repeat `--source` for every delegated branch accepted,
+   rejected, or still under consideration for this outcome:
+
+   ```bash
+   /usr/bin/python3.12 tools/outcome_retirement.py begin \
+     --base <M> --candidate <D> --candidate-ref <candidate-ref> \
+     --source <delegated-branch>
+   ```
+
+   The standard-library tool atomically stores each source branch, linked
+   worktree, and tip under the common Git directory at
+   `thetower/outcome-retirement/<D>.json`. It also scans local branches for tips
+   newly ancestral in `D` and for source patches absent from `M` but represented
+   in `D`; the latter is the `+` at `M`, `-` at `D` transition reported by
+   `git cherry`. Discovery supplements rather than replaces the explicit source
+   list. Every entry starts pending, including a patch-equivalent cherry-pick
+   whose commit hash changed. Even an outcome with no delegated source creates
+   an empty inventory, so ordinary closure has one machine-checked path.
+4. Review all `M..D` commits and the aggregate diff. Verify the applicable
    candidate gate above is complete for exact `D`, including the recorded
    completion-record exception when used. Resolve remaining uncertainty with
    retained or live evidence as appropriate. Classify every publishable
@@ -207,24 +227,24 @@ Enter this section only while `refs/thetower/promotion-owner` names exact `D`.
    publication, read the live `origin` `refs/heads/main` tip, require it to be
    absent or an ancestor of `D`, and stop before local promotion if the
    candidate contains anything known to be unsuitable for that remote.
-4. For every candidate except documentation-only, create a unique annotated
+5. For every candidate except documentation-only, create a unique annotated
    local tag at `M`, for example
    `production-before-20260804T210500Z-fe3c83b`. Never move or reuse it;
    pushing a tag is a separate operator decision. A documentation-only
    promotion creates no rollback tag: its parent remains in ordinary `main`
    history and no runtime or non-Git deployment state changes.
-5. Recheck that the candidate still names `D` and production still names `M`,
+6. Recheck that the candidate still names `D` and production still names `M`,
    select the boundary below, fast-forward the production checkout to exact
    object `D`, and verify `HEAD == main == D`. Abort on a non-fast-forward,
    changed ref, or newly dirty checkout.
-6. For documentation-only candidates, treat step 5's exact-commit and clean-
+7. For documentation-only candidates, treat step 6's exact-commit and clean-
    worktree verification plus the exact-`D` candidate gate as the complete
    post-promotion verification; perform no separate content/link/static smoke
    and no service or runtime action. For every other candidate, apply
    only separately reviewed non-Git changes, restart affected services, and
    perform a bounded production smoke test. Record the promoted or deployed
    commit and result.
-7. Complete the [successful-promotion closure](#close-a-successful-promotion).
+8. Complete the [successful-promotion closure](#close-a-successful-promotion).
    Promotion ownership includes default publication of exact `D` to
    `origin/main` and retirement of the outcome's clean integrated temporary
    branches and worktrees. Retain one only when an explicit request or a
@@ -232,9 +252,9 @@ Enter this section only while `refs/thetower/promotion-owner` names exact `D`.
 
 | Candidate contents | Production boundary |
 | --- | --- |
-| Documentation only | Use steps 5–7 without a rollback tag, service stop, restart, or runtime smoke. |
-| Runtime Python, YAML, templates, or runtime-read assets | Stop automation before update; restart and smoke-test afterward. |
-| Control surface or shared modules | Stop/restart the control-surface service; also stop automation when shared runtime code changes. |
+| Documentation only | Use steps 6–8 without a rollback tag, service stop, restart, or runtime smoke. |
+| Runtime Python, YAML, templates, or runtime-read assets | Stop automation before update; restart and smoke-test afterward. When Stop retained an exact owned battle, ordinary Start performs and waits for its fresh same-battle Attach automatically; a changed/ended battle remains Paused and must not be reported as a successful runtime smoke. |
+| Control surface or shared modules | Stop automation first when shared runtime code changes, preserving any eligible exact-battle handoff; stop/restart the control-surface service, then Start automation and require the same-battle Attach or the appropriate explicit Paused outcome in smoke evidence. |
 | Native Windows package input | Complete the [required Windows package publication](#required-windows-package-publication) after the production checkout reaches `D`. |
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
@@ -390,7 +410,12 @@ or smoke check succeeds:
    explicit disposition: integrated and eligible for normal retirement;
    explicitly superseded or abandoned and eligible only for archived
    retirement; or retained/deferred with its owner and remaining work recorded.
-   Ambiguity always selects retained/deferred.
+   Ambiguity always selects retained/deferred. Record each delegated source in
+   the inventory with `tools/outcome_retirement.py disposition`: `integrated`
+   accepts only a tip ancestral to `D`; `superseded` requires the exact annotated
+   `archive/...` tag and a reason; and `retained` requires an owner and remaining-
+   work description. Patch equivalence is evidence for supersession, never exact
+   integration.
 5. Apply the retirement procedure below to every clean exact integrated
    temporary branch/worktree involved in the outcome. Retain an object when the
    operator requests it, ownership is active or unclear, the worktree contains
@@ -400,19 +425,25 @@ or smoke check succeeds:
    re-listing the topology. A withheld or failed remote publication does not by
    itself make an integrated branch unique or prevent safe retirement.
 6. After publication disposition, retirement, and final topology verification
-   are complete, release only this transaction and inspect the result:
+   are complete, use the guard to release only this transaction and inspect the
+   result:
 
    ```bash
-   git update-ref -d refs/thetower/promotion-owner <D>
+   /usr/bin/python3.12 tools/outcome_retirement.py close --candidate <D>
    git rev-parse --verify --quiet refs/thetower/promotion-owner
    ```
 
-   The compare-delete cannot remove a different candidate's ownership. No ref
-   confirms the promotion lane is idle; if another ref is already present, a
-   later transaction acquired the lane after release and must remain untouched.
-   If active recovery still requires production mutation, retain the ownership
-   ref and hand off that exact state instead of allowing a second promotion to
-   overlap it.
+   `close` rescans for newly represented source patches, durably adds any newly
+   found source as pending, and refuses to release ownership while an entry is
+   pending, an integrated/superseded pair remains, an archive is invalid, or a
+   retained pair no longer preserves its inventoried tip. Only then does it
+   compare-delete the exact owner ref; the completed JSON inventory remains as
+   local transaction evidence. Never directly delete the owner ref during
+   ordinary closure. No ref confirms the promotion lane is idle; if another ref
+   is already present, a later transaction acquired the lane after release and
+   must remain untouched. If active recovery still requires production mutation,
+   retain the ownership ref and hand off that exact state instead of allowing a
+   second promotion to overlap it.
 
 ## Retire temporary work
 
@@ -422,7 +453,7 @@ integration branches and worktrees are temporary. Retirement has separate
 integrated and superseded dispositions; never describe patch-equivalent or
 selectively ported work as integrated.
 
-Before either disposition:
+Before any disposition:
 
 1. Re-list every local branch and linked worktree. Recheck the candidate's
    branch and `HEAD`, staged and unstaged changes, nonignored untracked files,
@@ -431,7 +462,8 @@ Before either disposition:
 2. Record the exact worktree path, local branch, tip commit, disposition, and
    integration or replacement target. Exclude `main`, rollback tags, remote
    branches, every active candidate, and every ambiguous item; remote deletion
-   is always a separate decision.
+   is always a separate decision. The candidate inventory owns these fields for
+   every delegated source; do not rely on chat or the aggregate branch name.
 
 Routine environment links, caches, and build products may be discarded with an
 otherwise clean integrated worktree. Logs, screenshots, control files, and
@@ -451,7 +483,9 @@ worktree can be created from current `main` when needed.
 1. Prove the branch tip is an ancestor of `main`. A merged label or patch-
    equivalent cherry-pick does not override uncertainty or the
    `git branch -d` ancestry guard.
-2. Run `git worktree remove <exact-path>` and then
+2. Record `--disposition integrated` for the exact branch in candidate `D`'s
+   inventory.
+3. Run `git worktree remove <exact-path>` and then
    `git branch -d <exact-branch>`. Never recursively delete a worktree or use a
    force option; retain any refused pair for review.
 
@@ -468,18 +502,31 @@ pretending the discarded commit was integrated:
    archive tag or making the commit unreachable is outside this procedure. A
    Git bundle is useful supplementary recovery but does not replace this
    durable in-repository archive ref.
-2. Recheck that the branch, worktree, tip, ownership, and inspected content are
+2. Record `--disposition superseded`, `--archive-tag <archive-tag>`, and a
+   concise `--reason` for the exact branch in candidate `D`'s inventory.
+3. Recheck that the branch, worktree, tip, ownership, and inspected content are
    unchanged and that the verified archive tag still names the tip.
-3. Run `git worktree remove <exact-path>` without `--force`. If Git refuses,
+4. Run `git worktree remove <exact-path>` without `--force`. If Git refuses,
    retain the worktree and stop for review; never delete it recursively.
-4. Run `git branch -D <exact-branch>` only for the approved, now-unlinked local
+5. Run `git branch -D <exact-branch>` only for the approved, now-unlinked local
    branch and only while its verified archive tag remains. No other force-
    deletion path is authorized.
 
-After either disposition, re-list branches and worktrees, verify `main` and
-every retained checkout remain unchanged and clean, and preserve rollback and
-archive tags. Do not rerun candidate validation solely because its integrated
-or archived worktree/ref was removed.
+### Retained or deferred temporary branch
+
+Use this disposition for active, dirty, unique, or ambiguous work. Record its
+owner and remaining work with `--disposition retained`, `--owner`, and
+`--remaining-work` in the candidate inventory, then leave its branch,
+worktree, tracked state, ignored evidence, and dirty state untouched. The
+inventoried tip must remain reachable from the retained branch at closure; new
+descendant commits are allowed and their exact closing tip is added to the
+inventory. A retained pair is resolved for this outcome, not declared complete.
+
+After any disposition, re-list branches and worktrees, verify `main` remains
+unchanged and clean, verify every retained checkout preserves its prior state
+(including pre-existing dirtiness), and preserve rollback and archive tags. Do
+not rerun candidate validation solely because its integrated or archived
+worktree/ref was removed.
 
 ### Obsolete standing integration branch
 

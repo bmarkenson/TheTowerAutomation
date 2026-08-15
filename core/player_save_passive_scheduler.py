@@ -1,12 +1,14 @@
-"""Explicit Perk-checkpoint scheduling for shared passive save bundles.
+"""Normal-runtime scheduling for shared passive save bundles.
 
-Stable Perk selection/exhaustion observations are the only asynchronous
-acquisition cause.  One typed passive bundle is delivered to every registered
-consumer; metrics and audit may project it, but cannot request another read.
+An independent periodic read opportunistically observes naturally serialized
+saves.  Stable Perk selection/exhaustion observations may also request a prompt
+checkpoint.  Neither path forces serialization, grants freshness authority, or
+reschedules the other.
 """
 
 from __future__ import annotations
 
+import math
 import queue
 import threading
 import time
@@ -27,16 +29,21 @@ PassiveBundleConsumer = Callable[
 ]
 
 _QUEUE_CAPACITY = 8
+_PERIODIC_OBSERVATION_REASON = "periodic_interval"
+_DEFAULT_OBSERVATION_INTERVAL_SECONDS = 300.0
 _PERK_CHECKPOINT_REASONS = frozenset(
     {
         "perk_exhaustion_boundary",
         "perk_selection_boundary",
     }
 )
+_PASSIVE_ACQUISITION_REASONS = frozenset(
+    {*_PERK_CHECKPOINT_REASONS, _PERIODIC_OBSERVATION_REASON}
+)
 
 
 class PlayerSavePassiveScheduler:
-    """Acquire one passive bundle for a coalesced Perk checkpoint request."""
+    """Acquire periodic and coalesced Perk-requested passive bundles."""
 
     def __init__(
         self,
@@ -44,10 +51,16 @@ class PlayerSavePassiveScheduler:
         acquirer: StablePlayerSaveAcquirer,
         context_fn: Callable[[], Optional[PlayerSaveObservationContext]],
         consumers: Sequence[PassiveBundleConsumer],
+        interval_seconds: float = _DEFAULT_OBSERVATION_INTERVAL_SECONDS,
         start_worker: bool = True,
     ) -> None:
         if not isinstance(acquirer, StablePlayerSaveAcquirer):
             raise TypeError("passive scheduler requires the shared acquirer")
+        interval = float(interval_seconds)
+        if not math.isfinite(interval) or interval <= 0:
+            raise ValueError(
+                "passive scheduler interval must be positive and finite"
+            )
         if not callable(context_fn):
             raise TypeError("passive scheduler requires a context provider")
         normalized_consumers = tuple(consumer for consumer in consumers if callable(consumer))
@@ -56,6 +69,7 @@ class PlayerSavePassiveScheduler:
         self._acquirer = acquirer
         self._context_fn = context_fn
         self._consumers = normalized_consumers
+        self._interval_seconds = interval
         self._commands: queue.Queue[Optional[str]] = queue.Queue(
             maxsize=_QUEUE_CAPACITY
         )
@@ -96,9 +110,10 @@ class PlayerSavePassiveScheduler:
         """Synchronous test seam using the same one-read/many-consumer path."""
 
         reason = str(reason_code or "").strip().lower()
-        if reason not in _PERK_CHECKPOINT_REASONS:
+        if reason not in _PASSIVE_ACQUISITION_REASONS:
             raise ValueError(
-                "passive acquisition is limited to explicit Perk checkpoints"
+                "passive acquisition is limited to periodic or explicit "
+                "Perk checkpoints"
             )
         return self._acquire_and_fan_out(reason)
 
@@ -122,8 +137,15 @@ class PlayerSavePassiveScheduler:
         return self._commands.unfinished_tasks == 0
 
     def _worker(self) -> None:
+        next_periodic = time.monotonic() + self._interval_seconds
         while not self._closed:
-            reason = self._commands.get()
+            timeout = max(0.0, next_periodic - time.monotonic())
+            try:
+                reason = self._commands.get(timeout=timeout)
+            except queue.Empty:
+                self._acquire_and_fan_out(_PERIODIC_OBSERVATION_REASON)
+                next_periodic = time.monotonic() + self._interval_seconds
+                continue
             try:
                 if reason is None:
                     return
@@ -135,7 +157,7 @@ class PlayerSavePassiveScheduler:
 
     def _acquire_and_fan_out(self, reason: str) -> bool:
         reason = str(reason or "").strip().lower()
-        if self._closed or reason not in _PERK_CHECKPOINT_REASONS:
+        if self._closed or reason not in _PASSIVE_ACQUISITION_REASONS:
             return False
         try:
             context = self._context_fn()

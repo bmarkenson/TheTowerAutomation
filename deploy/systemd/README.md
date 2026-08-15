@@ -43,13 +43,21 @@ automatic attached-battle validation. Manual `main.py --adb-port PORT
 --strategy NAME --startup-gates auto|auto_validate|immediate|next_run`
 arguments continue to override these defaults.
 
+Complete Stop may retain a one-shot exact-battle handoff when fresh runtime
+evidence proves automation owns the active battle. The following Start uses
+`next_run` only for that launch, restores the normal persisted startup policy,
+and completes a fresh save-backed Attach only if the battle identity is
+unchanged. This applies to battles automation started and battles it attached
+to later; wave progression does not end the handoff.
+
 The unit also reads the separate optional
 `~/.config/thetower/player-save-audit.env`. It is intentionally not rewritten
 by the control surface. The file can explicitly enable the observation-only
 player-save projector. It consumes only bundles already acquired by a forced
-lifecycle boundary, a natural terminal boundary, or an explicit Perk
-selection/exhaustion checkpoint; it has no cadence or independent acquisition
-setting. See
+lifecycle boundary, a natural terminal boundary, the runtime's independent
+300-second passive scheduler, or an explicit Perk selection/exhaustion
+checkpoint. The audit option has no cadence or independent acquisition setting
+of its own. See
 [`docs/operations/player_save_audit.md`](../../docs/operations/player_save_audit.md)
 for the exact interface, receipt path, and authority limits. Absence leaves the
 projector disabled.

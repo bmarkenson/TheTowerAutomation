@@ -32,6 +32,7 @@ from core.control_model import (
     validate_battle_workflow,
     validate_manual_control,
     validate_manual_terminal_evidence,
+    validate_process_restart_handoff,
     validate_save_reconciliation_receipt,
     validate_setup_capture,
     validate_setup_capture_preview,
@@ -221,6 +222,18 @@ class ControlDirectiveStore:
                 and validate_battle_workflow(data.get("battle_workflow")) is None
                 else None
             ),
+            "process_restart_handoff": validate_process_restart_handoff(
+                data.get("process_restart_handoff")
+            ),
+            "process_restart_handoff_error": (
+                "process restart handoff is malformed"
+                if data.get("process_restart_handoff") is not None
+                and validate_process_restart_handoff(
+                    data.get("process_restart_handoff")
+                )
+                is None
+                else None
+            ),
             "manual_control": validate_manual_control(
                 data.get("manual_control")
             ),
@@ -322,6 +335,7 @@ class ControlDirectiveStore:
         *,
         evidence: Mapping[str, object],
         strategy: Optional[str] = None,
+        process_restart_handoff_id: Optional[str] = None,
         source: Optional[str] = None,
         now: Optional[float] = None,
     ) -> dict[str, Any]:
@@ -343,6 +357,16 @@ class ControlDirectiveStore:
         normalized_strategy = (
             str(strategy).strip().lower() if strategy is not None else None
         )
+        normalized_restart_handoff_id = (
+            str(process_restart_handoff_id or "").strip() or None
+        )
+        if (
+            normalized_restart_handoff_id is not None
+            and normalized_intent != "attach_battle"
+        ):
+            raise ValueError(
+                "A process restart handoff may bind only an Attach workflow"
+            )
         if normalized_strategy is not None and not is_configurable_strategy(
             normalized_strategy,
             self.strategy_profile_dir,
@@ -392,6 +416,35 @@ class ControlDirectiveStore:
             }:
                 raise ValueError("Setup capture currently owns device input")
             timestamp = _timestamp_at(now)
+            restart_handoff = None
+            if normalized_restart_handoff_id is not None:
+                restart_handoff = validate_process_restart_handoff(
+                    data.get("process_restart_handoff")
+                )
+                if (
+                    restart_handoff is None
+                    or restart_handoff["handoff_id"]
+                    != normalized_restart_handoff_id
+                    or restart_handoff["status"] != "pending"
+                    or restart_handoff.get("workflow_id") is not None
+                    or restart_handoff["source_evidence"].get("adb_target")
+                    != normalized_evidence.get("adb_target")
+                    or (
+                        normalized_evidence.get(
+                            "active_round_identity_fingerprint"
+                        )
+                        is not None
+                        and normalized_evidence.get(
+                            "active_round_identity_fingerprint"
+                        )
+                        != restart_handoff[
+                            "expected_active_round_identity_fingerprint"
+                        ]
+                    )
+                ):
+                    raise ValueError(
+                        "Process restart handoff no longer matches this Attach request"
+                    )
             workflow_strategy: Optional[str] = None
             workflow_strategy_request_id: Optional[str] = None
             workflow_strategy_definition_fingerprint: Optional[str] = None
@@ -464,6 +517,13 @@ class ControlDirectiveStore:
                     workflow_strategy_definition_fingerprint
                 )
             data["battle_workflow"] = workflow
+            if restart_handoff is not None:
+                restart_handoff["workflow_id"] = workflow["request_id"]
+                restart_handoff["updated_at"] = timestamp
+                restart_handoff["updated_by"] = (
+                    source or "runtime-process-restart"
+                )
+                data["process_restart_handoff"] = restart_handoff
             data["updated_at"] = timestamp
             if source:
                 data["updated_by"] = source
@@ -1804,6 +1864,7 @@ class ControlDirectiveStore:
         reason: str,
         *,
         source: str,
+        restart_handoff_evidence: Optional[Mapping[str, object]] = None,
         now: Optional[float] = None,
     ) -> dict[str, Any]:
         """Atomically stop input authority and retire unfinished workflows."""
@@ -1815,6 +1876,28 @@ class ControlDirectiveStore:
                 f"expected one of {sorted(VALID_STATES)}"
             )
         normalized_reason = _bounded_text(reason, 512)
+        normalized_handoff_evidence = None
+        if restart_handoff_evidence is not None:
+            if normalized != "STOPPED":
+                raise ValueError(
+                    "A process restart handoff may be created only while stopping"
+                )
+            normalized_handoff_evidence = validate_workflow_evidence(
+                restart_handoff_evidence
+            )
+            if (
+                normalized_handoff_evidence is None
+                or normalized_handoff_evidence.get("game_state")
+                != "active_battle"
+                or not _valid_active_battle_identity(
+                    normalized_handoff_evidence.get(
+                        "active_round_identity_fingerprint"
+                    )
+                )
+            ):
+                raise ValueError(
+                    "Process restart handoff requires exact active-battle identity evidence"
+                )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _timestamp_at(now)
@@ -1824,6 +1907,43 @@ class ControlDirectiveStore:
                 source=source,
                 timestamp=timestamp,
             )
+            if normalized_handoff_evidence is not None:
+                expected_identity = str(
+                    normalized_handoff_evidence[
+                        "active_round_identity_fingerprint"
+                    ]
+                )
+                data["process_restart_handoff"] = {
+                    "schema_version": 1,
+                    "handoff_id": uuid4().hex,
+                    "status": "pending",
+                    "requested_at": timestamp,
+                    "updated_at": timestamp,
+                    "resume_state": "RUNNING",
+                    "expected_active_round_identity_fingerprint": (
+                        expected_identity
+                    ),
+                    "source_evidence": dict(normalized_handoff_evidence),
+                    "updated_by": source,
+                }
+            elif normalized == "STOPPED":
+                handoff = validate_process_restart_handoff(
+                    data.get("process_restart_handoff")
+                )
+                if handoff is not None and handoff["status"] == "pending":
+                    handoff.update(
+                        {
+                            "status": "cancelled",
+                            "reason": (
+                                "the newer Stop boundary did not retain exact "
+                                "active-battle continuity"
+                            ),
+                            "updated_at": timestamp,
+                            "completed_at": timestamp,
+                            "updated_by": source,
+                        }
+                    )
+                    data["process_restart_handoff"] = handoff
             data["state"] = normalized
             data.pop("resume_at", None)
             data["state_updated_at"] = timestamp
@@ -1834,6 +1954,96 @@ class ControlDirectiveStore:
 
         with self._dispatch_boundary():
             return self.update(mutate)
+
+    def finish_process_restart_handoff(
+        self,
+        handoff_id: str,
+        status: str,
+        *,
+        reason: str,
+        workflow_id: Optional[str] = None,
+        actual_active_round_identity: Optional[str] = None,
+        source: str = "runtime",
+        now: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Finish only the matching pending same-battle restart handoff."""
+
+        normalized_handoff_id = str(handoff_id or "").strip()
+        normalized_status = str(status or "").strip().lower()
+        normalized_reason = _bounded_text(reason, 512)
+        normalized_workflow_id = (
+            str(workflow_id or "").strip() or None
+        )
+        normalized_actual_identity = (
+            _valid_active_battle_identity(actual_active_round_identity)
+            if actual_active_round_identity is not None
+            else None
+        )
+        if (
+            not normalized_handoff_id
+            or normalized_status not in {"completed", "failed", "cancelled"}
+            or not normalized_reason
+            or (
+                actual_active_round_identity is not None
+                and normalized_actual_identity is None
+            )
+        ):
+            raise ValueError("Invalid process restart handoff result")
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            handoff = validate_process_restart_handoff(
+                data.get("process_restart_handoff")
+            )
+            if (
+                handoff is None
+                or handoff["handoff_id"] != normalized_handoff_id
+                or handoff["status"] != "pending"
+            ):
+                return data
+            bound_workflow_id = handoff.get("workflow_id")
+            if normalized_workflow_id is not None:
+                if (
+                    bound_workflow_id is not None
+                    and bound_workflow_id != normalized_workflow_id
+                ):
+                    raise ValueError(
+                        "Process restart result names a different Attach workflow"
+                    )
+                handoff["workflow_id"] = normalized_workflow_id
+            if normalized_status == "completed" and (
+                handoff.get("workflow_id") is None
+                or normalized_actual_identity
+                != handoff[
+                    "expected_active_round_identity_fingerprint"
+                ]
+            ):
+                raise ValueError(
+                    "Process restart cannot complete without the expected battle identity"
+                )
+            timestamp = _timestamp_at(now)
+            handoff.update(
+                {
+                    "status": normalized_status,
+                    "reason": normalized_reason,
+                    "updated_at": timestamp,
+                    "completed_at": timestamp,
+                    "updated_by": source,
+                }
+            )
+            if normalized_actual_identity is not None:
+                handoff[
+                    "actual_active_round_identity_fingerprint"
+                ] = normalized_actual_identity
+            data["process_restart_handoff"] = handoff
+            return data
+
+        saved = self.update(mutate)
+        handoff = validate_process_restart_handoff(
+            saved.get("process_restart_handoff")
+        )
+        if handoff is None or handoff["handoff_id"] != normalized_handoff_id:
+            return None
+        return handoff
 
     def set_adb_port(
         self,

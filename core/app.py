@@ -366,12 +366,26 @@ class App:
             adb_target_session.bind_runtime_owner(
                 self._supervisor.runtime_id
             )
+        restart_handoff = self._supervisor.process_restart_handoff
+        self._process_restart_reattachment_enabled = bool(
+            config.startup_gate_policy == "next_run"
+            and isinstance(restart_handoff, Mapping)
+            and restart_handoff.get("status") == "pending"
+        )
+        self._operator_battle_intent_required = bool(
+            self._operator_battle_intent_required
+            or self._process_restart_reattachment_enabled
+        )
         self._mission_mgr = MissionManager(
             self._load_mission(config),
             self._load_strategy(config),
             defer_startup_gates_until_next_run=(
                 config.startup_gate_policy
-                in {"auto", "auto_validate", "next_run"}
+                in {"auto", "auto_validate"}
+                or (
+                    config.startup_gate_policy == "next_run"
+                    and not self._process_restart_reattachment_enabled
+                )
             ),
             validate_attached_battle=(
                 config.startup_gate_policy == "auto_validate"
@@ -381,6 +395,7 @@ class App:
             ),
             await_initial_battle_intent=(
                 config.startup_gate_policy == "operator"
+                or self._process_restart_reattachment_enabled
             ),
             action_guard_fn=self._runtime_action_guard,
         )
@@ -399,6 +414,7 @@ class App:
         self._exclusive_validation_battle_dispatch_hold: Optional[str] = None
         self._exclusive_validation_launch_dispatch_hold: Optional[str] = None
         self._started_battle_workflow_completion: Optional[Dict[str, Any]] = None
+        self._process_restart_reattachment_attempted = False
         self._exclusive_validation_claimed_start_hold: Optional[str] = None
         self._exclusive_validation_launch_start_hold: Optional[str] = None
         self._exclusive_validation_passive_battle_hold: Optional[str] = None
@@ -595,8 +611,9 @@ class App:
                 )
             except Exception:
                 log(
-                    "[PLAYER_SAVE_PASSIVE] Perk checkpoint scheduling was "
-                    "unavailable; terminal Perks UI fallback remains active",
+                    "[PLAYER_SAVE_PASSIVE] Passive save observation scheduling "
+                    "was unavailable; forced and terminal save paths remain "
+                    "available",
                     "WARN",
                 )
         self._blind_tapper_suspended = False
@@ -1537,7 +1554,7 @@ class App:
         context: PlayerSaveObservationContext,
         reason_code: str,
     ) -> None:
-        """Fan one Perk-requested bundle through all passive projectors."""
+        """Fan one scheduler-owned passive bundle through all projectors."""
 
         self._publish_player_save_observation(
             acquisition,
@@ -4771,6 +4788,211 @@ class App:
             detection=detection,
         )
 
+    def _pending_process_restart_handoff_for_workflow(
+        self,
+        workflow_id: str,
+    ) -> Optional[Dict[str, object]]:
+        """Return the pending restart handoff bound to one fresh Attach."""
+
+        handoff = getattr(
+            self._supervisor,
+            "process_restart_handoff",
+            None,
+        )
+        if not (
+            isinstance(handoff, Mapping)
+            and handoff.get("status") == "pending"
+            and str(handoff.get("workflow_id") or "") == workflow_id
+        ):
+            return None
+        return dict(handoff)
+
+    def _fail_process_restart_reattachment(
+        self,
+        reason: str,
+        *,
+        current: Optional[Mapping[str, object]] = None,
+        workflow_id: Optional[str] = None,
+    ) -> bool:
+        """Fail closed when the replacement cannot prove the same battle."""
+
+        handoff = getattr(
+            self._supervisor,
+            "process_restart_handoff",
+            None,
+        )
+        if not (
+            isinstance(handoff, Mapping)
+            and handoff.get("status") == "pending"
+        ):
+            return False
+        handoff_id = str(handoff.get("handoff_id") or "")
+        bound_workflow_id = str(
+            workflow_id or handoff.get("workflow_id") or ""
+        ).strip()
+        actual_identity = None
+        if isinstance(current, Mapping):
+            actual_identity = str(
+                current.get("active_round_identity_fingerprint") or ""
+            ).strip() or None
+        details: Dict[str, object] = {
+            "reason": str(reason or "same-battle proof failed").strip(),
+        }
+        if bound_workflow_id:
+            details["workflow_id"] = bound_workflow_id
+        if actual_identity is not None:
+            details["actual_active_round_identity"] = actual_identity
+        result = self._supervisor.finish_process_restart_handoff(
+            handoff_id,
+            "failed",
+            **details,
+        )
+        self._supervisor.pause_for_operator_authority(
+            "same-battle process restart reattachment failed: "
+            f"{details['reason']}"
+        )
+        self._log_operator_workflow_result(
+            f"{handoff_id}:failed",
+            purpose="Reattaching automation after a process restart",
+            reason="resume only after a forced save proves the same battle",
+            result=(
+                "Automation remains Paused — automatic reattachment failed: "
+                f"{details['reason']}"
+            ),
+        )
+        return bool(
+            isinstance(result, Mapping)
+            and result.get("status") == "failed"
+        )
+
+    def _maybe_request_process_restart_reattachment(
+        self,
+        current: Optional[Mapping[str, object]],
+    ) -> None:
+        """Turn one durable Stop handoff into a fresh normal Attach workflow."""
+
+        if not getattr(self, "_process_restart_reattachment_enabled", False):
+            return
+        if getattr(self, "_process_restart_reattachment_attempted", False):
+            return
+        handoff = self._supervisor.process_restart_handoff
+        if not (
+            isinstance(handoff, Mapping)
+            and handoff.get("status") == "pending"
+        ):
+            self._process_restart_reattachment_attempted = True
+            return
+        if not isinstance(current, Mapping):
+            return
+        game_state = str(current.get("game_state") or "unknown")
+        if game_state == "unknown":
+            return
+        self._process_restart_reattachment_attempted = True
+        handoff_id = str(handoff.get("handoff_id") or "")
+        expected_identity = str(
+            handoff.get("expected_active_round_identity_fingerprint") or ""
+        ).strip()
+        source_evidence = handoff.get("source_evidence")
+        if not (
+            game_state in {"active_battle", "home_resume_battle"}
+            and isinstance(source_evidence, Mapping)
+            and source_evidence.get("adb_target") == current.get("adb_target")
+        ):
+            self._fail_process_restart_reattachment(
+                "the replacement runtime no longer observes the same active "
+                "or resumable battle target",
+                current=current,
+            )
+            return
+        observed_identity = str(
+            current.get("active_round_identity_fingerprint") or ""
+        ).strip()
+        if observed_identity and observed_identity != expected_identity:
+            self._fail_process_restart_reattachment(
+                "the replacement runtime already proved a different battle",
+                current=current,
+            )
+            return
+        if handoff.get("workflow_id") is not None:
+            self._fail_process_restart_reattachment(
+                "the restart handoff was already bound to an earlier process",
+                current=current,
+                workflow_id=str(handoff.get("workflow_id") or ""),
+            )
+            return
+        workflow = self._supervisor.request_process_restart_reattachment(
+            handoff_id,
+            evidence=current,
+        )
+        if workflow is None:
+            self._fail_process_restart_reattachment(
+                "a fresh Attach workflow could not be created",
+                current=current,
+            )
+            return
+        self._log_operator_workflow_result(
+            f"{handoff_id}:requested",
+            purpose="Reattaching automation after a process restart",
+            reason="validate the exact battle retained by the Stop boundary",
+            result=(
+                "Same-battle Attach requested — Automation remains Paused "
+                "until the control surface restores Enable"
+            ),
+        )
+
+    def _complete_process_restart_reattachment(
+        self,
+        workflow: Mapping[str, object],
+        current: Mapping[str, object],
+    ) -> bool:
+        """Finish the handoff only after normal Attach adoption completes."""
+
+        workflow_id = str(workflow.get("request_id") or "")
+        handoff = self._pending_process_restart_handoff_for_workflow(
+            workflow_id
+        )
+        if handoff is None:
+            return True
+        expected = str(
+            handoff.get("expected_active_round_identity_fingerprint") or ""
+        ).strip()
+        actual = str(
+            current.get("active_round_identity_fingerprint") or ""
+        ).strip()
+        if not actual or actual != expected:
+            self._fail_process_restart_reattachment(
+                "the completed Attach did not retain the expected battle identity",
+                current=current,
+                workflow_id=workflow_id,
+            )
+            return False
+        result = self._supervisor.finish_process_restart_handoff(
+            str(handoff.get("handoff_id") or ""),
+            "completed",
+            reason=(
+                "a fresh Attach workflow force-validated and adopted the same "
+                "battle after process replacement"
+            ),
+            workflow_id=workflow_id,
+            actual_active_round_identity=actual,
+        )
+        if not (
+            isinstance(result, Mapping)
+            and result.get("status") == "completed"
+        ):
+            self._supervisor.pause_for_operator_authority(
+                "same-battle reattachment completed locally but its durable "
+                "handoff result could not be persisted"
+            )
+            return False
+        self._log_operator_workflow_result(
+            f"{handoff.get('handoff_id')}:completed",
+            purpose="Completing process-restart battle reattachment",
+            reason="accept only the same forced-save battle identity",
+            result="Automation reattached to the same battle",
+        )
+        return True
+
     def _sync_operator_control_workflows(
         self,
         detection: Mapping[str, Any],
@@ -4798,6 +5020,15 @@ class App:
                     (
                         "battle-workflow",
                         self._supervisor.battle_workflow_error is True,
+                    ),
+                    (
+                        "process-restart-handoff",
+                        getattr(
+                            self._supervisor,
+                            "process_restart_handoff_error",
+                            False,
+                        )
+                        is True,
                     ),
                     (
                         "setup-capture",
@@ -5080,6 +5311,7 @@ class App:
                 self._retry_pending_running_return(manual, current)
                 return
 
+        self._maybe_request_process_restart_reattachment(current)
         workflow = self._supervisor.battle_workflow
         if workflow is None:
             return
@@ -5095,8 +5327,28 @@ class App:
                     intent,
                     request_id=str(workflow.get("request_id") or ""),
                 )
+            handoff = self._pending_process_restart_handoff_for_workflow(
+                str(workflow.get("request_id") or "")
+            )
+            if handoff is not None:
+                self._fail_process_restart_reattachment(
+                    str(
+                        workflow.get("reason")
+                        or "the fresh Attach workflow did not complete"
+                    ),
+                    current=current,
+                    workflow_id=str(workflow.get("request_id") or ""),
+                )
             return
         if workflow.get("status") == "completed":
+            handoff = self._pending_process_restart_handoff_for_workflow(
+                str(workflow.get("request_id") or "")
+            )
+            if handoff is not None and isinstance(current, Mapping):
+                self._complete_process_restart_reattachment(
+                    workflow,
+                    current,
+                )
             return
         request_id = str(workflow.get("request_id") or "")
         intent = str(workflow.get("intent") or "")
@@ -7515,6 +7767,11 @@ class App:
                 retained["completion_acknowledgement"] = dict(current)
         else:
             self._running_reconciliation_claims().pop(workflow_id, None)
+            if not self._complete_process_restart_reattachment(
+                workflow,
+                current,
+            ):
+                return False
         return True
 
     def _reuse_same_battle_session_preflight_after_adoption(
@@ -7613,6 +7870,11 @@ class App:
                 failed_checks=("workflow_reporting",),
                 detail_keys=("reporting_status",),
             )
+        if not self._complete_process_restart_reattachment(
+            workflow,
+            acknowledgement,
+        ):
+            return False
         self._running_reconciliation_claims().pop(
             str(workflow.get("request_id") or ""),
             None,
@@ -15577,6 +15839,47 @@ class App:
             and workflow.get("status") in {"validating_save", "action_dispatched"}
         ):
             workflow_id = str(workflow.get("request_id") or "")
+            restart_handoff = (
+                self._pending_process_restart_handoff_for_workflow(
+                    workflow_id
+                )
+            )
+            if restart_handoff is not None:
+                expected_identity = str(
+                    restart_handoff.get(
+                        "expected_active_round_identity_fingerprint"
+                    )
+                    or ""
+                ).strip()
+                actual_identity = str(
+                    temporal_binding.active_round_identity_fingerprint or ""
+                ).strip()
+                if not actual_identity or actual_identity != expected_identity:
+                    acknowledgement = dict(current)
+                    if actual_identity:
+                        acknowledgement[
+                            "active_round_identity_fingerprint"
+                        ] = actual_identity
+                    self._mission_mgr.revoke_initial_battle_intent(
+                        "attach_battle",
+                        request_id=workflow_id,
+                    )
+                    self._supervisor.transition_battle_workflow(
+                        workflow_id,
+                        "interrupted",
+                        reason=(
+                            "the forced save proved a different battle than "
+                            "the process-restart handoff"
+                        ),
+                        acknowledgement=acknowledgement,
+                    )
+                    self._fail_process_restart_reattachment(
+                        "the forced save proved a different battle than the "
+                        "one automation owned before Stop",
+                        current=acknowledgement,
+                        workflow_id=workflow_id,
+                    )
+                    return False
             strategy_decision = self._attachment_strategy_decision(
                 workflow,
                 acquisition=acquisition,

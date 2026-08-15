@@ -292,6 +292,34 @@ def _write_running_runtime_evidence(
     return lock_path
 
 
+def _write_pending_restart_handoff(
+    service: ControlSurfaceService,
+) -> dict[str, object]:
+    timestamp = datetime.now().astimezone().replace(microsecond=0)
+    source = {
+        "schema_version": 1,
+        "runtime_id": "stopped-runtime",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "observation_id": "stopped-runtime:1",
+        "observed_at": timestamp.isoformat(),
+        "primary_state": "RUNNING",
+        "home_battle_control": "UNKNOWN",
+        "game_state": "active_battle",
+        "active_battle": True,
+        "activity_scope_run_id": "owned-battle",
+        "target_generation": 1,
+        "active_round_identity_fingerprint": "a" * 64,
+    }
+    service.control_store.set_state_and_interrupt_operator_workflows(
+        "STOPPED",
+        "replace runtime",
+        source="test-stop",
+        restart_handoff_evidence=source,
+    )
+    return source
+
+
 def test_runtime_strategy_defaults_from_managed_environment(monkeypatch):
     monkeypatch.setenv("THETOWER_STRATEGY", "tournament")
 
@@ -943,6 +971,135 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     assert response["process_service"]["active"] is False
 
 
+def test_process_stop_retains_any_exact_owned_battle_for_next_start(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    control = service.control_store.set_state("RUNNING", source="test")
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
+        startup_gate_policy="operator",
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        response = service.apply_process_action({"action": "stop"})
+
+    handoff = service.control_store.status()["process_restart_handoff"]
+    assert handoff["status"] == "pending"
+    assert handoff["expected_active_round_identity_fingerprint"] == "a" * 64
+    assert handoff["source_evidence"]["game_state"] == "active_battle"
+    assert response["request"]["reattach_on_start"] is True
+    assert response["request"]["restart_handoff_id"] == handoff["handoff_id"]
+    assert manager.calls == ["stop"]
+
+
+def test_process_start_uses_pending_handoff_then_restores_operator_policy(
+    tmp_path,
+    monkeypatch,
+):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+    source = _write_pending_restart_handoff(service)
+
+    monkeypatch.setattr(
+        service,
+        "_wait_for_replacement_runtime",
+        lambda **_kwargs: {},
+    )
+
+    def complete_handoff(*, replacement_pid, handoff_id, expected_identity):
+        replacement = {
+            **source,
+            "runtime_id": "replacement-runtime",
+            "pid": replacement_pid,
+            "observation_id": "replacement-runtime:1",
+        }
+        workflow = service.control_store.request_battle_workflow(
+            "attach_battle",
+            evidence=replacement,
+            process_restart_handoff_id=handoff_id,
+            source="test-replacement",
+        )
+        service.control_store.finish_process_restart_handoff(
+            handoff_id,
+            "completed",
+            reason="same battle force-validated",
+            workflow_id=workflow["request_id"],
+            actual_active_round_identity=expected_identity,
+        )
+        return {}
+
+    monkeypatch.setattr(
+        service,
+        "_wait_for_same_battle_reattachment",
+        complete_handoff,
+    )
+
+    response = service.apply_process_action(
+        {"action": "start", "strategy": "tournament"}
+    )
+
+    assert manager.calls == [
+        "set_startup_gate_policy:next_run",
+        "set_strategy:tournament",
+        "start",
+        "persist_startup_gate_policy:operator",
+    ]
+    assert manager.startup_gate_policy == "operator"
+    assert service.control_store.status()["state"] == "RUNNING"
+    assert response["request"]["disposition"] == "same_battle_reattached"
+    assert response["request"]["battle_identity"] == "a" * 64
+    assert response["request"]["strategy"] == "tournament"
+
+
+def test_failed_same_battle_start_leaves_replacement_paused(
+    tmp_path,
+    monkeypatch,
+):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+    _write_pending_restart_handoff(service)
+    monkeypatch.setattr(
+        service,
+        "_wait_for_replacement_runtime",
+        lambda **_kwargs: {},
+    )
+
+    def reject_different_battle(**_kwargs):
+        raise AutomationProcessError("replacement proved a different battle")
+
+    monkeypatch.setattr(
+        service,
+        "_wait_for_same_battle_reattachment",
+        reject_different_battle,
+    )
+
+    with pytest.raises(ControlSurfaceRequestError, match="different battle"):
+        service.apply_process_action({"action": "start"})
+
+    assert manager.active is True
+    assert manager.startup_gate_policy == "operator"
+    assert service.control_store.status()["state"] == "PAUSED"
+
+
+def test_changed_target_cancels_handoff_and_starts_paused(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+    _write_pending_restart_handoff(service)
+    manager.adb_port = 5565
+
+    response = service.apply_process_action({"action": "start"})
+
+    assert manager.calls == ["set_startup_gate_policy:operator", "start"]
+    assert response["request"]["disposition"] == "completed"
+    assert response["request"]["action_authority"] == "paused"
+    handoff = service.control_store.status()["process_restart_handoff"]
+    assert handoff["status"] == "cancelled"
+    assert "different ADB target" in handoff["reason"]
+
+
 def test_process_stop_linearizes_after_an_inflight_enable(tmp_path):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
@@ -1050,7 +1207,7 @@ def test_take_manual_cannot_weaken_stop_while_process_exit_is_pending(tmp_path):
     assert manager.active is False
 
 
-def test_attached_restart_requires_explicit_stop_start_and_attach(tmp_path):
+def test_one_step_attached_restart_routes_to_durable_stop_start(tmp_path):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
     service.control_store.set_state("RUNNING", source="test")
@@ -1059,8 +1216,8 @@ def test_attached_restart_requires_explicit_stop_start_and_attach(tmp_path):
         service.apply_process_action({"action": "restart_attached"})
 
     assert exc_info.value.status == 409
-    assert exc_info.value.code == "explicit_attach_required"
-    assert "explicit Attach to Battle" in str(exc_info.value)
+    assert exc_info.value.code == "stop_start_required"
+    assert "automatically reattached" in str(exc_info.value)
     assert manager.calls == []
 
 

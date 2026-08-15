@@ -27,6 +27,10 @@ BATTLE_WORKFLOW_SCHEMA_VERSION = 1
 MANUAL_CONTROL_SCHEMA_VERSION = 1
 SETUP_CAPTURE_SCHEMA_VERSION = 1
 SAVE_RECONCILIATION_RECEIPT_SCHEMA_VERSION = 1
+PROCESS_RESTART_HANDOFF_SCHEMA_VERSION = 1
+PROCESS_RESTART_HANDOFF_STATUSES = frozenset(
+    {"pending", "completed", "failed", "cancelled"}
+)
 
 RUNNING_SAVE_RECONCILIATION_KINDS = frozenset(
     {
@@ -303,6 +307,82 @@ def validate_workflow_evidence(value: object) -> Optional[dict[str, Any]]:
         "adb_target": adb_target,
         **observation,
     }
+
+
+def validate_process_restart_handoff(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    """Return one same-battle process-restart attachment handoff.
+
+    The old runtime's evidence is retained only as the expected identity and
+    target for a fresh Attach workflow.  It is never itself replayable input
+    authority in the replacement process.
+    """
+
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    handoff_id = _bounded(value.get("handoff_id"), 64)
+    status = str(value.get("status") or "").strip().lower()
+    requested_at = _aware_timestamp(value.get("requested_at"))
+    expected_identity = value.get(
+        "expected_active_round_identity_fingerprint"
+    )
+    source_evidence = validate_workflow_evidence(
+        value.get("source_evidence")
+    )
+    if (
+        handoff_id is None
+        or status not in PROCESS_RESTART_HANDOFF_STATUSES
+        or requested_at is None
+        or not _sha256(expected_identity)
+        or source_evidence is None
+        or source_evidence.get("game_state") != "active_battle"
+        or source_evidence.get("active_round_identity_fingerprint")
+        != expected_identity
+        or value.get("resume_state") != "RUNNING"
+    ):
+        return None
+    result: dict[str, Any] = {
+        "schema_version": PROCESS_RESTART_HANDOFF_SCHEMA_VERSION,
+        "handoff_id": handoff_id,
+        "status": status,
+        "requested_at": requested_at,
+        "resume_state": "RUNNING",
+        "expected_active_round_identity_fingerprint": str(
+            expected_identity
+        ),
+        "source_evidence": source_evidence,
+    }
+    workflow_id = _optional_bounded(value.get("workflow_id"), 64)
+    if value.get("workflow_id") is not None and workflow_id is None:
+        return None
+    if workflow_id is not None:
+        result["workflow_id"] = workflow_id
+    actual_identity = value.get("actual_active_round_identity_fingerprint")
+    if actual_identity is not None:
+        if not _sha256(actual_identity):
+            return None
+        result["actual_active_round_identity_fingerprint"] = str(
+            actual_identity
+        )
+    _copy_optional_fields(
+        value,
+        result,
+        timestamps=("updated_at", "completed_at"),
+        text=("reason", "updated_by"),
+        mappings=(),
+    )
+    if status == "pending":
+        if "completed_at" in result or actual_identity is not None:
+            return None
+    else:
+        if "completed_at" not in result or not result.get("reason"):
+            return None
+    if status == "completed" and (
+        workflow_id is None or actual_identity != expected_identity
+    ):
+        return None
+    return result
 
 
 def validate_battle_workflow(value: object) -> Optional[dict[str, Any]]:
@@ -1979,6 +2059,8 @@ __all__ = [
     "MANUAL_SURRENDER_COLLECTIONS",
     "MANUAL_CONTROL_STATUSES",
     "MANUAL_CONTROL_TERMINAL_STATUSES",
+    "PROCESS_RESTART_HANDOFF_SCHEMA_VERSION",
+    "PROCESS_RESTART_HANDOFF_STATUSES",
     "RUNNING_SAVE_RECONCILIATION_KINDS",
     "RUNNING_UI_FALLBACK_SOURCE",
     "SAVE_RECONCILIATION_RECEIPT_SCHEMA_VERSION",
@@ -2002,6 +2084,7 @@ __all__ = [
     "validate_manual_control",
     "validate_manual_terminal_evidence",
     "validate_observation",
+    "validate_process_restart_handoff",
     "validate_save_reconciliation_receipt",
     "validate_setup_capture",
     "validate_setup_capture_preview",

@@ -45,10 +45,17 @@ when the original workflow still owns the exact runtime, target, operation,
 and visible boundary; otherwise that pending recovery is discarded. Activity-
 log scope creation or rotation never rejects Start.
 
-Stopping interrupts unfinished battle and manual-control workflows. Repeating
-an already satisfied Start or Stop is reported as a no-op. The old attached
-reload and Start-time attachment-policy controls are retired: after a process
-replacement, inspect fresh observation and issue a new exact battle intent.
+Stopping interrupts unfinished battle and manual-control workflows. If fresh
+status proves an exact active battle already owned by automation, complete Stop
+also records a one-shot handoff for that battle, regardless of whether
+automation originally started it or attached later. Start consumes that
+handoff with a fresh ordinary Attach workflow and forced save; wave progression
+does not matter because the proof is the battle identity. The service restores
+Enabled authority only after the same identity is adopted. A changed or ended
+battle, target mismatch, or unavailable proof leaves the replacement Paused
+for explicit intent. Without a handoff, Start retains its normal Paused,
+explicit-intent behavior. Repeating an already satisfied Start or Stop is
+reported as a no-op; the old one-step attached reload remains retired.
 
 ## Set what happens when a battle ends
 
@@ -191,7 +198,8 @@ Expected manual-boundary behavior is explicit:
   or restarts/Attaches at `RUNNING`, forced serialization returns a different
   ID. The runtime discards the old battle-local state and adopts the successor.
 - If the battle never changed, the same forced ID permits same-battle receipt
-  reuse. A restarted managed process always begins Paused and still requires
+  reuse. A restarted managed process begins Paused. A valid complete-Stop
+  handoff creates and completes its fresh Attach automatically; otherwise use
   explicit Attach (or Start from Home New).
 
 ## Capture a manually changed setup

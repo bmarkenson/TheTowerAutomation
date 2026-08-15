@@ -91,6 +91,17 @@ reported recovery guard. Uncertain equivalence selects the strongest
 applicable gate. The ref is a mutex rather than a persistent FIFO queue;
 losing another race repeats the same loop instead of abandoning the outcome.
 
+While that ref is held, one atomically replaced JSON inventory under the common
+Git directory binds exact candidate `D` and base `M` to every declared delegated
+branch, worktree, and tip. A read-only Git scan adds local tips newly ancestral
+in `D` and patches absent from `M` but patch-equivalent in `M..D`, catching
+cherry-picks whose hashes changed without treating them as exact integration.
+Each entry must become integrated-and-retired, archived-superseded-and-retired,
+or explicitly retained with an owner and remaining work before the guarded
+close may compare-delete the promotion-owner ref. The inventory is a small local
+transaction journal, not a remote registry, service, queue, or security record;
+it never cleans unrelated worktrees and remains after closure as evidence.
+
 Production is never switched to a feature or integration branch. Existing
 operator or parallel changes are preserved. A non-clean production checkout or
 candidate blocks that promotion but does not block unrelated feature or
@@ -491,7 +502,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, default coordinator promotion ownership with explicit opt-outs or reassignment, one private ref serializing production mutation, exact fast-forward promotion, default main-only remote publication, and default retirement of clean integrated temporary work | No standing `develop`/staging branch, concurrent production mutations, speculative retention of integrated worktrees, independent repository per worker, or source attestation |
+| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, default coordinator promotion ownership with explicit opt-outs or reassignment, one private ref serializing production mutation, one small exact-source retirement inventory, exact fast-forward promotion, default main-only remote publication, and default retirement of clean integrated temporary work | No standing `develop`/staging branch, concurrent production mutations, speculative retention of integrated worktrees, independent repository per worker, source attestation, or release service |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |
