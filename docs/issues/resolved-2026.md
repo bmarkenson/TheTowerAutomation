@@ -1098,8 +1098,7 @@ and actionable work lives in
   sent no game input, did not restart or alter production, and made all code and
   test changes in an isolated feature worktree.
 - **Fixed by:** `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b` originally;
-  the 2026-08-14 recurrence is corrected by the feature candidate recorded in
-  the completed-task log.
+  recurrence fix `91f8d609440308a3930609ae1b4ca3c99d328ff9`.
 
 ### First Perk Choice compared a value-bearing OCR slug to its semantic key
 

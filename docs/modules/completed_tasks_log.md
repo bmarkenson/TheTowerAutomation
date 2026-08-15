@@ -39,6 +39,25 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 check-local save repair authority
+
+- Commit `91f8d60` resolves the recurrence of
+  [save-first Cards repair discarding unrelated accepted decisions](../issues/resolved-2026.md#save-first-cards-repair-discarded-unrelated-accepted-decisions).
+  A Cards repair now preserves accepted Demon Mode, Nuke, First Perk, Workshop,
+  Bot, Guardian, and other independent save decisions. Target Priority, Poison
+  Stun, Damage Slider, and Orb Distance repairs likewise retire only their own
+  check; level-skip input closes mapping correlation without discarding
+  configuration facts.
+- Whole-snapshot invalidation remains fail-closed for authoritative save/UI
+  contradictions and global trust or continuity failures. A repaired value is
+  supported only by its verified UI result and is never promoted back into save
+  carry.
+- The affected slice passed 300 tests and the separate compatibility slice
+  passed 514 tests. Modified modules compiled, documentation lifecycle passed,
+  and whitespace validation was clean. Live diagnosis was read-only; the
+  isolated candidate sent no device input, changed no production process, and
+  was not deployed.
+
 ### 2026-08-14 global Module save identity completion
 
 - Commit `888f101` separates the complete 24-ID Module name/family catalog
