@@ -49,7 +49,6 @@ from utils.logger import (
 )
 
 
-POST_RETRY_HISTORY_POLL_INTERVAL_SECONDS = 15.0
 SOURCE_RETRY_INTERVAL_SECONDS = 5.0
 UI_HISTORY_SOURCE = BATTLE_HISTORY_UI_SOURCE
 UI_HISTORY_MAPPING_ID = BATTLE_HISTORY_UI_MAPPING_ID
@@ -345,21 +344,18 @@ class ActivityContinuityCoordinator:
         run_id = str(scope.get("run_id") or "").strip()
         if not run_id or run_id == self._checked_scope_id:
             return False
-        post_retry_pending = _pending_latest_completed_battle(scope) is not None
+        # Direct Retry already owns a distinct successor boundary.  Its
+        # pending completed-tail marker is not a reason to wait for Battle
+        # History to serialize, and completed-history tails do not identify
+        # the active successor battle.  A forced-save identity owner resolves
+        # that boundary separately.
+        if _pending_latest_completed_battle(scope) is not None:
+            return False
         state = str(detection.get("state") or "UNKNOWN").upper()
         if defer_running_check and state == "RUNNING":
             return False
         if self._pending_source is not None:
-            if (
-                self._pending_mode == "post_retry_baseline"
-                and self._clock() < self._retry_at
-            ):
-                return False
             return True
-        if post_retry_pending and (
-            not post_retry_poll_allowed or self._clock() < self._retry_at
-        ):
-            return False
         control = HomeBattleControl.parse(
             detection.get("home_battle_control", "UNKNOWN")
         )
@@ -367,7 +363,6 @@ class ActivityContinuityCoordinator:
             defer_home_baseline
             and state in {"HOME", "HOME_SCREEN"}
             and control is HomeBattleControl.NEW_BATTLE
-            and not post_retry_pending
             and _scope_battle_history(scope) is None
         ):
             return False
@@ -417,15 +412,11 @@ class ActivityContinuityCoordinator:
             self._reset_pending()
             self._pending_scope_id = run_id
 
-        post_retry_pending = _pending_latest_completed_battle(scope) is not None
-        if (
-            self._pending_source is None
-            and post_retry_pending
-            and (
-                not post_retry_poll_allowed
-                or self._clock() < self._retry_at
-            )
-        ):
+        # Activity Continuity deliberately does not turn a Retry boundary into
+        # a passive save/History polling loop.  Leave terminal handoff/report
+        # evidence untouched and let the forced-save identity owner bind the
+        # active successor battle.
+        if _pending_latest_completed_battle(scope) is not None:
             return ActivityContinuityOutcome()
 
         state = str(detection.get("state") or "UNKNOWN").upper()
@@ -443,49 +434,37 @@ class ActivityContinuityCoordinator:
                 defer_home_baseline
                 and state in {"HOME", "HOME_SCREEN"}
                 and control is HomeBattleControl.NEW_BATTLE
-                and not post_retry_pending
                 and _scope_battle_history(scope) is None
             ):
                 return ActivityContinuityOutcome()
             if state == "RUNNING":
                 self._pending_source = "RUNNING"
-                if post_retry_pending:
-                    self._pending_mode = "post_retry_baseline"
-                elif _scope_battle_history(scope) is None:
+                if _scope_battle_history(scope) is None:
                     self._pending_mode = "attachment_baseline"
                 else:
                     self._pending_mode = "compare"
             elif state == "BATTLE_HISTORY":
                 self._pending_source = "BATTLE_HISTORY"
-                self._pending_mode = (
-                    "post_retry_baseline" if post_retry_pending else "compare"
-                )
+                self._pending_mode = "compare"
             elif (
                 state in {"HOME", "HOME_SCREEN"}
                 and control is HomeBattleControl.RESUME_BATTLE
             ):
                 self._pending_source = "HOME_SCREEN"
                 self._pending_home_control = control
-                self._pending_mode = (
-                    "post_retry_baseline" if post_retry_pending else "compare"
-                )
+                self._pending_mode = "compare"
             elif (
                 state in {"HOME", "HOME_SCREEN"}
                 and control is HomeBattleControl.NEW_BATTLE
             ):
-                if post_retry_pending:
-                    self._pending_source = "HOME_SCREEN"
-                    self._pending_home_control = control
-                    self._pending_mode = "post_retry_baseline"
-                else:
-                    baseline = _scope_battle_history(scope)
-                    if baseline is not None:
-                        self._checked_scope_id = run_id
-                        self._reset_pending()
-                        return ActivityContinuityOutcome()
-                    self._pending_source = "HOME_SCREEN"
-                    self._pending_home_control = control
-                    self._pending_mode = "baseline"
+                baseline = _scope_battle_history(scope)
+                if baseline is not None:
+                    self._checked_scope_id = run_id
+                    self._reset_pending()
+                    return ActivityContinuityOutcome()
+                self._pending_source = "HOME_SCREEN"
+                self._pending_home_control = control
+                self._pending_mode = "baseline"
             else:
                 return ActivityContinuityOutcome()
         elif self._pending_source == "HOME_SCREEN" and state == "RUNNING":
@@ -504,9 +483,7 @@ class ActivityContinuityCoordinator:
         if not actions_allowed:
             return ActivityContinuityOutcome(pending=True)
         if self._clock() < self._retry_at:
-            return ActivityContinuityOutcome(
-                pending=self._pending_mode != "post_retry_baseline"
-            )
+            return ActivityContinuityOutcome(pending=True)
 
         use_save = self._should_read_save(scope, player_save_mode)
         attachment_observations = None
@@ -583,40 +560,7 @@ class ActivityContinuityCoordinator:
             if save_result.complete:
                 metadata = _normalize_history_metadata(save_result.metadata)
                 if metadata is not None:
-                    if self._pending_mode == "post_retry_baseline":
-                        previous = _pending_previous_battle(scope)
-                        compatible = history_sources_compatible(
-                            previous,
-                            metadata,
-                        )
-                        if previous is not None and not compatible:
-                            force_ui_fallback = True
-                            fallback_reason = "history_source_mapping_changed"
-                        elif (
-                            previous is not None
-                            and previous["fingerprint"]
-                            == metadata["fingerprint"]
-                        ):
-                            return self._handle_unchanged_post_retry(metadata)
-                        if (
-                            previous is not None
-                            and compatible
-                            and not valid_history_tail_advance(
-                                previous,
-                                metadata,
-                            )
-                        ):
-                            log(
-                                "[BATTLE_CONTINUITY] Save History tail changed "
-                                "without a valid append/rollover transition; "
-                                "restoring the guarded UI fallback",
-                                "INFO",
-                            )
-                            force_ui_fallback = True
-                            fallback_reason = "history_tail_transition_invalid"
-                        elif not force_ui_fallback:
-                            return self._handle_metadata(scope, metadata)
-                    elif self._pending_mode == "attachment_baseline":
+                    if self._pending_mode == "attachment_baseline":
                         return self._handle_metadata(
                             scope,
                             metadata,
@@ -775,14 +719,6 @@ class ActivityContinuityCoordinator:
                 ),
                 ui_fallback_reason=ui_fallback_reason,
             )
-        if self._pending_mode == "post_retry_baseline":
-            previous = _pending_previous_battle(scope)
-            if (
-                previous is not None
-                and history_sources_compatible(previous, metadata)
-                and previous["fingerprint"] == metadata["fingerprint"]
-            ):
-                return self._handle_unchanged_post_retry(metadata)
         return self._handle_metadata(
             scope,
             metadata,
@@ -881,12 +817,6 @@ class ActivityContinuityCoordinator:
             or self._pending_source == "BATTLE_HISTORY"
         ):
             return False
-        if self._pending_mode == "post_retry_baseline":
-            reference = _pending_previous_battle(scope)
-            return bool(
-                reference is not None
-                and reference.get("source") == PLAYER_SAVE_HISTORY_SOURCE
-            )
         if (
             self._pending_source == "RUNNING"
             and self._pending_mode in {"compare", "attachment_baseline"}
@@ -902,11 +832,6 @@ class ActivityContinuityCoordinator:
         if self._pending_mode == "baseline":
             summary = "Recording the Battle History baseline"
             reason = "identify the latest completed battle before this run starts"
-        elif self._pending_mode == "post_retry_baseline":
-            summary = "Polling the post-Retry Battle History baseline"
-            reason = (
-                "wait until the finished battle becomes the newest History entry"
-            )
         elif self._pending_mode == "attachment_baseline":
             summary = "Recording the attached battle's last-completed baseline"
             reason = (
@@ -924,21 +849,6 @@ class ActivityContinuityCoordinator:
                 f"channel={channel} scope_id={run_id}"
             ),
         )
-
-    def _handle_unchanged_post_retry(
-        self,
-        metadata: Mapping[str, Any],
-    ) -> ActivityContinuityOutcome:
-        log_result(
-            "Post-Retry Battle History tail is unchanged — passive polling "
-            "will continue",
-            detail=(
-                "[BATTLE_CONTINUITY] disposition=tail_unchanged "
-                f"latest={_metadata_detail(metadata)}"
-            ),
-        )
-        self._defer_post_retry_poll()
-        return ActivityContinuityOutcome(recapture=True)
 
     def _handle_metadata(
         self,
@@ -959,13 +869,7 @@ class ActivityContinuityCoordinator:
     ) -> ActivityContinuityOutcome:
         run_id = str(scope["run_id"])
         baseline = _scope_battle_history(scope)
-        pending_previous = _pending_previous_battle(scope)
         compatible = history_sources_compatible(baseline, metadata)
-        source_migration = bool(
-            self._pending_mode == "post_retry_baseline"
-            and pending_previous is not None
-            and not history_sources_compatible(pending_previous, metadata)
-        )
         source_incompatible_attachment = bool(
             self._pending_mode == "compare"
             and baseline is not None
@@ -1049,21 +953,6 @@ class ActivityContinuityCoordinator:
                     "incompatibility_reason="
                     f"{attachment_incompatibility_reason or 'none'} "
                     f"previous={_baseline_detail(baseline)} "
-                    f"latest={_metadata_detail(metadata)} scope_id={run_id}"
-                ),
-            )
-        elif self._pending_mode == "post_retry_baseline":
-            disposition = (
-                "post_retry_source_migrated_without_fingerprint_comparison"
-                if source_migration
-                else "post_retry_baseline_recorded"
-            )
-            log_result(
-                "Post-Retry Battle History baseline recorded — latest completed "
-                f"battle is Tier {metadata.get('tier')}, wave {metadata.get('wave')}",
-                detail=(
-                    f"[BATTLE_CONTINUITY] disposition={disposition} "
-                    f"previous={_baseline_detail(pending_previous)} "
                     f"latest={_metadata_detail(metadata)} scope_id={run_id}"
                 ),
             )
@@ -1198,25 +1087,6 @@ class ActivityContinuityCoordinator:
                 recapture=True,
             )
 
-        if self._pending_mode == "post_retry_baseline":
-            log_result(
-                "Post-Retry Battle History baseline was not read — passive "
-                "polling will continue",
-                detail=(
-                    "[BATTLE_CONTINUITY] disposition=read_retry_scheduled "
-                    f"reason={result.reason} scope_id={run_id}"
-                ),
-            )
-            self._defer_post_retry_poll()
-            return ActivityContinuityOutcome(
-                recapture=True,
-                ui_monitoring_fallback=True,
-                ui_fallback_complete=False,
-                ui_fallback_reason=str(
-                    ui_fallback_reason or result.reason or "history_ui_read_failed"
-                ),
-            )
-
         if self._pending_mode == "compare":
             replacement = start_activity_scope(
                 reason="battle_history_unavailable_on_attachment",
@@ -1252,16 +1122,6 @@ class ActivityContinuityCoordinator:
                 ui_fallback_reason or result.reason or "history_ui_read_failed"
             ),
         )
-
-    def _defer_post_retry_poll(self) -> None:
-        """Release action authority until the next bounded History poll."""
-
-        self._pending_source = None
-        self._pending_home_control = HomeBattleControl.UNKNOWN
-        self._pending_mode = None
-        self._boundary = None
-        self._action_logged = False
-        self._retry_at = self._clock() + POST_RETRY_HISTORY_POLL_INTERVAL_SECONDS
 
     def _reset_pending(self) -> None:
         self._pending_scope_id = None
@@ -1354,15 +1214,6 @@ def _pending_latest_completed_battle(
     if not isinstance(raw, Mapping) or raw.get("schema_version") != 1:
         return None
     return raw
-
-
-def _pending_previous_battle(
-    scope: Mapping[str, object],
-) -> Optional[dict[str, Any]]:
-    pending = _pending_latest_completed_battle(scope)
-    if pending is None:
-        return None
-    return _normalize_history_metadata(pending.get("previous_completed_battle"))
 
 
 def _bind_attachment_observations(

@@ -665,105 +665,70 @@ def test_priority_run_initialization_defers_running_continuity(
     assert logger.get_activity_scope()["latest_completed_battle"] == metadata
 
 
-def test_post_retry_history_poll_waits_for_startup_gates(
+@pytest.mark.parametrize("post_retry_poll_allowed", (False, True))
+@pytest.mark.parametrize(
+    "detection",
+    (
+        {"state": "RUNNING"},
+        {"state": "BATTLE_HISTORY"},
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "RESUME_BATTLE",
+        },
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "NEW_BATTLE",
+        },
+    ),
+)
+def test_retry_scope_never_polls_history_or_waits_for_a_natural_save(
     tmp_path,
     monkeypatch,
-):
-    monkeypatch.setenv(
-        "TOWER_ACTION_LOG_PATH",
-        str(tmp_path / "logs" / "actions.log"),
-    )
-    previous = _identity(wave="9112")
-    _scope_with_baseline(previous)
-    retry_scope = logger.start_retry_activity_scope()
-    assert retry_scope is not None
-    reads = []
-    coordinator = ActivityContinuityCoordinator(
-        history_reader=lambda **kwargs: reads.append(kwargs)
-    )
-
-    assert not coordinator.needs_check(
-        {"state": "RUNNING"},
-        post_retry_poll_allowed=False,
-    )
-    outcome = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-        post_retry_poll_allowed=False,
-    )
-
-    assert not outcome.pending
-    assert not outcome.recapture
-    assert reads == []
-    assert logger.get_activity_scope() == retry_scope
-
-
-def test_post_retry_history_poll_rejects_stale_latest_then_records_new_entry(
-    tmp_path,
-    monkeypatch,
+    post_retry_poll_allowed,
+    detection,
 ):
     log_path = tmp_path / "logs" / "actions.log"
     monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
-    previous = _identity(wave="9112")
-    latest = _identity(wave="9333")
-    _scope_with_baseline(previous)
+    previous = _save_metadata()
+    _scope_with_save_baseline(previous)
     retry_scope = logger.start_retry_activity_scope()
     assert retry_scope is not None
     now = [100.0]
-    identities = [previous, latest]
+    save_reads = []
+    ui_reads = []
     coordinator = ActivityContinuityCoordinator(
-        history_reader=lambda **_kwargs: _complete(identities.pop(0)),
+        save_history_reader=lambda **kwargs: save_reads.append(kwargs),
+        history_reader=lambda **kwargs: ui_reads.append(kwargs),
         clock=lambda: now[0],
     )
 
-    stale = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-    )
+    for timestamp in (100.0, 115.0, 700.0):
+        now[0] = timestamp
+        assert not coordinator.needs_check(
+            detection,
+            post_retry_poll_allowed=post_retry_poll_allowed,
+        )
+        outcome = coordinator.handle(
+            detection,
+            actions_allowed=True,
+            action_guard_fn=lambda: True,
+            post_retry_poll_allowed=post_retry_poll_allowed,
+            player_save_mode="save_first",
+        )
+        assert not outcome.pending
+        assert not outcome.recapture
 
     current = logger.get_activity_scope()
-    assert stale.recapture
-    assert not stale.pending
-    assert current is not None
-    assert current["run_id"] == retry_scope["run_id"]
-    assert "latest_completed_battle" not in current
-    assert "pending_latest_completed_battle" in current
-
-    now[0] = 114.9
-    assert not coordinator.needs_check({"state": "RUNNING"})
-    waiting = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-    )
-    assert not waiting.pending
-    assert not waiting.recapture
-    assert len(identities) == 1
-
-    now[0] = 115.0
-    assert coordinator.needs_check({"state": "RUNNING"})
-    recorded = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-    )
-
-    current = logger.get_activity_scope()
-    assert recorded.recapture
-    assert not recorded.pending
-    assert current is not None
-    assert current["run_id"] == retry_scope["run_id"]
-    assert (
-        current["latest_completed_battle"]["fingerprint"]
-        == latest.fingerprint
-    )
-    assert "pending_latest_completed_battle" not in current
+    assert current == retry_scope
+    assert current["pending_latest_completed_battle"] == {
+        "schema_version": 1,
+        "previous_completed_battle": previous,
+    }
+    assert save_reads == []
+    assert ui_reads == []
     contents = log_path.read_text(encoding="utf-8")
-    assert contents.count("Polling the post-Retry Battle History baseline") == 2
-    assert contents.count("passive polling will continue") == 1
-    assert "Post-Retry Battle History baseline recorded" in contents
+    assert "Polling the post-Retry Battle History baseline" not in contents
+    assert "passive polling will continue" not in contents
 
 
 def test_unverified_attachment_uses_conservative_new_scope(
@@ -934,27 +899,21 @@ def test_home_baseline_scope_write_loss_blocks_without_history_ui(
     assert ui_reads == []
 
 
-@pytest.mark.parametrize(
-    ("previous_count", "latest_count"),
-    ((29, 30), (30, 30)),
-)
-def test_direct_retry_accepts_save_tail_append_or_capacity_rollover(
+def test_direct_retry_does_not_use_completed_tail_as_successor_identity(
     tmp_path,
     monkeypatch,
-    previous_count,
-    latest_count,
 ):
     monkeypatch.setenv(
         "TOWER_ACTION_LOG_PATH",
         str(tmp_path / "logs" / "actions.log"),
     )
-    previous = _save_metadata(entry_count=previous_count)
+    previous = _save_metadata(entry_count=29)
     _scope_with_save_baseline(previous)
     retry_scope = logger.start_retry_activity_scope()
     assert retry_scope is not None
     latest = _save_metadata(
         fingerprint="b" * 64,
-        entry_count=latest_count,
+        entry_count=30,
         wave=2100,
     )
     save_reads = []
@@ -965,11 +924,10 @@ def test_direct_retry_accepts_save_tail_append_or_capacity_rollover(
 
     coordinator = ActivityContinuityCoordinator(
         save_history_reader=save_reader,
-        history_reader=lambda **_kwargs: pytest.fail(
-            "valid advancing save tail must suppress History UI"
-        ),
+        history_reader=lambda **_kwargs: pytest.fail("History UI must not open"),
     )
 
+    assert not coordinator.needs_check({"state": "RUNNING"})
     outcome = coordinator.handle(
         {"state": "RUNNING"},
         actions_allowed=True,
@@ -978,13 +936,16 @@ def test_direct_retry_accepts_save_tail_append_or_capacity_rollover(
     )
 
     current = logger.get_activity_scope()
-    assert outcome.recapture
+    assert not outcome.pending
+    assert not outcome.recapture
     assert current is not None
     assert current["run_id"] == retry_scope["run_id"]
-    assert current["latest_completed_battle"] == latest
-    assert "pending_latest_completed_battle" not in current
-    assert len(save_reads) == 1
-    assert save_reads[0]["expected_scope_id"] == retry_scope["run_id"]
+    assert "latest_completed_battle" not in current
+    assert current["pending_latest_completed_battle"] == {
+        "schema_version": 1,
+        "previous_completed_battle": previous,
+    }
+    assert save_reads == []
 
 
 def test_unchanged_save_tail_preserves_running_attachment_without_history_ui(
@@ -1363,249 +1324,6 @@ def test_blocked_active_attachment_save_never_opens_history_ui(
     assert outcome.operator_workflow_interruption_reason == (
         "active_attachment_restored_source_convergence_timeout"
     )
-
-
-def test_unchanged_retry_save_tail_polls_passively_without_history_ui(
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setenv(
-        "TOWER_ACTION_LOG_PATH",
-        str(tmp_path / "logs" / "actions.log"),
-    )
-    previous = _save_metadata()
-    _scope_with_save_baseline(previous)
-    retry_scope = logger.start_retry_activity_scope()
-    assert retry_scope is not None
-    now = [100.0]
-    save_reads = []
-
-    def save_reader(**kwargs):
-        save_reads.append(kwargs)
-        return _save_complete(previous)
-
-    coordinator = ActivityContinuityCoordinator(
-        save_history_reader=save_reader,
-        history_reader=lambda **_kwargs: pytest.fail(
-            "unchanged save tail must not navigate History"
-        ),
-        clock=lambda: now[0],
-    )
-
-    outcome = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-        player_save_mode="save_first",
-    )
-
-    current = logger.get_activity_scope()
-    assert outcome.recapture
-    assert not outcome.pending
-    assert current is not None
-    assert current["run_id"] == retry_scope["run_id"]
-    assert "latest_completed_battle" not in current
-    assert "pending_latest_completed_battle" in current
-    now[0] = 114.9
-    assert not coordinator.needs_check({"state": "RUNNING"})
-    now[0] = 115.0
-    assert coordinator.needs_check({"state": "RUNNING"})
-    repeated = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-        player_save_mode="save_first",
-    )
-    assert repeated.recapture
-    assert len(save_reads) == 2
-
-
-def test_save_acquisition_failure_restores_guarded_history_ui_fallback(
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setenv(
-        "TOWER_ACTION_LOG_PATH",
-        str(tmp_path / "logs" / "actions.log"),
-    )
-    previous = _save_metadata()
-    _scope_with_save_baseline(previous)
-    retry_scope = logger.start_retry_activity_scope()
-    assert retry_scope is not None
-    ui_identity = _identity(wave="9333")
-    ui_reads = []
-    coordinator = ActivityContinuityCoordinator(
-        save_history_reader=lambda **_kwargs: PlayerSaveHistoryReadResult(
-            PlayerSaveHistoryReadStatus.UI_FALLBACK,
-            "save_history_acquisition_failed",
-            safe_ui_fallback=True,
-        ),
-        history_reader=lambda **kwargs: (
-            ui_reads.append(kwargs) or _complete(ui_identity)
-        ),
-    )
-
-    outcome = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-        player_save_mode="save_first",
-    )
-
-    current = logger.get_activity_scope()
-    assert outcome.recapture
-    assert outcome.ui_monitoring_fallback is True
-    assert outcome.ui_fallback_complete is True
-    assert outcome.ui_fallback_reason == "save_history_acquisition_failed"
-    assert len(ui_reads) == 1
-    assert current is not None
-    assert current["run_id"] == retry_scope["run_id"]
-    assert current["latest_completed_battle"]["source"] == (
-        "battle_history_ui"
-    )
-    assert "pending_latest_completed_battle" not in current
-
-
-def test_target_control_or_boundary_loss_never_runs_history_ui(
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setenv(
-        "TOWER_ACTION_LOG_PATH",
-        str(tmp_path / "logs" / "actions.log"),
-    )
-    _scope_with_save_baseline(_save_metadata())
-    logger.start_retry_activity_scope()
-    ui_reads = []
-    coordinator = ActivityContinuityCoordinator(
-        save_history_reader=lambda **_kwargs: PlayerSaveHistoryReadResult(
-            PlayerSaveHistoryReadStatus.BLOCKED,
-            "history_source_binding_lost",
-        ),
-        history_reader=lambda **kwargs: ui_reads.append(kwargs),
-    )
-
-    outcome = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-        player_save_mode="save_first",
-    )
-
-    assert outcome.pending
-    assert outcome.recapture
-    assert ui_reads == []
-
-
-def test_pause_or_stop_prohibition_runs_neither_save_nor_history_ui(
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setenv(
-        "TOWER_ACTION_LOG_PATH",
-        str(tmp_path / "logs" / "actions.log"),
-    )
-    _scope_with_save_baseline(_save_metadata())
-    logger.start_retry_activity_scope()
-    save_reads = []
-    ui_reads = []
-    coordinator = ActivityContinuityCoordinator(
-        save_history_reader=lambda **kwargs: save_reads.append(kwargs),
-        history_reader=lambda **kwargs: ui_reads.append(kwargs),
-    )
-
-    outcome = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=False,
-        action_guard_fn=lambda: False,
-        player_save_mode="save_first",
-    )
-
-    assert outcome.pending
-    assert not outcome.recapture
-    assert save_reads == []
-    assert ui_reads == []
-
-
-def test_invalid_save_tail_transition_restores_guarded_history_ui(
-    tmp_path,
-    monkeypatch,
-):
-    log_path = tmp_path / "logs" / "actions.log"
-    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
-    previous = _save_metadata(entry_count=29)
-    _scope_with_save_baseline(previous)
-    logger.start_retry_activity_scope()
-    invalid = _save_metadata(
-        fingerprint="b" * 64,
-        entry_count=29,
-        wave=2100,
-    )
-    ui_reads = []
-    coordinator = ActivityContinuityCoordinator(
-        save_history_reader=lambda **_kwargs: _save_complete(invalid),
-        history_reader=lambda **kwargs: (
-            ui_reads.append(kwargs) or _complete(_identity(wave="2100"))
-        ),
-    )
-
-    outcome = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-        player_save_mode="save_first",
-    )
-
-    current = logger.get_activity_scope()
-    assert outcome.recapture
-    assert len(ui_reads) == 1
-    assert current is not None
-    assert current["latest_completed_battle"]["source"] == (
-        "battle_history_ui"
-    )
-    assert "history_tail_transition_invalid" in log_path.read_text(
-        encoding="utf-8"
-    )
-
-
-def test_changed_save_mapping_restores_ui_without_comparing_fingerprints(
-    tmp_path,
-    monkeypatch,
-):
-    log_path = tmp_path / "logs" / "actions.log"
-    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
-    previous = _save_metadata()
-    _scope_with_save_baseline(previous)
-    logger.start_retry_activity_scope()
-    changed_mapping = {
-        **_save_metadata(fingerprint="b" * 64, entry_count=30, wave=2100),
-        "mapping_id": "data-9-game-1074",
-    }
-    ui_reads = []
-    coordinator = ActivityContinuityCoordinator(
-        save_history_reader=lambda **_kwargs: _save_complete(changed_mapping),
-        history_reader=lambda **kwargs: (
-            ui_reads.append(kwargs) or _complete(_identity(wave="2100"))
-        ),
-    )
-
-    outcome = coordinator.handle(
-        {"state": "RUNNING"},
-        actions_allowed=True,
-        action_guard_fn=lambda: True,
-        player_save_mode="save_first",
-    )
-
-    current = logger.get_activity_scope()
-    assert outcome.recapture
-    assert len(ui_reads) == 1
-    assert current is not None
-    assert current["latest_completed_battle"]["source"] == (
-        "battle_history_ui"
-    )
-    contents = log_path.read_text(encoding="utf-8")
-    assert "history_source_mapping_changed" in contents
-    assert "post_retry_source_migrated_without_fingerprint_comparison" in contents
 
 
 @pytest.mark.parametrize("mode", ("force_ui", "comparison_audit"))
