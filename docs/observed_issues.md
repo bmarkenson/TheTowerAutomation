@@ -27,9 +27,10 @@ current runtime state.
   cross-heartbeat retry behavior, and for live confirmation or recurrence.
   Commit `af3d1b0` is deployed and its managed active-battle handoff passed;
   current-main code candidate `f3cf804` adds the required cross-owner
-  hardening. Next: checkpoint and promote that candidate, then observe one
-  natural no-battle launch boundary without manufacturing a battle or modal;
-  [state/recovery
+  hardening, and exact aggregate candidate `240b63f` passed the complete
+  checkpoint. Next: promote that candidate and its completion record, then
+  observe one natural no-battle launch boundary without manufacturing a battle
+  or modal; [state/recovery
   backlog](backlog/state-and-detection.md#state-coverage-and-recovery).
 
 ### Owned validation cleanup survived a later running-battle transition
@@ -45,7 +46,8 @@ current runtime state.
   `RUNNING` release now have one repository repair under `ISSUE-2026-046`; the
   source of the historical later transition remains unknown. Production
   commit `95bd630` contains the base repair, and current-main code candidate
-  `f3cf804` adds cross-owner hardening. Next: promote that hardening and safely
+  `f3cf804` adds cross-owner hardening; exact aggregate candidate `240b63f`
+  passed the complete checkpoint. Next: promote that hardening and safely
   confirm without manufacturing a battle transition;
   [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
@@ -70,9 +72,9 @@ current runtime state.
   before running or changing exclusive validation, confirmed Tournament launch,
   Free Ticket recovery, or typed action-authority routing. Production commit
   `95bd630` contains the base repair; current-main code candidate `f3cf804`
-  adds cross-owner hardening. Next: checkpoint, promote, and confirm the
-  multi-phase validation and verified Home cleanup at an explicitly authorized
-  safe boundary; [runtime
+  adds cross-owner hardening, and exact aggregate candidate `240b63f` passed
+  the complete checkpoint. Next: promote and confirm the multi-phase validation
+  and verified Home cleanup at an explicitly authorized safe boundary; [runtime
   backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Start Battle replaced a newer No Strategy selection with stale Tournament state

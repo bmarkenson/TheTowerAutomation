@@ -285,9 +285,10 @@ as checked checkpoint narrative here.
   At an explicitly authorized natural Home boundary, select No Strategy and
   immediately Start. Confirm the workflow, activity entry, and acknowledgement
   retain `none`, with no Tournament setup or exclusive-validation receipt.
-- [ ] Checkpoint and promote current-main cross-owner hardening candidate
-  `f3cf804`, then live-confirm the resulting production commit for the
-  exclusive-validation typed-authority repair recorded in
+- [ ] Promote checkpointed aggregate candidate `240b63f`, which contains
+  current-main cross-owner hardening code commit `f3cf804`, then live-confirm
+  the resulting production commit for the exclusive-validation typed-authority
+  repair recorded in
   [ISSUE-2026-046](../issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
   and the same-family later-battle release in
   [ISSUE-2026-001](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
