@@ -263,7 +263,8 @@ as checked checkpoint narrative here.
   from verified `NEW_BATTLE`, keep Pause through
   the manual start, require visual `RUNNING`, then Resume. Confirm zero forced
   identity/History/UI or device input while Paused, allowing only an
-  independently triggered explicit Perk checkpoint, followed by one guarded
+  independently scheduled periodic or explicit Perk passive checkpoint,
+  followed by one guarded
   forced serialization after Enable;
   require its `ActiveRoundIdentity` to adopt the manually started battle with
   no History read/poll loop, then open only genuinely unresolved configuration

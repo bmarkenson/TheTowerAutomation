@@ -1,9 +1,9 @@
 """Bound, monotonic active-run metrics from shared player-save checkpoints.
 
-The monitor is a pure domain owner.  It consumes only the capability-bound,
-bounded normalized runtime projection supplied by a shared Perk checkpoint
-scheduler; it never reads a save, sends device input, or grants action
-authority.
+The monitor is a pure domain owner.  It consumes only capability-bound,
+bounded normalized runtime projections supplied by shared forced, natural, or
+passive acquisitions; it never reads a save, sends device input, or grants
+action authority.
 """
 
 from __future__ import annotations

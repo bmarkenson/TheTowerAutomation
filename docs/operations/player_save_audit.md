@@ -13,8 +13,9 @@ auditor is also not an unknown-field discovery tool; targeted save-mapping and
 calibration work gathers its own purpose-specific evidence. This campaign only
 compares already-understood normalized claims over time. It consumes bundles
 already acquired for a forced attachment/Home check, a natural terminal
-boundary, or an explicit Perk selection/exhaustion checkpoint. It has no timer,
-cadence, or independent save-read request.
+boundary, a scheduler-owned periodic passive read, or an explicit Perk
+selection/exhaustion checkpoint. The auditor has no timer, cadence, or
+independent save-read request of its own.
 
 It never sends input, backgrounds the app, navigates, changes lifecycle,
 attaches or creates a battle record, publishes Strategy facts, decides Perks
@@ -33,7 +34,8 @@ The CLI is explicit and defaults off:
 ```
 
 The enable/disable switches override the environment value. There is no audit
-interval setting because enabling audit does not schedule acquisitions.
+interval setting because enabling audit does not schedule or alter the
+runtime's independent passive acquisitions.
 
 ## Managed unit
 
@@ -127,9 +129,9 @@ not an authentication or adversarial-security boundary.
 Acquisition/decode/receipt failures and disabled optional components leave
 normal UI and automation behavior unchanged. The App uses shared typed bundles;
 the audit worker only projects those bundles and never pulls or decodes a save.
-Perk checkpoints may still be requested while globally Paused because they are
-read-only. Timing fields are observation bounds, not exact game write or
-activation times. Survival checkpoints stay unavailable until
+Periodic or Perk-requested checkpoints are read-only; an absent current battle
+binding skips acquisition. Timing fields are observation bounds, not exact game
+write or activation times. Survival checkpoints stay unavailable until
 `V1073-RUNTIME-015`/`016` are independently promoted.
 
 Runtime logs and receipts are ignored evidence, not durable issue records.

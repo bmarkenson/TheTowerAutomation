@@ -321,7 +321,7 @@ composed save reads with the typed acquisition bundle defined in
 stateless parser and injects it into one `StablePlayerSaveAcquirer`, which owns
 locking, exact target/generation checks, quiet stable transport, one decode,
 root/byte disposal, timing, and redacted failure provenance. Forced
-serialization, terminal projection, and the Perk-checkpoint path must receive
+serialization, terminal projection, and the passive scheduler must receive
 that shared acquirer or an already acquired bundle; they cannot silently
 create an owner. Audit and metric consumers never request a read. One terminal
 bundle feeds progression, one structural History transition, the candidate
@@ -339,7 +339,8 @@ independent projections:
 | Home `NEW_BATTLE` before Start/Return | Perform one guarded `forced_serialization`, even when the configuration requirement set is empty; a report handoff may also be consumed from the same boundary. | The inactive runtime projection authorizes clearing retained battle identity; the same bundle supplies configuration and report projections. | An inactive proof is mandatory before Start. A safely restored transient failure is bounded and retryable; restoration, ownership, target, context, or control ambiguity blocks later input. |
 | First stable `RUNNING` after Start, Retry, Enable, or Attach | Perform one guarded `forced_serialization` and compare its exact `ActiveRoundIdentity` with the durable battle-identity record. Home Resume is a two-proof route: force once before the Resume tap to identify its target, then rearm and force again on the first stable `RUNNING` frame before adoption. | `SAME_BATTLE` restores eligible identity-bound state; `LATER_BATTLE` discards old battle-local state and adopts the successor; the bundle also supplies actual-loadout, Perk-prefix, metric, audit, and report projections. | There is no History/UI substitute for battle identity. A safely restored transient failure is bounded and retryable; an active source without identity remains input-blocked. Restoration, owner, target, control, or uncertain-input ambiguity is catastrophic and may Pause. |
 | `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, optional audit projection, and Tournament conditions. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
-| Perk selection or exhaustion checkpoint | One coalesced `passive_stable_read` explicitly requested by the stable Perk top-bar observer. There is no timer or general monitoring cadence. | The Perk monitor is the acquisition cause; active-run metrics and optional audit receipts consume the same read-only bundle without requesting another read. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
+| Periodic passive observation | Every 300 seconds, the scheduler attempts one `passive_stable_read` against the current exact process/target/battle binding. The cadence is independent of forced serialization and prompt checkpoints. | Perks, active-run metrics, and optional audit receipts consume any newly serialized positive evidence; unchanged checkpoints are harmless. | An absent binding skips the read. Never treat the timer or a stable pull as proof that the game wrote recently, background the game, claim freshness/absence, or authorize input. |
+| Perk selection or exhaustion checkpoint | The stable Perk top-bar observer may request one coalesced `passive_stable_read` without changing the periodic deadline. It does not force the game to serialize. | The Perk monitor benefits from lower observation latency; active-run metrics and optional audit receipts consume the same read-only bundle without requesting another read. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
 The terminal structural projector validates the newest tail once. A successful
 append or capacity rollover may become a normalized, one-use reporting handoff
@@ -359,16 +360,17 @@ forced Home boundary.
 No consumer reacquires data already represented by the bundle. In particular,
 the Tournament Results handler receives either complete or explicitly
 unavailable conditions from the terminal projection instead of performing a
-second save read. The Perk and active-run metric monitors consume
+second save read. The Perk and active-run metric monitors consume periodic and
 Perk-requested passive, already-forced attachment, and natural terminal
 bundles. The optional audit collector also projects those shared objects and is
 neither an acquisition service nor an authority source.
 
 `PlayerSaveObservationContext` is the neutral process/target/battle-identity
-binding for Perk-checkpoint fan-out; its activity-scope field is presentation
-metadata only. The scheduler accepts only Perk selection and exhaustion
-reasons, then rechecks the authoritative context—including ADB target
-generation and active-round identity—after acquisition and before publication.
+binding for passive fan-out; its activity-scope field is presentation metadata
+only. The scheduler owns an independent periodic deadline and accepts only Perk
+selection and exhaustion as prompt request reasons. It rechecks the
+authoritative context—including ADB target generation and active-round
+identity—after acquisition and before publication.
 Each subscriber is
 exception-isolated so a Perk projection failure cannot suppress metric or audit
 consumers of the same object. The parser and acquirer retain no process-global
@@ -387,8 +389,8 @@ grants or invalidates action, lifecycle, lease, save-fact, or battle-continuity
 authority. Fresh UI/control evidence, exact runtime and target ownership, an
 operation ID for the short pre-identity interval, and forced-save
 `ActiveRoundIdentity` own those decisions. Whenever runtime needs current save
-evidence it forces serialization immediately; only the explicit stable Perk
-selection/exhaustion checkpoints may request a passive runtime read.
+evidence it forces serialization immediately; periodic and explicit Perk
+checkpoint reads remain opportunistic observations with unknown write lag.
 
 #### Save-first active-round and terminal evidence
 
@@ -558,8 +560,9 @@ evidence and exact row-level promotions are recorded in
 Runtime adoption proceeds in bounded vertical slices with these ownership
 rules:
 
-1. The normal-runtime Perk monitor consumes explicit Perk-checkpoint revisions without
-   navigation or input and independently of collector opt-in. It binds each
+1. The normal-runtime Perk monitor consumes periodic and explicit
+   Perk-checkpoint revisions without navigation or input and independently of
+   collector opt-in. It binds each
    complete checkpoint to the exact process, target generation, mapping, and
    active identity. Activity scope is optional presentation metadata.
 2. Battle identity is bound only by a forced serialization. Terminal report
@@ -616,8 +619,9 @@ rules:
     terminal transition confirmation remain owned by verified UI controls.
 
 The Perk-timeline phase is implemented without backgrounding an active battle
-to accelerate a checkpoint. Only a stable Perk selection or exhaustion event
-requests a passive read; no periodic passive acquisition exists. The
+to accelerate a checkpoint. A stable Perk selection or exhaustion event may
+request a prompt passive read, while an independent 300-second timer consumes
+naturally serialized evidence without claiming when it was written. The
 separate `save_first` Current-run attachment boundary may briefly use Android
 Home only for a replacement process already at `RUNNING`; it preserves process,
 operation, target generation, active-round identity, control, source
@@ -1872,7 +1876,10 @@ hold or replaying input.
   It does not seed their completion variables. Game Over, Tournament Results,
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
-  preserve the attachment.
+  preserve the attachment. Managed same-battle Stop/Start uses `next_run` only
+  as a transient launch marker when a durable handoff is pending. That runtime
+  waits for a fresh Attach rather than treating the retained identity as
+  authority, and the normal persisted startup policy is restored immediately.
 - Save-backed battle identity is independent of process-local log/report
   segmentation. Home `NEW_BATTLE` forces a save and must prove an inactive
   round before launch. The first stable `RUNNING` after Start, direct Retry,
@@ -1919,20 +1926,27 @@ hold or replaying input.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.
-- The guarded active-battle reload makes that contract executable. A refreshed
-  same-state Pause directive causes the current runtime to acknowledge intent
-  and force its next captured frame into the status stream. Only a fresh
-  `RUNNING` result from the systemd MainPID's held ADB lock may cross the stop
-  boundary. The replacement launches once with `next_run`; the persistent
-  next-start policy is restored immediately after systemd copies its launch
-  environment. Normal control intent returns only after the replacement proves
-  its distinct PID, lock, attached startup, Pause consumption, and first
-  observation. Any failure after Pause preparation begins remains paused.
+- The guarded same-battle replacement makes that contract executable across
+  the ordinary complete Stop and later Start calls. Stop records a handoff only
+  from a fresh `RUNNING` observation, exact systemd MainPID and held ADB lock,
+  force-proven battle identity, and an already owned active-battle lifecycle.
+  Ownership has no origin distinction here: a battle started by automation and
+  one attached later produce the same eligible lifecycle. The replacement
+  launches once with `next_run`; the persistent next-start policy is restored
+  immediately after systemd copies its launch environment. The new runtime
+  consumes no old input authority. It creates a normal fresh Attach bound to
+  the new PID and lock, and forced serialization must equal the handoff battle
+  identity before lifecycle adoption and ordinary actions resume. Waves may
+  advance throughout because they do not change that identity. A later or
+  ended battle, changed target, unavailable proof, or reporting failure leaves
+  the replacement Paused and records a terminal handoff result.
 - Remote lifecycle control is limited to the configured
   `thetower-automation.service` systemd user unit. A start crosses the process
-  boundary under persisted `PAUSED` and may publish `RUNNING` only after the
-  unit is active. A stop persists `STOPPED` before systemd signals the unit;
-  guarded active-battle reload retains `PAUSED` across its stop/start boundary.
+  boundary under persisted `PAUSED`. Without a same-battle handoff it waits for
+  explicit intent. With one, the control service publishes `RUNNING` only after
+  the replacement unit is active and then waits for the fresh Attach to finish.
+  A stop persists `STOPPED` and any eligible exact-battle handoff before systemd
+  signals the unit.
   A stopped request may persist one validated localhost ADB TCP port and one
   validated startup-gate policy for the next start; an acknowledged paused
   runtime may apply that same restricted port as a live target handoff. Remote
