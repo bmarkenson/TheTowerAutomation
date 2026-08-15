@@ -2,6 +2,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
@@ -3426,6 +3427,13 @@ class GcFarmProfileTests(unittest.TestCase):
 
 
 class PausedStartupObservationTests(unittest.TestCase):
+    def setUp(self):
+        self._temporary_directory = TemporaryDirectory()
+        self.addCleanup(self._temporary_directory.cleanup)
+        self._control_file = str(
+            Path(self._temporary_directory.name) / "automation-control.json"
+        )
+
     def test_paused_startup_observes_and_reports_without_actions(self):
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
         strategy = _IncompleteInitializationStrategy()
@@ -3706,7 +3714,7 @@ class PausedStartupObservationTests(unittest.TestCase):
     def test_read_only_status_reporting_does_not_refresh_coin_display(self):
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
         supervisor = AutomationSupervisor(
-            control_file="logs/unused-test-control.json",
+            control_file=self._control_file,
             auto_return_enabled=False,
         )
         supervisor._last_coins_val = Decimal("1")
@@ -3762,7 +3770,7 @@ class PausedStartupObservationTests(unittest.TestCase):
     def test_status_reporting_collects_structured_coin_rate_samples(self):
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
         supervisor = AutomationSupervisor(
-            control_file="logs/unused-test-control.json",
+            control_file=self._control_file,
             auto_return_enabled=False,
         )
         reporter = StatusReporter(

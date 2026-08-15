@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
+from core.automation_supervisor import AutomationSupervisor
 from core.control_directives import ControlDirectiveStore
 from core.app import App
 from core.action_authority import (
@@ -907,6 +908,68 @@ def test_runtime_installs_recovery_hold_and_captures_pre_restart_wave():
     assert app._emulator_recovery_ack["state"] == "host_restart_authorized"
 
 
+def test_unacknowledged_maintenance_defers_to_existing_validation_owner():
+    maintenance = _maintenance("requested")
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(emulator_maintenance=maintenance)
+    app._emulator_recovery_terminal_pending = None
+    app._emulator_maintenance_hold_active = False
+    app._exclusive_validation_blocks_target_handoff = Mock(return_value=True)
+    app._finish_emulator_recovery = Mock(return_value=True)
+
+    app._sync_emulator_maintenance_control_boundary(now=1_000.0)
+
+    app._finish_emulator_recovery.assert_called_once_with(
+        maintenance,
+        disposition="validation_authority_conflict",
+        reason=(
+            "exclusive Tournament validation or its confirmed launch "
+            "acquired the exact runtime after this unacknowledged maintenance "
+            "request; no host mutation was authorized"
+        ),
+        now=1_000.0,
+    )
+    assert app._emulator_maintenance_hold_active is False
+
+
+def test_new_maintenance_owner_blocks_final_input_before_heartbeat_hold(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    enabled = store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(control_file))
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._status_reporter = Mock()
+    app._runtime_shutting_down = False
+    app._emulator_maintenance_hold_active = False
+    app._emulator_recovery_terminal_pending = None
+
+    owner = supervisor.current_exclusive_validation_owner()
+    runtime = {
+        **RUNTIME,
+        "runtime_id": owner["runtime_id"],
+        "pid": owner["pid"],
+        "state_request_id": enabled["state_request_id"],
+    }
+    maintenance = store.request_emulator_maintenance(
+        reason="confirmed degradation",
+        source="test",
+        runtime=runtime,
+        battle_scope="run-1",
+        host_target=HOST_TARGET,
+    )
+
+    assert not app._runtime_control_mutation_guard()
+    assert supervisor.emulator_maintenance["request_id"] == maintenance[
+        "request_id"
+    ]
+    assert app._emulator_maintenance_hold_active is False
+    app._status_reporter.request_immediate_report.assert_not_called()
+
+
 def test_unacknowledged_host_request_expires_before_any_host_mutation():
     maintenance = _maintenance("requested")
     app = App.__new__(App)
@@ -1277,10 +1340,18 @@ def test_free_ticket_clear_requires_two_stable_home_frames_before_retry():
 
 
 def test_restored_source_releases_hold_when_terminal_receipt_is_pending():
+    maintenance = _maintenance("host_restarted")
     app = App.__new__(App)
     app._supervisor = SimpleNamespace(
         finish_emulator_maintenance=Mock(return_value=None),
+        apply_control=Mock(return_value=False),
+        emulator_maintenance=maintenance,
+        exclusive_validation={"receipts": {}, "current_request_id": None},
+        input_authority_error=None,
+        interactive_development_lease=None,
+        control_state="RUNNING",
     )
+    app._runtime_shutting_down = False
     app._emulator_maintenance_hold_active = True
     app._emulator_recovery_force_new_battle = True
     app._emulator_recovery_action_logged = False
@@ -1288,8 +1359,6 @@ def test_restored_source_releases_hold_when_terminal_receipt_is_pending():
     app._update_action_authority = Mock()
     app._publish_action_authority = Mock()
     app._flag_recoverable_runtime_failure = Mock()
-    maintenance = _maintenance("host_restarted")
-
     assert app._finish_emulator_recovery(
         maintenance,
         disposition="fallback_new_battle",
@@ -1307,6 +1376,7 @@ def test_restored_source_releases_hold_when_terminal_receipt_is_pending():
         "the BlueStacks recovery source was restored, but its terminal "
         "receipt could not yet be persisted",
     )
+    assert app._runtime_control_mutation_guard()
 
 
 def test_recovery_home_authority_accepts_resume_or_forced_new_battle_only():

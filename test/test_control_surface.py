@@ -220,6 +220,7 @@ def _publish_runtime_acknowledgements(
     acknowledgements: dict[str, object],
     runtime_active: bool = True,
     strategy_scope: dict[str, object] | None = None,
+    holds: tuple[AuthorityHoldState, ...] = (),
 ) -> None:
     authority = RuntimeActionAuthority()
     authority.update_context(
@@ -227,6 +228,7 @@ def _publish_runtime_acknowledgements(
         active_battle=True,
         battle_scope="ack-scope",
         primary_state="RUNNING",
+        holds=holds,
     )
     publisher = RuntimeActionAuthorityPublisher(
         root / "logs" / "strategy_action_gate.json",
@@ -693,6 +695,68 @@ def test_runtime_acknowledgements_survive_action_log_rotation(tmp_path):
     assert status["control_model"]["actions"]["capture_current_setup"][
         "code"
     ] == "available"
+
+
+@pytest.mark.parametrize(
+    "validation_hold",
+    (
+        AuthorityHold.EXCLUSIVE_VALIDATION,
+        AuthorityHold.EXCLUSIVE_OWNERSHIP,
+    ),
+)
+def test_setup_capture_waits_for_exclusive_validation_owner(
+    tmp_path,
+    validation_hold,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    owner = {
+        "runtime_id": "runtime-validation-capture",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 8,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id=str(owner["runtime_id"]),
+        target_generation=8,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=_directive_acknowledgements(
+            control,
+            acknowledged_at=now.isoformat(timespec="seconds"),
+        ),
+        holds=(
+            AuthorityHoldState(
+                validation_hold,
+                "validation terminal cleanup owns the runtime boundary",
+            ),
+        ),
+    )
+    service = _service(tmp_path)
+    try:
+        availability = service.status(now=now.timestamp())["control_model"][
+            "actions"
+        ]["capture_current_setup"]
+        assert availability == {
+            "available": False,
+            "code": "exclusive_validation_active",
+            "reason": (
+                "complete exclusive validation before capturing current setup"
+            ),
+        }
+
+        with pytest.raises(ControlSurfaceRequestError) as busy:
+            service.apply_setup_capture({"operation": "request"})
+
+        assert busy.value.status == 409
+        assert busy.value.code == "exclusive_validation_active"
+        assert service.control_store.status().get("setup_capture") is None
+    finally:
+        lock_handle.close()
 
 
 @pytest.mark.parametrize("legacy_strategy_receipt", (None, "farm_t19"))
@@ -2506,6 +2570,62 @@ def test_host_failure_cannot_release_an_acknowledged_restart(tmp_path):
     assert service.control_store.status()["emulator_maintenance"]["state"] == (
         "host_acknowledged"
     )
+
+
+def test_interactive_development_request_waits_for_exclusive_runtime_hold(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope="validation-run",
+        primary_state="RUNNING",
+        holds=(
+            AuthorityHoldState(
+                AuthorityHold.EXCLUSIVE_VALIDATION,
+                "validation terminal persistence owns the runtime boundary",
+            ),
+        ),
+    )
+    owner = {
+        "runtime_id": "runtime-validation-hold",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+    }
+    RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    ).publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+    )
+    service = _service(tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
+    try:
+        with pytest.raises(ControlSurfaceRequestError) as busy:
+            service.apply_interactive_development_lease(
+                {
+                    "operation": "request",
+                    "owner_label": "must wait for validation",
+                },
+                now=now.timestamp(),
+            )
+
+        assert busy.value.status == 409
+        assert busy.value.code == "busy"
+        assert "exclusive_validation" in str(busy.value)
+        assert (
+            service.status(now=now.timestamp())["interactive_development_lease"]
+            ["request"]
+            is None
+        )
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
 
 
 def test_interactive_development_status_separates_request_and_fresh_ack(

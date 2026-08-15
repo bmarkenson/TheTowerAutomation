@@ -3,8 +3,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 import cv2
+import pytest
 
-from core.action_authority import AuthorityHold, AuthorityHoldState
+from core.action_authority import (
+    AuthorityHold,
+    AuthorityHoldState,
+    RuntimeActionClass,
+)
 from core.input import TapDispatchOutcome, TapDispatchStatus
 from core.matcher import get_match
 from handlers.free_ticket_handler import (
@@ -300,10 +305,20 @@ def test_app_blocking_modal_marks_the_same_terminal_owner_recovered():
     from core.app import App
 
     app = App.__new__(App)
-    app._supervisor = Mock(is_paused=False)
-    app._update_action_authority = Mock()
+    app._supervisor = Mock(
+        is_paused=False,
+        control_state="RUNNING",
+        emulator_maintenance=None,
+        exclusive_validation={"receipts": {}, "current_request_id": None},
+        input_authority_error=None,
+        interactive_development_lease=None,
+    )
+    app._supervisor.apply_control.return_value = False
+    app._authority_holds = ()
+    app._runtime_shutting_down = False
+    app._emulator_maintenance_hold_active = False
+    app._emulator_recovery_terminal_pending = None
     app._publish_action_authority = Mock()
-    app._runtime_action_guard = Mock(return_value=True)
     app._capture_frame = Mock()
     app._free_ticket_recovery_owner = Mock(
         return_value=("terminal_continuation", "terminal:obs-1")
@@ -343,6 +358,94 @@ def test_app_blocking_modal_marks_the_same_terminal_owner_recovered():
     assert app._free_ticket_recovery_attempts["terminal:obs-1"] == 1
     assert "terminal:obs-1" in app._free_ticket_recovery_cleared
     app._mark_terminal_home_continuation_modal_cleared.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("owner", "source_hold", "operator_hold", "maintenance_active"),
+    (
+        (
+            ("battle_workflow", "battle:start-1"),
+            AuthorityHold.OPERATOR_WORKFLOW,
+            AuthorityHold.OPERATOR_WORKFLOW,
+            False,
+        ),
+        (
+            ("terminal_continuation", "terminal:obs-1"),
+            AuthorityHold.OPERATOR_WORKFLOW,
+            AuthorityHold.OPERATOR_WORKFLOW,
+            False,
+        ),
+        (
+            ("emulator_maintenance", "emulator:restart-1"),
+            AuthorityHold.EMULATOR_MAINTENANCE,
+            None,
+            True,
+        ),
+        (
+            (
+                "exclusive_validation",
+                "exclusive-validation:validation-1",
+            ),
+            AuthorityHold.EXCLUSIVE_VALIDATION,
+            None,
+            False,
+        ),
+        (
+            (
+                "exclusive_validation_launch",
+                "exclusive-validation-launch:validation-1",
+            ),
+            AuthorityHold.EXCLUSIVE_VALIDATION,
+            None,
+            False,
+        ),
+    ),
+)
+def test_blocking_recovery_uses_exact_source_typed_owner(
+    owner,
+    source_hold,
+    operator_hold,
+    maintenance_active,
+):
+    from core.app import App
+
+    app = App.__new__(App)
+    app._supervisor = Mock(
+        is_paused=False,
+        setup_capture=None,
+        setup_capture_error=False,
+        battle_workflow_error=False,
+        input_authority_error=None,
+    )
+    app._emulator_maintenance_hold_active = maintenance_active
+    app._emulator_recovery_request_id = None
+    app._authority_holds = ()
+    app._operator_workflow_authority_hold = Mock(
+        return_value=(
+            AuthorityHoldState(operator_hold, "exact source owner")
+            if operator_hold is not None
+            else None
+        )
+    )
+    app._free_ticket_recovery_owner_current = Mock(return_value=True)
+
+    holds, ready = app._blocking_recovery_handoff(owner)
+    app._update_action_authority(
+        detection={"state": "FREE_TICKET"},
+        holds=holds,
+    )
+
+    assert ready
+    assert tuple(item.hold for item in holds) == (source_hold,)
+    assert app._free_ticket_recovery_action_owner(owner[0]) is source_hold
+    assert app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=source_hold,
+    ).allowed
+    assert not app._action_decision(
+        RuntimeActionClass.LIFECYCLE_ACTION,
+        owner=AuthorityHold.BLOCKING_MODAL_RECOVERY,
+    ).allowed
 
 
 def test_app_uncertain_claim_terminalizes_owner_before_catastrophic_pause():

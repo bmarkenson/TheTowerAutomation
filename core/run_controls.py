@@ -22,6 +22,16 @@ _RETRY_DELAY: Final[float] = 0.6
 _EXIT_DIALOG_REGION: Final[tuple[int, int, int, int]] = (130, 690, 820, 540)
 
 
+def _input_guard_kwargs(
+    action_guard: Optional[Callable[[], bool]],
+) -> dict[str, object]:
+    return (
+        {"action_guard_fn": action_guard}
+        if action_guard is not None
+        else {}
+    )
+
+
 def ensure_menu_open(
     timeout_s: float = 5.0,
     *,
@@ -60,6 +70,7 @@ def ensure_menu_open(
             "navigation.menu_open_button",
             screenshot=screenshot,
             retries=1,
+            **_input_guard_kwargs(action_guard),
         ):
             log("[RUN_CONTROL] Verified menu-open button did not match", "WARN")
             return False
@@ -127,7 +138,11 @@ def _open_exit_battle_dialog(
     if action_guard is not None and not action_guard():
         log("[RUN_CONTROL] Action ownership changed before Exit Battle tap", "WARN")
         return False
-    if not safe_tap("buttons.exit_battle", dispatch="now"):
+    if not safe_tap(
+        "buttons.exit_battle",
+        dispatch="now",
+        **_input_guard_kwargs(action_guard),
+    ):
         return False
     dialog = _wait_for_screen(
         _exit_battle_dialog_visible,
@@ -153,7 +168,11 @@ def _choose_exit_battle_action(
     if action_guard is not None and not action_guard():
         log("[RUN_CONTROL] Action ownership changed before terminal action", "WARN")
         return False
-    if not safe_tap(button_key, dispatch="now"):
+    if not safe_tap(
+        button_key,
+        dispatch="now",
+        **_input_guard_kwargs(action_guard),
+    ):
         return False
 
     def reached_expected_state(frame: Frame) -> bool:
@@ -191,15 +210,23 @@ def surrender_run(
     )
 
 
-def go_home_from_run(timeout_s: float = 12.0) -> bool:
+def go_home_from_run(
+    timeout_s: float = 12.0,
+    *,
+    action_guard: Optional[Callable[[], bool]] = None,
+) -> bool:
     """Leave the battle view without ending the current run."""
 
-    if not _open_exit_battle_dialog(timeout_s):
+    if not _open_exit_battle_dialog(
+        timeout_s,
+        action_guard=action_guard,
+    ):
         return False
     return _choose_exit_battle_action(
         "buttons.go_home:exit_battle",
         expected_state="HOME_SCREEN",
         timeout_s=timeout_s / 2,
+        action_guard=action_guard,
     )
 
 
@@ -228,6 +255,7 @@ def return_home_from_game_over(
         "buttons.home:game_over",
         screenshot=screenshot,
         retries=1,
+        **_input_guard_kwargs(action_guard),
     ):
         return False
 
@@ -252,10 +280,16 @@ def return_home_from_game_over(
     return True
 
 
-def restart_run(timeout_s: float = 12.0) -> bool:
+def restart_run(
+    timeout_s: float = 12.0,
+    *,
+    action_guard: Optional[Callable[[], bool]] = None,
+) -> bool:
     """Compatibility action: end the current run so Game Over can retry it."""
 
-    return surrender_run(timeout_s=timeout_s)
+    if action_guard is None:
+        return surrender_run(timeout_s=timeout_s)
+    return surrender_run(timeout_s=timeout_s, action_guard=action_guard)
 
 
 __all__ = [

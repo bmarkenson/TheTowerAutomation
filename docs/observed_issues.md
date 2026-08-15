@@ -25,22 +25,73 @@ current runtime state.
 - Load the [dossier](issues/open-2026.md#free-ticket-modal-stranded-a-completed-battle-launch-and-exposed-background-controls)
   before changing blocking-screen precedence, Home launch completion, or
   cross-heartbeat retry behavior, and for live confirmation or recurrence.
-  Commit `af3d1b0` is deployed and its managed active-battle handoff passed.
-  Next: observe one natural no-battle launch boundary without manufacturing a
-  battle or modal; [state/recovery
+  Commit `af3d1b0` is deployed and its managed active-battle handoff passed;
+  current-main code candidate `f3cf804` adds the required cross-owner
+  hardening, and exact aggregate candidate `240b63f` passed the complete
+  checkpoint and is deployed in production commit `f902a91`. Next: observe one
+  natural no-battle launch boundary without manufacturing a battle or modal;
+  [state/recovery
   backlog](backlog/state-and-detection.md#state-coverage-and-recovery).
 
 ### Owned validation cleanup survived a later running-battle transition
 
-**Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `confirmed_unresolved`
+**Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `repair_awaiting_confirmation`
 
 - A cleanup receipt kept exclusive authority after its
   claimed battle reached Game Over and a different battle appeared; after that
   sequence, fail closed, release the receipt, and perform no recovery input.
 - Load the [dossier](issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition)
   before claiming, cleaning, replacing, or recovering an exclusive-validation
-  battle. Next: prove the same-runtime later-`RUNNING` closure path without
-  Retry or Surrender; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+  battle. The missing same-battle Game Over dispatch and the fail-closed later-
+  `RUNNING` release now have one repository repair under `ISSUE-2026-046`; the
+  source of the historical later transition remains unknown. Production
+  commit `95bd630` contains the base repair, and current-main code candidate
+  `f3cf804` adds cross-owner hardening; exact aggregate candidate `240b63f`
+  passed the complete checkpoint and is deployed in production commit
+  `f902a91`. Next: safely confirm without manufacturing a battle transition;
+  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+
+### Exclusive validation denied its own strategy and cleanup input
+
+**Stable ID:** `ISSUE-2026-046` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- The exact-owner hold for an ordinary Tournament-validation battle conflicted
+  with its session-preflight caller, so the battle free-ran until timeout; the
+  same hold also had no matching Game Over lifecycle dispatch. The repair gives
+  validation, cleanup, and confirmed launch one exact typed owner while still
+  letting Pause or a stronger operator workflow interrupt every final input;
+  single-frame start/terminal proof survives Pause, continuity, and receipt
+  failures; terminal or passive-battle proof quarantines successor adoption,
+  Strategy replacement, and target handoff until the old boundary is durably
+  released. Unknown and incompletely classified post-dispatch screens retain
+  that suppressive boundary; they are not treated as proof that no battle
+  started. The same exact-owner handoff now covers a Free Ticket blocker,
+  typed Tournament-launch uncertainty, and durable owners that arrive between
+  a heartbeat and the next final input guard.
+- Load the [dossier](issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
+  before running or changing exclusive validation, confirmed Tournament launch,
+  Free Ticket recovery, or typed action-authority routing. Production commit
+  `95bd630` contains the base repair; current-main code candidate `f3cf804`
+  adds cross-owner hardening, and exact aggregate candidate `240b63f` passed
+  the complete checkpoint and is deployed in production commit `f902a91`.
+  Next: confirm the multi-phase validation and verified Home cleanup at an
+  explicitly authorized safe boundary; [runtime
+  backlog](backlog/runtime-and-validation.md#runtime-control).
+
+### Start Battle replaced a newer No Strategy selection with stale Tournament state
+
+**Stable ID:** `ISSUE-2026-047` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- Immediate Start Battle twice replaced a just-accepted No Strategy selection
+  with the runtime publication's stale Tournament value. The first recurrence
+  launched a disposable Tournament validation battle; the second was rejected
+  before Battle input. Start must snapshot the directive store's latest
+  accepted Strategy atomically and activity must name the bound Strategy.
+- Load the [dossier](issues/open-2026.md#start-battle-replaced-a-newer-no-strategy-selection-with-stale-tournament-state)
+  before changing Strategy/Start ordering or diagnosing a Strategy selection
+  that appears to reverse. Production commit `95bd630` contains the repair.
+  Next: safely confirm immediate Start from a natural Home boundary; [runtime
+  backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Stopped control could not interrupt an in-progress Home setup guard
 
@@ -111,10 +162,10 @@ current runtime state.
 
 **Stable ID:** `ISSUE-2026-005` · **Lifecycle:** `unresolved_pending_recurrence_evidence`
 
-- One authorized source tap yielded only `unknown`
-  post-tap evidence although Retry verified Stun off. Preserve the diagnostic
-  evidence, but a bounded verifier failure must release Battle launch in
-  degraded mode under the global runtime failure policy.
+- Two authorized setups on separate dates yielded only `unknown` post-tap
+  evidence on their first attempt, although each complete Retry succeeded.
+  Preserve the diagnostic evidence, but a bounded verifier failure must release
+  Battle launch in degraded mode under the global runtime failure policy.
 - Load the [dossier](issues/open-2026.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap)
   on recurrence or before changing this verifier. Next: retain the final frame
   and detail/off/on confidences; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
@@ -197,6 +248,37 @@ current runtime state.
   wrapper termination, crash, and manual activity; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ## Repairs awaiting confirmation
+
+### Tournament session preflight rejected its mapping-observation callback
+
+**Stable ID:** `ISSUE-2026-049` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- An attached Tournament opened and closed Modules, then its read-only session
+  preflight raised an unexpected-keyword error instead of evaluating the
+  captured screens. The generic navigator supplied its supported mapping
+  callback, but the Tournament wrapper neither accepted nor forwarded it.
+- Load the [dossier](issues/open-2026.md#tournament-session-preflight-rejected-its-mapping-observation-callback)
+  before changing Tournament preflight arguments or mapping-candidate
+  collection. Production commit `95bd630` contains the forwarding repair.
+  Next: confirm a fresh Tournament preflight completes without the callback
+  TypeError;
+  [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
+
+### Assist module assignments always fell back to Modules UI
+
+**Stable ID:** `ISSUE-2026-048` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- The deployed version-1073/1101 mappings named the Assist assignment member
+  `module`, while stable version-1101 saves expose `equippedModule`; the
+  synthetic fixture repeated the wrong name. Complete assignments therefore
+  became `ui_required`, and Tournament's observation-only policy correctly
+  inspected but did not repair them.
+- Load the [dossier](issues/open-2026.md#assist-module-assignments-always-fell-back-to-modules-ui)
+  before changing Module save shape, exact empty-slot semantics, or the
+  save/UI fallback. Production commit `95bd630` contains the exact-field
+  repair. Next: confirm one fresh ordinary boundary reports complete
+  save-backed Modules without opening the Modules UI;
+  [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ### Farm Bot preset switch required more Event medals than were available
 

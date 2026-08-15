@@ -589,7 +589,7 @@ def _assist_module_slot(slot_type: int, info_index: int) -> dict:
         "__class__": "AssistModuleSlot",
         "type": slot_type,
         "unlocked": True,
-        "module": _module_item(info_index),
+        "equippedModule": _module_item(info_index),
         "uniqueEffectEfficiencyLevel": 2,
         "mainEffectEfficiencyLevel": 23,
         "substatEfficiencyLevel": 24,
@@ -2901,7 +2901,7 @@ def test_all_current_module_info_indices_are_globally_mapped(mapping):
     assert mapping["module_loadout"]["empty_assignment_scope"] == (
         "explicit_nil"
     )
-    assert mapping["module_loadout"]["assist_item_field"] == "module"
+    assert mapping["module_loadout"]["assist_item_field"] == "equippedModule"
     assert len({item["name"] for item in MODULE_INFO_INDICES.values()}) == 24
     assert {
         family: sum(
@@ -2949,7 +2949,7 @@ def test_module_global_authority_scope_is_explicit_and_fail_closed(scope):
     else:
         mapping["module_loadout"]["assignment_authority_scope"] = scope
     decoded = _decoded_save()
-    decoded["assistModuleSlots"][2]["module"]["infoIndex"] = 43
+    decoded["assistModuleSlots"][2]["equippedModule"]["infoIndex"] = 43
     evidence = _module_loadout_evidence(decoded, mapping)
 
     if scope is None:
@@ -2994,6 +2994,18 @@ def test_module_empty_slot_shape_contract_is_explicit_and_fail_closed(
     assert evidence.status == "unmapped"
     assert evidence.complete is False
     assert evidence.reason == "module loadout structural contract is incomplete"
+
+
+def test_wrong_assist_module_member_name_cannot_satisfy_the_live_shape_contract():
+    decoded = _decoded_save()
+    slot = decoded["assistModuleSlots"][0]
+    slot["module"] = slot.pop("equippedModule")
+
+    evidence = _module_loadout_evidence(decoded, VERSION_MAPPING)
+
+    assert evidence.status == "unmapped"
+    assert evidence.complete is False
+    assert evidence.reason == "Assist module assignment field is missing"
 
 
 @pytest.mark.parametrize(
@@ -3195,7 +3207,7 @@ def test_explicit_primary_and_assist_nil_slots_are_complete_save_evidence(
 ):
     decoded = _decoded_save()
     decoded["moduleEquipped"][0] = None
-    decoded["assistModuleSlots"][0]["module"] = None
+    decoded["assistModuleSlots"][0]["equippedModule"] = None
     requested = {
         **FARM_MODULES,
         "cannon_primary": EMPTY_MODULE_ASSIGNMENT,
@@ -3231,7 +3243,7 @@ def test_observed_empty_module_mismatch_is_save_backed_in_observe_mode(
     monkeypatch,
 ):
     decoded = _decoded_save()
-    decoded["assistModuleSlots"][2]["module"] = None
+    decoded["assistModuleSlots"][2]["equippedModule"] = None
     snapshot = _snapshot(monkeypatch, decoded)
 
     decision = reconcile_requirements(
@@ -3263,7 +3275,9 @@ def test_observed_empty_module_mismatch_is_save_backed_in_observe_mode(
             "unsupported primary module infoIndex",
         ),
         (
-            lambda decoded: decoded["assistModuleSlots"][2]["module"].__setitem__(
+            lambda decoded: decoded["assistModuleSlots"][2][
+                "equippedModule"
+            ].__setitem__(
                 "infoIndex", 39
             ),
             "Assist module family mapping changed",
@@ -3281,12 +3295,14 @@ def test_observed_empty_module_mismatch_is_save_backed_in_observe_mode(
             "Assist module slot changed type",
         ),
         (
-            lambda decoded: decoded["assistModuleSlots"][0].pop("module"),
+            lambda decoded: decoded["assistModuleSlots"][0].pop(
+                "equippedModule"
+            ),
             "assignment field is missing",
         ),
         (
             lambda decoded: decoded["assistModuleSlots"][0].__setitem__(
-                "module", "not-a-module"
+                "equippedModule", "not-a-module"
             ),
             "assignment changed type",
         ),
@@ -3344,7 +3360,7 @@ def test_fresh_decode_effective_fingerprint_tracks_local_mapping_generation(
     )
     clean = _snapshot(monkeypatch, _decoded_save())
     decoded = _decoded_save()
-    decoded["assistModuleSlots"][3]["module"]["infoIndex"] = 777
+    decoded["assistModuleSlots"][3]["equippedModule"]["infoIndex"] = 777
     before = _snapshot(monkeypatch, decoded)
     before_projection = copy.deepcopy(before.as_dict())
     pending = before.checks["modules"].diagnostics["mapping_candidates"]
@@ -3519,7 +3535,7 @@ def test_known_generator_identity_in_generator_assist_is_save_backed(
     monkeypatch,
 ):
     decoded = _decoded_save()
-    decoded["assistModuleSlots"][2]["module"]["infoIndex"] = 43
+    decoded["assistModuleSlots"][2]["equippedModule"]["infoIndex"] = 43
     snapshot = _snapshot(monkeypatch, decoded)
     requested = {**FARM_MODULES, "generator_assist": "Project Funding"}
 
@@ -3559,7 +3575,7 @@ def test_duplicate_same_family_module_requirement_remains_ui_backed(monkeypatch)
 
 def test_duplicate_observed_module_names_remain_ui_backed(monkeypatch):
     decoded = _decoded_save()
-    decoded["assistModuleSlots"][2]["module"]["infoIndex"] = 27
+    decoded["assistModuleSlots"][2]["equippedModule"]["infoIndex"] = 27
 
     snapshot = _snapshot(monkeypatch, decoded)
     evidence = snapshot.checks["modules"]
@@ -3584,7 +3600,7 @@ def test_known_cross_role_module_does_not_hide_later_unknown_candidate(
 ):
     decoded = _decoded_save()
     decoded["moduleEquipped"][3]["infoIndex"] = 39
-    decoded["assistModuleSlots"][3]["module"]["infoIndex"] = 777
+    decoded["assistModuleSlots"][3]["equippedModule"]["infoIndex"] = 777
 
     evidence = _snapshot(monkeypatch, decoded).checks["modules"]
 

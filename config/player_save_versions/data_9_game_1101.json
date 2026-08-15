@@ -1139,7 +1139,7 @@
     "assignment_authority_scope": "canonical_global_same_family",
     "empty_assignment_scope": "explicit_nil",
     "assist_slot_class": "AssistModuleSlot",
-    "assist_item_field": "module",
+    "assist_item_field": "equippedModule",
     "primary": [
       {
         "array_index": 0,

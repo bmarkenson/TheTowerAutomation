@@ -57,6 +57,43 @@ resolved dossier instead of copying its detail.
   documentation-only candidate required no live, service, device, or native-
   package action.
 
+### 2026-08-15 exact candidate gates and retirement hygiene
+
+- Exact candidate `f08a10d` makes the final promotion gate explicitly
+  post-commit: finish source and tests, commit clean candidate `V`, run its
+  selected gate, then add only the concise completion record in immediate
+  successor `D`. A checkpoint on a mutable or uncommitted tree remains
+  development evidence and cannot accidentally trigger the documentation-only
+  carry-forward path.
+- Card Recharge failure-evidence tests now use pytest temporary directories,
+  and paused-startup status tests use a temporary control file instead of
+  repository `logs/`. The exact-candidate gate passed all 29 affected tests in
+  51.26 seconds plus whitespace checks; it created no ignored logs,
+  screenshots, control files, or evidence in the feature worktree. The focused
+  universal startup guidance adds 95 words to mandatory `AGENTS.md` plus
+  `docs/new_thread.md` reading.
+- After explicit operator authorization, the earlier integrated Tournament
+  authoring worktree and branch were retired with their 908 ignored environment,
+  build, cache, and reproducible test-artifact entries. Their tracked commits
+  remain on `main`.
+
+### 2026-08-15 Guarded Codex main publication
+
+- Commit `2795aa8` adds a project-local Codex execution rule for the production
+  procedure's explicit
+  `git push origin refs/heads/main:refs/heads/main` publication command. The
+  rule allows that guarded path without a separate external-action approval;
+  the tested force-first, tag-only, and alternate-remote forms remain
+  unmatched.
+- The rule stays under the existing trusted `.codex/` project layer, so it adds
+  no repository startup-document reading. Codex loads it only in a new session
+  after restart; it does not alter the permissions of the session that created
+  it.
+- Codex exec-policy checks selected `allow` for the standard publication and no
+  rule for the three excluded forms. Documentation lifecycle and whitespace
+  validation passed. No TheTower service, device, or native-package action was
+  applicable.
+
 ### 2026-08-14 Tournament loadout authoring
 
 - This commit makes the immutable bundled Tournament source inspectable and

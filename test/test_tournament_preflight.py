@@ -175,6 +175,32 @@ def test_bound_module_observation_retains_save_source_in_session_evidence():
     )
 
 
+def test_tournament_preflight_forwards_mapping_observation_callback():
+    requirements = load_tournament_requirements()
+    observations = []
+
+    evidence = validate_tournament_session_preflight_screens(
+        cards_screen=_load(TOURNAMENT_FIXTURES["cards"]),
+        workshop_screen=_load(TOURNAMENT_FIXTURES["workshop"]),
+        bots_screen=_load(TOURNAMENT_FIXTURES["bots"]),
+        guardians_screen=_load(TOURNAMENT_FIXTURES["guardians"]),
+        modules_screen=_load(TOURNAMENT_FIXTURES["modules"]),
+        module_requirements=requirements["modules"],
+        module_mode=requirements["loadout_policies"]["modules"],
+        ultimate_requirements=requirements["ultimate_weapons"],
+        ultimate_observations=_ultimate_observations(requirements),
+        mapping_observation_fn=lambda check_id, payload: observations.append(
+            (check_id, payload)
+        ),
+    )
+
+    assert evidence.valid
+    assert {check_id for check_id, _payload in observations} == {
+        "guardian_chips",
+        "modules",
+    }
+
+
 def test_farm_setup_fails_the_tournament_contract():
     evidence = _validate(FARM_FIXTURES)
 

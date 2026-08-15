@@ -24,6 +24,11 @@ REQUIRED = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _isolate_failure_evidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(recharge, "_FAILURE_EVIDENCE_DIR", tmp_path)
+
+
 def _load(name: str) -> np.ndarray:
     image = cv2.imread(str(FIXTURES / name))
     assert image is not None

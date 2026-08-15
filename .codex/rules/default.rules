@@ -1,0 +1,19 @@
+# Allow the production procedure's one explicit, non-force main publication.
+prefix_rule(
+    pattern = [
+        "git",
+        "push",
+        "origin",
+        "refs/heads/main:refs/heads/main",
+    ],
+    decision = "allow",
+    justification = "Publish TheTower's guarded production main promotion",
+    match = [
+        "git push origin refs/heads/main:refs/heads/main",
+    ],
+    not_match = [
+        "git push --force origin refs/heads/main:refs/heads/main",
+        "git push origin --tags",
+        "git push upstream refs/heads/main:refs/heads/main",
+    ],
+)

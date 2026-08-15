@@ -1154,6 +1154,7 @@ def _publish_runtime_observation(
     paused: bool = True,
     active_battle_adopted: bool = False,
     active_strategy: str | None = None,
+    runtime_startup_strategy: str | None = None,
     explicit_home_intent_required: bool = False,
     terminal_home_continuation: dict[str, object] | None = None,
     acknowledgements: dict[str, object] | None = None,
@@ -1176,6 +1177,14 @@ def _publish_runtime_observation(
         service.strategy_action_gate_path,
         owner=owner,
     )
+    strategy_scope = {
+        "active_battle": active_strategy,
+        "observation_only": bool(
+            active_battle_adopted and active_strategy == "none"
+        ),
+    }
+    if runtime_startup_strategy is not None:
+        strategy_scope["startup_default"] = runtime_startup_strategy
     publisher.publish(
         authority.snapshot(),
         owner=owner,
@@ -1206,12 +1215,7 @@ def _publish_runtime_observation(
                     terminal_home_continuation or {"pending": False}
                 ),
             },
-            "strategy_scope": {
-                "active_battle": active_strategy,
-                "observation_only": bool(
-                    active_battle_adopted and active_strategy == "none"
-                ),
-            },
+            "strategy_scope": strategy_scope,
         },
     )
     service._runtime_evidence = lambda: {
@@ -1885,6 +1889,39 @@ def test_start_battle_atomically_rearms_normal_tournament_gates(tmp_path):
     assert ledger["receipts"][new_request_id]["status"] == "pending"
     assert ledger["receipts"][new_request_id]["strategy_request_id"] == (
         control["strategy_request_id"]
+    )
+
+
+def test_start_battle_uses_durable_strategy_when_runtime_scope_is_stale(
+    tmp_path,
+):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    service.control_store.set_strategy("tournament", source="test")
+    _publish_runtime_observation(
+        service,
+        _evidence(),
+        runtime_startup_strategy="tournament",
+    )
+    selected = service.control_store.set_strategy("none", source="test")
+
+    response = service.apply_control({"action": "start_battle"})
+
+    control = response["control"]
+    workflow = response["control_model"]["battle_workflow"]
+    assert control["strategy"] == "none"
+    assert workflow["strategy"] == "none"
+    assert workflow["strategy_request_id"] == control["strategy_request_id"]
+    assert control["strategy_request_id"] != selected["strategy_request_id"]
+    ledger = control["exclusive_validation"]
+    assert all(
+        receipt["status"] != "pending"
+        for receipt in ledger["receipts"].values()
+    )
+    retained = ledger["receipts"][ledger["current_request_id"]]
+    assert retained["status"] == "result"
+    assert retained["outcome"] == "cancelled"
+    assert "Start Battle intent with Strategy none" in (
+        service.action_log.read_text(encoding="utf-8")
     )
 
 

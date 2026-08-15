@@ -16,6 +16,7 @@ import time
 from typing import Any, Mapping, Optional, Sequence
 
 from core.adb_connection import PersistentAdbConnectionManager
+from core.action_authority import AuthorityHold
 from core.app_setup import (
     DEFAULT_STARTUP_GATE_POLICY,
     STARTUP_GATE_POLICIES,
@@ -2314,6 +2315,24 @@ class ControlSurfaceService:
                             "Interactive development requires operator control RUNNING",
                             status=409,
                         )
+                    holds = authority.get("holds")
+                    conflicting_holds = [
+                        str(item.get("hold") or "")
+                        for item in (
+                            holds if isinstance(holds, list) else []
+                        )
+                        if isinstance(item, Mapping)
+                        and str(item.get("hold") or "")
+                        not in {"", AuthorityHold.EXTERNAL_DEVELOPMENT.value}
+                    ]
+                    if conflicting_holds:
+                        raise ControlSurfaceRequestError(
+                            "Interactive development must wait for the active "
+                            "runtime input owner to release: "
+                            + ", ".join(sorted(set(conflicting_holds))),
+                            status=409,
+                            code="busy",
+                        )
                     screen_state = str(
                         authority.get("primary_state") or "UNKNOWN"
                     ).upper()
@@ -2589,16 +2608,23 @@ class ControlSurfaceService:
                     action,
                     evidence=evidence,
                     strategy=(
-                        current.get("control_model", {})
+                        None
+                        if action == "start_battle"
+                        else current.get("control_model", {})
                         .get("strategy_scope", {})
                         .get("startup_default")
                     ),
                     source="control-surface",
                 )
+                workflow_strategy = str(
+                    workflow.get("strategy") or "unselected"
+                )
                 audit = (
-                    "Requested explicit Start Battle intent"
+                    "Requested explicit Start Battle intent with Strategy "
+                    f"{workflow_strategy}"
                     if action == "start_battle"
-                    else "Requested explicit Attach to Battle intent"
+                    else "Requested explicit Attach to Battle intent with "
+                    f"Strategy {workflow_strategy}"
                 )
             elif action == "take_manual_control":
                 current = self.status()
@@ -5575,6 +5601,20 @@ class ControlSurfaceService:
             )
 
         capture_game_state = str(observation.get("game_state") or "unknown")
+        published_holds = runtime_authority.get("holds")
+        exclusive_validation_hold_active = any(
+            isinstance(item, Mapping)
+            and item.get("hold")
+            in {
+                AuthorityHold.EXCLUSIVE_VALIDATION.value,
+                AuthorityHold.EXCLUSIVE_OWNERSHIP.value,
+            }
+            for item in (
+                published_holds
+                if isinstance(published_holds, list)
+                else []
+            )
+        )
         capture_binding_available = bool(
             evidence is not None
             and type(evidence.get("target_generation")) is int
@@ -5625,6 +5665,7 @@ class ControlSurfaceService:
             and not manual_error
             and not setup_capture_error
             and capture_binding_available
+            and not exclusive_validation_hold_active
         )
         if control_error:
             capture_code, capture_reason = "control_invalid", control_error
@@ -5637,6 +5678,11 @@ class ControlSurfaceService:
             capture_code, capture_reason = (
                 "fresh_observation_unavailable",
                 "fresh exact runtime-owned observation is required",
+            )
+        elif exclusive_validation_hold_active:
+            capture_code, capture_reason = (
+                "exclusive_validation_active",
+                "complete exclusive validation before capturing current setup",
             )
         elif workflow_error:
             capture_code, capture_reason = (

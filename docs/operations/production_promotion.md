@@ -64,9 +64,11 @@ the selected candidate.
 Validation follows the aggregate `M..D` change and remaining uncertainty, not
 the number of branches or Git operations used to produce it. Run focused tests,
 generators, static checks, and native builds while the candidate can still
-change, then run the strongest applicable gate below on final `D`. When several
-feature tips form one release, validate each proportionately while developing
-and run the combined gate once on the final integrated candidate.
+change. Finish and commit every source, test, configuration, generated, and
+other gate input before running the strongest applicable gate below on that
+exact candidate. When several feature tips form one release, validate each
+proportionately while developing and run the combined gate once on the final
+integrated candidate.
 
 | Aggregate candidate contents | Required candidate gate |
 | --- | --- |
@@ -81,16 +83,34 @@ If several rows apply, use their combined requirements.
 Record exact `D`, the selected gate and result, and the development-environment
 fingerprint when applicable.
 
+### Exact candidate before the final gate
+
+The final candidate gate is not a pre-commit check. First create a clean exact
+code/test candidate `V`, then run its complete checkpoint or other selected
+gate. A gate run against a mutable or uncommitted working tree remains useful
+development evidence but does not create the auditable `V` required for later
+reuse. If the gate exposes a needed source, test, configuration, generated, or
+other non-completion change, create the corrected exact candidate and apply the
+gate required by its reviewed delta.
+
+Before freezing `V`, inspect ignored non-cache output in its worktree. Tests
+must use pytest temporary directories or the checkpoint's isolated generated
+root for logs, screenshots, control files, and failure evidence; they must not
+populate the repository's ignored runtime-evidence paths. Repair and rerun a
+leaking test before promotion rather than turning routine retirement into an
+ambiguous destructive-evidence decision.
+
 ### Completion-record exception
 
-One narrow exception avoids rerunning an expensive code gate merely to record
-its result. A gate completed at code commit `V` may carry through one immediately
-following commit that only adds or corrects the concise completion record. Review
-`V..D`, run the documentation checks at final `D`, and verify that the delta
-changes no source, tests, configuration, generated or runtime-read input,
-dependency, unit, or native-package input and that the earlier gate does not
-read the record. Record both commits and both results. Any other change or
-uncertainty requires the applicable gate at final `D`.
+The normal completion-record sequence avoids rerunning an expensive code gate
+merely to record its result: commit exact code/test candidate `V`, complete its
+gate, then create one immediately following commit `D` that only adds or
+corrects the concise completion record. Review `V..D`, run the documentation
+checks at final `D`, and verify that the delta changes no source, tests,
+configuration, generated or runtime-read input, dependency, unit, or native-
+package input and that the earlier gate does not read the record. Record both
+commits and both results. Any other change or uncertainty requires the
+applicable gate at the corrected exact candidate.
 
 Checking out already validated `D` on `main`, publishing it, or removing its
 integrated temporary ref/worktree does not change the candidate and does not by
@@ -221,8 +241,9 @@ candidate cannot. Unknown names/IDs, cross-family placement, duplicate
 installed names, malformed structure, and mismatches retain the full Modules
 UI route.
 Explicit empty assignments are not identity candidates: only the versioned
-`moduleEquipped` array null or exact unlocked Assist `module=null` shape maps to
-canonical `empty`. Missing fields, missing slots, locked Assist slots, and
+`moduleEquipped` array null or exact unlocked Assist `equippedModule=null`
+shape maps to canonical `empty`. Missing fields, missing slots, locked Assist
+slots, and
 visual `not_ancestral` results are not promoted as empty evidence.
 
 The review fingerprint binds the mapping proposal, canonical target
@@ -393,6 +414,13 @@ Before either disposition:
    integration or replacement target. Exclude `main`, rollback tags, remote
    branches, every active candidate, and every ambiguous item; remote deletion
    is always a separate decision.
+
+Routine environment links, caches, and build products may be discarded with an
+otherwise clean integrated worktree. Logs, screenshots, control files, and
+evidence are not presumed disposable merely because Git ignores them. Tests
+that intentionally create those files must redirect them to their temporary
+test root; if a leak is discovered here, classify its exact producer and
+content before requesting deletion or retaining the pair for repair.
 
 ### Integrated feature or integration branch
 

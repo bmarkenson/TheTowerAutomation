@@ -4,12 +4,39 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-15 Tournament mapping-observation callback mismatch
+
+[`tournament-mapping-observation-callback-2026-08-15.md`](tournament-mapping-observation-callback-2026-08-15.md)
+preserves the attached Tournament preflight's unexpected-keyword failure and
+the source-interface mismatch that established `ISSUE-2026-049`.
+
+## 2026-08-15 Assist module assignment field mismatch
+
+[`assist-module-assignment-field-2026-08-15.md`](assist-module-assignment-field-2026-08-15.md)
+preserves the two post-deployment save failures, the resulting observation-only
+Modules UI fallback, and a value-redacted exact-target shape inspection that
+established `ISSUE-2026-048`.
+
+## 2026-08-14 Start Battle strategy linearization failure
+
+[`start-battle-strategy-linearization-2026-08-14.md`](start-battle-strategy-linearization-2026-08-14.md)
+preserves two consecutive No Strategy selections that immediate Start Battle
+rewrote to Tournament, plus the first resulting disposable validation battle
+and the second workflow's pre-input rejection, for `ISSUE-2026-047`.
+
 ## 2026-08-08–13 Home Perk repair confirmation
 
 [`perk-repair-confirmation-2026-08-08-13.md`](perk-repair-confirmation-2026-08-08-13.md)
 preserves the first successful post-deployment Auto Pick correction and later
 exact Ban/Auto Pick save matches used to close the original live-confirmation
 limitation in `ISSUE-2026-033`.
+
+## 2026-08-12 exclusive-validation authority mismatch
+
+[`exclusive-validation-authority-mismatch-2026-08-12.md`](exclusive-validation-authority-mismatch-2026-08-12.md)
+preserves the bounded production action sequence and repository cause that
+established `ISSUE-2026-046`. It distinguishes the validation-dispatch defect
+from the still-unexplained later-battle transition in `ISSUE-2026-001`.
 
 ## 2026-08-07 Utility Dissonance production confirmation
 

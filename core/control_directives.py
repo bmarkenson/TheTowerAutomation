@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime
 import fcntl
 import hashlib
@@ -2310,7 +2310,12 @@ class ControlDirectiveStore:
             raise ValueError(
                 "exclusive validation launch decision must be start or cancel"
             )
-        with self._lock():
+        authority_boundary = (
+            self._dispatch_boundary()
+            if normalized_decision == "start"
+            else nullcontext()
+        )
+        with authority_boundary, self._lock():
             current = self._read_unlocked()
             ledger = _valid_exclusive_validation_ledger(
                 current.get("exclusive_validation")
@@ -2409,6 +2414,11 @@ class ControlDirectiveStore:
                 if receipt
                 else None
             )
+            validation_owner = (
+                _valid_exclusive_validation_owner(receipt.get("owner"))
+                if receipt
+                else None
+            )
             if (
                 receipt is None
                 or ledger.get("current_request_id") != str(request_id)
@@ -2423,6 +2433,9 @@ class ControlDirectiveStore:
                 or launch is None
                 or launch.get("status") != "requested"
                 or policy is None
+                or validation_owner is None
+                or validation_owner.get("adb_target")
+                != normalized_owner.get("adb_target")
             ):
                 return None
             timestamp = _updated_at()
@@ -2504,10 +2517,16 @@ class ControlDirectiveStore:
         self,
         request_id: str,
         *,
+        observer: Mapping[str, Any],
         reason: str,
     ) -> Optional[dict[str, Any]]:
         """Consume an unclaimed prompt after a fresh manual battle start."""
 
+        normalized_observer = _valid_exclusive_validation_owner(observer)
+        if normalized_observer is None:
+            raise ValueError(
+                "exclusive validation launch observer is incomplete"
+            )
         with self._lock():
             current = self._read_unlocked()
             ledger = _valid_exclusive_validation_ledger(
@@ -2520,6 +2539,11 @@ class ControlDirectiveStore:
                 if receipt
                 else None
             )
+            validation_owner = (
+                _valid_exclusive_validation_owner(receipt.get("owner"))
+                if receipt
+                else None
+            )
             if (
                 receipt is None
                 or launch is None
@@ -2527,6 +2551,9 @@ class ControlDirectiveStore:
                     "awaiting_operator",
                     "requested",
                 }
+                or validation_owner is None
+                or validation_owner.get("adb_target")
+                != normalized_observer.get("adb_target")
             ):
                 return None
             timestamp = _updated_at()
