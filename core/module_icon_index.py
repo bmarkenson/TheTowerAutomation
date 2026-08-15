@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG_PATH = ROOT / "config" / "module_icon_index.json"
+EMPTY_MODULE_ASSIGNMENT = "empty"
 
 MatchStatus = Literal["matched", "unknown", "ambiguous", "not_ancestral"]
 
@@ -610,6 +611,7 @@ def identify_equipped_ancestral_modules(
 
 __all__ = [
     "DEFAULT_CATALOG_PATH",
+    "EMPTY_MODULE_ASSIGNMENT",
     "EquippedModuleMatch",
     "EquippedModuleSlot",
     "ModuleIconCatalog",

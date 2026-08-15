@@ -645,6 +645,36 @@ public sealed class StrategyAuthoringViewModelTests
     }
 
     [Fact]
+    public void ModuleLocalEditorAllowsEmptyInMultipleSlots()
+    {
+        var row = ManagedRow(LocalDefinition("modules"));
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        var local = Assert.IsType<AuthoringLocalDefinitionViewModel>(
+            row.LocalDefinitionEditor);
+        var first = local.Fields[0];
+        var second = local.Fields[1];
+        var firstEmpty = first.AvailableOptions.Single(option =>
+            option.Value.GetString() == "empty");
+
+        first.SelectedOption = firstEmpty;
+        var secondEmpty = second.AvailableOptions.Single(option =>
+            option.Value.GetString() == "empty");
+        second.SelectedOption = secondEmpty;
+
+        var definition = row.BuildDirective()?.Value?.GetProperty("local");
+        Assert.True(definition.HasValue);
+        var values = definition.Value.EnumerateObject()
+            .Select(property => property.Value.GetString())
+            .ToArray();
+        Assert.Equal(2, values.Count(value => value == "empty"));
+        Assert.Equal(
+            values.Length - 2,
+            values.Where(value => value != "empty")
+                .Distinct(StringComparer.Ordinal)
+                .Count());
+    }
+
+    [Fact]
     public void ChangingOneModuleSelectionKeepsEverySelectionAvailableDuringPeerRefresh()
     {
         var row = ManagedRow(LocalDefinition("modules"));
@@ -1421,6 +1451,7 @@ public sealed class StrategyAuthoringViewModelTests
                     $"slot_{index + 1}",
                     selected,
                     Options(
+                        "empty",
                         $"family_{family}_module_1",
                         $"family_{family}_module_2",
                         $"family_{family}_module_3")));
@@ -1434,6 +1465,7 @@ public sealed class StrategyAuthoringViewModelTests
             HelpText = "Choose every slot.",
             InitialValue = Element(initial),
             UniqueFieldValues = true,
+            RepeatableFieldValues = [Element("empty")],
             Fields = fields,
         };
     }

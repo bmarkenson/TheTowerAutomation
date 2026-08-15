@@ -22,6 +22,7 @@ from core.gc_no_battle_setup import (
     run_gc_no_battle_setup,
 )
 from core.gc_module_loadout import ModuleLoadoutCorrectionError
+from core.module_icon_index import EMPTY_MODULE_ASSIGNMENT
 from core.gate_decisions import build_gate_decision_options
 from core.home_battle import HomeBattleEvidence
 from core.home_perk_configuration import (
@@ -658,6 +659,46 @@ def test_exact_farm_module_save_match_skips_modules_navigation():
     assert modules["valid"] is True
     assert len(modules["slots"]) == 8
     assert all(slot["valid"] for slot in modules["slots"])
+
+
+def test_exact_save_empty_module_slots_skip_modules_navigation():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "modules": {
+            **REQUIREMENTS["modules"],
+            "cannon_primary": EMPTY_MODULE_ASSIGNMENT,
+            "cannon_assist": EMPTY_MODULE_ASSIGNMENT,
+        },
+    }
+    save_decisions = _save_matches(
+        requirements,
+        "cards_deck",
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+        "modules",
+        "target_priority",
+    )
+
+    result = _run(
+        router,
+        requirements,
+        save_decisions=save_decisions,
+    )
+
+    assert result.complete
+    assert router.module_checks == []
+    assert "navigation.goto_modules_home" not in router.static_actions
+    modules = result.evidence["modules"]
+    assert modules["valid"] is True
+    assert modules["fully_observed"] is True
+    empty_slots = [
+        slot for slot in modules["slots"]
+        if slot["actual"] == EMPTY_MODULE_ASSIGNMENT
+    ]
+    assert len(empty_slots) == 2
+    assert all(slot["match_status"] == "empty" for slot in empty_slots)
 
 
 def test_tournament_save_observation_reports_variation_without_modules_ui():

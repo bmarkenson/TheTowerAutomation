@@ -2025,6 +2025,9 @@ public sealed class StrategyEditorMetadata
     [JsonPropertyName("unique_field_values")]
     public bool UniqueFieldValues { get; set; }
 
+    [JsonPropertyName("repeatable_field_values")]
+    public List<JsonElement> RepeatableFieldValues { get; set; } = [];
+
     [JsonPropertyName("allow_group_selection")]
     public bool AllowGroupSelection { get; set; }
 

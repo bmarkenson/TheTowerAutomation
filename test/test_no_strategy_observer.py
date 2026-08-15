@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from core.module_icon_index import EquippedModuleMatch
+from core.module_icon_index import EMPTY_MODULE_ASSIGNMENT, EquippedModuleMatch
 from core.no_strategy_observer import (
     ATTACK_DISSONANCE_BADGE_REGION,
     DISSONANCE_BADGE_REGION,
@@ -360,6 +360,33 @@ def test_round_invariant_save_facts_feed_actual_loadout_with_temporal_provenance
     # Bot progression is deliberately not the selected Bot preset fact.
     assert fields["bots_preset"]["value"] == {"label": "Farm"}
     assert "medals_spent" not in str(fields["bots_preset"])
+
+
+def test_no_strategy_module_inventory_retains_complete_save_empty_slots():
+    observer = NoStrategyRunObserver(clock=_clock)
+    modules = {
+        "cannon_assist": EMPTY_MODULE_ASSIGNMENT,
+        "cannon_primary": EMPTY_MODULE_ASSIGNMENT,
+        "generator_primary": "Black Hole Digestor",
+        "generator_assist": "Singularity Harness",
+        "armor_assist": "Anti-Cube Portal",
+        "armor_primary": "Orbital Augment",
+        "core_primary": "Multiverse Nexus",
+        "core_assist": "Dimension Core",
+    }
+
+    applied = observer.record_player_save_observations(
+        running_attachment_observations({"modules": modules})
+    )
+    field = observer.snapshot()["fields"]["modules"]
+
+    assert applied == ("modules",)
+    assert field["status"] == "observed"
+    assert field["value"] == modules
+    assert field["source"] == "guarded_active_attachment_player_save"
+    assert field["provenance"]["temporal"]["temporal_class"] == (
+        "round_invariant"
+    )
 
 
 def test_same_round_invariant_conflict_is_sticky_and_fails_closed():

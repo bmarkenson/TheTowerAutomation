@@ -397,7 +397,7 @@ def test_profile_local_metadata_is_additive_to_revision_23_preset_contract():
             lambda metadata: metadata["local_editor"].update(
                 unique_field_values=False
             ),
-            "does not declare",
+            "require unique_field_values",
         ),
         (
             "modules",
@@ -405,7 +405,7 @@ def test_profile_local_metadata_is_additive_to_revision_23_preset_contract():
                 "options"
             ].append(
                 copy.deepcopy(
-                    metadata["local_editor"]["fields"][2]["options"][0]
+                    metadata["local_editor"]["fields"][2]["options"][1]
                 )
             ),
             "not cannon",

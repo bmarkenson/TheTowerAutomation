@@ -41,6 +41,7 @@ from core.player_save_mapping_candidates import (
     fingerprint_json,
     resolve_mapping_candidates,
 )
+from core.module_icon_index import EMPTY_MODULE_ASSIGNMENT
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
@@ -2897,6 +2898,10 @@ def test_all_current_module_info_indices_are_globally_mapped(mapping):
     assert mapping["module_loadout"]["assignment_authority_scope"] == (
         "canonical_global_same_family"
     )
+    assert mapping["module_loadout"]["empty_assignment_scope"] == (
+        "explicit_nil"
+    )
+    assert mapping["module_loadout"]["assist_item_field"] == "module"
     assert len({item["name"] for item in MODULE_INFO_INDICES.values()}) == 24
     assert {
         family: sum(
@@ -2952,7 +2957,8 @@ def test_module_global_authority_scope_is_explicit_and_fail_closed(scope):
         assert evidence.complete is True
         assert evidence.authority["scope"] == "calibrated_slot_values"
         assert evidence.authority["supported_names"]["generator_assist"] == [
-            "Singularity Harness"
+            "Singularity Harness",
+            EMPTY_MODULE_ASSIGNMENT,
         ]
         assert not save_observation_supports_requirement(
             "modules",
@@ -2962,6 +2968,32 @@ def test_module_global_authority_scope_is_explicit_and_fail_closed(scope):
     else:
         assert evidence.status == "unmapped"
         assert evidence.reason == "module loadout structural contract is incomplete"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    (
+        ("empty_assignment_scope", None),
+        ("empty_assignment_scope", "implicit_missing"),
+        ("assist_item_field", None),
+        ("assist_item_field", ""),
+    ),
+)
+def test_module_empty_slot_shape_contract_is_explicit_and_fail_closed(
+    key,
+    value,
+):
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    if value is None:
+        mapping["module_loadout"].pop(key)
+    else:
+        mapping["module_loadout"][key] = value
+
+    evidence = _module_loadout_evidence(_decoded_save(), mapping)
+
+    assert evidence.status == "unmapped"
+    assert evidence.complete is False
+    assert evidence.reason == "module loadout structural contract is incomplete"
 
 
 @pytest.mark.parametrize(
@@ -3158,12 +3190,71 @@ def test_unknown_tournament_module_name_retains_complete_ui_path(monkeypatch):
     assert decision["fallback"] == "existing_ui_check"
 
 
+def test_explicit_primary_and_assist_nil_slots_are_complete_save_evidence(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded["moduleEquipped"][0] = None
+    decoded["assistModuleSlots"][0]["module"] = None
+    requested = {
+        **FARM_MODULES,
+        "cannon_primary": EMPTY_MODULE_ASSIGNMENT,
+        "cannon_assist": EMPTY_MODULE_ASSIGNMENT,
+    }
+
+    snapshot = _snapshot(monkeypatch, decoded)
+    evidence = snapshot.checks["modules"]
+    decision = reconcile_requirements(
+        snapshot,
+        {"modules": requested},
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert evidence.status == "observed"
+    assert evidence.complete is True
+    assert evidence.value == requested
+    assert decision["disposition"] == "save_match"
+    assert decision["ui_required"] is False
+    empty_slots = [
+        slot
+        for slot in evidence.diagnostics["slots"]
+        if slot.get("mapping_status") == "explicit_empty_observation"
+    ]
+    assert {slot["slot_key"] for slot in empty_slots} == {
+        "cannon_primary",
+        "cannon_assist",
+    }
+    assert all(slot["assignment"] == EMPTY_MODULE_ASSIGNMENT for slot in empty_slots)
+
+
+def test_observed_empty_module_mismatch_is_save_backed_in_observe_mode(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded["assistModuleSlots"][2]["module"] = None
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    decision = reconcile_requirements(
+        snapshot,
+        {
+            "modules": FARM_MODULES,
+            "loadout_policies": {"modules": "observe"},
+        },
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert decision["disposition"] == "save_observation"
+    assert decision["observed"]["generator_assist"] == EMPTY_MODULE_ASSIGNMENT
+    assert decision["matches"] is False
+    assert decision["ui_required"] is False
+
+
 @pytest.mark.parametrize(
     ("mutation", "reason"),
     [
         (
-            lambda decoded: decoded["moduleEquipped"].__setitem__(0, None),
-            "Primary module entry",
+            lambda decoded: decoded["moduleEquipped"].__setitem__(0, {}),
+            "Primary module entry changed type",
         ),
         (
             lambda decoded: decoded["moduleEquipped"][0].__setitem__(
@@ -3190,10 +3281,20 @@ def test_unknown_tournament_module_name_retains_complete_ui_path(monkeypatch):
             "Assist module slot changed type",
         ),
         (
+            lambda decoded: decoded["assistModuleSlots"][0].pop("module"),
+            "assignment field is missing",
+        ),
+        (
             lambda decoded: decoded["assistModuleSlots"][0].__setitem__(
-                "module", None
+                "module", "not-a-module"
             ),
-            "exactly one ModuleItem",
+            "assignment changed type",
+        ),
+        (
+            lambda decoded: decoded["assistModuleSlots"][0].__setitem__(
+                "unexpectedModule", _module_item(8)
+            ),
+            "assignment changed type",
         ),
         (
             lambda decoded: decoded.__setitem__(
@@ -3411,7 +3512,7 @@ def test_known_global_same_family_pair_is_a_complete_observation(
         item["name"]
         for item in MODULE_INFO_INDICES.values()
         if item["family"] == "core"
-    ]
+    ] + [EMPTY_MODULE_ASSIGNMENT]
 
 
 def test_known_generator_identity_in_generator_assist_is_save_backed(
@@ -3438,7 +3539,7 @@ def test_known_generator_identity_in_generator_assist_is_save_backed(
         item["name"]
         for item in MODULE_INFO_INDICES.values()
         if item["family"] == "generator"
-    ]
+    ] + [EMPTY_MODULE_ASSIGNMENT]
 
 
 def test_duplicate_same_family_module_requirement_remains_ui_backed(monkeypatch):

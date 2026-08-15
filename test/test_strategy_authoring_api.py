@@ -235,6 +235,14 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
     )
     assert len(local_editors["modules"]["fields"]) == 8
     assert local_editors["modules"]["unique_field_values"] is True
+    assert local_editors["modules"]["repeatable_field_values"] == ["empty"]
+    assert all(
+        field["options"][0] == {
+            "value": "empty",
+            "display_name": "Empty",
+        }
+        for field in local_editors["modules"]["fields"]
+    )
     assert local_editors["target_priority"]["list_constraints"][
         "exact_items"
     ] == local_editors["target_priority"]["initial_value"]

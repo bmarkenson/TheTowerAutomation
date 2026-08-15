@@ -55,6 +55,7 @@ from core.player_save_mapping_candidates import (
     mapping_candidate_review_status,
     pending_mapping_candidate,
 )
+from core.module_icon_index import EMPTY_MODULE_ASSIGNMENT
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -3798,6 +3799,8 @@ def _module_loadout_evidence(
     assist_specs = spec.get("assist")
     observation_scope = spec.get("assignment_observation_scope")
     authority_scope = spec.get("assignment_authority_scope")
+    empty_assignment_scope = spec.get("empty_assignment_scope")
+    assist_item_field = spec.get("assist_item_field")
     if (
         not _is_sequence(primary_specs)
         or not _is_sequence(assist_specs)
@@ -3807,6 +3810,9 @@ def _module_loadout_evidence(
         not in {None, "canonical_global_same_family"}
         or authority_scope
         not in {None, "canonical_global_same_family"}
+        or empty_assignment_scope != "explicit_nil"
+        or not isinstance(assist_item_field, str)
+        or not assist_item_field
         or (
             authority_scope == "canonical_global_same_family"
             and observation_scope != authority_scope
@@ -3870,12 +3876,12 @@ def _module_loadout_evidence(
                 "Primary module slot mapping changed",
             )
         item = primary_raw[index]
-        if not _is_module_item(item):
+        if item is not None and not _is_module_item(item):
             return _unmapped_module_evidence(
                 source_fields,
-                "Primary module entry is missing or changed type",
+                "Primary module entry changed type",
             )
-        failure = _record_mapped_module_assignment(
+        failure = _record_module_assignment(
             assignments,
             supported_names,
             slot_diagnostics,
@@ -3894,7 +3900,7 @@ def _module_loadout_evidence(
                 diagnostics={"slots": slot_diagnostics},
             )
 
-    assist_by_type: dict[int, Mapping[str, Any]] = {}
+    assist_by_type: dict[int, Optional[Mapping[str, Any]]] = {}
     assist_slot_class = str(spec.get("assist_slot_class") or "").strip()
     if not assist_slot_class:
         return _unmapped_module_evidence(
@@ -3919,15 +3925,30 @@ def _module_loadout_evidence(
                 source_fields,
                 "Assist module slot is locked or has changed unlock state",
             )
-        module_items = [
-            value for value in raw_slot.values() if _is_module_item(value)
-        ]
-        if len(module_items) != 1:
+        if assist_item_field not in raw_slot:
             return _unmapped_module_evidence(
                 source_fields,
-                "Assist module slot does not contain exactly one ModuleItem",
+                "Assist module assignment field is missing",
             )
-        assist_by_type[slot_type] = module_items[0]
+        item = raw_slot[assist_item_field]
+        module_item_fields = [
+            key for key, value in raw_slot.items() if _is_module_item(value)
+        ]
+        if item is None:
+            if module_item_fields:
+                return _unmapped_module_evidence(
+                    source_fields,
+                    "Assist module slot contains an unexpected ModuleItem",
+                )
+        elif (
+            not _is_module_item(item)
+            or module_item_fields != [assist_item_field]
+        ):
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module assignment changed type",
+            )
+        assist_by_type[slot_type] = item
 
     assist_specs_by_type: dict[int, Mapping[str, Any]] = {}
     for raw_spec in assist_specs:
@@ -3991,17 +4012,13 @@ def _module_loadout_evidence(
     for raw_spec in assist_specs:
         assert isinstance(raw_spec, Mapping)
         slot_type = _exact_int(raw_spec.get("type"))
-        item = (
-            resolved_assist_items.get(slot_type)
-            if slot_type is not None
-            else None
-        )
-        if item is None:
+        if slot_type is None or slot_type not in resolved_assist_items:
             return _unmapped_module_evidence(
                 source_fields,
                 "Assist module slot membership changed",
             )
-        failure = _record_mapped_module_assignment(
+        item = resolved_assist_items[slot_type]
+        failure = _record_module_assignment(
             assignments,
             supported_names,
             slot_diagnostics,
@@ -4074,7 +4091,9 @@ def _module_loadout_evidence(
             diagnostics={"slots": slot_diagnostics},
         )
     normalized_assignments = [
-        _normal_scalar(name) for name in assignments.values()
+        _normal_scalar(name)
+        for name in assignments.values()
+        if name != EMPTY_MODULE_ASSIGNMENT
     ]
     if len(set(normalized_assignments)) != len(normalized_assignments):
         return _unmapped_module_evidence(
@@ -4141,7 +4160,7 @@ def _module_loadout_specs_are_valid(
     return scopes == expected_scopes and primary_indices == set(range(4))
 
 
-def _record_mapped_module_assignment(
+def _record_module_assignment(
     assignments: dict[str, str],
     supported_names: dict[str, list[str]],
     diagnostics: list[dict[str, str]],
@@ -4149,7 +4168,7 @@ def _record_mapped_module_assignment(
     module_identities: Mapping[int, tuple[str, str]],
     canonical_module_identities: Mapping[int, tuple[str, str]],
     spec: Mapping[str, Any],
-    item: Mapping[str, Any],
+    item: Optional[Mapping[str, Any]],
     *,
     observation_scope: Any,
     authority_scope: Any,
@@ -4158,7 +4177,6 @@ def _record_mapped_module_assignment(
     family = str(spec.get("family") or "").strip()
     role = str(spec.get("role") or "").strip()
     options = _module_value_options(spec)
-    observed_info_index = _exact_int(item.get("infoIndex"))
     if (
         not slot_key
         or slot_key in assignments
@@ -4168,6 +4186,32 @@ def _record_mapped_module_assignment(
         or options is None
     ):
         return "module slot mapping changed"
+    if authority_scope == "canonical_global_same_family":
+        supported_names[slot_key] = [
+            option_name
+            for _index, (option_name, option_family) in sorted(
+                canonical_module_identities.items()
+            )
+            if option_family == family
+        ]
+    else:
+        supported_names[slot_key] = [
+            option_name for _index, option_name in options
+        ]
+    supported_names[slot_key].append(EMPTY_MODULE_ASSIGNMENT)
+    if item is None:
+        assignments[slot_key] = EMPTY_MODULE_ASSIGNMENT
+        diagnostics.append(
+            {
+                "slot_key": slot_key,
+                "family": family,
+                "role": role,
+                "assignment": EMPTY_MODULE_ASSIGNMENT,
+                "mapping_status": "explicit_empty_observation",
+            }
+        )
+        return ""
+    observed_info_index = _exact_int(item.get("infoIndex"))
     if observed_info_index is None:
         return f"{role.title()} module infoIndex is unavailable"
     if observed_info_index < 0:
@@ -4233,18 +4277,6 @@ def _record_mapped_module_assignment(
         )
         return ""
     assignments[slot_key] = name
-    if authority_scope == "canonical_global_same_family":
-        supported_names[slot_key] = [
-            option_name
-            for _index, (option_name, option_family) in sorted(
-                canonical_module_identities.items()
-            )
-            if option_family == family
-        ]
-    else:
-        supported_names[slot_key] = [
-            option_name for _index, option_name in options
-        ]
     diagnostic = {
         "slot_key": slot_key,
         "family": family,
@@ -4677,7 +4709,11 @@ def _requirement_is_supported(
         }
         if set(expected_names) != {str(key) for key in supported_names}:
             return False
-        if len(set(expected_names.values())) != len(expected_names):
+        installed_names = [
+            value for value in expected_names.values()
+            if value != EMPTY_MODULE_ASSIGNMENT
+        ]
+        if len(set(installed_names)) != len(installed_names):
             return False
         return all(
             expected_name

@@ -12,6 +12,7 @@ import numpy as np
 
 from core.input import TapVerification, safe_tap, swipe_now
 from core.module_icon_index import (
+    EMPTY_MODULE_ASSIGNMENT,
     EquippedModuleMatch,
     ModuleIconCatalog,
     ancestral_green_fraction,
@@ -64,7 +65,8 @@ class GcModuleLoadoutEvidence:
 
         invalid = [slot for slot in self.slots if not slot.valid]
         return bool(invalid) and all(
-            slot.match_status == "matched" and slot.actual is not None
+            slot.match_status in {"matched", "empty"}
+            and slot.actual is not None
             for slot in invalid
         )
 
@@ -73,7 +75,8 @@ class GcModuleLoadoutEvidence:
         """Whether every equipped slot has authoritative identity evidence."""
 
         return bool(self.slots) and all(
-            slot.match_status == "matched" and slot.actual is not None
+            slot.match_status in {"matched", "empty"}
+            and slot.actual is not None
             for slot in self.slots
         )
 
@@ -158,6 +161,13 @@ def gc_module_loadout_evidence_from_assignments(
     for slot in selected_catalog.slots:
         observed_name = actual.get(slot.key)
         matched = observed_name is not None
+        match_status = (
+            "empty"
+            if observed_name == EMPTY_MODULE_ASSIGNMENT
+            else "matched"
+            if matched
+            else "unknown"
+        )
         slots.append(
             GcModuleSlotEvidence(
                 slot_key=slot.key,
@@ -165,7 +175,7 @@ def gc_module_loadout_evidence_from_assignments(
                 role=slot.role,
                 expected=expected[slot.key],
                 actual=observed_name,
-                match_status="matched" if matched else "unknown",
+                match_status=match_status,
                 valid=matched and observed_name == expected[slot.key],
                 confidence=1.0 if matched else 0.0,
                 margin=1.0 if matched else 0.0,
@@ -175,18 +185,30 @@ def gc_module_loadout_evidence_from_assignments(
     return GcModuleLoadoutEvidence(tuple(slots))
 
 
+def _normalize_module_requirement_value(value: Any) -> str:
+    if value is None:
+        return EMPTY_MODULE_ASSIGNMENT
+    normalized = str(value).strip()
+    if normalized.casefold() == EMPTY_MODULE_ASSIGNMENT:
+        return EMPTY_MODULE_ASSIGNMENT
+    return normalized
+
+
 def normalize_gc_module_requirements(
     raw: Any,
     *,
     catalog: Optional[ModuleIconCatalog] = None,
 ) -> dict[str, str]:
-    """Validate an exact eight-slot Ancestral module requirement mapping."""
+    """Validate an exact eight-slot Module-or-empty requirement mapping."""
 
     if not isinstance(raw, Mapping):
         raise ValueError("gc_farm session_preflight.modules must be a mapping")
     selected_catalog = catalog or load_module_icon_catalog()
     slots = {slot.key: slot for slot in selected_catalog.slots}
-    supplied = {str(key).strip(): str(value).strip() for key, value in raw.items()}
+    supplied = {
+        str(key).strip(): _normalize_module_requirement_value(value)
+        for key, value in raw.items()
+    }
     if set(supplied) != set(slots):
         missing = sorted(set(slots) - set(supplied))
         extra = sorted(set(supplied) - set(slots))
@@ -196,9 +218,16 @@ def normalize_gc_module_requirements(
         )
 
     modules = {module.name: module for module in selected_catalog.modules}
-    if len(set(supplied.values())) != len(supplied):
+    installed = [
+        value
+        for value in supplied.values()
+        if value != EMPTY_MODULE_ASSIGNMENT
+    ]
+    if len(set(installed)) != len(installed):
         raise ValueError("gc_farm session_preflight.modules cannot repeat a module")
     for key, expected in supplied.items():
+        if expected == EMPTY_MODULE_ASSIGNMENT:
+            continue
         module = modules.get(expected)
         if module is None:
             raise ValueError(f"unknown Ancestral module requirement: {expected!r}")
@@ -278,6 +307,7 @@ def ensure_gc_module_loadout(
     sleep_fn: Callable[[float], None] = time.sleep,
     evaluate_fn: Callable[..., GcModuleLoadoutEvidence] = evaluate_gc_module_loadout,
     equip_fn: Optional[Callable[[GcModuleSlotEvidence], Any]] = None,
+    unequip_fn: Optional[Callable[[GcModuleSlotEvidence], Any]] = None,
     temporary_equip_fn: Optional[
         Callable[[GcModuleSlotEvidence, set[str]], Any]
     ] = None,
@@ -291,14 +321,15 @@ def ensure_gc_module_loadout(
 ) -> GcModuleLoadoutEvidence:
     """Correct a GC module loadout while remaining on the Modules screen.
 
-    Every occupied slot is replaced through the game's verified level-transfer
-    prompt, so module levels behave as persistent slot levels. A Primary/Assist
-    cycle is broken with a verified level-1 same-family temporary module rather
-    than Unequip. Every inventory choice is authoritatively classified by icon
-    before its detail name is confirmed, and the complete settled overview is
-    re-evaluated after each transition. Live repair selects the Ancestral
-    inventory filter once before its first replacement and restores all
-    rarities only after the complete repaired loadout is verified.
+    Every occupied-to-occupied replacement uses the game's verified
+    level-transfer prompt, so module levels behave as persistent slot levels.
+    An exact occupied-to-empty requirement uses the verified Module detail
+    Unequip action. A Primary/Assist cycle is broken with a verified level-1
+    same-family temporary module. Every inventory choice is authoritatively
+    classified by icon before its detail name is confirmed, and the complete
+    settled overview is re-evaluated after each transition. Live repair selects
+    the Ancestral inventory filter once before its first replacement and
+    restores all rarities only after the complete repaired loadout is verified.
     """
 
     selected_catalog = catalog or load_module_icon_catalog()
@@ -378,13 +409,29 @@ def ensure_gc_module_loadout(
             f"outside the desired loadout (tried={attempted})"
         )
 
+    def live_unequip(slot: GcModuleSlotEvidence):
+        return _unequip_equipped_module(
+            slot,
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
+            sleep_fn=sleep_fn,
+            catalog=selected_catalog,
+        )
+
     equip_action = equip_fn or live_equip
+    unequip_action = unequip_fn or live_unequip
     temporary_action = temporary_equip_fn or live_temporary_equip
     announced = False
     initial_observed = False
+    proven_empty_slots: set[str] = set()
 
     for _step in range(_MAX_CORRECTION_STEPS):
         evidence = evaluate_fn(current, expected, catalog=selected_catalog)
+        evidence = _apply_causally_proven_empty_slots(
+            evidence,
+            proven_empty_slots,
+        )
         if not initial_observed:
             initial_observed = True
             if evidence.fully_observed and initial_evidence_observer_fn is not None:
@@ -415,7 +462,7 @@ def ensure_gc_module_loadout(
         uncertain = [
             slot
             for slot in evidence.slots
-            if not slot.valid and slot.match_status != "matched"
+            if not slot.valid and slot.match_status not in {"matched", "empty"}
         ]
         if uncertain:
             labels = ", ".join(
@@ -442,23 +489,43 @@ def ensure_gc_module_loadout(
             announced = True
 
         equipped_names = {
-            slot.actual for slot in evidence.slots if slot.actual is not None
+            slot.actual
+            for slot in evidence.slots
+            if slot.actual not in {None, EMPTY_MODULE_ASSIGNMENT}
         }
         direct = next(
             (slot for slot in invalid if slot.expected not in equipped_names),
             None,
         )
         if direct is not None:
-            current = equip_action(direct)
+            if direct.expected == EMPTY_MODULE_ASSIGNMENT:
+                if direct.match_status != "matched" or direct.actual is None:
+                    raise ModuleLoadoutCorrectionError(
+                        "refusing to infer an empty Module slot from uncertain "
+                        f"overview evidence for {direct.slot_key}"
+                    )
+                current = unequip_action(direct)
+                proven_empty_slots.add(direct.slot_key)
+            else:
+                current = equip_action(direct)
             _require_modules(current, detector)
             continue
 
-        cycle = next((slot for slot in invalid if slot.actual is not None), None)
+        cycle = next(
+            (
+                slot
+                for slot in invalid
+                if slot.actual not in {None, EMPTY_MODULE_ASSIGNMENT}
+            ),
+            None,
+        )
         if cycle is None:
             raise ModuleLoadoutCorrectionError(
                 "module correction made no progress and no cycle could be broken"
             )
-        excluded_names = set(expected.values()) | equipped_names
+        excluded_names = (
+            set(expected.values()) - {EMPTY_MODULE_ASSIGNMENT}
+        ) | equipped_names
         log(
             "[MODULE_LOADOUT] "
             f"{cycle.family} Primary/Assist reassignment requires a level-1 "
@@ -471,6 +538,37 @@ def ensure_gc_module_loadout(
     raise ModuleLoadoutCorrectionError(
         "module correction exceeded its bounded transition count"
     )
+
+
+def _apply_causally_proven_empty_slots(
+    evidence: GcModuleLoadoutEvidence,
+    proven_empty_slots: set[str],
+) -> GcModuleLoadoutEvidence:
+    """Retain emptiness proven by this repair after visual re-evaluation."""
+
+    if not proven_empty_slots:
+        return evidence
+    slots = []
+    for slot in evidence.slots:
+        if (
+            slot.slot_key in proven_empty_slots
+            and slot.expected == EMPTY_MODULE_ASSIGNMENT
+            and slot.match_status == "not_ancestral"
+        ):
+            slots.append(
+                replace(
+                    slot,
+                    actual=EMPTY_MODULE_ASSIGNMENT,
+                    match_status="empty",
+                    valid=True,
+                    confidence=1.0,
+                    margin=1.0,
+                    green_fraction=0.0,
+                )
+            )
+        else:
+            slots.append(slot)
+    return GcModuleLoadoutEvidence(tuple(slots))
 
 
 def _require_modules(frame, detector) -> None:
@@ -1023,17 +1121,139 @@ def _overview_visible(frame) -> bool:
     )
 
 
-def _settled_ancestral_overview_visible(
+def _settled_module_assignment_visible(
     frame,
     *,
+    slot: GcModuleSlotEvidence,
     catalog: ModuleIconCatalog,
 ) -> bool:
-    return _overview_visible(frame) and all(
-        match.status == "matched"
-        for match in identify_equipped_ancestral_modules(
-            frame,
-            catalog=catalog,
+    if not _overview_visible(frame):
+        return False
+    observed = next(
+        (
+            match
+            for match in identify_equipped_ancestral_modules(
+                frame,
+                catalog=catalog,
+            )
+            if match.slot_key == slot.slot_key
+        ),
+        None,
+    )
+    return bool(
+        observed is not None
+        and observed.status == "matched"
+        and observed.name == slot.expected
+    )
+
+
+def _unequip_equipped_module(
+    slot: GcModuleSlotEvidence,
+    *,
+    capture_fn,
+    detector,
+    safe_tap_fn,
+    sleep_fn,
+    catalog: ModuleIconCatalog,
+):
+    """Unequip one authoritatively identified overview assignment."""
+
+    if (
+        slot.expected != EMPTY_MODULE_ASSIGNMENT
+        or slot.match_status != "matched"
+        or slot.actual is None
+        or slot.actual == EMPTY_MODULE_ASSIGNMENT
+    ):
+        raise ModuleLoadoutCorrectionError(
+            f"slot {slot.slot_key} lacks an exact occupied-to-empty transition"
         )
+    catalog_slot = next(
+        (item for item in catalog.slots if item.key == slot.slot_key),
+        None,
+    )
+    if catalog_slot is None:
+        raise ModuleLoadoutCorrectionError(
+            f"unknown Module overview slot {slot.slot_key!r}"
+        )
+
+    def exact_assignment_visible(frame) -> bool:
+        if detector(frame).get("state") != "MODULES":
+            return False
+        observed = next(
+            (
+                match
+                for match in identify_equipped_ancestral_modules(
+                    frame,
+                    catalog=catalog,
+                )
+                if match.slot_key == slot.slot_key
+            ),
+            None,
+        )
+        return bool(
+            observed is not None
+            and observed.status == "matched"
+            and observed.name == slot.actual
+        )
+
+    overview = _capture_modules(capture_fn, detector)
+    if not exact_assignment_visible(overview):
+        raise ModuleLoadoutCorrectionError(
+            f"fresh overview no longer proves {slot.actual} in {slot.slot_key}"
+        )
+    frame_size = catalog.role_frame_crop_sizes[slot.role]
+    half = frame_size // 2
+    if not safe_tap_fn(
+        catalog_slot.center,
+        dispatch="now",
+        log_label=f"gc_module_slot:{slot.slot_key}:unequip",
+        verification=TapVerification(
+            screenshot=overview,
+            target_region=(
+                catalog_slot.center[0] - half,
+                catalog_slot.center[1] - half,
+                frame_size,
+                frame_size,
+            ),
+            description=(
+                f"module_overview:{slot.slot_key}:{slot.actual}:unequip"
+            ),
+            verifier=exact_assignment_visible,
+        ),
+    ):
+        raise ModuleLoadoutCorrectionError(
+            f"failed to open {slot.actual} in {slot.slot_key}"
+        )
+    detail = _wait_for(
+        lambda frame: _detail_for(frame, slot.actual, action="UNEQUIP"),
+        capture_fn=capture_fn,
+        detector=detector,
+        sleep_fn=sleep_fn,
+        reason=f"verified {slot.actual} Unequip detail",
+    )
+    if not safe_tap_fn(
+        "buttons.module:detail_equip_toggle",
+        dispatch="now",
+        verification=TapVerification(
+            screenshot=detail,
+            target_region=(120, 1610, 310, 130),
+            description=f"module_detail:unequip:{slot.actual}",
+            verifier=lambda frame: _detail_for(
+                frame,
+                slot.actual,
+                action="UNEQUIP",
+            ),
+        ),
+    ):
+        raise ModuleLoadoutCorrectionError(
+            f"Unequip tap failed for {slot.actual}"
+        )
+    return _wait_for(
+        _overview_visible,
+        capture_fn=capture_fn,
+        detector=detector,
+        sleep_fn=sleep_fn,
+        reason=f"settled Modules overview after unequipping {slot.actual}",
     )
 
 
@@ -1161,8 +1381,9 @@ def _equip_inventory_module(
                     "failed to accept module level transfer"
                 )
             return _wait_for(
-                lambda candidate: _settled_ancestral_overview_visible(
+                lambda candidate: _settled_module_assignment_visible(
                     candidate,
+                    slot=slot,
                     catalog=catalog,
                 ),
                 capture_fn=capture_fn,
@@ -1180,8 +1401,9 @@ def _equip_inventory_module(
                     "without offering the required level transfer"
                 )
             return _wait_for(
-                lambda candidate: _settled_ancestral_overview_visible(
+                lambda candidate: _settled_module_assignment_visible(
                     candidate,
+                    slot=slot,
                     catalog=catalog,
                 ),
                 capture_fn=capture_fn,

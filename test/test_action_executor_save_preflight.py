@@ -11,6 +11,7 @@ from core.gc_preflight_navigation import (
     GcLivePreflightResult,
     GcPreflightNavigationStatus,
 )
+from core.module_icon_index import EMPTY_MODULE_ASSIGNMENT
 
 
 ORDER = [
@@ -1281,6 +1282,52 @@ def test_exact_save_backed_modules_bind_into_final_session_evidence():
         slot["slot_key"]: slot["actual"]
         for slot in bound["modules"]["slots"]
     } == MODULES
+
+
+def test_exact_save_empty_modules_bind_into_final_session_evidence():
+    observed = {
+        **MODULES,
+        "cannon_primary": EMPTY_MODULE_ASSIGNMENT,
+        "cannon_assist": EMPTY_MODULE_ASSIGNMENT,
+    }
+
+    class BoundSave:
+        def consume(self, check_id):
+            assert check_id == "modules"
+            return dict(observed)
+
+    setup = {
+        "modules": {
+            "status": "save_match",
+            "source": "player_save_preflight",
+            "checked": False,
+            "valid": True,
+            "fully_observed": True,
+            "slots": [
+                {
+                    "slot_key": key,
+                    "expected": value,
+                    "actual": value,
+                    "match_status": (
+                        "empty"
+                        if value == EMPTY_MODULE_ASSIGNMENT
+                        else "matched"
+                    ),
+                    "valid": True,
+                }
+                for key, value in observed.items()
+            ],
+        }
+    }
+
+    bound = _bind_save_backed_home_evidence(setup, BoundSave())
+
+    assert bound["modules"]["source"] == "bound_player_save_preflight"
+    assert bound["modules"]["fully_observed"] is True
+    assert {
+        slot["slot_key"]: slot["actual"]
+        for slot in bound["modules"]["slots"]
+    } == observed
 
 
 def test_observed_module_variation_binds_without_enforcement():

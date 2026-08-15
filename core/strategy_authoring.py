@@ -39,7 +39,10 @@ from core.module_presets import (
     BUNDLED_MODULE_PRESETS_PATH,
     MODULE_PRESET_CATALOG_ID,
 )
-from core.module_icon_index import load_module_icon_catalog
+from core.module_icon_index import (
+    EMPTY_MODULE_ASSIGNMENT,
+    load_module_icon_catalog,
+)
 from core.orb_distance import (
     normalize_orb_distance_preset,
     normalize_orb_distance_presets,
@@ -663,13 +666,15 @@ def _module_local_editor(initial_value: Any) -> Mapping[str, Any]:
         "value_kind": "object",
         "fixed": False,
         "help_text": (
-            "Choose one family-valid Ancestral module for every server-declared "
-            "slot. A module cannot be selected more than once."
+            "Choose one family-valid Ancestral module or Empty for every "
+            "server-declared slot. An installed module cannot be selected "
+            "more than once; Empty may be repeated."
         ),
         "initial_value": local_initial,
         "server_normalized_text": False,
         "preserve_unknown_fields": False,
         "unique_field_values": True,
+        "repeatable_field_values": [EMPTY_MODULE_ASSIGNMENT],
         "fields": [
             {
                 "key": slot.key,
@@ -678,6 +683,8 @@ def _module_local_editor(initial_value: Any) -> Mapping[str, Any]:
                 "fixed": len(modules_by_family[slot.family]) == 1,
                 "initial_value": local_initial[slot.key],
                 "options": [
+                    _editor_option(EMPTY_MODULE_ASSIGNMENT, "Empty")
+                ] + [
                     _editor_option(module.name, module.name)
                     for module in modules_by_family[slot.family]
                 ],
@@ -1121,6 +1128,20 @@ def _validate_local_object_editor_metadata(
         raise ValueError(
             "editor.local_editor.unique_field_values must be boolean"
         )
+    raw_repeatable = metadata.get("repeatable_field_values", [])
+    if not isinstance(raw_repeatable, list):
+        raise ValueError(
+            "editor.local_editor.repeatable_field_values must be a list"
+        )
+    repeatable_keys = {_metadata_value_key(value) for value in raw_repeatable}
+    if len(repeatable_keys) != len(raw_repeatable):
+        raise ValueError(
+            "editor.local_editor.repeatable_field_values must be unique"
+        )
+    if repeatable_keys and not metadata["unique_field_values"]:
+        raise ValueError(
+            "editor.local_editor repeatable values require unique_field_values"
+        )
     if not isinstance(metadata.get("server_normalized_text"), bool):
         raise ValueError(
             "editor.local_editor.server_normalized_text must be boolean"
@@ -1209,8 +1230,12 @@ def _validate_local_object_editor_metadata(
         )
 
     if metadata["unique_field_values"]:
-        values = list(initial_value.values())
-        if len({_metadata_value_key(value) for value in values}) != len(values):
+        value_keys = [
+            _metadata_value_key(value)
+            for value in initial_value.values()
+            if _metadata_value_key(value) not in repeatable_keys
+        ]
+        if len(set(value_keys)) != len(value_keys):
             raise ValueError(
                 "editor.local_editor initial object violates unique_field_values"
             )
@@ -1221,15 +1246,19 @@ def _validate_local_object_editor_metadata(
                 candidate = copy.deepcopy(dict(initial_value))
                 previous = candidate[field["key"]]
                 selected = copy.deepcopy(option["value"])
-                duplicate_key = next(
-                    (
-                        other_key
-                        for other_key, current in candidate.items()
-                        if other_key != field["key"]
-                        and _metadata_value_key(current)
-                        == _metadata_value_key(selected)
-                    ),
-                    None,
+                selected_key = _metadata_value_key(selected)
+                duplicate_key = (
+                    None
+                    if selected_key in repeatable_keys
+                    else next(
+                        (
+                            other_key
+                            for other_key, current in candidate.items()
+                            if other_key != field["key"]
+                            and _metadata_value_key(current) == selected_key
+                        ),
+                        None,
+                    )
                 )
                 if duplicate_key is not None:
                     candidate[duplicate_key] = previous
@@ -1256,6 +1285,7 @@ def _validate_local_object_editor_metadata(
                     (
                         (key, value)
                         for key, value in first_keys.items()
+                        if key not in repeatable_keys
                         if any(
                             _metadata_value_key(option["value"]) == key
                             for option in second["options"]
@@ -1294,6 +1324,46 @@ def _validate_local_object_editor_metadata(
                     raise ValueError(
                         "unique_field_values is not enforced by the setting normalizer"
                     )
+
+    option_keys = {
+        _metadata_value_key(option["value"])
+        for field in fields
+        for option in field["options"]
+    }
+    if not repeatable_keys <= option_keys:
+        raise ValueError(
+            "editor.local_editor repeatable values must be declared options"
+        )
+    for repeatable_key in repeatable_keys:
+        eligible_fields = [
+            field
+            for field in fields
+            if any(
+                _metadata_value_key(option["value"]) == repeatable_key
+                for option in field["options"]
+            )
+        ]
+        if len(eligible_fields) < 2:
+            raise ValueError(
+                "editor.local_editor repeatable values must apply to multiple fields"
+            )
+        repeated = copy.deepcopy(dict(initial_value))
+        repeated_value = next(
+            option["value"]
+            for option in eligible_fields[0]["options"]
+            if _metadata_value_key(option["value"]) == repeatable_key
+        )
+        repeated[eligible_fields[0]["key"]] = copy.deepcopy(repeated_value)
+        repeated[eligible_fields[1]["key"]] = copy.deepcopy(repeated_value)
+        normalized = _normalize_local_editor_candidate(
+            definition,
+            metadata["key"],
+            repeated,
+        )
+        if normalized != repeated:
+            raise ValueError(
+                "editor.local_editor repeatable value is not accepted by the normalizer"
+            )
 
     metadata["initial_value"] = copy.deepcopy(dict(initial_value))
     metadata["fields"] = fields
@@ -1431,6 +1501,7 @@ def _validate_local_editor_metadata(
         "server_normalized_text",
         "preserve_unknown_fields",
         "unique_field_values",
+        "repeatable_field_values",
         "options",
         "fields",
         "list_constraints",

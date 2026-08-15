@@ -596,6 +596,9 @@ public sealed class AuthoringLocalDefinitionViewModel : INotifyPropertyChanged
         {
             return;
         }
+        var repeatableKeys = _metadata.RepeatableFieldValues
+            .Select(value => value.GetRawText())
+            .ToHashSet(StringComparer.Ordinal);
         foreach (var field in Fields)
         {
             var selectedByOthers = Fields
@@ -603,6 +606,7 @@ public sealed class AuthoringLocalDefinitionViewModel : INotifyPropertyChanged
                 .Select(candidate => candidate.SelectedOption?.ValueKey)
                 .Where(key => key is not null)
                 .Cast<string>()
+                .Where(key => !repeatableKeys.Contains(key))
                 .ToHashSet(StringComparer.Ordinal);
             field.RefreshAvailableOptions(selectedByOthers);
         }

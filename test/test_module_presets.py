@@ -156,6 +156,23 @@ def test_create_from_bundled_and_local_reopens_deterministically(tmp_path):
     ]
 
 
+def test_custom_module_preset_allows_repeated_empty_primary_and_assist_slots(
+    tmp_path,
+):
+    store = ModulePresetStore(tmp_path / "custom")
+    definition = _farm_modules()
+    definition["cannon_primary"] = None
+    definition["cannon_assist"] = "EMPTY"
+
+    created = store.create("empty_cannon", "Empty Cannon", definition)
+
+    assert created["definition"]["cannon_primary"] == "empty"
+    assert created["definition"]["cannon_assist"] == "empty"
+    reopened = ModulePresetStore(tmp_path / "custom").catalog()
+    custom = next(item for item in reopened["items"] if item["id"] == "empty_cannon")
+    assert custom["definition"] == created["definition"]
+
+
 @pytest.mark.parametrize(
     "identifier",
     (

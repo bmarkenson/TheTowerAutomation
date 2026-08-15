@@ -19,12 +19,19 @@ from core.gc_module_loadout import (
     _scroll_inventory_to_top,
     _detail_ready,
     _set_module_rarity_filter,
+    _settled_module_assignment_visible,
+    _unequip_equipped_module,
     ensure_gc_module_loadout,
     evaluate_gc_module_loadout,
+    gc_module_loadout_evidence_from_assignments,
     normalize_gc_module_requirements,
 )
 from core.clickmap_access import get_click, get_swipe, resolve_dot_path
-from core.module_icon_index import load_module_icon_catalog
+from core.module_icon_index import (
+    EMPTY_MODULE_ASSIGNMENT,
+    EquippedModuleMatch,
+    load_module_icon_catalog,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,24 +106,173 @@ def test_gc_module_requirements_must_cover_each_family_role_once():
         normalize_gc_module_requirements(wrong_family)
 
 
-def _evidence(actual_by_slot):
+def test_gc_module_requirements_allow_repeated_explicit_empty_slots():
+    requirements = dict(GC_MODULES)
+    requirements["cannon_primary"] = None
+    requirements["cannon_assist"] = "EMPTY"
+
+    normalized = normalize_gc_module_requirements(requirements)
+
+    assert normalized["cannon_primary"] == EMPTY_MODULE_ASSIGNMENT
+    assert normalized["cannon_assist"] == EMPTY_MODULE_ASSIGNMENT
+
+
+def test_save_assignments_treat_explicit_empty_as_complete_identity_evidence():
+    requirements = {
+        **GC_MODULES,
+        "cannon_primary": EMPTY_MODULE_ASSIGNMENT,
+        "cannon_assist": EMPTY_MODULE_ASSIGNMENT,
+    }
+
+    evidence = gc_module_loadout_evidence_from_assignments(
+        requirements,
+        requirements,
+    )
+
+    assert evidence.valid
+    assert evidence.fully_observed
+    empty_slots = [
+        slot for slot in evidence.slots
+        if slot.actual == EMPTY_MODULE_ASSIGNMENT
+    ]
+    assert len(empty_slots) == 2
+    assert all(slot.match_status == "empty" for slot in empty_slots)
+
+
+def test_visual_not_ancestral_is_not_inferred_to_be_empty():
+    requirements = {**GC_MODULES, "cannon_assist": EMPTY_MODULE_ASSIGNMENT}
+    matches = []
+    for slot in load_module_icon_catalog().slots:
+        if slot.key == "cannon_assist":
+            matches.append(
+                EquippedModuleMatch(
+                    slot_key=slot.key,
+                    family=slot.family,
+                    role=slot.role,
+                    status="not_ancestral",
+                    name=None,
+                    slug=None,
+                    confidence=0.0,
+                    margin=0.0,
+                    green_fraction=0.0,
+                    best_candidate=None,
+                    runner_up=None,
+                )
+            )
+        else:
+            name = GC_MODULES[slot.key]
+            matches.append(
+                EquippedModuleMatch(
+                    slot_key=slot.key,
+                    family=slot.family,
+                    role=slot.role,
+                    status="matched",
+                    name=name,
+                    slug=name.casefold().replace(" ", "-"),
+                    confidence=1.0,
+                    margin=1.0,
+                    green_fraction=1.0,
+                    best_candidate=name,
+                    runner_up="other",
+                )
+            )
+
+    evidence = evaluate_gc_module_loadout(
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        requirements,
+        identify_fn=lambda *_args, **_kwargs: tuple(matches),
+    )
+
+    empty = next(slot for slot in evidence.slots if slot.slot_key == "cannon_assist")
+    assert empty.actual is None
+    assert empty.match_status == "not_ancestral"
+    assert not empty.valid
+    assert not evidence.fully_observed
+
+
+def test_replacement_settle_requires_only_the_exact_destination_assignment():
+    catalog = load_module_icon_catalog()
+    slot = GcModuleSlotEvidence(
+        slot_key="generator_primary",
+        family="generator",
+        role="primary",
+        expected="Black Hole Digestor",
+        actual="Project Funding",
+        match_status="matched",
+        valid=False,
+        confidence=1.0,
+        margin=1.0,
+        green_fraction=1.0,
+    )
+    destination = EquippedModuleMatch(
+        slot_key=slot.slot_key,
+        family=slot.family,
+        role=slot.role,
+        status="matched",
+        name=slot.expected,
+        slug="black-hole-digestor",
+        confidence=1.0,
+        margin=1.0,
+        green_fraction=1.0,
+        best_candidate=slot.expected,
+        runner_up="other",
+    )
+    empty_peer = EquippedModuleMatch(
+        slot_key="cannon_assist",
+        family="cannon",
+        role="assist",
+        status="not_ancestral",
+        name=None,
+        slug=None,
+        confidence=0.0,
+        margin=0.0,
+        green_fraction=0.0,
+        best_candidate=None,
+        runner_up=None,
+    )
+
+    with (
+        patch("core.gc_module_loadout._overview_visible", return_value=True),
+        patch(
+            "core.gc_module_loadout.identify_equipped_ancestral_modules",
+            return_value=(destination, empty_peer),
+        ),
+    ):
+        assert _settled_module_assignment_visible(
+            np.zeros((1920, 1080, 3), dtype=np.uint8),
+            slot=slot,
+            catalog=catalog,
+        )
+
+
+def _evidence(actual_by_slot, requirements=GC_MODULES):
     catalog = load_module_icon_catalog()
     slots = []
     for catalog_slot in catalog.slots:
         actual = actual_by_slot[catalog_slot.key]
-        status = "matched" if actual is not None else "not_ancestral"
+        status = (
+            "empty"
+            if actual == EMPTY_MODULE_ASSIGNMENT
+            else "matched"
+            if actual is not None
+            else "not_ancestral"
+        )
         slots.append(
             GcModuleSlotEvidence(
                 slot_key=catalog_slot.key,
                 family=catalog_slot.family,
                 role=catalog_slot.role,
-                expected=GC_MODULES[catalog_slot.key],
+                expected=requirements[catalog_slot.key],
                 actual=actual,
                 match_status=status,
-                valid=actual == GC_MODULES[catalog_slot.key],
+                valid=actual == requirements[catalog_slot.key],
                 confidence=1.0 if actual is not None else 0.0,
                 margin=1.0 if actual is not None else 0.0,
-                green_fraction=1.0 if actual is not None else 0.0,
+                green_fraction=(
+                    1.0
+                    if actual not in {None, EMPTY_MODULE_ASSIGNMENT}
+                    else 0.0
+                ),
             )
         )
     return GcModuleLoadoutEvidence(tuple(slots))
@@ -189,6 +345,65 @@ def test_module_correction_preserves_a_swap_cycle_through_temporary_module():
         ("equip", "cannon_assist", "Being Annihilator"),
     ]
     assert len(evaluations) == 4
+
+
+def test_module_correction_unequips_an_authoritatively_occupied_empty_slot():
+    module_frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    requirements = {**GC_MODULES, "cannon_assist": EMPTY_MODULE_ASSIGNMENT}
+    actual = dict(GC_MODULES)
+    actions = []
+
+    def evaluate(_frame, _requirements, *, catalog):
+        return _evidence(actual, requirements)
+
+    def unequip(slot):
+        actions.append((slot.slot_key, slot.actual, slot.expected))
+        # The overview image alone remains ambiguous after the causal action.
+        actual[slot.slot_key] = None
+        return module_frame
+
+    result = ensure_gc_module_loadout(
+        requirements,
+        screenshot=module_frame,
+        detector=lambda _frame: {"state": "MODULES"},
+        evaluate_fn=evaluate,
+        equip_fn=lambda _slot: pytest.fail("must not equip"),
+        unequip_fn=unequip,
+        temporary_equip_fn=lambda *_args: pytest.fail(
+            "must not use temporary"
+        ),
+    )
+
+    assert result.valid
+    empty = next(slot for slot in result.slots if slot.slot_key == "cannon_assist")
+    assert empty.actual == EMPTY_MODULE_ASSIGNMENT
+    assert empty.match_status == "empty"
+    assert actions == [
+        ("cannon_assist", "Being Annihilator", EMPTY_MODULE_ASSIGNMENT)
+    ]
+
+
+def test_module_correction_will_not_guess_that_not_ancestral_means_empty():
+    module_frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    requirements = {**GC_MODULES, "cannon_assist": EMPTY_MODULE_ASSIGNMENT}
+    actual = dict(GC_MODULES)
+    actual["cannon_assist"] = None
+
+    with pytest.raises(ModuleLoadoutCorrectionError, match="uncertain"):
+        ensure_gc_module_loadout(
+            requirements,
+            screenshot=module_frame,
+            detector=lambda _frame: {"state": "MODULES"},
+            evaluate_fn=lambda *_args, **_kwargs: _evidence(
+                actual,
+                requirements,
+            ),
+            equip_fn=lambda _slot: pytest.fail("must not equip"),
+            unequip_fn=lambda _slot: pytest.fail("must not unequip"),
+            temporary_equip_fn=lambda *_args: pytest.fail(
+                "must not use temporary"
+            ),
+        )
 
 
 def test_live_module_correction_sets_ancestral_once_for_repair_batch():
@@ -338,6 +553,83 @@ def test_module_replacement_always_accepts_level_transfer(role):
         (
             "buttons.module:accept_level_transfer",
             "module_level_transfer:accept",
+        ),
+    ]
+
+
+def test_occupied_to_empty_repair_uses_verified_unequip_detail():
+    overview = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    detail = np.full((1920, 1080, 3), 48, dtype=np.uint8)
+    catalog = load_module_icon_catalog()
+    catalog_slot = next(
+        slot for slot in catalog.slots if slot.key == "cannon_assist"
+    )
+    slot = GcModuleSlotEvidence(
+        slot_key=catalog_slot.key,
+        family=catalog_slot.family,
+        role=catalog_slot.role,
+        expected=EMPTY_MODULE_ASSIGNMENT,
+        actual="Being Annihilator",
+        match_status="matched",
+        valid=False,
+        confidence=1.0,
+        margin=1.0,
+        green_fraction=1.0,
+    )
+    match = EquippedModuleMatch(
+        slot_key=slot.slot_key,
+        family=slot.family,
+        role=slot.role,
+        status="matched",
+        name=slot.actual,
+        slug="being-annihilator",
+        confidence=1.0,
+        margin=1.0,
+        green_fraction=1.0,
+        best_candidate=slot.actual,
+        runner_up="other",
+    )
+    taps = []
+
+    def safe_tap(target, **kwargs):
+        verification = kwargs["verification"]
+        point = target if isinstance(target, tuple) else get_click(target)
+        assert point is not None
+        assert verification.authorizes(point)
+        assert verification.verifier(verification.screenshot)
+        taps.append((target, verification.description))
+        return True
+
+    with (
+        patch("core.gc_module_loadout._capture_modules", return_value=overview),
+        patch(
+            "core.gc_module_loadout.identify_equipped_ancestral_modules",
+            return_value=(match,),
+        ),
+        patch("core.gc_module_loadout._detail_for", return_value=True),
+        patch(
+            "core.gc_module_loadout._wait_for",
+            side_effect=(detail, overview),
+        ),
+    ):
+        result = _unequip_equipped_module(
+            slot,
+            capture_fn=lambda: pytest.fail("capture is wrapped"),
+            detector=lambda _frame: {"state": "MODULES"},
+            safe_tap_fn=safe_tap,
+            sleep_fn=lambda _seconds: None,
+            catalog=catalog,
+        )
+
+    assert result is overview
+    assert taps == [
+        (
+            catalog_slot.center,
+            "module_overview:cannon_assist:Being Annihilator:unequip",
+        ),
+        (
+            "buttons.module:detail_equip_toggle",
+            "module_detail:unequip:Being Annihilator",
         ),
     ]
 
