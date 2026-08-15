@@ -33,9 +33,13 @@ owns a checkout, and parallel writers need separate feature worktrees.
 Repository artifacts—not chat—carry durable state. Checkpoint there before a
 handoff or coordinator replacement, and use a handoff only when another
 top-level chat continues the work. Read-only work ends with its evidence.
-Repository-changing work ends with a validated commit and updated owner.
-Promotion owners also publish and retire clean integrated temporary work under
-the [production procedure](operations/production_promotion.md).
+Unless the operator requests a draft/review-only result or no promotion, or
+assigns another owner, each repository-changing coordinator owns final
+production promotion and follows the
+[production procedure](operations/production_promotion.md) through applicable
+deployment and smoke, `origin/main` publication, and clean integrated temporary-
+work retirement. A no-publication or retained-work request narrows only its
+named step. A guard leaves the outcome pending, not complete.
 
 ## Repository-change preflight
 

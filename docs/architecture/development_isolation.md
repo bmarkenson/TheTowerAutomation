@@ -72,12 +72,14 @@ their owned feature changes. A clean feature tip is the normal candidate for
 one coherent outcome. Only when two or more reviewed feature tips intentionally
 ship together does the explicitly assigned outcome coordinator create a
 temporary integration branch, resolve their combined state, and use its tip as
-the candidate. A documentation-only coordinator has standing promotion
-ownership; every other promotion needs operator or explicitly assigned
-ownership. In all cases, the promotion owner advances `main` only to exact
-validated commit `D` by fast-forward, publishes that exact tip by default, and
-retires the outcome's clean integrated temporary work unless a retention guard
-applies. Candidate development and validation remain concurrent, while one
+the candidate. Under the
+[outcome-coordination default](../new_thread.md#outcome-coordination), each
+coordinator owns promotion unless the operator narrows closure or assigns
+another owner. The promotion owner advances `main` only to exact validated
+commit `D` by fast-forward, completes applicable deployment and smoke,
+publishes that exact tip by default, and retires the outcome's clean integrated
+temporary work unless a retention guard applies. Candidate development and
+validation remain concurrent, while one
 atomically acquired private Git ref serializes the mutable production window
 from final rereads through deployment, publication, and cleanup. Remote
 fast-forward rules remain the guard against a publisher from another clone. A
@@ -150,12 +152,14 @@ remote publication, and guarded cleanup remain explicit mutable boundaries.
 The executable candidate, validation, promotion, rollback, publication, and
 retirement checklist is owned only by
 [the production procedure](../operations/production_promotion.md).
-[Documentation maintenance](../documentation_maintenance.md#automatic-documentation-closure)
-owns the standing documentation-only authority, while the procedure applies
-it. Dependency, persistent-state format, and installed-systemd-unit changes
-still require an explicit rollback plan for their non-Git effects. Rewriting
-`main` backward is not the normal rollback mechanism, because a revert
-preserves what was deployed and why.
+The [startup outcome-coordination rule](../new_thread.md#outcome-coordination)
+assigns default promotion ownership;
+[documentation maintenance](../documentation_maintenance.md#automatic-documentation-closure)
+only classifies the documentation candidate and gate. Dependency,
+persistent-state format, and installed-systemd-unit changes still require an
+explicit rollback plan for their non-Git effects. Rewriting `main` backward is
+not the normal rollback mechanism, because a revert preserves what was deployed
+and why.
 
 Add a separate release/staging layer only after repeated direct-promotion
 failures demonstrate a concrete capability it would provide.
@@ -487,7 +491,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, standing documentation-only promotion ownership, assigned ownership for other outcomes, one private ref serializing production mutation, exact fast-forward promotion, default main-only remote publication, and default retirement of clean integrated temporary work | No standing `develop`/staging branch, concurrent production mutations, speculative retention of integrated worktrees, independent repository per worker, or source attestation |
+| Git topology | Production `main`, temporary feature worktrees, temporary integration only for combined outcomes, default coordinator promotion ownership with explicit opt-outs or reassignment, one private ref serializing production mutation, exact fast-forward promotion, default main-only remote publication, and default retirement of clean integrated temporary work | No standing `develop`/staging branch, concurrent production mutations, speculative retention of integrated worktrees, independent repository per worker, or source attestation |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |

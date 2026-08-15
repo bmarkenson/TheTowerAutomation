@@ -16,19 +16,15 @@ changes this model.
   supported bootstrap in `docs/new_thread.md` and must never execute, copy,
   link, or mutate production's environment. Run project Python and tests only
   through the selected `.venv/bin/python`.
-- `main` is production and implementation belongs on temporary feature
-  branches. Use temporary integration only when several reviewed feature tips
-  must ship together. A promotion owner follows the
-  [production procedure](docs/operations/production_promotion.md) through its
-  exclusive mutable transaction, exact fast-forward, `origin/main`
-  publication, and default retirement of clean integrated temporary work.
-  While the procedure's private coordination ref exists, other threads may
-  continue candidate work and validation but must not mutate the production
-  checkout, services, published artifacts, `origin/main`, or promotion cleanup
-  topology. Contenders follow its wait, refresh, retest, and retry loop;
-  contention is not completion. Documentation-only coordinators have standing
-  promotion ownership; every other `main` update requires the operator or an
-  explicitly assigned promotion owner.
+- `main` is production; implementation uses temporary feature branches and
+  temporary integration only for intentional combined outcomes. The
+  [outcome coordinator](docs/new_thread.md#outcome-coordination) owns promotion
+  and closure by default under the
+  [production procedure](docs/operations/production_promotion.md). Its private
+  ref serializes the mutable transaction. Other threads may continue candidate
+  work and validation but must not mutate production, services, artifacts,
+  `origin/main`, or its cleanup topology. Contenders wait, refresh, retest, and
+  retry; contention or another unfinished closure guard is not completion.
 - The operator-confirmed save-mapping fast lane documented in
   [development isolation](docs/architecture/development_isolation.md) is the
   only application-owned feature-branch exception. It may stage one allowlisted

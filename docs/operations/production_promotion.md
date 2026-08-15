@@ -1,17 +1,20 @@
 # Production Promotion and Rollback
 
-Production services remain fixed to the `main` checkout. Promotion is operator-
-or explicitly assigned promotion-owner work; a
-[documentation-only outcome](../documentation_maintenance.md#automatic-documentation-closure)
-gives its coordinator standing promotion ownership. Promotion ownership
-includes publishing the exact successful `main` tip unless the operator
-withholds it and retiring clean integrated temporary work by default. It never
-includes publishing tags or temporary refs. The exact candidate comes from a
-temporary feature branch, a temporary integration branch only when several
-feature tips must ship together, or the allowlisted private save-mapping
-staging ref. Complete the repository-change checklist before this procedure
-and [`live_preflight.md`](../live_preflight.md) before any service/device
-action.
+Production services remain fixed to the `main` checkout. The
+[outcome-coordination default](../new_thread.md#outcome-coordination) assigns
+the promotion owner and defines operator opt-outs. Unless narrowed there,
+ownership continues through exact candidate validation and promotion,
+applicable non-Git deployment and smoke, `origin/main` publication, and default
+clean integrated retirement. It never includes publishing tags or temporary
+refs. The exact candidate comes from a temporary feature branch, a temporary
+integration branch only when several feature tips must ship together, or the
+allowlisted private save-mapping staging ref. Complete the repository-change
+checklist before this procedure and [`live_preflight.md`](../live_preflight.md)
+before any service/device action.
+
+When the default applies, a validated feature commit is an intermediate
+candidate, not task completion; do not stop to request separate promotion
+authorization.
 
 ## Prepare one exact candidate
 

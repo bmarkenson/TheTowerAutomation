@@ -79,13 +79,15 @@ tests, configuration, generated output, runtime-read asset, dependency or unit
 input, or native-package input. Behavior-coupled documentation still receives
 its affected validation; running a test does not change the candidate class.
 
-Unless the operator requests a draft, review-only result, retained branch, or
-no promotion, its coordinator has standing promotion ownership and follows the
+The repository-wide [outcome-coordination default](new_thread.md#outcome-coordination)
+already gives its coordinator promotion ownership. For a documentation-only
+candidate, follow the
 [exact-candidate production procedure](operations/production_promotion.md#promote-one-exact-candidate)
-through publication and default clean integrated retirement. Scope expansion
-beyond documentation ends that standing authority. Any ordinary promotion or
-cleanup guard retains the exact state and is reported; never force the
-automatic path.
+with the documentation gate and production boundary through publication and
+default clean integrated retirement. Scope expansion selects the gate and
+production boundary for the new aggregate change without ending that ownership.
+Operator opt-outs and ordinary promotion or cleanup guards still apply; retain
+and report exact blocked state rather than forcing closure.
 
 ### Issues and evidence
 
