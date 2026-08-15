@@ -64,6 +64,7 @@ STRATEGY_GATE_AUXILIARY_ALLOWLIST = (
 class AuthorityHold(str, Enum):
     """Exclusive owners whose routes are stronger than the Strategy Gate."""
 
+    BATTLE_IDENTITY = "battle_identity"
     ACTIVITY_CONTINUITY = "activity_continuity"
     RUN_INITIALIZATION = "run_initialization"
     SESSION_PREFLIGHT = "session_preflight"

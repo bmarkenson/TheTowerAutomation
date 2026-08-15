@@ -8,6 +8,7 @@ import json
 import os
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, Mapping, Sequence, Set, Tuple
@@ -17,6 +18,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from utils.logger import (
+    capture_activity_boundary,
     ensure_activity_scope,
     get_activity_scope,
     log,
@@ -24,6 +26,7 @@ from utils.logger import (
     log_result,
     new_operation_id,
     set_mission_log_path,
+    start_activity_scope,
     start_retry_activity_scope,
 )
 from core.watchdog import (
@@ -34,7 +37,10 @@ from core.watchdog import (
 from core.adb_connection import AdbConnectionCoordinator
 from core.adb_target_session import AdbTargetSession
 from core.artifact_retention import RuntimeArtifactRetention
-from core.activity_continuity import ActivityContinuityCoordinator
+from core.activity_continuity import (
+    ActivityContinuityCoordinator,
+    ActivityContinuityOutcome,
+)
 from core.action_authority import (
     ActionAuthorityDecision,
     AuthorityHold,
@@ -89,6 +95,14 @@ from core.battle_stats import (
     persist_battle_record,
 )
 from core.battle_activation_tracker import BattleActivationTracker
+from core.battle_identity import (
+    ActiveBattleIdentityCoordinator,
+    BattleIdentityCheckContext,
+    BattleIdentityCheckStatus,
+    BattleIdentityRelation,
+    BattleIdentityStore,
+    BattleIdentityStoreError,
+)
 from core.player_save import (
     PlayerSaveParser,
     reconcile_acquired_requirements,
@@ -111,11 +125,14 @@ from core.player_save_preflight import (
     CarriedEvidenceState,
     PlayerSavePreflightContext,
     PlayerSavePreflightCoordinator,
+    PlayerSavePreflightStatus,
     requested_player_save_check_ids,
 )
 from core.player_save_history import (
     PlayerSaveAttachmentContext,
     PlayerSaveHistoryReader,
+    running_attachment_observations_from_acquisition,
+    running_attachment_temporal_binding_from_acquisition,
 )
 from core.player_save_mapping_observer import (
     BoundPlayerSaveMappingObserver,
@@ -417,6 +434,40 @@ class App:
             if adb_target_session is not None
             else None
         )
+        self._battle_identity_store = BattleIdentityStore(
+            Path(config.control_file).with_name("battle_identity.json")
+        )
+        try:
+            self._retained_battle_identity_record = (
+                self._battle_identity_store.active()
+            )
+        except BattleIdentityStoreError as exc:
+            # A stale/corrupt advisory record never becomes battle authority.
+            # The next forced serialization may safely replace it.
+            self._retained_battle_identity_record = None
+            log(
+                "[BATTLE_IDENTITY] Retained identity was unreadable and will "
+                f"not be trusted: {exc}",
+                "WARN",
+            )
+        self._active_round_identity = None
+        self._active_round_identity_fingerprint: Optional[str] = None
+        self._battle_identity_reconciliation_required = True
+        self._battle_identity_operation_id: Optional[str] = None
+        self._battle_identity_home_verified_preflight_id: Optional[str] = None
+        self._battle_identity_last_control_state = str(
+            getattr(AUTOMATION.state, "value", AUTOMATION.state)
+        ).upper()
+        self._battle_identity_coordinator = (
+            ActiveBattleIdentityCoordinator(
+                acquirer=self._player_save_acquirer,
+                store=self._battle_identity_store,
+                context_fn=self._current_battle_identity_check_context,
+                source_guard_fn=self._running_battle_source_matches,
+            )
+            if self._player_save_acquirer is not None
+            else None
+        )
         self._player_save_preflight_coordinator = (
             PlayerSavePreflightCoordinator(
                 acquirer=self._player_save_acquirer,
@@ -694,6 +745,469 @@ class App:
                 "normal automation is unaffected",
                 "DEBUG",
             )
+
+    def _sync_battle_identity_control_boundary(self) -> None:
+        """Make a retained ID non-authoritative across Pause/Stop/Enable."""
+
+        current = str(
+            getattr(AUTOMATION.state, "value", AUTOMATION.state)
+        ).upper()
+        previous = str(
+            getattr(self, "_battle_identity_last_control_state", current)
+            or current
+        ).upper()
+        if current == previous:
+            return
+        self._battle_identity_last_control_state = current
+        if current in {"PAUSED", "STOPPED"} or previous in {
+            "PAUSED",
+            "STOPPED",
+        }:
+            # Durable state remains available only for comparison with the next
+            # forced observation.  It grants no action authority by itself.
+            self._active_round_identity = None
+            self._active_round_identity_fingerprint = None
+            self._battle_identity_reconciliation_required = True
+            self._battle_identity_home_verified_preflight_id = None
+            self._battle_identity_operation_id = None
+            self._battle_identity_operation_kind = None
+
+    def _observe_battle_identity_ui_boundary(
+        self,
+        detection: Mapping[str, Any],
+    ) -> None:
+        """Invalidate active authority only at a real visual battle boundary."""
+
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        control = HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        )
+        signature = (state, control.value)
+        previous = getattr(self, "_battle_identity_ui_signature", None)
+        self._battle_identity_ui_signature = signature
+        inactive_boundary = bool(
+            state in {"GAME_OVER", "TOURNAMENT_RESULTS", "WORKSHOP"}
+            or (
+                state in {"HOME", "HOME_SCREEN"}
+                and control is HomeBattleControl.NEW_BATTLE
+            )
+        )
+        if not inactive_boundary:
+            return
+        if (
+            previous != signature
+            or getattr(self, "_active_round_identity_fingerprint", None)
+        ):
+            self._active_round_identity = None
+            self._active_round_identity_fingerprint = None
+            self._battle_identity_reconciliation_required = True
+            self._battle_identity_home_verified_preflight_id = None
+            self._battle_identity_operation_id = None
+            self._battle_identity_operation_kind = None
+
+    def _current_battle_identity_check_context(
+        self,
+    ) -> Optional[BattleIdentityCheckContext]:
+        """Return the exact operation and target owning a forced ID check."""
+
+        runtime_session_id = str(
+            getattr(self, "_player_save_runtime_session_id", "") or ""
+        ).strip()
+        operation_id = str(
+            getattr(self, "_battle_identity_operation_id", "") or ""
+        ).strip()
+        kind = str(
+            getattr(self, "_battle_identity_operation_kind", "") or ""
+        ).strip()
+        if not runtime_session_id or not operation_id:
+            return None
+        supervisor = getattr(self, "_supervisor", None)
+        if kind in {"start_battle", "attach_battle"}:
+            workflow = getattr(supervisor, "battle_workflow", None)
+            if not (
+                isinstance(workflow, Mapping)
+                and str(workflow.get("request_id") or "") == operation_id
+                and str(workflow.get("intent") or "") == kind
+                and str(workflow.get("status") or "")
+                not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            ):
+                return None
+        elif kind == "manual_return":
+            manual = getattr(supervisor, "manual_control", None)
+            if not (
+                isinstance(manual, Mapping)
+                and str(manual.get("manual_control_id") or "") == operation_id
+                and str(manual.get("status") or "") == "reconciling"
+            ):
+                return None
+        session = getattr(self, "_adb_target_session", None)
+        try:
+            snapshot = session.snapshot() if session is not None else None
+        except Exception:
+            return None
+        target_binding = PlayerSaveTargetBinding.from_snapshot(snapshot)
+        if target_binding is None:
+            return None
+        try:
+            return BattleIdentityCheckContext(
+                runtime_session_id=runtime_session_id,
+                operation_id=operation_id,
+                target_binding=target_binding,
+            )
+        except (TypeError, ValueError):
+            return None
+
+    def _battle_identity_source_matches(
+        self,
+        expected: str,
+        frame: Any,
+        *,
+        stable: bool,
+    ) -> bool:
+        """Recheck a RUNNING or Home/Resume source around serialization."""
+
+        expected_source = str(expected or "").upper()
+        attempts = 2 if stable else 1
+        current = frame
+        for attempt in range(attempts):
+            try:
+                if current is None or attempt > 0:
+                    current = self._capture_frame()
+                if current is None:
+                    return False
+                detection = detect_state_and_overlays(current)
+                state = str(detection.get("state") or "").upper()
+                if expected_source == "RUNNING":
+                    matched = state == "RUNNING"
+                else:
+                    matched = bool(
+                        state in {"HOME", "HOME_SCREEN"}
+                        and detect_home_battle_control(current).control
+                        is HomeBattleControl.RESUME_BATTLE
+                    )
+                if not matched:
+                    return False
+            except Exception:
+                return False
+            if stable and attempt == 0:
+                time.sleep(0.2)
+        return True
+
+    def _running_battle_source_matches(
+        self,
+        frame: Any,
+        stable: bool,
+    ) -> bool:
+        return self._battle_identity_source_matches(
+            "RUNNING",
+            frame,
+            stable=stable,
+        )
+
+    def _battle_identity_check_owner(
+        self,
+    ) -> Optional[tuple[str, str, AuthorityHold, str]]:
+        """Select the exact enabled workflow allowed to serialize identity."""
+
+        supervisor = getattr(self, "_supervisor", None)
+        workflow = getattr(supervisor, "battle_workflow", None)
+        if isinstance(workflow, Mapping):
+            workflow_id = str(workflow.get("request_id") or "").strip()
+            intent = str(workflow.get("intent") or "").strip()
+            status = str(workflow.get("status") or "").strip()
+            if workflow_id and (
+                (intent == "start_battle" and status == "action_dispatched")
+                or (
+                    intent == "attach_battle"
+                    and status in {"validating_save", "action_dispatched"}
+                )
+            ):
+                return (
+                    workflow_id,
+                    intent,
+                    AuthorityHold.OPERATOR_WORKFLOW,
+                    intent,
+                )
+        manual = getattr(supervisor, "manual_control", None)
+        if (
+            isinstance(manual, Mapping)
+            and manual.get("status") == "reconciling"
+        ):
+            manual_id = str(manual.get("manual_control_id") or "").strip()
+            if manual_id:
+                return (
+                    manual_id,
+                    "manual_return",
+                    AuthorityHold.MANUAL_CONTROL_RETURN,
+                    "automation_resumed",
+                )
+        if self._awaiting_initial_battle_intent():
+            return None
+        competing = self._operator_workflow_authority_hold()
+        if competing is not None:
+            return None
+        operation_id = new_operation_id()
+        return (
+            operation_id,
+            "runtime_reconciliation",
+            AuthorityHold.BATTLE_IDENTITY,
+            "runtime_reconciliation",
+        )
+
+    def _publish_forced_battle_identity_bundle(
+        self,
+        acquisition: PlayerSaveAcquisitionBundle,
+        *,
+        relation: BattleIdentityRelation,
+        identity_fingerprint: str,
+    ) -> None:
+        """Fan out one force-bound save without reacquiring it for projections."""
+
+        scope_id = self._current_run_scope_id()
+        runtime_session_id = str(
+            getattr(self, "_player_save_runtime_session_id", "") or ""
+        ).strip()
+        if not scope_id or not runtime_session_id or acquisition.binding is None:
+            return
+        self._observed_active_battle_scope_id = scope_id
+        context = PlayerSaveObservationContext(
+            runtime_session_id=runtime_session_id,
+            activity_scope_id=scope_id,
+            target_binding=acquisition.binding,
+        )
+        self._publish_player_save_observation(
+            acquisition,
+            context=context,
+            reason_code="forced_battle_identity",
+            bind_new_activity=(relation is not BattleIdentityRelation.SAME_BATTLE),
+        )
+
+        workflow = getattr(
+            getattr(self, "_supervisor", None),
+            "battle_workflow",
+            None,
+        )
+        manual = getattr(
+            getattr(self, "_supervisor", None),
+            "manual_control",
+            None,
+        )
+        attachment_owner = bool(
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "attach_battle"
+            and workflow.get("status")
+            in {"validating_save", "action_dispatched"}
+        )
+        return_owner = bool(
+            isinstance(manual, Mapping)
+            and manual.get("status") == "reconciling"
+        )
+        if not (attachment_owner or return_owner):
+            return
+        attachment_context = PlayerSaveAttachmentContext(
+            runtime_session_id=runtime_session_id,
+            activity_scope_id=scope_id,
+            target=acquisition.binding.target,
+            target_generation=acquisition.binding.generation,
+            active_battle_observed=True,
+        )
+        try:
+            temporal = running_attachment_temporal_binding_from_acquisition(
+                acquisition,
+                context=attachment_context,
+                active_round_identity_fingerprint=identity_fingerprint,
+            )
+            if temporal is not None:
+                temporal = temporal.bind_final_scope(scope_id)
+            observations = running_attachment_observations_from_acquisition(
+                acquisition,
+                context=attachment_context,
+                active_round_identity_fingerprint=identity_fingerprint,
+            )
+            if observations is not None:
+                observations = observations.bind_final_scope(scope_id)
+        except (TypeError, ValueError):
+            temporal = None
+            observations = None
+        outcome = ActivityContinuityOutcome(
+            recapture=True,
+            confirmed_same_battle_scope_id=(
+                scope_id
+                if relation is BattleIdentityRelation.SAME_BATTLE
+                else None
+            ),
+            confirmed_later_battle_scope_id=(
+                scope_id
+                if relation is BattleIdentityRelation.LATER_BATTLE
+                else None
+            ),
+            running_attachment_observations=observations,
+            running_attachment_temporal_binding=temporal,
+            running_attachment_acquisition=acquisition,
+            running_attachment_context=attachment_context,
+        )
+        self._apply_activity_continuity_outcome(outcome)
+
+    def _force_battle_identity(
+        self,
+        detection: Mapping[str, Any],
+        frame: Frame,
+    ) -> bool:
+        """Force and bind the active save identity before battle-bound work."""
+
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        control = HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        )
+        source = (
+            "RUNNING"
+            if state == "RUNNING"
+            else "HOME_RESUME"
+            if state in {"HOME", "HOME_SCREEN"}
+            and control is HomeBattleControl.RESUME_BATTLE
+            else ""
+        )
+        if not source or self._supervisor.is_paused:
+            return False
+        if (
+            not getattr(self, "_battle_identity_reconciliation_required", True)
+            and getattr(self, "_active_round_identity_fingerprint", None)
+        ):
+            return False
+        coordinator = getattr(self, "_battle_identity_coordinator", None)
+        owner = self._battle_identity_check_owner()
+        if coordinator is None or owner is None:
+            return False
+        operation_id, kind, authority_owner, reason = owner
+        self._battle_identity_operation_id = operation_id
+        self._battle_identity_operation_kind = kind
+        context = self._current_battle_identity_check_context()
+        if context is None:
+            return False
+        self._update_action_authority(
+            detection=detection,
+            holds=(
+                AuthorityHoldState(
+                    authority_owner,
+                    "forced save identity owns the next lifecycle boundary",
+                ),
+            ),
+        )
+        log_action_intent(
+            "Binding the active battle from a forced save",
+            reason=(
+                "use the save's canonical active-round ID before any "
+                "battle-bound automation continues"
+            ),
+            detail=(
+                f"[BATTLE_IDENTITY] source={source} owner={kind}"
+            ),
+            operation_id=operation_id,
+        )
+        manager_was_active = bool(
+            self._mission_mgr.active_battle_observed()
+        )
+        result = coordinator.bind(
+            context=context,
+            action_guard_fn=lambda: self._runtime_action_guard(
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                owner=authority_owner,
+            ),
+            reason=reason,
+            initial_frame=frame,
+            source_label=(
+                "the running battle"
+                if source == "RUNNING"
+                else "Home Resume Battle"
+            ),
+            source_guard_fn=(
+                None
+                if source == "RUNNING"
+                else lambda candidate, stable: (
+                    self._battle_identity_source_matches(
+                        "HOME_RESUME",
+                        candidate,
+                        stable=stable,
+                    )
+                )
+            ),
+        )
+        if result.complete:
+            assert result.identity is not None
+            assert result.relation is not None
+            assert result.acquisition is not None
+            missed_boundary = self._mission_mgr.observe_active_round_identity(
+                result.identity.fingerprint,
+                changed_from_retained=(
+                    result.relation is BattleIdentityRelation.LATER_BATTLE
+                ),
+            )
+            if missed_boundary and manager_was_active:
+                start_activity_scope(
+                    reason="save_active_round_identity_changed",
+                    boundary=capture_activity_boundary(),
+                )
+            self._active_round_identity = result.identity
+            self._active_round_identity_fingerprint = (
+                result.identity.fingerprint
+            )
+            self._battle_identity_reconciliation_required = False
+            try:
+                self._retained_battle_identity_record = (
+                    self._battle_identity_store.active()
+                )
+            except BattleIdentityStoreError:
+                self._retained_battle_identity_record = None
+            self._publish_forced_battle_identity_bundle(
+                result.acquisition,
+                relation=result.relation,
+                identity_fingerprint=result.identity.fingerprint,
+            )
+            log_result(
+                "Active battle identity bound from the forced save",
+                detail=(
+                    "[BATTLE_IDENTITY] result=complete relation="
+                    f"{result.relation.value} identity="
+                    f"{result.identity.fingerprint[:16]}"
+                ),
+                operation_id=operation_id,
+            )
+        else:
+            self._active_round_identity = None
+            self._active_round_identity_fingerprint = None
+            self._battle_identity_reconciliation_required = True
+            catastrophic_kind = None
+            if (
+                result.lifecycle_input_attempted
+                and not result.source_restored
+            ):
+                catastrophic_kind = RuntimeFailureKind.SOURCE_RESTORATION_LOST
+            elif "target_binding" in result.reason:
+                catastrophic_kind = RuntimeFailureKind.TARGET_OWNERSHIP_LOST
+            elif "uncertain" in result.reason:
+                catastrophic_kind = RuntimeFailureKind.INPUT_RESULT_UNCERTAIN
+            if catastrophic_kind is not None:
+                self._supervisor.pause_for_catastrophic_failure(
+                    catastrophic_kind,
+                    reason=result.reason,
+                )
+            else:
+                self._flag_recoverable_runtime_failure(
+                    RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+                    result.reason,
+                )
+            log_result(
+                "Active battle identity was not granted",
+                detail=(
+                    f"[BATTLE_IDENTITY] result={result.status.value} "
+                    f"reason={result.reason} source_restored="
+                    f"{result.source_restored}"
+                ),
+                operation_id=operation_id,
+            )
+        self._battle_identity_operation_id = None
+        self._battle_identity_operation_kind = None
+        return True
 
     def _current_player_save_observation_context(
         self,
@@ -6735,6 +7249,9 @@ class App:
         if not (
             battle_started is True
             and not self._tournament_battle_guard(detection or {})
+            and bool(
+                getattr(self, "_active_round_identity_fingerprint", None)
+            )
             and isinstance(workflow, Mapping)
             and workflow.get("intent") == "start_battle"
             and workflow.get("status") == "action_dispatched"
@@ -6745,7 +7262,8 @@ class App:
             "completed",
             reason=(
                 "verified new-run Home launch crossed the normal battle "
-                "lifecycle boundary"
+                "lifecycle boundary and its forced save supplied the active "
+                "round identity"
             ),
             acknowledgement=(self._current_control_workflow_evidence() or {}),
         )
@@ -9049,6 +9567,76 @@ class App:
             active_battle_observed=True,
         )
 
+    def _bind_forced_home_inactive_identity(self, result: object):
+        """Require one forced-save proof that Home really has no active round."""
+
+        store = getattr(self, "_battle_identity_store", None)
+        if store is None or result is None:
+            return result
+        acquisition = getattr(result, "acquisition", None)
+        snapshot = (
+            acquisition.snapshot
+            if isinstance(acquisition, PlayerSaveAcquisitionBundle)
+            and acquisition.complete
+            and acquisition.acquisition_type
+            is PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+            else None
+        )
+        runtime = getattr(snapshot, "runtime_save", None)
+        inactive = bool(
+            runtime is not None
+            and getattr(runtime, "round_active", None) is False
+            and getattr(runtime, "active_round_identity", None) is None
+        )
+        if inactive:
+            try:
+                store.mark_inactive(
+                    reason="home_new_battle",
+                    operation_id=str(
+                        getattr(self, "_player_save_preflight_session_id", "")
+                        or new_operation_id()
+                    ),
+                    acquisition=acquisition,
+                )
+            except BattleIdentityStoreError:
+                inactive = False
+            else:
+                self._retained_battle_identity_record = None
+                self._active_round_identity = None
+                self._active_round_identity_fingerprint = None
+                self._battle_identity_reconciliation_required = True
+                self._battle_identity_home_verified_preflight_id = str(
+                    getattr(self, "_player_save_preflight_session_id", "")
+                    or ""
+                )
+                return result
+
+        coordinator = getattr(
+            self,
+            "_player_save_preflight_coordinator",
+            None,
+        )
+        if coordinator is not None:
+            coordinator.discard_carry(
+                "home_inactive_round_identity_unavailable"
+            )
+        self._battle_identity_home_verified_preflight_id = None
+        self._battle_identity_reconciliation_required = True
+        self._flag_recoverable_runtime_failure(
+            RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
+            "Home New Battle was not confirmed inactive by the forced save",
+        )
+        try:
+            return replace(
+                result,
+                status=PlayerSavePreflightStatus.BLOCKED,
+                reason="home_inactive_round_identity_unavailable",
+                safe_ui_fallback=False,
+                carry=None,
+            )
+        except TypeError:
+            return result
+
     def _acquire_player_save_home_preflight(
         self,
         requirements: Mapping[str, Any],
@@ -9068,11 +9656,20 @@ class App:
             "player_save_preflight",
             "save_first",
         )
+        if not getattr(
+            self,
+            "_battle_identity_home_verified_preflight_id",
+            None,
+        ):
+            # Configuration may still choose UI fallbacks, but battle identity
+            # never does: serialize now and prove this is an inactive Home.
+            mode = "save_first"
         result = coordinator.acquire(
             requirements,
             mode=mode,
             initial_frame=screenshot,
         )
+        result = self._bind_forced_home_inactive_identity(result)
         self._player_save_preflight_result = result
         scope = get_activity_scope()
         self._player_save_preflight_activity_scope_id = (
@@ -12774,6 +13371,7 @@ class App:
 
         if self._supervisor.apply_control():
             self._status_reporter.request_immediate_report()
+        self._sync_battle_identity_control_boundary()
         self._observe_strategy_request()
         self._sync_interactive_development_control_boundary()
         self._sync_emulator_maintenance_control_boundary()
@@ -12811,6 +13409,7 @@ class App:
                 # and permits a paused live target handoff before capture.
                 if self._supervisor.apply_control():
                     self._status_reporter.request_immediate_report()
+                self._sync_battle_identity_control_boundary()
                 self._observe_strategy_request()
                 self._sync_interactive_development_control_boundary()
                 self._sync_emulator_maintenance_control_boundary()
@@ -12836,6 +13435,7 @@ class App:
                     )
                 self._annotate_home_battle_control(img, detection)
                 self._record_control_observation(detection)
+                self._observe_battle_identity_ui_boundary(detection)
                 self._observe_blocking_primary_boundary(detection)
                 self._setup_capture_source_refreshed = False
                 detected_state = str(
@@ -12900,6 +13500,12 @@ class App:
                     if self._reconcile_terminal_home_continuation(detection):
                         continue
                     self._observe_action_circuits(detection)
+                    if self._force_battle_identity(detection, img):
+                        # Android Home serialization and restoration make the
+                        # supplied frame stale.  Even a safely degraded result
+                        # must be followed by a fresh capture before any input.
+                        self._publish_action_authority()
+                        continue
                 if self._setup_capture_source_refreshed:
                     # The frame predates the Android-Home serialization route.
                     # Re-enter capture/detection before any ordinary handler.
@@ -12940,7 +13546,15 @@ class App:
                 # then give a genuinely initializing strategy exclusive tap
                 # authority. No overlay handler, recovery tap, mission action,
                 # or blind tapper may run before this gate clears.
-                if emulator_recovery_routing:
+                identity_blocks_running = bool(
+                    detected_state == "RUNNING"
+                    and not getattr(
+                        self,
+                        "_active_round_identity_fingerprint",
+                        None,
+                    )
+                )
+                if emulator_recovery_routing or identity_blocks_running:
                     battle_started = False
                 else:
                     battle_started = self._mission_mgr.maybe_run_start(detection)
@@ -13053,6 +13667,16 @@ class App:
                             "ready",
                             False,
                         )
+                        and getattr(
+                            self,
+                            "_battle_identity_home_verified_preflight_id",
+                            None,
+                        )
+                        == getattr(
+                            self,
+                            "_player_save_preflight_session_id",
+                            None,
+                        )
                     )
                     save_history_baseline_blocked = bool(
                         getattr(
@@ -13072,6 +13696,12 @@ class App:
                         == current_scope_id
                     )
                     forced_home_bundle_needed = bool(
+                        not getattr(
+                            self,
+                            "_battle_identity_home_verified_preflight_id",
+                            None,
+                        )
+                        or
                         (
                             player_save_mode
                             in {"save_first", "comparison_audit"}
@@ -13120,8 +13750,43 @@ class App:
                         self._running_save_reconciliation_owner()
                     )
                     workflow_hold = self._operator_workflow_authority_hold()
-                    continuity_needed = bool(
+                    identity_continuity_complete = bool(
                         (
+                            str(detection.get("state") or "").upper()
+                            == "RUNNING"
+                            and getattr(
+                                self,
+                                "_active_round_identity_fingerprint",
+                                None,
+                            )
+                        )
+                        or (
+                            home_new_battle
+                            and getattr(
+                                self,
+                                "_battle_identity_home_verified_preflight_id",
+                                None,
+                            )
+                        )
+                        or (
+                            home_state
+                            and HomeBattleControl.parse(
+                                detection.get(
+                                    "home_battle_control",
+                                    "UNKNOWN",
+                                )
+                            )
+                            is HomeBattleControl.RESUME_BATTLE
+                            and getattr(
+                                self,
+                                "_active_round_identity_fingerprint",
+                                None,
+                            )
+                        )
+                    )
+                    continuity_needed = bool(
+                        not identity_continuity_complete
+                        and (
                             not self._awaiting_initial_battle_intent()
                             or reconciliation_owner is not None
                         )
@@ -16759,19 +17424,43 @@ class App:
                     "ready",
                     False,
                 )
+                and getattr(
+                    self,
+                    "_battle_identity_home_verified_preflight_id",
+                    None,
+                )
+                == getattr(
+                    self,
+                    "_player_save_preflight_session_id",
+                    None,
+                )
             )
             baseline_only_preflight = bool(
                 home_preflight_authorized
                 and home_control is HomeBattleControl.NEW_BATTLE
                 and not requirements
-                and preflight_mode == "save_first"
+                and (
+                    preflight_mode == "save_first"
+                    or not getattr(
+                        self,
+                        "_battle_identity_home_verified_preflight_id",
+                        None,
+                    )
+                )
                 and getattr(
                     self,
                     "_player_save_preflight_coordinator",
                     None,
                 )
                 is not None
-                and not self._activity_scope_has_history_baseline(scope)
+                and (
+                    not self._activity_scope_has_history_baseline(scope)
+                    or not getattr(
+                        self,
+                        "_battle_identity_home_verified_preflight_id",
+                        None,
+                    )
+                )
                 and not current_preflight_ready
             )
             if baseline_only_preflight:
@@ -16789,7 +17478,14 @@ class App:
                     )
                     == scope_id
                 )
-                if prior_history_baseline_blocked:
+                if (
+                    prior_history_baseline_blocked
+                    and getattr(
+                        self,
+                        "_battle_identity_home_verified_preflight_id",
+                        None,
+                    )
+                ):
                     self._flag_recoverable_runtime_failure(
                         RuntimeFailureKind.EVIDENCE_UNAVAILABLE,
                         str(
@@ -16912,7 +17608,14 @@ class App:
                     getattr(self, "_startup_gate_waivers", {}),
                 )
                 save_preflight = None
-                if not prior_history_baseline_blocked:
+                if (
+                    not prior_history_baseline_blocked
+                    or not getattr(
+                        self,
+                        "_battle_identity_home_verified_preflight_id",
+                        None,
+                    )
+                ):
                     save_preflight = self._acquire_player_save_home_preflight(
                         requirements,
                         screenshot=img,

@@ -367,6 +367,40 @@ class MissionManager:
 
         return bool(self._battle_lifecycle.active_battle_observed)
 
+    def observe_active_round_identity(
+        self,
+        identity_fingerprint: str,
+        *,
+        changed_from_retained: bool,
+    ) -> bool:
+        """Apply a forced-save identity before emitting lifecycle hooks.
+
+        The visual lifecycle remains useful for screen transitions, but it
+        cannot distinguish two battles when Pause/Stop hides the intervening
+        terminal and Home frames.  A changed canonical save identity repairs
+        that missed boundary by making the next RUNNING observation emit the
+        ordinary new-run hooks.  Initial Attach keeps its existing adoption
+        semantics because no active visual battle has yet been claimed.
+        """
+
+        normalized = str(identity_fingerprint or "").strip()
+        if not normalized:
+            return False
+        self.ctx.data["active_round_identity_fingerprint"] = normalized
+        self.ctx.data.setdefault("mission_vars", {})[
+            "active_round_identity_fingerprint"
+        ] = normalized
+        missed_boundary = bool(
+            changed_from_retained
+            and self._battle_lifecycle.active_battle_observed
+        )
+        if missed_boundary:
+            self._battle_lifecycle.active_battle_observed = False
+            self._battle_lifecycle.adopt_initial_battle = False
+            self._clear_restored_session_preflight_report()
+            self._clear_attached_check_state()
+        return missed_boundary
+
     def _arm_startup_gates(self) -> None:
         self._clear_attached_check_state()
         if not self._startup_gates_deferred:
