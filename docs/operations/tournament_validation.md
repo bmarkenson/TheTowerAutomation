@@ -40,10 +40,15 @@ Attach first proves Tournament identity. A compatible selection becomes the
 active Tournament Strategy; an incompatible or unprovable selection observes
 degraded and remains pending for the next safe boundary. The attached
 Tournament performs its session inventory and Damage Slider/Orb Distance
-checks once in read-only mode. Mismatch, unavailable evidence, or validator
-failure marks the battle degraded and does not Pause or repeat the pass. It
-does not buy upgrades, repair configuration, Surrender, enter a Tournament, or
-start an ordinary battle. Its normal reward collectors and natural terminal
-handler remain eligible, and the selected terminal policy still owns what
-happens after results. The architecture contract is
+checks once in read-only mode. A managed one-shot launched from Home first
+binds its complete save-first decisions across the verified New Battle
+transition and does not reopen Cards, Modules, Bots, Guardians, or Workshop
+merely to repeat those facts. Only unsupported, incomplete, mismatched, or
+otherwise invalidated per-check evidence uses the guarded UI fallback.
+Mismatch, unavailable evidence, or validator failure marks the battle degraded
+and does not Pause or repeat the pass. The attached observer does not buy
+upgrades, repair configuration, Surrender, enter a Tournament, or start an
+ordinary battle. Its normal reward collectors and natural terminal handler
+remain eligible, and the selected terminal policy still owns what happens
+after results. The architecture contract is
 [`Tournament exclusive validation and observer profile`](../architecture/runtime.md#tournament-exclusive-validation-and-observer-profile).

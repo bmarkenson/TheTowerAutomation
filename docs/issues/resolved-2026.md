@@ -8,6 +8,46 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament session preflight rejected its mapping-observation callback
+
+**Stable ID:** `ISSUE-2026-049` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-15 at 01:42 PDT, the runtime attached the selected
+  Tournament Strategy to an already-running Tournament and began its read-only
+  session preflight.
+- **Symptom:** The route opened Modules and returned to the battle, then
+  `validate_tournament_session_preflight_screens` rejected the supported
+  `mapping_observation_fn` keyword. The runtime correctly continued degraded,
+  but the captured session screens never produced a valid preflight result.
+  The bounded action rows are retained in
+  [durable evidence](evidence/tournament-mapping-observation-callback-2026-08-15.md).
+- **Cause:** `run_read_only_gc_preflight` conditionally passes the existing
+  mapping-observation callback to every validator when the save coordinator
+  exposes it. The generic GC validator already accepted and consumed that
+  callback, but the Tournament wrapper omitted it from both its signature and
+  delegated call. Direct wrapper tests never supplied the production callback,
+  so the argument mismatch was not exercised.
+- **Resolution:** The Tournament wrapper accepts the same typed optional
+  callback and forwards it unchanged to the generic validator. A retained
+  Tournament fixture regression proves the route completes and publishes both
+  complete Modules and Guardian mapping observations through that callback.
+- **Repository validation:** The affected Tournament preflight, navigation,
+  save-preflight, and documentation lifecycle suites passed all 82 tests. Exact
+  corrected candidate `bb36ad8` also passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,825 repository tests in 431.08 seconds using development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Production confirmation:** Candidate `bb36ad8` was deployed in production
+  commit `95bd630`. During the later operator-authorized one-shot on 2026-08-15,
+  session preflight traversed its selected fallbacks, invoked the mapping
+  observation path, produced a conclusive configuration result at 08:53:23
+  PDT, and completed the owned validation lifecycle without an unexpected-
+  keyword exception. The separate reason those duplicate UI routes were
+  selected is tracked as
+  [`ISSUE-2026-050`](open-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence).
+- **Fixed by:** `bb36ad8` (deployed in `95bd630`).
+
 ### Start Battle intent was rejected after its Strategy applied at Home
 
 **Stable ID:** `ISSUE-2026-045` · **Lifecycle:** `resolved`

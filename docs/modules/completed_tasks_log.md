@@ -39,6 +39,16 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Tournament mapping callback confirmation
+
+- The operator-authorized owned validation completed its session preflight at
+  08:53:23 PDT without the former unexpected `mapping_observation_fn` keyword
+  failure. The same workflow then completed its guarded owned-battle cleanup.
+- This closes
+  [`ISSUE-2026-049`](../issues/resolved-2026.md#tournament-session-preflight-rejected-its-mapping-observation-callback).
+  The independently diagnosed reason complete Home save facts did not suppress
+  duplicate session UI remains active as `ISSUE-2026-050`.
+
 ### 2026-08-15 Default repository outcome closure
 
 - Policy commit `9d4466d` makes every repository-changing coordinator the

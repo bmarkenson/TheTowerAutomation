@@ -10995,6 +10995,20 @@ class App:
             return False
         request_id = str(claimed["request_id"])
         self._active_exclusive_validation_request_id = request_id
+        save_coordinator = getattr(
+            self,
+            "_player_save_preflight_coordinator",
+            None,
+        )
+        save_carry = (
+            save_coordinator.carry
+            if save_coordinator is not None
+            else None
+        )
+        save_carry_pending = bool(
+            save_carry is not None
+            and save_carry.state is CarriedEvidenceState.PENDING_LAUNCH
+        )
         current_holds = self._refreshed_operator_authority_holds(
             release_stale=False
         )
@@ -11081,6 +11095,10 @@ class App:
                     "the owned validation Battle input was accepted, but its "
                     "durable action receipt could not be retained"
                 )
+                if save_carry_pending:
+                    save_coordinator.suspend_carry(
+                        "durable_launch_receipt_unavailable"
+                    )
                 if isinstance(workflow, Mapping):
                     self._terminalize_uncertain_battle_workflow(
                         workflow,
@@ -11094,6 +11112,15 @@ class App:
                     reason + "; no Surrender or replay was attempted",
                 )
                 return True
+            if save_carry_pending:
+                # The verified tap rechecked action authority at its final
+                # dispatch boundary. Bind the same Home evidence lifecycle
+                # used by ordinary launches before RUNNING can consume it.
+                save_coordinator.mark_runtime_launch(
+                    control=home_control,
+                    action_authorized=True,
+                    dispatched=True,
+                )
             log(
                 "[TOURNAMENT_VALIDATION] Ordinary NEW_BATTLE dispatched after "
                 f"durable ownership claim {request_id}",
@@ -11105,6 +11132,8 @@ class App:
                 "the owned validation Battle input may have reached the device, "
                 "but its dispatch result was uncertain"
             )
+            if save_carry_pending:
+                save_coordinator.suspend_carry("input_result_uncertain")
             if isinstance(workflow, Mapping):
                 self._terminalize_uncertain_battle_workflow(
                     workflow,
@@ -11136,6 +11165,10 @@ class App:
                 acknowledgement=(
                     self._current_control_workflow_evidence() or {}
                 ),
+            )
+        if save_carry_pending:
+            save_coordinator.discard_carry(
+                "exclusive_validation_launch_not_dispatched"
             )
         self._finish_exclusive_validation_without_cleanup(
             claimed,

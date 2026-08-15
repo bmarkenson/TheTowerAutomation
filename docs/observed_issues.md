@@ -249,19 +249,19 @@ current runtime state.
 
 ## Repairs awaiting confirmation
 
-### Tournament session preflight rejected its mapping-observation callback
+### Exclusive Tournament validation discarded complete Home save evidence
 
-**Stable ID:** `ISSUE-2026-049` · **Lifecycle:** `repair_awaiting_confirmation`
+**Stable ID:** `ISSUE-2026-050` · **Lifecycle:** `repair_awaiting_confirmation`
 
-- An attached Tournament opened and closed Modules, then its read-only session
-  preflight raised an unexpected-keyword error instead of evaluating the
-  captured screens. The generic navigator supplied its supported mapping
-  callback, but the Tournament wrapper neither accepted nor forwarded it.
-- Load the [dossier](issues/open-2026.md#tournament-session-preflight-rejected-its-mapping-observation-callback)
-  before changing Tournament preflight arguments or mapping-candidate
-  collection. Production commit `95bd630` contains the forwarding repair.
-  Next: confirm a fresh Tournament preflight completes without the callback
-  TypeError;
+- An owned one-shot accepted complete version-1101 Cards, Workshop, Bots,
+  Guardians, and all eight Module assignments at Home, but its direct New
+  Battle launcher did not arm the carrier. The first RUNNING frame correctly
+  invalidated that unbound evidence, so session preflight reopened every UI
+  fallback.
+- Load the [dossier](issues/open-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence)
+  before changing exclusive-validation launch, Home save carry, or duplicate
+  Tournament session navigation. Next: promote the repair, then confirm one
+  explicitly authorized one-shot binds the carrier and omits duplicate UI;
   [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ### Assist module assignments always fell back to Modules UI
@@ -276,8 +276,9 @@ current runtime state.
 - Load the [dossier](issues/open-2026.md#assist-module-assignments-always-fell-back-to-modules-ui)
   before changing Module save shape, exact empty-slot semantics, or the
   save/UI fallback. Production commit `95bd630` contains the exact-field
-  repair. Next: confirm one fresh ordinary boundary reports complete
-  save-backed Modules without opening the Modules UI;
+  repair. The next Home decode reported all eight, but the independent
+  `ISSUE-2026-050` carrier defect still selected session UI. Next: confirm one
+  post-repair ordinary boundary stays save-backed without opening Modules UI;
   [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ### Farm Bot preset switch required more Event medals than were available

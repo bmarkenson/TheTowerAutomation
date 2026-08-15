@@ -39,16 +39,18 @@ as checked checkpoint narrative here.
   - [ ] Live-confirm deployed production commit `95bd630` for the exact Assist
     assignment-member repair in
     [ISSUE-2026-048](../issues/open-2026.md#assist-module-assignments-always-fell-back-to-modules-ui).
-    One fresh ordinary Home or terminal boundary must publish all eight Module
-    assignments from the save and omit Modules UI. Do not change or empty a
-    Module solely to manufacture the confirmation.
-  - [ ] Live-confirm deployed production commit `95bd630` for the Tournament
-    mapping-observation callback repair in
-    [ISSUE-2026-049](../issues/open-2026.md#tournament-session-preflight-rejected-its-mapping-observation-callback).
-    The next ordinary attached or owned-validation Tournament preflight must
-    complete without an unexpected-keyword failure and retain its read-only
-    mapping observations. Do not start or attach a battle solely for this
+    The 2026-08-15 one-shot published all eight assignments from the save, but
+    the independent `ISSUE-2026-050` carrier failure still reopened Modules in
+    session. One post-repair ordinary Home or terminal boundary must omit that
+    duplicate UI. Do not change or empty a Module solely to manufacture the
     confirmation.
+  - [ ] Promote and live-confirm
+    [ISSUE-2026-050](../issues/open-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence).
+    The next explicitly authorized owned-validation one-shot must log an
+    accepted carried-launch binding, bind the same evidence at stable RUNNING,
+    and omit duplicate Cards, Modules, Bots, Guardians, and Workshop UI. An
+    uncertain or context-changed boundary must retain UI fallback. Do not
+    start another disposable battle without fresh operator authorization.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
