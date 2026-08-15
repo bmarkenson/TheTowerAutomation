@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import inspect
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from core.app import App
 from core.perk_save_monitor import PerkSaveMonitorContext
@@ -97,6 +98,38 @@ def test_scheduler_does_not_read_without_an_active_bound_context():
 
     pull.assert_not_called()
     consumer.assert_not_called()
+
+
+def test_worker_accepts_only_explicit_perk_checkpoint_requests():
+    parameters = inspect.signature(PlayerSavePassiveScheduler).parameters
+    assert "interval_seconds" not in parameters
+    assert "monotonic_fn" not in parameters
+
+    pull = Mock(return_value=b"stable-payload")
+    consumer = Mock()
+    scheduler = PlayerSavePassiveScheduler(
+        acquirer=StablePlayerSaveAcquirer(
+            target_snapshot_fn=lambda: SimpleNamespace(
+                target="localhost:5555",
+                generation=3,
+                owned=True,
+            ),
+            pull_fn=pull,
+            decode_fn=Mock(return_value=SimpleNamespace(marker="normalized")),
+        ),
+        context_fn=_context,
+        consumers=(consumer,),
+    )
+
+    assert scheduler.request_observation("periodic_interval") is False
+    assert scheduler.request_observation("mapping_followup") is False
+    assert scheduler.request_observation("perk_selection_boundary") is True
+    assert scheduler.wait_until_idle()
+    scheduler.close(wait=True)
+
+    pull.assert_called_once_with(device_id="localhost:5555")
+    assert consumer.call_count == 1
+    assert consumer.call_args.args[2] == "perk_selection_boundary"
 
 
 def test_target_generation_change_is_delivered_only_as_typed_failure():
@@ -232,7 +265,7 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
     app._consume_passive_player_save_bundle(
         acquisition,
         context,
-        "scheduled_interval",
+        "perk_selection_boundary",
     )
 
     app._perk_save_monitor.observe_bundle.assert_called_once_with(
@@ -245,5 +278,37 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
     )
     app._player_save_audit_collector.observe_acquisition.assert_called_once_with(
         acquisition,
-        reason_code="scheduled_interval",
+        reason_code="perk_selection_boundary",
     )
+
+
+def test_app_requests_only_changed_perk_selection_or_exhaustion_boundaries():
+    app = App.__new__(App)
+    observer = Mock()
+    scheduler = Mock()
+    scheduler.request_observation.return_value = True
+    app._perk_timeline_observer = observer
+    app._player_save_passive_scheduler = scheduler
+    app._last_requested_perk_checkpoint_signature = None
+
+    observer.snapshot.return_value = {
+        "passive_top_bar": {
+            "selection_boundaries": [{"scheduled_wave": 200}],
+            "exhaustion": None,
+        }
+    }
+    app._request_perk_checkpoint_for_passive_boundary()
+    app._request_perk_checkpoint_for_passive_boundary()
+
+    observer.snapshot.return_value = {
+        "passive_top_bar": {
+            "selection_boundaries": [{"scheduled_wave": 200}],
+            "exhaustion": {"event_id": "exhaustion-1"},
+        }
+    }
+    app._request_perk_checkpoint_for_passive_boundary()
+
+    assert scheduler.request_observation.call_args_list == [
+        call("perk_selection_boundary"),
+        call("perk_exhaustion_boundary"),
+    ]

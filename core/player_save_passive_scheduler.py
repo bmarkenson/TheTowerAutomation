@@ -1,8 +1,8 @@
-"""Normal-runtime scheduling for shared passive player-save bundles.
+"""Explicit Perk-checkpoint scheduling for shared passive save bundles.
 
-This owner controls cadence only.  It performs no Android lifecycle action and
-grants no input authority.  One typed passive bundle is delivered to every
-registered consumer; consumers project it independently and never reacquire.
+Stable Perk selection/exhaustion observations are the only asynchronous
+acquisition cause.  One typed passive bundle is delivered to every registered
+consumer; metrics and audit may project it, but cannot request another read.
 """
 
 from __future__ import annotations
@@ -29,10 +29,16 @@ PassiveBundleConsumer = Callable[
 
 _QUEUE_CAPACITY = 8
 _SAFE_REASON_RE = re.compile(r"[a-z][a-z0-9_]{0,95}")
+_PERK_CHECKPOINT_REASONS = frozenset(
+    {
+        "perk_exhaustion_boundary",
+        "perk_selection_boundary",
+    }
+)
 
 
 class PlayerSavePassiveScheduler:
-    """Acquire one passive bundle on cadence or a coalesced checkpoint request."""
+    """Acquire one passive bundle for a coalesced Perk checkpoint request."""
 
     def __init__(
         self,
@@ -40,15 +46,10 @@ class PlayerSavePassiveScheduler:
         acquirer: StablePlayerSaveAcquirer,
         context_fn: Callable[[], Optional[PlayerSaveObservationContext]],
         consumers: Sequence[PassiveBundleConsumer],
-        interval_seconds: float = 300.0,
-        monotonic_fn: Callable[[], float] = time.monotonic,
         start_worker: bool = True,
     ) -> None:
         if not isinstance(acquirer, StablePlayerSaveAcquirer):
             raise TypeError("passive scheduler requires the shared acquirer")
-        interval = float(interval_seconds)
-        if interval <= 0:
-            raise ValueError("passive scheduler interval must be positive")
         if not callable(context_fn):
             raise TypeError("passive scheduler requires a context provider")
         normalized_consumers = tuple(consumer for consumer in consumers if callable(consumer))
@@ -57,8 +58,6 @@ class PlayerSavePassiveScheduler:
         self._acquirer = acquirer
         self._context_fn = context_fn
         self._consumers = normalized_consumers
-        self._interval_seconds = interval
-        self._monotonic_fn = monotonic_fn
         self._commands: queue.Queue[Optional[str]] = queue.Queue(
             maxsize=_QUEUE_CAPACITY
         )
@@ -75,10 +74,10 @@ class PlayerSavePassiveScheduler:
             self._thread.start()
 
     def request_observation(self, reason_code: str) -> bool:
-        """Request one prompt checkpoint without blocking the App loop."""
+        """Request one recognized Perk checkpoint without blocking App."""
 
         reason = str(reason_code or "").strip().lower()
-        if self._closed or _SAFE_REASON_RE.fullmatch(reason) is None:
+        if self._closed or reason not in _PERK_CHECKPOINT_REASONS:
             return False
         with self._pending_lock:
             if reason in self._pending_reasons:
@@ -112,30 +111,22 @@ class PlayerSavePassiveScheduler:
             self._thread.join(timeout=max(0.0, float(timeout)))
 
     def wait_until_idle(self, timeout: float = 2.0) -> bool:
-        deadline = self._monotonic_fn() + max(0.0, float(timeout))
-        while self._monotonic_fn() < deadline:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while time.monotonic() < deadline:
             if self._commands.unfinished_tasks == 0:
                 return True
             time.sleep(0.005)
         return self._commands.unfinished_tasks == 0
 
     def _worker(self) -> None:
-        next_periodic = self._monotonic_fn() + self._interval_seconds
         while not self._closed:
-            timeout = max(0.0, next_periodic - self._monotonic_fn())
-            try:
-                reason = self._commands.get(timeout=timeout)
-            except queue.Empty:
-                self._acquire_and_fan_out("periodic_interval")
-                next_periodic = self._monotonic_fn() + self._interval_seconds
-                continue
+            reason = self._commands.get()
             try:
                 if reason is None:
                     return
                 with self._pending_lock:
                     self._pending_reasons.discard(reason)
                 self._acquire_and_fan_out(reason)
-                next_periodic = self._monotonic_fn() + self._interval_seconds
             finally:
                 self._commands.task_done()
 

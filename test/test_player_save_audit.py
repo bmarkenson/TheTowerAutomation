@@ -5,7 +5,6 @@ import hashlib
 import inspect
 import json
 import threading
-import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -13,13 +12,11 @@ import pytest
 
 from core.app import App
 from core.app_setup import config_from_args, parse_args
-from core.player_save import PlayerSaveDecodeError, PlayerSavePullError
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
     PlayerSaveTargetBinding,
-    StablePlayerSaveAcquirer,
 )
 from core.player_save_audit import (
     AppendOnlyAuditReceiptWriter,
@@ -63,24 +60,6 @@ FORBIDDEN_KEY_PARTS = {
 
 def _sha(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()
-
-
-def _shared_acquirer(
-    *,
-    target_snapshot_fn=lambda: SimpleNamespace(
-        target="localhost:5555",
-        generation=1,
-        owned=True,
-    ),
-    pull_fn=None,
-    decode_fn=None,
-):
-    return StablePlayerSaveAcquirer(
-        target_snapshot_fn=target_snapshot_fn,
-        pull_fn=pull_fn,
-        decode_fn=decode_fn,
-        pull_options={"attempts": 3, "settle_seconds": 0.1},
-    )
 
 
 def _identity(
@@ -238,7 +217,7 @@ def _request(boundary: str | None, *, offset: int = 0, reason: str | None = None
         "RUNNING": "first_running_observation",
         "GAME_OVER": "game_over",
         "TOURNAMENT_RESULTS": "tournament_results",
-        None: "periodic_interval",
+        None: "perk_selection_boundary",
     }[boundary]
     return AuditRequest(
         reasons=(reason or default_reason,),
@@ -252,7 +231,6 @@ def _machine(receipts: list[dict], *, runtime="runtime-1", collector="collector-
     machine = PlayerSaveAuditStateMachine(
         load_player_save_audit_manifest(),
         receipt_sink=lambda receipt: receipts.append(dict(receipt)),
-        interval_seconds=300,
         runtime_session_id=runtime,
         collector_session_id=collector,
         now_fn=lambda: START,
@@ -312,6 +290,45 @@ def _unmapped_runtime(
     )
 
 
+def _acquisition(
+    runtime: NormalizedRuntimeSave | None,
+    *,
+    generation: int = 1,
+    target: str = "localhost:5555",
+    status: PlayerSaveAcquisitionStatus = PlayerSaveAcquisitionStatus.COMPLETE,
+    reason: str = "save_acquired",
+) -> PlayerSaveAcquisitionBundle:
+    captured = (
+        datetime.fromisoformat(str(runtime.capture["captured_at"]))
+        if runtime is not None
+        else START
+    )
+    snapshot = (
+        SimpleNamespace(
+            runtime_save=runtime,
+            mapping_supported=True,
+            shape_valid=True,
+            game_version=runtime.active_round_identity.game_version
+            if runtime.active_round_identity is not None
+            else 1073,
+            mapping_id=runtime.mapping_id,
+        )
+        if runtime is not None and status is PlayerSaveAcquisitionStatus.COMPLETE
+        else None
+    )
+    return PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+        status=status,
+        reason=reason,
+        binding=PlayerSaveTargetBinding(target, generation),
+        acquisition_started_at=captured - timedelta(milliseconds=100),
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=25),
+        transport_stable=status is PlayerSaveAcquisitionStatus.COMPLETE,
+        snapshot=snapshot,
+    )
+
+
 def _mapping_batch(*, family: str = "interest") -> dict:
     return {
         "schema_version": 1,
@@ -331,30 +348,17 @@ def _mapping_batch(*, family: str = "interest") -> dict:
     }
 
 
-def test_cli_and_environment_opt_in_are_default_disabled_and_bounded(monkeypatch):
+def test_cli_and_environment_opt_in_are_default_disabled(monkeypatch):
     monkeypatch.delenv("THETOWER_PLAYER_SAVE_AUDIT", raising=False)
-    monkeypatch.delenv("THETOWER_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS", raising=False)
     config = config_from_args(parse_args([]))
     assert config.player_save_audit_enabled is False
-    assert config.player_save_audit_interval_seconds == 300
 
-    config = config_from_args(
-        parse_args(
-            [
-                "--player-save-audit",
-                "--player-save-audit-interval-seconds",
-                "30",
-            ]
-        )
-    )
+    config = config_from_args(parse_args(["--player-save-audit"]))
     assert config.player_save_audit_enabled is True
-    assert config.player_save_audit_interval_seconds == 30
 
     monkeypatch.setenv("THETOWER_PLAYER_SAVE_AUDIT", "yes")
-    monkeypatch.setenv("THETOWER_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS", "600")
     config = config_from_args(parse_args([]))
     assert config.player_save_audit_enabled is True
-    assert config.player_save_audit_interval_seconds == 600
     assert (
         config_from_args(
             parse_args(["--no-player-save-audit"])
@@ -362,99 +366,56 @@ def test_cli_and_environment_opt_in_are_default_disabled_and_bounded(monkeypatch
         is False
     )
 
-    with pytest.raises(SystemExit):
-        parse_args(["--player-save-audit-interval-seconds", "29"])
-    with pytest.raises(SystemExit):
-        parse_args(["--player-save-audit-interval-seconds", "3601"])
     monkeypatch.setenv("THETOWER_PLAYER_SAVE_AUDIT", "sometimes")
     with pytest.raises(SystemExit):
         parse_args([])
 
 
-def test_disabled_collector_performs_zero_acquisition_and_creates_zero_files(
-    tmp_path,
-):
-    pulls = Mock()
-    targets = Mock()
+def test_disabled_collector_creates_zero_files(tmp_path):
     receipt = tmp_path / "audit" / "receipts.jsonl"
     collector = PlayerSaveAuditCollector(
         enabled=False,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            target_snapshot_fn=targets,
-            pull_fn=pulls,
-        ),
-        acquire_internally=True,
         receipt_path=receipt,
     )
 
     collector.observe_screen(
         {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
     )
-    collector.request_observation("periodic_interval")
     collector.observe_visual_events([{"ability": "nuke"}])
     collector.observe_perk_mapping_evidence([_mapping_batch()])
     collector.reset_perk_mapping_evidence()
     collector.close(wait=True)
 
-    pulls.assert_not_called()
-    targets.assert_not_called()
     assert not receipt.exists()
     assert not receipt.parent.exists()
 
 
-def test_collector_rejects_out_of_bounds_interval_without_acquisition_or_receipt(
-    tmp_path,
-    monkeypatch,
-):
-    pulls = Mock()
-    targets = Mock()
-    receipt = tmp_path / "audit" / "receipts.jsonl"
-    monkeypatch.setattr("core.player_save_audit.log", Mock())
+def test_collector_has_no_acquisition_or_cadence_api(tmp_path):
+    parameters = inspect.signature(PlayerSaveAuditCollector).parameters
+    assert "interval_seconds" not in parameters
+    assert "acquirer" not in parameters
+    assert "acquire_internally" not in parameters
+    assert not hasattr(PlayerSaveAuditCollector, "request_observation")
 
+    receipt = tmp_path / "receipts.jsonl"
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=29,
-        acquirer=_shared_acquirer(
-            target_snapshot_fn=targets,
-            pull_fn=pulls,
-        ),
-        acquire_internally=True,
         receipt_path=receipt,
     )
-    collector.observe_screen({"state": "RUNNING"})
+    collector.observe_screen({"state": "TOURNAMENT_RESULTS"})
+    assert collector.wait_until_idle(2.0)
     collector.close(wait=True)
 
-    assert collector.enabled is False
-    pulls.assert_not_called()
-    targets.assert_not_called()
-    assert not receipt.exists()
-    assert not receipt.parent.exists()
-
-
-def test_internal_cadence_requires_an_explicit_shared_acquirer(
-    tmp_path,
-    monkeypatch,
-):
-    log = Mock()
-    monkeypatch.setattr("core.player_save_audit.log", log)
-
-    collector = PlayerSaveAuditCollector(
-        enabled=True,
-        interval_seconds=300,
-        acquire_internally=True,
-        receipt_path=tmp_path / "receipts.jsonl",
-    )
-
-    assert collector.enabled is False
-    collector.close(wait=True)
-    assert any("shared_acquirer_unavailable" in str(call) for call in log.call_args_list)
-    assert not (tmp_path / "receipts.jsonl").exists()
+    records = [json.loads(line) for line in receipt.read_text().splitlines()]
+    session = _records(records, "collector_session")[0]
+    assert session["configuration"]["acquisition_policy"] == "shared_bundles_only"
+    boundary = _records(records, "boundary_observation")[0]
+    assert boundary["boundary"]["save_acquisition_requested"] is False
+    assert not _records(records, "save_observation")
 
 
 def test_enabled_worker_projects_only_normalized_runtime_evidence(tmp_path):
     receipt = tmp_path / "receipts.jsonl"
-    raw_payload = b"raw-save-marker-that-must-not-survive"
     runtime = NormalizedRuntimeSave(
         mapping_id="data-9-game-1073",
         audit_matrix_id="data-9-game-1073-runtime-audit-v2",
@@ -486,40 +447,20 @@ def test_enabled_worker_projects_only_normalized_runtime_evidence(tmp_path):
             entry=None,
         ),
     )
-    pull = Mock(return_value=raw_payload)
-
-    def decode(payload, *, source_name, captured_at):
-        assert payload == raw_payload
-        assert source_name == "playerInfo.dat"
-        assert captured_at.tzinfo is not None
-        return SimpleNamespace(
-            runtime_save=runtime,
-            mapping_supported=True,
-            shape_valid=True,
-            game_version=1073,
-        )
-
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            pull_fn=pull,
-            decode_fn=decode,
-        ),
-        acquire_internally=True,
         receipt_path=receipt,
     )
     collector.observe_screen(
         {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
     )
+    collector.observe_acquisition(
+        _acquisition(runtime),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
     collector.close(wait=True, timeout=1.0)
 
-    pull.assert_called_once_with(
-        device_id="localhost:5555",
-        attempts=3,
-        settle_seconds=0.1,
-    )
     records = [json.loads(line) for line in receipt.read_text().splitlines()]
     save = next(
         record for record in records if record["record_type"] == "save_observation"
@@ -529,90 +470,34 @@ def test_enabled_worker_projects_only_normalized_runtime_evidence(tmp_path):
     assert save["history_tail"]["baseline_comparison"]["status"] == (
         "inactive_home_baseline_recorded"
     )
-    assert raw_payload.decode() not in json.dumps(records)
-
-
-def test_external_mode_projects_shared_bundle_without_another_pull(tmp_path):
-    receipt = tmp_path / "receipts.jsonl"
-    pull = Mock()
-    runtime = _unmapped_runtime(1)
-    captured = datetime.fromisoformat(str(runtime.capture["captured_at"]))
-    snapshot = SimpleNamespace(
-        runtime_save=runtime,
-        mapping_supported=True,
-        shape_valid=True,
-        game_version=1073,
-        mapping_id=runtime.mapping_id,
-    )
-    acquisition = PlayerSaveAcquisitionBundle(
-        acquisition_type=PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
-        status=PlayerSaveAcquisitionStatus.COMPLETE,
-        reason="save_acquired",
-        binding=PlayerSaveTargetBinding("localhost:5555", 1),
-        acquisition_started_at=captured - timedelta(milliseconds=100),
-        captured_at=captured,
-        acquisition_completed_at=captured + timedelta(milliseconds=25),
-        transport_stable=True,
-        snapshot=snapshot,
-    )
-    collector = PlayerSaveAuditCollector(
-        enabled=True,
-        interval_seconds=300,
-        receipt_path=receipt,
-        acquire_internally=False,
-    )
-
-    collector.observe_screen({"state": "RUNNING"})
-    collector.observe_acquisition(
-        acquisition,
-        reason_code="periodic_interval",
-    )
-    assert collector.wait_until_idle(2.0)
-    collector.close(wait=True, timeout=1.0)
-
-    pull.assert_not_called()
-    records = [json.loads(line) for line in receipt.read_text().splitlines()]
-    saves = _records(records, "save_observation")
-    assert len(saves) == 1
-    assert saves[0]["capture"]["save_revision"] == 1
-    assert saves[0]["request"]["reason_codes"] == ["periodic_interval"]
-    assert datetime.fromisoformat(saves[0]["request"]["requested_at"]) == (
-        acquisition.acquisition_started_at
-    )
+    assert save["request"]["reason_codes"] == ["perk_selection_boundary"]
 
 
 def test_collector_maps_unknown_perk_and_keeps_mapping_across_retry_reset(tmp_path):
     receipt = tmp_path / "receipts.jsonl"
-    decode_count = {"value": 0}
-
-    def decode(_payload, **_kwargs):
-        decode_count["value"] += 1
-        return SimpleNamespace(
-            runtime_save=_unmapped_runtime(decode_count["value"]),
-            mapping_supported=True,
-            shape_valid=True,
-            game_version=1073,
-        )
-
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            pull_fn=lambda **_kwargs: b"stable",
-            decode_fn=decode,
-        ),
-        acquire_internally=True,
         receipt_path=receipt,
     )
     collector.observe_screen({"state": "RUNNING"})
+    collector.observe_acquisition(
+        _acquisition(_unmapped_runtime(1)),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
 
     collector.observe_perk_mapping_evidence([_mapping_batch()])
-    collector.request_observation("mapping_followup")
+    collector.observe_acquisition(
+        _acquisition(_unmapped_runtime(2)),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
 
     collector.reset_perk_mapping_evidence()
-    collector.request_observation("retry_followup")
+    collector.observe_acquisition(
+        _acquisition(_unmapped_runtime(3)),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
     collector.close(wait=True, timeout=1.0)
 
@@ -667,43 +552,40 @@ def test_collector_maps_unknown_perk_and_keeps_mapping_across_retry_reset(tmp_pa
 
 def test_target_generation_change_discards_learned_perk_mapping(tmp_path):
     receipt = tmp_path / "receipts.jsonl"
-    holder = {"generation": 1, "decode_count": 0}
-
-    def target_snapshot():
-        return SimpleNamespace(
-            target=f"localhost:{5545 + holder['generation'] * 10}",
-            generation=holder["generation"],
-            owned=True,
-        )
-
-    def decode(_payload, **_kwargs):
-        holder["decode_count"] += 1
-        return SimpleNamespace(
-            runtime_save=_unmapped_runtime(holder["decode_count"]),
-            mapping_supported=True,
-            shape_valid=True,
-            game_version=1073,
-        )
 
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            target_snapshot_fn=target_snapshot,
-            pull_fn=lambda **_kwargs: b"stable",
-            decode_fn=decode,
-        ),
-        acquire_internally=True,
         receipt_path=receipt,
     )
     collector.observe_screen({"state": "RUNNING"})
+    collector.observe_acquisition(
+        _acquisition(
+            _unmapped_runtime(1),
+            target="localhost:5555",
+            generation=1,
+        ),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
     collector.observe_perk_mapping_evidence([_mapping_batch()])
-    collector.request_observation("mapping_followup")
+    collector.observe_acquisition(
+        _acquisition(
+            _unmapped_runtime(2),
+            target="localhost:5555",
+            generation=1,
+        ),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
 
-    holder["generation"] = 2
-    collector.request_observation("target_handoff_followup")
+    collector.observe_acquisition(
+        _acquisition(
+            _unmapped_runtime(3),
+            target="localhost:5565",
+            generation=2,
+        ),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
     collector.close(wait=True, timeout=1.0)
 
@@ -720,36 +602,33 @@ def test_target_generation_change_discards_learned_perk_mapping(tmp_path):
 
 def test_compatible_core_mapping_does_not_broaden_exact_perk_calibration(tmp_path):
     receipt = tmp_path / "receipts.jsonl"
-    revision = {"value": 0}
-
-    def decode(_payload, **_kwargs):
-        revision["value"] += 1
-        runtime = _unmapped_runtime(
-            revision["value"],
-            mapping_id="data-9-game-1101",
-            game_version=1101,
-        )
-        return SimpleNamespace(
-            runtime_save=runtime,
-            mapping_supported=True,
-            shape_valid=True,
-            game_version=1101,
-        )
-
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            pull_fn=lambda **_kwargs: b"stable",
-            decode_fn=decode,
-        ),
-        acquire_internally=True,
         receipt_path=receipt,
     )
     collector.observe_screen({"state": "RUNNING"})
+    collector.observe_acquisition(
+        _acquisition(
+            _unmapped_runtime(
+                1,
+                mapping_id="data-9-game-1101",
+                game_version=1101,
+            )
+        ),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
     collector.observe_perk_mapping_evidence([_mapping_batch()])
-    collector.request_observation("mapping_followup")
+    collector.observe_acquisition(
+        _acquisition(
+            _unmapped_runtime(
+                2,
+                mapping_id="data-9-game-1101",
+                game_version=1101,
+            )
+        ),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
     collector.close(wait=True, timeout=1.0)
 
@@ -772,13 +651,6 @@ def test_collector_rejects_unallowlisted_perk_mapping_before_queue(tmp_path):
     receipt = tmp_path / "receipts.jsonl"
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            pull_fn=lambda **_kwargs: (_ for _ in ()).throw(
-                PlayerSavePullError("unused")
-            ),
-        ),
-        acquire_internally=True,
         receipt_path=receipt,
     )
     unsafe = _mapping_batch()
@@ -1017,7 +889,6 @@ def test_duplicate_revision_and_source_are_suppressed_without_rewriting_prior_li
     machine = PlayerSaveAuditStateMachine(
         load_player_save_audit_manifest(),
         receipt_sink=writer.append,
-        interval_seconds=300,
         runtime_session_id="runtime-append",
         collector_session_id="collector-append",
         now_fn=lambda: START,
@@ -1739,7 +1610,6 @@ def test_future_optional_component_requires_explicit_manifest_allowlist(tmp_path
     machine = PlayerSaveAuditStateMachine(
         load_player_save_audit_manifest(manifest_path),
         receipt_sink=receipts.append,
-        interval_seconds=300,
         runtime_session_id="runtime-future-gate",
         collector_session_id="collector-future-gate",
         now_fn=lambda: START,
@@ -1825,95 +1695,23 @@ def test_recursive_privacy_allowlist_excludes_private_and_unbounded_evidence():
     inspect(receipts)
 
 
-def test_slow_failed_acquisition_does_not_block_or_change_app_dispatch(tmp_path):
-    started = threading.Event()
-    release = threading.Event()
+def test_typed_target_handoff_failure_is_projected_without_acquisition(tmp_path):
     receipt = tmp_path / "receipts.jsonl"
-
-    def slow_pull(**_kwargs):
-        started.set()
-        assert release.wait(2.0)
-        raise PlayerSavePullError("private transport detail")
-
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            pull_fn=slow_pull,
-        ),
-        acquire_internally=True,
-        receipt_path=receipt,
-    )
-    app = App.__new__(App)
-    app._player_save_audit_collector = collector
-    dispatch = Mock()
-
-    before = time.monotonic()
-    result = app._observe_player_save_audit_screen(
-        {"state": "GAME_OVER", "home_battle_control": "UNKNOWN"}
-    )
-    elapsed = time.monotonic() - before
-    dispatch()
-
-    assert result is None
-    assert elapsed < 0.1
-    dispatch.assert_called_once_with()
-    assert started.wait(1.0)
-    release.set()
-    assert collector.wait_until_idle(2.0)
-    collector.close(wait=True, timeout=1.0)
-    records = [json.loads(line) for line in receipt.read_text().splitlines()]
-    failures = [
-        record for record in records if record["record_type"] == "audit_outcome"
-    ]
-    assert failures[-1]["outcome"]["code"] == "stable_read_unavailable"
-    assert "private transport detail" not in json.dumps(records)
-
-
-def test_exact_target_result_is_discarded_after_handoff(tmp_path, monkeypatch):
-    holder = {"generation": 1}
-    receipt = tmp_path / "receipts.jsonl"
-
-    def target_snapshot():
-        return SimpleNamespace(
-            target="localhost:5555" if holder["generation"] == 1 else "localhost:5565",
-            generation=holder["generation"],
-            owned=True,
-        )
-
-    def decode(_payload, **_kwargs):
-        holder["generation"] = 2
-        return SimpleNamespace(
-            runtime_save=object(),
-            mapping_supported=True,
-            shape_valid=True,
-            game_version=1073,
-        )
-
-    safe_observation = _observation(
-        1,
-        active=False,
-        wave=0,
-        tail=_tail("before", count=1),
-    )
-    monkeypatch.setattr(
-        "core.player_save_audit._audit_observation_from_runtime",
-        lambda *_args, **_kwargs: safe_observation,
-    )
-    collector = PlayerSaveAuditCollector(
-        enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            target_snapshot_fn=target_snapshot,
-            pull_fn=lambda **_kwargs: b"stable",
-            decode_fn=decode,
-        ),
-        acquire_internally=True,
         receipt_path=receipt,
     )
 
     collector.observe_screen(
         {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+    )
+    collector.observe_acquisition(
+        _acquisition(
+            None,
+            status=PlayerSaveAcquisitionStatus.BINDING_LOST,
+            reason="exact_target_binding_changed",
+        ),
+        reason_code="perk_selection_boundary",
     )
     assert collector.wait_until_idle(2.0)
     collector.close(wait=True, timeout=1.0)
@@ -1926,41 +1724,6 @@ def test_exact_target_result_is_discarded_after_handoff(tmp_path, monkeypatch):
     assert not any(record["record_type"] == "save_observation" for record in records)
     assert "localhost:5555" not in json.dumps(records)
     assert "localhost:5565" not in json.dumps(records)
-
-
-def test_single_worker_never_has_more_than_one_poll_in_flight(tmp_path):
-    lock = threading.Lock()
-    active = 0
-    maximum = 0
-    calls = 0
-
-    def pull(**_kwargs):
-        nonlocal active, maximum, calls
-        with lock:
-            active += 1
-            maximum = max(maximum, active)
-            calls += 1
-        time.sleep(0.05)
-        with lock:
-            active -= 1
-        raise PlayerSavePullError("unavailable")
-
-    collector = PlayerSaveAuditCollector(
-        enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            pull_fn=pull,
-        ),
-        acquire_internally=True,
-        receipt_path=tmp_path / "receipts.jsonl",
-    )
-    collector.request_observation("test_request_one")
-    collector.request_observation("test_request_two")
-    assert collector.wait_until_idle(2.0)
-    collector.close(wait=True, timeout=1.0)
-
-    assert calls == 2
-    assert maximum == 1
 
 
 def test_pause_does_not_block_passive_boundary_forwarding():
@@ -2026,14 +1789,13 @@ def test_perk_timeline_syncs_save_before_passive_observation_without_ui_route():
     assert "perk_timeline_handled" not in source
 
 
-def test_receipt_write_or_decoder_failure_cannot_escape_into_normal_runtime(
+def test_receipt_write_or_typed_bundle_failure_cannot_escape_into_normal_runtime(
     tmp_path,
 ):
     receipts = Mock(side_effect=OSError("private filesystem detail"))
     machine = PlayerSaveAuditStateMachine(
         load_player_save_audit_manifest(),
         receipt_sink=receipts,
-        interval_seconds=300,
         runtime_session_id="runtime-write-failure",
         collector_session_id="collector-write-failure",
         now_fn=lambda: START,
@@ -2047,17 +1809,17 @@ def test_receipt_write_or_decoder_failure_cannot_escape_into_normal_runtime(
     receipt_path = tmp_path / "decode-failure.jsonl"
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            pull_fn=lambda **_kwargs: b"stable",
-            decode_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                PlayerSaveDecodeError("private decoder detail")
-            ),
-        ),
-        acquire_internally=True,
         receipt_path=receipt_path,
     )
     collector.observe_screen({"state": "RUNNING"})
+    collector.observe_acquisition(
+        _acquisition(
+            None,
+            status=PlayerSaveAcquisitionStatus.UNAVAILABLE,
+            reason="decoder_unavailable",
+        ),
+        reason_code="perk_selection_boundary",
+    )
     assert collector.wait_until_idle(2.0)
     collector.close(wait=True, timeout=1.0)
 
@@ -2066,7 +1828,6 @@ def test_receipt_write_or_decoder_failure_cannot_escape_into_normal_runtime(
         record.get("outcome", {}).get("code") == "decoder_unavailable"
         for record in records
     )
-    assert "private decoder detail" not in json.dumps(records)
 
 
 def test_collector_worker_start_failure_disables_it_without_runtime_failure(
@@ -2074,7 +1835,6 @@ def test_collector_worker_start_failure_disables_it_without_runtime_failure(
     monkeypatch,
 ):
     receipt = tmp_path / "receipts.jsonl"
-    targets = Mock()
     monkeypatch.setattr("core.player_save_audit.log", Mock())
 
     def fail_start(_thread):
@@ -2083,46 +1843,33 @@ def test_collector_worker_start_failure_disables_it_without_runtime_failure(
     monkeypatch.setattr(threading.Thread, "start", fail_start)
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(target_snapshot_fn=targets),
-        acquire_internally=True,
         receipt_path=receipt,
     )
 
     assert collector.enabled is False
     collector.observe_screen({"state": "RUNNING"})
     collector.close(wait=True)
-    targets.assert_not_called()
     assert not receipt.exists()
 
 
-def test_tournament_terminal_boundary_requests_an_immediate_observation(tmp_path):
-    started = threading.Event()
-
-    def pull(**_kwargs):
-        started.set()
-        raise PlayerSavePullError("unavailable")
-
+def test_tournament_terminal_boundary_records_without_requesting_a_save(tmp_path):
+    receipt = tmp_path / "receipts.jsonl"
     collector = PlayerSaveAuditCollector(
         enabled=True,
-        interval_seconds=300,
-        acquirer=_shared_acquirer(
-            pull_fn=pull,
-        ),
-        acquire_internally=True,
-        receipt_path=tmp_path / "receipts.jsonl",
+        receipt_path=receipt,
     )
     collector.observe_screen({"state": "TOURNAMENT_RESULTS"})
 
-    assert started.wait(1.0)
     assert collector.wait_until_idle(2.0)
     collector.close(wait=True, timeout=1.0)
     records = [
         json.loads(line)
-        for line in (tmp_path / "receipts.jsonl").read_text().splitlines()
+        for line in receipt.read_text().splitlines()
     ]
     boundary = next(
         record for record in records if record["record_type"] == "boundary_observation"
     )
     assert boundary["boundary"]["label"] == "TOURNAMENT_RESULTS"
     assert boundary["boundary"]["reason_code"] == "tournament_results"
+    assert boundary["boundary"]["save_acquisition_requested"] is False
+    assert not _records(records, "save_observation")

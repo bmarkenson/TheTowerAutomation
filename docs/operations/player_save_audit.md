@@ -11,7 +11,10 @@ the question is answered.
 The receipts have no automated consumer. Runtime does not use them. The
 auditor is also not an unknown-field discovery tool; targeted save-mapping and
 calibration work gathers its own purpose-specific evidence. This campaign only
-compares already-understood normalized claims over time.
+compares already-understood normalized claims over time. It consumes bundles
+already acquired for a forced attachment/Home check, a natural terminal
+boundary, or an explicit Perk selection/exhaustion checkpoint. It has no timer,
+cadence, or independent save-read request.
 
 It never sends input, backgrounds the app, navigates, changes lifecycle,
 attaches or creates a battle record, publishes Strategy facts, decides Perks
@@ -26,13 +29,11 @@ The CLI is explicit and defaults off:
 
 ```bash
 .venv/bin/python main.py --player-save-audit
-.venv/bin/python main.py --player-save-audit \
-  --player-save-audit-interval-seconds 600
 .venv/bin/python main.py --no-player-save-audit
 ```
 
-The interval is 30–3600 seconds and defaults to 300. CLI switches override
-environment values; invalid values fail parsing.
+The enable/disable switches override the environment value. There is no audit
+interval setting because enabling audit does not schedule acquisitions.
 
 ## Managed unit
 
@@ -51,15 +52,12 @@ curl --fail --silent --show-error \
   http://127.0.0.1:8787/api/v1/process | jq .
 ```
 
-Atomically enable the campaign with a five-minute cadence:
+Atomically enable the campaign:
 
 ```bash
 install -d -m 700 ~/.config/thetower
 audit_env_next=$(mktemp ~/.config/thetower/player-save-audit.env.XXXXXX)
-printf '%s\n' \
-  'THETOWER_PLAYER_SAVE_AUDIT=1' \
-  'THETOWER_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS=300' \
-  > "$audit_env_next"
+printf '%s\n' 'THETOWER_PLAYER_SAVE_AUDIT=1' > "$audit_env_next"
 chmod 600 "$audit_env_next"
 mv "$audit_env_next" ~/.config/thetower/player-save-audit.env
 ```
@@ -128,11 +126,11 @@ not an authentication or adversarial-security boundary.
 
 Acquisition/decode/receipt failures and disabled optional components leave
 normal UI and automation behavior unchanged. The App uses shared typed bundles;
-the legacy standalone worker permits at most one bounded read, uses only the
-already owned exact target, and never manages an ADB connection. Observation
-continues while globally Paused. Timing fields are observation bounds, not
-exact game write or activation times. Survival checkpoints stay unavailable
-until `V1073-RUNTIME-015`/`016` are independently promoted.
+the audit worker only projects those bundles and never pulls or decodes a save.
+Perk checkpoints may still be requested while globally Paused because they are
+read-only. Timing fields are observation bounds, not exact game write or
+activation times. Survival checkpoints stay unavailable until
+`V1073-RUNTIME-015`/`016` are independently promoted.
 
 Runtime logs and receipts are ignored evidence, not durable issue records.
 Promote a needed regression fixture or follow the issue-evidence lifecycle in

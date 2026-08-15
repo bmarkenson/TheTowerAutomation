@@ -339,7 +339,7 @@ independent projections:
 | Home `NEW_BATTLE` under `save_first` | Consume a valid one-use terminal History handoff when present. If current configuration is requested, or an authoritative History baseline has no handoff, perform one guarded `forced_serialization` even when the configuration requirement set is empty. | Configuration reconciliation, structural History baseline, and every eligible Home projection. | A safely restored acquisition failure may use the existing guarded UI fallback. Restoration, ownership, context, or control ambiguity blocks later input. |
 | Replacement process attached at `RUNNING` | Freeze the accepted selected Strategy definition, then prefer one guarded `forced_serialization`; when its source is safely restored but its data or mapping is unusable, bind the established Battle History/UI route instead. | Save-backed active identity, structural History continuity, temporally classified actual-loadout observations, Perk prefix, and optional audit projection; otherwise UI continuity plus supported UI monitoring. The final attachment is intentional No Strategy observation, an exact compatible Strategy, or incompatible/unprovable degraded observation. | Data, revision, mapping, projection, validation, or reporting failure completes degraded and releases automation. Source-restoration, owner, target, scope, control, or uncertain-input ambiguity is catastrophic and may Pause. |
 | `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, optional audit projection, and Tournament conditions. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
-| Ordinary monitoring | Scheduled `passive_stable_read`, independent of audit opt-in. | Perk and active-run metric monitors, plus audit receipts when enabled, consume the same read-only bundle. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
+| Perk selection or exhaustion checkpoint | One coalesced `passive_stable_read` explicitly requested by the stable Perk top-bar observer. There is no timer or general monitoring cadence. | The Perk monitor is the acquisition cause; active-run metrics and optional audit receipts consume the same read-only bundle without requesting another read. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
 The terminal structural projector validates the newest tail once. A successful
 append or capacity rollover becomes a normalized, one-use handoff in
@@ -362,14 +362,15 @@ forced Home boundary.
 No consumer reacquires data already represented by the bundle. In particular,
 the Tournament Results handler receives either complete or explicitly
 unavailable conditions from the terminal projection instead of performing a
-second save read. The Perk and active-run metric monitors consume ordinary
-passive, already-forced attachment, and natural terminal bundles. The optional
-audit collector also projects those shared objects and is neither an
-acquisition service nor an authority source.
+second save read. The Perk and active-run metric monitors consume
+Perk-requested passive, already-forced attachment, and natural terminal
+bundles. The optional audit collector also projects those shared objects and is
+neither an acquisition service nor an authority source.
 
 `PlayerSaveObservationContext` is the neutral process/activity/target binding
-for passive fan-out. The scheduler rechecks the complete context—including ADB
-target generation—after acquisition and before publication. Each subscriber is
+for Perk-checkpoint fan-out. The scheduler accepts only Perk selection and
+exhaustion reasons, then rechecks the complete context—including ADB target
+generation—after acquisition and before publication. Each subscriber is
 exception-isolated so a Perk projection failure cannot suppress metric or audit
 consumers of the same object. The parser and acquirer retain no process-global
 "latest snapshot" cache; every coherent boundary owns its explicit bundle.
@@ -613,7 +614,8 @@ rules:
     terminal transition confirmation remain owned by verified UI controls.
 
 The Perk-timeline phase is implemented without backgrounding an active battle
-to accelerate a checkpoint. Prompt and periodic reads remain passive. The
+to accelerate a checkpoint. Only a stable Perk selection or exhaustion event
+requests a passive read; no periodic passive acquisition exists. The
 separate `save_first` Current-run attachment boundary may briefly use Android
 Home only for a replacement process already at `RUNNING`; it preserves process,
 activity scope, target generation, active-round identity, control, source
@@ -752,9 +754,9 @@ unknown ID therefore remains unavailable and preserves terminal fallback.
 Ambiguous or conflicting evidence stays unavailable, and the static mapping
 manifest is never rewritten.
 
-The collector begins with a pre-round structural-tail baseline, records the
-first naturally serialized active identity, samples only stable revision
-changes at the audit cadence, and observes the natural terminal transition. It
+The collector begins with a shared pre-round structural-tail baseline when one
+is available, records an already-acquired active identity, projects later Perk
+checkpoint bundles, and observes the shared natural terminal transition. It
 records the last complete same-round Perks, the first inactive/cleared save,
 and any structural tail change—including 30-entry rollover—as candidates. It
 may calculate candidate tier/wave/time agreement, but it cannot call that entry

@@ -537,9 +537,6 @@ class App:
         try:
             self._player_save_audit_collector = PlayerSaveAuditCollector(
                 enabled=config.player_save_audit_enabled,
-                interval_seconds=config.player_save_audit_interval_seconds,
-                acquirer=self._player_save_acquirer,
-                acquire_internally=False,
             )
         except Exception:
             log(
@@ -572,11 +569,10 @@ class App:
                     acquirer=self._player_save_acquirer,
                     context_fn=self._current_player_save_observation_context,
                     consumers=(self._consume_passive_player_save_bundle,),
-                    interval_seconds=config.player_save_audit_interval_seconds,
                 )
             except Exception:
                 log(
-                    "[PLAYER_SAVE_PASSIVE] Normal passive scheduling was "
+                    "[PLAYER_SAVE_PASSIVE] Perk checkpoint scheduling was "
                     "unavailable; terminal Perks UI fallback remains active",
                     "WARN",
                 )
@@ -1258,7 +1254,7 @@ class App:
         context: PlayerSaveObservationContext,
         reason_code: str,
     ) -> None:
-        """Fan one scheduled passive read through the global observation API."""
+        """Fan one Perk-requested bundle through all passive projectors."""
 
         self._publish_player_save_observation(
             acquisition,
@@ -1477,7 +1473,7 @@ class App:
             self._perk_timeline().bind_exhaustion_identity(identity)
 
     def _request_perk_checkpoint_for_passive_boundary(self) -> None:
-        """Coalesce stable top-bar events onto the normal passive scheduler."""
+        """Coalesce stable top-bar events into explicit Perk save checkpoints."""
 
         snapshot = self._perk_timeline().snapshot()
         passive = snapshot.get("passive_top_bar")

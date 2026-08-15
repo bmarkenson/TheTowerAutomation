@@ -1,12 +1,11 @@
 """Opt-in, observation-only player-save audit projection.
 
 The collector is deliberately outside every action and lifecycle authority
-path.  Normal App runtime gives its daemon worker the same typed bundles used
-by other consumers.  A focused standalone cadence must still receive an
-explicit shared acquirer; this module never constructs an acquisition owner.
-Only a compact allowlisted projection crosses the acquisition boundary; raw
-save bytes, decoded roots, profile evidence, and completed-history rows are
-never retained by this module.
+path. Normal App runtime gives its daemon worker the same typed bundles used by
+other consumers. The collector has no acquisition or cadence path. Only a
+compact allowlisted projection crosses the acquisition boundary; raw save
+bytes, decoded roots, profile evidence, and completed-history rows are never
+retained by this module.
 """
 
 from __future__ import annotations
@@ -29,8 +28,6 @@ from uuid import uuid4
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
-    PlayerSaveAcquisitionType,
-    StablePlayerSaveAcquirer,
 )
 from core.perk_id_resolver import (
     normalize_timeline_mapping_batch,
@@ -61,10 +58,6 @@ _WARNING_REMINDER_SECONDS = 15 * 60.0
 _QUEUE_CAPACITY = 128
 _MAX_PERK_MAPPING_BATCHES = 512
 _MAX_PERK_MAPPING_BATCHES_PER_COMMAND = 64
-_DEFAULT_INTERVAL_SECONDS = 300
-_MIN_INTERVAL_SECONDS = 30
-_MAX_INTERVAL_SECONDS = 3600
-
 _BOUNDARY_REASON_CODES = {
     "HOME_NEW_BATTLE": "home_new_battle",
     "RUNNING": "first_running_observation",
@@ -398,7 +391,6 @@ class PlayerSaveAuditStateMachine:
         manifest: PlayerSaveAuditManifest,
         *,
         receipt_sink: Callable[[Mapping[str, Any]], Any],
-        interval_seconds: int,
         runtime_session_id: Optional[str] = None,
         collector_session_id: Optional[str] = None,
         now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -406,7 +398,6 @@ class PlayerSaveAuditStateMachine:
     ) -> None:
         self.manifest = manifest
         self._receipt_sink = receipt_sink
-        self._interval_seconds = int(interval_seconds)
         self.runtime_session_id = runtime_session_id or str(uuid4())
         self.collector_session_id = collector_session_id or str(uuid4())
         self._now_fn = now_fn
@@ -450,8 +441,8 @@ class PlayerSaveAuditStateMachine:
             },
             configuration={
                 "enabled": True,
-                "interval_seconds": self._interval_seconds,
-                "stable_read_policy": "two_identical_reads",
+                "acquisition_policy": "shared_bundles_only",
+                "stable_read_policy": "provided_typed_bundle",
                 "session_restore_policy": "never_restore_prior_session",
             },
             authority=_observation_only_authority(),
@@ -467,7 +458,7 @@ class PlayerSaveAuditStateMachine:
                 "label": label,
                 "observed_at": _utc_iso(request.boundary_observed_at),
                 "reason_code": _BOUNDARY_REASON_CODES[label],
-                "save_acquisition_requested": True,
+                "save_acquisition_requested": False,
             },
             authority=_observation_only_authority(),
         )
@@ -1215,24 +1206,12 @@ class PlayerSaveAuditCollector:
         self,
         *,
         enabled: bool,
-        interval_seconds: int,
         receipt_path: Path | str = DEFAULT_PLAYER_SAVE_AUDIT_RECEIPT_PATH,
         manifest_path: Path | str = DEFAULT_PLAYER_SAVE_AUDIT_MANIFEST_PATH,
-        acquirer: Optional[StablePlayerSaveAcquirer] = None,
-        acquire_internally: bool = False,
         now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         monotonic_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         self.enabled = bool(enabled)
-        self._interval_seconds = _DEFAULT_INTERVAL_SECONDS
-        interval_invalid = False
-        if self.enabled:
-            try:
-                self._interval_seconds = _validated_interval_seconds(interval_seconds)
-            except PlayerSaveAuditError:
-                interval_invalid = True
-        self._acquirer = acquirer
-        self._acquire_internally = bool(acquire_internally)
         self._now_fn = now_fn
         self._monotonic_fn = monotonic_fn
         self._commands: queue.Queue[Any] = queue.Queue(maxsize=_QUEUE_CAPACITY)
@@ -1249,14 +1228,6 @@ class PlayerSaveAuditCollector:
         self._perk_mapping_scope: Optional[tuple[str, int]] = None
         if not self.enabled:
             return
-        if interval_invalid:
-            self.enabled = False
-            self._rate_limited_warning("collector_interval_invalid")
-            return
-        if self._acquire_internally and self._acquirer is None:
-            self.enabled = False
-            self._rate_limited_warning("shared_acquirer_unavailable")
-            return
 
         try:
             manifest = load_player_save_audit_manifest(manifest_path)
@@ -1264,7 +1235,6 @@ class PlayerSaveAuditCollector:
             self._state_machine = PlayerSaveAuditStateMachine(
                 manifest,
                 receipt_sink=writer.append,
-                interval_seconds=self._interval_seconds,
                 now_fn=now_fn,
                 write_failure_fn=self._receipt_write_failed,
             )
@@ -1312,36 +1282,11 @@ class PlayerSaveAuditCollector:
         )
         self._enqueue(_BoundaryCommand(request))
 
-    def request_observation(
-        self,
-        reason_code: str,
-        *,
-        requested_at: Optional[datetime] = None,
-    ) -> None:
-        """Queue an additional safe passive reason without performing a read inline."""
-
-        if not self.enabled or self._closed:
-            return
-        reason = _safe_code(reason_code, "request_reason")
-        with self._boundary_lock:
-            label = self._last_boundary_label
-            boundary_at = self._last_boundary_observed_at
-        request = AuditRequest(
-            reasons=(reason,),
-            requested_at=_aware_datetime(
-                requested_at or self._now_fn(),
-                "requested_at",
-            ),
-            boundary_label=label,
-            boundary_observed_at=boundary_at,
-        )
-        self._enqueue(_BoundaryCommand(request))
-
     def observe_acquisition(
         self,
         acquisition: PlayerSaveAcquisitionBundle,
         *,
-        reason_code: str = "periodic_interval",
+        reason_code: str = "shared_bundle",
         requested_at: Optional[datetime] = None,
     ) -> None:
         """Queue one already-acquired shared bundle for audit projection."""
@@ -1506,34 +1451,13 @@ class PlayerSaveAuditCollector:
         if state is None:
             return
         state.start_session()
-        next_periodic = self._monotonic_fn() + self._interval_seconds
-        mode = "internal cadence" if self._acquire_internally else "shared bundles"
         log(
             "[PLAYER_SAVE_AUDIT] Observation-only collector enabled; "
-            f"source={mode}",
+            "source=shared bundles",
             "INFO",
         )
         while True:
-            timeout = (
-                max(0.0, next_periodic - self._monotonic_fn())
-                if self._acquire_internally
-                else None
-            )
-            try:
-                command = self._commands.get(timeout=timeout)
-            except queue.Empty:
-                with self._boundary_lock:
-                    label = self._last_boundary_label
-                    boundary_at = self._last_boundary_observed_at
-                request = AuditRequest(
-                    reasons=("periodic_interval",),
-                    requested_at=self._now_fn(),
-                    boundary_label=label,
-                    boundary_observed_at=boundary_at,
-                )
-                self._acquire_and_process(request)
-                next_periodic = self._monotonic_fn() + self._interval_seconds
-                continue
+            command = self._commands.get()
 
             try:
                 if isinstance(command, _StopCommand):
@@ -1542,9 +1466,6 @@ class PlayerSaveAuditCollector:
                     if _starts_perk_mapping_round(command.request):
                         self._perk_mapping_batches.clear()
                     state.record_boundary(command.request)
-                    if self._acquire_internally:
-                        self._acquire_and_process(command.request)
-                    next_periodic = self._monotonic_fn() + self._interval_seconds
                 elif isinstance(command, _ExternalAcquisitionCommand):
                     self._process_acquisition(
                         command.request,
@@ -1573,23 +1494,6 @@ class PlayerSaveAuditCollector:
                 self._rate_limited_warning("collector_worker_failed")
             finally:
                 self._commands.task_done()
-
-    def _acquire_and_process(self, request: AuditRequest) -> None:
-        state = self._state_machine
-        if state is None:
-            return
-        acquirer = self._acquirer
-        binding = acquirer.current_binding() if acquirer is not None else None
-        if binding is None:
-            state.record_outcome("exact_target_unavailable", request=request)
-            self._rate_limited_warning("exact_target_unavailable")
-            return
-        self._sync_perk_mapping_scope(binding.private_key)
-        acquisition = acquirer.acquire(
-            PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
-            expected_binding=binding,
-        )
-        self._process_acquisition(request, acquisition)
 
     def _process_acquisition(
         self,
@@ -2386,14 +2290,6 @@ def _boundary_label(value: Any) -> Optional[str]:
         return None
     label = str(value).strip().upper()
     return label if label in _BOUNDARY_REASON_CODES else None
-
-
-def _validated_interval_seconds(value: Any) -> int:
-    if type(value) is not int or not (
-        _MIN_INTERVAL_SECONDS <= value <= _MAX_INTERVAL_SECONDS
-    ):
-        raise PlayerSaveAuditError("collector_interval_invalid")
-    return value
 
 
 def _observation_only_authority() -> dict[str, Any]:
