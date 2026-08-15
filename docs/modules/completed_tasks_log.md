@@ -39,6 +39,24 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Default repository outcome closure
+
+- Policy commit `9d4466d` makes every repository-changing coordinator the
+  promotion owner by default unless the operator requests a draft/review-only
+  result or no promotion, or assigns another owner. A no-publication or
+  retained-work request narrows only its named closure step, and an unfinished
+  guard leaves the outcome pending rather than complete.
+- The canonical assignment and opt-outs remain compact in the startup router;
+  the always-loaded safeguard summarizes and links them, while the conditional
+  production procedure owns validation, deployment, publication, and cleanup.
+  Candidate scope expansion now changes its gate and production boundary
+  without silently ending the coordinator's ownership.
+- The documentation gate passed both lifecycle tests, changed-anchor and stale-
+  contradiction checks, and `git diff --check`. Mandatory `AGENTS.md` plus
+  `docs/new_thread.md` reading decreased from 1,215 to 1,211 words. This
+  documentation-only candidate required no live, service, device, or native-
+  package action.
+
 ### 2026-08-14 Tournament loadout authoring
 
 - This commit makes the immutable bundled Tournament source inspectable and
