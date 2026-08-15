@@ -260,8 +260,9 @@ current runtime state.
   fallback.
 - Load the [dossier](issues/open-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence)
   before changing exclusive-validation launch, Home save carry, or duplicate
-  Tournament session navigation. Next: promote the repair, then confirm one
-  explicitly authorized one-shot binds the carrier and omits duplicate UI;
+  Tournament session navigation. Production commit `9cc4a09` contains the
+  repair. Next: confirm one explicitly authorized one-shot binds the carrier
+  and omits duplicate UI;
   [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ### Assist module assignments always fell back to Modules UI

@@ -44,7 +44,7 @@ as checked checkpoint narrative here.
     session. One post-repair ordinary Home or terminal boundary must omit that
     duplicate UI. Do not change or empty a Module solely to manufacture the
     confirmation.
-  - [ ] Promote and live-confirm
+  - [ ] Live-confirm deployed production commit `9cc4a09` for
     [ISSUE-2026-050](../issues/open-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence).
     The next explicitly authorized owned-validation one-shot must log an
     accepted carried-launch binding, bind the same evidence at stable RUNNING,
