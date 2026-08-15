@@ -91,6 +91,8 @@ _ALLOWED_SCOPE_KEYS = frozenset(
         "family",
         "role",
         "field",
+        "attack_range",
+        "attack_range_contract",
         "cards_deck",
         "workshop_preset",
     }
@@ -449,6 +451,10 @@ def resolve_mapping_candidates(
             expected_observed_scope = item["scope"]
             if item["value_kind"] == "orb_distance_calibration":
                 expected_observed_scope = {"field": item["locator"]}
+                if item["scope"].get("attack_range"):
+                    expected_observed_scope["attack_range"] = item[
+                        "scope"
+                    ]["attack_range"]
             if (
                 len(semantic_values) == item["expected_observation_count"]
                 and len(locator_values) == item["expected_observation_count"]
@@ -1551,12 +1557,19 @@ def _require_pending_pairing_invariants(
                 "mapping_candidate_calibration_scope_invalid"
             )
     elif check_id == "orb_distance":
-        if (
-            set(scope) != {"field", "cards_deck", "workshop_preset"}
-            or scope.get("field") != candidate["locator"]
-            or not scope.get("cards_deck")
-            or not scope.get("workshop_preset")
-        ):
+        current_scope = bool(
+            set(scope) == {"field", "attack_range", "attack_range_contract"}
+            and scope.get("field") == candidate["locator"]
+            and scope.get("attack_range")
+            and scope.get("attack_range_contract")
+        )
+        legacy_scope = bool(
+            set(scope) == {"field", "cards_deck", "workshop_preset"}
+            and scope.get("field") == candidate["locator"]
+            and scope.get("cards_deck")
+            and scope.get("workshop_preset")
+        )
+        if not (current_scope or legacy_scope):
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_calibration_scope_invalid"
             )
@@ -1616,12 +1629,20 @@ def _require_persisted_pairing_invariants(
                 "mapping_candidate_calibration_scope_invalid"
             )
     elif check_id == "orb_distance":
-        if scope != {"field": candidate["locator"]} and (
-            set(scope) != {"field", "cards_deck", "workshop_preset"}
-            or scope.get("field") != candidate["locator"]
-            or not scope.get("cards_deck")
-            or not scope.get("workshop_preset")
-        ):
+        current_scope = bool(
+            set(scope) == {"field", "attack_range", "attack_range_contract"}
+            and scope.get("field") == candidate["locator"]
+            and scope.get("attack_range")
+            and scope.get("attack_range_contract")
+        )
+        historical_field_scope = scope == {"field": candidate["locator"]}
+        legacy_scope = bool(
+            set(scope) == {"field", "cards_deck", "workshop_preset"}
+            and scope.get("field") == candidate["locator"]
+            and scope.get("cards_deck")
+            and scope.get("workshop_preset")
+        )
+        if not (current_scope or historical_field_scope or legacy_scope):
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_calibration_scope_invalid"
             )

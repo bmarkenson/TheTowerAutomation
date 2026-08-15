@@ -44,6 +44,7 @@ ROUND_INVARIANT_ATTACHMENT_CHECKS = frozenset(
         "perk_bans",
         "perk_first_choice",
         "perk_auto_pick_order",
+        "attack_range",
     }
 )
 POINT_IN_TIME_ATTACHMENT_CHECKS = frozenset({"cards_deck"})

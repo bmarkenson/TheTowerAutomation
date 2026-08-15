@@ -8,10 +8,56 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Orb Distance treated selected Range lab level as live Attack Range
+
+**Stable ID:** `ISSUE-2026-052` · **Lifecycle:** `resolved`
+
+- **Observed:** Review of the save-backed Orb matcher after
+  [`ISSUE-2026-051`](#tournament-attachment-reopened-orb-distance-despite-a-bound-save)
+  found that `rangeLevelSelected` was being compared as though it were the
+  displayed Attack Range. Cards and Workshop preset names supplied context,
+  but no calculation proved the live effective value.
+- **Risk:** A complete-looking tuple could enter Home carry or a running
+  attachment and suppress both Attack Range OCR and Distance Adjuster even
+  though base Workshop Range, in-battle upgrades, Range-card state, or Cannon
+  Module Range made the effective value different. The old alias fix closed an
+  unnecessary UI fallback but did not establish this broader dependency.
+- **Safety response:** Unknown tuples and later formula uncertainty continued
+  to retain the existing UI route. The dated evidence now explicitly corrects
+  its original Range interpretation without discarding the valid Orb/UI
+  pairing.
+- **Cause:** Effective Range had no reusable semantic owner. Orb Distance
+  reconstructed authority from one selected-lab field and preset labels, and
+  the calibration path mislabeled visible Range under the same raw locator.
+- **Resolution:** A neutral, versioned Attack Range calculator now reproduces
+  the independently disassembled v1073/v1101 binary32 pipeline. It selects the
+  active total or inactive Workshop level, validates selected/researched lab
+  levels and Range Card state, resolves Primary/Assist Cannon Range effects,
+  applies exact compression/display behavior, and publishes a standalone
+  normalized check with semantic and binding fingerprints. Orb matching uses
+  that value plus only `innerOrbDistance` and `workshopOrbDistance`; preset
+  names no longer grant authority.
+- **Lifecycle boundary:** Out-of-round Range remains available for other
+  consumers but cannot authorize a live Orb check. Active Range below level 79
+  is diagnostic and incomplete because it can still upgrade before
+  consumption. Only a complete, max-stable, current-active-round calculation
+  can project the dependent Orb fact into an attachment. Unlisted forward
+  versions fail only Range and Orb.
+- **Regression:** Formula, Card, lab, Workshop/current level, Module effect,
+  compression, formatting, malformed-input, version, Home-scope, raw-tolerance,
+  candidate-provenance, and attachment-projection cases cover the corrected
+  boundary. UI calibration no longer emits a `rangeLevelSelected` observation
+  for displayed Range.
+
 ### Tournament attachment reopened Orb Distance despite a bound save
 
 **Stable ID:** `ISSUE-2026-051` · **Lifecycle:** `resolved`
 
+- **Superseded authority interpretation:**
+  [`ISSUE-2026-052`](#orb-distance-treated-selected-range-lab-level-as-live-attack-range)
+  corrects the assumption that `rangeLevelSelected` plus preset context proved
+  visible Range. This issue's raw Orb/UI observations remain valid, but its
+  alias-only resolution is not sufficient to suppress the live UI.
 - **Observed:** On 2026-08-15 at 11:41 PDT, automation attached Tournament
   Strategy to an already-running Tournament, forced a fresh version-1101
   player save, and bound its exact active-round identity.

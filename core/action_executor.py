@@ -1074,7 +1074,6 @@ def execute_actions(
                     if not range_basis or extra is None or workshop is None:
                         return
                     locator_values = {
-                        "rangeLevelSelected": range_basis,
                         "innerOrbDistance": extra,
                         "workshopOrbDistance": workshop,
                     }
@@ -1086,7 +1085,10 @@ def execute_actions(
                                 canonical_values=list(locator_values.values()),
                                 locator_values=locator_values,
                                 locator_scopes={
-                                    field: {"field": field}
+                                    field: {
+                                        "field": field,
+                                        "attack_range": range_basis,
+                                    }
                                     for field in locator_values
                                 },
                             ),

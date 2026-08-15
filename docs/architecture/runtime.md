@@ -97,7 +97,13 @@ overviews fail closed. Target Priority and Orb Distance are not Home controls:
 their Home-boundary evidence remains explicitly deferred, and their policies
 are checked after the new run reaches `RUNNING`. Each generated Orb Distance
 action carries the complete configured preset set. The authoritative observed
-Attack Range selects its matching Extra/Workshop pair; a readable Range
+Attack Range selects its matching Extra/Workshop pair. That observation may
+come from the guarded UI or from one exact-version save calculation using the
+active total Workshop level, selected/researched Range lab, live Range Card,
+Cannon Module bonuses, native binary32 compression, and display formatting.
+Save evidence is consumable here only with `current_active_round` scope and a
+maxed current Range level; incomplete, mutable, out-of-round, malformed, or
+forward-version evidence retains the UI. A readable Range
 outside that set is preserved as an operator experiment without opening
 Distance Adjuster. Unreadable Range evidence skips that adjustment and is
 retained as degraded validation evidence. Tier 18 Farm binds
@@ -1118,7 +1124,11 @@ Surrender authority. Once that selective inventory pass reaches a conclusive
 result, the explicitly
 `run_when_attached` battle-only rules observe Damage Slider and the configured
 Orb Distance pair for an authoritative configured Attack Range; they do not
-change either value. A
+change either value. A bound save can skip the Range/Distance panels only when
+its independently calculated Attack Range is complete, max-stable, and bound
+to that active round, and its two Orb raw fields uniquely match the same
+Range-bound tuple. Preset labels and the selected lab level alone are never
+live Range evidence. A
 readable unconfigured Range is preserved without opening Distance Adjuster.
 The attachment path never selects a Home preset or equips a loadout. The
 separate guarded process-reload
@@ -1555,9 +1565,11 @@ warning text in `actions.log`.
   verified final value, and returns to `RUNNING/ATTACK_MENU`. Unknown sequences
   fall back to single-step feedback; unknown or incomplete evidence skips that
   correction and completes the check degraded.
-- Orb Distance enforcement first locates the Attack Range tile and requires
-  authoritative OCR, with one adaptive-threshold retry for the dim value on a
-  Maxed tile. The observed Range selects a matching entry from the complete
+- Orb Distance enforcement first requires authoritative Attack Range evidence.
+  A complete bound save fact may supply it under the calculation and lifecycle
+  rules above; otherwise the workflow locates the tile and uses OCR, with one
+  adaptive-threshold retry for the dim value on a Maxed tile. The observed
+  Range selects a matching entry from the complete
   generated preset set. A readable unconfigured Range records
   `unconfigured_range_preserved` and completes without Distance Adjuster input;
   unreadable evidence is flagged and skips Distance Adjuster. For a configured

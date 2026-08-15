@@ -127,11 +127,14 @@ as checked checkpoint narrative here.
       supplies one unique normalized value/tuple and the reviewed mapping
       workflow accepts it. Damage Slider remains exact. Orb Distance permits
       only its configured one-decimal raw centers with independent `±0.1`
-      variance after exact Range and Cards/Workshop context matching; ambiguous
-      overlap retains UI. Current Farm/Tournament values are save-backed;
-      incompatible versions or shapes and unknown/unsupported values retain the
-      complete UI route. Do not infer neighboring slider values, an Orb
-      distance formula, or a new semantic tuple from the raw tolerance.
+      variance after exact equality with the reusable calculated Attack Range;
+      preset names and `rangeLevelSelected` are not displayed-Range authority.
+      Candidate receipts bind the calculated Range and its semantic-contract
+      fingerprint. Ambiguous overlap, incomplete/mutable active Range,
+      out-of-round scope, incompatible versions/shapes, and
+      unknown/unsupported values retain the complete UI route. The Attack Range
+      formula is versioned and proven separately; raw Orb tolerance still must
+      not infer a new semantic tuple or an Orb-distance conversion formula.
     - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
       weapon index's off/on polarity at a time with normalized
       before/change/restore evidence. Validate Spotlight Missiles off through

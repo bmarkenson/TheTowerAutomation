@@ -39,13 +39,23 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Save-backed effective Attack Range authority
+
+- [`ISSUE-2026-052`](../issues/resolved-2026.md#orb-distance-treated-selected-range-lab-level-as-live-attack-range)
+  replaces the unsafe selected-lab/preset alias with one reusable, versioned
+  v1073/v1101 Attack Range calculation and makes Orb Distance depend on its
+  complete live value. Mutable, Home-scoped, malformed, and forward-version
+  evidence retains UI; candidate calibration no longer labels displayed Range
+  as `rangeLevelSelected`.
+
 ### 2026-08-15 Orb Distance tenths-tolerance policy
 
 - Operator policy now treats one decimal place as sufficient for the raw
   `innerOrbDistance` and `workshopOrbDistance` save fields and accepts an
-  independent `±0.1` variance around each configured center. Range and
-  Cards/Workshop context remain exact, and any overlap between different
-  semantic tuples retains UI rather than guessing.
+  independent `±0.1` variance around each configured center. The subsequently
+  corrected authority requires exact calculated effective Range instead of
+  selected-lab/preset context, and any overlap between different semantic
+  tuples retains UI rather than guessing.
 - Exact candidate `3b603c7` passed compilation, state definitions, clickmap
   integrity with zero errors and the established 44 orphan notices, and all
   2,858 repository tests in 423.44 seconds using development-environment
