@@ -798,10 +798,14 @@ def test_save_backed_required_locks_ignore_unmanaged_health_without_input():
     assert locks["diagnostics"]["unmanaged_locks"] == ["Health"]
 
 
-def test_cards_mismatch_repair_invalidates_save_backed_perk_decisions():
+def test_cards_mismatch_repair_preserves_unrelated_save_decisions():
     router = _NoBattleRouter(selected=False, correct_guardians=True)
     requirements = {
         "cards_deck": "Farm",
+        "card_recharge_modes": {
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
+        },
         "workshop_preset": "Farm",
         "bots_preset": "Farm",
         "guardian_chips": ["Fetch", "Summon", "Scout"],
@@ -816,6 +820,7 @@ def test_cards_mismatch_repair_invalidates_save_backed_perk_decisions():
     invalidations = []
     save_decisions = _save_matches(
         requirements,
+        "card_recharge_modes",
         "workshop_preset",
         "bots_preset",
         "guardian_chips",
@@ -825,25 +830,7 @@ def test_cards_mismatch_repair_invalidates_save_backed_perk_decisions():
     )
     save_decisions.update(_save_mismatches(requirements, "cards_deck"))
     ensure_perks = Mock(
-        return_value=HomePerkConfigurationResult(
-            valid=True,
-            changed=False,
-            reason="matched",
-            failed_check=None,
-            evidence={
-                check_id: {
-                    "checked": True,
-                    "valid": True,
-                    "observed": requirements[check_id],
-                }
-                for check_id in (
-                    "perk_first_choice",
-                    "perk_bans",
-                    "perk_auto_pick_order",
-                )
-            },
-            home_screenshot="home",
-        )
+        side_effect=AssertionError("accepted Perks tabs must remain closed")
     )
 
     result = _run(
@@ -855,24 +842,34 @@ def test_cards_mismatch_repair_invalidates_save_backed_perk_decisions():
     )
 
     assert result.complete
-    assert invalidations == ["cards_deck_repair"]
-    ensure_perks.assert_called_once()
-    assert ensure_perks.call_args.kwargs["waived_fields"] == ()
+    assert invalidations == []
+    ensure_perks.assert_not_called()
+    assert router.card_recharge_checks == []
     assert "navigation.goto_cards_home" in router.static_actions
-    assert "navigation.goto_workshop_home" in router.static_actions
-    assert "navigation.event:bots_tab" in router.static_actions
-    assert "navigation.guild:guardian_tab" in router.static_actions
+    assert "navigation.goto_workshop_home" not in router.static_actions
+    assert "navigation.event:bots_tab" not in router.static_actions
+    assert "navigation.guild:guardian_tab" not in router.static_actions
     assert result.evidence["cards_deck"]["status"] == "ui_verified_repair"
     assert result.evidence["cards_deck"]["source"] == "ui"
     assert result.evidence["cards_deck"]["save_disposition"] == "save_mismatch"
-    assert result.evidence["save_preflight"]["invalidated"] is True
-    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == []
+    assert result.evidence["save_preflight"]["invalidated"] is False
+    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == [
+        "bots_preset",
+        "card_recharge_modes",
+        "guardian_chips",
+        "perk_auto_pick_order",
+        "perk_bans",
+        "perk_first_choice",
+        "workshop_preset",
+    ]
     for check_id in (
         "perk_first_choice",
         "perk_bans",
         "perk_auto_pick_order",
     ):
-        assert result.evidence[check_id]["checked"] is True
+        assert result.evidence[check_id]["source"] == (
+            "player_save_preflight"
+        )
 
 
 def test_multiple_trusted_mismatches_run_only_their_ui_repair_paths():
@@ -903,15 +900,16 @@ def test_multiple_trusted_mismatches_run_only_their_ui_repair_paths():
     assert "navigation.goto_cards_home" in router.static_actions
     assert "navigation.goto_workshop_home" in router.static_actions
     assert "navigation.event:bots_tab" in router.static_actions
-    assert "navigation.guild:guardian_tab" in router.static_actions
+    assert "navigation.guild:guardian_tab" not in router.static_actions
     assert result.evidence["save_preflight"]["ui_verified_checks"] == {
         "bots_preset": "ui_verified_repair",
         "cards_deck": "ui_verified_repair",
-        "guardian_chips": "ui_verified",
         "workshop_preset": "ui_verified_repair",
     }
-    assert result.evidence["save_preflight"]["invalidated"] is True
-    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == []
+    assert result.evidence["save_preflight"]["invalidated"] is False
+    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == [
+        "guardian_chips"
+    ]
 
 
 def test_save_mismatch_ui_already_matches_is_a_contradiction():
@@ -1016,7 +1014,7 @@ def test_mixed_perk_decisions_visit_only_ui_required_tabs():
     assert result.evidence["perk_bans"]["checked"] is True
 
 
-def test_mixed_perk_repair_rechecks_perks_and_requests_full_ui_retry():
+def test_mixed_perk_repair_preserves_save_backed_peer_fields():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
     requirements = {
         "cards_deck": "Farm",
@@ -1045,40 +1043,19 @@ def test_mixed_perk_repair_rechecks_perks_and_requests_full_ui_retry():
 
     def ensure_perks(_requirements, **kwargs):
         waived.append(set(kwargs["waived_fields"]))
-        if len(waived) == 1:
-            kwargs["repair_observer_fn"]("perk_bans")
-            return HomePerkConfigurationResult(
-                valid=True,
-                changed=True,
-                reason="repaired",
-                failed_check=None,
-                evidence={
-                    "perk_bans": {
-                        "checked": True,
-                        "valid": True,
-                        "changed": True,
-                        "observed": list(FARM_PERK_BANS),
-                    }
-                },
-                home_screenshot="home",
-            )
+        kwargs["repair_observer_fn"]("perk_bans")
         return HomePerkConfigurationResult(
             valid=True,
-            changed=False,
-            reason="matched",
+            changed=True,
+            reason="repaired",
             failed_check=None,
             evidence={
-                check_id: {
+                "perk_bans": {
                     "checked": True,
                     "valid": True,
-                    "changed": False,
-                    "observed": requirements[check_id],
+                    "changed": True,
+                    "observed": list(FARM_PERK_BANS),
                 }
-                for check_id in (
-                    "perk_first_choice",
-                    "perk_bans",
-                    "perk_auto_pick_order",
-                )
             },
             home_screenshot="home",
         )
@@ -1091,21 +1068,18 @@ def test_mixed_perk_repair_rechecks_perks_and_requests_full_ui_retry():
         ensure_perk_configuration_fn=ensure_perks,
     )
 
-    assert not result.complete
-    assert result.retryable_from_home is True
-    assert result.evidence["save_preflight"]["revalidation_required"] is True
-    assert result.evidence["save_preflight"][
-        "revalidation_required_checks"
-    ] == ["cards_deck"]
-    assert waived == [
-        {"perk_first_choice", "perk_auto_pick_order"},
-        set(),
-    ]
-    assert invalidations == ["perk_repair:perk_bans"]
-    assert result.evidence["save_preflight"]["invalidated"] is True
-    assert result.evidence["perk_first_choice"]["source"] == "ui"
+    assert result.complete
+    assert waived == [{"perk_first_choice", "perk_auto_pick_order"}]
+    assert invalidations == []
+    assert result.evidence["save_preflight"]["invalidated"] is False
+    assert "revalidation_required" not in result.evidence["save_preflight"]
+    assert result.evidence["perk_first_choice"]["source"] == (
+        "player_save_preflight"
+    )
     assert result.evidence["perk_bans"]["source"] == "ui"
-    assert "perk_auto_pick_order" not in result.evidence
+    assert result.evidence["perk_auto_pick_order"]["source"] == (
+        "player_save_preflight"
+    )
 
 
 def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():

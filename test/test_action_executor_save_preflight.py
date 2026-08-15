@@ -945,19 +945,26 @@ def test_battle_control_requirement_change_restores_complete_ui_path():
             ("damage_slider",),
         )
     ]
-    damage_ui.assert_called_once_with("100%", mode="enforce")
+    damage_ui.assert_called_once()
+    assert damage_ui.call_args.args == ("100%",)
+    assert damage_ui.call_args.kwargs["mode"] == "enforce"
+    assert callable(damage_ui.call_args.kwargs["repair_observer_fn"])
 
 
-def test_battle_control_first_repair_invalidates_remaining_save_carry():
-    invalidations = []
+def test_battle_control_repair_falls_back_only_affected_check():
+    fallbacks = []
+    mapping_windows_closed = []
 
     class BoundSave:
         def consume(self, check_id):
             assert check_id == "damage_slider"
             return None
 
-        def invalidate(self, reason, *, check_ids):
-            invalidations.append((reason, check_ids))
+        def fallback_checks(self, reason, *, check_ids):
+            fallbacks.append((reason, check_ids))
+
+        def close_mapping_candidate_window(self, reason):
+            mapping_windows_closed.append(reason)
 
         def record_ui_verification(self, check_id, *, changed):
             assert (check_id, changed) == ("damage_slider", True)
@@ -1000,9 +1007,10 @@ def test_battle_control_first_repair_invalidates_remaining_save_carry():
             ctx,
         )
 
-    assert invalidations == [
+    assert fallbacks == [
         ("damage_slider_repair_started", ("damage_slider",))
     ]
+    assert mapping_windows_closed == ["damage_slider_repair_started"]
 
 
 def test_target_priority_requirement_change_falls_back_without_global_invalidation():
@@ -1040,8 +1048,8 @@ def test_target_priority_requirement_change_falls_back_without_global_invalidati
     assert ensure.call_args.kwargs["expected"] == ORDER
 
 
-def test_target_priority_ui_repair_invalidates_other_carried_checks():
-    invalidations = []
+def test_target_priority_ui_repair_falls_back_only_affected_check():
+    fallbacks = []
     verifications = []
     mapping_observations = []
     mapping_windows_closed = []
@@ -1050,8 +1058,8 @@ def test_target_priority_ui_repair_invalidates_other_carried_checks():
         def consume(self, _check_id):
             return None
 
-        def invalidate(self, reason, *, check_ids):
-            invalidations.append((reason, check_ids))
+        def fallback_checks(self, reason, *, check_ids):
+            fallbacks.append((reason, check_ids))
 
         def record_ui_verification(self, check_id, *, changed):
             verifications.append((check_id, changed))
@@ -1091,10 +1099,10 @@ def test_target_priority_ui_repair_invalidates_other_carried_checks():
             action_guard_fn=lambda: True,
         )
 
-    assert invalidations == [
+    assert fallbacks == [
         ("target_priority_repair_started", ("target_priority",))
     ]
-    assert mapping_windows_closed == []
+    assert mapping_windows_closed == ["target_priority_repair_started"]
     assert verifications == [("target_priority", True)]
     assert len(mapping_observations) == 1
     check_id, mapping_evidence = mapping_observations[0]
@@ -1448,12 +1456,16 @@ def test_unbound_home_uw_copy_is_not_reused_by_session_preflight():
     assert "ultimate_weapons" not in bound
 
 
-def test_ui_configuration_repairs_invalidate_remaining_carried_checks():
-    invalidations = []
+def test_ui_configuration_repairs_fall_back_per_check():
+    fallbacks = []
+    mapping_windows_closed = []
 
     class BoundSave:
-        def invalidate(self, reason, *, check_ids):
-            invalidations.append((reason, check_ids))
+        def fallback_checks(self, reason, *, check_ids):
+            fallbacks.append((reason, check_ids))
+
+        def close_mapping_candidate_window(self, reason):
+            mapping_windows_closed.append(reason)
 
     ctx = MissionContext(
         data={
@@ -1526,7 +1538,11 @@ def test_ui_configuration_repairs_invalidate_remaining_carried_checks():
             action_guard_fn=lambda: True,
         )
 
-    assert invalidations == [
+    assert fallbacks == [
         ("damage_slider_repair_started", ("damage_slider",)),
         ("orb_distance_repair_started", ("orb_distance",)),
+    ]
+    assert mapping_windows_closed == [
+        "damage_slider_repair_started",
+        "orb_distance_repair_started",
     ]

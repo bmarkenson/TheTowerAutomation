@@ -39,6 +39,34 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 check-local save repair authority
+
+- Commit `91f8d60` resolves the recurrence of
+  [save-first Cards repair discarding unrelated accepted decisions](../issues/resolved-2026.md#save-first-cards-repair-discarded-unrelated-accepted-decisions).
+  A Cards repair now preserves accepted Demon Mode, Nuke, First Perk, Workshop,
+  Bot, Guardian, and other independent save decisions. Target Priority, Poison
+  Stun, Damage Slider, and Orb Distance repairs likewise retire only their own
+  check; level-skip input closes mapping correlation without discarding
+  configuration facts.
+- Whole-snapshot invalidation remains fail-closed for authoritative save/UI
+  contradictions and global trust or continuity failures. A repaired value is
+  supported only by its verified UI result and is never promoted back into save
+  carry.
+- The affected slice passed 300 tests and the separate compatibility slice
+  passed 514 tests. Modified modules compiled, documentation lifecycle passed,
+  and whitespace validation was clean. After current-main refresh, the combined
+  save/Home/control regression slice passed 604 tests with the concurrently
+  promoted Start Battle scope fix included. Exact candidate `4d1e3a1` then
+  passed the complete 2,696-test checkpoint in 430.92 seconds, including state
+  definitions and clickmap integrity with zero errors and 44 established
+  orphans.
+- Production advanced from `40946cb` to `4d1e3a1` behind rollback tag
+  `production-before-20260815T011412Z-40946cb`. Replacement automation PID
+  `1767202` and control surface PID `1766735` were healthy and Paused at a
+  fresh Home `NEW_BATTLE` observation on exact target `localhost:5555`. The
+  pre-existing Start Battle workflow was interrupted and not replayed; no game
+  input was sent.
+
 ### 2026-08-14 Start Battle strategy-scope continuity
 
 - Resolved

@@ -979,10 +979,7 @@ class PlayerSavePreflightCoordinator:
         if changed or normalized not in self._ui_verified_checks:
             self._ui_verified_checks[normalized] = status
         if changed:
-            self.invalidate(
-                f"ui_repair:{normalized}",
-                check_ids=(normalized,),
-            )
+            self.close_mapping_candidate_window(f"ui_repair:{normalized}")
         log(
             "[PLAYER_SAVE_PREFLIGHT] Current UI evidence recorded: "
             f"check={normalized} disposition={status} "

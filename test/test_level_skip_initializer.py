@@ -949,7 +949,7 @@ def test_executor_records_fast_initializer_metrics():
     assert mv["eals_first_tap_elapsed_s"] == 4.75
     assert mv["level_skip_elapsed_s"] == 5.25
     assert mv["level_skip_taps_sent"] == 8
-    save_coordinator.invalidate.assert_called_once_with(
-        "level_skip_mutation_started",
-        check_ids=(),
+    save_coordinator.close_mapping_candidate_window.assert_called_once_with(
+        "level_skip_mutation_started"
     )
+    save_coordinator.invalidate.assert_not_called()

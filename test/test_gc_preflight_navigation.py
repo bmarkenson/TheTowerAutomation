@@ -1701,7 +1701,7 @@ def test_bound_save_components_skip_redundant_auto_pick_and_uw_navigation():
     assert ui.swipes == []
 
 
-def test_poison_stun_repair_invalidates_and_rechecks_carried_evidence():
+def test_poison_stun_repair_preserves_unrelated_carried_evidence():
     ui = _FakeUi()
     ui.frame[220:310, 255:355] = (0, 255, 0)
     setup_evidence = {
@@ -1726,15 +1726,19 @@ def test_poison_stun_repair_invalidates_and_rechecks_carried_evidence():
         "poison_swamp_stun": None,
         "spotlight_missiles": "on",
     }
-    invalidations = []
+    fallbacks = []
+    mapping_windows_closed = []
     ui_verifications = []
 
     class BoundSave:
         def consume(self, check_id):
             return carried.get(check_id)
 
-        def invalidate(self, reason, *, check_ids):
-            invalidations.append((reason, check_ids))
+        def fallback_checks(self, reason, *, check_ids):
+            fallbacks.append((reason, check_ids))
+
+        def close_mapping_candidate_window(self, reason):
+            mapping_windows_closed.append(reason)
 
         def record_ui_verification(self, check_id, *, changed):
             ui_verifications.append((check_id, changed))
@@ -1783,26 +1787,32 @@ def test_poison_stun_repair_invalidates_and_rechecks_carried_evidence():
     )
 
     assert result.status is GcPreflightNavigationStatus.COMPLETE
-    assert invalidations == [
+    assert fallbacks == [
         ("poison_swamp_stun_repair_started", ("poison_swamp_stun",))
     ]
-    assert ui_verifications == [
-        ("poison_swamp_stun", True),
-        ("auto_pick_perks", False),
-    ]
+    assert mapping_windows_closed == ["poison_swamp_stun_repair_started"]
+    assert ui_verifications == [("poison_swamp_stun", True)]
     assert validated["ultimate_observations"] == {
+        "Golden Tower": {"primary": "on"},
+        "Black Hole": {"primary": "on"},
         "Poison Swamp": {"primary": "on", "stun": "off"},
+        "Spotlight": {"primary": "on", "missiles": "on"},
     }
-    assert validated.get("configuration_boundary_evidence") is None
-    assert validated.get("free_upgrade_lock_boundary_evidence") is None
-    assert validated.get("auto_pick_boundary_evidence") is None
-    assert validated["accepted_sections"]["bots"] == (
-        _ui_boundary_token("bots")
-    )
-    assert validated["perks_screen"] is ui.frame
-    assert "navigation.open_perks" in ui.static_taps
-    assert "buttons.perks:auto_pick" not in ui.static_taps
-    assert "navigation.Cards" in ui.visible_taps
+    assert validated["configuration_boundary_evidence"] == setup_evidence[
+        "configuration"
+    ]
+    assert validated["free_upgrade_lock_boundary_evidence"] == {
+        "status": "save_match",
+        "source": "bound_player_save_preflight",
+    }
+    assert validated["auto_pick_boundary_evidence"] == {
+        "source": "bound_player_save_preflight",
+        "value": True,
+    }
+    assert "accepted_sections" not in validated
+    assert validated.get("perks_screen") is None
+    assert "navigation.open_perks" not in ui.static_taps
+    assert "navigation.Cards" not in ui.visible_taps
     assert "navigation.menu_event" not in ui.visible_taps
     assert "navigation.menu_modules" not in ui.visible_taps
 
