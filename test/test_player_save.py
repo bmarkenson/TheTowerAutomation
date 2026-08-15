@@ -1995,9 +1995,14 @@ def test_orb_distance_exact_farm_tuples_are_save_backed(
 
 
 @pytest.mark.parametrize("snapshot_fn", (_snapshot, _snapshot_v1101))
+@pytest.mark.parametrize(
+    "workshop_raw",
+    (8.036911010742188, 8.036909103393555),
+)
 def test_orb_distance_exact_tournament_tuple_is_save_backed(
     monkeypatch,
     snapshot_fn,
+    workshop_raw,
 ):
     decoded = (
         _decoded_save_v1101()
@@ -2009,7 +2014,7 @@ def test_orb_distance_exact_tournament_tuple_is_save_backed(
         currentWorkshopPreset=1,
         rangeLevelSelected=0,
         innerOrbDistance=8.71588134765625,
-        workshopOrbDistance=8.036911010742188,
+        workshopOrbDistance=workshop_raw,
     )
 
     evidence = snapshot_fn(monkeypatch, decoded).checks["orb_distance"]

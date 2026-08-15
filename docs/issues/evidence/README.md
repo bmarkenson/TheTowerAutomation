@@ -4,6 +4,12 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-15 Tournament Orb Distance save alias
+
+[`tournament-orb-distance-save-alias-2026-08-15.md`](tournament-orb-distance-save-alias-2026-08-15.md)
+preserves the two exact version-1101 save/UI pairings that establish the
+second Tournament `workshopOrbDistance` encoding for `ISSUE-2026-051`.
+
 ## 2026-08-15 Tournament validation repair confirmation
 
 [`tournament-validation-repair-confirmation-2026-08-15.md`](tournament-validation-repair-confirmation-2026-08-15.md)

@@ -1122,6 +1122,22 @@
           "extra": "87.16m",
           "workshop": "80.37m"
         }
+      },
+      {
+        "raw": {
+          "range_basis": 0,
+          "extra": 8.71588134765625,
+          "workshop": 8.036909103393555
+        },
+        "context": {
+          "cards_deck": "Tournament",
+          "workshop_preset": "Tourney"
+        },
+        "value": {
+          "range_basis": "98.38m",
+          "extra": "87.16m",
+          "workshop": "80.37m"
+        }
       }
     ]
   },
