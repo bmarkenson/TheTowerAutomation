@@ -414,9 +414,14 @@ Game Over -> direct Retry successor. They cover Cards, Workshop, Bot and
 Guardian selections, Free Upgrade locks, Modules, Auto Pick enabled `true`,
 exact complete Target Priority order, all nine primaries on, Spotlight Missiles
 on, Poison Swamp Stun, and the other supported Home checks. A Home carrier is
-armed only by verified authorized dispatch. No dispatch remains pending, and
-an unstable first `RUNNING` frame defers instead of rejecting the evidence.
-`WAIT` is only the next-terminal policy and has no effect on binding.
+armed only by verified authorized dispatch. Every direct owner of that
+dispatch, including the exclusive Tournament-validation launcher, must advance
+the same carrier before the first `RUNNING` observation; the observed battle
+cannot retroactively supply the missing launch proof. A conclusive miss retires
+a no-retry owner's carrier, while an uncertain dispatch or missing durable
+owner suspends it and keeps UI fallback authoritative. No dispatch remains
+pending, and an unstable first `RUNNING` frame defers instead of rejecting the
+evidence. `WAIT` is only the next-terminal policy and has no effect on binding.
 
 The direct-Retry carrier reuses the already acquired natural terminal bundle
 without another read. It requires the typed Game Over boundary to name the

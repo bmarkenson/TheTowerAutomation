@@ -23,6 +23,11 @@ from core.exclusive_validation import (
 )
 from core.app import App
 from core.input import TapDispatchOutcome, TapDispatchStatus
+from core.player_save_preflight import (
+    CarriedEvidenceState,
+    CarriedPlayerSaveEvidence,
+    PlayerSavePreflightContext,
+)
 from core.run_state import AUTOMATION
 from core.runtime_failure_policy import RuntimeFailureKind
 from handlers.free_ticket_handler import (
@@ -1650,6 +1655,130 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
     assert result_log.call_args.args[0].startswith(
         "Tournament validation complete — "
     )
+
+
+def test_validation_launch_carries_complete_home_save_into_running_session(
+    tmp_path,
+):
+    app, _store, _manager = _app_for_pending_validation(tmp_path)
+    context = PlayerSavePreflightContext(
+        runtime_session_id="runtime-private",
+        preflight_session_id="preflight-private",
+        activity_scope_id="activity-private",
+        strategy_name="tournament",
+        configuration_fingerprint="f" * 64,
+        target="private-target",
+        target_generation=1,
+    )
+    carried_values = {
+        "cards_deck": "Tournament",
+        "modules": {"cannon_primary": "Amplifying Strike"},
+        "bots_preset": "Amplify",
+        "guardian_chips": ["Attack", "Ally", "Scout"],
+    }
+    carry = CarriedPlayerSaveEvidence(
+        context=context,
+        snapshot_fingerprint="s" * 64,
+        effective_mapping_fingerprint="m" * 64,
+        values=carried_values,
+    )
+    coordinator = Mock(carry=carry)
+    coordinator.mark_runtime_launch.side_effect = (
+        lambda **kwargs: carry.mark_runtime_launch(context, **kwargs)
+    )
+    app._player_save_preflight_coordinator = coordinator
+
+    def dispatch_with_final_authority_check(
+        *,
+        action_guard_fn,
+        return_dispatch_outcome,
+    ):
+        assert action_guard_fn()
+        assert return_dispatch_outcome is True
+        return TapDispatchOutcome(TapDispatchStatus.DISPATCHED)
+
+    with (
+        patch(
+            "core.app.tap_verified_new_battle",
+            side_effect=dispatch_with_final_authority_check,
+        ),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+
+    coordinator.mark_runtime_launch.assert_called_once_with(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    coordinator.suspend_carry.assert_not_called()
+    coordinator.discard_carry.assert_not_called()
+    assert carry.state is CarriedEvidenceState.LAUNCH_DISPATCHED
+    assert carry.bind_running(
+        context,
+        battle_started=True,
+        stable_running=True,
+        continuity_verified=True,
+    )
+    assert {
+        check_id: carry.consume(check_id, context)
+        for check_id in carried_values
+    } == carried_values
+
+
+def test_uncertain_validation_launch_suspends_home_save_carry(tmp_path):
+    app, _store, _manager = _app_for_pending_validation(tmp_path)
+    carry = SimpleNamespace(state=CarriedEvidenceState.PENDING_LAUNCH)
+    coordinator = Mock(carry=carry)
+    app._player_save_preflight_coordinator = coordinator
+
+    with (
+        patch(
+            "core.app.tap_verified_new_battle",
+            return_value=TapDispatchOutcome(TapDispatchStatus.UNCERTAIN),
+        ),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+
+    coordinator.suspend_carry.assert_called_once_with(
+        "input_result_uncertain"
+    )
+    coordinator.mark_runtime_launch.assert_not_called()
+    coordinator.discard_carry.assert_not_called()
+
+
+def test_failed_validation_launch_discards_home_save_carry(tmp_path):
+    app, _store, _manager = _app_for_pending_validation(tmp_path)
+    carry = SimpleNamespace(state=CarriedEvidenceState.PENDING_LAUNCH)
+    coordinator = Mock(carry=carry)
+    app._player_save_preflight_coordinator = coordinator
+
+    with (
+        patch(
+            "core.app.tap_verified_new_battle",
+            return_value=TapDispatchOutcome(
+                TapDispatchStatus.NOT_DISPATCHED
+            ),
+        ),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+
+    coordinator.discard_carry.assert_called_once_with(
+        "exclusive_validation_launch_not_dispatched"
+    )
+    coordinator.mark_runtime_launch.assert_not_called()
+    coordinator.suspend_carry.assert_not_called()
 
 
 def test_uncertain_validation_battle_dispatch_pauses_and_never_replays(

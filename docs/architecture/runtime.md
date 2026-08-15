@@ -914,7 +914,12 @@ path as well. An unwaived failed Home check consumes the request with its reason
 and never starts a battle. Once Home preflight is complete, the runtime
 atomically claims the matching receipt and then uses a fresh verified control
 to start exactly one ordinary `NEW_BATTLE`. It rejects Home `RESUME_BATTLE` and
-never opens the Tournament screen or starts a Tournament battle.
+never opens the Tournament screen or starts a Tournament battle. A conclusive
+authorized dispatch advances the same single-use save carrier as an ordinary
+Home launch before RUNNING can bind it. Complete carried Cards, Workshop,
+Bots, Guardians, Modules, and other supported session facts suppress their
+duplicate UI routes; only a per-check mismatch, unsupported/incomplete fact,
+policy-forced audit, or invalidated transition may select those fallbacks.
 
 The disposable ordinary battle bypasses EHLS/EALS initialization without
 seeding either completion flag. It does not toggle Auto Perks. Session
