@@ -46,8 +46,14 @@ named step. A guard leaves the outcome pending, not complete.
 1. Confirm the assigned feature worktree, branch, and target diffs.
 2. Read the relevant owner, source, callers, and tests; extend an existing
    capability when its boundary fits.
-3. Make one coherent change, stage only owned hunks, validate, and commit it.
-4. If a guard blocks the outcome, follow its documented wait or recovery path;
+3. Make one coherent change and use focused validation while the candidate can
+   still change.
+4. Recheck the target diff, stage only owned hunks, and commit the exact
+   candidate before running its final promotion gate. When the gate result must
+   be added afterward, put only the concise completion record in the immediately
+   following commit under the production procedure's
+   [completion-record exception](operations/production_promotion.md#completion-record-exception).
+5. If a guard blocks the outcome, follow its documented wait or recovery path;
    never weaken it or claim completion.
 
 ## Development Python environment
@@ -66,6 +72,20 @@ it does not bracket successful commands. Use focused tests while work can
 change, and run `.venv/bin/python tools/development.py checkpoint` only when the
 [production procedure](operations/production_promotion.md#choose-the-candidate-gate)
 requires the complete gate.
+
+A complete checkpoint against a mutable or uncommitted working tree is
+development evidence, not the final exact-candidate gate. Finish source, tests,
+configuration, generated inputs, and other gate inputs; commit exact candidate
+`V`; verify its tracked worktree is clean; then run the checkpoint at `V`.
+Do not add or change a test assertion after that gate and expect a later mixed
+commit to qualify for the completion-record exception. Fold such a change into
+a new exact candidate and apply the gate selected by the production procedure.
+
+Tests must write intentional logs, screenshots, control files, and failure
+evidence to pytest temporary directories or the checkpoint's isolated generated
+root, never to ignored runtime-evidence paths in the feature worktree. Inspect
+non-cache ignored output before freezing the candidate and repair a leaking test
+while the worktree still has an owner; do not defer discovery until retirement.
 
 Do not install packages ad hoc. The bootstrap's fingerprint, lock, completion,
 and isolation contract is in
