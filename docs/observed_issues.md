@@ -41,8 +41,9 @@ current runtime state.
   before claiming, cleaning, replacing, or recovering an exclusive-validation
   battle. The missing same-battle Game Over dispatch and the fail-closed later-
   `RUNNING` release now have one repository repair under `ISSUE-2026-046`; the
-  source of the historical later transition remains unknown. Next: deploy and
-  safely confirm the repair without manufacturing a battle transition;
+  source of the historical later transition remains unknown. Production
+  commit `95bd630` contains the repair. Next: safely confirm it without
+  manufacturing a battle transition;
   [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Exclusive validation denied its own strategy and cleanup input
@@ -62,9 +63,10 @@ current runtime state.
   started.
 - Load the [dossier](issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
   before running or changing exclusive validation, confirmed Tournament launch,
-  or typed action-authority routing. Next: deploy and confirm the complete
-  multi-phase validation and verified Home cleanup at an explicitly authorized
-  safe boundary; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+  or typed action-authority routing. Production commit `95bd630` contains the
+  repair. Next: confirm the complete multi-phase validation and verified Home
+  cleanup at an explicitly authorized safe boundary;
+  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Start Battle replaced a newer No Strategy selection with stale Tournament state
 
@@ -77,8 +79,8 @@ current runtime state.
   accepted Strategy atomically and activity must name the bound Strategy.
 - Load the [dossier](issues/open-2026.md#start-battle-replaced-a-newer-no-strategy-selection-with-stale-tournament-state)
   before changing Strategy/Start ordering or diagnosing a Strategy selection
-  that appears to reverse. Next: integrate and safely confirm immediate Start
-  from a natural Home boundary; [runtime
+  that appears to reverse. Production commit `95bd630` contains the repair.
+  Next: safely confirm immediate Start from a natural Home boundary; [runtime
   backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Stopped control could not interrupt an in-progress Home setup guard
@@ -247,8 +249,9 @@ current runtime state.
   callback, but the Tournament wrapper neither accepted nor forwarded it.
 - Load the [dossier](issues/open-2026.md#tournament-session-preflight-rejected-its-mapping-observation-callback)
   before changing Tournament preflight arguments or mapping-candidate
-  collection. Next: deploy the forwarding repair and confirm a fresh
-  Tournament preflight completes without the callback TypeError;
+  collection. Production commit `95bd630` contains the forwarding repair.
+  Next: confirm a fresh Tournament preflight completes without the callback
+  TypeError;
   [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ### Assist module assignments always fell back to Modules UI
@@ -262,9 +265,10 @@ current runtime state.
   inspected but did not repair them.
 - Load the [dossier](issues/open-2026.md#assist-module-assignments-always-fell-back-to-modules-ui)
   before changing Module save shape, exact empty-slot semantics, or the
-  save/UI fallback. Next: deploy the exact-field repair and confirm one fresh
-  ordinary boundary reports complete save-backed Modules without opening the
-  Modules UI; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
+  save/UI fallback. Production commit `95bd630` contains the exact-field
+  repair. Next: confirm one fresh ordinary boundary reports complete
+  save-backed Modules without opening the Modules UI;
+  [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ### Farm Bot preset switch required more Event medals than were available
 
