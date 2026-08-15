@@ -39,6 +39,36 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Automatic save-mapping promotion
+
+- Exact implementation candidate `f9cced3` replaces private staging as a
+  terminal outcome with one resumable integration transaction. A reviewed
+  mapping now proceeds through exact local promotion and non-forcing
+  `origin/main` publication; durable background reconciliation consumes queued
+  publication or owner-cleanup work, and a fresh successful decode retires the
+  private candidate and journal. The transaction never publishes an unrelated
+  enclosing `main` advance.
+- An exact, conflict-free `killedBy` proposal backed by paired terminal UI and
+  pre-mutation save evidence is machine-certified and needs neither operator
+  review nor confirmation. Other reviewable proposals integrate immediately
+  after review. Non-reviewable or blocked items expose the concrete reason and
+  a copyable agent request, while actions that cannot apply are hidden instead
+  of appearing as unexplained disabled controls.
+- The one complete checkpoint invocation at `f9cced3` passed compilation,
+  state definitions, and clickmap integrity with zero errors and the
+  established 44 orphan notices, then exposed three stale test expectations
+  after the already-integrated `9 -> Ray` mapping and revision 45. Corrected
+  candidate `745a46b` changes only those two Python test files; review proved
+  the passed components unaffected, so only the invalidated full pytest
+  component was rerun. All 2,946 tests passed in 449.50 seconds, and the
+  checkpoint wrapper was deliberately not repeated.
+- Focused mapping-manager validation passed 43 tests, browser/control-surface
+  validation passed 132 tests, and portable native authoring passed 196 tests.
+  The Release ControlSurface cross-build completed with zero errors; its only
+  warning was the known read-only NuGet vulnerability-cache `NU1900`.
+  Validation used development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-15 Exact committed-candidate checkpoint guard
 
 - Exact process candidate `d472548` closes the gap that allowed a complete
