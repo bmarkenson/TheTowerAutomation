@@ -39,6 +39,50 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Resolvable save-mapping observations
+
+- Exact production candidate `556f9c0` (implementation commit `58f656a`) makes
+  every save-mapping catalog item actionable: reviewable observations expose
+  their exact proposal, dismissible observations get an append-only,
+  evidence-preserving dismissal, and other blocked states explain the blocker
+  and provide a copyable request telling the operator what to ask an agent to
+  resolve. Neither dismissal nor the agent-request path changes mappings,
+  production Git, runtime control, or the device.
+- Compatible `battle_history_killed_by_id` proposals now target only the v1073
+  authority mapping that owns inherited `runtime_save.killed_by_ids`; they no
+  longer manufacture an unowned v1101 structural patch. The retained
+  `killedBy 9 -> Ray` observation consequently became reviewable while
+  remaining dismissible, and was deliberately left unresolved for operator
+  confirmation.
+- Exact candidate `556f9c0` passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,926 repository tests in 422.06 seconds. Its post-merge affected suite
+  passed 233 tests in 72.42 seconds. Portable native authoring passed 194
+  tests, and both Release Windows cross-builds completed with zero errors; the
+  only native warning was the known read-only NuGet vulnerability-cache
+  `NU1900`. Validation used development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- Production advanced from `b321854` to `556f9c0` behind rollback tag
+  `production-before-20260815T214401Z-b321854`. Control-surface revision 44
+  restarted healthy as PID 3424014; automation restarted as PID 3428292,
+  runtime `d541b517cd8642e5b1254f1fd90dbd31`, with the exact `localhost:5555`
+  lock held, current Pause acknowledged, and a fresh Home/New Battle
+  observation with no active battle.
+- The complete Windows package was published on 2026-08-15 at 14:48 PDT.
+  Current `TheTower.ControlSurface.exe` is 72,494,139 bytes
+  (`8d09b817d4dba815973a07833df4584c5dee65b976c9ee0d991b3b5227bd9b41`)
+  and `TheTower.TunnelHost.exe` is 35,172,106 bytes
+  (`50590b058cceca5981511d2d940be17c06e30e4254a056d244bf6a24f9098085`).
+  Retained slot 1 contains 72,489,817-byte
+  `TheTower.ControlSurface.exe`
+  (`a18e3a6d20e54f3767c4abfab2be7a91a5f3f03bdda04a886390493fa2dac355`)
+  and 35,172,127-byte `TheTower.TunnelHost.exe`
+  (`def8cf4f9514d887ab8485f06539ab6f923adc42f76cdc5df932b439acbe7f5b`);
+  retained slot 2 contains 72,489,449-byte `TheTower.ControlSurface.exe`
+  (`a4da12427abe04a62f15cad3f00b55c3da2dfef157864cdd2e631430e15fcbbe`)
+  and 35,172,102-byte `TheTower.TunnelHost.exe`
+  (`9a2da678ace3e52e97afd9b6ef7c7b71cd1b1d7721801263fe604f7e3354b871`).
+
 ### 2026-08-15 Save-backed effective Attack Range authority
 
 - [`ISSUE-2026-052`](../issues/resolved-2026.md#orb-distance-treated-selected-range-lab-level-as-live-attack-range)
