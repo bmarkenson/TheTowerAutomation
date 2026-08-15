@@ -251,7 +251,7 @@ function renderConfirmedLocalMapping(status) {
   reviewButton.disabled = !compatible;
   reviewButton.title = compatible
     ? "Review an exact canonical proposal and stage it for promotion."
-    : "Linux API revision 42 with save_mapping_staged_candidate_v1 is required.";
+    : "Linux API revision 44 with staged-candidate and disposition capabilities is required.";
 }
 
 function saveMappingCandidate() {
@@ -277,10 +277,21 @@ function saveMappingSelectionStillCurrent(selection) {
 function updateSaveMappingControls() {
   const item = saveMappingCandidate();
   const reviewButton = byId("reviewSaveMappingProposalButton");
+  const copyButton = byId("copySaveMappingAgentPromptButton");
+  const dismissButton = byId("dismissSaveMappingObservationButton");
   const integrateButton = byId("integrateSaveMappingButton");
   reviewButton.disabled = state.saveMappingBusy
     || !item
     || item.review_available !== true;
+  const agentPrompt = String(item?.agent_review_prompt || "").trim();
+  copyButton.hidden = !agentPrompt;
+  copyButton.disabled = state.saveMappingBusy || !agentPrompt;
+  copyButton.title = agentPrompt
+    ? "Copy the complete request shown in the proposal panel."
+    : "No agent-review request is needed for this observation.";
+  dismissButton.disabled = state.saveMappingBusy
+    || !item
+    || item.dismiss_available !== true;
   const availability = clientModel.saveMappingIntegrateAvailability(
     state.saveMappingReview,
     byId("saveMappingCandidateSelect").value,
@@ -366,13 +377,47 @@ function renderSaveMappingSelection() {
   setText(
     "saveMappingCandidateDetail",
     item
-      ? `${item.mapping_id} · ${item.state} · ${item.reason || "Review pending"}`
+      ? `${item.mapping_id} · ${item.state}\nReason: ${item.reason || "Review pending"}\nNext: ${item.next_action || "Review the exact proposal."}`
       : "Choose one durable observation.",
   );
   const reviewButton = byId("reviewSaveMappingProposalButton");
   reviewButton.title = item?.review_available === false
     ? item.review_reason || "This observation is not reviewable."
     : "Review the exact server-generated proposal.";
+  const dismissButton = byId("dismissSaveMappingObservationButton");
+  dismissButton.title = item?.dismiss_available === false
+    ? item.dismiss_reason || "This observation cannot be dismissed now."
+    : "Hide this observation from the active queue while preserving its receipt.";
+  if (item?.review_available === false) {
+    const proposal = byId("saveMappingProposal");
+    proposal.replaceChildren();
+    proposal.className = "mapping-proposal";
+    proposal.append(mappingProposalRow(
+      "Exact proposal unavailable",
+      item.review_reason || item.reason || "No safe automatic proposal is available.",
+    ));
+    proposal.append(mappingProposalRow(
+      "What to do",
+      item.next_action || "Copy the agent-review request for help resolving this observation.",
+    ));
+    if (item.agent_review_prompt) {
+      proposal.append(mappingProposalRow(
+        "Agent-review request",
+        item.agent_review_prompt,
+      ));
+    }
+    setText(
+      "saveMappingIntegrateStatus",
+      item.next_action || "The exact proposal must be resolved before staging.",
+    );
+  } else {
+    setText(
+      "saveMappingIntegrateStatus",
+      item
+        ? "Review this exact candidate before staging, or dismiss it if it is incorrect."
+        : "Choose an observation to see its available actions.",
+    );
+  }
   updateSaveMappingControls();
 }
 
@@ -570,6 +615,100 @@ async function reviewSaveMappingProposal() {
   } finally {
     setSaveMappingBusy(false);
   }
+}
+
+async function copySaveMappingAgentPrompt() {
+  const prompt = String(saveMappingCandidate()?.agent_review_prompt || "").trim();
+  if (!prompt) return;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+    await navigator.clipboard.writeText(prompt);
+    toast("Agent-review request copied");
+  } catch (_error) {
+    window.prompt("Copy this agent-review request:", prompt);
+  }
+}
+
+function renderSaveMappingDismissalResult(result) {
+  const container = byId("saveMappingResult");
+  container.replaceChildren();
+  container.hidden = false;
+  container.className = "callout success";
+  const title = document.createElement("strong");
+  const detail = document.createElement("p");
+  title.textContent = result.changed
+    ? "Observation dismissed"
+    : "Observation was already dismissed";
+  detail.textContent = "The durable receipt was preserved. No canonical mapping, Git ref, runtime state, device input, or current battle was changed.";
+  container.append(title, detail);
+  container.append(mappingProposalRow(
+    "Disposition receipt",
+    `${result.event_id}\nrecorded ${result.recorded_at}`,
+  ));
+  if (result.warning) {
+    container.append(mappingProposalRow("Audit warning", result.warning));
+  }
+}
+
+async function dismissSaveMappingObservation() {
+  if (state.saveMappingBusy) return;
+  const item = saveMappingCandidate();
+  const selection = saveMappingSelection();
+  const { candidateRecordId } = selection;
+  if (!item || !candidateRecordId || item.dismiss_available !== true) return;
+  const confirmation = [
+    "Dismiss this exact observation from the active review queue?",
+    candidateRecordId,
+    "",
+    "The original durable receipt will be preserved, together with an append-only dismissal record. This does not change canonical mappings, Git refs, main, runtime authority, device input, or the current battle.",
+  ].join("\n");
+  if (!window.confirm(confirmation)) return;
+  let dismissed = null;
+  setSaveMappingBusy(true);
+  try {
+    const result = await api("/api/v1/save-mapping-integration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "dismiss",
+        candidate_record_id: candidateRecordId,
+      }),
+    });
+    if (!saveMappingSelectionStillCurrent(selection)) {
+      const error = new Error(
+        "The GUI selection changed while dismissal was in flight.",
+      );
+      error.code = "selection_changed_during_dismissal";
+      throw error;
+    }
+    const validation = clientModel.saveMappingDismissedResultValidation(
+      result,
+      candidateRecordId,
+    );
+    if (!validation.valid) {
+      const error = new Error(validation.reason);
+      error.code = validation.code;
+      throw error;
+    }
+    dismissed = result;
+  } catch (error) {
+    const presentation = renderSaveMappingFailure(error, false);
+    setText("saveMappingIntegrateStatus", presentation.detail);
+    toast(error.message, true);
+  } finally {
+    setSaveMappingBusy(false);
+  }
+  if (!dismissed) return;
+  await loadSaveMappingIntegrationCatalog();
+  renderSaveMappingDismissalResult(dismissed);
+  setText(
+    "saveMappingIntegrateStatus",
+    "Observation removed from the active queue; its durable evidence was preserved.",
+  );
+  toast(dismissed.changed
+    ? "Observation dismissed; evidence preserved"
+    : "Observation was already dismissed; evidence preserved");
+  if (dismissed.warning) toast(dismissed.warning, true);
 }
 
 async function integrateSaveMappingProposal() {
@@ -1745,6 +1884,14 @@ byId("saveMappingIntegrationDialog").addEventListener("cancel", (event) => {
 byId("reviewSaveMappingProposalButton").addEventListener(
   "click",
   reviewSaveMappingProposal,
+);
+byId("copySaveMappingAgentPromptButton").addEventListener(
+  "click",
+  copySaveMappingAgentPrompt,
+);
+byId("dismissSaveMappingObservationButton").addEventListener(
+  "click",
+  dismissSaveMappingObservation,
 );
 byId("integrateSaveMappingButton").addEventListener(
   "click",

@@ -11,6 +11,7 @@ import pytest
 
 import core.player_save_mapping_candidates as candidates_module
 from core.player_save_mapping_candidates import (
+    AppendOnlyMappingCandidateDispositionStore,
     AppendOnlyMappingCandidateStore,
     PlayerSaveMappingCandidateError,
     build_mapping_candidate_context,
@@ -136,6 +137,40 @@ def _compatible_module_record() -> dict:
         "structural_mapping_id": "data-9-game-1101",
     }
     return _record(mapping=mapping)
+
+
+def _compatible_killed_by_record() -> dict:
+    pending = pending_mapping_candidate(
+        value_kind="battle_history_killed_by_id",
+        raw_value=9,
+        pairing_method="exact_locator",
+        locator="killed_by",
+        expected_observation_count=1,
+        known_semantic_values=("Boss",),
+    )
+    resolved = resolve_mapping_candidates(
+        "battle_history_killed_by",
+        [pending],
+        _ui("Ray", locator="killed_by"),
+    )[0]
+    mapping = {
+        **_mapping(resolution="compatible_exact_revision"),
+        "mapping_id": "data-9-game-1101",
+        "game_version": 1101,
+        "authority_mapping_id": "data-9-game-1073",
+        "structural_mapping_id": "data-9-game-1101",
+    }
+    return build_mapping_candidate_record(
+        mapping=mapping,
+        check_id="battle_history_killed_by",
+        candidate=resolved,
+        snapshot_fingerprint=SNAPSHOT_FINGERPRINT,
+        ui_evidence_fingerprint=UI_FINGERPRINT,
+        source_observation_fingerprint=SOURCE_OBSERVATION_FINGERPRINT,
+        workflow_provenance=_terminal_workflow("terminal_game_over"),
+        observed_at=OBSERVED_AT,
+        recorded_at="2026-08-08T12:00:01+00:00",
+    )
 
 
 def _module_info_record(
@@ -507,6 +542,37 @@ def test_partial_receipt_tail_is_recovered_without_losing_complete_records(
     assert path.read_bytes().endswith(b"\n")
 
 
+def test_dismissal_is_private_idempotent_and_preserves_source_receipt(tmp_path):
+    receipt_path = tmp_path / "receipts.jsonl"
+    disposition_path = tmp_path / "dispositions-v1.jsonl"
+    receipts = AppendOnlyMappingCandidateStore(receipt_path)
+    dispositions = AppendOnlyMappingCandidateDispositionStore(disposition_path)
+    record = _record()
+    receipts.append_once(record)
+
+    first = dispositions.dismiss(
+        record["record_id"],
+        recorded_at="2026-08-08T12:01:00+00:00",
+    )
+    second = dispositions.dismiss(
+        record["record_id"],
+        recorded_at="2026-08-08T12:02:00+00:00",
+    )
+
+    assert first["changed"] is True
+    assert second == {
+        "changed": False,
+        **{key: value for key, value in first.items() if key != "changed"},
+    }
+    assert stat.S_IMODE(disposition_path.stat().st_mode) == 0o600
+    assert receipts.list_records() == [record]
+    assert mapping_candidate_review_status(
+        store=receipts,
+        disposition_store=dispositions,
+        repository_root=ROOT,
+    )["items"] == []
+
+
 def test_review_proposal_is_non_mutating_and_requires_repository_validation():
     target = ROOT / "config/player_save_versions/data_9_game_1073.json"
     before = target.read_bytes()
@@ -547,6 +613,53 @@ def test_compatible_exact_revision_proposal_updates_owner_and_mirror_atomically(
     ]
     assert all(target["state"] == "pending" for target in proposal["targets"])
     assert all(target["operations"] for target in proposal["targets"])
+
+
+def test_compatible_killed_by_proposal_targets_only_runtime_authority():
+    proposal = proposed_mapping_patch(
+        _compatible_killed_by_record(),
+        repository_root=ROOT,
+    )
+
+    assert [target["mapping_id"] for target in proposal["targets"]] == [
+        "data-9-game-1073"
+    ]
+    assert proposal["targets"][0]["operations"] == [
+        {
+            "op": "add",
+            "path": "/runtime_save/battle_history/killed_by_ids/9",
+            "value": "Ray",
+        }
+    ]
+
+
+def test_compatible_killed_by_status_tracks_only_runtime_authority(tmp_path):
+    mapping_dir = tmp_path / "config" / "player_save_versions"
+    mapping_dir.mkdir(parents=True)
+    for name in ("data_9_game_1073.json", "data_9_game_1101.json"):
+        shutil.copyfile(
+            ROOT / "config/player_save_versions" / name,
+            mapping_dir / name,
+        )
+    store = AppendOnlyMappingCandidateStore(tmp_path / "receipts.jsonl")
+    store.append_once(_compatible_killed_by_record())
+
+    pending = mapping_candidate_review_status(
+        store=store,
+        repository_root=tmp_path,
+    )
+    assert pending["counts"] == {"review_required": 1}
+
+    authority_path = mapping_dir / "data_9_game_1073.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    authority["runtime_save"]["battle_history"]["killed_by_ids"]["9"] = "Ray"
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
+
+    integrated = mapping_candidate_review_status(
+        store=store,
+        repository_root=tmp_path,
+    )
+    assert integrated["counts"] == {"integrated": 1}
 
 
 def test_compatible_proposal_only_emits_the_missing_mirror_operation(tmp_path):

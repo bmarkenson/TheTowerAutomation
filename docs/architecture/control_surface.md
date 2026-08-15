@@ -599,6 +599,19 @@ current object or empty state, production cleanliness, and any blocker.
 Requests cannot carry a filesystem path, ref, target, patch operation, mapping
 value, commit message, or Git identity.
 
+Server revision 44 also advertises
+`save_mapping_candidate_disposition_v1`. Every selected observation now has an
+explicit path forward. A safely generated proposal enables **Review exact
+proposal**. Any nonreviewable item displays its reason and next action plus a
+selectable, copyable agent-review request; the client does not invoke an agent.
+An ordinary unreviewed observation may instead use **Dismiss observation…**.
+That exact-shape request carries only `operation=dismiss` and the candidate
+record ID. The server appends an idempotent disposition, preserves the original
+receipt, and returns the disposition event identity with
+`evidence_preserved=true`. Dismissal and staging use the same coordination lock;
+promotion, validation, and recovery lifecycle states must be completed rather
+than dismissed.
+
 Review is read-only and binds the candidate receipt, proposal, exact target
 before/after hashes and modes, prospective canonical mapping fingerprint, and
 standardized commit contract. `reviewed_base_commit` remains visible for audit,

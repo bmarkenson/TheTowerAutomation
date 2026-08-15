@@ -337,10 +337,38 @@
 
   function saveMappingIntegrationCompatible(status) {
     return status?.api_version === 1
-      && Number(status?.server_revision) >= 42
+      && Number(status?.server_revision) >= 44
       && (status?.capabilities || []).includes(
         "save_mapping_staged_candidate_v1",
+      )
+      && (status?.capabilities || []).includes(
+        "save_mapping_candidate_disposition_v1",
       );
+  }
+
+  function saveMappingDismissedResultValidation(result, candidateRecordId) {
+    const candidate = String(candidateRecordId || "").trim();
+    const recordedAt = Date.parse(String(result?.recorded_at || ""));
+    const valid = result
+      && typeof result === "object"
+      && result.schema_version === 1
+      && result.capability === "save_mapping_candidate_disposition_v1"
+      && result.operation === "dismiss"
+      && result.disposition === "dismissed"
+      && lowerHex64(candidate)
+      && result.candidate_record_id === candidate
+      && lowerHex64(result.event_id)
+      && Number.isFinite(recordedAt)
+      && typeof result.changed === "boolean"
+      && result.evidence_preserved === true
+      && (result.warning === undefined || typeof result.warning === "string");
+    return {
+      valid: Boolean(valid),
+      code: valid ? "" : "dismissal_result_invalid",
+      reason: valid
+        ? ""
+        : "The server response did not prove that this exact observation was dismissed while preserving its evidence.",
+    };
   }
 
   function saveMappingIntegrateAvailability(
@@ -509,6 +537,7 @@
     workflowPresentation,
     confirmedLocalMappingPresentation,
     saveMappingFailurePresentation,
+    saveMappingDismissedResultValidation,
     saveMappingIntegrationCompatible,
     saveMappingIntegrateAvailability,
     saveMappingIntegratedPresentation,

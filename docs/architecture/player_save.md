@@ -900,15 +900,31 @@ on its existing UI fallback.
 
 The control surface publishes the combined local-confirmation and candidate
 review queue as a persistent nonmodal warning. A `compatible_exact_revision`
-proposal is an atomic review artifact for both the authority owner and the
-exact structural mirror, with a base hash and scoped operation for each. The
-runtime decoder never applies that proposal. Server revision 42 instead offers
-the same narrow operator workflow in both control-surface GUIs. It has no
+proposal targets only the canonical documents that physically own the value,
+with a base hash and scoped operation for each. Shared identity/value maps are
+atomically updated in both the authority owner and exact structural mirror.
+An inherited `runtime_save.battle_history.killed_by_ids` value is owned only by
+the authority mapping; the compatible structural revision deliberately has no
+duplicate `runtime_save` document to patch. The runtime decoder never applies
+the proposal. Server revision 42 introduced the same narrow operator workflow
+in both control-surface GUIs. It has no
 feature-worktree selection: the operator reviews one exact candidate and its
 mapping target hashes, then separately confirms creation of one verified child
 of current `main` under `refs/thetower/save-mapping-candidate`. The client
 cannot supply a path, ref, target, operation, value, commit message, or Git
 identity.
+
+Server revision 44 adds an explicit outcome for observations that should not
+be integrated. **Dismiss observation…** appends a mode-0600 disposition event
+under `logs/player_save_mapping_candidates/` and removes only that exact
+receipt from the active queue; it never deletes or rewrites the source receipt.
+Dismissal shares the canonical-integration lock with staging and is unavailable
+while a staging transaction must be completed or recovered. A dismissed
+candidate cannot subsequently be reviewed or staged. When an item is not
+safely reviewable, both GUIs show the server reason, a concrete next action,
+and a selectable/copyable request that tells an agent which durable receipt,
+mapping, check, state, and blocker to inspect. The GUI never launches or grants
+authority to an agent itself.
 
 Review binds the candidate, every canonical base/result hash and file mode, the
 prospective canonical mapping-set fingerprint, and the standardized commit

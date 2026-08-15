@@ -184,10 +184,14 @@ application again restores and foregrounds the existing main window, or flashes
 it on the taskbar if Windows declines the foreground request.
 
 **Tools > Save mapping integration…** and the persistent save-mapping banner's
-**Review mappings…** action open the revision-42 private-staging UI. Choose one
-durable observation, verify the read-only Private staging eligibility panel,
-review the exact proposal fingerprint, then accept the separate warning before
-staging. The client never submits a filesystem path, ref, target, patch
+**Review mappings…** action open the revision-44 review, disposition, and
+private-staging UI. Choose one durable observation and verify the read-only
+Private staging eligibility panel. A safely patchable observation can be
+reviewed and separately confirmed for staging. **Dismiss observation…** hides
+only that exact observation from the active queue while preserving its durable
+receipt. When review is unavailable, the panel shows the actual reason, next
+action, and a copyable request to give an agent; it does not launch the agent.
+The client never submits a filesystem path, ref, target, patch
 operation, mapping value, commit message, or Git identity. Success shows the
 fixed private ref, actual `main` parent, staged commit, target hashes, passed
 mapping invariants, and the still-pending production promotion and fresh-decode
@@ -198,7 +202,7 @@ promotion** when the ref had already moved. A fully recorded commit reappears as
 **Save mapping awaiting production promotion** instead of offering another
 write. An unprovable outcome remains an inspection warning.
 
-While review or Stage is in flight, the selection, refresh, and Close
+While review, dismissal, or Stage is in flight, the selection, refresh, and Close
 controls are disabled and the window cannot be dismissed. Failed or lost
 requests are never retried automatically; the UI distinguishes a proven
 rejection from an unconfirmed outcome and surfaces any audit warning.
@@ -1061,10 +1065,11 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 43, `current_battle_perks_v1`,
+current Windows build requires revision 44, `current_battle_perks_v1`,
 `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,
 `save_backed_setup_capture_v2`, `save_mapping_staged_candidate_v1`,
+`save_mapping_candidate_disposition_v1`,
 `save_mapping_review_status_v2`, `confirmed_local_mapping_status_v2`,
 `host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,

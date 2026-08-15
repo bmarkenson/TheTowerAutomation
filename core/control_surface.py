@@ -75,6 +75,7 @@ from core.player_save import confirmed_local_mapping_status
 from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
 from core.player_save_mapping_candidates import AppendOnlyMappingCandidateStore
 from core.player_save_mapping_staged_candidate import (
+    SAVE_MAPPING_DISPOSITION_CAPABILITY,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
     SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
     SaveMappingIntegrationError,
@@ -95,7 +96,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 43
+CONTROL_SURFACE_REVISION = 44
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -126,6 +127,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "same_battle_process_restart_reattachment_v1",
     SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
+    SAVE_MAPPING_DISPOSITION_CAPABILITY,
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
     "strategy_aware_attach_v1",
@@ -310,13 +312,14 @@ class ControlSurfaceService:
         self,
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Review or stage one exact mapping proposal without moving main."""
+        """Review, dismiss, or stage one exact mapping observation."""
 
         if not isinstance(request, Mapping):
             raise ControlSurfaceRequestError("Request body must be a JSON object")
         operation = str(request.get("operation") or "").strip().lower()
         required = {
             "review": {"operation", "candidate_record_id"},
+            "dismiss": {"operation", "candidate_record_id"},
             "stage": {
                 "operation",
                 "candidate_record_id",
@@ -324,7 +327,9 @@ class ControlSurfaceService:
             },
         }
         if operation not in required:
-            raise ControlSurfaceRequestError("operation must be review or stage")
+            raise ControlSurfaceRequestError(
+                "operation must be review, dismiss, or stage"
+            )
         if set(request) != required[operation]:
             raise ControlSurfaceRequestError(
                 f"{operation} accepts exactly: "
@@ -343,6 +348,61 @@ class ControlSurfaceService:
                     candidate_record_id=candidate_record_id,
                 )
 
+            record_prefix = candidate_record_id[:12]
+            if operation == "dismiss":
+                operation_id = (
+                    f"save-mapping-dismiss-{record_prefix}-"
+                    f"{secrets.token_hex(6)}"
+                )
+                action_warning = self._append_audit(
+                    "Dismissing canonical save-mapping observation "
+                    f"candidate={record_prefix} evidence=preserved "
+                    f"[OPERATION] id={operation_id}",
+                    level="ACTION",
+                )
+                if action_warning:
+                    raise ControlSurfaceRequestError(
+                        "Dismissal audit could not be written; nothing was changed.",
+                        status=503,
+                        code="mapping_integration_audit_unavailable",
+                    )
+                try:
+                    result = self.save_mapping_integration_manager.dismiss(
+                        candidate_record_id=candidate_record_id,
+                    )
+                except SaveMappingIntegrationError as exc:
+                    disposition = _save_mapping_integration_disposition(exc.code)
+                    self._append_audit(
+                        "Canonical save-mapping dismissal "
+                        f"disposition={disposition} code={exc.code} "
+                        f"[OPERATION] id={operation_id}",
+                        level="RESULT",
+                    )
+                    raise
+                except Exception as exc:
+                    self._append_audit(
+                        "Canonical save-mapping dismissal "
+                        "disposition=unconfirmed code=unexpected_failure "
+                        f"[OPERATION] id={operation_id}",
+                        level="RESULT",
+                    )
+                    raise ControlSurfaceRequestError(
+                        "Observation dismissal failed unexpectedly; inspect the "
+                        "receipt and disposition stores before continuing.",
+                        status=500,
+                        code="mapping_integration_unexpected_failure",
+                    ) from exc
+                result_warning = self._append_audit(
+                    "Canonical save-mapping dismissal disposition=dismissed "
+                    f"candidate={record_prefix} evidence=preserved "
+                    f"changed={str(bool(result.get('changed'))).lower()} "
+                    f"[OPERATION] id={operation_id}",
+                    level="RESULT",
+                )
+                if result_warning:
+                    result["warning"] = result_warning
+                return result
+
             reviewed_fingerprint = request.get(
                 "reviewed_proposal_fingerprint"
             )
@@ -353,7 +413,7 @@ class ControlSurfaceService:
                     "reviewed_proposal_fingerprint must be exactly 64 lowercase "
                     "hexadecimal characters"
                 )
-            record_prefix = str(candidate_record_id or "")[:12]
+            record_prefix = candidate_record_id[:12]
             fingerprint_prefix = str(reviewed_fingerprint or "")[:12]
             operation_id = (
                 f"save-mapping-{record_prefix}-{fingerprint_prefix}-"

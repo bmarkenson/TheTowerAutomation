@@ -26,9 +26,17 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MAPPING_CANDIDATE_RECEIPT_PATH = (
     ROOT / "logs" / "player_save_mapping_candidates" / "receipts-v2.jsonl"
 )
+DEFAULT_MAPPING_CANDIDATE_DISPOSITION_PATH = (
+    ROOT / "logs" / "player_save_mapping_candidates" / "dispositions-v1.jsonl"
+)
 MAPPING_CANDIDATE_SCHEMA_VERSION = 2
 MAPPING_CANDIDATE_SCHEMA_ID = "thetower.player_save_mapping_candidate.v2"
 MAX_MAPPING_CANDIDATE_RECEIPT_BYTES = 32 * 1024
+MAPPING_CANDIDATE_DISPOSITION_SCHEMA_VERSION = 1
+MAPPING_CANDIDATE_DISPOSITION_SCHEMA_ID = (
+    "thetower.player_save_mapping_candidate_disposition.v1"
+)
+MAX_MAPPING_CANDIDATE_DISPOSITION_BYTES = 4 * 1024
 
 MAPPING_CANDIDATE_STATUSES = frozenset(
     {
@@ -773,16 +781,138 @@ class AppendOnlyMappingCandidateStore:
         return matches[0]
 
 
+class AppendOnlyMappingCandidateDispositionStore:
+    """Append-only operator dismissals that preserve the source receipts."""
+
+    def __init__(
+        self,
+        path: Path | str = DEFAULT_MAPPING_CANDIDATE_DISPOSITION_PATH,
+    ) -> None:
+        self.path = Path(path)
+
+    def dismiss(
+        self,
+        candidate_record_id: object,
+        *,
+        recorded_at: object = None,
+    ) -> dict[str, Any]:
+        """Append one idempotent dismissal for an exact durable receipt."""
+
+        candidate_id = _sha256(candidate_record_id, "candidate_record_id")
+        payload = {
+            "schema_version": MAPPING_CANDIDATE_DISPOSITION_SCHEMA_VERSION,
+            "schema_id": MAPPING_CANDIDATE_DISPOSITION_SCHEMA_ID,
+            "record_type": "mapping_candidate_disposition",
+            "candidate_record_id": candidate_id,
+            "disposition": "dismissed",
+            "reason": "operator_dismissed",
+        }
+        event = {
+            **payload,
+            "event_id": fingerprint_json(payload),
+            "recorded_at": _utc_datetime(
+                datetime.now(timezone.utc)
+                if recorded_at is None
+                else recorded_at,
+                "recorded_at",
+            ).isoformat(),
+        }
+        normalized = validate_mapping_candidate_disposition(event)
+        rendered = _render_disposition_record(normalized)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            self.path,
+            os.O_RDWR | os.O_CREAT | os.O_APPEND,
+            0o600,
+        )
+        changed = False
+        result = normalized
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            os.fchmod(descriptor, 0o600)
+            _recover_partial_tail(descriptor)
+            original_size = os.fstat(descriptor).st_size
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            existing = _read_locked_disposition_records(descriptor)
+            prior = next(
+                (
+                    item
+                    for item in existing
+                    if item["candidate_record_id"] == candidate_id
+                ),
+                None,
+            )
+            if prior is not None:
+                result = prior
+            else:
+                try:
+                    written = os.write(descriptor, rendered)
+                    if written != len(rendered):
+                        os.ftruncate(descriptor, original_size)
+                        os.fsync(descriptor)
+                        raise OSError("candidate disposition append was partial")
+                except OSError:
+                    if os.fstat(descriptor).st_size != original_size:
+                        os.ftruncate(descriptor, original_size)
+                        os.fsync(descriptor)
+                    raise
+                os.fsync(descriptor)
+                changed = True
+        finally:
+            os.close(descriptor)
+        _fsync_directory(self.path.parent)
+        return {"changed": changed, **result}
+
+    def list_records(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        descriptor = os.open(self.path, os.O_RDWR)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            _recover_partial_tail(descriptor)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            return _read_locked_disposition_records(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def dismissed_record_ids(self) -> frozenset[str]:
+        return frozenset(
+            item["candidate_record_id"] for item in self.list_records()
+        )
+
+    def dismissal_for(self, candidate_record_id: object) -> Optional[dict[str, Any]]:
+        candidate_id = _sha256(candidate_record_id, "candidate_record_id")
+        return next(
+            (
+                item
+                for item in self.list_records()
+                if item["candidate_record_id"] == candidate_id
+            ),
+            None,
+        )
+
+
 def mapping_candidate_review_status(
     *,
     store: Optional[AppendOnlyMappingCandidateStore] = None,
+    disposition_store: Optional[
+        AppendOnlyMappingCandidateDispositionStore
+    ] = None,
     repository_root: Path | str = ROOT,
 ) -> dict[str, Any]:
     """Project durable candidate receipts into a nonblocking review queue."""
 
     owner = store or AppendOnlyMappingCandidateStore()
+    dispositions = disposition_store or AppendOnlyMappingCandidateDispositionStore(
+        owner.path.with_name("dispositions-v1.jsonl")
+    )
     try:
-        records = owner.list_records()
+        dismissed = dispositions.dismissed_record_ids()
+        records = [
+            record
+            for record in owner.list_records()
+            if record["record_id"] not in dismissed
+        ]
         mappings = _repository_mappings_by_id(Path(repository_root))
     except (OSError, PlayerSaveMappingCandidateError) as exc:
         return {
@@ -893,6 +1023,29 @@ def canonical_mapping_set_fingerprint(
     )
 
 
+def _candidate_target_mapping_ids(
+    candidate: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> list[str]:
+    """Return only canonical documents that own this candidate's contract."""
+
+    if mapping["resolution"] != "compatible_exact_revision":
+        return [mapping["mapping_id"]]
+    if candidate["value_kind"] == "battle_history_killed_by_id":
+        # The structural revision declares runtime_save inheritance from the
+        # authority mapping and intentionally has no duplicate runtime_save
+        # document to patch.
+        return [mapping["authority_mapping_id"]]
+    return list(
+        dict.fromkeys(
+            (
+                mapping["authority_mapping_id"],
+                mapping["structural_mapping_id"],
+            )
+        )
+    )
+
+
 def _mapping_candidate_status_item(
     record: Mapping[str, Any],
     mappings: Mapping[str, Mapping[str, Any]],
@@ -916,12 +1069,7 @@ def _mapping_candidate_status_item(
         state = "more_evidence_required"
         reason = "exact-version evidence is required before integration"
     else:
-        target_ids = [mapping["mapping_id"]]
-        if mapping["resolution"] == "compatible_exact_revision":
-            target_ids = [
-                mapping["authority_mapping_id"],
-                mapping["structural_mapping_id"],
-            ]
+        target_ids = _candidate_target_mapping_ids(candidate, mapping)
         target_states = [
             _candidate_state_in_mapping(candidate, mappings.get(mapping_id))
             for mapping_id in target_ids
@@ -1125,12 +1273,7 @@ def proposed_mapping_patch(
             "mapping_candidate_not_ready_for_proposal"
         )
     root = Path(repository_root)
-    target_ids = [mapping["mapping_id"]]
-    if mapping["resolution"] == "compatible_exact_revision":
-        target_ids = [
-            mapping["authority_mapping_id"],
-            mapping["structural_mapping_id"],
-        ]
+    target_ids = _candidate_target_mapping_ids(candidate, mapping)
     targets: list[dict[str, Any]] = []
     for mapping_id in target_ids:
         target, target_bytes, target_mapping = _repository_mapping_target(
@@ -2183,6 +2326,79 @@ def _render_record(record: Mapping[str, Any]) -> bytes:
     return rendered
 
 
+def validate_mapping_candidate_disposition(raw: object) -> dict[str, Any]:
+    """Validate one append-only operator dismissal event."""
+
+    keys = {
+        "schema_version",
+        "schema_id",
+        "record_type",
+        "event_id",
+        "recorded_at",
+        "candidate_record_id",
+        "disposition",
+        "reason",
+    }
+    if not isinstance(raw, Mapping) or set(raw) != keys:
+        raise PlayerSaveMappingCandidateError(
+            "mapping_candidate_disposition_changed_shape"
+        )
+    if (
+        raw.get("schema_version")
+        != MAPPING_CANDIDATE_DISPOSITION_SCHEMA_VERSION
+        or raw.get("schema_id") != MAPPING_CANDIDATE_DISPOSITION_SCHEMA_ID
+        or raw.get("record_type") != "mapping_candidate_disposition"
+        or raw.get("disposition") != "dismissed"
+        or raw.get("reason") != "operator_dismissed"
+    ):
+        raise PlayerSaveMappingCandidateError(
+            "mapping_candidate_disposition_invalid"
+        )
+    candidate_id = _sha256(
+        raw.get("candidate_record_id"),
+        "candidate_record_id",
+    )
+    payload = {
+        "schema_version": MAPPING_CANDIDATE_DISPOSITION_SCHEMA_VERSION,
+        "schema_id": MAPPING_CANDIDATE_DISPOSITION_SCHEMA_ID,
+        "record_type": "mapping_candidate_disposition",
+        "candidate_record_id": candidate_id,
+        "disposition": "dismissed",
+        "reason": "operator_dismissed",
+    }
+    event_id = _sha256(raw.get("event_id"), "event_id")
+    if event_id != fingerprint_json(payload):
+        raise PlayerSaveMappingCandidateError(
+            "mapping_candidate_disposition_fingerprint_invalid"
+        )
+    return {
+        **payload,
+        "event_id": event_id,
+        "recorded_at": _utc_datetime(
+            raw.get("recorded_at"),
+            "recorded_at",
+        ).isoformat(),
+    }
+
+
+def _render_disposition_record(record: Mapping[str, Any]) -> bytes:
+    rendered = (
+        json.dumps(
+            record,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    if len(rendered) > MAX_MAPPING_CANDIDATE_DISPOSITION_BYTES:
+        raise PlayerSaveMappingCandidateError(
+            "mapping_candidate_disposition_exceeds_size_bound"
+        )
+    return rendered
+
+
 def _read_locked_records(descriptor: int) -> list[dict[str, Any]]:
     chunks: list[bytes] = []
     while True:
@@ -2210,6 +2426,36 @@ def _read_locked_records(descriptor: int) -> list[dict[str, Any]]:
                 "mapping_candidate_receipt_invalid_json"
             ) from exc
         records.append(validate_mapping_candidate_record(raw))
+    return records
+
+
+def _read_locked_disposition_records(descriptor: int) -> list[dict[str, Any]]:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(descriptor, 64 * 1024)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    payload = b"".join(chunks)
+    if not payload:
+        return []
+    if not payload.endswith(b"\n"):
+        raise PlayerSaveMappingCandidateError(
+            "mapping_candidate_disposition_partial_line"
+        )
+    records: list[dict[str, Any]] = []
+    for line in payload.splitlines():
+        if len(line) > MAX_MAPPING_CANDIDATE_DISPOSITION_BYTES:
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_disposition_exceeds_size_bound"
+            )
+        try:
+            raw = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PlayerSaveMappingCandidateError(
+                "mapping_candidate_disposition_invalid_json"
+            ) from exc
+        records.append(validate_mapping_candidate_disposition(raw))
     return records
 
 
@@ -2374,8 +2620,10 @@ def _is_sequence(raw: object) -> bool:
 
 
 __all__ = [
+    "AppendOnlyMappingCandidateDispositionStore",
     "AppendOnlyMappingCandidateStore",
     "AppendOnlyMappingCandidateWriter",
+    "DEFAULT_MAPPING_CANDIDATE_DISPOSITION_PATH",
     "DEFAULT_MAPPING_CANDIDATE_RECEIPT_PATH",
     "MAPPING_CANDIDATE_CHECKS",
     "MAPPING_CANDIDATE_SCHEMA_ID",
@@ -2395,6 +2643,7 @@ __all__ = [
     "reconcile_mapping_candidate_resolutions",
     "resolve_mapping_candidates",
     "validate_mapping_candidate_context",
+    "validate_mapping_candidate_disposition",
     "validate_mapping_candidate_record",
     "validate_mapping_candidate_result",
 ]

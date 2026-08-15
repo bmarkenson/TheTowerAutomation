@@ -497,6 +497,18 @@ public sealed class SaveMappingIntegrationItem
 
     [JsonPropertyName("review_reason")]
     public string ReviewReason { get; set; } = "";
+
+    [JsonPropertyName("dismiss_available")]
+    public bool DismissAvailable { get; set; }
+
+    [JsonPropertyName("dismiss_reason")]
+    public string DismissReason { get; set; } = "";
+
+    [JsonPropertyName("agent_review_prompt")]
+    public string AgentReviewPrompt { get; set; } = "";
+
+    [JsonPropertyName("next_action")]
+    public string NextAction { get; set; } = "";
 }
 
 public sealed class SaveMappingIntegrationReview
@@ -645,6 +657,39 @@ public sealed class SaveMappingIntegratedResult
 
     [JsonPropertyName("promotion_validation")]
     public string PromotionValidation { get; set; } = "";
+
+    [JsonPropertyName("warning")]
+    public string Warning { get; set; } = "";
+}
+
+public sealed class SaveMappingDismissedResult
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    [JsonPropertyName("operation")]
+    public string Operation { get; set; } = "";
+
+    [JsonPropertyName("disposition")]
+    public string Disposition { get; set; } = "";
+
+    [JsonPropertyName("candidate_record_id")]
+    public string CandidateRecordId { get; set; } = "";
+
+    [JsonPropertyName("event_id")]
+    public string EventId { get; set; } = "";
+
+    [JsonPropertyName("recorded_at")]
+    public string RecordedAt { get; set; } = "";
+
+    [JsonPropertyName("changed")]
+    public bool? Changed { get; set; }
+
+    [JsonPropertyName("evidence_preserved")]
+    public bool? EvidencePreserved { get; set; }
 
     [JsonPropertyName("warning")]
     public string Warning { get; set; } = "";

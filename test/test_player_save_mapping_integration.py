@@ -19,6 +19,7 @@ from core.player_save_mapping_candidates import (
 )
 from core.player_save_mapping_staged_candidate import (
     CanonicalDecodeReceiptStore,
+    SAVE_MAPPING_DISPOSITION_CAPABILITY,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
     SAVE_MAPPING_STAGING_REF,
     SaveMappingIntegrationError,
@@ -123,6 +124,60 @@ def _record(
         },
         observed_at=OBSERVED_AT,
         recorded_at=recorded_at,
+    )
+
+
+def _killed_by_record() -> dict:
+    pending = pending_mapping_candidate(
+        value_kind="battle_history_killed_by_id",
+        raw_value=9,
+        pairing_method="exact_locator",
+        locator="killed_by",
+        expected_observation_count=1,
+        known_semantic_values=("Boss",),
+    )
+    resolved = resolve_mapping_candidates(
+        "battle_history_killed_by",
+        [pending],
+        {
+            "canonical_values": ["Ray"],
+            "locator_values": {"killed_by": "Ray"},
+            "locator_scopes": {},
+            "complete": True,
+            "pre_mutation": True,
+            "observed_at": OBSERVED_AT,
+            "source_observation_fingerprint": "3" * 64,
+        },
+    )[0]
+    return build_mapping_candidate_record(
+        mapping={
+            "mapping_id": "data-9-game-1101",
+            "data_version": 9,
+            "game_version": 1101,
+            "root_class": "SaveLoad+PlayerData",
+            "resolution": "compatible_exact_revision",
+            "authority_mapping_id": "data-9-game-1073",
+            "structural_mapping_id": "data-9-game-1101",
+            "canonical_dependency_fingerprint": "9" * 64,
+        },
+        check_id="battle_history_killed_by",
+        candidate=resolved,
+        snapshot_fingerprint="4" * 64,
+        ui_evidence_fingerprint="5" * 64,
+        source_observation_fingerprint="3" * 64,
+        workflow_provenance={
+            "capture_request_id": "capture-killed-by",
+            "inspection_request_id": "inspection-killed-by",
+            "runtime_session_fingerprint": "6" * 64,
+            "pid": 4242,
+            "target_generation_fingerprint": "7" * 64,
+            "activity_scope_fingerprint": "8" * 64,
+            "game_state": "terminal_game_over",
+            "active_round_identity_fingerprint": "a" * 64,
+            "boundary_fingerprint": "b" * 64,
+        },
+        observed_at=OBSERVED_AT,
+        recorded_at="2026-08-10T12:02:01+00:00",
     )
 
 
@@ -241,6 +296,9 @@ def test_catalog_needs_only_clean_main_and_empty_private_staging_ref(
     }
     assert catalog["items"][0]["record_id"] == record["record_id"]
     assert catalog["items"][0]["review_available"] is True
+    assert catalog["items"][0]["dismiss_available"] is True
+    assert catalog["items"][0]["agent_review_prompt"] == ""
+    assert "Review the exact proposal" in catalog["items"][0]["next_action"]
 
 
 def test_review_is_nonmutating_and_binds_only_mapping_inputs(
@@ -269,6 +327,61 @@ def test_review_is_nonmutating_and_binds_only_mapping_inputs(
         for path in (production / "config/player_save_versions").glob("*.json")
     } == before
     assert not _git(production, "for-each-ref", "--format=%(objectname)", SAVE_MAPPING_STAGING_REF)
+
+
+def test_compatible_killed_by_review_and_stage_change_only_runtime_authority(
+    integration_repository,
+):
+    production, store, _record_fixture, manager = integration_repository
+    record = _killed_by_record()
+    store.append_once(record)
+
+    catalog_item = next(
+        item
+        for item in manager.catalog()["items"]
+        if item["record_id"] == record["record_id"]
+    )
+    assert catalog_item["review_available"] is True
+
+    review = _review(manager, record)
+    assert [target["mapping_id"] for target in review["proposal"]["targets"]] == [
+        "data-9-game-1073"
+    ]
+
+    result = _stage(manager, record, review)
+    assert [target["mapping_id"] for target in result["targets"]] == [
+        "data-9-game-1073"
+    ]
+    assert _git(
+        production,
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        result["staged_commit"],
+    ).splitlines() == [
+        "config/player_save_versions/data_9_game_1073.json"
+    ]
+
+
+def test_dismiss_preserves_receipt_hides_observation_and_is_idempotent(
+    integration_repository,
+):
+    _production, store, record, manager = integration_repository
+
+    first = manager.dismiss(candidate_record_id=record["record_id"])
+    second = manager.dismiss(candidate_record_id=record["record_id"])
+
+    assert first["capability"] == SAVE_MAPPING_DISPOSITION_CAPABILITY
+    assert first["operation"] == "dismiss"
+    assert first["changed"] is True
+    assert first["evidence_preserved"] is True
+    assert second == {**first, "changed": False}
+    assert store.get(record["record_id"]) == record
+    assert manager.catalog()["items"] == []
+    with pytest.raises(SaveMappingIntegrationError) as failure:
+        _review(manager, record)
+    assert failure.value.code == "mapping_candidate_dismissed"
 
 
 def test_stage_creates_one_private_candidate_and_leaves_main_index_and_tree_untouched(
@@ -439,6 +552,17 @@ def test_contradictory_semantics_leave_the_routine_lane(integration_repository):
 
     assert len(catalog["items"]) == 2
     assert all(item["review_available"] is False for item in catalog["items"])
+    assert all(item["dismiss_available"] is True for item in catalog["items"])
+    assert all(
+        item["agent_review_prompt"].startswith(
+            "Please review TheTower save-mapping observation"
+        )
+        for item in catalog["items"]
+    )
+    assert all(
+        "Copy the agent-review request" in item["next_action"]
+        for item in catalog["items"]
+    )
     with pytest.raises(SaveMappingIntegrationError) as failure:
         _review(manager, record)
     assert failure.value.code == "mapping_candidate_requires_ordinary_development"
@@ -463,6 +587,16 @@ def test_contradictory_module_family_across_scopes_leaves_routine_lane(
     with pytest.raises(SaveMappingIntegrationError) as failure:
         _review(manager, record)
     assert failure.value.code == "mapping_candidate_requires_ordinary_development"
+
+
+def test_active_staging_transaction_blocks_dismissal(integration_repository):
+    _production, _store, record, manager = integration_repository
+    _stage(manager, record, _review(manager, record))
+
+    with pytest.raises(SaveMappingIntegrationError) as failure:
+        manager.dismiss(candidate_record_id=record["record_id"])
+
+    assert failure.value.code == "transaction_recovery_required"
 
 
 def test_retry_is_idempotent_and_does_not_create_another_commit(

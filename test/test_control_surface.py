@@ -1145,6 +1145,46 @@ def test_save_mapping_integrate_requires_exact_review_and_logs_one_pair(tmp_path
     assert "staged=true promoted=false mapping_invariants=passed" in activity
 
 
+def test_save_mapping_dismiss_preserves_evidence_and_logs_one_pair(tmp_path):
+    service = _service(tmp_path)
+    dismissed = {
+        "capability": "save_mapping_candidate_disposition_v1",
+        "operation": "dismiss",
+        "disposition": "dismissed",
+        "candidate_record_id": "a" * 64,
+        "event_id": "b" * 64,
+        "changed": True,
+        "evidence_preserved": True,
+    }
+    service.save_mapping_integration_manager.dismiss = Mock(
+        return_value=dismissed
+    )
+
+    result = service.apply_save_mapping_integration(
+        {
+            "operation": "dismiss",
+            "candidate_record_id": "a" * 64,
+        }
+    )
+
+    assert result == dismissed
+    service.save_mapping_integration_manager.dismiss.assert_called_once_with(
+        candidate_record_id="a" * 64,
+    )
+    activity = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    assert activity.count("[ACTION ") == 1
+    assert activity.count("[RESULT ") == 1
+    assert "evidence=preserved" in activity
+    assert "disposition=dismissed" in activity
+    operation_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if "[OPERATION] id=" in line
+    ]
+    assert len(set(operation_ids)) == 1
+    assert operation_ids[0].startswith("save-mapping-dismiss-aaaaaaaaaaaa-")
+
+
 def test_save_mapping_integrate_attempts_have_unique_audit_identities(tmp_path):
     service = _service(tmp_path)
     review = {
@@ -1214,7 +1254,10 @@ def test_post_ref_transaction_write_failure_is_audited_as_unconfirmed(tmp_path):
 def test_legacy_save_mapping_prepare_operation_is_rejected_without_audit(tmp_path):
     service = _service(tmp_path)
 
-    with pytest.raises(ControlSurfaceRequestError, match="review or stage"):
+    with pytest.raises(
+        ControlSurfaceRequestError,
+        match="review, dismiss, or stage",
+    ):
         service.apply_save_mapping_integration(
             {
                 "operation": "prepare",
@@ -1291,6 +1334,15 @@ def test_save_mapping_integration_requests_are_exact_shape(tmp_path):
                 "candidate_record_id": "a" * 64,
                 "workspace_id": "b" * 64,
                 "path": "/client/supplied/path",
+            }
+        )
+
+    with pytest.raises(ControlSurfaceRequestError, match="accepts exactly"):
+        service.apply_save_mapping_integration(
+            {
+                "operation": "dismiss",
+                "candidate_record_id": "a" * 64,
+                "reason": "client supplied",
             }
         )
 
@@ -3528,7 +3580,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 43" in native_compatibility
+    assert "MinimumServerRevision = 44" in native_compatibility
     assert '"bluestacks_maintenance_v1"' not in native_compatibility
     assert '"bluestacks_maintenance_v2"' in native_compatibility
     assert '"bluestacks_operator_restart_v1"' in native_compatibility
@@ -3544,6 +3596,8 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "save_mapping_review_status_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_staged_candidate_v1"' in native_compatibility
     assert "save_mapping_staged_candidate_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_candidate_disposition_v1"' in native_compatibility
+    assert "save_mapping_candidate_disposition_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'id="confirmedLocalMappingAlert"' in html
     assert 'x:Name="ConfirmedLocalMappingBanner"' in native_xaml
     assert 'JsonPropertyName("confirmed_local_mappings")' in native_models
@@ -4188,14 +4242,48 @@ assert.strictEqual(
 );
 assert.strictEqual(model.saveMappingIntegrationCompatible({{
   api_version: 1,
-  server_revision: 42,
-  capabilities: ['save_mapping_staged_candidate_v1'],
+  server_revision: 44,
+  capabilities: [
+    'save_mapping_staged_candidate_v1',
+    'save_mapping_candidate_disposition_v1',
+  ],
 }}), true);
 assert.strictEqual(model.saveMappingIntegrationCompatible({{
   api_version: 1,
-  server_revision: 41,
+  server_revision: 43,
+  capabilities: [
+    'save_mapping_staged_candidate_v1',
+    'save_mapping_candidate_disposition_v1',
+  ],
+}}), false);
+assert.strictEqual(model.saveMappingIntegrationCompatible({{
+  api_version: 1,
+  server_revision: 44,
   capabilities: ['save_mapping_staged_candidate_v1'],
 }}), false);
+const dismissedResult = {{
+  schema_version: 1,
+  capability: 'save_mapping_candidate_disposition_v1',
+  operation: 'dismiss',
+  disposition: 'dismissed',
+  candidate_record_id: 'a'.repeat(64),
+  event_id: 'd'.repeat(64),
+  recorded_at: '2026-08-15T12:00:00+00:00',
+  changed: true,
+  evidence_preserved: true,
+}};
+assert.strictEqual(model.saveMappingDismissedResultValidation(
+  dismissedResult,
+  'a'.repeat(64),
+).valid, true);
+assert.strictEqual(model.saveMappingDismissedResultValidation(
+  {{...dismissedResult, evidence_preserved: false}},
+  'a'.repeat(64),
+).valid, false);
+assert.strictEqual(model.saveMappingDismissedResultValidation(
+  dismissedResult,
+  'b'.repeat(64),
+).valid, false);
 const integratedResult = {{
   schema_version: 3,
   capability: 'save_mapping_staged_candidate_v1',
@@ -4308,8 +4396,14 @@ assert.match(promotionDominatesQueue.detail, /awaiting exact production promotio
     assert "Stage reviewed mapping for promotion" in html
     assert "private staging ref" in browser
     assert "saveMappingIntegratedResultValidation" in browser
+    assert "saveMappingDismissedResultValidation" in browser
     assert "saveMappingSelectionStillCurrent" in browser
     assert "Interrupted integration requires recovery" in browser
+    assert 'id="copySaveMappingAgentPromptButton"' in html
+    assert 'id="dismissSaveMappingObservationButton"' in html
+    assert 'operation: "dismiss"' in browser
+    assert "The original durable receipt will be preserved" in browser
+    assert "Agent-review request" in browser
     assert 'byId("saveMappingCandidateSelect").disabled = busy' in browser
     assert "saveMappingWorkspaceSelect" not in browser
     assert "state.saveMappingResult != null" in browser
@@ -5085,6 +5179,10 @@ def test_http_save_mapping_integration_routes_catalog_review_and_integrate(
                 "candidate_record_id": "a" * 64,
             },
             {
+                "operation": "dismiss",
+                "candidate_record_id": "a" * 64,
+            },
+            {
                 "operation": "stage",
                 "candidate_record_id": "a" * 64,
                 "reviewed_proposal_fingerprint": "c" * 64,
@@ -5107,6 +5205,10 @@ def test_http_save_mapping_integration_routes_catalog_review_and_integrate(
         assert calls == [
             {
                 "operation": "review",
+                "candidate_record_id": "a" * 64,
+            },
+            {
+                "operation": "dismiss",
                 "candidate_record_id": "a" * 64,
             },
             {

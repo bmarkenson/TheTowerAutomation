@@ -20,6 +20,11 @@ internal sealed record SaveMappingIntegratedResultValidation(
     string Code,
     string Reason);
 
+internal sealed record SaveMappingDismissedResultValidation(
+    bool Valid,
+    string Code,
+    string Reason);
+
 internal sealed record SaveMappingFailurePresentation(
     bool Uncertain,
     string Title,
@@ -40,6 +45,34 @@ internal static class SaveMappingIntegrationViewModels
                     : item.SemanticValue)
             : "";
         return $"{Format(item.CheckId)}{slot}{value}";
+    }
+
+    public static string CandidateDetail(SaveMappingIntegrationItem item) =>
+        $"{item.MappingId} · {item.State}{Environment.NewLine}"
+        + $"Reason: {(string.IsNullOrWhiteSpace(item.Reason) ? "Review pending" : item.Reason)}"
+        + Environment.NewLine
+        + $"Next: {(string.IsNullOrWhiteSpace(item.NextAction) ? "Review the exact proposal." : item.NextAction)}";
+
+    public static string NonReviewableProposalText(
+        SaveMappingIntegrationItem item)
+    {
+        var text = new StringBuilder();
+        text.AppendLine("EXACT PROPOSAL UNAVAILABLE");
+        text.AppendLine(string.IsNullOrWhiteSpace(item.ReviewReason)
+            ? item.Reason
+            : item.ReviewReason);
+        text.AppendLine();
+        text.AppendLine("WHAT TO DO");
+        text.AppendLine(string.IsNullOrWhiteSpace(item.NextAction)
+            ? "Copy the agent-review request for help resolving this observation."
+            : item.NextAction);
+        if (!string.IsNullOrWhiteSpace(item.AgentReviewPrompt))
+        {
+            text.AppendLine();
+            text.AppendLine("AGENT-REVIEW REQUEST");
+            text.AppendLine(item.AgentReviewPrompt);
+        }
+        return text.ToString().TrimEnd();
     }
 
     public static bool ReviewMatches(
@@ -266,6 +299,54 @@ internal static class SaveMappingIntegrationViewModels
                 : "The server response did not prove this exact reviewed proposal was staged without moving main.");
     }
 
+    public static SaveMappingDismissedResultValidation ValidateDismissedResult(
+        SaveMappingDismissedResult? result,
+        string? candidateRecordId)
+    {
+        var valid = result is not null
+            && result.SchemaVersion == 1
+            && result.Capability == "save_mapping_candidate_disposition_v1"
+            && result.Operation == "dismiss"
+            && result.Disposition == "dismissed"
+            && IsLowerHex64(candidateRecordId)
+            && result.CandidateRecordId == candidateRecordId
+            && IsLowerHex64(result.EventId)
+            && DateTimeOffset.TryParse(
+                result.RecordedAt,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out _)
+            && result.Changed.HasValue
+            && result.EvidencePreserved is true;
+        return new(
+            valid,
+            valid ? "" : "dismissal_result_invalid",
+            valid
+                ? ""
+                : "The server response did not prove that this exact observation was dismissed while preserving its evidence.");
+    }
+
+    public static string DismissedResultText(SaveMappingDismissedResult result)
+    {
+        var text = new StringBuilder();
+        text.AppendLine(result.Changed is true
+            ? "Observation dismissed"
+            : "Observation was already dismissed");
+        text.AppendLine(
+            "The durable receipt was preserved. No canonical mapping, Git ref, "
+            + "runtime state, device input, or current battle was changed.");
+        text.AppendLine();
+        text.AppendLine($"disposition event: {result.EventId}");
+        text.AppendLine($"recorded: {result.RecordedAt}");
+        if (!string.IsNullOrWhiteSpace(result.Warning))
+        {
+            text.AppendLine();
+            text.AppendLine("AUDIT WARNING");
+            text.AppendLine(result.Warning);
+        }
+        return text.ToString().TrimEnd();
+    }
+
     public static SaveMappingResultPresentation IntegratedResult(
         SaveMappingIntegratedResult? result,
         SaveMappingIntegrationReview? review)
@@ -339,7 +420,8 @@ internal static class SaveMappingIntegrationViewModels
     public static SaveMappingFailurePresentation Failure(
         string? code,
         string message,
-        bool integrateRequest)
+        bool integrateRequest,
+        bool dismissRequest = false)
     {
         if (code == "integration_busy")
         {
@@ -366,9 +448,15 @@ internal static class SaveMappingIntegrationViewModels
         {
             return new(
                 false,
-                integrateRequest ? "Staging rejected" : "Review unavailable",
-                message
-                    + " Nothing was staged by this request. Refresh and review again.");
+                dismissRequest
+                    ? "Dismissal rejected"
+                    : integrateRequest
+                        ? "Staging rejected"
+                        : "Review unavailable",
+                dismissRequest
+                    ? message + " Nothing was changed by this request. Refresh the catalog."
+                    : message
+                        + " Nothing was staged by this request. Refresh and review again.");
         }
         return new(
             true,

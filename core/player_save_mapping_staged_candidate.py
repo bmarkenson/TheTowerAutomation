@@ -24,6 +24,7 @@ import tempfile
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from core.player_save_mapping_candidates import (
+    AppendOnlyMappingCandidateDispositionStore,
     AppendOnlyMappingCandidateStore,
     PlayerSaveMappingCandidateError,
     canonical_mapping_set_fingerprint,
@@ -51,6 +52,7 @@ from core.player_save_mapping_integration import (
 SAVE_MAPPING_INTEGRATION_CAPABILITY = "save_mapping_staged_candidate_v1"
 SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION = 3
 SAVE_MAPPING_REVIEW_STATUS_CAPABILITY = "save_mapping_review_status_v2"
+SAVE_MAPPING_DISPOSITION_CAPABILITY = "save_mapping_candidate_disposition_v1"
 SAVE_MAPPING_STAGING_REF = "refs/thetower/save-mapping-candidate"
 
 _TRANSACTION_KIND = "save_mapping_staged_candidate_transaction"
@@ -60,6 +62,17 @@ _COMMIT_SUBJECT_PREFIX = "Stage save mapping candidate"
 _CANDIDATE_TRAILER = "Save-Mapping-Candidate-ID"
 _PROPOSAL_TRAILER = "Save-Mapping-Proposal-Fingerprint"
 _RECEIPT_SCHEMA_VERSION = 2
+
+_DISMISSIBLE_CANDIDATE_STATES = frozenset(
+    {
+        "more_evidence_required",
+        "evidence_ambiguous",
+        "canonical_conflict",
+        "review_required",
+        "mirror_pending",
+        "authority_pending",
+    }
+)
 
 
 def _is_hex(value: object, length: int) -> bool:
@@ -609,6 +622,7 @@ class SaveMappingIntegrationManager:
         *,
         repository_root: Path | str,
         candidate_store: AppendOnlyMappingCandidateStore,
+        disposition_path: Path | str | None = None,
         lock_path: Path | str | None = None,
         transaction_path: Path | str | None = None,
         decode_receipt_path: Path | str | None = None,
@@ -616,6 +630,11 @@ class SaveMappingIntegrationManager:
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.candidate_store = candidate_store
+        self.candidate_dispositions = AppendOnlyMappingCandidateDispositionStore(
+            Path(disposition_path)
+            if disposition_path is not None
+            else candidate_store.path.with_name("dispositions-v1.jsonl")
+        )
         self.lock_path = (
             Path(lock_path)
             if lock_path is not None
@@ -767,6 +786,33 @@ class SaveMappingIntegrationManager:
                         review_code=("" if base["integration_available"] else base["code"]),
                         review_reason=("" if base["integration_available"] else base["reason"]),
                     )
+            dismiss_available = bool(
+                active_transaction is None
+                and item.get("state") in _DISMISSIBLE_CANDIDATE_STATES
+            )
+            review_available = projected.get("review_available") is True
+            projected.update(
+                dismiss_available=dismiss_available,
+                dismiss_reason=(
+                    "Dismiss this observation while preserving its durable receipt."
+                    if dismiss_available
+                    else _dismiss_unavailable_reason(projected, active_transaction)
+                ),
+                agent_review_prompt=(
+                    ""
+                    if review_available
+                    else _agent_review_prompt(
+                        projected,
+                        dismiss_available=dismiss_available,
+                    )
+                ),
+                next_action=(
+                    "Review the exact proposal, or dismiss this observation if "
+                    "you know it is incorrect."
+                    if review_available
+                    else _nonreviewable_next_action(projected)
+                ),
+            )
             items.append(projected)
         return {
             "schema_version": SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION,
@@ -792,6 +838,7 @@ class SaveMappingIntegrationManager:
             transaction = _load_transaction(self.transaction_path)
         main_status = mapping_candidate_review_status(
             store=self.candidate_store,
+            disposition_store=self.candidate_dispositions,
             repository_root=self.repository_root,
         )
         if main_status.get("available") is not True:
@@ -863,6 +910,7 @@ class SaveMappingIntegrationManager:
             if transaction is None:
                 status = mapping_candidate_review_status(
                     store=self.candidate_store,
+                    disposition_store=self.candidate_dispositions,
                     repository_root=self.repository_root,
                 )
                 if status.get("available") is True and any(
@@ -885,6 +933,7 @@ class SaveMappingIntegrationManager:
         except (OSError, PlayerSaveMappingCandidateError, SaveMappingIntegrationError) as exc:
             fallback = mapping_candidate_review_status(
                 store=self.candidate_store,
+                disposition_store=self.candidate_dispositions,
                 repository_root=self.repository_root,
             )
             return {
@@ -995,6 +1044,60 @@ class SaveMappingIntegrationManager:
             "stage": staging,
             "recovery_required": recovery_required,
         }
+
+    def dismiss(self, *, candidate_record_id: object) -> dict[str, Any]:
+        """Dismiss one exact observation without deleting its source receipt."""
+
+        descriptor = self._acquire_lock()
+        try:
+            candidate_id = str(candidate_record_id or "").strip().lower()
+            try:
+                prior = self.candidate_dispositions.dismissal_for(candidate_id)
+            except (OSError, PlayerSaveMappingCandidateError) as exc:
+                raise SaveMappingIntegrationError(
+                    _proposal_error_code(exc),
+                    _proposal_error_message(exc),
+                ) from exc
+            if prior is not None:
+                return _dismissal_result(prior, changed=False)
+            if _load_transaction(self.transaction_path) is not None:
+                raise SaveMappingIntegrationError(
+                    "transaction_recovery_required",
+                    "Finish or inspect the existing canonical integration before "
+                    "dismissing an observation.",
+                )
+            try:
+                record = self.candidate_store.get(candidate_id)
+                status = mapping_candidate_record_status(
+                    record,
+                    repository_root=self.repository_root,
+                )
+            except (OSError, PlayerSaveMappingCandidateError) as exc:
+                raise SaveMappingIntegrationError(
+                    _proposal_error_code(exc),
+                    _proposal_error_message(exc),
+                ) from exc
+            if status.get("state") not in _DISMISSIBLE_CANDIDATE_STATES:
+                raise SaveMappingIntegrationError(
+                    "mapping_candidate_not_dismissible",
+                    "This observation is no longer an active dismissible candidate. "
+                    "Refresh the catalog before choosing another action.",
+                )
+            try:
+                disposition = self.candidate_dispositions.dismiss(
+                    record["record_id"]
+                )
+            except (OSError, PlayerSaveMappingCandidateError) as exc:
+                raise SaveMappingIntegrationError(
+                    _proposal_error_code(exc),
+                    _proposal_error_message(exc),
+                ) from exc
+            return _dismissal_result(
+                disposition,
+                changed=bool(disposition["changed"]),
+            )
+        finally:
+            os.close(descriptor)
 
     def _recovery_review(
         self,
@@ -1477,6 +1580,7 @@ class SaveMappingIntegrationManager:
             raise PlayerSaveMappingCandidateError(
                 "mapping_candidate_record_not_found"
             )
+        self._require_candidate_not_dismissed(matches[0])
         self._require_routine_candidate_records(matches[0], candidate_records)
 
     def _staging_ref_commit(self) -> Optional[str]:
@@ -2274,10 +2378,18 @@ class SaveMappingIntegrationManager:
         return descriptor
 
     def _require_routine_candidate(self, record: Mapping[str, Any]) -> None:
+        self._require_candidate_not_dismissed(record)
         self._require_routine_candidate_records(
             record,
             self.candidate_store.list_records(),
         )
+
+    def _require_candidate_not_dismissed(
+        self,
+        record: Mapping[str, Any],
+    ) -> None:
+        if self.candidate_dispositions.dismissal_for(record.get("record_id")):
+            raise PlayerSaveMappingCandidateError("mapping_candidate_dismissed")
 
     @staticmethod
     def _require_routine_candidate_records(
@@ -2340,6 +2452,24 @@ def _public_target(target: _PreparedTarget) -> dict[str, Any]:
         "after_sha256": target.after_sha256,
         "changed": target.changed,
         "mode": target.mode,
+    }
+
+
+def _dismissal_result(
+    disposition: Mapping[str, Any],
+    *,
+    changed: bool,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "capability": SAVE_MAPPING_DISPOSITION_CAPABILITY,
+        "operation": "dismiss",
+        "disposition": "dismissed",
+        "candidate_record_id": disposition["candidate_record_id"],
+        "event_id": disposition["event_id"],
+        "recorded_at": disposition["recorded_at"],
+        "changed": changed,
+        "evidence_preserved": True,
     }
 
 
@@ -2495,8 +2625,69 @@ def _proposal_error_message(exc: BaseException) -> str:
             "Conflicting, ambiguous, or incomplete evidence requires ordinary "
             "development review."
         ),
+        "mapping_candidate_dismissed": (
+            "This observation was dismissed. Refresh the catalog before "
+            "choosing another action."
+        ),
+        "mapping_candidate_not_dismissible": (
+            "This observation is no longer an active dismissible candidate."
+        ),
     }
     return messages.get(str(exc), "The canonical mapping proposal is unavailable.")
+
+
+def _agent_review_prompt(
+    item: Mapping[str, Any],
+    *,
+    dismiss_available: bool,
+) -> str:
+    candidate_id = str(
+        item.get("candidate_record_id") or item.get("record_id") or "unknown"
+    )
+    return (
+        "Please review TheTower save-mapping observation "
+        f"{candidate_id}. The GUI cannot safely complete it.\n"
+        f"Mapping: {item.get('mapping_id') or 'unknown'}\n"
+        f"Check: {item.get('check_id') or 'unknown'}\n"
+        f"State: {item.get('state') or 'unknown'}\n"
+        f"Reason: {item.get('review_reason') or item.get('reason') or 'unknown'}\n"
+        "Inspect the durable receipt and the current canonical mapping owners. "
+        + (
+            "Either implement and validate the correct mapping through the "
+            "normal feature-branch workflow, or dismiss this exact observation "
+            "if it is incorrect. Preserve the original receipt and report what "
+            "changed."
+            if dismiss_available
+            else "Resolve or complete the reported staging lifecycle without "
+                "bypassing or dismissing it, then report what changed."
+        )
+    )
+
+
+def _nonreviewable_next_action(item: Mapping[str, Any]) -> str:
+    reason = str(
+        item.get("review_reason")
+        or item.get("reason")
+        or "The exact proposal is unavailable."
+    )
+    return f"{reason} Copy the agent-review request for help resolving it."
+
+
+def _dismiss_unavailable_reason(
+    item: Mapping[str, Any],
+    active_transaction: Optional[Mapping[str, Any]],
+) -> str:
+    if active_transaction is not None:
+        return (
+            "Finish or inspect the existing canonical integration before "
+            "dismissing an observation."
+        )
+    if item.get("state") not in _DISMISSIBLE_CANDIDATE_STATES:
+        return (
+            "This lifecycle state must be completed or recovered; it cannot be "
+            "dismissed as an unreviewed observation."
+        )
+    return "Dismissal is temporarily unavailable; refresh the catalog."
 
 
 def canonical_mapping_runtime_commit(
@@ -2555,6 +2746,7 @@ def observe_canonical_mapping_decode(
 
 __all__ = [
     "CanonicalDecodeReceiptStore",
+    "SAVE_MAPPING_DISPOSITION_CAPABILITY",
     "SAVE_MAPPING_INTEGRATION_CAPABILITY",
     "SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION",
     "SAVE_MAPPING_REVIEW_STATUS_CAPABILITY",

@@ -97,15 +97,134 @@ public partial class SaveMappingIntegrationWindow : Window
         var candidate = SelectedCandidate?.Item;
         CandidateDetailText.Text = candidate is null
             ? "Choose one durable observation."
-            : $"{candidate.MappingId} · {candidate.State} · "
-                + (string.IsNullOrWhiteSpace(candidate.Reason)
-                    ? "Review pending"
-                    : candidate.Reason);
+            : SaveMappingIntegrationViewModels.CandidateDetail(candidate);
         ReviewButton.IsEnabled = !_busy
             && candidate?.ReviewAvailable == true;
         ReviewButton.ToolTip = candidate?.ReviewAvailable == false
             ? candidate.ReviewReason
             : "Review the exact server-generated proposal.";
+        CopyAgentReviewButton.Visibility = string.IsNullOrWhiteSpace(
+            candidate?.AgentReviewPrompt)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        CopyAgentReviewButton.IsEnabled = !_busy
+            && !string.IsNullOrWhiteSpace(candidate?.AgentReviewPrompt);
+        DismissButton.IsEnabled = !_busy
+            && candidate?.DismissAvailable == true;
+        DismissButton.ToolTip = candidate?.DismissAvailable == false
+            ? candidate.DismissReason
+            : "Hide this observation from the active queue while preserving its receipt.";
+        if (candidate?.ReviewAvailable == false)
+        {
+            ProposalText.Text =
+                SaveMappingIntegrationViewModels.NonReviewableProposalText(
+                    candidate);
+            IntegrateStatusText.Text = string.IsNullOrWhiteSpace(
+                candidate.NextAction)
+                    ? "The exact proposal must be resolved before staging."
+                    : candidate.NextAction;
+        }
+        else
+        {
+            IntegrateStatusText.Text = candidate is null
+                ? "Choose an observation to see its available actions."
+                : "Review this exact candidate before staging, or dismiss it if it is incorrect.";
+        }
+    }
+
+    private void CopyAgentReview_Click(object sender, RoutedEventArgs e)
+    {
+        var prompt = SelectedCandidate?.Item.AgentReviewPrompt;
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return;
+        }
+        try
+        {
+            Clipboard.SetText(prompt);
+            IntegrateStatusText.Text = "Agent-review request copied to the clipboard.";
+        }
+        catch (Exception exc)
+        {
+            ProposalText.Text = prompt;
+            ProposalText.Focus();
+            ProposalText.SelectAll();
+            ResultPanel.Visibility = Visibility.Visible;
+            ResultPanel.BorderBrush = new SolidColorBrush(
+                Color.FromRgb(241, 191, 91));
+            ResultText.Text = "Clipboard unavailable"
+                + Environment.NewLine
+                + exc.Message
+                + Environment.NewLine
+                + "The request remains selected in the proposal panel for manual copying.";
+        }
+    }
+
+    private async void Dismiss_Click(object sender, RoutedEventArgs e)
+    {
+        var candidate = SelectedCandidate?.Item;
+        if (candidate?.DismissAvailable != true)
+        {
+            return;
+        }
+        var confirmation =
+            "Dismiss this exact observation from the active review queue?\n\n"
+            + candidate.RecordId
+            + "\n\nThe original durable receipt will be preserved, together "
+            + "with an append-only dismissal record. This does not change "
+            + "canonical mappings, Git refs, main, runtime authority, device "
+            + "input, or the current battle.";
+        if (MessageBox.Show(
+            this,
+            confirmation,
+            "Dismiss save-mapping observation",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel) != MessageBoxResult.OK)
+        {
+            return;
+        }
+        var selection = new SelectionSnapshot(
+            candidate.RecordId,
+            _selectionGeneration);
+        SaveMappingDismissedResult? dismissed = null;
+        await RunAsync(async cancellationToken =>
+        {
+            var result = await _api.DismissSaveMappingObservationAsync(
+                new
+                {
+                    operation = "dismiss",
+                    candidate_record_id = candidate.RecordId,
+                },
+                cancellationToken);
+            if (!SelectionStillCurrent(selection))
+            {
+                throw new InvalidOperationException(
+                    "The GUI selection changed while dismissal was in flight.");
+            }
+            var validation =
+                SaveMappingIntegrationViewModels.ValidateDismissedResult(
+                    result,
+                    candidate.RecordId);
+            if (!validation.Valid)
+            {
+                throw new InvalidOperationException(validation.Reason);
+            }
+            dismissed = result;
+        }, dismissalRequest: true);
+        if (dismissed is not { } dismissalResult)
+        {
+            return;
+        }
+        await RefreshCatalogAsync();
+        ResultPanel.Visibility = Visibility.Visible;
+        ResultPanel.BorderBrush = new SolidColorBrush(
+            Color.FromRgb(73, 214, 157));
+        ResultText.Text =
+            SaveMappingIntegrationViewModels.DismissedResultText(
+                dismissalResult);
+        IntegrateStatusText.Text =
+            "Observation removed from the active queue; its durable evidence was preserved.";
     }
 
     private async void Review_Click(object sender, RoutedEventArgs e)
@@ -239,7 +358,8 @@ public partial class SaveMappingIntegrationWindow : Window
 
     private async Task RunAsync(
         Func<CancellationToken, Task> action,
-        bool integrateRequest = false)
+        bool integrateRequest = false,
+        bool dismissalRequest = false)
     {
         if (_busy)
         {
@@ -265,7 +385,8 @@ public partial class SaveMappingIntegrationWindow : Window
             var presentation = SaveMappingIntegrationViewModels.Failure(
                 code,
                 exc.Message,
-                integrateRequest);
+                integrateRequest,
+                dismissalRequest);
             ResultText.Text = presentation.Title
                 + Environment.NewLine
                 + presentation.Detail;
@@ -280,6 +401,10 @@ public partial class SaveMappingIntegrationWindow : Window
     private void RenderSelectionButtonsOnly()
     {
         ReviewButton.IsEnabled = SelectedCandidate?.Item.ReviewAvailable == true;
+        CopyAgentReviewButton.IsEnabled = !string.IsNullOrWhiteSpace(
+            SelectedCandidate?.Item.AgentReviewPrompt);
+        DismissButton.IsEnabled =
+            SelectedCandidate?.Item.DismissAvailable == true;
         var availability = SaveMappingIntegrationViewModels.IntegrateAvailability(
             _review,
             SelectedCandidate?.Item.RecordId);
@@ -336,6 +461,8 @@ public partial class SaveMappingIntegrationWindow : Window
         if (busy)
         {
             ReviewButton.IsEnabled = false;
+            CopyAgentReviewButton.IsEnabled = false;
+            DismissButton.IsEnabled = false;
             IntegrateButton.IsEnabled = false;
         }
         else

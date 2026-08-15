@@ -1901,7 +1901,8 @@ public partial class MainWindow : Window
             _serverCompatibility))
         {
             ShowError(new InvalidOperationException(
-                "Linux API revision 42 with save_mapping_staged_candidate_v1 is required."));
+                $"Linux API revision {ControlSurfaceCompatibility.MinimumServerRevision} "
+                + "with save-mapping staging and disposition capabilities is required."));
             return;
         }
         try
@@ -3833,8 +3834,9 @@ public partial class MainWindow : Window
                 _serverCompatibility);
         SaveMappingIntegrationMenuItem.IsEnabled = compatible;
         SaveMappingIntegrationMenuItem.ToolTip = compatible
-            ? "Review an exact proposal and stage one verified commit for promotion."
-            : "Linux API revision 42 with save_mapping_staged_candidate_v1 is required.";
+            ? "Review, dismiss, or stage a save-mapping observation."
+            : $"Linux API revision {ControlSurfaceCompatibility.MinimumServerRevision} "
+                + "with save-mapping staging and disposition capabilities is required.";
         ReviewSaveMappingsButton.IsEnabled = compatible;
         ReviewSaveMappingsButton.ToolTip =
             SaveMappingIntegrationMenuItem.ToolTip;

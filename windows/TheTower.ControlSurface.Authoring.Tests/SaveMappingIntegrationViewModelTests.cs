@@ -83,6 +83,62 @@ public sealed class SaveMappingIntegrationViewModelTests
     }
 
     [Fact]
+    public void Nonreviewable_candidate_exposes_reason_next_step_and_agent_request()
+    {
+        var item = new SaveMappingIntegrationItem
+        {
+            MappingId = "data-9-game-1101",
+            State = "canonical_conflict",
+            Reason = "canonical mapping conflicts with the observation",
+            ReviewReason = "Conflicting evidence requires ordinary development.",
+            NextAction = "Copy the agent-review request for help resolving it.",
+            AgentReviewPrompt = "Please review exact observation aaaa.",
+        };
+
+        var detail = SaveMappingIntegrationViewModels.CandidateDetail(item);
+        var proposal =
+            SaveMappingIntegrationViewModels.NonReviewableProposalText(item);
+
+        Assert.Contains("Reason:", detail);
+        Assert.Contains("Next:", detail);
+        Assert.Contains("EXACT PROPOSAL UNAVAILABLE", proposal);
+        Assert.Contains("WHAT TO DO", proposal);
+        Assert.Contains("AGENT-REVIEW REQUEST", proposal);
+        Assert.Contains(item.AgentReviewPrompt, proposal);
+    }
+
+    [Fact]
+    public void Exact_dismissal_result_proves_evidence_was_preserved()
+    {
+        var result = new SaveMappingDismissedResult
+        {
+            SchemaVersion = 1,
+            Capability = "save_mapping_candidate_disposition_v1",
+            Operation = "dismiss",
+            Disposition = "dismissed",
+            CandidateRecordId = CandidateId,
+            EventId = new string('d', 64),
+            RecordedAt = "2026-08-15T12:00:00+00:00",
+            Changed = true,
+            EvidencePreserved = true,
+        };
+
+        Assert.True(
+            SaveMappingIntegrationViewModels.ValidateDismissedResult(
+                result,
+                CandidateId).Valid);
+        Assert.Contains(
+            "durable receipt was preserved",
+            SaveMappingIntegrationViewModels.DismissedResultText(result));
+
+        result.EvidencePreserved = false;
+        Assert.False(
+            SaveMappingIntegrationViewModels.ValidateDismissedResult(
+                result,
+                CandidateId).Valid);
+    }
+
+    [Fact]
     public void Exact_durable_recovery_review_remains_actionable_after_refresh()
     {
         var review = Review();
@@ -270,6 +326,14 @@ public sealed class SaveMappingIntegrationViewModelTests
         Assert.Contains("do not retry automatically", uncertain.Detail);
         Assert.False(unchanged.Uncertain);
         Assert.Contains("retry once only when directed", unchanged.Detail);
+
+        var dismissal = SaveMappingIntegrationViewModels.Failure(
+            "transaction_recovery_required",
+            "Finish the transaction.",
+            integrateRequest: false,
+            dismissRequest: true);
+        Assert.Equal("Dismissal rejected", dismissal.Title);
+        Assert.Contains("Nothing was changed", dismissal.Detail);
     }
 
     private static SaveMappingIntegrationReview Review() => new()
