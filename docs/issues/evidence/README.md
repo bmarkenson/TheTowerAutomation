@@ -4,6 +4,12 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-15 Tournament mapping-observation callback mismatch
+
+[`tournament-mapping-observation-callback-2026-08-15.md`](tournament-mapping-observation-callback-2026-08-15.md)
+preserves the attached Tournament preflight's unexpected-keyword failure and
+the source-interface mismatch that established `ISSUE-2026-049`.
+
 ## 2026-08-15 Assist module assignment field mismatch
 
 [`assist-module-assignment-field-2026-08-15.md`](assist-module-assignment-field-2026-08-15.md)

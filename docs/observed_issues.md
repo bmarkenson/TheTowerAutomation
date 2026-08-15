@@ -237,6 +237,20 @@ current runtime state.
 
 ## Repairs awaiting confirmation
 
+### Tournament session preflight rejected its mapping-observation callback
+
+**Stable ID:** `ISSUE-2026-049` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- An attached Tournament opened and closed Modules, then its read-only session
+  preflight raised an unexpected-keyword error instead of evaluating the
+  captured screens. The generic navigator supplied its supported mapping
+  callback, but the Tournament wrapper neither accepted nor forwarded it.
+- Load the [dossier](issues/open-2026.md#tournament-session-preflight-rejected-its-mapping-observation-callback)
+  before changing Tournament preflight arguments or mapping-candidate
+  collection. Next: deploy the forwarding repair and confirm a fresh
+  Tournament preflight completes without the callback TypeError;
+  [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Assist module assignments always fell back to Modules UI
 
 **Stable ID:** `ISSUE-2026-048` · **Lifecycle:** `repair_awaiting_confirmation`

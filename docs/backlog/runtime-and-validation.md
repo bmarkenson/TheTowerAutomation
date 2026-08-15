@@ -41,6 +41,13 @@ as checked checkpoint narrative here.
     One fresh ordinary Home or terminal boundary must publish all eight Module
     assignments from the save and omit Modules UI. Do not change or empty a
     Module solely to manufacture the confirmation.
+  - [ ] Deploy and confirm the Tournament mapping-observation callback repair
+    in
+    [ISSUE-2026-049](../issues/open-2026.md#tournament-session-preflight-rejected-its-mapping-observation-callback).
+    The next ordinary attached or owned-validation Tournament preflight must
+    complete without an unexpected-keyword failure and retain its read-only
+    mapping observations. Do not start or attach a battle solely for this
+    confirmation.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
