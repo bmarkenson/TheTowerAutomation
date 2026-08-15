@@ -179,14 +179,14 @@ and actionable work lives in
 - **Follow-up validation and deployment status:** The same-family and
   explicit-empty implementation passed all 451 affected Python tests, all 190
   portable native authoring tests, and the two documentation lifecycle tests.
-  After reconciliation onto current `main`, exact integrated code candidate
-  `60b1b21` passed an expanded 671-test affected slice, all 190 portable native
+  After the final current-main refresh, exact integrated code candidate
+  `bbdf30f` passed a 381-test combined overlap slice, all 192 portable native
   authoring tests, a successful Release WPF cross-build, and the two
   documentation lifecycle tests. Native restore/build emitted only the known
   read-only NuGet vulnerability-cache warning. Its complete isolated
   checkpoint passed compilation, state definitions, clickmap
-  integrity with zero errors and 44 established orphan notices, and all 2,721
-  Python tests in 426.64 seconds. It was validated code-only; production
+  integrity with zero errors and 44 established orphan notices, and all 2,728
+  Python tests in 409.14 seconds. It was validated code-only; production
   deployment and a later natural ordinary-boundary observation remain
   coordinator work.
 - **Fixed by:** `888f101`, `1c977de`, `9f9062f`, and `86671b1`.
