@@ -233,8 +233,8 @@ Enter this section only while `refs/thetower/promotion-owner` names exact `D`.
 | Candidate contents | Production boundary |
 | --- | --- |
 | Documentation only | Use steps 5–7 without a rollback tag, service stop, restart, or runtime smoke. |
-| Runtime Python, YAML, templates, or runtime-read assets | Stop automation before update; restart and smoke-test afterward. |
-| Control surface or shared modules | Stop/restart the control-surface service; also stop automation when shared runtime code changes. |
+| Runtime Python, YAML, templates, or runtime-read assets | Stop automation before update; restart and smoke-test afterward. When Stop retained an exact owned battle, ordinary Start performs and waits for its fresh same-battle Attach automatically; a changed/ended battle remains Paused and must not be reported as a successful runtime smoke. |
+| Control surface or shared modules | Stop automation first when shared runtime code changes, preserving any eligible exact-battle handoff; stop/restart the control-surface service, then Start automation and require the same-battle Attach or the appropriate explicit Paused outcome in smoke evidence. |
 | Native Windows package input | Complete the [required Windows package publication](#required-windows-package-publication) after the production checkout reaches `D`. |
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |

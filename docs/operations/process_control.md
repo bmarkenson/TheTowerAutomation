@@ -46,7 +46,11 @@ no-op.
 `automation_ctl.py` changes authority/workflow directives; it does not manage
 the systemd process lifecycle. Use the control surface's separate **Start
 Automation**/**Stop Automation** process actions for that lifecycle. Start
-Automation always launches Paused and waits for explicit battle intent.
+Automation launches Paused. It waits for explicit battle intent unless the
+preceding complete Stop retained fresh proof of an exact battle automation
+owned. In that case Start creates a fresh Attach, enables only for its guarded
+validation, and completes only after a forced save proves the same battle.
+Different or ended battle evidence leaves Automation Paused.
 
 Start Battle is accepted only with fresh verified Home `NEW_BATTLE` evidence;
 Attach to Battle requires fresh Home `RESUME_BATTLE` or active-battle evidence.
