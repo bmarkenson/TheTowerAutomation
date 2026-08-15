@@ -82,17 +82,34 @@ and actionable work lives in
 - **Resolution:** Commit `888f101` adds a versioned global
   `module_info_indices` owner containing all 24 current
   `infoIndex -> (name, family)` identities in the version-1073 authority and
-  version-1101 structural mirror. Existing `module_loadout` values remain
-  unchanged as exact slot/role UI-suppression allowlists. A globally known but
-  slot-unsupported value is diagnostic only and retains the complete Modules
-  UI route without generating a duplicate candidate. A truly unknown ID emits
-  a global identity candidate and also retains UI. Reviewed proposals and
-  confirmed-local overlays add only global identity; they never add slot
-  support, make Modules observed, or authorize equip/repair input. Scope,
-  family, locator, case-normalized name, and cross-receipt conflicts now fail
-  closed. The inventory fallback retains the fixed-grid fast path and adds a
+  version-1101 structural mirror. At that point, existing `module_loadout`
+  values remained unchanged as exact slot/role UI-suppression allowlists, so a
+  globally known but unlisted placement remained diagnostic. A truly unknown
+  ID emits a global identity candidate and retains UI. Reviewed proposals and
+  confirmed-local overlays add only global identity; they never patch a slot
+  list or directly authorize equip/repair input. Scope, family, locator,
+  case-normalized name, and cross-receipt conflicts now fail closed. The
+  inventory fallback retains the fixed-grid fast path and adds a
   requested-identity-only vertical search whose result must still pass the
   complete icon-catalog margin, Ancestral-frame, and exact detail guards.
+- **Same-family and empty-slot authority follow-up:** Code commits `1c977de`,
+  `9f9062f`, and `86671b1` remove the remaining per-name/per-role restriction,
+  fail closed on a duplicate installed name, and normalize explicit empty
+  assignments. Both exact mapping owners now opt
+  into `assignment_authority_scope=canonical_global_same_family`; a canonical
+  name can satisfy either exact Primary or Assist slot of its mapped family.
+  `empty_assignment_scope=explicit_nil` maps a Primary array null or the exact
+  `module=null` field of an unlocked typed Assist slot to canonical `empty`.
+  All eight structural slots remain required; installed names are unique while
+  multiple empty assignments are valid. Matching complete evidence may omit
+  Modules UI, while an enforced mismatch still uses the full guarded UI path.
+  A positively reidentified occupied slot can be unequipped for an explicit
+  empty requirement, but `not_ancestral` alone remains ambiguous and cannot be
+  called empty. Unknown IDs/names, cross-family values, duplicate installed
+  names, missing/locked Assist entries, malformed or partial structures, and
+  locally confirmed but not canonically integrated identities remain
+  fail-closed. This authority adds no rarity, level, star, effect, substat,
+  inventory, GUID, or private-value claim.
 - **Mapping evidence:** An operator-authorized no-battle Home campaign paired
   three exact four-Primary UI loadouts with fresh stable version-1101 saves.
   It established Havoc Bringer `7`, Death Penalty `8`, Wormhole Redirector
@@ -113,12 +130,15 @@ and actionable work lives in
   a process, service, emulator, or ADB server; deploy code; or modify installed
   production files.
 - **Regression:** Decoder tests require the complete catalog in both mappings,
-  reject malformed identities and slot/global disagreement, and distinguish
-  unknown IDs from globally known unsupported placements. Candidate,
+  reject malformed identities and slot/global disagreement, accept Project
+  Funding `43` in `generator_assist`, normalize repeated explicit empty slots,
+  and distinguish unknown IDs from canonical same-family placements.
+  Home/session/No Strategy tests prove the same normalized evidence avoids
+  duplicate reads; guarded repair tests prove exact occupied-to-empty input and
+  reject ambiguous visual absence. Candidate,
   confirmed-local, integration, status-presentation, and shifted-inventory-row
   tests prove global conflict handling, identity-only proposals/overlays,
-  unchanged slot authority, later-slot candidate discovery, and guarded Havoc
-  selection.
+  later-slot candidate discovery, and guarded Havoc selection.
 - **Validation:** Focused Module/save/candidate/control tests passed 331 tests;
   Strategy/loadout authoring passed 106; documentation lifecycle passed 2;
   portable native compatibility passed all 189 tests; and state-definition and
@@ -156,7 +176,15 @@ and actionable work lives in
   and 35,172,132-byte Tunnel Host
   `96e27dc3a73c77a9be6777533b2273720d041a581847a757d521103580bcbae5`.
   Linux publication does not establish Windows WPF lifecycle behavior.
-- **Fixed by:** `888f101`.
+- **Follow-up validation and deployment status:** The same-family and
+  explicit-empty implementation passed all 451 affected Python tests, all 190
+  portable native authoring tests, and the two documentation lifecycle tests.
+  The complete isolated checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and 44 established orphan notices, and
+  all 2,720 Python tests in 413.98 seconds. It was validated code-only;
+  production deployment and a later natural ordinary-boundary observation
+  remain coordinator work.
+- **Fixed by:** `888f101`, `1c977de`, `9f9062f`, and `86671b1`.
 
 ### Unbound manual terminal handoff permanently disabled Automation at Home
 
@@ -1279,7 +1307,11 @@ and actionable work lives in
   changing Tournament's observation-only policy. The 2026-08-14 no-battle
   campaign then completed all 24 global Module identities; exact current Farm
   and `tournament_standard` assignments suppress duplicate Modules UI, while a
-  globally known identity in an unsupported slot remains UI-backed.
+  globally known identity in an unsupported slot remained UI-backed at that
+  checkpoint. Follow-ups `1c977de`, `9f9062f`, and `86671b1` replaced that
+  historical restriction with canonical same-family authority for either exact
+  Primary or Assist role and added explicit empty-slot normalization.
+
 ### Stopping managed automation removed the only localhost ADB registration
 
 - **Observed:** 2026-08-05 at a post-automation invocation boundary for the

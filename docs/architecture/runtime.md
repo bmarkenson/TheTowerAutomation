@@ -188,33 +188,48 @@ state in which all nine weapons are present, unlocked, and on; Spotlight
 Missiles supports only the exact unlocked/on state. A mixed/off primary request,
 Spotlight Missiles off, malformed structure, or unsupported value restores only
 the applicable shared-screen UI work, where any component actually observed
-can still contradict carried evidence. Module decoding separates a global
-`infoIndex -> (name, family)` identity catalog from exact slot/role allowlists;
-it is not a generic inventory map. The catalog now names all 24 current
-Modules—six per family—under the
-[player-save mapping owner](player_save.md#current-status). This does not add
-any slot support. Farm's four Primary and four typed Assist assignments remain
-enforced. The Tournament reference is also fully mapped:
+can still contradict carried evidence. Module decoding separates a canonical
+global `infoIndex -> (name, family)` identity catalog from the exact structural
+Primary/Assist slot map; it is not a generic inventory map. The catalog names
+all 24 current Modules—six per family—under the
+[player-save mapping owner](player_save.md#current-status). Its explicit
+`canonical_global_same_family` authority permits any canonical name in either
+exact slot of its family. Its separate explicit-nil contract represents an
+uninstalled Primary or unlocked Assist assignment as canonical `empty`.
+Farm's four Primary and four typed Assist assignments remain enforced. The
+Tournament reference is also fully mapped:
 Primary Amplifying Strike (`45`), Orbital Augment (`46`), Project Funding
 (`43`), and Dimension Core (`38`); Assist Being Annihilator (`9`), Anti-Cube
 Portal (`20`), Singularity Harness (`30`), and Harmony Conductor (`39`). A
 same-run stable-save/UI pairing additionally established armor Primary
 Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`).
 
-Exact slot, family, role, allowlisted name, unlocked Assist state, and complete
-structure must agree before save evidence can replace Modules observation.
+Exact slot, family, role, canonical name-or-empty assignment, unlocked Assist
+state, and complete structure must agree before save evidence can replace
+Modules observation. Installed names must be unique; `empty` may repeat.
 Tournament's `observe` policy records a fully decoded difference from
 `tournament_standard` as `save_observation`; it neither fails the gate nor
 authorizes a repair. An `enforce` policy still requires exact equality.
-A globally identified value outside a slot's allowlist is normalized for
-diagnostics but still retains the complete Modules UI path and does not produce
-a duplicate candidate. A genuinely unknown ID produces identity-review
-evidence at a complete, exact, pre-mutation UI observation and also retains the
-full route. A later local confirmation makes only that identity available for
-diagnostics; it does not widen the slot allowlist. Unsupported requested names
-and malformed or partial structures likewise retain UI. These facts do not map
-rarity, levels, stars, effects, substats, inventory semantics, GUIDs, or private
-record values. Orb Distance and Damage Slider remain UI-authoritative.
+A canonical value in either same-family role may match without another
+placement campaign. A genuinely unknown ID produces identity-review evidence
+at a complete, exact, pre-mutation UI observation and retains the full route.
+A later local confirmation makes only that identity available for diagnostics;
+same-family authority begins only after canonical integration. Unknown names,
+cross-family values, duplicate installed names, enforced mismatches, and
+malformed or partial structures likewise retain UI. An overview classified only
+as `not_ancestral` is not empty evidence because it may contain a lower-rarity
+Module. These facts do not map rarity, levels, stars, effects, substats,
+inventory semantics, GUIDs, or private record values. Orb Distance and Damage
+Slider retain their independent exact-value authority.
+
+Save-backed Home, carried session evidence, and No Strategy inventory reporting
+all consume the same normalized eight-slot assignment. On a verified boundary,
+an exact match or a complete `observe` result therefore needs no Modules
+navigation, including explicit empty slots. UI remains exceptional for save
+acquisition/version/shape failure, an unknown identity, an enforced mismatch,
+or explicit `force_ui`/comparison audit. The repair path may causally unequip a
+freshly reidentified occupied slot when the requirement is `empty`; it does not
+guess that an initially non-Ancestral-looking slot is empty.
 
 Inventory fallback first checks the normal fixed grid, then—only when no
 authoritative target match exists—searches variable vertical centers left by
@@ -1404,9 +1419,10 @@ warning text in `actions.log`.
   Guardians, and Modules. The save-first coordinator may omit exact
   allowlisted matches and complete observation-policy Module evidence. Exact
   Farm assignments remain enforced; mapped Tournament assignments are reported
-  only. Current Farm/Tournament Module placements and calibrated exact
-  Damage/Orb values may omit duplicate UI; unsupported placements, requests,
-  values, contexts, or structures remain UI-backed. Navigation alone does not
+  only. Any canonical same-family Module or explicit-empty assignment and
+  calibrated exact Damage/Orb values may omit duplicate UI; unknown names/IDs,
+  family or structure failures, ambiguous visual absence, mismatches,
+  unsupported values, and contexts remain UI-backed. Navigation alone does not
   discard another accepted component, but the first actual UI mutation
   invalidates every remaining save-derived decision. Card recharge traversal
   checks

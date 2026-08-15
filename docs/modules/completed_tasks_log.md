@@ -51,13 +51,48 @@ resolved dossier instead of copying its detail.
   rollback tag `production-before-20260814T235526Z-48cbc40`; replacement PID
   `1646204` remained Paused at fresh Home New Battle and sent no battle input.
 
+### 2026-08-14 same-family and explicit-empty Module save authority
+
+- Code commits `1c977de`, `9f9062f`, and `86671b1` replace the redundant
+  per-name/per-role save allowlists with explicit canonical same-family and
+  explicit-nil authority. Any of the 24 mapped identities can match in either
+  exact Primary or Assist slot of its family; Project Funding `43` in
+  `generator_assist` is the direct cross-role regression. A Primary array null
+  or an unlocked typed Assist slot's exact `module=null` maps to canonical
+  `empty`. All eight slots remain structurally present, installed identities
+  remain unique, and `empty` may repeat.
+- Home setup, carried session validation, No Strategy inventory observation,
+  custom Module presets, and the Windows local editor consume the same
+  normalized assignment. A complete matching or observation-only loadout may
+  omit duplicate Modules UI. An enforced occupied-to-empty mismatch uses a
+  fresh exact-slot/name guard before Unequip; a visually `not_ancestral` slot
+  is not guessed to be empty.
+- Unknown IDs/names, cross-family placement, duplicate installed names,
+  missing or locked Assist entries, malformed or partial structures, ambiguous
+  visual absence, and local identity confirmations awaiting canonical
+  integration remain fail-closed. This authority does not claim rarity, level,
+  stars, effects, substats, inventory semantics, GUIDs, or private values.
+- The affected Python slice passed all 451 tests and the complete portable
+  native authoring suite passed all 190 tests. The native restore/test emitted
+  only the sandbox's read-only NuGet vulnerability-cache warning. The complete
+  isolated checkpoint then passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  2,720 Python tests in 413.98 seconds.
+- The implementation was validated code-only and has not been promoted,
+  deployed, or live-validated. Promotion ownership and a later natural
+  ordinary-boundary observation remain in the
+  [runtime backlog](../backlog/runtime-and-validation.md#current-validation-gates).
+
 ### 2026-08-14 global Module save identity completion
 
-- Commit `888f101` separates the complete 24-ID Module name/family catalog
-  from the unchanged exact slot/role allowlists. Unknown future IDs can enter
-  the reviewed global identity pipeline, while known unsupported placements
-  and locally confirmed identities retain the full Modules UI route and never
-  gain repair authority. The
+- Commit `888f101` initially separated the complete 24-ID Module name/family
+  catalog from the then-unchanged exact slot/role allowlists. Unknown future
+  IDs entered the reviewed global identity pipeline, while known unlisted
+  placements and locally confirmed identities retained the full Modules UI
+  route at that checkpoint. The later same-family authority follow-up above
+  removed the canonical placement restriction. Neither save-backed identity nor
+  placement evidence directly grants repair authority; the explicit-empty
+  repair relies on independent fresh UI proof. The
   [`ISSUE-2026-044`](../issues/resolved-2026.md#global-module-save-identities-were-incomplete-and-conflated-with-slot-authority)
   owns the mapping, campaign, restoration, and safety evidence.
 - An operator-authorized no-battle Home campaign paired the twelve remaining

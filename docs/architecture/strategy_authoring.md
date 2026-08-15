@@ -391,11 +391,13 @@ Sparse authoring source schema 3 gives `modules`, `target_priority`, and
 `orb_distance` one exact preset-or-local value contract. A directive value is
 either `{"preset": "<id>"}` or `{"local": <definition>}`; it cannot contain
 both or any extra field. Shared preset IDs and catalogs remain supported.
-Modules local data is the exact validated eight-slot-to-module mapping, Target
-Priority local data is the complete ordered target list, and Orb Distance local
-data contains exactly `range_basis`, `extra`, and `workshop`. The existing
-Module family/slot catalog, Target Priority order validator, and Orb Distance
-normalizers remain authoritative.
+Modules local data is the exact validated eight-slot-to-assignment mapping:
+each value is one family-valid canonical Module name or canonical `empty`.
+Installed names remain unique, while `empty` may repeat in Primary and Assist
+slots. Target Priority local data is the complete ordered target list, and Orb
+Distance local data contains exactly `range_basis`, `extra`, and `workshop`.
+The existing Module family/slot catalog, Target Priority order validator, and
+Orb Distance normalizers remain authoritative.
 
 Every effective schema-3 loadout definition has a server-owned
 `definition_snapshot` in resolution:
@@ -517,10 +519,14 @@ summaries, rich preset details, prospective Base/Strategy resolution, and
 publication. Every item exposes its stable ID, display name, bundled/custom
 origin, immutable editability state, complete normalized definition, and the
 authoritative ordered eight slots with slot label, family, role, and assigned
-Module. The existing Module normalizer remains the sole authority for exact
-slot membership, family compatibility, known Modules, and cross-slot
-uniqueness. Existing `{preset: id}` values are immutable references: there is
-no overwrite, rename, deletion, retirement, or mutable pointer in this slice.
+Module or `empty`. The existing Module normalizer remains the sole authority
+for exact slot membership, family compatibility, known Modules, installed-name
+uniqueness, and explicit empty assignments. The nested local-editor metadata
+publishes `empty` as a choice for every slot and declares it as the sole
+repeatable field value; the portable client keeps all installed-name choices
+unique while allowing several empty slots. Existing `{preset: id}` values are
+immutable references: there is no overwrite, rename, deletion, retirement, or
+mutable pointer in this slice.
 
 Server revision 25 adds `managed_custom_module_presets_v1` and the authenticated
 `create_module_preset` authoring operation while retaining the complete

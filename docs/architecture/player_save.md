@@ -115,11 +115,17 @@ armor Primary Anti-Cube Portal (`20`), generator Primary Project Funding
 Harness (`30`), and core Assist Harmony Conductor (`39`). Combined with the
 prior Farm evidence, every value in `tournament_standard` is now decodable.
 The top-level `module_info_indices` table owns each observed global
-`infoIndex`/name/family identity. The separate `module_loadout.*.values` tables
-remain exact slot/role allowlists: identity knowledge alone cannot suppress the
-Modules UI route or authorize a loadout change. Neither table is a Module
-inventory map. The currently observed armor variation is evidence only; it
-does not replace the Tournament reference.
+`infoIndex`/name/family identity. The separate `module_loadout` structure owns
+the four exact Primary indices, four typed Assist slots, family/role labels,
+and retained calibrated placement examples. Its explicit
+`assignment_authority_scope=canonical_global_same_family` contract permits any
+canonical identity in either exact slot of its mapped family. The versioned
+`empty_assignment_scope=explicit_nil` and `assist_item_field=module` contract
+also maps a Primary array `null` or an unlocked typed Assist slot whose exact
+`module` field is `null` to the canonical assignment `empty`. A matching save
+may omit duplicate Modules observation; it never authorizes a loadout change.
+Neither table is a Module inventory map. The currently observed armor
+variation is evidence only; it does not replace the Tournament reference.
 
 On 2026-08-14 an operator-authorized no-battle campaign completed the global
 identity catalog on the compatible version-1101 structure. Three exact
@@ -142,9 +148,15 @@ The current global catalog contains all 24 Modules, six in each family:
 | core | `37` Multiverse Nexus; `38` Dimension Core; `39` Harmony Conductor; `40` Om Chip; `44` Magnetic Hook; `48` Primordial Collapse |
 
 The version-1073 authority and version-1101 exact structural mirror carry the
-same catalog. This completes identity decoding only. The exact current Farm and
-`tournament_standard` assignments are slot-allowlisted; other placements of a
-globally known identity still run the complete Modules UI path.
+same catalog. All 24 identities are authoritative for exact name-only
+reconciliation in either Primary or Assist slot of the same family. Complete
+matching loadouts may therefore omit Modules UI without collecting every
+possible role permutation. A complete loadout accounts for all eight slots as
+either one canonical same-family identity or explicit `empty`; multiple empty
+slots are valid while an installed identity remains unique. Unknown identities,
+cross-family placements, duplicate installed names, malformed or partial
+structures, and enforced mismatches retain the complete existing Modules UI
+path.
 
 Bounded mutation testing then established direct causality and the save-write
 boundary. Changing the visible Cards preset from slot 2 to slot 1 and back
@@ -179,8 +191,9 @@ mapping now allowlists every configuration claim covered by the accepted
 version-1073 calibration: Cards, Workshop, and Bots preset selection; independent
 First Perk Choice; Ban Perks; the ranked Auto Pick prefix; the exact current
 three-lock Farm required subset; equipped Guardians; exact enforced Farm
-Modules and complete mapped observation-only Tournament Modules; Demon
-Mode/Nuke recharge behavior;
+Modules, complete mapped observation-only Tournament Modules, and any other
+canonical same-family Module name or explicit-empty assignment; Demon Mode/Nuke
+recharge behavior;
 Auto Pick enabled for the required value `true`; complete Target Priority ID
 and ordering semantics; Poison Swamp Stun in both calibrated polarities; all
 nine Ultimate Weapon primaries for the all-on requirement; and Spotlight
@@ -227,10 +240,13 @@ exact context-bound authority for Farm `30.00m/30.00m/39.00m`, Farm
 `30.00m/31.80m/37.20m`, and Tournament
 `98.38m/87.16m/80.37m`; no formula or tolerance is inferred. The current Farm
 and `tournament_standard` eight-slot Module assignments are fully supported.
-A different globally named Module placement, unsupported requested name,
-unknown slot `infoIndex`, or nonexact/partial loadout retains the complete
-Modules UI route. More values can be added only with cross-channel calibration,
-not merely because a plausible raw field exists.
+Any other canonical Module is also supported in either exact same-family role,
+and an explicit nil assignment is supported as canonical `empty`. An unknown
+requested name or slot `infoIndex`, a family mismatch, duplicate installed
+assignment, ambiguous absence, or nonexact/partial loadout retains the complete
+Modules UI route.
+New identities can be added only with cross-channel calibration, not merely
+because a plausible raw field exists.
 
 ### Implemented completed-run profile progression snapshots
 
@@ -734,7 +750,7 @@ inherited claims continue to cite their originating authority.
 | `V1073-CFG-012B` all nine Ultimate Weapon primaries on | Exact nine-element `ultimateWeaponUnlocked` and `ultimateWeaponOn` arrays | **Shortcut-ready, value-scoped** only when all nine exact booleans are unlocked and on. | Any subset, mixed/off request, false value, non-boolean, name/length change, or locked weapon restores UI. Validate each individual off/on index before supporting future mixed requirements. |
 | `V1073-CFG-012C` Spotlight Missiles on | `spotlightSmartMissilesOff` plus exact unlocked Spotlight structure | **Shortcut-ready, value-scoped** only for raw exact `false` / required on. | Off, raw true, malformed, missing, locked, or changed structure remains UI-required until one reversible off transition and restoration are reviewed. |
 | `V1073-CFG-013` Legend Tournament conditions | Tournament identity fields plus exact-version generator | **Shortcut-ready.** Seventeen consecutive event sets agreed with historical/live UI evidence. | Retain Heat/Overheat audits; validate every additional league and new exact game version independently. |
-| `V1073-CFG-014` Modules | Four `moduleEquipped` `ModuleItem` entries plus four typed `assistModuleSlots` | **Shortcut-ready, exact-slot/value-scoped.** The global `module_info_indices` catalog contains all 24 currently defined ID/name/family identities. Farm's slot allowlists map cannon Primary Amplifying Strike (`45`), armor Primary Orbital Augment (`46`), generator Primary Black Hole Digestor (`27`), core Primary Multiverse Nexus (`37`); cannon Assist Being Annihilator (`9`), armor Assist Anti-Cube Portal (`20`), generator Assist Singularity Harness (`30`), and core Assist Dimension Core (`38`). Tournament evidence adds generator Primary Project Funding (`43`), core Primary Dimension Core (`38`), core Assist Harmony Conductor (`39`), plus observed alternatives armor Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`). | Require exact slot/family/role/allowlisted name, four unlocked exact-boolean Assist slots, and complete structure. `enforce` requires equality; `observe` reports any complete slot-supported assignment without repair. A globally identified but slot-unsupported value is diagnostic only and retains the full UI path without generating a duplicate identity candidate. A future unknown ID generates global identity-review evidence and retains UI. Nil/missing/locked/partial entries or unsupported requests also retain UI. No rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
+| `V1073-CFG-014` Modules | Four-entry `moduleEquipped` plus four typed `assistModuleSlots`; each exact assignment is one `ModuleItem` or explicit nil | **Shortcut-ready, exact-slot/family-scoped.** The canonical `module_info_indices` catalog contains all 24 current ID/name/family identities, six per family. `module_loadout` binds four exact Primary indices and four typed Assist slots to their families, identifies the Assist `module` field, grants `canonical_global_same_family` requirement authority, and maps only explicit nil to `empty`. The retained Farm, Tournament, and armor-variation placements are calibration evidence, not per-role allowlists. | Require all eight exact slot/family/role assignments, four unlocked exact-boolean Assist slots, and complete structure. Each assignment must be one canonical same-family name or explicit `empty`; installed names remain unique while `empty` may repeat. `enforce` requires equality; `observe` publishes any complete supported assignment without repair. Unknown IDs/names, cross-family values, duplicate installed names, missing arrays/slots/Assist item fields, locked Assist slots, changed types, ambiguous visual absence, unsupported authority scope, or enforced mismatch retain the full UI path. A new unknown ID generates global identity-review evidence; a local confirmation remains diagnostic until canonical integration. No rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
 | `V1073-CFG-015` Damage Slider | `damageAdjustmentLog`, exact calibrated value table | **Shortcut-ready, exact-value-scoped** for raw `6=1E-22%`, `9=1E-19%`, `10=1E-18%`, and `30=1E2%`. | Matching canonical requirements may omit UI. Unknown raw values, unsupported requested values, malformed data, invalid action modes, `force_ui`, and audit retain the complete slider route. No logarithmic formula, neighboring value, or tolerance is inferred. |
 | `V1073-CFG-016` Orb Distance | `rangeLevelSelected`, `innerOrbDistance`, `workshopOrbDistance`, plus Cards/Workshop context | **Shortcut-ready, exact-tuple-scoped** for Farm `30.00m/30.00m/39.00m`, Farm `30.00m/31.80m/37.20m`, and Tournament `98.38m/87.16m/80.37m`. | Matching context and one exact tuple may omit UI; allowed range presets remain generic UI policy. Changed context, unknown tuple, malformed data, unsupported requirement, `force_ui`, or audit retains the complete route. `savedWorkshopOrbDistance` is not authoritative and no formula/tolerance is inferred. |
 | `V1073-PROFILE-001` card ownership, levels, mastery unlocks, and five 28-slot decks | `cardUnlocked`, `cardLevel`, `cardMasteryUnlocked`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | **Structural and implemented for completed-run comparison.** Exact vectors, source fields, and changed indices are retained; base/effective width remains distinct. | Build the complete card-ID and mastery-effect map before assigning names or effects to indices. The snapshot never suppresses Cards UI. |

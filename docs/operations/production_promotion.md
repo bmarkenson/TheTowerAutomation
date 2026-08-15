@@ -208,10 +208,19 @@ durable observation, inspect **Private staging eligibility**, review the exact
 proposal and target hashes, then confirm **Stage reviewed mapping for
 promotion…**.
 
-A Module `infoIndex` proposal adds only its global name/family identity. It
-must not append the observed name to a `module_loadout` slot allowlist; slot
-support is a separate ordinary code review because it can suppress future UI
-observation.
+A Module `infoIndex` proposal adds only its global name/family identity; the
+observed slot remains pairing provenance and is not patched. Once ordinary
+promotion integrates that identity into both canonical mapping owners, the
+versioned `canonical_global_same_family` contract permits exact save matching
+in either slot of that family. The reviewed identity therefore can suppress
+future duplicate UI observation, while a local confirmation or staged private
+candidate cannot. Unknown names/IDs, cross-family placement, duplicate
+installed names, malformed structure, and mismatches retain the full Modules
+UI route.
+Explicit empty assignments are not identity candidates: only the versioned
+`moduleEquipped` array null or exact unlocked Assist `module=null` shape maps to
+canonical `empty`. Missing fields, missing slots, locked Assist slots, and
+visual `not_ancestral` results are not promoted as empty evidence.
 
 The review fingerprint binds the mapping proposal, canonical target
 before/after hashes and modes, mapping-set fingerprint, candidate identity, and

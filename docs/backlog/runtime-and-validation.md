@@ -29,6 +29,15 @@ as checked checkpoint narrative here.
     proved a fresh Home `NEW_BATTLE` boundary under acknowledged Pause and sent
     no input; do not override Pause or manufacture a battle solely for this
     confirmation.
+  - [ ] Assign a promotion owner for the same-family and explicit-empty Module
+    authority implementation ending at `86671b1`. After deployment, confirm at
+    an ordinary verified save boundary that a complete canonical same-family
+    loadout omits duplicate Modules UI. When a naturally occurring empty slot
+    is available, confirm its explicit nil normalizes to `empty` without
+    navigation; do not empty/rearrange Modules or start a battle solely for this
+    observation. Unknown IDs/names, family/structure failures, duplicate
+    installed names, ambiguous visual absence, and mismatches must retain the
+    complete UI route.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping
@@ -116,13 +125,6 @@ as checked checkpoint narrative here.
   - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
     for future bounded normalized candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.
-    - [ ] Extend exact-slot Module allowlists only through future natural paired
-      placement evidence. All 24 current ID/name/family identities are globally
-      mapped, including Magnetic Hook, but identity knowledge does not support
-      a new Primary/Assist placement. A future unknown ID, globally known but
-      slot-unsupported value, unsupported requested name, or partial structure
-      must retain the complete Modules UI route. Do not infer rarity, levels,
-      stars, effects, substats, GUIDs, or inventory semantics.
     - [ ] Extend Damage Slider and Orb Distance only when a natural UI fallback
       supplies one unique exact normalized value/tuple and the reviewed mapping
       workflow accepts it. Current Farm/Tournament values are save-backed;
