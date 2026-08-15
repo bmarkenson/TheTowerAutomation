@@ -32,6 +32,7 @@ from core.player_save import (
     pull_player_save_bytes,
     read_player_save_file,
     reconcile_requirements,
+    save_observation_supports_requirement,
 )
 from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
 from core.player_save_mapping_candidates import (
@@ -2953,6 +2954,11 @@ def test_module_global_authority_scope_is_explicit_and_fail_closed(scope):
         assert evidence.authority["supported_names"]["generator_assist"] == [
             "Singularity Harness"
         ]
+        assert not save_observation_supports_requirement(
+            "modules",
+            {**FARM_MODULES, "generator_assist": "Project Funding"},
+            evidence,
+        )
     else:
         assert evidence.status == "unmapped"
         assert evidence.reason == "module loadout structural contract is incomplete"
@@ -3448,6 +3454,28 @@ def test_duplicate_same_family_module_requirement_remains_ui_backed(monkeypatch)
     assert decision["save_requirement_supported"] is False
     assert decision["disposition"] == "ui_required"
     assert decision["reason"] == "save_requirement_outside_validated_scope"
+
+
+def test_duplicate_observed_module_names_remain_ui_backed(monkeypatch):
+    decoded = _decoded_save()
+    decoded["assistModuleSlots"][2]["module"]["infoIndex"] = 27
+
+    snapshot = _snapshot(monkeypatch, decoded)
+    evidence = snapshot.checks["modules"]
+    decision = reconcile_requirements(
+        snapshot,
+        {
+            "modules": FARM_MODULES,
+            "loadout_policies": {"modules": "observe"},
+        },
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert evidence.status == "unmapped"
+    assert evidence.complete is False
+    assert evidence.reason == "module loadout contains duplicate names"
+    assert decision["disposition"] == "ui_required"
+    assert decision["fallback"] == "existing_ui_check"
 
 
 def test_known_cross_role_module_does_not_hide_later_unknown_candidate(

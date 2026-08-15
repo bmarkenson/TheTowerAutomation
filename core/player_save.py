@@ -4073,6 +4073,15 @@ def _module_loadout_evidence(
             partial_reason,
             diagnostics={"slots": slot_diagnostics},
         )
+    normalized_assignments = [
+        _normal_scalar(name) for name in assignments.values()
+    ]
+    if len(set(normalized_assignments)) != len(normalized_assignments):
+        return _unmapped_module_evidence(
+            source_fields,
+            "module loadout contains duplicate names",
+            diagnostics={"slots": slot_diagnostics},
+        )
     return SaveCheckEvidence(
         check_id="modules",
         status="observed",
