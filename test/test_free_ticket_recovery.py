@@ -437,6 +437,7 @@ def test_blocking_recovery_uses_exact_source_typed_owner(
 
     assert ready
     assert tuple(item.hold for item in holds) == (source_hold,)
+    assert app._free_ticket_recovery_action_owner(owner[0]) is source_hold
     assert app._action_decision(
         RuntimeActionClass.LIFECYCLE_ACTION,
         owner=source_hold,

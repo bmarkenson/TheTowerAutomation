@@ -1382,9 +1382,11 @@ def test_explicit_start_owns_tournament_validation_launch_through_adoption(
     assert supervisor.battle_workflow["status"] == "completed"
 
 
+@pytest.mark.parametrize("failed_write", ("workflow", "validation"))
 def test_explicit_start_validation_free_ticket_uncertainty_retries_only_writes(
     tmp_path,
     monkeypatch,
+    failed_write,
 ):
     app, store, supervisor, manager, launch_scope = (
         _dispatch_explicit_start_validation(tmp_path, monkeypatch)
@@ -1408,18 +1410,35 @@ def test_explicit_start_validation_free_ticket_uncertainty_retries_only_writes(
         "active_battle": False,
     }
     original_transition = supervisor.transition_battle_workflow
-    failed_writes = 0
+    original_validation_finish = (
+        app._finish_exclusive_validation_without_cleanup
+    )
+    write_calls = {"workflow": 0, "validation": 0}
 
     def transient_workflow_failure(*args, **kwargs):
-        nonlocal failed_writes
         if len(args) >= 2 and args[1] == "failed":
-            failed_writes += 1
-            if failed_writes == 1:
+            write_calls["workflow"] += 1
+            if (
+                failed_write == "workflow"
+                and write_calls["workflow"] == 1
+            ):
                 return None
         return original_transition(*args, **kwargs)
 
+    def transient_validation_failure(*args, **kwargs):
+        write_calls["validation"] += 1
+        if (
+            failed_write == "validation"
+            and write_calls["validation"] == 1
+        ):
+            return None
+        return original_validation_finish(*args, **kwargs)
+
     supervisor.transition_battle_workflow = Mock(
         side_effect=transient_workflow_failure
+    )
+    app._finish_exclusive_validation_without_cleanup = Mock(
+        side_effect=transient_validation_failure
     )
     recovery = FreeTicketRecoveryResult(
         FreeTicketRecoveryStatus.UNCERTAIN,
@@ -1447,7 +1466,10 @@ def test_explicit_start_validation_free_ticket_uncertainty_retries_only_writes(
             {"state": "FREE_TICKET"},
         )
         assert claim.call_count == 1
-        assert supervisor.battle_workflow["status"] == "action_dispatched"
+        expected_workflow_status = (
+            "action_dispatched" if failed_write == "workflow" else "failed"
+        )
+        assert supervisor.battle_workflow["status"] == expected_workflow_status
         assert _current_receipt(store)["status"] == "claimed"
         assert supervisor.is_paused
 
@@ -1459,7 +1481,10 @@ def test_explicit_start_validation_free_ticket_uncertainty_retries_only_writes(
         )
 
     claim.assert_called_once()
-    assert failed_writes == 2
+    assert write_calls == {
+        "workflow": 2 if failed_write == "workflow" else 1,
+        "validation": 1 if failed_write == "workflow" else 2,
+    }
     assert app._free_ticket_recovery_attempts == {
         f"battle:{workflow_id}": 1,
         f"exclusive-validation:{validation_id}": 1,

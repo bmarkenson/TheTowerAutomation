@@ -2944,8 +2944,33 @@ class App:
             "exclusive_validation",
             "exclusive_validation_launch",
         }:
+            attempts = self._free_ticket_recovery_attempt_map()
+            workflow = getattr(self._supervisor, "battle_workflow", None)
+            continuation = getattr(self, "_terminal_home_continuation", None)
+            passive_initial_intent = bool(
+                int(attempts.get(owner[1], 0)) >= 1
+                and competing is not None
+                and competing.hold is AuthorityHold.OPERATOR_WORKFLOW
+                and self._awaiting_initial_battle_intent()
+                and (
+                    not isinstance(workflow, Mapping)
+                    or workflow.get("status")
+                    in BATTLE_WORKFLOW_TERMINAL_STATUSES
+                )
+                and getattr(
+                    self._supervisor,
+                    "battle_workflow_error",
+                    False,
+                )
+                is not True
+                and not (
+                    isinstance(continuation, Mapping)
+                    and str(continuation.get("phase") or "armed")
+                    in {"action_dispatched", "retry_ready"}
+                )
+            )
             healthy_validation = bool(
-                competing is None
+                (competing is None or passive_initial_intent)
                 and not setup_active
                 and self._free_ticket_recovery_owner_current(*owner)
             )
