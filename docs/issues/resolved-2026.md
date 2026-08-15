@@ -186,10 +186,20 @@ and actionable work lives in
   read-only NuGet vulnerability-cache warning. Its complete isolated
   checkpoint passed compilation, state definitions, clickmap
   integrity with zero errors and 44 established orphan notices, and all 2,728
-  Python tests in 409.14 seconds. It was validated code-only; production
-  deployment and a later natural ordinary-boundary observation remain
-  coordinator work.
-- **Fixed by:** `888f101`, `1c977de`, `9f9062f`, and `86671b1`.
+  Python tests in 409.14 seconds.
+- **Deployment:** Production advanced from `a7d991d` to exact integrated
+  candidate `59c86a5` behind rollback tag
+  `production-before-20260815T020710Z-a7d991d`. Control-surface PID `1837913`
+  and replacement automation PID `1838176` / runtime
+  `961eeadf873e42b693fff88dca798b63` were healthy on exact target
+  `localhost:5555`, with current Pause acknowledgement and a fresh Home
+  `NEW_BATTLE` observation. The complete native package was published and
+  inventoried without device or battle input; exact executable and retained-
+  slot hashes are in the
+  [completion record](../modules/completed_tasks_log.md#2026-08-14-same-family-and-explicit-empty-module-save-authority).
+  One natural ordinary-boundary routing observation remains in the backlog;
+  this deployment did not manufacture a battle or Module rearrangement.
+- **Fixed by:** `888f101`, `1c977de`, `9f9062f`, `86671b1`, and `59c86a5`.
 
 ### Unbound manual terminal handoff permanently disabled Automation at Home
 

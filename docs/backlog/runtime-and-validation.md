@@ -29,15 +29,13 @@ as checked checkpoint narrative here.
     proved a fresh Home `NEW_BATTLE` boundary under acknowledged Pause and sent
     no input; do not override Pause or manufacture a battle solely for this
     confirmation.
-  - [ ] Assign a promotion owner for the same-family and explicit-empty Module
-    authority implementation ending at `86671b1`. After deployment, confirm at
-    an ordinary verified save boundary that a complete canonical same-family
-    loadout omits duplicate Modules UI. When a naturally occurring empty slot
-    is available, confirm its explicit nil normalizes to `empty` without
-    navigation; do not empty/rearrange Modules or start a battle solely for this
-    observation. Unknown IDs/names, family/structure failures, duplicate
-    installed names, ambiguous visual absence, and mismatches must retain the
-    complete UI route.
+  - [ ] At the next ordinary operator-authorized Start from Home, confirm the
+    deployed `59c86a5` same-family Module authority omits duplicate Modules UI.
+    When a naturally occurring empty slot is available, confirm its explicit
+    nil normalizes to `empty` without navigation; do not empty/rearrange Modules
+    or start a battle solely for this observation. Unknown IDs/names,
+    family/structure failures, duplicate installed names, ambiguous visual
+    absence, and mismatches must retain the complete UI route.
   - [ ] Add a guarded operator revoke/reacquire workflow for a locally
     confirmed Module identity. Acquire Pause or otherwise stop new-battle input,
     revoke with generation/document-fingerprint compare-and-swap, close mapping

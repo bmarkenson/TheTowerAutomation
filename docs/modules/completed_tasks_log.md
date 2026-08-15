@@ -154,10 +154,31 @@ resolved dossier instead of copying its detail.
   compilation, state definitions,
   clickmap integrity with zero errors and the established 44 orphan notices,
   and all 2,728 Python tests in 409.14 seconds.
-- The implementation was validated code-only and has not been promoted,
-  deployed, or live-validated. Promotion ownership and a later natural
-  ordinary-boundary observation remain in the
+- Production advanced from `a7d991d` to exact integrated candidate `59c86a5`
+  behind rollback tag `production-before-20260815T020710Z-a7d991d`.
+  Control-surface PID `1837913` and replacement automation PID `1838176` /
+  runtime `961eeadf873e42b693fff88dca798b63` were healthy on exact target
+  `localhost:5555`; the replacement acknowledged current Pause and freshly
+  observed Home `NEW_BATTLE`. Deployment sent no device or battle input.
+- The complete native package was published from `59c86a5` and inventoried at
+  `2026-08-15T02:09:35Z`. Current Control Surface is 72,489,144 bytes with
+  SHA-256
+  `0a125701f11557d3cf4b4ffbd6489afa9e8f7aedb841f53417e3d18e5253e2e5`;
+  current Tunnel Host is 35,172,110 bytes with SHA-256
+  `a3be1c2cf0092af7e0f2d2c41a9dab4482f08692d2eddd278acfd6300867aa98`.
+  Retained slot 1 is the prior `2c8d842` pair: 72,488,788-byte Control Surface
+  `9ac69dbbe2d52d57c8af076f16553aa19beed3a1fd2b51ae24da76fdaf91fc8b`
+  and 35,172,127-byte Tunnel Host
+  `f8354c3bd5f6a579395c831f4ebaaefad2387397902758ad4c23a161eaeae28d`.
+  Retained slot 2 is the prior `f01e050` pair: 72,481,195-byte Control Surface
+  `f48d3cf595673dcee397d12ba3c3db942234fc2a42d43fe4c79349ae08fd7a5e`
+  and 35,172,119-byte Tunnel Host
+  `5e313c2d90bb33c2f443abe9d1b6ecc6dda41517d54da6181f45fee03e88905c`.
+  Cross-publication does not establish Windows WPF runtime behavior.
+- A natural ordinary-boundary routing observation remains in the
   [runtime backlog](../backlog/runtime-and-validation.md#current-validation-gates).
+  The deployment did not manufacture a battle, empty a Module slot, or
+  rearrange the live loadout solely for confirmation.
 
 ### 2026-08-14 global Module save identity completion
 
