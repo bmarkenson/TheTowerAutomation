@@ -8,6 +8,56 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Start Battle intent was rejected after its Strategy applied at Home
+
+**Stable ID:** `ISSUE-2026-045` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-14, the operator selected
+  `farm_t19_ad_assist` and immediately requested Start Battle from fresh Home
+  `NEW_BATTLE` evidence. At 15:22:20 the runtime rejected the request with
+  `battle activity scope changed` even though the runtime, PID, ADB target,
+  target generation, and physical Home boundary were unchanged.
+- **Symptom:** The request was bound to activity scope `9dfa…` at observation
+  59. Applying the queued Strategy at the same Home boundary started scope
+  `b031…`; the first runtime reconciliation of the request then treated that
+  self-created scope replacement as stale operator intent and refused to
+  launch.
+- **Safety response:** The evidence guard failed closed, so the rejected
+  request sent no Battle input. Diagnosis used retained control, activity-scope,
+  action-log, source, and test evidence. Deployment stopped the managed
+  automation service, fast-forwarded production, and restarted it Paused; no
+  validation battle or device input was manufactured.
+- **Cause:** `MissionManager.replace_strategy_at_boundary()` unconditionally
+  cleared `_new_battle_home_observed`. When a Strategy revision arrived after
+  the current Home `NEW_BATTLE` boundary had already established its preflight
+  scope, the next `maybe_run_start()` call incorrectly treated the same screen
+  as a second physical run boundary and replaced the activity scope.
+- **Resolution:** Strategy replacement now preserves whether the current Home
+  `NEW_BATTLE` boundary has already been observed. A replacement before a new
+  physical boundary still allows the normal scope creation, while a replacement
+  on the already-observed boundary cannot invalidate an exact Start Battle
+  request bound to that boundary. The general changed-scope rejection remains
+  intact.
+- **Regression:**
+  `test/test_run_initialization.py::RunBoundaryTests::test_strategy_replacement_preserves_observed_home_run_boundary`
+  proves that applying a Strategy on one observed Home boundary creates only
+  one preflight scope. Existing Better Control Model tests continue to require
+  rejection of unrelated pre-acknowledgement scope changes and allow only the
+  typed post-acknowledgement launch transition.
+- **Validation:** After current-main reconciliation, the 512-test lifecycle,
+  control, no-strategy, control-surface, and automation-control slice passed.
+  Exact code candidate `5d75375` compiled, passed state-definition and clickmap
+  integrity validation with zero errors and the established 44 orphan notices,
+  and passed all 2,696 tests in 415.32 seconds in development environment
+  fingerprint `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Deployment:** Production advanced from `48cbc40` to `5d75375` behind
+  rollback tag `production-before-20260814T235526Z-48cbc40`. Replacement PID
+  `1646204` held the exact `localhost:5555` lock, acknowledged current
+  `PAUSED` / `NEXT_BATTLE` / `farm_t19_ad_assist` directives, and published a
+  fresh `HOME_SCREEN/PAUSED` observation at 16:56:58 PDT. The earlier workflow
+  was terminally interrupted by the deployment Stop and was not replayed.
+- **Fixed by:** `88a3ce4` (integrated candidate `5d75375`).
+
 ### Global Module save identities were incomplete and conflated with slot authority
 
 **Stable ID:** `ISSUE-2026-044` · **Lifecycle:** `resolved`
@@ -1089,7 +1139,9 @@ and actionable work lives in
   mapping-candidate, Card Recharge, Perk, Poison Stun, Free Upgrade, terminal,
   and control-model compatibility slice passed 514 tests. Modified modules
   compiled, documentation lifecycle passed both tests, and the candidate has
-  no whitespace errors.
+  no whitespace errors. After refresh onto current production, the combined
+  save/Home/control regression slice passed 604 tests with the concurrently
+  promoted Start Battle scope fix included.
 - **Safety:** This correction used only fakes and retained fixtures. It did not
   inspect or interact with the production process, systemd, ADB, emulator,
   shared live frame, or battle, and did not deploy or modify installed files.
