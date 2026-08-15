@@ -47,7 +47,10 @@ and actionable work lives in
   compression, formatting, malformed-input, version, Home-scope, raw-tolerance,
   candidate-provenance, and attachment-projection cases cover the corrected
   boundary. UI calibration no longer emits a `rangeLevelSelected` observation
-  for displayed Range.
+  for displayed Range. Exact code/test candidate `ce1560b` passed the complete
+  repository checkpoint: compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,919 tests
+  in 451.39 seconds.
 
 ### Tournament attachment reopened Orb Distance despite a bound save
 

@@ -47,6 +47,11 @@ resolved dossier instead of copying its detail.
   complete live value. Mutable, Home-scoped, malformed, and forward-version
   evidence retains UI; candidate calibration no longer labels displayed Range
   as `rangeLevelSelected`.
+- Exact code/test candidate `ce1560b` passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,919 repository tests in 451.39 seconds using development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 
 ### 2026-08-15 Coordinated outcome retirement guard
 
