@@ -179,6 +179,7 @@ def _terminal_acquisition(
     target: str = "private-device-target",
     generation: int = 1,
     kind: PlayerSaveBoundaryKind = PlayerSaveBoundaryKind.GAME_OVER,
+    active_round_identity_fingerprint: str = "a" * 64,
 ) -> PlayerSaveAcquisitionBundle:
     captured = datetime.fromisoformat(CAPTURED_AT)
     return PlayerSaveAcquisitionBundle(
@@ -196,6 +197,9 @@ def _terminal_acquisition(
             observed_at=captured,
             runtime_session_id=runtime_session,
             activity_scope_id=source_scope,
+            active_round_identity_fingerprint=(
+                active_round_identity_fingerprint
+            ),
         ),
     )
 
@@ -538,6 +542,7 @@ def test_natural_game_over_save_binds_only_to_exact_retry_successor(monkeypatch)
     result = coordinator.stage_direct_retry(
         _terminal_acquisition(),
         {"cards_deck": "Farm", "auto_pick_perks": True},
+        expected_active_round_identity_fingerprint="a" * 64,
         source_activity_scope_id="activity-source",
     )
 
@@ -591,6 +596,7 @@ def test_exact_battle_controls_are_carried_across_home_and_retry(
         result = coordinator.stage_direct_retry(
             acquisition,
             requirements,
+            expected_active_round_identity_fingerprint="a" * 64,
             source_activity_scope_id="activity-source",
         )
         assert coordinator.bind_running(
@@ -624,7 +630,6 @@ def test_exact_battle_controls_are_carried_across_home_and_retry(
     "acquisition",
     [
         _terminal_acquisition(runtime_session="different-runtime"),
-        _terminal_acquisition(source_scope="different-source"),
         _terminal_acquisition(target="different-target"),
         _terminal_acquisition(generation=2),
         _terminal_acquisition(kind=PlayerSaveBoundaryKind.TOURNAMENT_RESULTS),
@@ -640,6 +645,7 @@ def test_direct_retry_binding_change_uses_ui_without_blocking_route(
     result = coordinator.stage_direct_retry(
         acquisition,
         {"cards_deck": "Farm", "auto_pick_perks": True},
+        expected_active_round_identity_fingerprint="a" * 64,
         source_activity_scope_id="activity-source",
     )
 
@@ -649,13 +655,49 @@ def test_direct_retry_binding_change_uses_ui_without_blocking_route(
     assert result.ui_required_checks == ("auto_pick_perks", "cards_deck")
 
 
-def test_direct_retry_requires_a_distinct_successor_scope(monkeypatch):
+def test_direct_retry_ignores_terminal_log_scope_metadata(monkeypatch):
+    successor = replace(_context(), activity_scope_id="activity-retry")
+    coordinator = _coordinator(monkeypatch, context_fn=lambda: successor)
+
+    result = coordinator.stage_direct_retry(
+        _terminal_acquisition(source_scope="different-source"),
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        expected_active_round_identity_fingerprint="a" * 64,
+        source_activity_scope_id="activity-source",
+    )
+
+    assert result.ready
+    assert result.reason == "direct_retry_save_reconciled"
+    assert result.carry is not None
+
+
+def test_direct_retry_ignores_successor_log_scope_rotation(monkeypatch):
     same_scope = replace(_context(), activity_scope_id="activity-source")
     coordinator = _coordinator(monkeypatch, context_fn=lambda: same_scope)
 
     result = coordinator.stage_direct_retry(
         _terminal_acquisition(),
         {"cards_deck": "Farm", "auto_pick_perks": True},
+        expected_active_round_identity_fingerprint="a" * 64,
+        source_activity_scope_id="activity-source",
+    )
+
+    assert result.ready
+    assert result.reason == "direct_retry_save_reconciled"
+    assert result.carry is not None
+
+
+def test_direct_retry_rejects_a_different_predecessor_battle_identity(
+    monkeypatch,
+):
+    coordinator = _coordinator(monkeypatch)
+
+    result = coordinator.stage_direct_retry(
+        _terminal_acquisition(
+            active_round_identity_fingerprint="b" * 64
+        ),
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        expected_active_round_identity_fingerprint="a" * 64,
         source_activity_scope_id="activity-source",
     )
 
@@ -680,6 +722,7 @@ def test_direct_retry_active_round_projection_uses_ui_without_blocking_route(
     result = coordinator.stage_direct_retry(
         acquisition,
         {"cards_deck": "Farm", "auto_pick_perks": True},
+        expected_active_round_identity_fingerprint="a" * 64,
         source_activity_scope_id="activity-source",
     )
 
@@ -1398,7 +1441,6 @@ def test_unstable_first_running_frame_defers_until_stable(monkeypatch):
     [
         replace(_context(), runtime_session_id="restarted-runtime"),
         replace(_context(), preflight_session_id="later-preflight"),
-        replace(_context(), activity_scope_id="unrelated-battle"),
         replace(_context(), strategy_name="farm_t18"),
         replace(_context(), configuration_fingerprint="e" * 64),
         replace(_context(), target="replacement-target"),
@@ -1424,3 +1466,24 @@ def test_carry_rejects_every_context_continuity_change(
         dispatched=True,
     )
     assert carry.state is CarriedEvidenceState.INVALIDATED
+
+
+def test_carry_treats_activity_scope_change_as_report_metadata(monkeypatch):
+    current = [_context()]
+    coordinator = _coordinator(monkeypatch, context_fn=lambda: current[0])
+    carry = coordinator.acquire(
+        {"auto_pick_perks": True},
+        initial_frame=object(),
+    ).carry
+    assert carry is not None
+    current[0] = replace(
+        current[0],
+        activity_scope_id="unrelated-log-segment",
+    )
+
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert carry.state is CarriedEvidenceState.LAUNCH_DISPATCHED

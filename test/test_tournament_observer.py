@@ -46,6 +46,8 @@ def _load(path: Path):
 def _bind_terminal_context(app: App, scope_id: str = "test-tournament") -> None:
     app._current_run_scope_id = lambda: scope_id
     app._observed_active_battle_scope_id = scope_id
+    app._observed_active_round_identity_fingerprint = "a" * 64
+    app._terminal_round_identity_fingerprint = "a" * 64
 
 
 def test_tournament_generated_plan_matches_compact_source():
@@ -360,6 +362,7 @@ def test_continuity_supplies_bound_workshop_evidence_to_attached_tournament():
         PlayerSaveAttachmentContext(
             runtime_session_id="runtime-1",
             activity_scope_id="scope-1",
+            active_round_identity_fingerprint="active-round-fingerprint",
             target="private-target",
             target_generation=3,
             active_battle_observed=True,
@@ -370,7 +373,7 @@ def test_continuity_supplies_bound_workshop_evidence_to_attached_tournament():
     )
 
     with patch("core.app.log"):
-        app._apply_activity_continuity_outcome(
+        app._apply_running_attachment_projection(
             SimpleNamespace(running_attachment_observations=observations)
         )
 
@@ -397,7 +400,7 @@ def test_continuity_supplies_bound_workshop_evidence_to_attached_tournament():
     assert bound.consume("workshop_preset") == "Tourney"
 
 
-def test_tournament_attachment_rejects_scope_or_target_change_before_publish():
+def test_tournament_attachment_rejects_target_change_before_publish():
     strategy = get_strategy("tournament")
     assert strategy is not None
     ctx = MissionContext(data={"mission_vars": {}})
@@ -408,6 +411,7 @@ def test_tournament_attachment_rejects_scope_or_target_change_before_publish():
         PlayerSaveAttachmentContext(
             runtime_session_id="runtime-1",
             activity_scope_id="scope-1",
+            active_round_identity_fingerprint="active-round-fingerprint",
             target="private-target",
             target_generation=4,
             active_battle_observed=True,
@@ -415,7 +419,7 @@ def test_tournament_attachment_rejects_scope_or_target_change_before_publish():
     )
 
     with patch("core.app.log") as logged:
-        app._apply_activity_continuity_outcome(
+        app._apply_running_attachment_projection(
             SimpleNamespace(
                 running_attachment_observations=(
                     running_attachment_observations(
@@ -426,7 +430,7 @@ def test_tournament_attachment_rejects_scope_or_target_change_before_publish():
         )
 
     assert "player_save_attachment_evidence" not in ctx.data
-    assert "target or activity scope changed" in logged.call_args.args[0]
+    assert "runtime or target binding changed" in logged.call_args.args[0]
 
 
 def test_tournament_invariant_mismatch_is_nonblocking_but_warned():
@@ -550,6 +554,7 @@ def test_tournament_does_not_start_independent_floating_gem_tapper():
     app = App.__new__(App)
     app._mission_mgr = SimpleNamespace(strategy=get_strategy("tournament"))
     app._blind_tapper_suspended = False
+    app._active_round_identity_fingerprint = "a" * 64
 
     with (
         patch("core.app.start_blind_gem_tapper") as start,
@@ -593,6 +598,7 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
     app._last_wave_conf = -1.0
     app._last_wave_ts = 0.0
     app._blind_tapper_suspended = False
+    app._active_round_identity_fingerprint = "a" * 64
     app._run_initialization_gate_logged = False
     app._session_preflight_gate_logged = False
     app._session_preflight_repair_denial_logged = False
@@ -680,6 +686,7 @@ def test_tournament_main_loop_preserves_policy_after_attached_gate_releases(
     app._last_wave_conf = -1.0
     app._last_wave_ts = 0.0
     app._blind_tapper_suspended = False
+    app._active_round_identity_fingerprint = "a" * 64
     app._run_initialization_gate_logged = False
     app._session_preflight_gate_logged = False
     app._session_preflight_terminal_blocked_logged = False

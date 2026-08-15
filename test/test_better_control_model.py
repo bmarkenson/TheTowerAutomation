@@ -103,7 +103,7 @@ def _evidence(
         "home_new_battle": "NEW_BATTLE",
         "home_resume_battle": "RESUME_BATTLE",
     }.get(game_state, "UNKNOWN")
-    return {
+    evidence = {
         "schema_version": 1,
         "runtime_id": runtime_id,
         "pid": os.getpid(),
@@ -118,6 +118,14 @@ def _evidence(
         "activity_scope_run_id": scope,
         "target_generation": 7,
     }
+    if game_state in {
+        "home_resume_battle",
+        "active_battle",
+        "game_over",
+        "tournament_results",
+    }:
+        evidence["active_round_identity_fingerprint"] = "a" * 64
+    return evidence
 
 
 @pytest.mark.parametrize("request_change", ("policy_cycle", "authority_cycle"))
@@ -974,6 +982,7 @@ def _running_reconciliation_objects(
     context = PlayerSaveAttachmentContext(
         runtime_session_id="save-runtime-1",
         activity_scope_id=resolved_scope,
+        active_round_identity_fingerprint="b" * 64,
         target=str(evidence["adb_target"]),
         target_generation=int(evidence["target_generation"]),
         active_battle_observed=True,
@@ -1130,6 +1139,9 @@ def _natural_terminal_acquisition(
             observed_at=started,
             runtime_session_id=str(evidence["runtime_id"]),
             activity_scope_id=str(evidence["activity_scope_run_id"]),
+            active_round_identity_fingerprint=str(
+                evidence["active_round_identity_fingerprint"]
+            ),
         ),
     )
 
@@ -1247,6 +1259,7 @@ def test_attachment_context_treats_scope_rebind_as_projection_metadata(
     app._mission_mgr = MagicMock()
     app._mission_mgr.active_battle_observed.return_value = True
     app._player_save_runtime_session_id = "save-runtime-1"
+    app._active_round_identity_fingerprint = "b" * 64
     app._current_control_workflow_evidence = lambda: _evidence(
         game_state="active_battle",
         scope="scope-before-continuity",
@@ -1268,7 +1281,8 @@ def test_attachment_context_treats_scope_rebind_as_projection_metadata(
 
     assert context == PlayerSaveAttachmentContext(
         runtime_session_id="save-runtime-1",
-        activity_scope_id="scope-after-continuity",
+        activity_scope_id="scope-after-report-rotation",
+        active_round_identity_fingerprint="b" * 64,
         target="localhost:5555",
         target_generation=7,
         active_battle_observed=True,
@@ -1299,6 +1313,81 @@ def test_workflow_evidence_treats_activity_scope_as_observational(
 
     assert allowed is True
     assert reason == "fresh runtime evidence still matches the explicit intent"
+
+
+def test_attach_workflow_rejects_a_changed_canonical_battle_identity():
+    app = App.__new__(App)
+    requested = _evidence(game_state="active_battle")
+    requested["active_round_identity_fingerprint"] = "a" * 64
+    current = {
+        **requested,
+        "observation_id": "runtime-1:2",
+        "active_round_identity_fingerprint": "b" * 64,
+    }
+
+    allowed, reason = app._workflow_evidence_matches_runtime(
+        requested,
+        current,
+        intent="attach_battle",
+    )
+
+    assert allowed is False
+    assert reason == "active battle identity changed"
+
+
+def test_attach_workflow_accepts_first_forced_identity_after_unbound_request():
+    app = App.__new__(App)
+    requested = _evidence(game_state="active_battle")
+    requested.pop("active_round_identity_fingerprint")
+    current = {
+        **requested,
+        "observation_id": "runtime-1:2",
+        "active_round_identity_fingerprint": "a" * 64,
+    }
+
+    allowed, reason = app._workflow_evidence_matches_runtime(
+        requested,
+        current,
+        intent="attach_battle",
+    )
+
+    assert allowed is True
+    assert reason == "fresh runtime evidence still matches the explicit intent"
+
+
+def test_first_terminal_frame_records_the_canonical_battle_identity():
+    app = App.__new__(App)
+    app._battle_identity_ui_signature = ("RUNNING", "UNKNOWN")
+    app._active_round_identity = object()
+    app._active_round_identity_fingerprint = "a" * 64
+    app._observed_active_round_identity_fingerprint = "a" * 64
+    app._terminal_round_identity_fingerprint = None
+    app._control_observation_sequence = 0
+    app._current_run_scope_id = lambda: "report-scope"
+    app._observe_battle_authority_precondition = MagicMock(return_value=False)
+    app._supervisor = MagicMock()
+    app._supervisor.current_exclusive_validation_owner.return_value = {
+        "runtime_id": "runtime-1",
+    }
+    app._adb_target_session = MagicMock()
+    app._adb_target_session.snapshot.return_value = SimpleNamespace(
+        owned=True,
+        generation=7,
+    )
+    detection = {
+        "state": "GAME_OVER",
+        "home_battle_control": "UNKNOWN",
+    }
+
+    # This is the production loop order: transfer the active identity to the
+    # terminal boundary before publishing evidence for the first terminal frame.
+    app._observe_battle_identity_ui_boundary(detection)
+    observation = app._record_control_observation(detection)
+
+    assert app._active_round_identity_fingerprint is None
+    assert app._terminal_round_identity_fingerprint == "a" * 64
+    assert observation["game_state"] == "game_over"
+    assert observation["active_round_identity_fingerprint"] == "a" * 64
 
 
 @pytest.mark.parametrize(
@@ -1948,6 +2037,7 @@ def test_idle_home_intent_hold_exposes_only_home_ad_gem(active_battle):
         global_pause=False,
         active_battle=active_battle,
         battle_scope="run-1",
+        battle_identity="a" * 64 if active_battle else None,
         primary_state="HOME_SCREEN",
         holds=(hold,),
     )
@@ -2125,6 +2215,7 @@ def test_verified_retry_scope_stages_terminal_save_for_current_strategy():
 
     assert app._stage_direct_retry_player_save_preflight(
         acquisition,
+        expected_active_round_identity_fingerprint="a" * 64,
         source_activity_scope_id="source-scope",
         retry_scope={"reason": "game_over_retry", "run_id": "retry-scope"},
     )
@@ -2135,6 +2226,7 @@ def test_verified_retry_scope_stages_terminal_save_for_current_strategy():
     coordinator.stage_direct_retry.assert_called_once_with(
         acquisition,
         {"auto_pick_perks": True},
+        expected_active_round_identity_fingerprint="a" * 64,
         source_activity_scope_id="source-scope",
         mode="save_first",
     )
@@ -2159,6 +2251,7 @@ def test_retry_save_staging_failure_preserves_retry_and_uses_ui_fallback():
     with patch("core.app.log") as emit:
         assert not app._stage_direct_retry_player_save_preflight(
             MagicMock(spec=PlayerSaveAcquisitionBundle),
+            expected_active_round_identity_fingerprint="a" * 64,
             source_activity_scope_id="source-scope",
             retry_scope={"reason": "game_over_retry", "run_id": "retry-scope"},
         )
@@ -2551,7 +2644,7 @@ def test_attach_completion_report_failure_never_reclaims_terminal_hold(
     assert "workflow_reporting" not in repaired_degradation["failed_checks"]
 
 
-def test_unusable_attach_save_releases_enabled_ui_monitoring(
+def test_empty_attachment_projection_cannot_authorize_ui_fallback(
     tmp_path,
     monkeypatch,
 ):
@@ -2595,27 +2688,13 @@ def test_unusable_attach_save_releases_enabled_ui_monitoring(
         if key not in {"runtime_id", "pid", "adb_target"}
     }
 
-    app._apply_activity_continuity_outcome(
-        SimpleNamespace(
-            ui_monitoring_fallback=True,
-            ui_fallback_complete=True,
-            ui_fallback_reason="unsupported_save_version",
-            confirmed_same_battle_scope_id="scope-1",
-            confirmed_later_battle_scope_id=None,
-        )
-    )
+    app._apply_running_attachment_projection(SimpleNamespace())
 
-    ready = supervisor.battle_workflow
-    assert ready["status"] == "ready"
-    assert ready["save_receipt"]["ui_fallback"]["source"] == (
-        "battle_history_ui"
-    )
-    assert app._complete_ready_attachment_after_adoption() is True
-    assert supervisor.battle_workflow["status"] == "completed"
+    assert supervisor.battle_workflow["status"] == "validating_save"
     assert supervisor.is_paused is False
 
 
-def test_attach_reporting_failure_adopts_degraded_observer_and_completes(
+def test_running_attachment_has_no_ui_identity_fallback_entrypoint(
     tmp_path,
     monkeypatch,
 ):
@@ -2661,40 +2740,8 @@ def test_attach_reporting_failure_adopts_degraded_observer_and_completes(
     app._no_strategy_inventory_retry_at = 0.0
     app._pending_no_strategy_record = None
 
-    with patch(
-        "core.app.build_running_ui_reconciliation_receipt",
-        side_effect=ValueError("report serializer unavailable"),
-    ):
-        handled = app._complete_ui_backed_operator_reconciliation(
-            SimpleNamespace(
-                ui_fallback_complete=True,
-                ui_fallback_reason="unsupported_save_version",
-                confirmed_same_battle_scope_id="scope-1",
-                confirmed_later_battle_scope_id=None,
-            )
-        )
-
-    assert handled is True
-    assert manager.awaiting_initial_battle_intent() is False
-    degradation = manager.running_configuration_degradation()
-    assert degradation is not None
-    assert "attachment_reporting" in degradation["sources"]
-    assert degradation["failed_checks"] == ["workflow_reporting"]
-
-    assert manager.maybe_run_start({"state": "RUNNING"}) is False
-    assert manager.active_battle_observed() is True
-    assert app._operator_workflow_authority_hold() is None
-    assert app._complete_ready_attachment_after_adoption() is True
-    assert supervisor.battle_workflow["status"] == "completed"
-    assert supervisor.battle_workflow["configuration"]["reporting_status"] == (
-        "unavailable"
-    )
-    completed_degradation = manager.running_configuration_degradation()
-    assert completed_degradation is not None
-    assert completed_degradation["sources"] == ["attachment_reporting"]
-    assert completed_degradation["failed_checks"] == ["workflow_reporting"]
-    assert App._degradation_requires_home_repair(completed_degradation) is False
-    assert supervisor.is_paused is False
+    assert not hasattr(app, "_complete_ui_backed_operator_reconciliation")
+    assert supervisor.battle_workflow["status"] == "validating_save"
 
 
 def test_reporting_only_degradation_does_not_manufacture_home_repair():
@@ -3188,7 +3235,7 @@ def test_home_return_reports_nonretryable_setup_for_manual_correction(
     app._run_home_setup_attempts.assert_called_once()
 
 
-def test_post_serialization_interruption_terminates_attach_and_pauses(
+def test_empty_projection_cannot_classify_an_attachment_failure(
     tmp_path,
     monkeypatch,
 ):
@@ -3232,21 +3279,13 @@ def test_post_serialization_interruption_terminates_attach_and_pauses(
         if key not in {"runtime_id", "pid", "adb_target"}
     }
 
-    app._apply_activity_continuity_outcome(
-        SimpleNamespace(
-            operator_workflow_interruption_reason=(
-                "active_attachment_restored_source_convergence_timeout"
-            ),
-            operator_workflow_source_restored=False,
-        )
-    )
+    app._apply_running_attachment_projection(SimpleNamespace())
 
-    assert supervisor.is_paused is True
-    assert supervisor.battle_workflow["status"] == "interrupted"
-    assert "Automation remains Paused" in supervisor.battle_workflow["reason"]
+    assert supervisor.is_paused is False
+    assert supervisor.battle_workflow["status"] == "validating_save"
 
 
-def test_identity_projection_failure_terminates_return_and_discards_claim(
+def test_empty_projection_cannot_classify_a_return_failure(
     tmp_path,
     monkeypatch,
 ):
@@ -3297,21 +3336,13 @@ def test_identity_projection_failure_terminates_return_and_discards_claim(
         manual["manual_control_id"]: {"private": "typed claim"}
     }
 
-    app._apply_activity_continuity_outcome(
-        SimpleNamespace(
-            operator_workflow_interruption_reason=(
-                "active_attachment_temporal_projection_unavailable"
-            ),
-            operator_workflow_source_restored=True,
-        )
-    )
+    app._apply_running_attachment_projection(SimpleNamespace())
 
     assert supervisor.is_paused is False
-    assert supervisor.manual_control["status"] == "failed"
-    assert supervisor.manual_control["refresh_status"] == (
-        "save_evidence_rejected_continued"
-    )
-    assert app._manual_return_reconciliation_claims == {}
+    assert supervisor.manual_control["status"] == "reconciling"
+    assert app._manual_return_reconciliation_claims == {
+        manual["manual_control_id"]: {"private": "typed claim"}
+    }
 
 
 def test_running_return_trusted_save_mismatch_completes_degraded(
@@ -3336,8 +3367,7 @@ def test_running_return_trusted_save_mismatch_completes_degraded(
 
     completed = app._complete_save_backed_operator_reconciliation(
         outcome=SimpleNamespace(
-            confirmed_same_battle_scope_id="scope-1",
-            confirmed_later_battle_scope_id=None,
+            battle_relation="same_battle",
         ),
         acquisition=acquisition,
         temporal_binding=temporal,
@@ -3391,8 +3421,7 @@ def test_running_return_report_failure_releases_hold_and_retries_receipt(
     ):
         assert app._complete_save_backed_operator_reconciliation(
             outcome=SimpleNamespace(
-                confirmed_same_battle_scope_id="scope-1",
-                confirmed_later_battle_scope_id=None,
+                battle_relation="same_battle",
             ),
             acquisition=acquisition,
             temporal_binding=temporal,
@@ -3424,7 +3453,7 @@ def test_running_return_report_failure_releases_hold_and_retries_receipt(
     assert app._pending_return_reconciliation_claims() == {}
 
 
-def test_unusable_running_return_save_starts_supported_ui_reconciliation(
+def test_empty_running_return_projection_cannot_start_ui_reconciliation(
     tmp_path,
     monkeypatch,
 ):
@@ -3445,25 +3474,11 @@ def test_unusable_running_return_save_starts_supported_ui_reconciliation(
     )
     manager.begin_manual_return_reconciliation.return_value = True
 
-    app._apply_activity_continuity_outcome(
-        SimpleNamespace(
-            ui_monitoring_fallback=True,
-            ui_fallback_complete=False,
-            ui_fallback_reason="save_mapping_unavailable",
-            confirmed_same_battle_scope_id=None,
-            confirmed_later_battle_scope_id=None,
-        )
-    )
+    app._apply_running_attachment_projection(SimpleNamespace())
 
-    pending = supervisor.manual_control
-    assert pending["status"] == "awaiting_configuration"
-    assert pending["refresh_status"] == "configuration_validation_pending"
-    assert pending["save_receipt"]["ui_fallback"]["status"] == "degraded"
-    assert pending["configuration"]["ui_required_check_ids"] == [
-        "workshop_preset"
-    ]
+    assert supervisor.manual_control["status"] == "reconciling"
     assert supervisor.is_paused is False
-    manager.begin_manual_return_reconciliation.assert_called_once_with()
+    manager.begin_manual_return_reconciliation.assert_not_called()
 
 
 def test_completed_return_mismatch_does_not_retain_capture_authority(
@@ -3490,8 +3505,7 @@ def test_completed_return_mismatch_does_not_retain_capture_authority(
     )
     assert app._complete_save_backed_operator_reconciliation(
         outcome=SimpleNamespace(
-            confirmed_same_battle_scope_id="scope-1",
-            confirmed_later_battle_scope_id=None,
+            battle_relation="same_battle",
         ),
         acquisition=acquisition,
         temporal_binding=temporal,
@@ -3764,7 +3778,6 @@ def test_unbound_terminal_handoff_waits_for_exact_home_boundary(
             "schema_version": 1,
             "starting_game_state": "game_over",
             "observed_game_state": "home_new_battle",
-            "battle_scope_preserved": True,
         }
 
 
@@ -3921,15 +3934,11 @@ def test_unbound_terminal_enable_starts_home_save_reconciliation(
         for key, value in home.items()
         if key not in {"runtime_id", "pid", "adb_target"}
     }
-    app._activity_continuity = MagicMock()
     app._log_operator_workflow_result = MagicMock()
 
     app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
 
     assert supervisor.manual_control["status"] == "reconciling"
-    app._activity_continuity.request_running_reconciliation.assert_called_once_with(
-        str(home["activity_scope_run_id"])
-    )
 
 
 def test_manual_correction_enable_discards_prior_claim_before_new_home_save(
@@ -4038,8 +4047,7 @@ def test_running_return_save_match_completes_without_using_queued_strategy(
 
     completed = app._complete_save_backed_operator_reconciliation(
         outcome=SimpleNamespace(
-            confirmed_same_battle_scope_id="scope-1",
-            confirmed_later_battle_scope_id=None,
+            battle_relation="same_battle",
         ),
         acquisition=acquisition,
         temporal_binding=temporal,
@@ -4116,8 +4124,7 @@ def test_running_return_persists_forced_save_before_ui_fallback_is_armed(
 
     completed = app._complete_save_backed_operator_reconciliation(
         outcome=SimpleNamespace(
-            confirmed_same_battle_scope_id="scope-1",
-            confirmed_later_battle_scope_id=None,
+            battle_relation="same_battle",
         ),
         acquisition=acquisition,
         temporal_binding=temporal,
@@ -4131,7 +4138,60 @@ def test_running_return_persists_forced_save_before_ui_fallback_is_armed(
     manager.begin_manual_return_reconciliation.assert_called_once_with()
 
 
-def test_terminal_return_write_retry_does_not_repeat_save_or_ui_work(
+def test_changed_battle_return_waits_for_lifecycle_adoption_before_checks(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    (
+        app,
+        supervisor,
+        manager,
+        _evidence_value,
+        acquisition,
+        temporal,
+        observations,
+        context,
+    ) = _running_return_fixture(
+        tmp_path,
+        snapshot=_player_save_snapshot(
+            "workshop_preset",
+            "Farm",
+            complete=False,
+        ),
+        observed_value="Farm",
+    )
+    manager.active_battle_observed.return_value = False
+    manager.begin_manual_return_reconciliation.return_value = True
+
+    completed = app._complete_save_backed_operator_reconciliation(
+        outcome=SimpleNamespace(
+            battle_relation="later_battle",
+        ),
+        acquisition=acquisition,
+        temporal_binding=temporal,
+        observations=observations,
+        context=context,
+    )
+
+    assert completed is True
+    manual = supervisor.manual_control
+    assert manual["status"] == "reconciling"
+    retained = app._pending_return_reconciliation_claims()[
+        manual["manual_control_id"]
+    ]
+    assert retained["awaiting_lifecycle_adoption"] is True
+    manager.begin_manual_return_reconciliation.assert_not_called()
+
+    manager.active_battle_observed.return_value = True
+    assert app._resume_running_return_after_battle_adoption() is True
+
+    assert retained["awaiting_lifecycle_adoption"] is False
+    assert supervisor.manual_control["status"] == "awaiting_configuration"
+    manager.begin_manual_return_reconciliation.assert_called_once_with()
+
+
+def test_terminal_return_retry_ignores_log_scope_and_reuses_save(
     tmp_path,
     monkeypatch,
 ):
@@ -4211,9 +4271,13 @@ def test_terminal_return_write_retry_does_not_repeat_save_or_ui_work(
         }
     }
 
+    current = {
+        **terminal,
+        "activity_scope_run_id": "rotated-report-segment",
+    }
     completed = app._retry_pending_manual_terminal_completion(
         supervisor.manual_control,
-        terminal,
+        current,
     )
 
     assert completed is not None
@@ -4750,6 +4814,9 @@ def test_owned_development_terminal_uses_minimal_return_home_route(monkeypatch):
             "battle_scope": terminal["activity_scope_run_id"],
             "observed_at": _timestamp(),
             "target_generation": terminal["target_generation"],
+            "active_round_identity_fingerprint": terminal[
+                "active_round_identity_fingerprint"
+            ],
         },
         "terminal_evidence": {
             "screen_state": "GAME_OVER",
@@ -4757,6 +4824,9 @@ def test_owned_development_terminal_uses_minimal_return_home_route(monkeypatch):
             "battle_scope": terminal["activity_scope_run_id"],
             "observed_at": _timestamp(),
             "target_generation": terminal["target_generation"],
+            "active_round_identity_fingerprint": terminal[
+                "active_round_identity_fingerprint"
+            ],
         },
     }
     game_over = MagicMock(
@@ -5094,6 +5164,7 @@ def test_validated_attach_completes_only_after_lifecycle_adoption(
     )
     app._adb_target_session = session
     app._player_save_runtime_session_id = "save-runtime-1"
+    app._active_round_identity_fingerprint = "b" * 64
     monkeypatch.setattr(
         "core.app.get_activity_scope",
         lambda: {"run_id": final_scope},

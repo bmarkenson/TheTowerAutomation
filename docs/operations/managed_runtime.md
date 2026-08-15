@@ -26,8 +26,9 @@ under its own exact evidence and serialization authority.
 
 **Start Battle** is available only from fresh, owner-matched Home **New
 Battle** evidence. If requested while Paused it remains `awaiting_enable`;
-explicit **Enable Automation** revalidates the same runtime, target, activity
-scope, and boundary before normal new-run gates receive action authority.
+explicit **Enable Automation** revalidates the same runtime, target, workflow
+operation, and boundary. It then forces serialization and requires
+`round_active=false` before normal new-run gates receive action authority.
 When the selected Strategy declares a numeric tier, the runtime reads the Home
 tier selector, moves it one verified step at a time in either direction, and
 rechecks the requested tier on a fresh frame immediately before Battle. It
@@ -35,12 +36,14 @@ does not tap Battle when the current tier, an individual selector transition,
 or the final tier cannot be proved. A strategy without a numeric tier retains
 the existing launch behavior. Once the verified Home control is tapped, status
 reports `action_dispatched`; the workflow continues to suppress unrelated
-input until lifecycle adoption or a visible interrupted/failed result.
+input until the first stable `RUNNING` frame forces and binds the new
+`ActiveRoundIdentity`, or a visible interrupted/failed result occurs.
 If Pause, Stop, or Take Manual Control arrives during a Home configuration
 route, setup yields at the first denied input and performs no cleanup action.
 Observation and acknowledgement continue. A later Enable restores Home only
-when the original workflow still owns the exact runtime, target, and activity
-scope; otherwise that pending recovery is discarded.
+when the original workflow still owns the exact runtime, target, operation,
+and visible boundary; otherwise that pending recovery is discarded. Activity-
+log scope creation or rotation never rejects Start.
 
 Stopping interrupts unfinished battle and manual-control workflows. Repeating
 an already satisfied Start or Stop is reported as a no-op. The old attached
@@ -66,7 +69,7 @@ start: degraded-battle repair, No Strategy post-run inventory, and Tournament
 Results dismissal. If Continue was already selected
 for that exact terminal boundary, the runtime may carry one process-local
 continuation through the owned Home work. It is bound to the exact runtime,
-target generation, activity scope, and terminal-time state/policy request IDs;
+target generation, terminal active-round identity, operation, and terminal-time state/policy request IDs;
 it accepts only fresh **New Battle**, runs normal new-run gates, and is consumed
 only after one verified dispatch. Pause/Enable or policy request changes,
 manual/workflow supersession, Resume Battle, changed binding, process restart,
@@ -93,15 +96,17 @@ state when authority or manual ownership supersedes it.
 **Attach to Battle** is available only from fresh active-battle or Home
 **Resume Battle** evidence. It never starts a new battle as a fallback and does
 not adopt the observed battle merely because the intent was accepted. The
-runtime first revalidates the exact PID, ADB target/generation, activity scope,
-and observed boundary.
+runtime first revalidates the exact PID, ADB target/generation, workflow
+operation, and observed boundary.
 
 The runtime remains input-blocked in `validating_save` while it attempts one
 guarded exact-target serialization and restores the source. A usable save
-binds active-round identity to the final activity scope. If the save is absent,
-uses an unsupported revision, has an incompatible shape, or cannot be
-projected after safe restoration, the runtime automatically uses guarded
-Battle History instead. The Attach request freezes the complete accepted
+must provide `ActiveRoundIdentity`. With no prior identity it is adopted; an
+equal ID proves the same battle; a different ID proves a later battle and
+discards old battle-local state. Battle History, timestamps, visual similarity,
+and activity scope never substitute. A safely restored transient failure gets
+bounded forced retries and a retryable workflow result rather than releasing
+battle input. The Attach request freezes the complete accepted
 Strategy definition at the request boundary, so a later selection cannot
 change the battle being attached:
 
@@ -124,9 +129,9 @@ Strategy** observation remains eligible for a later explicit switch.
 All attached-battle configuration checks are observational. They may inspect
 supported UI, but cannot change Damage Slider, Orb Distance, Auto Pick, Poison
 Swamp Stun, a preset, a loadout, or any other configuration. A check failure,
-unsupported field, unusable save after safe restoration, or status-reporting
-failure completes degraded and releases automation. Only loss of the exact
-owner, target, scope, action authority, source restoration, or certainty about
+unsupported configuration field, or status-reporting failure completes
+degraded after identity succeeds. Only loss of the exact owner, target,
+canonical identity, action authority, source restoration, or certainty about
 a dispatched input is catastrophic and leaves Automation Paused. A failed
 receipt write never turns a successfully adopted battle into a global input
 hold; the runtime retains its exact process-local claim and retries reporting.
@@ -146,21 +151,19 @@ a later manual Surrender should be handled at that boundary:
 Neither choice tells automation to Surrender, and there is no manual Surrender
 command to announce in advance.
 
-**Return Control** refreshes passive observation while Pause remains in force.
-It is available only at exact-bound Home New, Home Resume, active battle, or
-Game Over evidence; Tournament Results, unknown state, or missing target/scope
-binding is visibly unavailable. Explicit **Enable Automation** then authorizes
-only reconciliation. The runtime first requests a newly forced save (or the
-bound Game Over natural save). If it is usable, mapped evidence reconciles
-battle identity and configuration after profile and one-run skips are removed.
-A trusted mismatch completes Return with degraded evidence and does not restore
-Pause. If the save is unusable after safe restoration, active and resumable
-Return uses Battle History plus every supported active-Strategy UI verifier,
-Home New uses every supported Home configuration verifier, and Game Over uses
-the full Game Stats/Perks/More Stats collector. Each route writes a bound typed
-reconciliation receipt before ordinary input returns. Do not use Enable as a
-shortcut around Return.
-If a Home New refresh loses its source restoration, owner, target, scope, or
+**Return Control** records fresh visual observation while Pause remains in
+force; it does not read or serialize the save. It is available only at Home
+New, Home Resume, active battle, or bound Game Over evidence. Explicit
+**Enable Automation** then authorizes only reconciliation. At Home New the
+runtime forces an inactive proof and closes the retained ID. At Home Resume or
+active battle it forces `ActiveRoundIdentity`: equal resumes the same battle;
+different discards old battle-local state and adopts the manually started
+successor before configuration checks run. Game Over consumes its lifecycle-
+issued natural bundle. No path waits for a save, polls History, or treats log
+scope as identity. Once identity succeeds, an unavailable configuration/report
+projection may use its supported UI route and complete degraded. Do not use
+Enable as a shortcut around Return.
+If a Home New refresh loses its source restoration, owner, target, identity, or
 authority binding after backgrounding, Return becomes failed/interrupted and
 Automation remains Paused.
 Do not retry by repeatedly selecting Enable; start a new explicit Return only
@@ -169,6 +172,21 @@ At Home New, a mismatch is repaired immediately because the boundary is already
 safe. If evidence is unavailable or bounded repair exhausts, Return completes
 degraded with the failed check and exact reason. Automation remains Enabled;
 the workflow does not wait for a manual correction or another Enable.
+
+Expected manual-boundary behavior is explicit:
+
+- Pause or Stop makes the retained battle ID comparison-only; neither action
+  assumes the battle stayed active.
+- If the operator Surrenders and returns at Home New, Enable/Return forces an
+  inactive save and closes the old ID. A later Start independently forces Home
+  inactive again, dispatches Battle, and force-binds the successor at
+  `RUNNING`.
+- If the operator Surrenders, manually starts another battle, and then Enables
+  or restarts/Attaches at `RUNNING`, forced serialization returns a different
+  ID. The runtime discards the old battle-local state and adopts the successor.
+- If the battle never changed, the same forced ID permits same-battle receipt
+  reuse. A restarted managed process always begins Paused and still requires
+  explicit Attach (or Start from Home New).
 
 ## Capture a manually changed setup
 

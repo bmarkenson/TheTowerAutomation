@@ -3,25 +3,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.adb_target_session import AdbTargetSnapshot
-from core.adb_utils import AdbShellDispatchOutcome
-from core.battle_lifecycle import HomeBattleControl
-from core.player_save import SaveCheckEvidence, pull_player_save_bytes
+from core.player_save import SaveCheckEvidence
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
     PlayerSaveTargetBinding,
-    StablePlayerSaveAcquirer,
 )
 from core.player_save_history import (
     CrossSourceHistoryStatus,
     PlayerSaveAttachmentContext,
-    PlayerSaveHistoryReadStatus,
-    PlayerSaveHistoryReader,
     corroborate_ui_and_save_history,
     history_metadata_from_acquisition,
     history_sources_compatible,
+    running_attachment_observations_from_acquisition,
+    running_attachment_temporal_binding_from_acquisition,
     valid_history_tail_advance,
 )
 from core.player_save_temporal import PlayerSaveTemporalClass
@@ -114,6 +110,7 @@ def _attachment_context(**changes):
     values = {
         "runtime_session_id": "runtime-1",
         "activity_scope_id": "scope-1",
+        "active_round_identity_fingerprint": "active-round-fingerprint",
         "target": "private-target",
         "target_generation": 3,
         "active_battle_observed": True,
@@ -138,61 +135,6 @@ def _acquisition(
         acquisition_completed_at=captured + timedelta(milliseconds=1),
         transport_stable=True,
         snapshot=snapshot,
-    )
-
-
-def _reader(
-    *,
-    target_snapshot_fn=lambda: AdbTargetSnapshot("private-target", 3, True),
-    capture_fn=lambda: object(),
-    detector=lambda _frame: {"state": "RUNNING"},
-    scope_fn=lambda: {"run_id": "scope-1"},
-    attachment_context_fn=None,
-    background_fn=None,
-    foreground_fn=None,
-    pull_fn=lambda **_kwargs: b"stable-save",
-    decode_fn=lambda _payload, **_kwargs: _snapshot(),
-    sleep_fn=lambda _seconds: None,
-    input_log_fn=lambda *_args, **_kwargs: None,
-    debug_log_fn=lambda *_args, **_kwargs: None,
-):
-    return PlayerSaveHistoryReader(
-        acquirer=StablePlayerSaveAcquirer(
-            target_snapshot_fn=target_snapshot_fn,
-            pull_fn=pull_fn,
-            decode_fn=decode_fn,
-        ),
-        capture_fn=capture_fn,
-        detector=detector,
-        home_control_fn=lambda _frame: SimpleNamespace(
-            control=HomeBattleControl.NEW_BATTLE
-        ),
-        scope_fn=scope_fn,
-        attachment_context_fn=attachment_context_fn,
-        background_fn=background_fn,
-        foreground_fn=foreground_fn,
-        sleep_fn=sleep_fn,
-        input_log_fn=input_log_fn,
-        debug_log_fn=debug_log_fn,
-    )
-
-
-def _read(reader):
-    return reader.read(
-        source_state="RUNNING",
-        expected_home_control=HomeBattleControl.UNKNOWN,
-        expected_scope_id="scope-1",
-        action_guard_fn=lambda: True,
-    )
-
-
-def _read_active(reader, *, action_guard_fn=lambda: True):
-    return reader.read(
-        source_state="RUNNING",
-        expected_home_control=HomeBattleControl.UNKNOWN,
-        expected_scope_id="scope-1",
-        action_guard_fn=action_guard_fn,
-        serialize_active_attachment=True,
     )
 
 
@@ -369,215 +311,51 @@ def test_cross_source_bridge_rejects_nonpositive_or_noncanonical_save_values(
     assert result.status is CrossSourceHistoryStatus.AMBIGUOUS
     assert result.reason == "save_history_tier_wave_ambiguous"
 
+def test_running_attachment_binding_uses_forced_save_battle_identity():
+    context = _attachment_context()
+    acquisition = _acquisition(_snapshot())
 
-def test_reader_binds_stable_read_to_exact_target_scope_control_and_source():
-    calls = {"target": 0, "capture": 0, "pull": 0}
-
-    def target():
-        calls["target"] += 1
-        return AdbTargetSnapshot("private-target", 3, True)
-
-    def capture():
-        calls["capture"] += 1
-        return object()
-
-    def pull(**kwargs):
-        calls["pull"] += 1
-        assert kwargs == {"device_id": "private-target"}
-        return b"stable-save"
-
-    result = _read(
-        _reader(
-            target_snapshot_fn=target,
-            capture_fn=capture,
-            pull_fn=pull,
-        )
+    binding = running_attachment_temporal_binding_from_acquisition(
+        acquisition,
+        context=context,
+        active_round_identity_fingerprint=(
+            context.active_round_identity_fingerprint
+        ),
     )
 
-    assert result.complete
-    assert result.metadata is not None
-    assert result.metadata["acquisition"]["type"] == "passive_stable_read"
-    assert calls == {"target": 4, "capture": 2, "pull": 1}
-
-
-def test_default_reader_transport_requires_two_identical_exact_target_reads(
-    monkeypatch,
-):
-    import core.adb_utils as adb_utils
-    import core.player_save as player_save
-
-    reads = []
-
-    def read_device_file(path, **kwargs):
-        reads.append((path, kwargs))
-        return b"identical-stable-save"
-
-    monkeypatch.setattr(adb_utils, "read_device_file", read_device_file)
-    monkeypatch.setattr(player_save.time, "sleep", lambda _seconds: None)
-    reader = _reader(pull_fn=pull_player_save_bytes)
-
-    result = _read(reader)
-
-    assert result.complete
-    assert len(reads) == 2
-    assert all(
-        kwargs == {
-            "device_id": "private-target",
-            "report_errors": False,
-        }
-        for _path, kwargs in reads
-    )
-
-
-def test_active_attachment_forces_serialization_and_restores_same_running_source():
-    calls = {
-        "target": 0,
-        "context": 0,
-        "capture": 0,
-        "background": 0,
-        "foreground": 0,
-        "pull": 0,
-    }
-    inputs = []
-
-    def target():
-        calls["target"] += 1
-        return AdbTargetSnapshot("private-target", 3, True)
-
-    def context():
-        calls["context"] += 1
-        return _attachment_context()
-
-    def capture():
-        calls["capture"] += 1
-        return object()
-
-    def pull(**kwargs):
-        calls["pull"] += 1
-        assert kwargs == {"device_id": "private-target"}
-        return b"stable-save"
-
-    result = _read_active(
-        _reader(
-            target_snapshot_fn=target,
-            capture_fn=capture,
-            attachment_context_fn=context,
-            background_fn=lambda _target: (
-                calls.__setitem__("background", calls["background"] + 1)
-                or True
-            ),
-            foreground_fn=lambda _target: (
-                calls.__setitem__("foreground", calls["foreground"] + 1)
-                or True
-            ),
-            pull_fn=pull,
-            input_log_fn=lambda *args, **kwargs: inputs.append(
-                (args, kwargs)
-            ),
-        )
-    )
-
-    assert result.complete
-    assert result.metadata is not None
-    assert result.metadata["acquisition"]["type"] == "forced_serialization"
-    observations = result.running_attachment_observations
-    assert observations is None  # the default snapshot has no profile facts
-    temporal = result.running_attachment_temporal_binding
-    assert temporal is not None
-    assert temporal.activity_scope_id is None
-    assert temporal.active_round_identity_fingerprint == (
+    assert binding is not None
+    assert binding.runtime_session_id == "runtime-1"
+    assert binding.source_activity_scope_id == "scope-1"
+    assert binding.activity_scope_id is None
+    assert binding.active_round_identity_fingerprint == (
         "active-round-fingerprint"
     )
-    assert result.running_attachment_context == _attachment_context()
-    assert result.acquisition is not None
-    assert calls == {
-        "target": 7,
-        "context": 5,
-        "capture": 6,
-        "background": 1,
-        "foreground": 1,
-        "pull": 1,
-    }
-    assert len(inputs) == 2
+    assert binding.target_binding == PlayerSaveTargetBinding(
+        "private-target",
+        3,
+    )
 
 
-def test_active_attachment_waits_for_delayed_running_restoration():
-    states = iter(
-        (
-            {"state": "RUNNING"},
-            {"state": "RUNNING"},
-            {"state": "RUNNING"},
-            {"state": "RUNNING"},
-            {"state": "UNKNOWN"},
-            {"state": "RUNNING"},
-            {"state": "RUNNING"},
+@pytest.mark.parametrize(
+    "changed_identity",
+    ("different-battle", ""),
+)
+def test_running_attachment_binding_rejects_missing_or_changed_battle_identity(
+    changed_identity,
+):
+    context = _attachment_context()
+
+    assert (
+        running_attachment_temporal_binding_from_acquisition(
+            _acquisition(_snapshot()),
+            context=context,
+            active_round_identity_fingerprint=changed_identity,
         )
-    )
-    calls = {"capture": 0}
-    diagnostics = []
-
-    def capture():
-        calls["capture"] += 1
-        return object()
-
-    result = _read_active(
-        _reader(
-            capture_fn=capture,
-            detector=lambda _frame: next(states),
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: True,
-            foreground_fn=lambda _target: True,
-            debug_log_fn=lambda message, _level: diagnostics.append(message),
-        )
-    )
-
-    assert result.complete
-    assert calls["capture"] == 7
-    assert any(
-        "result=source_not_yet_stable attempt=1/6" in message
-        for message in diagnostics
-    )
-    assert any(
-        "result=verified attempt=2/6" in message
-        for message in diagnostics
+        is None
     )
 
 
-def test_active_attachment_default_pull_uses_two_identical_reads(monkeypatch):
-    import core.adb_utils as adb_utils
-    import core.player_save as player_save
-
-    reads = []
-
-    def read_device_file(path, **kwargs):
-        reads.append((path, kwargs))
-        return b"identical-stable-save"
-
-    monkeypatch.setattr(adb_utils, "read_device_file", read_device_file)
-    monkeypatch.setattr(player_save.time, "sleep", lambda _seconds: None)
-
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: True,
-            foreground_fn=lambda _target: True,
-            pull_fn=pull_player_save_bytes,
-        )
-    )
-
-    assert result.complete
-    assert len(reads) == 2
-    assert all(
-        kwargs
-        == {
-            "device_id": "private-target",
-            "report_errors": False,
-        }
-        for _path, kwargs in reads
-    )
-
-
-def test_active_attachment_returns_complete_allowlisted_profile_observations():
+def test_running_attachment_projection_keeps_only_validated_save_facts():
     snapshot = _snapshot(
         profile_checks={
             "cards_deck": SaveCheckEvidence(
@@ -595,416 +373,26 @@ def test_active_attachment_returns_complete_allowlisted_profile_observations():
         }
     )
     snapshot.validated_checks = ("cards_deck",)
+    context = _attachment_context()
 
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: True,
-            foreground_fn=lambda _target: True,
-            decode_fn=lambda _payload, **_kwargs: snapshot,
-        )
+    observations = running_attachment_observations_from_acquisition(
+        _acquisition(snapshot),
+        context=context,
+        active_round_identity_fingerprint=(
+            context.active_round_identity_fingerprint
+        ),
     )
 
-    assert result.complete
-    observations = result.running_attachment_observations
     assert observations is not None
-    assert observations.binding.mapping_id == "data-9-game-1073"
-    assert observations.binding.activity_scope_id is None
-    assert observations.binding.source_activity_scope_id == "scope-1"
     assert observations.binding.active_round_identity_fingerprint == (
         "active-round-fingerprint"
     )
-    assert observations.binding.target_binding.fingerprint
     assert len(observations.facts) == 1
     fact = observations.facts[0]
     assert fact.check_id == "cards_deck"
     assert fact.temporal_class is PlayerSaveTemporalClass.POINT_IN_TIME
     assert fact.copied_value() == "Farm"
     assert fact.source_fields == ("presetName", "currentPreset")
-
-
-@pytest.mark.parametrize(
-    "fallback_kind",
-    ("acquisition", "unsupported_projection"),
-)
-def test_active_attachment_allows_ui_fallback_only_after_safe_restoration(
-    fallback_kind,
-):
-    lifecycle = []
-    if fallback_kind == "acquisition":
-        pull_fn = lambda **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("private read failure")
-        )
-        decode_fn = lambda _payload, **_kwargs: _snapshot()
-    else:
-        pull_fn = lambda **_kwargs: b"stable-save"
-        decode_fn = lambda _payload, **_kwargs: SimpleNamespace(
-            runtime_save=None,
-            captured_at="2026-08-04T20:00:00+00:00",
-            game_version=1073,
-        )
-
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: lifecycle.append("background") or True,
-            foreground_fn=lambda _target: lifecycle.append("foreground") or True,
-            pull_fn=pull_fn,
-            decode_fn=decode_fn,
-        )
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.UI_FALLBACK
-    assert result.safe_ui_fallback
-    assert result.metadata is None
-    assert lifecycle == ["background", "foreground"]
-
-
-def test_active_attachment_pre_dispatch_serialization_failure_uses_ui_fallback():
-    lifecycle = []
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: AdbShellDispatchOutcome(),
-            foreground_fn=lambda target: lifecycle.append(target) or True,
-        )
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.UI_FALLBACK
-    assert result.safe_ui_fallback
-    assert result.reason == (
-        "active_attachment_background_serialization_dispatch_unavailable"
-    )
-    assert result.operator_workflow_interrupted is False
-    assert result.source_restored is True
-    assert lifecycle == []
-
-
-@pytest.mark.parametrize(
-    "failure_kind",
-    ("target", "scope", "source", "control"),
-)
-def test_active_attachment_prebackground_authority_failure_is_action_free(
-    failure_kind,
-):
-    lifecycle = []
-    target_snapshot_fn = lambda: AdbTargetSnapshot(
-        "private-target",
-        3,
-        failure_kind != "target",
-    )
-    context = _attachment_context
-    if failure_kind == "scope":
-        context = lambda: _attachment_context(
-            activity_scope_id="different-scope"
-        )
-    detector = (
-        (lambda _frame: {"state": "HOME_SCREEN"})
-        if failure_kind == "source"
-        else (lambda _frame: {"state": "RUNNING"})
-    )
-    action_guard = (
-        (lambda: False)
-        if failure_kind == "control"
-        else (lambda: True)
-    )
-
-    result = _read_active(
-        _reader(
-            target_snapshot_fn=target_snapshot_fn,
-            detector=detector,
-            attachment_context_fn=context,
-            background_fn=lambda _target: lifecycle.append("background") or True,
-            foreground_fn=lambda _target: lifecycle.append("foreground") or True,
-        ),
-        action_guard_fn=action_guard,
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert not result.safe_ui_fallback
-    assert lifecycle == []
-
-
-def test_active_attachment_control_loss_restores_before_yielding():
-    authority = iter((True, True, False))
-    lifecycle = []
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: lifecycle.append("background") or True,
-            foreground_fn=lambda _target: lifecycle.append("foreground") or True,
-        ),
-        action_guard_fn=lambda: next(authority),
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert not result.safe_ui_fallback
-    assert result.reason.endswith(
-        "restored_control_authority_interrupted"
-    )
-    assert result.background_dispatched is True
-    assert result.operator_workflow_interrupted is True
-    assert result.source_restored is True
-    assert lifecycle == ["background", "foreground"]
-
-
-def test_active_attachment_rechecks_context_at_background_input_boundary():
-    lifecycle = []
-    contexts = iter(
-        (
-            _attachment_context(),
-            _attachment_context(),
-            _attachment_context(runtime_session_id="runtime-2"),
-        )
-    )
-
-    result = _read_active(
-        _reader(
-            attachment_context_fn=lambda: next(contexts),
-            background_fn=lambda _target: lifecycle.append("background") or True,
-            foreground_fn=lambda _target: lifecycle.append("foreground") or True,
-        )
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert not result.safe_ui_fallback
-    assert result.reason.endswith("initial_source_boundary_unverified")
-    assert lifecycle == []
-
-
-@pytest.mark.parametrize(
-    "failure_kind",
-    ("foreground", "target_generation", "process", "restored_source"),
-)
-def test_active_attachment_restoration_ambiguity_blocks_ui_fallback(
-    failure_kind,
-):
-    lifecycle = []
-    target_calls = 0
-    context_calls = 0
-    state_calls = 0
-
-    def target():
-        nonlocal target_calls
-        target_calls += 1
-        generation = (
-            4
-            if failure_kind == "target_generation" and target_calls >= 3
-            else 3
-        )
-        return AdbTargetSnapshot("private-target", generation, True)
-
-    def context():
-        nonlocal context_calls
-        context_calls += 1
-        return _attachment_context(
-            runtime_session_id=(
-                "runtime-2"
-                if failure_kind == "process" and context_calls >= 5
-                else "runtime-1"
-            )
-        )
-
-    def detector(_frame):
-        nonlocal state_calls
-        state_calls += 1
-        return {
-            "state": (
-                "HOME_SCREEN"
-                if failure_kind == "restored_source" and state_calls >= 5
-                else "RUNNING"
-            )
-        }
-
-    result = _read_active(
-        _reader(
-            target_snapshot_fn=target,
-            detector=detector,
-            attachment_context_fn=context,
-            background_fn=lambda _target: lifecycle.append("background") or True,
-            foreground_fn=lambda _target: (
-                lifecycle.append("foreground")
-                or (
-                    AdbShellDispatchOutcome()
-                    if failure_kind == "foreground"
-                    else True
-                )
-            ),
-        )
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert not result.safe_ui_fallback
-    assert lifecycle == ["background", "foreground"]
-
-
-@pytest.mark.parametrize("failure_kind", ("context", "control"))
-def test_active_attachment_rechecks_authority_after_stable_restoration(
-    failure_kind,
-):
-    lifecycle = []
-    contexts = iter(
-        (
-            _attachment_context(),
-            _attachment_context(),
-            _attachment_context(),
-            _attachment_context(),
-            _attachment_context(
-                runtime_session_id=(
-                    "runtime-2" if failure_kind == "context" else "runtime-1"
-                )
-            ),
-        )
-    )
-    authority = iter((True, True, failure_kind != "control"))
-
-    result = _read_active(
-        _reader(
-            attachment_context_fn=lambda: next(contexts),
-            background_fn=lambda _target: lifecycle.append("background") or True,
-            foreground_fn=lambda _target: lifecycle.append("foreground") or True,
-        ),
-        action_guard_fn=lambda: next(authority),
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert not result.safe_ui_fallback
-    assert result.reason == (
-        "active_attachment_restored_context_boundary_unverified"
-        if failure_kind == "context"
-        else "active_attachment_restored_control_authority_interrupted"
-    )
-    assert lifecycle == ["background", "foreground"]
-
-
-def test_active_attachment_conflicting_active_round_identity_blocks_fallback():
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: True,
-            foreground_fn=lambda _target: True,
-            decode_fn=lambda _payload, **_kwargs: _snapshot(active=False),
-        )
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert not result.safe_ui_fallback
-    assert result.reason == "active_round_identity_conflicted_after_restore"
-    assert result.background_dispatched is True
-    assert result.operator_workflow_interrupted is True
-
-
-def test_active_attachment_keeps_identity_when_fact_projection_fails(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        "core.player_save_history.running_attachment_observations_from_acquisition",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            ValueError("unsupported optional fact")
-        ),
-    )
-
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: True,
-            foreground_fn=lambda _target: True,
-        )
-    )
-
-    assert result.complete
-    assert result.running_attachment_temporal_binding is not None
-    assert result.running_attachment_observations is None
-    assert result.operator_workflow_interrupted is False
-
-
-def test_active_attachment_identity_projection_failure_interrupts_workflow(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        "core.player_save_history.running_attachment_temporal_binding_from_acquisition",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            ValueError("identity projection failed")
-        ),
-    )
-
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: True,
-            foreground_fn=lambda _target: True,
-        )
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert result.reason == (
-        "active_attachment_temporal_projection_unavailable"
-    )
-    assert result.background_dispatched is True
-    assert result.operator_workflow_interrupted is True
-
-
-def test_active_attachment_missing_identity_projection_interrupts_workflow(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        "core.player_save_history.running_attachment_temporal_binding_from_acquisition",
-        lambda *_args, **_kwargs: None,
-    )
-
-    result = _read_active(
-        _reader(
-            attachment_context_fn=_attachment_context,
-            background_fn=lambda _target: True,
-            foreground_fn=lambda _target: True,
-        )
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert result.reason == (
-        "active_attachment_temporal_projection_unavailable"
-    )
-    assert result.background_dispatched is True
-    assert result.operator_workflow_interrupted is True
-
-
-def test_acquisition_failure_allows_ui_only_after_source_binding_is_restored():
-    result = _read(
-        _reader(
-            pull_fn=lambda **_kwargs: (_ for _ in ()).throw(
-                RuntimeError("private decode details")
-            )
-        )
-    )
-
-    assert result.status is PlayerSaveHistoryReadStatus.UI_FALLBACK
-    assert result.safe_ui_fallback
-    assert result.metadata is None
-    assert "private decode details" not in result.reason
-
-
-def test_target_generation_change_blocks_ui_fallback():
-    targets = iter(
-        (
-            AdbTargetSnapshot("private-target", 3, True),
-            AdbTargetSnapshot("private-target", 4, True),
-        )
-    )
-
-    result = _read(_reader(target_snapshot_fn=lambda: next(targets)))
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert not result.safe_ui_fallback
-
-
-def test_boundary_or_control_loss_blocks_ui_fallback():
-    states = iter(({"state": "RUNNING"}, {"state": "HOME_SCREEN"}))
-
-    result = _read(_reader(detector=lambda _frame: next(states)))
-
-    assert result.status is PlayerSaveHistoryReadStatus.BLOCKED
-    assert result.reason == "history_source_binding_lost"
-
 
 def test_source_compatibility_and_capacity_rollover_are_explicit():
     previous = history_metadata_from_acquisition(

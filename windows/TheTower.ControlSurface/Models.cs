@@ -691,6 +691,9 @@ public sealed class StrategyActionGateStatus
     [JsonPropertyName("battle_scope")]
     public string? BattleScope { get; set; }
 
+    [JsonPropertyName("runtime_battle_identity")]
+    public string? RuntimeBattleIdentity { get; set; }
+
     [JsonPropertyName("source")]
     public string? Source { get; set; }
 

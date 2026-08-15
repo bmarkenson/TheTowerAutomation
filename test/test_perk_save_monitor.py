@@ -39,10 +39,16 @@ def _sha(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()
 
 
-def _context(*, generation: int = 4, activity: str = "scope-1"):
+def _context(
+    *,
+    generation: int = 4,
+    activity: str = "scope-1",
+    identity: str = "a" * 64,
+):
     return PerkSaveMonitorContext(
         runtime_session_id="runtime-1",
         activity_scope_id=activity,
+        active_round_identity_fingerprint=identity,
         target_binding=PlayerSaveTargetBinding(
             "localhost:5555",
             generation,
@@ -161,6 +167,7 @@ def _observe(
     context: PerkSaveMonitorContext | None = None,
     acquisition_type: PlayerSaveAcquisitionType | None = None,
     boundary_scope: str | None = None,
+    boundary_identity: str | None = None,
     boundary_lead_ms: int = 200,
 ) -> str:
     bound_context = context or _context()
@@ -176,6 +183,8 @@ def _observe(
             captured - timedelta(milliseconds=boundary_lead_ms),
             bound_context.runtime_session_id,
             boundary_scope or bound_context.activity_scope_id,
+            boundary_identity
+            or bound_context.active_round_identity_fingerprint,
         )
         if acquisition_type is PlayerSaveAcquisitionType.NATURAL_BOUNDARY
         else None
@@ -449,7 +458,7 @@ def test_natural_clear_with_wrong_activity_scope_fails_closed():
     assert _observe(
         monitor,
         _terminal_runtime(6, captured_offset=30),
-        boundary_scope="another-scope",
+        boundary_identity="b" * 64,
     ) == "rejected_unbound_terminal_clear"
     assert monitor.terminal_evidence(
         context=_context(), terminal_state="GAME_OVER"

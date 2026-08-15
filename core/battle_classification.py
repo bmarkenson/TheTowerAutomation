@@ -15,7 +15,7 @@ KNOWN_BATTLE_TYPES = {
 
 UNBOUND_RUN_EVIDENCE_WARNING = (
     "Process-local run evidence was omitted because the terminal screen was "
-    "not bound to an active battle observed in this process and activity scope"
+    "not bound to a forced-save battle identity observed on this process and target"
 )
 
 _DISSONANCE_PRESET_PREFIXES = {

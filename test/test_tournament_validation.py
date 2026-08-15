@@ -30,6 +30,7 @@ OWNER_TWO = {
     "pid": 202,
     "adb_target": "localhost:5555",
 }
+VALIDATION_BATTLE_IDENTITY = "e" * 64
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +72,9 @@ def _app_for_pending_validation(tmp_path, *, home_preflight_complete=True):
     app._mission_reward_scheduler = Mock()
     app._mission_reward_scheduler.should_attempt.return_value = False
     app._active_exclusive_validation_request_id = None
+    app._active_exclusive_validation_battle_identity = None
     app._exclusive_validation_terminal_hold = None
+    app._active_round_identity_fingerprint = VALIDATION_BATTLE_IDENTITY
     return app, store, manager
 
 
@@ -122,6 +125,7 @@ def _app_for_ready_launch(tmp_path):
     app._supervisor = supervisor
     app._mission_mgr = manager
     app._active_exclusive_validation_request_id = None
+    app._active_exclusive_validation_battle_identity = None
     app._active_exclusive_validation_launch_request_id = None
     app._exclusive_validation_terminal_hold = None
     app._exclusive_validation_ownership_hold = False
@@ -472,6 +476,7 @@ def test_restart_retires_old_owner_without_holding_new_pending_request(tmp_path)
     app._mission_mgr = MissionManager(None, get_strategy("tournament"))
     app._mission_mgr.start()
     app._active_exclusive_validation_request_id = None
+    app._active_exclusive_validation_battle_identity = None
     app._exclusive_validation_ownership_hold = False
     with patch("core.app.log"):
         receipt = app._reconcile_exclusive_validation()
@@ -589,6 +594,7 @@ def test_explicit_start_owns_tournament_validation_launch_through_adoption(
         for key, value in evidence.items()
         if key not in {"runtime_id", "pid", "adb_target"}
     }
+    app._active_round_identity_fingerprint = VALIDATION_BATTLE_IDENTITY
 
     app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
     assert supervisor.battle_workflow["status"] == "acknowledged"
@@ -932,6 +938,35 @@ def test_tournament_identity_never_authorizes_validation_surrender(tmp_path):
     result = _current_receipt(store)
     assert result["outcome"] == "failed"
     assert "refusing Surrender" in result["reason"]
+
+
+def test_changed_save_identity_never_authorizes_validation_surrender(tmp_path):
+    app, store, manager = _app_for_pending_validation(tmp_path)
+    with (
+        patch("core.app.tap_verified_new_battle", return_value=True),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+    detection = {"state": "RUNNING", "secondary_states": []}
+    app._observe_exclusive_validation_battle_start(
+        detection,
+        battle_started=manager.maybe_run_start(detection),
+    )
+    app._active_round_identity_fingerprint = "f" * 64
+
+    with (
+        patch("core.app.surrender_run") as surrender,
+        patch("core.app.log"),
+    ):
+        assert app._advance_exclusive_validation(detection)
+
+    surrender.assert_not_called()
+    result = _current_receipt(store)
+    assert result["outcome"] == "failed"
+    assert "save identity no longer matches" in result["reason"]
 
 
 def test_active_strategy_change_cleans_up_only_the_owned_validation_battle(

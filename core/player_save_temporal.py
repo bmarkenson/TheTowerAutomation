@@ -20,6 +20,9 @@ from core.player_save_acquisition import (
 )
 
 
+_REPORT_SCOPE_UNAVAILABLE = "report-scope-unavailable"
+
+
 class PlayerSaveTemporalClass(str, Enum):
     """The time interval over which one mapped save fact is authoritative."""
 
@@ -62,7 +65,7 @@ class RunningAttachmentTemporalBinding:
     """Private exact binding for facts obtained while a battle is running."""
 
     runtime_session_id: str = field(repr=False)
-    source_activity_scope_id: str = field(repr=False)
+    source_activity_scope_id: Optional[str] = field(repr=False)
     target_binding: PlayerSaveTargetBinding = field(repr=False)
     mapping_id: str
     effective_mapping_fingerprint: str
@@ -74,7 +77,6 @@ class RunningAttachmentTemporalBinding:
     def __post_init__(self) -> None:
         required = {
             "runtime_session_id": self.runtime_session_id,
-            "source_activity_scope_id": self.source_activity_scope_id,
             "mapping_id": self.mapping_id,
             "effective_mapping_fingerprint": (
                 self.effective_mapping_fingerprint
@@ -89,6 +91,12 @@ class RunningAttachmentTemporalBinding:
             if not normalized:
                 raise ValueError(f"running attachment requires {name}")
             object.__setattr__(self, name, normalized)
+        source_scope = str(self.source_activity_scope_id or "").strip()
+        object.__setattr__(
+            self,
+            "source_activity_scope_id",
+            source_scope or None,
+        )
         if not (
             len(self.effective_mapping_fingerprint) == 64
             and all(
@@ -113,20 +121,19 @@ class RunningAttachmentTemporalBinding:
 
     @property
     def final(self) -> bool:
-        return self.activity_scope_id is not None
+        """Return whether canonical forced-save authority is complete."""
+
+        return True
 
     @property
     def claim_fingerprint(self) -> str:
         """Stable comparison key without exposing private binding values."""
 
-        if self.activity_scope_id is None:
-            raise ValueError("temporal claim is not bound to a final scope")
         return _fingerprint(
             "round-claim",
             self.mapping_id,
             self.effective_mapping_fingerprint,
             self.target_binding.fingerprint,
-            self.activity_scope_id,
             self.active_round_identity_fingerprint,
         )
 
@@ -134,24 +141,23 @@ class RunningAttachmentTemporalBinding:
         self,
         activity_scope_id: str,
     ) -> "RunningAttachmentTemporalBinding":
-        """Bind only after continuity persisted the authoritative final scope."""
+        """Attach mutable report metadata to canonical save-bound evidence."""
 
         normalized = str(activity_scope_id or "").strip()
         if not normalized:
-            raise ValueError("final activity scope is required")
-        if self.activity_scope_id is not None and self.activity_scope_id != normalized:
-            raise ValueError("running attachment is already bound to another scope")
+            return self
         return replace(self, activity_scope_id=normalized)
 
     def matches_context(self, context: Any) -> bool:
-        """Revalidate current process, final scope, target, and generation."""
+        """Revalidate process, save battle ID, target, and active state."""
 
-        if self.activity_scope_id is None or context is None:
+        if context is None:
             return False
         try:
             return bool(
                 str(context.runtime_session_id) == self.runtime_session_id
-                and str(context.activity_scope_id) == self.activity_scope_id
+                and str(context.active_round_identity_fingerprint)
+                == self.active_round_identity_fingerprint
                 and str(context.target) == self.target_binding.target
                 and int(context.target_generation)
                 == self.target_binding.generation
@@ -161,8 +167,10 @@ class RunningAttachmentTemporalBinding:
             return False
 
     def redacted(self) -> dict[str, Any]:
-        if self.activity_scope_id is None:
-            raise ValueError("unbound temporal provenance cannot be published")
+        source_scope = (
+            self.source_activity_scope_id or _REPORT_SCOPE_UNAVAILABLE
+        )
+        report_scope = self.activity_scope_id or _REPORT_SCOPE_UNAVAILABLE
         return {
             "schema_version": 1,
             "mapping_id": self.mapping_id,
@@ -175,11 +183,11 @@ class RunningAttachmentTemporalBinding:
             ),
             "source_activity_scope": _fingerprint(
                 "activity-scope",
-                self.source_activity_scope_id,
+                source_scope,
             ),
             "target_generation": self.target_binding.fingerprint,
             "activity_scope": _fingerprint(
-                "activity-scope", self.activity_scope_id
+                "activity-scope", report_scope
             ),
             "round_identity": self.active_round_identity_fingerprint,
             "captured_at": self.captured_at,

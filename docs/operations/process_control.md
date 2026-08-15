@@ -52,25 +52,25 @@ Start Battle is accepted only with fresh verified Home `NEW_BATTLE` evidence;
 Attach to Battle requires fresh Home `RESUME_BATTLE` or active-battle evidence.
 Unavailable, stale, and mismatched requests fail without substituting the
 other route. Attach remains input-blocked at `validating_save` until one
-guarded exact-target serialization proves source restoration and either binds
-usable save evidence or selects the established Battle History UI fallback.
-An absent, unsupported, incompatible, or unprojectable save after safe
-restoration therefore still adopts the battle and keeps supported UI
-monitoring available. Attach freezes the accepted selected Strategy definition
-with the request. No Strategy becomes an intentional observer; a proven
+guarded exact-target serialization proves source restoration and binds a valid
+`ActiveRoundIdentity`. There is no Battle History or log-scope fallback for
+battle identity. After identity succeeds, unsupported configuration/report
+projections may still use their supported UI monitoring. Attach freezes the
+accepted selected Strategy definition with the request. No Strategy becomes an
+intentional observer; a proven
 kind/tier-compatible Strategy becomes active; and an incompatible or
 unprovable selection becomes a degraded observer while the selection remains
 pending for the next safe boundary. Attached checks never repair the current
 battle. Recoverable check, data, and reporting failures complete degraded and
-release automation. Only owner, target, scope, authority, restoration, or
-uncertain-input loss is catastrophic and leaves input Paused.
+release automation. Only owner, target, canonical identity, authority,
+restoration, or uncertain-input loss is catastrophic and leaves input Paused.
 
 Take Manual Control first requests an indefinite Pause and becomes active only
 after runtime acknowledgement. Return Control remains Paused; explicit Enable
 starts an exclusive reconciliation hold. A newly forced save, or the exact
-bound natural Game Over save, is preferred. When that save is unusable after a
-safe source restoration, the same hold automatically uses the supported
-active/Home/terminal UI discovery route and a target/scope-bound UI receipt.
+bound natural Game Over save, is required for identity. After identity is
+established, unusable configuration/report projection may use the supported
+active/Home/terminal UI discovery route and an identity-bound UI receipt.
 A trusted mapped mismatch completes Return with exact degraded evidence; at
 Home it is repaired immediately when possible, and exhausted repair still
 releases automation. Cached evidence cannot satisfy Return, and an unsafe
@@ -135,7 +135,7 @@ only when appropriate. Replacement never restores the previous action
 authority or battle intent implicitly. Never kill a PID solely from possibly
 stale metadata.
 
-To recover a preserved terminal after uncertain continuity:
+To recover a preserved terminal after uncertain process ownership:
 
 1. Keep mode `WAIT`; inspect the screen, owner, lock, and exact target.
 2. Stop the known owner cleanly and start the replacement `PAUSED`.
@@ -146,5 +146,6 @@ To recover a preserved terminal after uncertain continuity:
 
 A terminal-only replacement may preserve Game Stats, Perks, and More Stats,
 but it cannot attach process-local Strategy, configuration, timeline, or
-sampling evidence without same-process active-battle continuity. Do not leave
-the terminal manually, run another battle, and enable an older waiting handler.
+sampling evidence without a matching canonical active-round binding. Do not
+leave the terminal manually, run another battle, and enable an older waiting
+handler.

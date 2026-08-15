@@ -488,7 +488,7 @@ class NoStrategyRunObserver:
         self,
         observations: RunningAttachmentSaveObservations,
     ) -> tuple[str, ...]:
-        """Merge facts only after continuity binds their final run scope."""
+        """Merge facts only after a forced save binds the active battle ID."""
 
         if not isinstance(observations, RunningAttachmentSaveObservations):
             raise TypeError("typed active-attachment observations are required")

@@ -7,13 +7,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.player_save import PlayerSavePullError, SaveCheckEvidence
-from core.adb_target_session import AdbTargetSnapshot
-from core.player_save_acquisition import StablePlayerSaveAcquirer
+from core.player_save import SaveCheckEvidence
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+)
 from core.tournament_conditions import (
-    capture_current_tournament_conditions,
     derive_tournament_conditions,
     derive_tournament_conditions_from_save,
+    tournament_conditions_from_acquisition,
 )
 
 
@@ -23,19 +27,6 @@ MAPPING = json.loads(
         encoding="utf-8"
     )
 )
-
-
-def _acquirer(*, pull_fn, decode_fn=None, target_snapshot_fn=None):
-    target = (
-        {"target_snapshot_fn": target_snapshot_fn}
-        if target_snapshot_fn is not None
-        else {"fixed_target": "private-target"}
-    )
-    return StablePlayerSaveAcquirer(
-        **target,
-        pull_fn=pull_fn,
-        decode_fn=decode_fn,
-    )
 
 
 @pytest.mark.parametrize(
@@ -190,7 +181,7 @@ def test_post_run_checked_number_fails_closed_when_registry_record_is_stale():
     assert evidence["reason"] == "checked_tournament_record_is_stale"
 
 
-def test_capture_enriches_evidence_without_retaining_raw_save_values():
+def test_projection_enriches_evidence_from_a_shared_acquisition():
     value = derive_tournament_conditions(
         287,
         5,
@@ -217,52 +208,41 @@ def test_capture_enriches_evidence_without_retaining_raw_save_values():
         source_sha256="abc123",
     )
 
-    evidence = capture_current_tournament_conditions(
-        acquirer=_acquirer(
-            pull_fn=lambda **_kwargs: b"opaque-save",
-            decode_fn=lambda *_args, **_kwargs: snapshot,
-        ),
+    captured_at = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="complete",
+        binding=PlayerSaveTargetBinding("private-target", 1),
+        acquisition_started_at=captured_at,
+        captured_at=captured_at,
+        acquisition_completed_at=captured_at,
+        transport_stable=True,
+        snapshot=snapshot,
     )
+    evidence = tournament_conditions_from_acquisition(acquisition)
 
     assert evidence["status"] == "complete"
     assert evidence["source"]["save_revision"] == 45969
     assert evidence["source"]["save_sha256"] == "abc123"
-    assert "opaque-save" not in repr(evidence)
+    assert "private-target" not in repr(evidence)
 
 
-def test_capture_failure_is_explicit_and_nonblocking():
-    def fail_pull(**_kwargs):
-        raise PlayerSavePullError("unavailable")
-
-    evidence = capture_current_tournament_conditions(
-        acquirer=_acquirer(pull_fn=fail_pull)
+def test_projection_failure_is_explicit_and_nonblocking():
+    captured_at = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.UNAVAILABLE,
+        reason="stable_read_unavailable",
+        binding=PlayerSaveTargetBinding("private-target", 1),
+        acquisition_started_at=captured_at,
+        captured_at=None,
+        acquisition_completed_at=captured_at,
+        transport_stable=False,
     )
+    evidence = tournament_conditions_from_acquisition(acquisition)
 
     assert evidence["status"] == "unavailable"
     assert evidence["reason"] == "save_pull_failed"
-    assert evidence["ui_fallback"]["required"]
-
-
-def test_standalone_capture_discards_projection_on_target_generation_change():
-    snapshots = iter(
-        (
-            AdbTargetSnapshot("private-target", 1, True),
-            AdbTargetSnapshot("private-target", 2, True),
-        )
-    )
-
-    evidence = capture_current_tournament_conditions(
-        acquirer=_acquirer(
-            target_snapshot_fn=lambda: next(snapshots),
-            pull_fn=lambda **_kwargs: b"opaque-save",
-            decode_fn=lambda *_args, **_kwargs: SimpleNamespace(
-                checks={},
-                mapping_id="data-9-game-1073",
-            ),
-        ),
-    )
-
-    assert evidence["status"] == "unavailable"
-    assert evidence["reason"] == "save_capture_failed"
     assert evidence["ui_fallback"]["required"]
     assert "private-target" not in repr(evidence)

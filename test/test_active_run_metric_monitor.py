@@ -42,10 +42,16 @@ def _sha(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()
 
 
-def _context(*, activity: str = "scope-1", generation: int = 4):
+def _context(
+    *,
+    activity: str = "scope-1",
+    generation: int = 4,
+    identity: str = "a" * 64,
+):
     return PerkSaveMonitorContext(
         runtime_session_id="runtime-1",
         activity_scope_id=activity,
+        active_round_identity_fingerprint=identity,
         target_binding=PlayerSaveTargetBinding("localhost:5555", generation),
     )
 
@@ -381,6 +387,7 @@ def _acquisition(
     *,
     context: PerkSaveMonitorContext | None = None,
     boundary_activity: str | None = None,
+    boundary_identity: str | None = None,
 ) -> PlayerSaveAcquisitionBundle:
     bound = context or _context()
     captured = datetime.fromisoformat(str(runtime.capture["captured_at"]))
@@ -397,6 +404,7 @@ def _acquisition(
             captured - timedelta(milliseconds=100),
             bound.runtime_session_id,
             boundary_activity or bound.activity_scope_id,
+            boundary_identity or bound.active_round_identity_fingerprint,
         )
     )
     semantic_forward = runtime.mapping_id == SEMANTIC_MAPPING_ID
@@ -1836,7 +1844,7 @@ def test_terminal_window_rejects_a_different_activity_scope():
     acquisition = _acquisition(
         _terminal_runtime(),
         context=context,
-        boundary_activity="scope-other",
+        boundary_identity="b" * 64,
     )
 
     assert monitor.observe_bundle(acquisition, context=context) == (
@@ -1855,8 +1863,12 @@ def test_terminal_window_rejects_a_different_activity_scope():
 def test_new_activity_resets_evidence_but_target_change_does_not_rebind():
     monitor = ActiveRunMetricMonitor()
     assert monitor.bind_context(_context())
-    assert monitor.bind_context(_context(activity="scope-2"), new_activity=True)
+    assert monitor.bind_context(_context(activity="scope-2"))
+    assert monitor.bind_context(
+        _context(activity="scope-2", identity="b" * 64),
+        new_activity=True,
+    )
     assert not monitor.bind_context(
-        _context(activity="scope-3", generation=5),
+        _context(activity="scope-3", generation=5, identity="c" * 64),
         new_activity=True,
     )

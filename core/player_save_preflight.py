@@ -110,7 +110,7 @@ class PlayerSavePreflightContext:
 
     runtime_session_id: str
     preflight_session_id: str
-    activity_scope_id: str
+    activity_scope_id: str = field(compare=False)
     strategy_name: str
     configuration_fingerprint: str
     target: str
@@ -731,14 +731,16 @@ class PlayerSavePreflightCoordinator:
         acquisition: Optional[PlayerSaveAcquisitionBundle],
         requirements: Mapping[str, Any],
         *,
+        expected_active_round_identity_fingerprint: str,
         source_activity_scope_id: str,
         mode: Any = DEFAULT_PLAYER_SAVE_PREFLIGHT_MODE,
     ) -> PlayerSavePreflightResult:
         """Stage accepted terminal-save facts for one verified direct Retry.
 
-        The Retry tap and successor activity scope must already exist.  Failure
-        here never owns or reverses that lifecycle action; it simply leaves the
-        existing per-check UI validation path in place.
+        The Retry tap and predecessor battle identity must already be proven.
+        Activity scope is carried only as report metadata. Failure here never
+        owns or reverses that lifecycle action; it simply leaves the existing
+        per-check UI validation path in place.
         """
 
         selected_mode = normalize_player_save_preflight_mode(mode)
@@ -779,8 +781,9 @@ class PlayerSavePreflightCoordinator:
                     acquisition,
                     requirements,
                     runtime_session_id=context.runtime_session_id,
-                    source_activity_scope_id=source_activity_scope_id,
-                    successor_activity_scope_id=context.activity_scope_id,
+                    expected_active_round_identity_fingerprint=(
+                        expected_active_round_identity_fingerprint
+                    ),
                     expected_binding=PlayerSaveTargetBinding(
                         context.target,
                         context.target_generation,

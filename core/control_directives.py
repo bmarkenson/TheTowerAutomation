@@ -1320,13 +1320,12 @@ class ControlDirectiveStore:
             normalized_evidence.get("screen_state") == "HOME_SCREEN"
             and normalized_evidence.get("home_battle_control") == "NEW_BATTLE"
             and normalized_evidence.get("battle_active") is False
-            and str(normalized_evidence.get("battle_scope") or "").strip()
             and type(normalized_evidence.get("target_generation")) is int
             and int(normalized_evidence["target_generation"]) > 0
         ):
             raise ValueError(
                 "An owned development battle must be preclaimed from exact "
-                "Home New Battle evidence with a target generation and scope"
+                "Home New Battle evidence with a target generation"
             )
         if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
             raise ValueError("Interactive development lease TTL must be an integer")
@@ -1402,7 +1401,7 @@ class ControlDirectiveStore:
         if normalized is None or "host_target" not in normalized:
             raise ValueError(
                 "Emulator maintenance requires a reason, source, exact runtime, "
-                "ADB target, bounded battle scope, and exact Windows target"
+                "ADB target, canonical battle identity, and exact Windows target"
             )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
@@ -3475,7 +3474,6 @@ def _valid_interactive_development_lease(
             starting_evidence.get("screen_state") == "HOME_SCREEN"
             and starting_evidence.get("home_battle_control") == "NEW_BATTLE"
             and starting_evidence.get("battle_active") is False
-            and str(starting_evidence.get("battle_scope") or "").strip()
             and type(starting_evidence.get("target_generation")) is int
             and int(starting_evidence["target_generation"]) > 0
         ):

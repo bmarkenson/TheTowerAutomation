@@ -68,6 +68,8 @@ def _app_without_strategy():
     app._no_strategy_post_run_recovery_checked = True
     app._current_run_scope_id = lambda: "test-no-strategy"
     app._observed_active_battle_scope_id = "test-no-strategy"
+    app._observed_active_round_identity_fingerprint = "a" * 64
+    app._terminal_round_identity_fingerprint = "a" * 64
     return app
 
 
@@ -154,6 +156,7 @@ def test_no_strategy_terminal_retry_arms_continuation_only_after_home():
         "adb_target": "localhost:5555",
         "target_generation": 4,
         "activity_scope_run_id": "run-1",
+        "active_round_identity_fingerprint": "a" * 64,
         "game_state": "game_over",
     }
     app._current_control_workflow_evidence = MagicMock(return_value=binding)
@@ -212,6 +215,7 @@ def test_degraded_continue_retries_home_then_arms_profile_repair_launch():
         "adb_target": "localhost:5555",
         "target_generation": 4,
         "activity_scope_run_id": "run-1",
+        "active_round_identity_fingerprint": "a" * 64,
         "game_state": "game_over",
     }
     app._current_control_workflow_evidence = MagicMock(return_value=binding)
@@ -825,7 +829,7 @@ def test_no_strategy_inventory_requires_running_to_grant_a_new_route():
     inventory.assert_not_called()
 
 
-def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():
+def test_forced_attachment_projection_applies_to_no_strategy_observer():
     app = App.__new__(App)
     app._mission_mgr = MagicMock()
     app._mission_mgr.strategy = None
@@ -839,6 +843,7 @@ def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():
         PlayerSaveAttachmentContext(
             runtime_session_id="runtime-1",
             activity_scope_id="scope-1",
+            active_round_identity_fingerprint="active-round-fingerprint",
             target="private-target",
             target_generation=3,
             active_battle_observed=True,
@@ -846,7 +851,7 @@ def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():
     )
 
     with patch("core.app.log") as logged:
-        app._apply_activity_continuity_outcome(
+        app._apply_running_attachment_projection(
             SimpleNamespace(running_attachment_observations=observations)
         )
 
@@ -885,7 +890,7 @@ def test_managed_strategy_clears_stale_observer_before_later_no_strategy_run():
     assert cards["value"] is None
 
 
-def test_activity_continuity_accepts_expected_scope_transition_before_recapture():
+def test_forced_attachment_projection_ignores_report_scope_rotation():
     app = App.__new__(App)
     app._mission_mgr = MagicMock()
     app._mission_mgr.strategy = None
@@ -899,7 +904,8 @@ def test_activity_continuity_accepts_expected_scope_transition_before_recapture(
     )
     final_context = PlayerSaveAttachmentContext(
         runtime_session_id="runtime-1",
-        activity_scope_id="scope-after-continuity",
+        activity_scope_id="scope-after-report-rotation",
+        active_round_identity_fingerprint="active-round-fingerprint",
         target="private-target",
         target_generation=3,
         active_battle_observed=True,
@@ -911,14 +917,14 @@ def test_activity_continuity_accepts_expected_scope_transition_before_recapture(
         ]
     )
 
-    app._apply_activity_continuity_outcome(
+    app._apply_running_attachment_projection(
         SimpleNamespace(running_attachment_observations=observations)
     )
 
     assert app._current_player_save_attachment_context.call_args_list == [
         call(),
         call(
-            transition_source_activity_scope_id="scope-before-continuity"
+            transition_source_activity_scope_id="scope-before-report-rotation"
         ),
     ]
     cards = app._no_strategy_observer.snapshot()["fields"]["cards_deck"]
@@ -932,12 +938,15 @@ def test_attachment_bundle_reaches_perk_monitor_without_profile_facts():
     app._mission_mgr.strategy = None
     app._no_strategy_observation_active = False
     app._exclusive_validation_ownership_hold = False
+    app._supervisor = MagicMock()
+    app._supervisor.current_exclusive_validation_owner.return_value = None
     app._perk_save_monitor = MagicMock()
     app._perk_save_monitor.bind_context.return_value = True
     app._player_save_audit_collector = MagicMock()
     attachment_context = PlayerSaveAttachmentContext(
         runtime_session_id="runtime-1",
         activity_scope_id="scope-1",
+        active_round_identity_fingerprint="a" * 64,
         target="private-target",
         target_generation=3,
         active_battle_observed=True,
@@ -955,10 +964,15 @@ def test_attachment_bundle_reaches_perk_monitor_without_profile_facts():
         transport_stable=True,
         snapshot=object(),
     )
+    temporal = running_attachment_observations(
+        {"cards_deck": "Farm"},
+        round_identity="a" * 64,
+    ).binding
 
-    app._apply_activity_continuity_outcome(
+    app._apply_running_attachment_projection(
         SimpleNamespace(
             running_attachment_observations=None,
+            running_attachment_temporal_binding=temporal,
             running_attachment_context=attachment_context,
             running_attachment_acquisition=acquisition,
         )
@@ -968,6 +982,10 @@ def test_attachment_bundle_reaches_perk_monitor_without_profile_facts():
     assert observed.args == (acquisition,)
     assert observed.kwargs["context"].target_binding == acquisition.binding
     assert observed.kwargs["context"].activity_scope_id == "scope-1"
+    assert (
+        observed.kwargs["context"].active_round_identity_fingerprint
+        == "a" * 64
+    )
     audit = app._player_save_audit_collector.observe_acquisition.call_args
     assert audit.args == (acquisition,)
     assert audit.kwargs == {"reason_code": "forced_running_attachment"}
@@ -993,6 +1011,7 @@ def test_pending_game_over_modal_recovery_preserves_enabled_authority():
         "adb_target": "localhost:5555",
         "target_generation": 4,
         "activity_scope_run_id": "run-1",
+        "active_round_identity_fingerprint": "a" * 64,
     }
     app._pending_game_over_route = {
         "binding": binding,
@@ -1018,7 +1037,7 @@ def test_pending_game_over_modal_recovery_preserves_enabled_authority():
     app._supervisor.persist_state.assert_not_called()
 
 
-def test_pending_game_over_modal_recovery_rejects_changed_battle_binding():
+def test_pending_game_over_modal_recovery_ignores_log_scope_rotation():
     app = _app_without_strategy()
     expected = {
         "runtime_id": "runtime-1",
@@ -1026,8 +1045,36 @@ def test_pending_game_over_modal_recovery_rejects_changed_battle_binding():
         "adb_target": "localhost:5555",
         "target_generation": 4,
         "activity_scope_run_id": "run-1",
+        "active_round_identity_fingerprint": "a" * 64,
     }
     current = {**expected, "activity_scope_run_id": "run-2"}
+    app._pending_game_over_route = {
+        "binding": expected,
+        "desired_route": "retry",
+        "retry_at": 0.0,
+    }
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch("core.app.restore_game_stats_for_terminal_route") as restore:
+        handled = app._advance_pending_game_over_route_recovery("PERKS", frame)
+
+    assert handled is True
+    assert app._pending_game_over_route is not None
+    restore.assert_called_once()
+
+
+def test_pending_game_over_modal_recovery_rejects_changed_target_generation():
+    app = _app_without_strategy()
+    expected = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "activity_scope_run_id": "run-1",
+        "active_round_identity_fingerprint": "a" * 64,
+    }
+    current = {**expected, "target_generation": 5}
     app._pending_game_over_route = {
         "binding": expected,
         "desired_route": "retry",
@@ -1042,6 +1089,82 @@ def test_pending_game_over_modal_recovery_rejects_changed_battle_binding():
     assert handled is False
     assert app._pending_game_over_route is None
     restore.assert_not_called()
+
+
+def test_pending_game_over_modal_recovery_rejects_replaced_battle_identity():
+    app = _app_without_strategy()
+    expected = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "activity_scope_run_id": "run-1",
+        "active_round_identity_fingerprint": "a" * 64,
+    }
+    app._terminal_round_identity_fingerprint = "b" * 64
+    app._pending_game_over_route = {
+        "binding": expected,
+        "desired_route": "retry",
+        "retry_at": 0.0,
+    }
+    app._current_control_workflow_evidence = MagicMock(return_value=expected)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch("core.app.restore_game_stats_for_terminal_route") as restore:
+        handled = app._advance_pending_game_over_route_recovery("PERKS", frame)
+
+    assert handled is False
+    assert app._pending_game_over_route is None
+    restore.assert_not_called()
+
+
+def test_game_over_discards_pending_route_from_a_replaced_battle():
+    app = _app_without_strategy()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    current = {
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "activity_scope_run_id": "rotated-report-scope",
+        "active_round_identity_fingerprint": "b" * 64,
+        "game_state": "game_over",
+    }
+    app._terminal_round_identity_fingerprint = "b" * 64
+    app._current_control_workflow_evidence = MagicMock(return_value=current)
+    app._pending_game_over_route = {
+        "binding": {
+            **current,
+            "active_round_identity_fingerprint": "a" * 64,
+        },
+        "desired_route": "retry",
+        "record": {"battle_id": "stale-battle"},
+        "retry_at": 0.0,
+    }
+    app._build_terminal_home_continuation_claim = MagicMock(return_value=None)
+
+    with patch(
+        "core.app.handle_game_over",
+        return_value=GameOverHandlingOutcome(
+            False,
+            "pending_retry",
+            None,
+            "unavailable",
+        ),
+    ):
+        app._handle_primary_states("GAME_OVER", set(), frame)
+
+    assert app._pending_game_over_route["binding"] == {
+        key: current[key]
+        for key in (
+            "runtime_id",
+            "pid",
+            "adb_target",
+            "target_generation",
+            "active_round_identity_fingerprint",
+        )
+    }
+    assert app._pending_game_over_route["record"] is None
 
 
 def test_no_battle_home_recovers_unfinished_inventory_after_process_reload():

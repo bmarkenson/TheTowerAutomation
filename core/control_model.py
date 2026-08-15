@@ -59,6 +59,7 @@ UI_RECONCILIATION_SOURCES = frozenset(
         TERMINAL_UI_FALLBACK_SOURCE,
     }
 )
+_REPORT_SCOPE_UNAVAILABLE = "report-scope-unavailable"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 BATTLE_INTENTS = frozenset({"start_battle", "attach_battle"})
@@ -212,7 +213,14 @@ def validate_observation(value: object) -> Optional[dict[str, Any]]:
     scope = _optional_bounded(value.get("activity_scope_run_id"), 128)
     if value.get("activity_scope_run_id") is not None and scope is None:
         return None
-    return {
+    active_round_identity = value.get(
+        "active_round_identity_fingerprint"
+    )
+    if active_round_identity is not None and not _sha256(
+        active_round_identity
+    ):
+        return None
+    normalized = {
         "schema_version": 1,
         "observation_id": observation_id,
         "observed_at": observed_at,
@@ -223,6 +231,11 @@ def validate_observation(value: object) -> Optional[dict[str, Any]]:
         "activity_scope_run_id": scope,
         "target_generation": target_generation,
     }
+    if active_round_identity is not None:
+        normalized["active_round_identity_fingerprint"] = str(
+            active_round_identity
+        )
+    return normalized
 
 
 def workflow_evidence_from_authority(
@@ -635,11 +648,6 @@ def validate_setup_capture_preview(
                 "setup-capture-runtime",
                 normalized_evidence["runtime_id"],
             )
-            or binding["activity_scope_fingerprint"]
-            != _fingerprint(
-                "setup-capture-scope",
-                str(normalized_evidence.get("activity_scope_run_id") or ""),
-            )
         ):
             return None
     origin = value.get("capture_origin")
@@ -902,10 +910,10 @@ def build_running_save_reconciliation_receipt(
         "acquisition": acquisition.redacted_provenance(),
         "temporal": temporal_provenance,
         "continuity": {
-            "status": "scope_bound",
+            "status": "battle_identity_bound",
             "disposition": normalized_disposition,
-            "final_scope_fingerprint": temporal_provenance[
-                "activity_scope"
+            "battle_identity_fingerprint": temporal_provenance[
+                "round_identity"
             ],
         },
         "configuration": {
@@ -956,6 +964,11 @@ def build_running_ui_reconciliation_receipt(
         or normalized_disposition not in SAVE_RECONCILIATION_DISPOSITIONS
         or normalized_evidence is None
         or normalized_evidence.get("game_state") != "active_battle"
+        or not _sha256(
+            normalized_evidence.get(
+                "active_round_identity_fingerprint"
+            )
+        )
     ):
         raise ValueError(
             "running UI reconciliation requires exact active-battle evidence"
@@ -980,10 +993,10 @@ def build_running_ui_reconciliation_receipt(
         "observation_id": normalized_observation_id,
         "ui_fallback": ui_fallback,
         "continuity": {
-            "status": "scope_bound",
+            "status": "battle_identity_bound",
             "disposition": normalized_disposition,
-            "final_scope_fingerprint": ui_fallback[
-                "activity_scope_fingerprint"
+            "battle_identity_fingerprint": ui_fallback[
+                "active_round_identity_fingerprint"
             ],
         },
         "configuration": {
@@ -1076,10 +1089,12 @@ def validate_save_reconciliation_receipt(
     configuration = value.get("configuration")
     if (
         not isinstance(continuity, Mapping)
-        or continuity.get("status") != "scope_bound"
+        or continuity.get("status") != "battle_identity_bound"
         or str(continuity.get("disposition") or "")
         not in SAVE_RECONCILIATION_DISPOSITIONS
-        or not _sha256(continuity.get("final_scope_fingerprint"))
+        or not _sha256(
+            continuity.get("battle_identity_fingerprint")
+        )
         or not isinstance(configuration, Mapping)
         or str(configuration.get("status") or "")
         not in SAVE_RECONCILIATION_CONFIGURATION_STATUSES
@@ -1091,16 +1106,16 @@ def validate_save_reconciliation_receipt(
             or acquisition["binding_fingerprint"]
             != temporal["target_generation"]
             or acquisition["timing"]["captured_at"] != temporal["captured_at"]
-            or continuity.get("final_scope_fingerprint")
-            != temporal.get("activity_scope")
+            or continuity.get("battle_identity_fingerprint")
+            != temporal.get("round_identity")
         ):
             return None
     elif (
         value.get("temporal") is not None
         or ui_fallback is None
         or ui_fallback.get("source") != RUNNING_UI_FALLBACK_SOURCE
-        or continuity.get("final_scope_fingerprint")
-        != ui_fallback.get("activity_scope_fingerprint")
+        or continuity.get("battle_identity_fingerprint")
+        != ui_fallback.get("active_round_identity_fingerprint")
     ):
         return None
     try:
@@ -1124,10 +1139,10 @@ def validate_save_reconciliation_receipt(
         "workflow_id": workflow_id,
         "observation_id": observation_id,
         "continuity": {
-            "status": "scope_bound",
+            "status": "battle_identity_bound",
             "disposition": str(continuity["disposition"]),
-            "final_scope_fingerprint": str(
-                continuity["final_scope_fingerprint"]
+            "battle_identity_fingerprint": str(
+                continuity["battle_identity_fingerprint"]
             ),
         },
         "configuration": {
@@ -1158,11 +1173,12 @@ def build_home_return_reconciliation_receipt(
 
     normalized_workflow_id = _bounded(workflow_id, 64)
     normalized_observation_id = _bounded(observation_id, 128)
-    normalized_scope = _bounded(activity_scope_id, 128)
+    normalized_scope = (
+        _bounded(activity_scope_id, 128) or _REPORT_SCOPE_UNAVAILABLE
+    )
     if (
         normalized_workflow_id is None
         or normalized_observation_id is None
-        or normalized_scope is None
         or not isinstance(acquisition, PlayerSaveAcquisitionBundle)
         or not acquisition.complete
         or acquisition.acquisition_type
@@ -1371,16 +1387,18 @@ def build_terminal_return_reconciliation_receipt(
 ) -> dict[str, Any]:
     """Build a Return receipt from one causally bound natural Game Over save."""
 
+    # Retained for schema/API compatibility only.  The natural acquisition's
+    # operation, runtime session, target binding, and boundary kind establish
+    # authority; a log segment never decides whether the receipt is usable.
+    del activity_scope_id
     normalized_workflow_id = _bounded(workflow_id, 64)
     normalized_observation_id = _bounded(observation_id, 128)
-    normalized_scope = _bounded(activity_scope_id, 128)
     normalized_runtime_session = _bounded(runtime_session_id, 128)
     normalized_killed_by = _bounded(killed_by, 128)
     normalized_collection = str(collection or "").strip().lower()
     if (
         normalized_workflow_id is None
         or normalized_observation_id is None
-        or normalized_scope is None
         or normalized_runtime_session is None
         or normalized_killed_by is None
         or normalized_collection not in MANUAL_SURRENDER_COLLECTIONS
@@ -1392,7 +1410,6 @@ def build_terminal_return_reconciliation_receipt(
         or acquisition.boundary.kind.value != "GAME_OVER"
         or acquisition.boundary.runtime_session_id
         != normalized_runtime_session
-        or acquisition.boundary.activity_scope_id != normalized_scope
         or not isinstance(expected_binding, PlayerSaveTargetBinding)
         or acquisition.binding != expected_binding
     ):
@@ -1400,6 +1417,14 @@ def build_terminal_return_reconciliation_receipt(
             "terminal Return reconciliation requires a bound natural Game Over save"
         )
     acquisition_provenance = acquisition.redacted_provenance()
+    report_scope_fingerprint = acquisition_provenance["boundary"].get(
+        "activity_scope"
+    )
+    if not _sha256(report_scope_fingerprint):
+        report_scope_fingerprint = _fingerprint(
+            "control-workflow-scope",
+            _REPORT_SCOPE_UNAVAILABLE,
+        )
     receipt = {
         "schema_version": 1,
         "kind": TERMINAL_RETURN_RECONCILIATION_KIND,
@@ -1408,9 +1433,7 @@ def build_terminal_return_reconciliation_receipt(
         "acquisition": acquisition_provenance,
         "terminal": {
             "status": "confirmed",
-            "activity_scope_fingerprint": acquisition_provenance[
-                "boundary"
-            ]["activity_scope"],
+            "activity_scope_fingerprint": report_scope_fingerprint,
             "runtime_session_fingerprint": acquisition_provenance[
                 "boundary"
             ]["runtime_session"],
@@ -1576,7 +1599,7 @@ def _validated_natural_terminal_acquisition_provenance(
         or boundary.get("kind") != "GAME_OVER"
         or _aware_timestamp(boundary.get("observed_at")) is None
         or not _sha256(boundary.get("runtime_session"))
-        or not _sha256(boundary.get("activity_scope"))
+        or not _sha256(boundary.get("active_round_identity"))
     ):
         return None
     started = _aware_timestamp(timing.get("started_at"))
@@ -1606,7 +1629,17 @@ def _validated_natural_terminal_acquisition_provenance(
             "kind": "GAME_OVER",
             "observed_at": _aware_timestamp(boundary["observed_at"]),
             "runtime_session": str(boundary["runtime_session"]),
-            "activity_scope": str(boundary["activity_scope"]),
+            "activity_scope": (
+                str(boundary.get("activity_scope"))
+                if _sha256(boundary.get("activity_scope"))
+                else _fingerprint(
+                    "control-workflow-scope",
+                    _REPORT_SCOPE_UNAVAILABLE,
+                )
+            ),
+            "active_round_identity": str(
+                boundary["active_round_identity"]
+            ),
         },
     }
 
@@ -1712,11 +1745,21 @@ def _build_ui_fallback_provenance(
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("UI reconciliation target binding is unavailable") from exc
-    scope_id = _bounded(evidence.get("activity_scope_run_id"), 128)
+    scope_id = (
+        _bounded(evidence.get("activity_scope_run_id"), 128)
+        or _REPORT_SCOPE_UNAVAILABLE
+    )
     runtime_id = _bounded(evidence.get("runtime_id"), 128)
-    if scope_id is None or runtime_id is None:
-        raise ValueError("UI reconciliation runtime or activity scope is unavailable")
-    return {
+    if runtime_id is None:
+        raise ValueError("UI reconciliation runtime is unavailable")
+    active_round_identity = evidence.get(
+        "active_round_identity_fingerprint"
+    )
+    if active_round_identity is not None and not _sha256(
+        active_round_identity
+    ):
+        raise ValueError("UI reconciliation battle identity is invalid")
+    result = {
         "status": "complete" if complete else "degraded",
         "source": normalized_source,
         "reason": normalized_reason,
@@ -1730,6 +1773,11 @@ def _build_ui_fallback_provenance(
         ),
         "target_binding_fingerprint": target_binding.fingerprint,
     }
+    if active_round_identity is not None:
+        result["active_round_identity_fingerprint"] = str(
+            active_round_identity
+        )
+    return result
 
 
 def _validated_ui_fallback_provenance(
@@ -1747,9 +1795,15 @@ def _validated_ui_fallback_provenance(
         or not _sha256(value.get("runtime_session_fingerprint"))
         or not _sha256(value.get("activity_scope_fingerprint"))
         or not _sha256(value.get("target_binding_fingerprint"))
+        or (
+            value.get("active_round_identity_fingerprint") is not None
+            and not _sha256(
+                value.get("active_round_identity_fingerprint")
+            )
+        )
     ):
         return None
-    return {
+    result = {
         "status": status,
         "source": source,
         "reason": reason,
@@ -1763,6 +1817,11 @@ def _validated_ui_fallback_provenance(
             value["target_binding_fingerprint"]
         ),
     }
+    if value.get("active_round_identity_fingerprint") is not None:
+        result["active_round_identity_fingerprint"] = str(
+            value["active_round_identity_fingerprint"]
+        )
+    return result
 
 
 def ui_reconciliation_receipt_matches_evidence(
@@ -1798,13 +1857,13 @@ def ui_reconciliation_receipt_matches_evidence(
     # ``observation_id`` is receipt provenance, not a lease: the runtime emits
     # a new observation ID on every heartbeat while a UI workflow can span
     # several heartbeats. Process-local callers separately retain the original
-    # claim and PID; these fingerprints prove the refreshed observation is
-    # still the same runtime session, activity scope, and target generation.
+    # claim and PID; runtime session and target generation prove the refreshed
+    # observation still belongs to the operation. Activity scope is retained
+    # only as receipt provenance and cannot invalidate the operation.
     return all(
         ui_fallback.get(field) == expected.get(field)
         for field in (
             "runtime_session_fingerprint",
-            "activity_scope_fingerprint",
             "target_binding_fingerprint",
         )
     )

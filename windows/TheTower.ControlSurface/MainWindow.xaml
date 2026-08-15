@@ -256,7 +256,7 @@
                       x:Name="RunElapsedMetricPanel"
                       Visibility="Collapsed"
                       Margin="2,0,12,0"
-                      ToolTip="Elapsed time in the current authoritative activity scope, calculated from the atomic server timestamp.">
+                      ToolTip="Elapsed time in the current log/report segment, calculated from the atomic server timestamp.">
             <TextBlock Text="RUN ELAPSED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="RunElapsedText" Text="-" FontSize="15" FontWeight="Bold" />
           </StackPanel>
@@ -853,7 +853,7 @@
                          FontWeight="Bold"
                          TextWrapping="Wrap" />
               <TextBlock x:Name="CurrentPerksCheckpointText"
-                         Text="The list updates from the running battle's passive save monitor."
+                         Text="The list updates at Perk selection or exhaustion checkpoints."
                          Foreground="{StaticResource MutedBrush}"
                          FontSize="10"
                          TextWrapping="Wrap"

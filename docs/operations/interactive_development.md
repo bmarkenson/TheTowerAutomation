@@ -38,17 +38,20 @@ curl --fail --silent --show-error \
 
 Require capability `interactive_development_owned_battle_v1` and the ordinary
 composite `active: true` acknowledgement. The request is accepted only from a
-fresh exact Home `NEW_BATTLE` observation with no active battle, a nonempty
-activity scope, and a positive target generation. Production may then retain
-that exact same-runtime/same-target/same-scope claim through the one battle.
+fresh exact Home `NEW_BATTLE` observation with force-proven inactive state and
+a positive target generation. The preclaim is provisional; log scope is not
+battle identity.
 
-At Game Over the input lease terminalizes, but the exact process-local claim
-may authorize only production's existing minimal return-to-Home terminal
-handler. It cannot Retry, collect a representative record, adopt a pre-existing
-or Tournament battle, or authorize a new terminal lease. Pause, Stop,
-runtime/PID/target-generation/scope replacement, an unexpected terminal, or
-ambiguous evidence cancels cleanup input. Do not use this option when the task
-authorizes observation only.
+At Game Over the input lease terminalizes. The exact process-local claim may
+authorize the minimal return-to-Home handler only when a forced
+`ActiveRoundIdentity` was established for the owned run and matches the
+terminal. The suppressive lease normally prevents that runtime lifecycle
+checkpoint, so cleanup is deliberately declined unless the identity was
+established through an explicit compatible workflow. It cannot Retry, collect
+a representative record, adopt a pre-existing or Tournament battle, or
+authorize a new terminal lease. Pause, Stop, runtime/PID/target-generation/
+identity replacement, an unexpected terminal, or ambiguous evidence cancels
+cleanup input. Do not use this option when the task authorizes observation only.
 
 Keep the exact lease ID current separately; heartbeats do not enter the action
 log:

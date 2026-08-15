@@ -315,10 +315,13 @@ current runtime state.
 
 - A manual `NEW_BATTLE -> RUNNING` transition left the
   pending Home History baseline retrying its obsolete source and blocked No
-  Strategy inventory, although Pause correctly suppressed every input.
+  Strategy inventory, although Pause correctly suppressed every input. The
+  legacy History owner is now removed; Resume/Attach forces the save's battle
+  ID instead.
 - Load the [dossier](issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle)
-  before changing paused manual-start continuity or on recurrence. Next:
-  observe one natural paused manual start under deployed `ab84a3c`; the
+  before changing paused manual-start identity reconciliation or on recurrence.
+  Next: observe one natural paused manual start with zero reads/input during
+  Pause and one forced identity transaction after Enable; the
   replacement attachment and lease replay follow-ons are resolved in
   [2026 history](issues/resolved-2026.md#running-attachment-used-battle-history-and-repeated-save-backed-configuration-ui).
   [Runtime backlog](backlog/runtime-and-validation.md#runtime-control).

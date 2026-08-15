@@ -76,7 +76,9 @@ class PerkSaveMonitor:
         if (
             new_activity
             and current.runtime_session_id == context.runtime_session_id
-            and current.activity_scope_id != context.activity_scope_id
+            and current.active_round_identity_fingerprint
+            != context.active_round_identity_fingerprint
+            and current.target_binding == context.target_binding
         ):
             self._reset_evidence()
             self._context = context
@@ -84,7 +86,7 @@ class PerkSaveMonitor:
         reason = (
             "target_binding_changed"
             if current.target_binding != context.target_binding
-            else "runtime_or_activity_binding_changed"
+            else "runtime_or_battle_identity_changed"
         )
         self._reject(reason, component="binding")
         return False
@@ -439,7 +441,8 @@ class PerkSaveMonitor:
             or boundary is None
             or boundary.kind is not PlayerSaveBoundaryKind.GAME_OVER
             or boundary.runtime_session_id != context.runtime_session_id
-            or boundary.activity_scope_id != context.activity_scope_id
+            or boundary.active_round_identity_fingerprint
+            != context.active_round_identity_fingerprint
             or boundary.observed_at >= acquisition.acquisition_started_at
         ):
             self._reject(
@@ -502,8 +505,8 @@ class PerkSaveMonitor:
     def _bind_exhaustion(self, evidence: Mapping[str, Any]) -> bool:
         if self._identity is None or self._context is None:
             return False
-        if evidence.get("activity_scope_fingerprint") != _fingerprint_text(
-            self._context.activity_scope_id
+        if evidence.get("active_round_identity_fingerprint") != (
+            self._context.active_round_identity_fingerprint
         ):
             return False
         claimed_identity = evidence.get("active_round_identity")
@@ -1381,8 +1384,6 @@ def _normalize_exhaustion(
         raise TypeError("exhaustion evidence must be a mapping")
     if evidence.get("source") != "stable_top_bar_view_perks":
         raise ValueError("unsupported exhaustion source")
-    if str(evidence.get("activity_scope_id") or "") != context.activity_scope_id:
-        raise ValueError("exhaustion activity scope mismatch")
     observed_wave = evidence.get("observed_wave")
     stable_count = evidence.get("stable_observation_count")
     confidence = evidence.get("ocr_confidence")
@@ -1421,6 +1422,9 @@ def _normalize_exhaustion(
         "event_id": event_id,
         "activity_scope_fingerprint": _fingerprint_text(
             context.activity_scope_id
+        ),
+        "active_round_identity_fingerprint": (
+            context.active_round_identity_fingerprint
         ),
         "binding_status": (
             "active_round_identity_bound"

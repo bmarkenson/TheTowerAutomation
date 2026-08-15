@@ -178,17 +178,18 @@ resolved dossier instead of copying its detail.
   pre-existing Start Battle workflow was interrupted and not replayed; no game
   input was sent.
 
-### 2026-08-14 Start Battle strategy-scope continuity
+### 2026-08-15 save-backed battle identity and Start recurrence
 
 - Resolved
   [`ISSUE-2026-045`](../issues/resolved-2026.md#start-battle-intent-was-rejected-after-its-strategy-applied-at-home):
-  applying a queued Strategy on an already-observed Home New Battle boundary
-  no longer creates a second activity scope and invalidates the operator's
-  exact Start Battle request. Unrelated scope changes remain fail-closed.
-- Exact code candidate `5d75375` passed a 512-test affected slice and the
-  complete 2,696-test checkpoint. It was deployed from `48cbc40` behind
-  rollback tag `production-before-20260814T235526Z-48cbc40`; replacement PID
-  `1646204` remained Paused at fresh Home New Battle and sent no battle input.
+  the original Strategy-boundary patch missed an independent heartbeat-order
+  race, so a harmless activity-log scope rotation could still reject Start.
+- Activity scope is now log/report/presentation metadata only. Forced-save
+  `ActiveRoundIdentity` is the sole same/later-battle key; Home inactive proof,
+  Start/Retry successor binding, Attach/Return, Pause/Stop revalidation, and
+  same-ID receipt reuse follow that contract. Legacy History continuity,
+  post-Retry polling, and timed passive acquisition were removed; only Perk
+  selection/exhaustion may request a passive runtime save.
 
 ### 2026-08-14 same-family and explicit-empty Module save authority
 

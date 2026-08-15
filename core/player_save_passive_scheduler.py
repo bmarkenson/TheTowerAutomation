@@ -8,7 +8,6 @@ consumer; metrics and audit may project it, but cannot request another read.
 from __future__ import annotations
 
 import queue
-import re
 import threading
 import time
 from typing import Callable, Optional, Sequence
@@ -28,7 +27,6 @@ PassiveBundleConsumer = Callable[
 ]
 
 _QUEUE_CAPACITY = 8
-_SAFE_REASON_RE = re.compile(r"[a-z][a-z0-9_]{0,95}")
 _PERK_CHECKPOINT_REASONS = frozenset(
     {
         "perk_exhaustion_boundary",
@@ -91,12 +89,17 @@ class PlayerSavePassiveScheduler:
             return False
         return True
 
-    def acquire_once(self, reason_code: str = "test_checkpoint") -> bool:
+    def acquire_once(
+        self,
+        reason_code: str = "perk_selection_boundary",
+    ) -> bool:
         """Synchronous test seam using the same one-read/many-consumer path."""
 
         reason = str(reason_code or "").strip().lower()
-        if _SAFE_REASON_RE.fullmatch(reason) is None:
-            raise ValueError("invalid passive acquisition reason")
+        if reason not in _PERK_CHECKPOINT_REASONS:
+            raise ValueError(
+                "passive acquisition is limited to explicit Perk checkpoints"
+            )
         return self._acquire_and_fan_out(reason)
 
     def close(self, *, wait: bool = False, timeout: float = 1.0) -> None:
@@ -131,7 +134,8 @@ class PlayerSavePassiveScheduler:
                 self._commands.task_done()
 
     def _acquire_and_fan_out(self, reason: str) -> bool:
-        if self._closed:
+        reason = str(reason or "").strip().lower()
+        if self._closed or reason not in _PERK_CHECKPOINT_REASONS:
             return False
         try:
             context = self._context_fn()

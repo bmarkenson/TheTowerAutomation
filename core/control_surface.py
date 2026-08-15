@@ -1328,7 +1328,13 @@ class ControlSurfaceService:
             process_service,
         )
         healthy = bool(runtime["active"] and observation and not observation["stale"])
-        current_battle_perks = self._current_battle_perks(current_run)
+        current_battle_perks = self._current_battle_perks(
+            current_run,
+            battle_identity=str(
+                strategy_action_gate.get("runtime_battle_identity") or ""
+            ).strip()
+            or None,
+        )
         confirmed_local_mappings = confirmed_local_mapping_status(
             store=self.confirmed_local_mapping_store,
             candidate_store=self.mapping_candidate_store,
@@ -1519,7 +1525,7 @@ class ControlSurfaceService:
             and runtime_authority.get("stale") is False
             and runtime_authority.get("owner_matches_exact_runtime") is True
             and runtime_authority.get("active_battle") is True
-            and str(runtime_authority.get("runtime_battle_scope") or "")
+            and str(runtime_authority.get("runtime_battle_identity") or "")
             and str(runtime_authority.get("primary_state") or "").upper()
             == "RUNNING"
             and isinstance(runtime_authority.get("owner"), Mapping)
@@ -1572,18 +1578,18 @@ class ControlSurfaceService:
             )
             else None
         )
-        run_id = (
-            str(current_run.get("run_id") or "").strip()
-            if isinstance(current_run, Mapping)
-            else ""
-        )
+        # ``current_run`` is a mutable action-log segment.  Host telemetry and
+        # automatic maintenance must correlate to the canonical save identity.
+        run_id = str(
+            runtime_authority.get("runtime_battle_identity") or ""
+        ).strip()
         if not run_id:
             return {
                 "schema_version": 1,
                 "assessed_at": assessed_at.isoformat(timespec="seconds"),
                 "status": "ineligible",
                 "automatic_ready": False,
-                "reason": "an active runtime battle scope is required",
+                "reason": "a forced save battle identity is required",
                 "current_run_id": None,
                 "current_strategy": current_strategy or None,
                 "candidate_battle_ids": [],
@@ -1695,6 +1701,9 @@ class ControlSurfaceService:
         assessment["cooldown_seconds"] = int(
             AUTOMATIC_RESTART_COOLDOWN.total_seconds()
         )
+        active_battle_identity = str(
+            runtime_authority.get("runtime_battle_identity") or ""
+        ).strip()
 
         def gated(
             value: Mapping[str, Any],
@@ -1732,7 +1741,11 @@ class ControlSurfaceService:
                     "maintenance_active",
                     "a BlueStacks maintenance request is already active",
                 )
-            if str(durable.get("battle_scope") or "") == run_id:
+            if (
+                active_battle_identity
+                and str(durable.get("battle_scope") or "")
+                == active_battle_identity
+            ):
                 return suppress(
                     "already_recovered_this_battle",
                     "automatic recovery is limited to once per battle",
@@ -1786,8 +1799,7 @@ class ControlSurfaceService:
             and runtime_authority.get("stale") is False
             and runtime_authority.get("owner_matches_exact_runtime") is True
             and runtime_authority.get("active_battle") is True
-            and str(runtime_authority.get("runtime_battle_scope") or "")
-            == run_id
+            and active_battle_identity
             and str(runtime_authority.get("primary_state") or "").upper()
             == "RUNNING"
             and isinstance(runtime_authority.get("owner"), Mapping)
@@ -2090,23 +2102,19 @@ class ControlSurfaceService:
                 )
         authority = current.get("strategy_action_gate") or {}
         owner = authority.get("owner")
-        current_run = current.get("current_run")
-        if not isinstance(owner, Mapping) or not isinstance(
-            current_run, Mapping
-        ):
+        if not isinstance(owner, Mapping):
             raise ControlSurfaceRequestError(
-                "fresh runtime ownership and battle scope are required",
+                "fresh runtime ownership is required",
                 status=409,
                 code="maintenance_runtime_unavailable",
             )
-        battle_scope = str(current_run.get("run_id") or "")
-        if (
-            not battle_scope
-            or str(authority.get("runtime_battle_scope") or "")
-            != battle_scope
-        ):
+        battle_scope = str(
+            authority.get("runtime_battle_identity") or ""
+        ).strip()
+        if not battle_scope:
             raise ControlSurfaceRequestError(
-                "the runtime battle scope changed before maintenance creation",
+                "the forced save battle identity is unavailable before "
+                "maintenance creation",
                 status=409,
                 code="maintenance_runtime_unavailable",
             )
@@ -2329,12 +2337,6 @@ class ControlSurfaceService:
                         and workflow_evidence.get("game_state")
                         == "home_new_battle"
                         and workflow_evidence.get("active_battle") is False
-                        and str(
-                            workflow_evidence.get(
-                                "activity_scope_run_id"
-                            )
-                            or ""
-                        ).strip()
                         and type(
                             workflow_evidence.get("target_generation")
                         )
@@ -2487,20 +2489,37 @@ class ControlSurfaceService:
                 status=409,
             )
 
+    def _runtime_battle_identity_for_host_performance(self) -> Optional[str]:
+        """Return the fresh exact-runtime save identity for telemetry ingest."""
+
+        authority = self._strategy_action_gate_status(
+            now=time.time(),
+            runtime=self._runtime_evidence(),
+        )
+        identity = str(
+            authority.get("runtime_battle_identity") or ""
+        ).strip()
+        if not (
+            identity
+            and authority.get("available") is True
+            and authority.get("stale") is False
+            and authority.get("owner_matches_exact_runtime") is True
+            and authority.get("active_battle") is True
+        ):
+            return None
+        return identity
+
     def publish_host_performance(
         self,
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
         """Persist idempotent Windows host-performance aggregates."""
 
-        current_run = self._load_activity_scope()
         try:
             return self.host_performance_store.publish(
                 request,
                 server_run_id=(
-                    current_run["run_id"]
-                    if current_run is not None
-                    else None
+                    self._runtime_battle_identity_for_host_performance()
                 ),
             )
         except HostPerformancePayloadError as exc:
@@ -4072,13 +4091,16 @@ class ControlSurfaceService:
     def _current_battle_perks(
         self,
         current_run: Optional[Mapping[str, Any]],
+        *,
+        battle_identity: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Load the runtime-owned, scope-bound Perk presentation checkpoint."""
+        """Load Perk presentation bound to the forced-save battle identity."""
 
-        if current_run is None:
+        expected_identity = str(battle_identity or "").strip()
+        if not expected_identity:
             return _unavailable_current_battle_perks(
                 status="unavailable",
-                reason="current_run_unavailable",
+                reason="battle_identity_unavailable",
             )
         try:
             if self.perk_timeline_path.stat().st_size > (
@@ -4109,7 +4131,7 @@ class ControlSurfaceService:
         if (
             payload.get("schema_version") != 3
             or str(payload.get("activity_scope_run_id") or "").strip()
-            != str(current_run.get("run_id") or "").strip()
+            != expected_identity
         ):
             return _unavailable_current_battle_perks(
                 status="awaiting_save_checkpoint",
@@ -4349,6 +4371,7 @@ class ControlSurfaceService:
                 "runtime_stopped": False,
                 "active_battle": False,
                 "runtime_battle_scope": None,
+                "runtime_battle_identity": None,
                 "primary_state": "UNKNOWN",
                 "holds": [],
                 "observation_authority": {
@@ -4581,6 +4604,9 @@ class ControlSurfaceService:
             "runtime_stopped": payload.get("runtime_stopped") is True,
             "active_battle": payload.get("active_battle") is True,
             "runtime_battle_scope": payload.get("runtime_battle_scope"),
+            "runtime_battle_identity": payload.get(
+                "runtime_battle_identity"
+            ),
             "primary_state": str(payload.get("primary_state") or "UNKNOWN"),
             "holds": holds if isinstance(holds, list) else [],
             "observation_authority": authority_field(
@@ -5088,14 +5114,12 @@ class ControlSurfaceService:
             if action_key == "attach_battle" and (
                 type(evidence.get("target_generation")) is not int
                 or int(evidence["target_generation"]) < 1
-                or not str(evidence.get("activity_scope_run_id") or "").strip()
             ):
                 return {
                     "available": False,
                     "code": "exact_attachment_binding_unavailable",
                     "reason": (
-                        "Attach requires an exact target generation and active "
-                        "activity scope"
+                        "Attach requires an exact target generation"
                     ),
                 }
             if (
@@ -5208,7 +5232,6 @@ class ControlSurfaceService:
             evidence is not None
             and type(evidence.get("target_generation")) is int
             and int(evidence["target_generation"]) >= 1
-            and str(evidence.get("activity_scope_run_id") or "").strip()
         )
         return_boundary_available = return_game_state in {
             "home_new_battle",
@@ -5274,8 +5297,7 @@ class ControlSurfaceService:
                             and manual.get("status") == "active"
                             and not indefinite_pause_acknowledged
                             else (
-                                "Return Control requires an exact target generation "
-                                "and current activity scope"
+                                "Return Control requires an exact target generation"
                                 if manual is not None
                                 and manual.get("status") == "active"
                                 and not return_binding_available
@@ -5410,7 +5432,6 @@ class ControlSurfaceService:
             and evidence.get("game_state") == "home_new_battle"
             and manual_configuration.get("observed_game_state")
             == "home_new_battle"
-            and manual_configuration.get("battle_scope_preserved") is True
         )
         terminal_evidence_blocks_enable = bool(
             terminal_evidence_unavailable
@@ -5558,7 +5579,6 @@ class ControlSurfaceService:
             evidence is not None
             and type(evidence.get("target_generation")) is int
             and int(evidence["target_generation"]) > 0
-            and str(evidence.get("activity_scope_run_id") or "").strip()
         )
         manual_save_receipt = (
             manual.get("save_receipt")
@@ -5656,7 +5676,7 @@ class ControlSurfaceService:
         elif not capture_binding_available:
             capture_code, capture_reason = (
                 "exact_capture_binding_unavailable",
-                "Capture requires an exact target generation and activity scope",
+                "Capture requires an exact target generation",
             )
         elif retained_return_capture_available:
             capture_code, capture_reason = (

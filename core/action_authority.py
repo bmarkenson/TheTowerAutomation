@@ -65,7 +65,6 @@ class AuthorityHold(str, Enum):
     """Exclusive owners whose routes are stronger than the Strategy Gate."""
 
     BATTLE_IDENTITY = "battle_identity"
-    ACTIVITY_CONTINUITY = "activity_continuity"
     RUN_INITIALIZATION = "run_initialization"
     SESSION_PREFLIGHT = "session_preflight"
     EXCLUSIVE_VALIDATION = "exclusive_validation"
@@ -130,6 +129,7 @@ class StrategyActionGateState:
     reason: str
     activated_at: str
     updated_at: str
+    battle_identity: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +142,7 @@ class AuxiliaryRouteLease:
     source_state: str
     gate_id: Optional[str]
     claimed_at: str
+    battle_identity: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ class RuntimeAuthorityContext:
     global_pause: bool = False
     active_battle: bool = False
     battle_scope: Optional[str] = None
+    battle_identity: Optional[str] = None
     primary_state: str = "UNKNOWN"
     holds: tuple[AuthorityHoldState, ...] = ()
     runtime_stopped: bool = False
@@ -173,6 +175,7 @@ class RuntimeActionAuthoritySnapshot:
     gate_id: Optional[str]
     strategy: Optional[str]
     battle_scope: Optional[str]
+    battle_identity: Optional[str]
     source: Optional[str]
     phase: Optional[str]
     failed_check_ids: tuple[str, ...]
@@ -183,6 +186,7 @@ class RuntimeActionAuthoritySnapshot:
     runtime_stopped: bool
     active_battle: bool
     runtime_battle_scope: Optional[str]
+    runtime_battle_identity: Optional[str]
     primary_state: str
     holds: tuple[AuthorityHoldState, ...]
     observation_authority: ActionAuthorityDecision
@@ -200,6 +204,7 @@ class RuntimeActionAuthoritySnapshot:
                 "route_id": lease.route_id,
                 "collectors": [value.value for value in lease.collectors],
                 "battle_scope": lease.battle_scope,
+                "battle_identity": lease.battle_identity,
                 "source_state": lease.source_state,
                 "gate_id": lease.gate_id,
                 "claimed_at": lease.claimed_at,
@@ -212,6 +217,7 @@ class RuntimeActionAuthoritySnapshot:
             "gate_id": self.gate_id,
             "strategy": self.strategy,
             "battle_scope": self.battle_scope,
+            "battle_identity": self.battle_identity,
             "source": self.source,
             "phase": self.phase,
             "failed_check_ids": list(self.failed_check_ids),
@@ -222,6 +228,7 @@ class RuntimeActionAuthoritySnapshot:
             "runtime_stopped": self.runtime_stopped,
             "active_battle": self.active_battle,
             "runtime_battle_scope": self.runtime_battle_scope,
+            "runtime_battle_identity": self.runtime_battle_identity,
             "primary_state": self.primary_state,
             "holds": [
                 {
@@ -304,17 +311,20 @@ class RuntimeActionAuthority:
         active_battle: bool,
         battle_scope: Optional[str],
         primary_state: str,
+        battle_identity: Optional[str] = None,
         holds: Iterable[AuthorityHoldState] = (),
         runtime_stopped: bool = False,
         shutting_down: bool = False,
     ) -> None:
         normalized_scope = str(battle_scope or "").strip() or None
+        normalized_identity = str(battle_identity or "").strip() or None
         normalized_holds = tuple(holds)
         with self._lock:
             self._context = RuntimeAuthorityContext(
                 global_pause=bool(global_pause),
                 active_battle=bool(active_battle),
                 battle_scope=normalized_scope,
+                battle_identity=normalized_identity,
                 primary_state=str(primary_state or "UNKNOWN").upper(),
                 holds=normalized_holds,
                 runtime_stopped=bool(runtime_stopped),
@@ -330,6 +340,7 @@ class RuntimeActionAuthority:
         phase: str,
         failed_check_ids: Iterable[str],
         reason: str,
+        battle_identity: Optional[str] = None,
         now: Optional[float] = None,
     ) -> StrategyActionGateState:
         """Enter or update one run-scoped gate without changing Pause state."""
@@ -337,6 +348,9 @@ class RuntimeActionAuthority:
         timestamp = _timestamp(now)
         normalized_strategy = str(strategy or "none").strip().lower()
         normalized_scope = str(battle_scope or "").strip() or None
+        normalized_identity = str(
+            battle_identity or self._context.battle_identity or ""
+        ).strip() or None
         normalized_source = str(source or "runtime").strip().lower()
         normalized_phase = str(phase or "running_battle").strip().lower()
         normalized_checks = tuple(
@@ -352,9 +366,9 @@ class RuntimeActionAuthority:
             same_gate = bool(
                 previous
                 and previous.strategy == normalized_strategy
-                and previous.battle_scope == normalized_scope
                 and previous.source == normalized_source
                 and previous.phase == normalized_phase
+                and previous.battle_identity == normalized_identity
             )
             if same_gate and previous is not None:
                 if (
@@ -396,6 +410,7 @@ class RuntimeActionAuthority:
                 reason=normalized_reason,
                 activated_at=timestamp,
                 updated_at=timestamp,
+                battle_identity=normalized_identity,
             )
             self._gate = gate
             log(
@@ -433,23 +448,35 @@ class RuntimeActionAuthority:
             return True
 
     def scope_gate_if_missing(self, battle_scope: Optional[str]) -> bool:
-        """Attach later authoritative run identity without replacing a gate."""
+        """Attach later report metadata and canonical identity to a gate."""
 
         normalized_scope = str(battle_scope or "").strip() or None
         if normalized_scope is None:
             return False
         with self._lock:
-            if self._gate is None or self._gate.battle_scope is not None:
+            if self._gate is None:
+                return False
+            identity = self._context.battle_identity
+            if (
+                self._gate.battle_scope is not None
+                and self._gate.battle_identity is not None
+            ):
                 return False
             self._gate = replace(
                 self._gate,
-                battle_scope=normalized_scope,
+                battle_scope=(
+                    self._gate.battle_scope or normalized_scope
+                ),
+                battle_identity=(
+                    self._gate.battle_identity or identity
+                ),
                 updated_at=_timestamp(),
             )
             log(
                 "[STRATEGY_GATE] Updated running-battle gate "
-                f"{self._gate.gate_id}: authoritative battle scope="
-                f"{normalized_scope}",
+                f"{self._gate.gate_id}: activity scope="
+                f"{self._gate.battle_scope or 'unavailable'} identity="
+                f"{str(self._gate.battle_identity or 'unavailable')[:16]}",
                 "INFO",
                 console=True,
             )
@@ -557,24 +584,19 @@ class RuntimeActionAuthority:
             )
         gate = self._gate
         route = self._route
+        if context.active_battle and not context.battle_identity:
+            return ActionAuthorityDecision(
+                RuntimeActionClass.AUXILIARY_COLLECTION,
+                False,
+                "the active battle has not been bound to a forced save identity",
+                collector=collector,
+                owner=owner,
+            )
         if gate is not None and not context.active_battle:
             return ActionAuthorityDecision(
                 RuntimeActionClass.AUXILIARY_COLLECTION,
                 False,
                 "the running-battle precondition is no longer authoritative",
-                collector=collector,
-                owner=owner,
-            )
-        if (
-            gate is not None
-            and gate.battle_scope is not None
-            and context.battle_scope is not None
-            and gate.battle_scope != context.battle_scope
-        ):
-            return ActionAuthorityDecision(
-                RuntimeActionClass.AUXILIARY_COLLECTION,
-                False,
-                "the observed battle identity no longer matches the gate scope",
                 collector=collector,
                 owner=owner,
             )
@@ -620,17 +642,28 @@ class RuntimeActionAuthority:
                     owner=owner,
                 )
             if (
-                lease.battle_scope is not None
-                and context.battle_scope is not None
-                and lease.battle_scope != context.battle_scope
+                lease.battle_identity is not None
+                and lease.battle_identity != context.battle_identity
             ):
                 return ActionAuthorityDecision(
                     RuntimeActionClass.AUXILIARY_COLLECTION,
                     False,
-                    "the auxiliary route no longer matches the battle identity",
+                    "the forced save battle identity changed after the route was claimed",
                     collector=collector,
                     owner=owner,
                 )
+        if (
+            gate is not None
+            and gate.battle_identity is not None
+            and gate.battle_identity != context.battle_identity
+        ):
+            return ActionAuthorityDecision(
+                RuntimeActionClass.AUXILIARY_COLLECTION,
+                False,
+                "the forced save battle identity changed after the gate was entered",
+                collector=collector,
+                owner=owner,
+            )
         if gate is not None and collector not in STRATEGY_GATE_AUXILIARY_ALLOWLIST:
             return ActionAuthorityDecision(
                 RuntimeActionClass.AUXILIARY_COLLECTION,
@@ -696,6 +729,25 @@ class RuntimeActionAuthority:
                     f"exclusive {owner} ownership authorizes its bounded route",
                     owner=owner,
                 )
+            if self._context.active_battle and not self._context.battle_identity:
+                return ActionAuthorityDecision(
+                    action_class,
+                    False,
+                    "the active battle has not been bound to a forced save identity",
+                    owner=owner,
+                )
+            if (
+                self._gate is not None
+                and self._gate.battle_identity is not None
+                and self._gate.battle_identity
+                != self._context.battle_identity
+            ):
+                return ActionAuthorityDecision(
+                    action_class,
+                    False,
+                    "the forced save battle identity changed after the gate was entered",
+                    owner=owner,
+                )
             if self._route is not None:
                 return ActionAuthorityDecision(
                     action_class,
@@ -740,7 +792,14 @@ class RuntimeActionAuthority:
         with self._lock:
             if self._route is not None:
                 return None
-            if not self._context.active_battle or normalized_source != "RUNNING":
+            normalized_identity = str(
+                self._context.battle_identity or ""
+            ).strip() or None
+            if (
+                not self._context.active_battle
+                or normalized_source != "RUNNING"
+                or normalized_identity is None
+            ):
                 return None
             for collector in normalized_collectors:
                 if not self._auxiliary_decision(
@@ -750,12 +809,6 @@ class RuntimeActionAuthority:
                     ignore_route=True,
                 ).allowed:
                     return None
-            if (
-                normalized_scope is not None
-                and self._context.battle_scope is not None
-                and normalized_scope != self._context.battle_scope
-            ):
-                return None
             lease = AuxiliaryRouteLease(
                 route_id=uuid4().hex,
                 collectors=normalized_collectors,
@@ -763,6 +816,7 @@ class RuntimeActionAuthority:
                 source_state=normalized_source,
                 gate_id=self._gate.gate_id if self._gate is not None else None,
                 claimed_at=_timestamp(),
+                battle_identity=normalized_identity,
             )
             self._route = AuxiliaryRouteState(
                 lease=lease,
@@ -812,9 +866,8 @@ class RuntimeActionAuthority:
             if not self._context.active_battle:
                 return None
             if (
-                lease.battle_scope is not None
-                and self._context.battle_scope is not None
-                and lease.battle_scope != self._context.battle_scope
+                lease.battle_identity is None
+                or lease.battle_identity != self._context.battle_identity
             ):
                 return None
             for collector in lease.collectors:
@@ -909,6 +962,7 @@ class RuntimeActionAuthority:
                 gate_id=gate.gate_id if gate else None,
                 strategy=gate.strategy if gate else None,
                 battle_scope=gate.battle_scope if gate else None,
+                battle_identity=gate.battle_identity if gate else None,
                 source=gate.source if gate else None,
                 phase=gate.phase if gate else None,
                 failed_check_ids=gate.failed_check_ids if gate else (),
@@ -919,6 +973,7 @@ class RuntimeActionAuthority:
                 runtime_stopped=self._context.runtime_stopped,
                 active_battle=self._context.active_battle,
                 runtime_battle_scope=self._context.battle_scope,
+                runtime_battle_identity=self._context.battle_identity,
                 primary_state=self._context.primary_state,
                 holds=self._context.holds,
                 observation_authority=observation,

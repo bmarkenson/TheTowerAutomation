@@ -1,7 +1,7 @@
 """Bound, monotonic active-run metrics from shared player-save checkpoints.
 
 The monitor is a pure domain owner.  It consumes only the capability-bound,
-bounded normalized runtime projection supplied by the normal passive save
+bounded normalized runtime projection supplied by a shared Perk checkpoint
 scheduler; it never reads a save, sends device input, or grants action
 authority.
 """
@@ -76,7 +76,8 @@ class ActiveRunMetricMonitor:
         if (
             new_activity
             and current.runtime_session_id == context.runtime_session_id
-            and current.activity_scope_id != context.activity_scope_id
+            and current.active_round_identity_fingerprint
+            != context.active_round_identity_fingerprint
             and current.target_binding == context.target_binding
         ):
             self._reset_evidence()
@@ -85,7 +86,7 @@ class ActiveRunMetricMonitor:
         reason = (
             "target_binding_changed"
             if current.target_binding != context.target_binding
-            else "runtime_or_activity_binding_changed"
+            else "runtime_or_battle_identity_changed"
         )
         self._reject(reason, component="binding")
         return False
@@ -698,7 +699,8 @@ class ActiveRunMetricMonitor:
                 PlayerSaveBoundaryKind.TOURNAMENT_RESULTS,
             }
             or boundary.runtime_session_id != context.runtime_session_id
-            or boundary.activity_scope_id != context.activity_scope_id
+            or boundary.active_round_identity_fingerprint
+            != context.active_round_identity_fingerprint
             or boundary.observed_at >= acquisition.acquisition_started_at
         ):
             self._reject(

@@ -178,6 +178,17 @@ class BattleIdentityStore:
             raise BattleIdentityStoreError(
                 "battle identity requires a complete forced serialization"
             )
+        runtime = getattr(acquisition.snapshot, "runtime_save", None)
+        observed_identity = getattr(runtime, "active_round_identity", None)
+        if (
+            getattr(runtime, "round_active", None) is not True
+            or not isinstance(observed_identity, ActiveRoundIdentity)
+            or observed_identity.fingerprint
+            != normalized_identity.fingerprint
+        ):
+            raise BattleIdentityStoreError(
+                "forced serialization does not contain the supplied battle identity"
+            )
         timestamp = _aware_timestamp(bound_at).isoformat()
 
         with self._lock:
@@ -243,6 +254,14 @@ class BattleIdentityStore:
         ):
             raise BattleIdentityStoreError(
                 "inactive battle proof requires forced serialization"
+            )
+        runtime = getattr(acquisition.snapshot, "runtime_save", None)
+        if (
+            getattr(runtime, "round_active", None) is not False
+            or getattr(runtime, "active_round_identity", None) is not None
+        ):
+            raise BattleIdentityStoreError(
+                "forced serialization does not prove an inactive round"
             )
         with self._lock:
             try:

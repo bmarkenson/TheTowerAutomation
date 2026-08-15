@@ -2707,7 +2707,7 @@ def test_app_feeds_history_from_the_same_home_preflight_result():
     app._mission_mgr = manager
     app._player_save_preflight_coordinator = coordinator
     app._player_save_preflight_session_id = ""
-    app._activity_continuity = continuity
+    app._activity_history_reporter = continuity
 
     with patch(
         "core.app.get_activity_scope",
@@ -2752,7 +2752,7 @@ def test_baseline_only_preflight_context_does_not_require_a_strategy():
     assert context.activity_scope_id == "scope-1"
 
 
-def test_app_skips_repeated_save_and_continues_when_history_scope_is_blocked():
+def test_history_report_failure_does_not_suppress_forced_home_save():
     frame = object()
     manager = Mock()
     manager.no_battle_setup_requirements.return_value = REQUIREMENTS
@@ -2773,6 +2773,14 @@ def test_app_skips_repeated_save_and_continues_when_history_scope_is_blocked():
     app._runtime_action_guard = Mock(return_value=True)
     app._player_save_history_baseline_outcome = SimpleNamespace(blocked=True)
     coordinator = Mock()
+    coordinator.acquire.return_value = SimpleNamespace(
+        ready=True,
+        history_tail={"disposition": "unavailable"},
+        history_scope_id="scope-1",
+        decisions={},
+        as_dict=lambda: {"ready": True, "decisions": {}},
+    )
+    coordinator.carry = None
     app._player_save_preflight_coordinator = coordinator
     setup = GcNoBattleSetupResult(
         GcNoBattleSetupStatus.COMPLETE,
@@ -2798,10 +2806,17 @@ def test_app_skips_repeated_save_and_continues_when_history_scope_is_blocked():
     ):
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
-    coordinator.acquire.assert_not_called()
+    coordinator.acquire.assert_called_once_with(
+        REQUIREMENTS,
+        mode="save_first",
+        initial_frame=frame,
+    )
     run_setup.assert_called_once()
     manager.mark_no_battle_setup_complete.assert_called_once_with(
-        setup.evidence
+        {
+            **setup.evidence,
+            "player_save_preflight": {"ready": True, "decisions": {}},
+        }
     )
     handle_home.assert_called_once_with(
         restart_enabled=True,
@@ -2848,7 +2863,7 @@ def test_save_first_home_without_requirements_forces_one_baseline_bundle():
         blocked=False,
         ui_required=False,
     )
-    app._activity_continuity = continuity
+    app._activity_history_reporter = continuity
 
     with (
         patch(

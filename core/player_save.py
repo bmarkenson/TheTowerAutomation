@@ -962,8 +962,7 @@ def reconcile_direct_retry_requirements(
     requirements: Mapping[str, Any],
     *,
     runtime_session_id: str,
-    source_activity_scope_id: str,
-    successor_activity_scope_id: str,
+    expected_active_round_identity_fingerprint: str,
     expected_binding: PlayerSaveTargetBinding,
     max_snapshot_age_s: Optional[float] = None,
     now: Optional[datetime] = None,
@@ -972,8 +971,8 @@ def reconcile_direct_retry_requirements(
 
     A natural terminal save is not generic current-configuration authority.
     This deliberately narrow seam accepts it only while the acquisition still
-    names the same process, predecessor activity scope, target, and target
-    generation that own the verified direct-Retry transition.  Home and
+    names the same process, forced predecessor battle identity, target, and
+    target generation that own the verified direct-Retry transition. Home and
     attachment callers must continue to use their existing acquisition paths.
     """
 
@@ -990,15 +989,14 @@ def reconcile_direct_retry_requirements(
     ):
         raise ValueError("direct-Retry reconciliation requires a Game Over boundary")
     runtime_id = str(runtime_session_id or "").strip()
-    source_scope = str(source_activity_scope_id or "").strip()
-    successor_scope = str(successor_activity_scope_id or "").strip()
+    expected_identity = str(
+        expected_active_round_identity_fingerprint or ""
+    ).strip()
     if (
         not runtime_id
-        or not source_scope
-        or not successor_scope
-        or successor_scope == source_scope
+        or not expected_identity
         or boundary.runtime_session_id != runtime_id
-        or boundary.activity_scope_id != source_scope
+        or boundary.active_round_identity_fingerprint != expected_identity
     ):
         raise ValueError("direct-Retry predecessor binding changed")
     if not isinstance(expected_binding, PlayerSaveTargetBinding):

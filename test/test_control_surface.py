@@ -41,6 +41,9 @@ from core.player_save_mapping_staged_candidate import SaveMappingIntegrationErro
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
 
 
+ACTIVE_BATTLE_IDENTITY = "a" * 64
+
+
 def _service(root: Path, *, stale_after_seconds: int = 180) -> ControlSurfaceService:
     return ControlSurfaceService(
         repository_root=root,
@@ -883,7 +886,7 @@ def test_same_value_request_stays_pending_until_exact_request_id_replaces_ack(
     )
 
 
-def test_status_exposes_scope_bound_current_save_perks(tmp_path):
+def test_status_projection_uses_battle_identity_bound_current_save_perks(tmp_path):
     _write_current_run_scope(tmp_path, run_id="battle-perks-status")
     presentation = _current_perks_presentation()
     timeline_path = (
@@ -902,9 +905,17 @@ def test_status_exposes_scope_bound_current_save_perks(tmp_path):
         encoding="utf-8",
     )
 
-    status = _service(tmp_path).status()
+    service = _service(tmp_path)
+    current_battle_perks = service._current_battle_perks(
+        {"run_id": "unrelated-report-scope"},
+        battle_identity="battle-perks-status",
+    )
+    status = service.status()
 
-    assert status["current_battle_perks"] == presentation
+    assert current_battle_perks == presentation
+    assert status["current_battle_perks"]["reason"] == (
+        "battle_identity_unavailable"
+    )
     assert "current_battle_perks_v1" in status["capabilities"]
 
 
@@ -1202,7 +1213,7 @@ def test_save_mapping_integration_requests_are_exact_shape(tmp_path):
         )
 
 
-def test_status_never_exposes_perks_from_another_run(tmp_path):
+def test_status_never_exposes_perks_from_another_battle_identity(tmp_path):
     _write_current_run_scope(tmp_path, run_id="new-battle")
     timeline_path = (
         tmp_path / "logs" / "automation_ctl.perk_timeline_state.json"
@@ -1220,14 +1231,17 @@ def test_status_never_exposes_perks_from_another_run(tmp_path):
         encoding="utf-8",
     )
 
-    current = _service(tmp_path).status()["current_battle_perks"]
+    current = _service(tmp_path)._current_battle_perks(
+        {"run_id": "unrelated-report-scope"},
+        battle_identity="new-battle",
+    )
 
     assert current["status"] == "awaiting_save_checkpoint"
     assert current["reason"] == "current_run_checkpoint_unavailable"
     assert current["items"] == []
 
 
-def test_status_rejects_internally_inconsistent_current_perks(tmp_path):
+def test_status_projection_rejects_internally_inconsistent_current_perks(tmp_path):
     _write_current_run_scope(tmp_path, run_id="invalid-perks")
     presentation = _current_perks_presentation()
     presentation["picked_count"] = 4
@@ -1247,7 +1261,10 @@ def test_status_rejects_internally_inconsistent_current_perks(tmp_path):
         encoding="utf-8",
     )
 
-    current = _service(tmp_path).status()["current_battle_perks"]
+    current = _service(tmp_path)._current_battle_perks(
+        None,
+        battle_identity="invalid-perks",
+    )
 
     assert current["status"] == "unavailable"
     assert current["reason"] == "current_perks_projection_invalid"
@@ -1262,6 +1279,7 @@ def test_status_serializes_fresh_runtime_owned_strategy_gate(tmp_path):
         global_pause=False,
         active_battle=True,
         battle_scope="run-status",
+        battle_identity="a" * 64,
         primary_state="RUNNING",
     )
     gate = authority.activate_strategy_gate(
@@ -1496,6 +1514,7 @@ def _host_maintenance_context(
         global_pause=control_state != "RUNNING",
         active_battle=True,
         battle_scope=run_id,
+        battle_identity=ACTIVE_BATTLE_IDENTITY,
         primary_state="RUNNING",
     )
     publisher = RuntimeActionAuthorityPublisher(
@@ -1560,6 +1579,7 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
         global_pause=False,
         active_battle=True,
         battle_scope=run_id,
+        battle_identity=ACTIVE_BATTLE_IDENTITY,
         primary_state="RUNNING",
     )
     publisher = RuntimeActionAuthorityPublisher(
@@ -1620,7 +1640,7 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
         maintenance = requested["host_maintenance"]["request"]
         assert maintenance["state"] == "requested"
         assert maintenance["runtime"] == bound_runtime
-        assert maintenance["battle_scope"] == run_id
+        assert maintenance["battle_scope"] == ACTIVE_BATTLE_IDENTITY
         assert maintenance["initiator"] == "automatic_detector"
         assert {
             key: maintenance["host_target"][key] for key in listener
@@ -1635,6 +1655,7 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
             global_pause=False,
             active_battle=True,
             battle_scope=run_id,
+            battle_identity=ACTIVE_BATTLE_IDENTITY,
             primary_state="RUNNING",
             holds=(
                 AuthorityHoldState(
@@ -1648,7 +1669,7 @@ def test_host_maintenance_handshake_is_runtime_bound_and_idempotent(tmp_path):
             "request_id": request_id,
             "state": "host_restart_authorized",
             "runtime": bound_runtime,
-            "battle_scope": run_id,
+            "battle_scope": ACTIVE_BATTLE_IDENTITY,
             "high_water_wave": 2_000,
             "intro_sprint_active": False,
             "replay_active": False,
@@ -2089,7 +2110,7 @@ def test_operator_restart_bypasses_detector_but_keeps_runtime_authority(tmp_path
         assert maintenance["state"] == "requested"
         assert maintenance["initiator"] == "operator"
         assert maintenance["source"] == "windows-control-surface-operator"
-        assert maintenance["battle_scope"] == run_id
+        assert maintenance["battle_scope"] == ACTIVE_BATTLE_IDENTITY
         assert maintenance["runtime"] == {
             **owner,
             "state_request_id": control["state_request_id"],
@@ -2222,6 +2243,7 @@ def test_operator_restart_rejects_held_or_stale_runtime_authority(
             global_pause=False,
             active_battle=True,
             battle_scope=run_id,
+            battle_identity=ACTIVE_BATTLE_IDENTITY,
             primary_state="RUNNING",
             holds=(
                 AuthorityHoldState(
@@ -2258,7 +2280,7 @@ def test_operator_restart_rejects_held_or_stale_runtime_authority(
         lock_handle.close()
 
 
-def test_operator_restart_rejects_runtime_current_run_scope_mismatch(tmp_path):
+def test_operator_restart_ignores_log_scope_rotation(tmp_path):
     (
         now,
         _run_id,
@@ -2272,12 +2294,13 @@ def test_operator_restart_rejects_runtime_current_run_scope_mismatch(tmp_path):
     ) = _host_maintenance_context(tmp_path)
     _write_current_run_scope(tmp_path, run_id="different-current-run")
     try:
-        with pytest.raises(ControlSurfaceRequestError) as rejected:
-            service.apply_host_maintenance(
-                {"operation": "request_operator", **listener},
-                now=now.timestamp(),
-            )
-        assert rejected.value.code == "maintenance_runtime_unavailable"
+        requested = service.apply_host_maintenance(
+            {"operation": "request_operator", **listener},
+            now=now.timestamp(),
+        )
+        assert requested["host_maintenance"]["request"]["battle_scope"] == (
+            ACTIVE_BATTLE_IDENTITY
+        )
     finally:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
         lock_handle.close()
@@ -2341,6 +2364,7 @@ def test_durable_target_rejects_changed_process_before_acknowledgement(tmp_path)
             global_pause=False,
             active_battle=True,
             battle_scope=run_id,
+            battle_identity=ACTIVE_BATTLE_IDENTITY,
             primary_state="RUNNING",
             holds=(
                 AuthorityHoldState(
@@ -2361,7 +2385,7 @@ def test_durable_target_rejects_changed_process_before_acknowledgement(tmp_path)
                     "request_id": maintenance["request_id"],
                     "state": "host_restart_authorized",
                     "runtime": bound_runtime,
-                    "battle_scope": run_id,
+                    "battle_scope": ACTIVE_BATTLE_IDENTITY,
                     "high_water_wave": 2_000,
                     "intro_sprint_active": False,
                     "replay_active": False,

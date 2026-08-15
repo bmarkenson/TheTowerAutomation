@@ -5,6 +5,8 @@ import inspect
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
+import pytest
+
 from core.app import App
 from core.perk_save_monitor import PerkSaveMonitorContext
 from core.player_save_acquisition import (
@@ -23,10 +25,12 @@ def _context(
     generation: int = 3,
     *,
     activity: str = "scope-1",
+    identity: str = "a" * 64,
 ) -> PerkSaveMonitorContext:
     return PerkSaveMonitorContext(
         runtime_session_id="runtime-1",
         activity_scope_id=activity,
+        active_round_identity_fingerprint=identity,
         target_binding=PlayerSaveTargetBinding("localhost:5555", generation),
     )
 
@@ -132,6 +136,27 @@ def test_worker_accepts_only_explicit_perk_checkpoint_requests():
     assert consumer.call_args.args[2] == "perk_selection_boundary"
 
 
+def test_synchronous_seam_rejects_non_perk_acquisition_causes():
+    pull = Mock(return_value=b"unused")
+    scheduler = PlayerSavePassiveScheduler(
+        acquirer=StablePlayerSaveAcquirer(
+            fixed_target="localhost:5555",
+            pull_fn=pull,
+            decode_fn=Mock(),
+        ),
+        context_fn=_context,
+        consumers=(Mock(),),
+        start_worker=False,
+    )
+
+    with pytest.raises(ValueError, match="explicit Perk checkpoints"):
+        scheduler.acquire_once("mapping_followup")
+    assert scheduler._acquire_and_fan_out("mapping_followup") is False
+
+    scheduler.close()
+    pull.assert_not_called()
+
+
 def test_target_generation_change_is_delivered_only_as_typed_failure():
     target = SimpleNamespace(
         target="localhost:5555",
@@ -161,10 +186,38 @@ def test_target_generation_change_is_delivered_only_as_typed_failure():
     assert received[0].reason == "exact_target_binding_mismatch"
 
 
-def test_activity_scope_change_during_read_discards_bundle_before_projection():
+def test_log_scope_change_during_read_keeps_same_battle_bundle():
     pull = Mock(return_value=b"stable-payload")
     decode = Mock(return_value=SimpleNamespace(marker="normalized"))
     contexts = iter((_context(activity="scope-1"), _context(activity="scope-2")))
+    consumer = Mock()
+    scheduler = PlayerSavePassiveScheduler(
+        acquirer=StablePlayerSaveAcquirer(
+            target_snapshot_fn=lambda: SimpleNamespace(
+                target="localhost:5555",
+                generation=3,
+                owned=True,
+            ),
+            pull_fn=pull,
+            decode_fn=decode,
+        ),
+        context_fn=lambda: next(contexts),
+        consumers=(consumer,),
+        start_worker=False,
+    )
+
+    assert scheduler.acquire_once() is True
+    scheduler.close()
+
+    pull.assert_called_once_with(device_id="localhost:5555")
+    decode.assert_called_once()
+    consumer.assert_called_once()
+
+
+def test_battle_identity_change_during_read_discards_bundle_before_projection():
+    pull = Mock(return_value=b"stable-payload")
+    decode = Mock(return_value=SimpleNamespace(marker="normalized"))
+    contexts = iter((_context(identity="a" * 64), _context(identity="b" * 64)))
     consumer = Mock()
     scheduler = PlayerSavePassiveScheduler(
         acquirer=StablePlayerSaveAcquirer(
@@ -232,7 +285,7 @@ def test_app_applies_worker_checkpoint_only_on_matching_current_context():
     assert app._pending_perk_timeline_save_checkpoint is None
 
 
-def test_app_discards_worker_checkpoint_after_activity_scope_changes():
+def test_app_keeps_worker_checkpoint_after_log_scope_rotation():
     app = App.__new__(App)
     observer = Mock()
     app._perk_timeline_observer = observer
@@ -242,6 +295,26 @@ def test_app_discards_worker_checkpoint_after_activity_scope_changes():
     )
     app._current_perk_save_monitor_context = lambda: _context(
         activity="scope-2"
+    )
+
+    app._perk_timeline_observer.observe_saved_checkpoint.return_value = (
+        "initial_saved_prefix"
+    )
+    assert app._sync_perk_timeline_save_checkpoint() == "initial_saved_prefix"
+    observer.observe_saved_checkpoint.assert_called_once()
+    assert app._pending_perk_timeline_save_checkpoint is None
+
+
+def test_app_discards_worker_checkpoint_after_battle_identity_changes():
+    app = App.__new__(App)
+    observer = Mock()
+    app._perk_timeline_observer = observer
+    app._pending_perk_timeline_save_checkpoint = (
+        _context(identity="a" * 64),
+        {"schema_version": 1},
+    )
+    app._current_perk_save_monitor_context = lambda: _context(
+        identity="b" * 64
     )
 
     assert app._sync_perk_timeline_save_checkpoint() is None

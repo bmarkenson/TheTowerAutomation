@@ -81,7 +81,7 @@ agnostic.
   one cooperative interactive-development lease request, heartbeat, and
   release,
   one detector-authorized BlueStacks maintenance handshake bound to the exact
-  runtime, ADB target, and battle scope,
+  runtime, ADB target, and canonical battle identity,
   bundled or validated custom-strategy selection, constrained custom Farm
   profile publication, stopped or
   acknowledged-paused ADB-port configuration, and fixed managed-service
@@ -117,8 +117,10 @@ agnostic.
   authority or chooses attachment implicitly.
 - Start Battle is available only from fresh, owner-matched Home `NEW_BATTLE`
   evidence. The runtime revalidates the same PID, target, target generation,
-  activity scope, and boundary before acknowledging the request, then enters
-  the ordinary new-run lifecycle and its normal gates. Attach to Battle is
+  workflow operation, and boundary, then forces a save that must prove no
+  active round before dispatch. After the tap it remains input-blocked until
+  first stable `RUNNING` forces and binds the new `ActiveRoundIdentity`.
+  Activity-log scope changes never reject the request. Attach to Battle is
   available only from fresh Home `RESUME_BATTLE` or active-battle evidence and
   never falls back to Start Battle. Attachment stays input-blocked before
   battle adoption while its exact forced-save identity validation is
@@ -285,18 +287,18 @@ override an authoritative scope.
 | Live | paused | Home New Battle | Start Battle | `requested` → `awaiting_enable`; explicit Enable revalidates and acknowledges normal new-run gates |
 | Live | enabled | Home New Battle | Start Battle | revalidate and acknowledge normal new-run gates |
 | Live | enabled | Home New or Home Resume with no exact immediate workflow grant | terminal-policy change, Enable, Strategy selection, or no additional request | observe and claim only a freshly visible five-gem Home reward through the typed `home_ad_gem` collector; do not serialize ordinary Home preflight, run configuration setup, claim validation, recover Home, dispatch a battle control, or run any other collector |
-| Live | enabled | Home New Battle with a terminal-bound continuation | no new request | revalidate the exact terminal-time state/policy request IDs, runtime, target generation, activity scope, and New Battle control; run normal new-run gates, dispatch exactly one verified New Battle, and consume the claim only after successful dispatch |
+| Live | enabled | Home New Battle with a terminal-bound continuation | no new request | revalidate terminal-time request IDs, runtime, target generation, operation, and New Battle control; force inactive-save proof, dispatch once, then force-bind the successor ID at stable `RUNNING` |
 | Live | enabled | verified Home control was tapped | acknowledged Start or ready resumable Attach | record `action_dispatched`; keep unrelated automation suppressed until the same battle is adopted, a definitive mismatch interrupts, or the 20-second launch window fails |
 | Live | paused | Home Resume Battle or active battle | Attach to Battle | `requested` → `awaiting_enable`; explicit Enable enters `validating_save` without adopting the battle |
-| Live | enabled | Home Resume Battle or active battle | Attach to Battle | freeze the accepted Strategy definition; prefer a stable exact-target save and use guarded Battle History after safely restored unusable data; adopt as intentional No Strategy observer, compatible exact Strategy, or incompatible/unprovable degraded observer; never repair the attached battle |
+| Live | enabled | Home Resume Battle or active battle | Attach to Battle | freeze the accepted Strategy definition; force a stable exact-target save and require its active-round ID; adopt first/same/later identity as appropriate, then classify as intentional No Strategy observer, compatible exact Strategy, or incompatible/unprovable degraded observer; never repair the attached battle |
 | Live | either | Game Over, Tournament Results, unknown, stale, or mismatched evidence | Start Battle or Attach to Battle | reject as unavailable/mismatched; never substitute the other workflow |
 | Live | enabled or paused | any fresh exact state | Take Manual Control | atomically request indefinite Pause; become `active` only after runtime acknowledgement |
-| Live | paused and manual control `active` | Home New, Home Resume, active battle, or Game Over with exact target/scope binding | Return Control | remain Paused; record passive observation; await explicit Enable |
+| Live | paused and manual control `active` | Home New, Home Resume, active battle, or Game Over with exact runtime/target binding | Return Control | remain Paused; record visual observation only; await explicit Enable |
 | Live | paused and manual control `active` | Tournament Results, unknown, or incomplete exact binding | Return Control | unavailable; no save-backed Return route is advertised or substituted |
-| Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; prefer a new forced save (or a bound natural Game Over save), then automatically use the supported active/Home/terminal UI route if that save is unusable after safe restoration |
+| Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; force current identity (or consume a bound natural Game Over save), classify same/later/inactive, then use supported configuration/report UI only after identity succeeds |
 | Live | paused, Return `awaiting_enable`, terminal semantics unavailable | fresh exact Home New Battle | Enable | permit the ordinary save-first Home reconciliation; the unavailable terminal component remains unavailable and grants no terminal input |
 | Live | paused, Return `awaiting_enable`, terminal semantics unavailable | any other boundary | Enable | retain `awaiting_enable`; send no UI or lifecycle input |
-| Live | reconciling Return | source restoration, owner, target, scope, or authority binding is lost after lifecycle input | no additional request | persist Automation Paused and terminalize that Return as failed/interrupted; do not repeat lifecycle input or open UI from an unsafe boundary |
+| Live | reconciling Return | source restoration, owner, target, canonical identity, or authority binding is lost after lifecycle input | no additional request | persist Automation Paused and terminalize that Return as failed/interrupted; do not repeat lifecycle input or open UI from an unsafe boundary |
 | Live | enabled, adopted active battle | active battle | apply selected Strategy to this battle | adopt only after explicit selection; preserve battle identity and defer new-run/Home-only gates; Surrender remains unauthorized |
 | Live | enabled, adopted active battle | recoverable configuration mismatch | no additional request | record exact degraded evidence and continue the battle; do not create a Strategy Gate, Pause, or Surrender permission |
 | Live | enabled | Home New, Home Resume, or active battle with exact binding | Capture current setup as… | force a new save, present captured and unresolved fields for review, then save a new inactive Module preset or Strategy draft without selecting, queueing, publishing, or applying it |
@@ -312,7 +314,7 @@ override an authoritative scope.
 | Live/stopped | already satisfied | any | repeated Pause, Enable, Start Automation, Stop Automation, terminal policy, or Take Manual Control where defined | return a visible no-op instead of fabricating a transition |
 
 An intent requested under Pause is pending, not acknowledged action authority.
-If the runtime, target, activity scope, or observed boundary changes before
+If the runtime, target, workflow/control identity, or observed boundary changes before
 acknowledgement, the request becomes `rejected` or `interrupted`. Stop and a new
 process boundary interrupt unfinished workflows. Home alone never enables or
 pauses input.
@@ -337,11 +339,11 @@ route that must pass through Home—degraded-battle repair, No Strategy post-run
 collection, an explicitly authorized configuration-repair return, or
 Tournament Results dismissal—may carry a one-shot claim created from the exact
 terminal observation. The claim is bound to runtime/PID, ADB target and
-generation, activity scope, and the state and mode request identities in force
+generation, terminal active-round identity, and the state and mode request identities in force
 at that terminal. It survives only its owned Home work, requires fresh
 `NEW_BATTLE`, and is consumed only after a verified dispatch. Policy or
 authority request changes, manual/workflow supersession, Resume Battle,
-owner/target/scope change, process replacement, or unexpected manual activity
+owner/target/battle-identity change, process replacement, or unexpected manual activity
 discard it. Being at Home, selecting a Strategy, or changing **When this battle
 ends** never creates one.
 
@@ -358,9 +360,10 @@ Pause remains authoritative, then requires an explicit Enable request and an
 exclusive reconciliation hold. Running and resumable returns prefer a newly
 forced exact-target save; Home New prefers the normal Home serializer, and
 Game Over prefers the bound natural terminal acquisition. If that save is
-absent, unsupported, structurally incompatible, or unprojectable after safe
-source restoration, the runtime automatically uses the complete supported UI
-route for that boundary and writes an exact-bound UI reconciliation receipt.
+missing a valid active/inactive identity, no UI route can substitute and
+battle-bound work stays blocked. Once identity is established, an unsupported
+or unprojectable configuration/report component may use its complete supported
+UI route and write an exact-bound reconciliation receipt.
 A terminal component marked `unavailable` normally blocks Enable. The one safe
 exception is a fresh exact Home `NEW_BATTLE` observation while Return remains
 `awaiting_enable`: Home save-first reconciliation can establish its own source
@@ -368,7 +371,7 @@ and boundary authority without pretending that the missing terminal component
 became available. The runtime rechecks that exact Home boundary immediately
 before entering reconciliation; replacement, Resume, active, terminal, stale,
 or unknown evidence keeps the hold and sends no input.
-A loss of restoration, owner, target, scope, or action authority terminates
+A loss of restoration, owner, target, canonical identity, or action authority terminates
 the exact workflow and leaves Automation Paused rather than opening UI from
 cached data. Home New terminalizes that unsafe outcome once, so later
 heartbeats do not background the game again. A trusted mapped mismatch remains
@@ -548,12 +551,11 @@ and unique count so the client never presents a passive save as newer than it
 is.
 
 The adapter accepts the presentation only when its checkpoint schema is
-supported and `activity_scope_run_id` exactly matches the atomic current-run
-ledger. A missing checkpoint reports `awaiting_save_checkpoint`; an absent
-current run or malformed projection reports `unavailable`; and every such
-result contains an empty item list. A scope transition therefore hides the old
-battle immediately even if the runtime has not yet written the new battle's
-first save checkpoint. This is a read-only projection: the API performs no
+supported and its canonical battle identity matches the runtime's current
+force-bound identity. A missing checkpoint reports `awaiting_save_checkpoint`;
+a missing identity or malformed projection reports `unavailable`; and every
+such result contains an empty item list. Activity scope may group the display
+but cannot hide or revive a battle. This is a read-only projection: the API performs no
 save acquisition, serialization, panel navigation, device input, or action-
 authority decision.
 
@@ -646,7 +648,7 @@ they migrate a legacy session-preflight gate to degraded evidence instead.
 `GET /api/v1/status` exposes `strategy_action_gate` separately from
 `control.state`, state acknowledgement, and the latest observation. The object
 reports availability, active/inactive and stale state, age, owner match,
-strategy and battle scope, source/phase, failed check IDs, operator reason,
+strategy and canonical battle identity, source/phase, failed check IDs, operator reason,
 activation/update times, Pause/Stop context, active exclusive holds, the four
 typed authority decisions, any optional collector allowlist declared by a
 hold, currently allowed auxiliary collectors, and any exclusive auxiliary
@@ -689,13 +691,15 @@ fresh matching runtime ownership. Heartbeats extend the fixed 120-second expiry
 without adding an action-log entry.
 
 The owned-battle variant is accepted only from fresh exact Home
-`NEW_BATTLE`, inactive-battle evidence with a nonempty activity scope and
-positive target generation. The same runtime may carry that exact claim into
-one `RUNNING` battle. The lease terminalizes at Game Over, but its process-local
-claim may authorize only the existing minimal return-to-Home terminal handler;
-it cannot collect a representative battle, Retry, claim a pre-existing or
-Tournament run, or survive runtime/PID, target-generation, scope, control, or
-boundary replacement.
+`NEW_BATTLE`, force-proven inactive evidence, and positive target generation.
+The preclaim is provisional: activity scope is irrelevant, and terminal
+cleanup is authorized only if the launched run later has an exact force-bound
+`ActiveRoundIdentity` matching the terminal. Because `external_development`
+deliberately forbids runtime lifecycle input, a lease that remains held for the
+whole run normally declines automatic cleanup rather than guessing identity.
+It cannot collect a representative battle, Retry, claim a pre-existing or
+Tournament run, or survive runtime/PID, target-generation, canonical identity,
+control, or boundary replacement.
 
 `GET /api/v1/status` exposes `interactive_development_lease.request` from the
 control directive and `runtime_acknowledgement` from the atomic runtime-owned
@@ -982,13 +986,12 @@ setup-capture availability, or paused ADB-handoff eligibility.
 The native client's default `Current run` scope uses the atomic
 `logs/activity_scope.json` ledger. Automation startup creates it only when no
 valid scope exists and otherwise reuses it, while verified Home `NEW_BATTLE`
-preflight replaces it at the game-run boundary. It does not infer a run from
-human-readable log messages. The runtime records the newest copied in-game
-Battle History report as that scope's baseline and compares it after process
-attachment. An unchanged report keeps the same Current run; a later report
-starts a new scope at the visible continuity `ACTION`, including when the
-battle was begun while automation was stopped. This is runtime-owned metadata
-and does not change the activity API or native-client compatibility revision.
+preflight may replace it for presentation. It does not infer a battle from
+human-readable log messages, and its value is never compared with canonical
+battle identity. Terminal History metadata may be attached best effort for
+report grouping; an unavailable ledger or a rotation cannot permit, reject, or
+interrupt runtime work. This is runtime-owned display metadata and does not
+change the activity API or native-client compatibility revision.
 Activity responses include an opaque end cursor;
 the client's non-destructive `Clear view` sends that cursor back as `after` and
 can restore the complete selected scope at any time. Server revision 10
@@ -1143,9 +1146,10 @@ continues while every automatic option is disabled. It exposes three lanes:
   teach itself that a slow leak is normal. This is a provisional maintenance
   threshold based on low restart cost and observed correlation, not a claim
   that handle count alone proves a performance bottleneck.
-- **Severe in-run loss.** The passive five-minute player-save scheduler
-  supplies interval CPH, wave, and effective speed without another save read.
-  Three fresh consecutive intervals must each be at or below 60% of a
+- **Severe in-run loss.** Perk-requested player-save checkpoints may supply
+  interval CPH, wave, and effective speed to the metric consumer without
+  another save read. There is no timed scheduler. Three fresh consecutive
+  intervals must each be at or below 60% of a
   conservative lower envelope built from at least six intervals across two
   completed runs in the same Strategy, exact run configuration, save-mapping
   semantics, and broad 1,000-wave band. Effective speed must remain at least
@@ -1182,7 +1186,7 @@ in durable trigger provenance. A disabled ready lane remains visible as
 "would trigger (disabled)." The client first proves that its freshly inspected
 listener is the same exact process lifetime named by the detector. Request
 creation still requires a fresh owner-matched
-`RUNNING` Farm battle, exact active Strategy and activity scope, Enabled
+`RUNNING` Farm battle, exact active Strategy and canonical battle identity, Enabled
 automation, no other hold, and both normal Strategy and lifecycle authority.
 Only one automatic attempt is allowed per battle, and a terminal request starts
 an eight-hour cooldown.
@@ -1204,7 +1208,7 @@ The durable request separates the two mutation owners:
    time together with the request initiator. Automatic creation additionally
    compares that identity with the detector's exact listener lifetime. Linux
    also binds runtime ID, PID, ADB target, positive target generation,
-   authorizing state-request ID, and battle scope. Request creation atomically
+   authorizing state-request ID, and canonical battle identity. Request creation atomically
    rechecks that the same state request is still `RUNNING`. The runtime
    captures the current wave, installs the suppressive `emulator_maintenance`
    hold, and publishes a separate fresh authorization. Host acknowledgement
@@ -1319,7 +1323,8 @@ Process request examples:
 - The global status derives run elapsed only from the published current-run
   activity-scope start and the atomic server timestamp. Wave and Coins/min are
   absent outside a fresh active-battle observation instead of presenting stale
-  values or placeholder dashes. Expected duration, active Peak Coins/min,
+  values or placeholder dashes. This elapsed value is presentation only and
+  never establishes battle identity or authority. Expected duration, active Peak Coins/min,
   expected-versus-observed requirement detail, recovery countdowns, and
   Return/Extend/Cancel recovery actions remain absent until their owning
   runtime status fields and guarded directives exist.
@@ -1342,7 +1347,8 @@ Process request examples:
   most-recent-first order. It
   shows the checkpoint wave and local capture time, preserves an unchanged
   scroll position across ordinary five-second status refreshes, and clears on
-  an unavailable or changed activity scope. The current native client requires
+  an unavailable or changed canonical battle identity. Activity scope may
+  regroup the activity view without clearing the Perks projection. The current native client requires
   server revision 32 and capability `current_battle_perks_v1`.
 - Take Manual Control selects default minimal or opt-in full collection for a
   later save-confirmed manual Surrender without granting Surrender authority.

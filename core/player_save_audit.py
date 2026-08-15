@@ -1690,7 +1690,7 @@ class PlayerSaveAuditCollector:
             self._warning_times[safe_code] = now
         else:
             log(
-                f"[PLAYER_SAVE_AUDIT] Passive retry outcome={safe_code}",
+                f"[PLAYER_SAVE_AUDIT] Receipt retry outcome={safe_code}",
                 "DEBUG",
             )
         self._active_failure_code = safe_code

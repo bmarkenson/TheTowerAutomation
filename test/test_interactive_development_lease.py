@@ -103,6 +103,9 @@ def _runtime_app(
     )
     app._authority_battle_active = battle_active
     app._authority_primary_state = screen_state
+    app._active_round_identity_fingerprint = (
+        "b" * 64 if battle_active else None
+    )
     app._authority_holds = ()
     app._external_development_hold_active = False
     app._interactive_development_ack = None
@@ -124,6 +127,9 @@ def _runtime_app(
         ),
         "active_battle": battle_active,
         "activity_scope_run_id": scope,
+        "active_round_identity_fingerprint": (
+            "b" * 64 if battle_active else None
+        ),
         "target_generation": 7,
     }
     return app, supervisor, store, lease
@@ -551,7 +557,7 @@ def test_pause_terminates_locally_if_terminal_persistence_fails(
     assert not app._external_development_hold_active
 
 
-def test_heartbeat_expiry_waits_for_fresh_observation_then_restores_production(
+def test_heartbeat_expiry_requires_fresh_save_identity_before_actions_resume(
     tmp_path,
     monkeypatch,
 ):
@@ -577,9 +583,14 @@ def test_heartbeat_expiry_waits_for_fresh_observation_then_restores_production(
     terminal = store.status()["interactive_development_lease"]
     assert terminal["terminal_disposition"] == "expired"
     assert not app._external_development_hold_active
-    assert app._get_action_authority().decision(
+    decision = app._get_action_authority().decision(
         RuntimeActionClass.STRATEGY_ACTION
-    ).allowed
+    )
+    assert not decision.allowed
+    assert decision.reason == (
+        "the active battle has not been bound to a forced save identity"
+    )
+    assert app._battle_identity_reconciliation_required is True
 
 
 @pytest.mark.parametrize(
@@ -688,7 +699,7 @@ def test_natural_game_over_ends_lease_before_normal_terminal_authority(
     ).allowed
 
 
-def test_battle_scope_change_terminates_without_cross_battle_continuation(
+def test_log_scope_change_does_not_terminate_exclusive_lease(
     tmp_path,
     monkeypatch,
 ):
@@ -705,9 +716,10 @@ def test_battle_scope_change_terminates_without_cross_battle_continuation(
             now=1_004.0,
         )
 
-    terminal = store.status()["interactive_development_lease"]
-    assert terminal["terminal_disposition"] == "battle_boundary"
-    assert "identity changed" in terminal["terminal_reason"]
+    retained = store.status()["interactive_development_lease"]
+    assert retained["request_state"] == "requested"
+    assert app._interactive_development_ack["state"] == "active"
+    assert app._battle_identity_reconciliation_required is True
 
 
 def test_home_lease_ends_when_a_running_battle_boundary_appears(
@@ -742,7 +754,7 @@ def test_home_lease_ends_when_a_running_battle_boundary_appears(
     assert "running-battle boundary changed" in terminal["terminal_reason"]
 
 
-def test_owned_home_lease_retains_exact_run_and_terminal_cleanup_claim(
+def test_owned_home_lease_declines_terminal_cleanup_without_forced_save_id(
     tmp_path,
     monkeypatch,
 ):
@@ -793,7 +805,7 @@ def test_owned_home_lease_retains_exact_run_and_terminal_cleanup_claim(
         "observed_at": _timestamp(1_004.0),
         "target_generation": 7,
     }
-    assert app._observed_active_battle_scope_id == "run-1"
+    assert getattr(app, "_observed_active_battle_scope_id", None) is None
 
     app._authority_battle_active = False
     app._authority_primary_state = "GAME_OVER"
@@ -821,17 +833,16 @@ def test_owned_home_lease_retains_exact_run_and_terminal_cleanup_claim(
     claim = app._matching_interactive_development_owned_terminal_claim(
         app._current_control_workflow_evidence()
     )
-    assert claim == {
-        "schema_version": 1,
-        "lease_id": lease["lease_id"],
-        "activity_scope_run_id": "run-1",
-        "target_generation": 7,
-    }
+    assert claim is None
 
 
 @pytest.mark.parametrize(
     "changed_field",
-    ("activity_scope_run_id", "target_generation", "game_state"),
+    (
+        "target_generation",
+        "game_state",
+        "active_round_identity_fingerprint",
+    ),
 )
 def test_owned_terminal_claim_rejects_replacement_or_nonterminal_boundary(
     tmp_path,
@@ -860,6 +871,7 @@ def test_owned_terminal_claim_rejects_replacement_or_nonterminal_boundary(
             "battle_scope": "run-1",
             "observed_at": _timestamp(1_004.0),
             "target_generation": 7,
+            "active_round_identity_fingerprint": "b" * 64,
         },
         "terminal_evidence": {
             "screen_state": "GAME_OVER",
@@ -867,6 +879,7 @@ def test_owned_terminal_claim_rejects_replacement_or_nonterminal_boundary(
             "battle_scope": "run-1",
             "observed_at": _timestamp(1_005.0),
             "target_generation": 7,
+            "active_round_identity_fingerprint": "b" * 64,
         },
     }
     current = {
@@ -874,18 +887,76 @@ def test_owned_terminal_claim_rejects_replacement_or_nonterminal_boundary(
         **owner,
         "game_state": "game_over",
         "activity_scope_run_id": "run-1",
+        "active_round_identity_fingerprint": "b" * 64,
         "target_generation": 7,
     }
     current[changed_field] = {
-        "activity_scope_run_id": "run-2",
         "target_generation": 8,
         "game_state": "active_battle",
+        "active_round_identity_fingerprint": "c" * 64,
     }[changed_field]
 
     assert (
         app._matching_interactive_development_owned_terminal_claim(current)
         is None
     )
+
+
+def test_owned_terminal_claim_ignores_log_scope_rotation(
+    tmp_path,
+    monkeypatch,
+):
+    app, _supervisor, _store, lease = _runtime_app(
+        tmp_path,
+        monkeypatch,
+        battle_active=False,
+        screen_state="HOME_SCREEN",
+        owned_battle_start=True,
+    )
+    owner = app._interactive_development_runtime_owner()
+    app._interactive_development_ack = {
+        "schema_version": 1,
+        "lease_id": lease["lease_id"],
+        "owner_label": lease["owner_label"],
+        "state": "terminal",
+        "runtime": owner,
+        "owned_battle_start": True,
+        "terminal_disposition": "natural_game_over",
+        "owned_battle_evidence": {
+            "screen_state": "RUNNING",
+            "battle_active": True,
+            "battle_scope": "run-before",
+            "observed_at": _timestamp(1_004.0),
+            "target_generation": 7,
+            "active_round_identity_fingerprint": "b" * 64,
+        },
+        "terminal_evidence": {
+            "screen_state": "GAME_OVER",
+            "battle_active": False,
+            "battle_scope": "run-after",
+            "observed_at": _timestamp(1_005.0),
+            "target_generation": 7,
+            "active_round_identity_fingerprint": "b" * 64,
+        },
+    }
+    current = {
+        "schema_version": 1,
+        **owner,
+        "game_state": "game_over",
+        "activity_scope_run_id": "run-current",
+        "active_round_identity_fingerprint": "b" * 64,
+        "target_generation": 7,
+    }
+
+    claim = app._matching_interactive_development_owned_terminal_claim(current)
+
+    assert claim == {
+        "schema_version": 1,
+        "lease_id": lease["lease_id"],
+        "activity_scope_run_id": "run-current",
+        "active_round_identity_fingerprint": "b" * 64,
+        "target_generation": 7,
+    }
 
 
 def test_owned_battle_request_requires_exact_home_new_boundary(

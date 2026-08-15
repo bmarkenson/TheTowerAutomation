@@ -51,8 +51,9 @@ Completed and superseded detail remains in the
     transient detection loss, a recognized blocking modal, lost foreground,
     process/ADB-target change, an expected transition still in flight, and a
     genuinely unsupported screen.
-  - Preserve exact runtime, PID, ADB target/generation, activity scope, control
-    request, and transition-receipt ownership. Pause, Stop, manual control,
+  - Preserve exact runtime, PID, ADB target/generation, workflow/control
+    operation, canonical battle identity when battle-bound, and transition-
+    receipt ownership. Activity scope is report metadata only. Pause, Stop, manual control,
     changed ownership, or uncertain accepted input must abort or fail closed
     without replay.
   - Retain attempt and circuit-breaker state across equivalent heartbeats so

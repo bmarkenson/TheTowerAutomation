@@ -84,9 +84,9 @@ def terminal_save_report_from_acquisition(
     """Return a completed entry only after exact same-run tail attachment.
 
     Fingerprints are compared only within the player-save source contract.  A
-    UI History baseline, missing scope, unbound terminal, unchanged tail,
-    malformed count transition, unknown semantic cause, or terminal-kind
-    mismatch leaves the existing terminal UI route authoritative.
+    An unbound terminal, changed canonical battle identity, unknown semantic
+    cause, or terminal-kind mismatch leaves the existing terminal UI route
+    authoritative. Activity scope is optional report provenance only.
     """
 
     if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
@@ -147,26 +147,25 @@ def terminal_save_report_from_acquisition(
         else None
     )
     structural_binding = structural.get("run_binding")
-    expected_scope_id = (
-        str(run_binding.get("activity_scope_run_id") or "")
-        if isinstance(run_binding, Mapping)
-        else ""
+    structural_boundary = (
+        structural_source.get("boundary")
+        if isinstance(structural_source, Mapping)
+        else None
     )
-    actual_scope_id = (
-        str(activity_scope.get("run_id") or "")
-        if isinstance(activity_scope, Mapping)
-        else ""
-    )
+    expected_identity = str(
+        run_binding.get("active_round_identity_fingerprint") or ""
+    ).strip()
     if not (
         isinstance(structural_source, Mapping)
         and isinstance(structural_binding, Mapping)
-        and expected_scope_id
-        and actual_scope_id == expected_scope_id
-        and structural_binding.get("activity_scope_run_id")
-        == actual_scope_id
-        and terminal_history_handoff_matches_source_scope(
-            structural_handoff, actual_scope_id
+        and isinstance(structural_boundary, Mapping)
+        and _sha256_fingerprint(expected_identity)
+        and structural_binding.get(
+            "active_round_identity_fingerprint"
         )
+        == expected_identity
+        and structural_boundary.get("active_round_identity")
+        == expected_identity
         and structural_source.get("mapping_id")
         == getattr(snapshot, "mapping_id", None)
         and structural_source.get("effective_mapping_fingerprint")
@@ -322,19 +321,21 @@ def terminal_history_transition_from_acquisition(
         return unavailable("terminal_natural_boundary_kind_mismatch")
     if not isinstance(run_binding, Mapping) or run_binding.get("status") != "bound":
         return unavailable("terminal_run_unbound")
-    if not isinstance(activity_scope, Mapping):
-        return unavailable("activity_scope_unavailable")
+    expected_identity = str(
+        run_binding.get("active_round_identity_fingerprint") or ""
+    ).strip()
+    if (
+        not _sha256_fingerprint(expected_identity)
+        or acquisition.boundary.active_round_identity_fingerprint
+        != expected_identity
+    ):
+        return unavailable("terminal_active_round_identity_mismatch")
 
-    expected_scope_id = str(run_binding.get("activity_scope_run_id") or "")
-    actual_scope_id = str(activity_scope.get("run_id") or "")
-    if not expected_scope_id or actual_scope_id != expected_scope_id:
-        return unavailable("terminal_activity_scope_binding_lost")
-    if acquisition.boundary.activity_scope_id != actual_scope_id:
-        return unavailable("terminal_natural_boundary_scope_mismatch")
-
-    baseline = activity_scope.get("latest_completed_battle")
-    if not isinstance(baseline, Mapping):
-        return unavailable("pre_terminal_history_baseline_unavailable")
+    baseline = (
+        activity_scope.get("latest_completed_battle")
+        if isinstance(activity_scope, Mapping)
+        else None
+    )
 
     history_result = history_metadata_from_acquisition(acquisition)
     if not history_result.complete or not isinstance(history_result.metadata, Mapping):
@@ -355,13 +356,6 @@ def terminal_history_transition_from_acquisition(
         or latest.get("is_tournament") is not expected_tournament
     ):
         return unavailable("terminal_history_kind_mismatch")
-    if not history_sources_compatible(baseline, latest):
-        return unavailable("pre_terminal_history_source_incompatible")
-    if baseline.get("fingerprint") == latest.get("fingerprint"):
-        return unavailable("terminal_history_tail_unchanged")
-    if not valid_history_tail_advance(baseline, latest):
-        return unavailable("terminal_history_tail_transition_invalid")
-
     if runtime is None:
         return unavailable("runtime_history_projection_unavailable")
     if getattr(runtime, "round_active", True):
@@ -372,26 +366,51 @@ def terminal_history_transition_from_acquisition(
     if not _sha256_fingerprint(source_fingerprint):
         return unavailable("terminal_source_fingerprint_unavailable")
     try:
-        baseline_count = int(baseline["entry_count"])
         observed_count = int(latest["entry_count"])
         capacity = int(latest["capacity"])
     except (KeyError, TypeError, ValueError):
         return unavailable("terminal_history_tail_transition_invalid")
-    rollover = baseline_count == capacity and observed_count == capacity
-    transition = {
-        "status": "capacity_rollover" if rollover else "append",
-        "baseline_fingerprint": baseline.get("fingerprint"),
-        "observed_fingerprint": latest.get("fingerprint"),
-        "baseline_entry_count": baseline_count,
-        "observed_entry_count": observed_count,
-        "capacity": capacity,
-    }
+    baseline_advance = bool(
+        isinstance(baseline, Mapping)
+        and history_sources_compatible(baseline, latest)
+        and baseline.get("fingerprint") != latest.get("fingerprint")
+        and valid_history_tail_advance(baseline, latest)
+    )
+    if baseline_advance:
+        baseline_count = int(baseline["entry_count"])
+        rollover = baseline_count == capacity and observed_count == capacity
+        transition = {
+            "status": "capacity_rollover" if rollover else "append",
+            "baseline_fingerprint": baseline.get("fingerprint"),
+            "observed_fingerprint": latest.get("fingerprint"),
+            "baseline_entry_count": baseline_count,
+            "observed_entry_count": observed_count,
+            "capacity": capacity,
+        }
+    else:
+        transition = {
+            "status": "causal_terminal_boundary",
+            "observed_fingerprint": latest.get("fingerprint"),
+            "observed_entry_count": observed_count,
+            "capacity": capacity,
+            "baseline_status": (
+                "unavailable"
+                if not isinstance(baseline, Mapping)
+                else "not_required"
+            ),
+        }
     capture = {
         "captured_at": getattr(snapshot, "captured_at", None),
         "save_revision": getattr(snapshot, "save_revision", None),
         "source_fingerprint": source_fingerprint,
         "acquisition": acquisition.redacted_provenance(),
     }
+    report_scope_id = (
+        str(activity_scope.get("run_id") or "").strip()
+        if isinstance(activity_scope, Mapping)
+        else ""
+    ) or str(acquisition.boundary.activity_scope_id or "").strip()
+    report_scope_id = report_scope_id or "report-scope-unavailable"
     handoff = {
         "schema_version": TERMINAL_HISTORY_HANDOFF_SCHEMA_VERSION,
         "status": "ready",
@@ -410,7 +429,7 @@ def terminal_history_transition_from_acquisition(
                 "runtime", acquisition.boundary.runtime_session_id
             ),
             "activity_scope_fingerprint": _redacted_identity(
-                "scope", actual_scope_id
+                "scope", report_scope_id
             ),
             "target_generation_fingerprint": acquisition.binding_fingerprint,
             "boundary": acquisition.boundary.redacted(),
@@ -432,7 +451,8 @@ def terminal_history_transition_from_acquisition(
         "capture": capture,
         "run_binding": {
             "status": "bound",
-            "activity_scope_run_id": actual_scope_id,
+            "activity_scope_run_id": report_scope_id,
+            "active_round_identity_fingerprint": expected_identity,
         },
         "latest_completed_battle": latest,
         "history_transition": transition,
@@ -506,7 +526,6 @@ def validate_terminal_history_handoff(
     ):
         return None, "terminal_history_handoff_identity_invalid"
     try:
-        baseline_count = int(transition["baseline_entry_count"])
         observed_count = int(transition["observed_entry_count"])
         capacity = int(transition["capacity"])
         latest_count = int(latest.get("entry_count"))
@@ -514,21 +533,32 @@ def validate_terminal_history_handoff(
     except (KeyError, TypeError, ValueError):
         return None, "terminal_history_handoff_transition_invalid"
     transition_status = transition.get("status")
-    valid_counts = bool(
-        capacity > 0
-        and observed_count > 0
-        and (
-            (
-                transition_status == "append"
-                and observed_count == baseline_count + 1
-                and observed_count <= capacity
-            )
-            or (
-                transition_status == "capacity_rollover"
-                and baseline_count == observed_count == capacity
+    if transition_status in {"append", "capacity_rollover"}:
+        try:
+            baseline_count = int(transition["baseline_entry_count"])
+        except (KeyError, TypeError, ValueError):
+            return None, "terminal_history_handoff_transition_invalid"
+        valid_counts = bool(
+            capacity > 0
+            and observed_count > 0
+            and (
+                (
+                    transition_status == "append"
+                    and observed_count == baseline_count + 1
+                    and observed_count <= capacity
+                )
+                or (
+                    transition_status == "capacity_rollover"
+                    and baseline_count == observed_count == capacity
+                )
             )
         )
-    )
+    else:
+        valid_counts = bool(
+            transition_status == "causal_terminal_boundary"
+            and capacity > 0
+            and 0 < observed_count <= capacity
+        )
     if (
         not valid_counts
         or transition.get("observed_fingerprint") != fingerprint
@@ -546,8 +576,9 @@ def validate_terminal_history_handoff(
         boundary.get("kind") == terminal
         and boundary.get("runtime_session")
         == source.get("runtime_session_fingerprint")
-        and boundary.get("activity_scope")
-        == source.get("activity_scope_fingerprint")
+        and _sha256_fingerprint(
+            str(boundary.get("active_round_identity") or "")
+        )
         and acquisition.get("type")
         == PlayerSaveAcquisitionType.NATURAL_BOUNDARY.value
         and acquisition.get("status") == "complete"
@@ -633,7 +664,8 @@ def terminal_save_report_structural_complete(value: Any) -> bool:
         and structural.get("status") == "complete"
         and structural.get("reason") == ""
         and isinstance(transition, Mapping)
-        and transition.get("status") in {"append", "capacity_rollover"}
+        and transition.get("status")
+        in {"append", "capacity_rollover", "causal_terminal_boundary"}
     )
 
 
@@ -657,7 +689,6 @@ def terminal_mapping_workflow_provenance(
         and acquisition.boundary is not None
         and isinstance(run_binding, Mapping)
         and run_binding.get("status") == "bound"
-        and isinstance(activity_scope, Mapping)
         and _terminal_history_transition_complete(history_transition)
         and type(pid) is int
         and pid > 0
@@ -668,15 +699,14 @@ def terminal_mapping_workflow_provenance(
     if terminal not in _SUPPORTED_TERMINALS:
         return None
     expected_kind = PlayerSaveBoundaryKind(terminal)
-    scope_id = str(activity_scope.get("run_id") or "").strip()
-    expected_scope = str(
-        run_binding.get("activity_scope_run_id") or ""
+    expected_identity = str(
+        run_binding.get("active_round_identity_fingerprint") or ""
     ).strip()
     if not (
         acquisition.boundary.kind is expected_kind
-        and scope_id
-        and scope_id == expected_scope
-        and acquisition.boundary.activity_scope_id == scope_id
+        and _sha256_fingerprint(expected_identity)
+        and acquisition.boundary.active_round_identity_fingerprint
+        == expected_identity
         and getattr(snapshot, "mapping_resolution", None)
         in {"exact", "compatible_exact_revision"}
         and _sha256_fingerprint(
@@ -714,7 +744,9 @@ def terminal_mapping_workflow_provenance(
         and source.get("target_generation_fingerprint")
         == acquisition.binding_fingerprint
         and source.get("acquisition") == acquisition.redacted_provenance()
-        and terminal_history_handoff_matches_source_scope(handoff, scope_id)
+        and isinstance(source.get("boundary"), Mapping)
+        and source["boundary"].get("active_round_identity")
+        == expected_identity
     ):
         return None
     boundary_fingerprint = _json_fingerprint(
@@ -753,7 +785,7 @@ def terminal_mapping_workflow_provenance(
             if terminal == "GAME_OVER"
             else "terminal_tournament_results"
         ),
-        "active_round_identity_fingerprint": latest["fingerprint"],
+        "active_round_identity_fingerprint": expected_identity,
         "boundary_fingerprint": boundary_fingerprint,
     }
 

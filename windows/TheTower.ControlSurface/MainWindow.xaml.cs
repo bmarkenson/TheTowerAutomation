@@ -3082,7 +3082,7 @@ public partial class MainWindow : Window
                 _settings);
         _hostPerformance.UpdateServerContext(
             status.Control.AdbPort ?? service?.AdbPort,
-            status.CurrentRun?.RunId,
+            status.StrategyActionGate?.RuntimeBattleIdentity,
             blueStacksTarget,
             status.Capabilities.Contains(
                 "host_performance_telemetry_v1",
@@ -3904,8 +3904,8 @@ public partial class MainWindow : Window
                 : Color.FromRgb(255, 113, 135));
         CurrentPerksCheckpointText.Text = perks.Reason switch
         {
-            "current_run_unavailable" =>
-                "No current battle scope is available yet.",
+            "battle_identity_unavailable" =>
+                "No forced-save battle identity is available yet.",
             "timeline_checkpoint_unavailable" =>
                 "The running battle has not persisted its timeline yet.",
             "current_run_checkpoint_unavailable" =>
@@ -3914,7 +3914,7 @@ public partial class MainWindow : Window
             "timeline_checkpoint_invalid" or
             "current_perks_projection_invalid" =>
                 "The persisted Perk presentation could not be read safely.",
-            _ => "The list updates from the running battle's passive save monitor.",
+            _ => "The list updates at Perk selection or exhaustion checkpoints.",
         };
     }
 

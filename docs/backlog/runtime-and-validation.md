@@ -254,10 +254,11 @@ as checked checkpoint narrative here.
 
 - [ ] Live-confirm the deployed paused Home manual-start repair from `8cf5548`:
   from verified `NEW_BATTLE`, keep Pause through
-  the manual start, require passive `RUNNING`, then Resume. Confirm one guarded
-  save records or validates the last completed battle without Battle History
-  UI, releases No Strategy without a retry loop, and opens only genuinely
-  unresolved configuration sections. Require zero input while Paused; an
+  the manual start, require visual `RUNNING`, then Resume. Confirm zero save/UI
+  input while Paused followed by one guarded forced serialization after Enable;
+  require its `ActiveRoundIdentity` to adopt the manually started battle with
+  no History read/poll loop, then open only genuinely unresolved configuration
+  sections. An
   Attack sword must not probe its disabled menu, while a Utility star must
   leave the accessible Attack Damage Slider in the inventory plan. The generic
   replacement attachment and terminal-lease replay were confirmed during

@@ -57,6 +57,40 @@ and actionable work lives in
   fresh `HOME_SCREEN/PAUSED` observation at 16:56:58 PDT. The earlier workflow
   was terminally interrupted by the deployment Stop and was not replayed.
 - **Fixed by:** `88a3ce4` (integrated candidate `5d75375`).
+- **Recurrence (2026-08-15):** The same rejection returned without a Strategy
+  replacement. On each heartbeat App published Home evidence under the old
+  activity scope before `MissionManager.maybe_run_start()` created the Home
+  preflight scope. A Start clicked against that publication reached the next
+  workflow sync still `requested`; the new scope was permitted only after
+  acknowledgement, so the runtime rejected it with the same message. The
+  earlier repair covered one scope-rotation source but left the invalid
+  authority model intact.
+- **Deeper cause:** `activity_scope_run_id` was serving simultaneously as an
+  action-log segment, async-operation guard, completed-History handoff key, and
+  proxy battle identity. The save already exposes the canonical active-round
+  tuple, but same/later-battle decisions still used log-scope and completed
+  History behavior. This made harmless logging-order changes operational.
+- **Final resolution:** Activity scope is now log/report/presentation metadata
+  only. Home Start forces serialization and requires an inactive save; first
+  stable `RUNNING`, Attach, Resume, direct Retry, and post-Pause reconciliation
+  force `ActiveRoundIdentity` before battle-bound work. Equal IDs restore
+  eligible same-battle state, different IDs discard it, and an inactive Home
+  proof closes it. The legacy History/UI continuity state machine, post-Retry
+  polling, and timed passive-save cadence were removed. Only explicit stable
+  Perk selection/exhaustion checkpoints may request a passive runtime read.
+- **Final regression:** Better Control coverage now proves a pre-acknowledgement
+  log-scope rotation cannot reject Start and that Start remains
+  `action_dispatched` until forced active identity is bound. Battle-identity
+  coverage exercises inactive Home retry/exhaustion, same/later attachment,
+  direct Retry, terminal continuation, Pause/Enable revalidation, and the two
+  manual-surrender successor shapes. Structural tests prove the report-only
+  activity owner has no save/UI/lifecycle entry points and the passive
+  scheduler accepts only Perk checkpoint reasons.
+- **Supersession:** The earlier sentence preserving general changed-scope
+  rejection and its corresponding test expectation are obsolete. Exact
+  runtime, target generation, workflow/control operation, visible boundary,
+  source restoration, and canonical save identity remain fail-closed guards;
+  log-scope change is not one.
 
 ### Global Module save identities were incomplete and conflated with slot authority
 

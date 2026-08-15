@@ -567,7 +567,7 @@ def test_stale_dispatched_workflow_reconciles_before_blocker_handoff():
     app._mission_mgr = Mock()
     app._current_control_workflow_evidence = Mock(return_value=current)
     app._workflow_dispatch_receipt_mismatch = Mock(
-        return_value="battle activity scope changed"
+        return_value="runtime evidence changed"
     )
     app._tournament_battle_guard = Mock(return_value=False)
 
@@ -585,7 +585,7 @@ def test_stale_dispatched_workflow_reconciles_before_blocker_handoff():
     )
     assert (
         app._supervisor.transition_battle_workflow.call_args.kwargs["reason"]
-        == "battle activity scope changed"
+        == "runtime evidence changed"
     )
 
 

@@ -103,7 +103,15 @@ class PlayerSaveNaturalBoundary:
     kind: PlayerSaveBoundaryKind
     observed_at: datetime
     runtime_session_id: str = field(repr=False)
-    activity_scope_id: Optional[str] = field(default=None, repr=False)
+    activity_scope_id: Optional[str] = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
+    active_round_identity_fingerprint: Optional[str] = field(
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, PlayerSaveBoundaryKind):
@@ -118,6 +126,22 @@ class PlayerSaveNaturalBoundary:
         )
         scope = str(self.activity_scope_id or "").strip() or None
         object.__setattr__(self, "activity_scope_id", scope)
+        identity = str(
+            self.active_round_identity_fingerprint or ""
+        ).strip().lower() or None
+        if identity is not None and (
+            len(identity) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in identity
+            )
+        ):
+            raise ValueError("natural boundary active-round identity is invalid")
+        object.__setattr__(
+            self,
+            "active_round_identity_fingerprint",
+            identity,
+        )
 
     def redacted(self) -> dict[str, Any]:
         return {
@@ -129,6 +153,7 @@ class PlayerSaveNaturalBoundary:
                 if self.activity_scope_id
                 else None
             ),
+            "active_round_identity": self.active_round_identity_fingerprint,
         }
 
 

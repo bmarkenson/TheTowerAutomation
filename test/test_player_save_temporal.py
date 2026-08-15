@@ -13,6 +13,7 @@ def _context(**changes):
     values = {
         "runtime_session_id": "runtime-1",
         "activity_scope_id": "scope-1",
+        "active_round_identity_fingerprint": "active-round-fingerprint",
         "target": "private-target",
         "target_generation": 3,
         "active_battle_observed": True,
@@ -74,7 +75,7 @@ def test_bound_consumer_accepts_every_exact_bound_class_once():
     assert evidence.consume("workshop_preset") is None
 
 
-def test_bound_consumer_rejects_target_scope_and_process_changes():
+def test_bound_consumer_rejects_target_identity_and_process_changes():
     observations = running_attachment_observations(
         {"workshop_preset": "Tourney"}
     )
@@ -93,9 +94,15 @@ def test_bound_consumer_rejects_target_scope_and_process_changes():
     # A failed exact-binding check invalidates the one-use carrier permanently.
     assert evidence.consume("workshop_preset") is None
 
+    scope_changed = BoundRunningAttachmentSaveEvidence(
+        observations,
+        lambda: _context(activity_scope_id="scope-2"),
+    )
+    assert scope_changed.consume("workshop_preset") == "Tourney"
+
     for changed in (
-        _context(activity_scope_id="scope-2"),
         _context(runtime_session_id="runtime-2"),
+        _context(active_round_identity_fingerprint="different-round"),
         _context(target="other-target"),
         _context(active_battle_observed=False),
     ):

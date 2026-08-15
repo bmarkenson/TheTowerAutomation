@@ -15,23 +15,22 @@ may continue while Paused, but every automated input remains blocked.
 
 For manual play, first use **Take Manual Control** and wait for its
 acknowledged indefinite Pause. **Return Control** is not an alias for Enable:
-it records fresh passive observation while remaining Paused, and a later
+it records fresh visual observation while remaining Paused, and a later
 explicit Enable enters configuration reconciliation. Running Return and
 **Attach to Battle** each perform one guarded active-battle acquisition: the
 game is briefly backgrounded to Android Home, stable exact-target reads are
 taken, and the same battle is restored and reverified. Active-round identity
-and the final activity scope remain mandatory when the save is usable. If its
-revision, structure, mapping, or projection is unusable after the source is
-safely restored, the runtime automatically opens Battle History and all
-supported configuration discovery instead; attachment completes
+is mandatory and has no History/UI fallback. Activity scope is optional log
+metadata. Once identity succeeds, unusable configuration projections may open
+supported configuration discovery; attachment completes
 observation-only with Automation Enabled so No Strategy monitoring and safe
 collectors continue. Home New Return similarly runs the supported Home UI
 checks, and Game Over Return runs the full terminal UI collector. Restoration,
-owner, target, scope, or authority loss is catastrophic and leaves input
+owner, target, canonical identity, or authority loss is catastrophic and leaves input
 Paused. A catastrophically unsafe Home serializer is terminalized once rather
 than repeated on later heartbeats. Recoverable mismatch, unavailable evidence,
 and exhausted repair are flagged while automation continues. The
-future terminal policy does not repair or replace this continuity step.
+future terminal policy does not repair or replace this identity step.
 
 Selecting No Strategy before Attach deliberately requests observation-only
 adoption and is not a degraded condition. Other selections use the

@@ -105,27 +105,11 @@ def _process_attribution(**overrides):
     return payload
 
 
-def _write_activity_scope(root: Path, run_id: str) -> None:
-    path = root / "logs" / "activity_scope.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "scope": "current_run",
-                "run_id": run_id,
-                "started_at": "2026-07-30T14:00:00+00:00",
-                "source_file_id": "1:2",
-                "start_offset": 0,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
 def test_host_performance_publish_is_idempotent_and_keeps_sample_run(tmp_path):
-    _write_activity_scope(tmp_path, "server-run-at-ingest")
     service = ControlSurfaceService(repository_root=tmp_path)
+    service._runtime_battle_identity_for_host_performance = (
+        lambda: "server-battle-at-ingest"
+    )
 
     first = service.publish_host_performance(_request())
     duplicate = service.publish_host_performance(_request())
@@ -136,7 +120,7 @@ def test_host_performance_publish_is_idempotent_and_keeps_sample_run(tmp_path):
         "accepted": 1,
         "duplicates": 0,
         "ingested_at_utc": first["ingested_at_utc"],
-        "server_run_id": "server-run-at-ingest",
+        "server_run_id": "server-battle-at-ingest",
     }
     assert duplicate["accepted"] == 0
     assert duplicate["duplicates"] == 1
@@ -149,7 +133,7 @@ def test_host_performance_publish_is_idempotent_and_keeps_sample_run(tmp_path):
             """
         ).fetchall()
     assert len(rows) == 1
-    assert rows[0][:2] == ("sample-run", "server-run-at-ingest")
+    assert rows[0][:2] == ("sample-run", "server-battle-at-ingest")
     stored = json.loads(rows[0][2])
     assert stored["adb_port"] == 5555
     assert stored["host_name"] == "MAIN-PC"
@@ -535,6 +519,7 @@ def test_degradation_cache_invalidates_when_listener_lifetime_changes(tmp_path):
         "baseline_battle_ids": [],
     }
     authority = {
+        "runtime_battle_identity": "current-run",
         "control_model": {
             "strategy_scope": {"active_battle": "farm_t19"},
         }

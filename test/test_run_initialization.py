@@ -79,6 +79,8 @@ def _free_upgrade_lock_boundary_evidence():
 def _bind_terminal_context(app: App, scope_id: str = "test-run") -> None:
     app._current_run_scope_id = lambda: scope_id
     app._observed_active_battle_scope_id = scope_id
+    app._observed_active_round_identity_fingerprint = "a" * 64
+    app._terminal_round_identity_fingerprint = "a" * 64
 
 
 def _repair_authority() -> dict[str, object]:
@@ -89,6 +91,7 @@ def _repair_authority() -> dict[str, object]:
         "adb_target": "localhost:5555",
         "target_generation": 7,
         "activity_scope_run_id": "scope-1",
+        "active_round_identity_fingerprint": "a" * 64,
         "game_state": "active_battle",
     }
 
@@ -111,6 +114,7 @@ def _repair_terminal_acquisition() -> PlayerSaveAcquisitionBundle:
             observed_at=started,
             runtime_session_id="save-runtime-1",
             activity_scope_id="scope-1",
+            active_round_identity_fingerprint="a" * 64,
         ),
     )
 
@@ -1481,7 +1485,7 @@ class DeferredStartupGateTests(unittest.TestCase):
         self.assertTrue(manager.attached_validation_requested())
         self.assertTrue(manager.session_preflight_pending())
 
-    def test_same_battle_continuity_releases_legacy_orphaned_validation_hold(self):
+    def test_same_save_identity_releases_orphaned_validation_hold(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()
         app._exclusive_validation_ownership_hold = True
@@ -1493,27 +1497,70 @@ class DeferredStartupGateTests(unittest.TestCase):
             session_preflight=receipt,
         )
 
-        app._apply_activity_continuity_outcome(
+        app._apply_running_attachment_projection(
             SimpleNamespace(
-                confirmed_same_battle_scope_id="current-run"
+                battle_relation="same_battle"
             )
         )
 
         reuse = (
             app._mission_mgr.reuse_session_preflight_for_confirmed_attachment
         )
-        reuse.assert_called_once_with(self._BATTLE_IDENTITY, receipt)
+        reuse.assert_not_called()
         self.assertFalse(app._exclusive_validation_ownership_hold)
 
-    def test_later_battle_continuity_clears_orphaned_validation_hold(self):
+    def test_app_reuses_same_battle_receipt_only_after_real_manager_adoption(self):
+        strategy = self._strategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+        )
+        manager.start()
+        self._bind_identity(manager)
+        receipt = self._identity_receipt(strategy)
+        workflow_id = "attach-1"
+        retained = {
+            "same_battle_session_preflight": receipt,
+        }
+        app = App.__new__(App)
+        app._mission_mgr = manager
+        app._active_round_identity_fingerprint = self._BATTLE_IDENTITY
+        app._operator_save_reconciliation_claims = {
+            workflow_id: retained,
+        }
+
+        self.assertFalse(
+            app._reuse_same_battle_session_preflight_after_adoption(
+                workflow_id,
+                dict(retained),
+            )
+        )
+        self.assertNotIn("session_preflight_reuse_attempted", retained)
+
+        manager.maybe_run_start({"state": "RUNNING"})
+
+        self.assertTrue(
+            app._reuse_same_battle_session_preflight_after_adoption(
+                workflow_id,
+                dict(retained),
+            )
+        )
+        self.assertTrue(retained["session_preflight_reuse_attempted"])
+        self.assertTrue(retained["session_preflight_reused"])
+        self.assertTrue(manager.ctx.data["attached_session_preflight_reused"])
+        self.assertFalse(manager.session_preflight_pending())
+
+    def test_later_save_identity_clears_orphaned_validation_hold(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()
         app._exclusive_validation_ownership_hold = True
 
         with patch("core.app.log"):
-            app._apply_activity_continuity_outcome(
+            app._apply_running_attachment_projection(
                 SimpleNamespace(
-                    confirmed_later_battle_scope_id="later-run"
+                    battle_relation="later_battle"
                 )
             )
 
@@ -2998,6 +3045,8 @@ class GcFarmProfileTests(unittest.TestCase):
         app._handle_mission_rewards_if_due = MagicMock(return_value=False)
         app._current_run_scope_id = lambda: "stale-scope"
         app._observed_active_battle_scope_id = None
+        app._observed_active_round_identity_fingerprint = None
+        app._terminal_round_identity_fingerprint = None
         app._perk_timeline_observer = MagicMock()
         app._battle_activation_tracker = MagicMock()
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
@@ -3013,9 +3062,10 @@ class GcFarmProfileTests(unittest.TestCase):
             {
                 "schema_version": 1,
                 "status": "unbound",
-                "reason": "terminal_without_observed_active_battle",
+                "reason": "terminal_without_forced_active_battle",
                 "activity_scope_run_id": "stale-scope",
-                "observed_active_scope_run_id": None,
+                "active_round_identity_fingerprint": None,
+                "observed_active_round_identity_fingerprint": None,
             },
         )
         self.assertEqual(
@@ -3033,28 +3083,27 @@ class GcFarmProfileTests(unittest.TestCase):
         app._battle_activation_tracker.reset.assert_called_once_with()
         app._battle_activation_tracker.snapshot.assert_not_called()
 
-    def test_terminal_binding_waits_for_continuity_and_clears_at_new_battle(self):
+    def test_terminal_binding_uses_save_identity_and_clears_at_new_battle(self):
         app = App.__new__(App)
         scope = {"id": "run-1"}
         app._current_run_scope_id = lambda: scope["id"]
         app._observed_active_battle_scope_id = None
+        app._active_round_identity_fingerprint = "a" * 64
+        app._observed_active_round_identity_fingerprint = None
+        app._terminal_round_identity_fingerprint = None
 
-        app._observe_terminal_run_binding(
-            {"state": "RUNNING"},
-            continuity_pending=True,
-        )
-        self.assertIsNone(app._observed_active_battle_scope_id)
-
-        app._observe_terminal_run_binding(
-            {"state": "RUNNING"},
-            continuity_pending=False,
-        )
+        app._observe_terminal_run_binding({"state": "RUNNING"})
         self.assertEqual(app._observed_active_battle_scope_id, "run-1")
+        self.assertEqual(
+            app._observed_active_round_identity_fingerprint,
+            "a" * 64,
+        )
 
         scope["id"] = "run-2"
+        app._observe_battle_identity_ui_boundary({"state": "GAME_OVER"})
         self.assertEqual(
-            app._terminal_run_binding()["reason"],
-            "activity_scope_changed_after_active_observation",
+            app._terminal_run_binding()["status"],
+            "bound",
         )
 
         app._observe_terminal_run_binding(
@@ -3062,9 +3111,11 @@ class GcFarmProfileTests(unittest.TestCase):
                 "state": "HOME_SCREEN",
                 "home_battle_control": "NEW_BATTLE",
             },
-            continuity_pending=False,
         )
         self.assertIsNone(app._observed_active_battle_scope_id)
+        self.assertIsNone(
+            app._observed_active_round_identity_fingerprint
+        )
 
     def test_session_preflight_mismatch_completes_degraded_without_blocking(self):
         strategy = get_strategy("gc_farm_t19_experiment")
@@ -3565,6 +3616,7 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._session_preflight_gate_logged = True
         app._session_preflight_terminal_blocked_logged = False
         app._session_preflight_repair_denial_logged = False
+        app._active_round_identity_fingerprint = "a" * 64
         app._capture_frame = MagicMock(side_effect=[frame, KeyboardInterrupt])
         app._resolve_upgrade_detail_overlay = MagicMock()
         app._handle_primary_states = MagicMock()

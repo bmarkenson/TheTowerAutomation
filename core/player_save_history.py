@@ -1,9 +1,8 @@
-"""Source-bound Battle History continuity from stable player-save reads.
+"""Typed Battle History and running-attachment projections from save bundles.
 
-Ordinary reads remain observation-only.  Replacement-process attachment may
-explicitly request the guarded Android-Home serialization shared with Home
-preflight.  Neither path navigates game UI or authorizes lifecycle input, and
-``UI_FALLBACK`` is available only after the exact source was safely restored.
+This module never acquires a save or navigates game UI. Callers supply a typed
+bundle acquired at its causal boundary; canonical active-round identity is
+validated independently before these reporting/configuration projections run.
 """
 
 from __future__ import annotations
@@ -14,21 +13,11 @@ from datetime import datetime
 from enum import Enum
 import hashlib
 import re
-import time
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Mapping, Optional
 
-from core.battle_lifecycle import HomeBattleControl
-from core.home_battle import detect_home_battle_control
-from core.player_save import PlayerSaveSnapshot
-from core.player_save_serialization import (
-    GuardedPlayerSaveSerializer,
-    GuardedSerializationStatus,
-)
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
-    PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
-    StablePlayerSaveAcquirer,
 )
 from core.player_save_temporal import (
     RunningAttachmentSaveFact,
@@ -36,8 +25,6 @@ from core.player_save_temporal import (
     RunningAttachmentTemporalBinding,
     attachment_temporal_class,
 )
-from core.state_detector import detect_state_and_overlays
-from utils.logger import get_activity_scope, log, log_input
 
 
 PLAYER_SAVE_HISTORY_SOURCE = "player_save"
@@ -117,18 +104,20 @@ class PlayerSaveHistoryReadResult:
 
 @dataclass(frozen=True)
 class PlayerSaveAttachmentContext:
-    """Exact process-local authority for one running-battle attachment read."""
+    """Exact process, battle ID, and target for one attachment read."""
 
     runtime_session_id: str
-    activity_scope_id: str
+    activity_scope_id: str = field(compare=False)
+    active_round_identity_fingerprint: str
     target: str
     target_generation: int
     active_battle_observed: bool
 
     def valid_for(self, expected_scope_id: str) -> bool:
+        del expected_scope_id
         return bool(
             self.runtime_session_id
-            and self.activity_scope_id == str(expected_scope_id or "")
+            and self.active_round_identity_fingerprint
             and self.target
             and self.target_generation > 0
             and self.active_battle_observed
@@ -159,7 +148,7 @@ class CrossSourceHistoryResult:
 def history_metadata_from_acquisition(
     acquisition: PlayerSaveAcquisitionBundle,
 ) -> PlayerSaveHistoryReadResult:
-    """Project only the structural newest-tail identity needed by continuity."""
+    """Project the structural newest History tail needed by reporting."""
 
     if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
         raise TypeError("History projection requires a typed acquisition")
@@ -307,6 +296,8 @@ def running_attachment_temporal_binding_from_acquisition(
         or context.target_generation != acquisition.binding.generation
         or not context.valid_for(context.activity_scope_id)
         or not str(active_round_identity_fingerprint or "").strip()
+        or context.active_round_identity_fingerprint
+        != str(active_round_identity_fingerprint).strip()
         or not acquisition.complete
         or acquisition.snapshot is None
     ):
@@ -401,324 +392,6 @@ def corroborate_ui_and_save_history(
     )
 
 
-class PlayerSaveHistoryReader:
-    """Acquire one stable save while preserving exact runtime source binding."""
-
-    def __init__(
-        self,
-        *,
-        acquirer: StablePlayerSaveAcquirer,
-        capture_fn: Callable[[], Any],
-        detector: Callable[[Any], Mapping[str, Any]] = (
-            detect_state_and_overlays
-        ),
-        home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
-        scope_fn: Callable[[], Optional[Mapping[str, Any]]] = get_activity_scope,
-        attachment_context_fn: Optional[
-            Callable[[], PlayerSaveAttachmentContext]
-        ] = None,
-        background_fn: Optional[Callable[[str], bool]] = None,
-        foreground_fn: Optional[Callable[[str], bool]] = None,
-        sleep_fn: Callable[[float], None] = time.sleep,
-        input_log_fn: Callable[..., None] = log_input,
-        debug_log_fn: Callable[..., None] = log,
-    ) -> None:
-        if not isinstance(acquirer, StablePlayerSaveAcquirer):
-            raise TypeError("player-save History requires the shared acquirer")
-        self._capture_fn = capture_fn
-        self._detector = detector
-        self._home_control_fn = home_control_fn
-        self._scope_fn = scope_fn
-        self._attachment_context_fn = attachment_context_fn
-        self._background_fn = background_fn
-        self._foreground_fn = foreground_fn
-        self._acquirer = acquirer
-        self._sleep_fn = sleep_fn
-        self._input_log_fn = input_log_fn
-        self._debug_log_fn = debug_log_fn
-
-    def read(
-        self,
-        *,
-        source_state: str,
-        expected_home_control: HomeBattleControl,
-        expected_scope_id: str,
-        action_guard_fn: Callable[[], bool],
-        serialize_active_attachment: bool = False,
-    ) -> PlayerSaveHistoryReadResult:
-        normalized_source = str(source_state or "").upper()
-        if normalized_source not in {"RUNNING", "HOME_SCREEN"}:
-            return _blocked("save_history_source_unsupported")
-        if serialize_active_attachment:
-            if normalized_source != "RUNNING":
-                return _blocked("active_attachment_source_unsupported")
-            return self._read_serialized_active_attachment(
-                expected_scope_id=expected_scope_id,
-                action_guard_fn=action_guard_fn,
-            )
-
-        # Control/action authority is checked outside the exact-target lock so
-        # every path keeps the global mutation -> target lock order.  Binding,
-        # scope, and source are revalidated while handoff is excluded.
-        if not _action_allowed(action_guard_fn):
-            return _blocked("history_source_binding_unverified")
-        with self._acquirer.locked_operation():
-            binding = self._acquirer.current_binding()
-            if (
-                binding is None
-                or not _scope_matches(self._scope_fn, expected_scope_id)
-                or not self._source_matches(
-                    normalized_source,
-                    expected_home_control,
-                )
-            ):
-                return _blocked("history_source_binding_unverified")
-
-            acquisition = self._acquirer.acquire(
-                PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
-                expected_binding=binding,
-            )
-            if acquisition.complete:
-                try:
-                    observed = history_metadata_from_acquisition(acquisition)
-                except Exception:
-                    observed = _ui_fallback(
-                        "runtime_history_projection_unavailable",
-                        acquisition=acquisition,
-                    )
-            else:
-                observed = _ui_fallback(
-                    "save_history_acquisition_failed",
-                    acquisition=acquisition,
-                )
-
-            if (
-                acquisition.status
-                in {
-                    PlayerSaveAcquisitionStatus.BINDING_REJECTED,
-                    PlayerSaveAcquisitionStatus.BINDING_LOST,
-                }
-                or not self._acquirer.binding_matches(binding)
-                or not _scope_matches(self._scope_fn, expected_scope_id)
-                or not self._source_matches(
-                    normalized_source,
-                    expected_home_control,
-                )
-            ):
-                return _blocked("history_source_binding_lost")
-        if not _action_allowed(action_guard_fn):
-            return _blocked("history_source_binding_lost")
-        return observed
-
-    def _read_serialized_active_attachment(
-        self,
-        *,
-        expected_scope_id: str,
-        action_guard_fn: Callable[[], bool],
-    ) -> PlayerSaveHistoryReadResult:
-        context_fn = self._attachment_context_fn
-        if context_fn is None:
-            return _blocked("active_attachment_context_unavailable")
-        try:
-            context = context_fn()
-        except Exception:
-            return _blocked("active_attachment_context_unavailable")
-        if not context.valid_for(expected_scope_id):
-            return _blocked("active_attachment_context_unverified")
-
-        serializer = GuardedPlayerSaveSerializer(
-            acquirer=self._acquirer,
-            context_guard_fn=lambda: self._same_attachment_context(
-                context,
-                expected_scope_id,
-            ),
-            action_guard_fn=action_guard_fn,
-            source_guard_fn=lambda frame, stable: self._source_matches(
-                "RUNNING",
-                HomeBattleControl.UNKNOWN,
-                initial_frame=frame,
-                stable=stable,
-            ),
-            background_fn=self._background_fn,
-            foreground_fn=self._foreground_fn,
-            sleep_fn=self._sleep_fn,
-            input_log_fn=self._input_log_fn,
-            debug_log_fn=self._debug_log_fn,
-            log_prefix="BATTLE_CONTINUITY",
-        )
-        serialized = serializer.acquire(
-            expected_target=context.target,
-            expected_generation=context.target_generation,
-            target_generation_detail=context.target_generation_detail(),
-            source_label="the attached running battle",
-            stable_initial_source=True,
-        )
-        if serialized.status is GuardedSerializationStatus.BLOCKED:
-            if (
-                serialized.reason
-                == "background_serialization_dispatch_unavailable"
-                and not serialized.lifecycle_input_attempted
-                and not serialized.background_dispatched
-            ):
-                # The host proved KEYCODE_HOME never started, so the attached
-                # battle remains safely on-screen.  Save serialization is
-                # unavailable, but that is recoverable evidence loss: let the
-                # established guarded UI/degraded path finish the attachment
-                # instead of retaining its input hold indefinitely.
-                return _ui_fallback(
-                    "active_attachment_background_serialization_dispatch_unavailable"
-                )
-            return _blocked(
-                f"active_attachment_{serialized.reason}",
-                background_dispatched=serialized.background_dispatched,
-                operator_workflow_interrupted=(
-                    serialized.background_dispatched
-                    or serialized.lifecycle_input_attempted
-                ),
-                source_restored=serialized.source_restored,
-            )
-        acquisition = serialized.acquisition
-        snapshot = serialized.snapshot
-        if snapshot is None:
-            return _ui_fallback(serialized.reason, acquisition=acquisition)
-
-        try:
-            runtime = snapshot.runtime_save
-        except Exception:
-            return _ui_fallback(
-                "active_round_projection_unavailable",
-                acquisition=acquisition,
-            )
-        if runtime is None:
-            return _ui_fallback("active_round_projection_unavailable")
-        active_identity = runtime.active_round_identity
-        if not runtime.round_active or active_identity is None:
-            return _blocked(
-                "active_round_identity_conflicted_after_restore",
-                background_dispatched=serialized.background_dispatched,
-                operator_workflow_interrupted=True,
-            )
-        if (
-            not active_identity.fingerprint
-            or active_identity.game_version != snapshot.game_version
-            or active_identity.current_tier < 0
-            or active_identity.rounds_started_this_tier < 0
-            or active_identity.round_seed <= 0
-        ):
-            return _blocked(
-                "active_round_identity_invalid_after_restore",
-                background_dispatched=serialized.background_dispatched,
-                operator_workflow_interrupted=True,
-            )
-
-        assert acquisition is not None
-        try:
-            observed = history_metadata_from_acquisition(acquisition)
-        except Exception:
-            observed = _ui_fallback(
-                "runtime_history_projection_unavailable",
-                acquisition=acquisition,
-            )
-        try:
-            attachment_temporal_binding = (
-                running_attachment_temporal_binding_from_acquisition(
-                    acquisition,
-                    context=context,
-                    active_round_identity_fingerprint=(
-                        active_identity.fingerprint
-                    ),
-                )
-            )
-        except Exception:
-            return _blocked(
-                "active_attachment_temporal_projection_unavailable",
-                background_dispatched=serialized.background_dispatched,
-                operator_workflow_interrupted=True,
-            )
-        if attachment_temporal_binding is None:
-            return _blocked(
-                "active_attachment_temporal_projection_unavailable",
-                background_dispatched=serialized.background_dispatched,
-                operator_workflow_interrupted=True,
-            )
-        try:
-            attachment_observations = (
-                running_attachment_observations_from_acquisition(
-                    acquisition,
-                    context=context,
-                    active_round_identity_fingerprint=(
-                        active_identity.fingerprint
-                    ),
-                )
-            )
-        except Exception:
-            attachment_observations = None
-        return PlayerSaveHistoryReadResult(
-            observed.status,
-            observed.reason,
-            metadata=observed.metadata,
-            safe_ui_fallback=observed.safe_ui_fallback,
-            running_attachment_observations=attachment_observations,
-            running_attachment_temporal_binding=(
-                attachment_temporal_binding
-            ),
-            running_attachment_context=context,
-            acquisition=acquisition,
-        )
-
-    def _same_attachment_context(
-        self,
-        expected: PlayerSaveAttachmentContext,
-        expected_scope_id: str,
-    ) -> bool:
-        context_fn = self._attachment_context_fn
-        if context_fn is None:
-            return False
-        try:
-            current = context_fn()
-        except Exception:
-            return False
-        return bool(
-            current == expected
-            and current.valid_for(expected_scope_id)
-            and _scope_matches(self._scope_fn, expected_scope_id)
-        )
-
-    def _source_matches(
-        self,
-        source_state: str,
-        expected_home_control: HomeBattleControl,
-        *,
-        initial_frame: Any = None,
-        stable: bool = False,
-    ) -> bool:
-        attempts = 2 if stable else 1
-        frame = initial_frame
-        for attempt in range(attempts):
-            try:
-                if frame is None or attempt > 0:
-                    frame = self._capture_fn()
-                if frame is None:
-                    return False
-                detection = self._detector(frame)
-                state = str(detection.get("state") or "").upper()
-                if source_state == "RUNNING":
-                    matched = state == "RUNNING"
-                else:
-                    matched = bool(
-                        state in {"HOME", "HOME_SCREEN"}
-                        and self._home_control_fn(frame).control
-                        is expected_home_control
-                    )
-                if not matched:
-                    return False
-            except Exception:
-                return False
-            if stable and attempt == 0:
-                self._sleep_fn(0.2)
-        return True
-
-
 def history_sources_compatible(
     first: Optional[Mapping[str, Any]],
     second: Optional[Mapping[str, Any]],
@@ -776,27 +449,6 @@ def valid_history_tail_advance(
     if previous_count < previous_capacity:
         return latest_count == previous_count + 1
     return latest_count == previous_capacity
-
-
-def _scope_matches(
-    scope_fn: Callable[[], Optional[Mapping[str, Any]]],
-    expected_scope_id: str,
-) -> bool:
-    try:
-        scope = scope_fn()
-    except Exception:
-        return False
-    return bool(
-        isinstance(scope, Mapping)
-        and str(scope.get("run_id") or "") == str(expected_scope_id or "")
-    )
-
-
-def _action_allowed(action_guard_fn: Callable[[], bool]) -> bool:
-    try:
-        return action_guard_fn() is True
-    except Exception:
-        return False
 
 
 def _safe_reason(value: Any) -> str:
@@ -885,23 +537,6 @@ def _ui_fallback(
     )
 
 
-def _blocked(
-    reason: str,
-    *,
-    background_dispatched: bool = False,
-    operator_workflow_interrupted: bool = False,
-    source_restored: bool = True,
-) -> PlayerSaveHistoryReadResult:
-    return PlayerSaveHistoryReadResult(
-        PlayerSaveHistoryReadStatus.BLOCKED,
-        _safe_reason(reason),
-        safe_ui_fallback=False,
-        background_dispatched=background_dispatched,
-        operator_workflow_interrupted=operator_workflow_interrupted,
-        source_restored=source_restored,
-    )
-
-
 __all__ = [
     "ACTIVITY_HISTORY_METADATA_SCHEMA_VERSION",
     "BATTLE_HISTORY_UI_MAPPING_ID",
@@ -912,7 +547,6 @@ __all__ = [
     "PlayerSaveAttachmentContext",
     "PlayerSaveHistoryReadResult",
     "PlayerSaveHistoryReadStatus",
-    "PlayerSaveHistoryReader",
     "corroborate_ui_and_save_history",
     "history_metadata_from_acquisition",
     "history_sources_compatible",

@@ -13,11 +13,7 @@ import copy
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Optional
 
-from core.player_save_acquisition import (
-    PlayerSaveAcquisitionBundle,
-    PlayerSaveAcquisitionType,
-    StablePlayerSaveAcquirer,
-)
+from core.player_save_acquisition import PlayerSaveAcquisitionBundle
 
 
 SCHEMA_VERSION = 1
@@ -484,23 +480,6 @@ def derive_tournament_conditions_from_save(
     )
 
 
-def capture_current_tournament_conditions(
-    *,
-    acquirer: StablePlayerSaveAcquirer,
-) -> dict[str, Any]:
-    """Project one shared stable acquisition without changing game state."""
-
-    if not isinstance(acquirer, StablePlayerSaveAcquirer):
-        raise TypeError("Tournament capture requires the shared acquirer")
-    acquisition = acquirer.acquire(
-        PlayerSaveAcquisitionType.PASSIVE_STABLE_READ
-    )
-    try:
-        return tournament_conditions_from_acquisition(acquisition)
-    except Exception:
-        return unavailable_tournament_conditions("save_capture_failed")
-
-
 def tournament_conditions_from_acquisition(
     acquisition: PlayerSaveAcquisitionBundle,
 ) -> dict[str, Any]:
@@ -571,7 +550,6 @@ __all__ = [
     "MAPPING_ID",
     "SCHEMA_VERSION",
     "SUPPORTED_VERSION",
-    "capture_current_tournament_conditions",
     "derive_tournament_conditions",
     "derive_tournament_conditions_from_save",
     "tournament_conditions_from_acquisition",

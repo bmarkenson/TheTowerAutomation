@@ -37,11 +37,12 @@ performs no Retry or Surrender.
 
 An explicitly authorized interactive-development test may instead preclaim one
 ordinary battle with `owned_battle_start=true` while a fresh exact Home
-`NEW_BATTLE` lease is active. That claim must preserve the same runtime/PID,
-exact target and generation, activity scope, and non-Tournament battle from the
-verified start through Game Over. The lease itself ends at Game Over;
-production may use the retained process-local claim only for its guarded
-minimal return-to-Home terminal route. It does not authorize Retry, terminal
+`NEW_BATTLE` lease is active. The Home preclaim is provisional; activity scope
+is irrelevant. Guarded terminal cleanup requires the same runtime/PID, exact
+target and generation, and a force-bound non-Tournament `ActiveRoundIdentity`
+matching Game Over. If the suppressive lease prevents that identity checkpoint,
+production declines cleanup. The lease itself ends at Game Over; a proven
+process-local claim may authorize only the minimal return-to-Home route. It does not authorize Retry, terminal
 lease reacquisition, representative collection, another battle, or retroactive
 ownership. Pause, Stop, replacement, or ambiguity sends no cleanup input.
 

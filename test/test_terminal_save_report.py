@@ -26,6 +26,7 @@ from core.player_save_history import history_metadata_from_acquisition
 
 MAPPING_ID = "data-9-game-1073"
 SCOPE_ID = "current-run"
+ACTIVE_ROUND_ID = "e" * 64
 
 
 class _Entry:
@@ -126,6 +127,7 @@ def _binding():
         "schema_version": 1,
         "status": "bound",
         "activity_scope_run_id": SCOPE_ID,
+        "active_round_identity_fingerprint": ACTIVE_ROUND_ID,
     }
 
 
@@ -147,6 +149,7 @@ def _acquisition(snapshot, *, terminal_state="GAME_OVER"):
             observed_at=started,
             runtime_session_id="runtime-1",
             activity_scope_id=SCOPE_ID,
+            active_round_identity_fingerprint=ACTIVE_ROUND_ID,
         ),
     )
 
@@ -204,13 +207,12 @@ def test_terminal_mapping_workflow_binds_semantic_neutral_tail():
 
     assert workflow is not None
     assert workflow["game_state"] == "terminal_game_over"
-    assert workflow["active_round_identity_fingerprint"] == "b" * 64
+    assert workflow["active_round_identity_fingerprint"] == ACTIVE_ROUND_ID
 
 
 @pytest.mark.parametrize(
     "mutation",
     (
-        "scope_changed",
         "target_changed",
         "effective_authority_changed",
         "terminal_kind_changed",
@@ -229,9 +231,7 @@ def test_terminal_mapping_workflow_rejects_lost_boundary_authority(mutation):
     )
     binding = _binding()
     terminal = "GAME_OVER"
-    if mutation == "scope_changed":
-        scope = {**scope, "run_id": "replacement-run"}
-    elif mutation == "target_changed":
+    if mutation == "target_changed":
         transition["handoff"]["source"][
             "target_generation_fingerprint"
         ] = "f" * 64
@@ -256,6 +256,30 @@ def test_terminal_mapping_workflow_rejects_lost_boundary_authority(mutation):
     assert workflow is None
 
 
+def test_terminal_mapping_workflow_ignores_report_scope_rotation():
+    snapshot = _snapshot(count=30, semantic_status="unavailable")
+    acquisition = _acquisition(snapshot)
+    source_scope = _scope(_metadata(fingerprint="a" * 64, count=29))
+    transition = terminal_history_transition_from_acquisition(
+        acquisition,
+        terminal_state="GAME_OVER",
+        run_binding=_binding(),
+        activity_scope=source_scope,
+    )
+
+    workflow = terminal_mapping_workflow_provenance(
+        acquisition,
+        terminal_state="GAME_OVER",
+        run_binding=_binding(),
+        activity_scope={**source_scope, "run_id": "replacement-report-run"},
+        history_transition=transition,
+        pid=4242,
+    )
+
+    assert workflow is not None
+    assert workflow["active_round_identity_fingerprint"] == ACTIVE_ROUND_ID
+
+
 def test_terminal_save_report_accepts_capacity_rollover_and_tournament_kind():
     report = terminal_save_report_from_acquisition(
         _acquisition(
@@ -273,19 +297,35 @@ def test_terminal_save_report_accepts_capacity_rollover_and_tournament_kind():
     assert report["history_transition"]["status"] == "capacity_rollover"
 
 
+def test_terminal_save_report_rejects_an_unbound_battle():
+    scope = {"schema_version": 1, "run_id": SCOPE_ID}
+    scope["latest_completed_battle"] = _metadata(
+        fingerprint="a" * 64,
+        count=29,
+    )
+
+    report = terminal_save_report_from_acquisition(
+        _acquisition(_snapshot(count=30)),
+        terminal_state="GAME_OVER",
+        run_binding={"status": "unbound"},
+        activity_scope=scope,
+    )
+
+    assert not terminal_save_report_complete(report)
+    assert report["reason"] == "terminal_run_unbound"
+    assert report["ui_fallback"]["required"]
+
+
 @pytest.mark.parametrize(
-    ("binding", "baseline", "reason"),
+    "baseline",
     (
-        ({"status": "unbound"}, _metadata(fingerprint="a" * 64, count=29), "terminal_run_unbound"),
-        (_binding(), None, "pre_terminal_history_baseline_unavailable"),
-        (_binding(), _metadata(fingerprint="b" * 64, count=30), "terminal_history_tail_unchanged"),
-        (_binding(), _metadata(fingerprint="a" * 64, count=28), "terminal_history_tail_transition_invalid"),
+        None,
+        _metadata(fingerprint="b" * 64, count=30),
+        _metadata(fingerprint="a" * 64, count=28),
     ),
 )
-def test_terminal_save_report_fails_closed_without_causal_tail_proof(
-    binding,
+def test_natural_terminal_boundary_does_not_require_a_history_baseline(
     baseline,
-    reason,
 ):
     scope = {"schema_version": 1, "run_id": SCOPE_ID}
     if baseline is not None:
@@ -294,13 +334,14 @@ def test_terminal_save_report_fails_closed_without_causal_tail_proof(
     report = terminal_save_report_from_acquisition(
         _acquisition(_snapshot(count=30)),
         terminal_state="GAME_OVER",
-        run_binding=binding,
+        run_binding=_binding(),
         activity_scope=scope,
     )
 
-    assert not terminal_save_report_complete(report)
-    assert report["reason"] == reason
-    assert report["ui_fallback"]["required"]
+    assert terminal_save_report_complete(report)
+    assert report["history_transition"]["status"] == (
+        "causal_terminal_boundary"
+    )
 
 
 def test_semantic_forward_report_retains_only_monitor_bound_terminal_claims():

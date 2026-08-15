@@ -34,7 +34,7 @@ def _normalized_repair_authority(
         for field in (
             "runtime_id",
             "adb_target",
-            "activity_scope_run_id",
+            "active_round_identity_fingerprint",
         )
     }
     pid = value.get("pid")

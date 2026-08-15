@@ -39,6 +39,8 @@ from handlers.game_restarted_handler import (
 
 
 REQUEST_ID = "0123456789abcdef0123456789abcdef"
+ACTIVE_BATTLE_IDENTITY = "a" * 64
+REPLACEMENT_BATTLE_IDENTITY = "b" * 64
 RUNTIME = {
     "runtime_id": "runtime-recovery",
     "pid": 1234,
@@ -240,7 +242,7 @@ def test_present_malformed_or_operator_unbound_host_target_is_invalid():
         "requested_at": "2026-08-10T10:00:00+00:00",
         "updated_at": "2026-08-10T10:00:00+00:00",
         "runtime": RUNTIME,
-        "battle_scope": "run-1",
+        "battle_scope": ACTIVE_BATTLE_IDENTITY,
         "trigger": {"request_kind": "operator"},
     }
 
@@ -863,7 +865,7 @@ def _maintenance(state: str = "host_restarted") -> dict:
         "requested_at": "2026-08-10T10:00:00+00:00",
         "updated_at": "2026-08-10T10:00:00+00:00",
         "runtime": RUNTIME,
-        "battle_scope": "run-1",
+        "battle_scope": ACTIVE_BATTLE_IDENTITY,
     }
 
 
@@ -878,6 +880,7 @@ def test_runtime_installs_recovery_hold_and_captures_pre_restart_wave():
     )
     app._last_wave_value = 1_234
     app._current_run_scope_id = lambda: "run-1"
+    app._active_round_identity_fingerprint = ACTIVE_BATTLE_IDENTITY
     app._activation_tracker = lambda: SimpleNamespace(
         intro_sprint_active=False
     )
@@ -894,7 +897,7 @@ def test_runtime_installs_recovery_hold_and_captures_pre_restart_wave():
 
     assert app._emulator_maintenance_hold_active is True
     assert app._emulator_replay_window.high_water_wave == 1_234
-    assert app._emulator_replay_window.battle_scope == "run-1"
+    assert app._emulator_replay_window.battle_scope == ACTIVE_BATTLE_IDENTITY
     assert app._emulator_recovery_ack["state"] == "pending"
     assert app._emulator_recovery_ack["runtime"] == RUNTIME
     stop_tapper.assert_called_once_with()
@@ -913,6 +916,7 @@ def test_unacknowledged_host_request_expires_before_any_host_mutation():
         control_request_identity={"state_request_id": "state-enable-1"},
     )
     app._current_run_scope_id = lambda: "run-1"
+    app._active_round_identity_fingerprint = ACTIVE_BATTLE_IDENTITY
     app._finish_emulator_recovery = Mock(return_value=True)
     expired_at = (
         datetime.fromisoformat(maintenance["requested_at"]).timestamp() + 181
@@ -940,16 +944,17 @@ def test_request_is_cancelled_if_battle_changes_before_host_acknowledgement():
         control_request_identity={"state_request_id": "state-enable-1"},
     )
     app._current_run_scope_id = lambda: "replacement-run"
+    app._active_round_identity_fingerprint = REPLACEMENT_BATTLE_IDENTITY
     app._finish_emulator_recovery = Mock(return_value=True)
 
     app._sync_emulator_maintenance_control_boundary()
 
     app._finish_emulator_recovery.assert_called_once_with(
         maintenance,
-        disposition="battle_scope_replaced",
+        disposition="battle_identity_replaced",
         reason=(
-            "the active battle scope changed before Windows acknowledged any "
-            "host mutation"
+            "the forced save battle identity changed before Windows "
+            "acknowledged any host mutation"
         ),
         now=None,
     )
@@ -965,12 +970,13 @@ def _recovery_app() -> App:
         control_request_identity={"state_request_id": "state-enable-1"},
     )
     app._current_run_scope_id = lambda: "run-1"
+    app._active_round_identity_fingerprint = ACTIVE_BATTLE_IDENTITY
     app._emulator_maintenance_hold_active = True
     app._emulator_recovery_request_id = REQUEST_ID
     app._emulator_replay_window = RestartReplayWindow(
         REQUEST_ID,
         100,
-        battle_scope="run-1",
+        battle_scope=ACTIVE_BATTLE_IDENTITY,
     )
     app._emulator_recovery_resume_attempts = 0
     app._emulator_recovery_launch_attempts = 0

@@ -21,6 +21,9 @@ from core.run_state import AUTOMATION
 from core.runtime_failure_policy import RuntimeFailureKind
 
 
+ACTIVE_BATTLE_IDENTITY = "a" * 64
+
+
 def _set_running_context(
     authority: RuntimeActionAuthority,
     *,
@@ -30,11 +33,13 @@ def _set_running_context(
     scope: str = "run-1",
     stopped: bool = False,
     active_battle: bool = True,
+    battle_identity: str | None = ACTIVE_BATTLE_IDENTITY,
 ) -> None:
     authority.update_context(
         global_pause=paused,
         active_battle=active_battle,
         battle_scope=scope,
+        battle_identity=(battle_identity if active_battle else None),
         primary_state=state,
         holds=holds,
         runtime_stopped=stopped,
@@ -178,7 +183,6 @@ def test_emulator_recovery_supersedes_ordinary_internal_holds_only():
     superseded = tuple(
         AuthorityHoldState(hold, "ordinary recovery boundary")
         for hold in (
-            AuthorityHold.ACTIVITY_CONTINUITY,
             AuthorityHold.RUN_INITIALIZATION,
             AuthorityHold.SESSION_PREFLIGHT,
             AuthorityHold.OPERATOR_WORKFLOW,
@@ -221,10 +225,11 @@ def test_emulator_replay_hold_allows_only_independent_collectors():
     app._emulator_maintenance_hold_active = True
     app._emulator_recovery_request_id = "maintenance-1"
     app._emulator_recovery_force_new_battle = False
+    app._active_round_identity_fingerprint = ACTIVE_BATTLE_IDENTITY
     app._emulator_replay_window = RestartReplayWindow(
         "maintenance-1",
         100,
-        battle_scope="run-1",
+        battle_scope=ACTIVE_BATTLE_IDENTITY,
     )
     app._emulator_replay_window.mark_resume_dispatched()
     app._supervisor = SimpleNamespace(
@@ -552,12 +557,40 @@ def test_multi_screen_route_requires_running_source_and_exclusive_lease():
     assert authority.resume_auxiliary_route(lease) is not None
 
     _set_running_context(authority, scope="run-2")
+    # Activity scope is a log/report cursor. It cannot invalidate an exact
+    # route lease while the forced save battle identity remains current.
+    assert authority.resume_auxiliary_route(lease) is not None
+    assert authority.decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.DAILY_MISSION_REWARDS,
+        route_id=lease.route_id,
+    ).allowed
+
+    _set_running_context(authority, battle_identity="b" * 64)
     assert authority.resume_auxiliary_route(lease) is None
     assert not authority.decision(
         RuntimeActionClass.AUXILIARY_COLLECTION,
         collector=AuxiliaryCollector.DAILY_MISSION_REWARDS,
         route_id=lease.route_id,
     ).allowed
+
+
+def test_battle_bound_input_waits_for_forced_save_identity():
+    authority = RuntimeActionAuthority()
+    _set_running_context(authority, battle_identity=None)
+
+    assert authority.decision(RuntimeActionClass.OBSERVATION).allowed
+    assert not authority.decision(RuntimeActionClass.STRATEGY_ACTION).allowed
+    assert not authority.decision(RuntimeActionClass.LIFECYCLE_ACTION).allowed
+    assert not authority.decision(
+        RuntimeActionClass.AUXILIARY_COLLECTION,
+        collector=AuxiliaryCollector.IN_BATTLE_AD_GEM,
+    ).allowed
+    assert authority.begin_auxiliary_route(
+        (AuxiliaryCollector.DAILY_MISSION_REWARDS,),
+        battle_scope="log-scope",
+        source_state="RUNNING",
+    ) is None
 
 
 def test_gate_transition_timestamps_change_only_for_real_transitions():
@@ -652,13 +685,9 @@ def test_app_auxiliary_guard_has_no_capture_or_status_work_in_tap_hot_path():
     app._authority_battle_active = True
     app._authority_primary_state = "RUNNING"
     app._authority_holds = ()
+    app._active_round_identity_fingerprint = ACTIVE_BATTLE_IDENTITY
     app._action_authority = RuntimeActionAuthority()
-    app._action_authority.update_context(
-        global_pause=False,
-        active_battle=True,
-        battle_scope="run-1",
-        primary_state="RUNNING",
-    )
+    _set_running_context(app._action_authority)
     _activate_gate(app._action_authority)
     app._current_run_scope_id = Mock(return_value="run-1")
     app._publish_action_authority = Mock()
@@ -668,16 +697,16 @@ def test_app_auxiliary_guard_has_no_capture_or_status_work_in_tap_hot_path():
         AuxiliaryCollector.FLOATING_GEM_SCAN
     )
     assert guard()
-    # One read binds the worker and one refreshes the identity before its tap;
-    # _runtime_action_guard reuses that refresh rather than parsing it twice.
-    assert app._current_run_scope_id.call_count == 2
+    # The scope is published once as metadata; it is not reread as tap
+    # authority in the hot path.
+    assert app._current_run_scope_id.call_count == 1
     app._supervisor.apply_control.assert_called_once_with()
     app._capture_frame.assert_not_called()
     app._publish_action_authority.assert_not_called()
 
     app._supervisor.is_paused = True
     assert not guard()
-    assert app._current_run_scope_id.call_count == 3
+    assert app._current_run_scope_id.call_count == 2
     assert app._supervisor.apply_control.call_count == 2
 
     app._supervisor.is_paused = False
@@ -691,7 +720,7 @@ def test_app_auxiliary_guard_has_no_capture_or_status_work_in_tap_hot_path():
     )
     assert not guard()
     # Gate replacement fails before any new device-adjacent or status work.
-    assert app._current_run_scope_id.call_count == 3
+    assert app._current_run_scope_id.call_count == 2
     assert app._supervisor.apply_control.call_count == 2
 
 
@@ -850,6 +879,13 @@ def test_success_strategy_change_and_natural_boundary_end_the_scoped_gate():
     _activate_gate(authority)
     app._current_run_scope_id.return_value = "run-2"
     app._observe_strategy_gate_boundary({"state": "STORE"})
+    assert authority.strategy_gate is not None
+    app._observe_strategy_gate_boundary(
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "NEW_BATTLE",
+        }
+    )
     assert authority.strategy_gate is None
 
 

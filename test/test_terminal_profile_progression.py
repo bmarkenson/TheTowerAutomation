@@ -57,7 +57,7 @@ def _install_shared_acquirer(app, decoded):
     return pull, parse
 
 
-def test_terminal_progression_uses_stable_exact_target_and_marks_acquisition():
+def test_terminal_progression_wrapper_never_requests_a_runtime_save():
     target = AdbTargetSnapshot("localhost:5555", 4, True)
     app = App.__new__(App)
     app._adb_target_session = _StableSession(target, target)
@@ -70,36 +70,10 @@ def test_terminal_progression_uses_stable_exact_target_and_marks_acquisition():
 
     result = app._capture_terminal_profile_progression()
 
-    assert result["status"] == "complete"
-    assert result["source"]["acquisition"]["type"] == "passive_stable_read"
-    pull.assert_called_once_with(
-        device_id="localhost:5555",
-        attempts=3,
-        settle_seconds=0.1,
-        read_fn=quiet_player_save_read,
-    )
-    assert parse.call_args.args == (b"save",)
-    assert parse.call_args.kwargs["source_name"] == "playerInfo.dat"
-
-
-def test_terminal_progression_discards_snapshot_across_target_generation_change():
-    app = App.__new__(App)
-    app._adb_target_session = _StableSession(
-        AdbTargetSnapshot("localhost:5555", 4, True),
-        AdbTargetSnapshot("localhost:5555", 5, True),
-    )
-    decoded = SimpleNamespace(
-        profile_progression=_normalized_progression(),
-        mapping_id="data-9-game-1073",
-        save_revision=47316,
-    )
-    _install_shared_acquirer(app, decoded)
-
-    result = app._capture_terminal_profile_progression()
-
     assert result["status"] == "unavailable"
-    assert result["reason"] == "adb_target_changed_during_terminal_capture"
-    assert result["identity"]["mapping_id"] is None
+    assert result["reason"] == "unsupported_terminal_state"
+    pull.assert_not_called()
+    parse.assert_not_called()
 
 
 def test_terminal_progression_is_nonblocking_without_an_owned_target():
@@ -200,7 +174,7 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
     app = App.__new__(App)
     app._adb_target_session = _StableSession(target, target)
     app._player_save_runtime_session_id = "runtime-1"
-    app._activity_continuity = SimpleNamespace(
+    app._activity_history_reporter = SimpleNamespace(
         publish_terminal_history_handoff=Mock()
     )
     app._perk_save_monitor = Mock()
@@ -277,7 +251,7 @@ def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
         report_bundle,
         context=monitor_context,
     )
-    app._activity_continuity.publish_terminal_history_handoff.assert_called_once_with(
+    app._activity_history_reporter.publish_terminal_history_handoff.assert_called_once_with(
         transition
     )
 
