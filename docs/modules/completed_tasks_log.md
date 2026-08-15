@@ -39,6 +39,24 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Same-battle process restart reattachment
+
+- Exact code/test candidate `ea81b24` makes complete Stop retain a one-shot
+  handoff only from fresh, exact-owner evidence for the active battle. The
+  lifecycle has no origin distinction, so this covers battles automation
+  started and battles it attached to later; advancing waves retain the same
+  battle identity.
+- Start launches the replacement Paused with a transient `next_run` marker,
+  restores the normal persistent startup policy, creates a fresh ordinary
+  Attach, and returns Enabled only after forced serialization proves and adopts
+  the pre-Stop identity. A different or ended battle, changed target, or
+  unavailable proof remains Paused for explicit intent.
+- Focused process/control validation passed 270 tests. The required complete
+  checkpoint passed compilation, state definitions, clickmap integrity with
+  zero errors and the established 44 orphan notices, and all 2,853 repository
+  tests in 454.66 seconds using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-15 Tournament attachment Orb Distance save alias
 
 - [`ISSUE-2026-051`](../issues/resolved-2026.md#tournament-attachment-reopened-orb-distance-despite-a-bound-save)
