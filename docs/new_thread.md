@@ -49,9 +49,8 @@ named step. A guard leaves the outcome pending, not complete.
 3. Make one coherent change and use focused validation while the candidate can
    still change.
 4. Recheck the target diff, stage only owned hunks, and commit the exact
-   candidate before running its final promotion gate. When the gate result must
-   be added afterward, put only the concise completion record in the immediately
-   following commit under the production procedure's
+   candidate before running its final promotion gate. Add a later completion
+   record only under the production procedure's
    [completion-record exception](operations/production_promotion.md#completion-record-exception).
 5. If a guard blocks the outcome, follow its documented wait or recovery path;
    never weaken it or claim completion.
@@ -73,19 +72,13 @@ change, and run `.venv/bin/python tools/development.py checkpoint` only when the
 [production procedure](operations/production_promotion.md#choose-the-candidate-gate)
 requires the complete gate.
 
-A complete checkpoint against a mutable or uncommitted working tree is
-development evidence, not the final exact-candidate gate. Finish source, tests,
-configuration, generated inputs, and other gate inputs; commit exact candidate
-`V`; verify its tracked worktree is clean; then run the checkpoint at `V`.
-Do not add or change a test assertion after that gate and expect a later mixed
-commit to qualify for the completion-record exception. Fold such a change into
-a new exact candidate and apply the gate selected by the production procedure.
-
-Tests must write intentional logs, screenshots, control files, and failure
-evidence to pytest temporary directories or the checkpoint's isolated generated
-root, never to ignored runtime-evidence paths in the feature worktree. Inspect
-non-cache ignored output before freezing the candidate and repair a leaking test
-while the worktree still has an owner; do not defer discovery until retirement.
+Before a complete checkpoint, finish and commit every gate input as exact
+candidate `V`. A checkpoint against a mutable or uncommitted working tree is
+development evidence only. Follow the production procedure's
+[exact-candidate sequence](operations/production_promotion.md#exact-candidate-before-the-final-gate).
+Tests write logs, screenshots, control files, and failure evidence only to
+pytest temporary directories or the checkpoint's isolated generated root.
+Inspect non-cache ignored output and repair leaks before freezing the candidate.
 
 Do not install packages ad hoc. The bootstrap's fingerprint, lock, completion,
 and isolation contract is in
