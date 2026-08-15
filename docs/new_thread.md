@@ -67,15 +67,20 @@ creates or selects the fingerprinted environment:
 ```
 
 Run project Python through `.venv/bin/python`. `status` diagnoses a selection;
-it does not bracket successful commands. Use focused tests while work can
-change, and run `.venv/bin/python tools/development.py checkpoint` only when the
+it does not bracket successful commands. While work can change, use the least
+expensive focused checks that exercise the affected contract. The complete
+checkpoint is a risk-selected final gate, not a general confidence,
+pre-commit, or cleanup check; run it only when the
 [production procedure](operations/production_promotion.md#choose-the-candidate-gate)
-requires the complete gate.
+requires its additional coverage.
 
-Before a complete checkpoint, finish and commit every gate input as exact
-candidate `V`. A checkpoint against a mutable or uncommitted working tree is
-development evidence only. Follow the production procedure's
-[exact-candidate sequence](operations/production_promotion.md#exact-candidate-before-the-final-gate).
+Before a required complete checkpoint, finish and commit every gate input as
+exact candidate `V`, then run it once for that unchanged candidate. Do not run
+it against a mutable or uncommitted working tree; use focused checks until `V`
+exists. Repeat only when the production procedure's
+[invalidation rule](operations/production_promotion.md#exact-candidate-before-the-final-gate)
+says the retained evidence no longer applies; otherwise rerun only newly
+affected checks.
 Tests write logs, screenshots, control files, and failure evidence only to
 pytest temporary directories or the checkpoint's isolated generated root.
 Inspect non-cache ignored output and repair leaks before freezing the candidate.
