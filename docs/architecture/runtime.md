@@ -1876,7 +1876,10 @@ hold or replaying input.
   It does not seed their completion variables. Game Over, Tournament Results,
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
-  preserve the attachment.
+  preserve the attachment. Managed same-battle Stop/Start uses `next_run` only
+  as a transient launch marker when a durable handoff is pending. That runtime
+  waits for a fresh Attach rather than treating the retained identity as
+  authority, and the normal persisted startup policy is restored immediately.
 - Save-backed battle identity is independent of process-local log/report
   segmentation. Home `NEW_BATTLE` forces a save and must prove an inactive
   round before launch. The first stable `RUNNING` after Start, direct Retry,
@@ -1923,20 +1926,27 @@ hold or replaying input.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.
-- The guarded active-battle reload makes that contract executable. A refreshed
-  same-state Pause directive causes the current runtime to acknowledge intent
-  and force its next captured frame into the status stream. Only a fresh
-  `RUNNING` result from the systemd MainPID's held ADB lock may cross the stop
-  boundary. The replacement launches once with `next_run`; the persistent
-  next-start policy is restored immediately after systemd copies its launch
-  environment. Normal control intent returns only after the replacement proves
-  its distinct PID, lock, attached startup, Pause consumption, and first
-  observation. Any failure after Pause preparation begins remains paused.
+- The guarded same-battle replacement makes that contract executable across
+  the ordinary complete Stop and later Start calls. Stop records a handoff only
+  from a fresh `RUNNING` observation, exact systemd MainPID and held ADB lock,
+  force-proven battle identity, and an already owned active-battle lifecycle.
+  Ownership has no origin distinction here: a battle started by automation and
+  one attached later produce the same eligible lifecycle. The replacement
+  launches once with `next_run`; the persistent next-start policy is restored
+  immediately after systemd copies its launch environment. The new runtime
+  consumes no old input authority. It creates a normal fresh Attach bound to
+  the new PID and lock, and forced serialization must equal the handoff battle
+  identity before lifecycle adoption and ordinary actions resume. Waves may
+  advance throughout because they do not change that identity. A later or
+  ended battle, changed target, unavailable proof, or reporting failure leaves
+  the replacement Paused and records a terminal handoff result.
 - Remote lifecycle control is limited to the configured
   `thetower-automation.service` systemd user unit. A start crosses the process
-  boundary under persisted `PAUSED` and may publish `RUNNING` only after the
-  unit is active. A stop persists `STOPPED` before systemd signals the unit;
-  guarded active-battle reload retains `PAUSED` across its stop/start boundary.
+  boundary under persisted `PAUSED`. Without a same-battle handoff it waits for
+  explicit intent. With one, the control service publishes `RUNNING` only after
+  the replacement unit is active and then waits for the fresh Attach to finish.
+  A stop persists `STOPPED` and any eligible exact-battle handoff before systemd
+  signals the unit.
   A stopped request may persist one validated localhost ADB TCP port and one
   validated startup-gate policy for the next start; an acknowledged paused
   runtime may apply that same restricted port as a live target handoff. Remote

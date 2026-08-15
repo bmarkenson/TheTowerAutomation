@@ -1564,6 +1564,92 @@ def test_directive_store_rejects_mismatched_intent_and_serializes_workflows(
         store.transition_battle_workflow(first["request_id"], "completed")
 
 
+def test_process_stop_handoff_binds_one_fresh_same_target_attach(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    store.set_state("RUNNING", source="test")
+    source = _evidence(game_state="active_battle")
+
+    stopped = store.set_state_and_interrupt_operator_workflows(
+        "STOPPED",
+        "replace runtime",
+        source="test-stop",
+        restart_handoff_evidence=source,
+    )
+    handoff = stopped["process_restart_handoff"]
+
+    assert handoff["status"] == "pending"
+    assert handoff["expected_active_round_identity_fingerprint"] == "a" * 64
+    assert handoff["source_evidence"] == source
+
+    store.set_state("PAUSED", source="test-start")
+    replacement = _evidence(
+        game_state="active_battle",
+        observation_id="runtime-2:1",
+        runtime_id="runtime-2",
+    )
+    with pytest.raises(ValueError, match="no longer matches"):
+        store.request_battle_workflow(
+            "attach_battle",
+            evidence={
+                **replacement,
+                "active_round_identity_fingerprint": "b" * 64,
+            },
+            process_restart_handoff_id=handoff["handoff_id"],
+        )
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=replacement,
+        process_restart_handoff_id=handoff["handoff_id"],
+        source="replacement-runtime",
+    )
+    bound = store.status()["process_restart_handoff"]
+
+    assert workflow["status"] == "requested"
+    assert bound["workflow_id"] == workflow["request_id"]
+    with pytest.raises(ValueError, match="expected battle identity"):
+        store.finish_process_restart_handoff(
+            handoff["handoff_id"],
+            "completed",
+            reason="wrong battle",
+            workflow_id=workflow["request_id"],
+            actual_active_round_identity="b" * 64,
+        )
+
+    completed = store.finish_process_restart_handoff(
+        handoff["handoff_id"],
+        "completed",
+        reason="same battle force-validated",
+        workflow_id=workflow["request_id"],
+        actual_active_round_identity="a" * 64,
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["actual_active_round_identity_fingerprint"] == "a" * 64
+
+
+def test_new_stop_without_owned_battle_cancels_pending_restart_handoff(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    source = _evidence(game_state="active_battle")
+    first = store.set_state_and_interrupt_operator_workflows(
+        "STOPPED",
+        "replace runtime",
+        source="first-stop",
+        restart_handoff_evidence=source,
+    )
+
+    second = store.set_state_and_interrupt_operator_workflows(
+        "STOPPED",
+        "no exact active battle remains",
+        source="second-stop",
+    )
+
+    assert second["process_restart_handoff"]["handoff_id"] == (
+        first["process_restart_handoff"]["handoff_id"]
+    )
+    assert second["process_restart_handoff"]["status"] == "cancelled"
+
+
 @pytest.mark.parametrize("request_kind", ("battle", "setup_capture"))
 def test_input_owner_request_waits_for_current_dispatch(tmp_path, request_kind):
     store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
@@ -2069,6 +2155,63 @@ def test_operator_startup_waits_for_matching_intent_and_enable(
     assert manager.maybe_run_start({"state": "RUNNING"}) is True
 
 
+def test_replacement_runtime_creates_fresh_attach_for_owned_battle(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(tmp_path / "actions.log"))
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    source = _evidence(
+        game_state="active_battle",
+        runtime_id="stopped-runtime",
+    )
+    stopped = store.set_state_and_interrupt_operator_workflows(
+        "STOPPED",
+        "replace runtime",
+        source="control-surface-process-stop",
+        restart_handoff_evidence=source,
+    )
+    handoff_id = stopped["process_restart_handoff"]["handoff_id"]
+    store.set_state("PAUSED", source="control-surface-process-start")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    replacement = _evidence(
+        game_state="active_battle",
+        observation_id="replacement-runtime:1",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    replacement["pid"] = owner["pid"]
+    replacement.pop("active_round_identity_fingerprint")
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._process_restart_reattachment_enabled = True
+    app._process_restart_reattachment_attempted = False
+    app._control_observation = {
+        key: value
+        for key, value in replacement.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+
+    workflow = supervisor.battle_workflow
+    handoff = supervisor.process_restart_handoff
+    assert workflow is not None
+    assert workflow["intent"] == "attach_battle"
+    assert workflow["status"] == "awaiting_enable"
+    assert workflow["evidence"]["runtime_id"] == owner["runtime_id"]
+    assert handoff is not None
+    assert handoff["handoff_id"] == handoff_id
+    assert handoff["workflow_id"] == workflow["request_id"]
+    assert handoff["expected_active_round_identity_fingerprint"] == "a" * 64
+
+
 @pytest.mark.parametrize("active_battle", (False, True))
 def test_idle_home_intent_hold_exposes_only_home_ad_gem(active_battle):
     app = App.__new__(App)
@@ -2524,13 +2667,29 @@ def test_dispatched_start_suspends_timeout_for_known_modal_then_retries_once(
     assert supervisor.battle_workflow["status"] == "action_dispatched"
 
 
+@pytest.mark.parametrize("restart_handoff", (False, True))
 def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
     tmp_path,
     monkeypatch,
+    restart_handoff,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
     path = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(path)
+    handoff_id = None
+    if restart_handoff:
+        source = _evidence(
+            game_state="active_battle",
+            runtime_id="stopped-runtime",
+        )
+        source["active_round_identity_fingerprint"] = "b" * 64
+        stopped = store.set_state_and_interrupt_operator_workflows(
+            "STOPPED",
+            "replace runtime",
+            source="control-surface-process-stop",
+            restart_handoff_evidence=source,
+        )
+        handoff_id = stopped["process_restart_handoff"]["handoff_id"]
     store.set_state("RUNNING", source="test")
     supervisor = AutomationSupervisor(control_file=str(path))
     supervisor.apply_control()
@@ -2547,6 +2706,7 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
     workflow = store.request_battle_workflow(
         "attach_battle",
         evidence=evidence,
+        process_restart_handoff_id=handoff_id,
     )
     for status in ("acknowledged", "validating_save"):
         store.transition_battle_workflow(
@@ -2667,6 +2827,13 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
 
     assert app._complete_ready_attachment_after_adoption() is True
     assert supervisor.battle_workflow["status"] == "completed"
+    if restart_handoff:
+        handoff = supervisor.process_restart_handoff
+        assert handoff is not None
+        assert handoff["status"] == "completed"
+        assert handoff["actual_active_round_identity_fingerprint"] == (
+            identity_fingerprint
+        )
 
 
 def test_attach_completion_report_failure_never_reclaims_terminal_hold(
@@ -3413,6 +3580,82 @@ def test_empty_projection_cannot_classify_an_attachment_failure(
 
     assert supervisor.is_paused is False
     assert supervisor.battle_workflow["status"] == "validating_save"
+
+
+def test_restart_reattachment_pauses_when_forced_save_proves_new_battle(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    source = _evidence(
+        game_state="active_battle",
+        runtime_id="stopped-runtime",
+    )
+    stopped = store.set_state_and_interrupt_operator_workflows(
+        "STOPPED",
+        "replace runtime",
+        source="control-surface-process-stop",
+        restart_handoff_evidence=source,
+    )
+    handoff_id = stopped["process_restart_handoff"]["handoff_id"]
+    store.set_state("RUNNING", source="replacement-enabled")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    requested = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    requested["pid"] = owner["pid"]
+    requested.pop("active_round_identity_fingerprint")
+    workflow = supervisor.request_process_restart_reattachment(
+        handoff_id,
+        evidence=requested,
+    )
+    assert workflow is not None
+    for status in ("acknowledged", "validating_save"):
+        store.transition_battle_workflow(
+            workflow["request_id"],
+            status,
+            acknowledgement=requested,
+        )
+    supervisor.apply_control()
+    current = {**requested, "active_round_identity_fingerprint": "b" * 64}
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = MagicMock()
+    app._control_observation = {
+        key: value
+        for key, value in current.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    acquisition, temporal, context = _running_reconciliation_objects(current)
+
+    completed = app._complete_save_backed_operator_reconciliation(
+        outcome=SimpleNamespace(battle_relation="later_battle"),
+        acquisition=acquisition,
+        temporal_binding=temporal,
+        observations=object(),
+        context=context,
+    )
+
+    assert completed is False
+    assert supervisor.is_paused is True
+    assert supervisor.battle_workflow["status"] == "interrupted"
+    handoff = supervisor.process_restart_handoff
+    assert handoff is not None
+    assert handoff["status"] == "failed"
+    assert handoff["actual_active_round_identity_fingerprint"] == "b" * 64
+    app._mission_mgr.revoke_initial_battle_intent.assert_called_once_with(
+        "attach_battle",
+        request_id=workflow["request_id"],
+    )
 
 
 def test_empty_projection_cannot_classify_a_return_failure(

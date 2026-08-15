@@ -46,6 +46,7 @@ from core.control_directives import (
 from core.control_model import (
     validate_battle_workflow,
     validate_manual_control,
+    validate_process_restart_handoff,
     validate_setup_capture,
 )
 from core.strategy_profiles import is_configurable_strategy
@@ -163,6 +164,13 @@ class AutomationSupervisor:
         self._battle_workflow_error = bool(
             initial_directives.get("battle_workflow") is not None
             and self._battle_workflow is None
+        )
+        self._process_restart_handoff = validate_process_restart_handoff(
+            initial_directives.get("process_restart_handoff")
+        )
+        self._process_restart_handoff_error = bool(
+            initial_directives.get("process_restart_handoff") is not None
+            and self._process_restart_handoff is None
         )
         self._manual_control = validate_manual_control(
             initial_directives.get("manual_control")
@@ -303,6 +311,7 @@ class AutomationSupervisor:
             ),
             ("manual-control", self._manual_control_error),
             ("battle-workflow", self._battle_workflow_error),
+            ("process-restart-handoff", self._process_restart_handoff_error),
             ("setup-capture", self._setup_capture_error),
             ("emulator-maintenance", self._emulator_maintenance_error),
         ):
@@ -325,6 +334,22 @@ class AutomationSupervisor:
         """Return the latest validated explicit battle workflow directive."""
 
         return deepcopy(self._battle_workflow) if self._battle_workflow else None
+
+    @property
+    def process_restart_handoff(self) -> Optional[Dict[str, object]]:
+        """Return the latest same-battle process-restart handoff."""
+
+        return (
+            deepcopy(self._process_restart_handoff)
+            if self._process_restart_handoff
+            else None
+        )
+
+    @property
+    def process_restart_handoff_error(self) -> bool:
+        """Return whether the same-battle restart handoff is malformed."""
+
+        return bool(self._process_restart_handoff_error)
 
     @property
     def manual_control(self) -> Optional[Dict[str, object]]:
@@ -606,6 +631,13 @@ class AutomationSupervisor:
             self._battle_workflow_error = bool(
                 directives.get("battle_workflow") is not None
                 and self._battle_workflow is None
+            )
+            self._process_restart_handoff = validate_process_restart_handoff(
+                directives.get("process_restart_handoff")
+            )
+            self._process_restart_handoff_error = bool(
+                directives.get("process_restart_handoff") is not None
+                and self._process_restart_handoff is None
             )
             self._manual_control = validate_manual_control(
                 directives.get("manual_control")
@@ -1400,6 +1432,67 @@ class AutomationSupervisor:
             return None
         self._battle_workflow = dict(workflow) if workflow else None
         return dict(workflow) if workflow else None
+
+    def request_process_restart_reattachment(
+        self,
+        handoff_id: str,
+        *,
+        evidence: Mapping[str, object],
+        strategy: Optional[str] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Create the fresh Attach workflow for one exact restart handoff."""
+
+        try:
+            workflow = self._control_store.request_battle_workflow(
+                "attach_battle",
+                evidence=evidence,
+                strategy=strategy,
+                process_restart_handoff_id=handoff_id,
+                source="runtime-process-restart",
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[PROCESS_RESTART] Failed creating same-battle Attach "
+                f"workflow: {exc}",
+                "WARN",
+            )
+            return None
+        self._battle_workflow = dict(workflow)
+        handoff = deepcopy(self._process_restart_handoff)
+        if (
+            handoff is not None
+            and handoff.get("handoff_id") == handoff_id
+            and handoff.get("status") == "pending"
+        ):
+            handoff["workflow_id"] = workflow["request_id"]
+            self._process_restart_handoff = handoff
+        return dict(workflow)
+
+    def finish_process_restart_handoff(
+        self,
+        handoff_id: str,
+        status: str,
+        **details: object,
+    ) -> Optional[Dict[str, object]]:
+        """Persist a terminal result for one same-battle restart handoff."""
+
+        try:
+            handoff = self._control_store.finish_process_restart_handoff(
+                handoff_id,
+                status,
+                **details,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[PROCESS_RESTART] Failed recording restart handoff result: "
+                f"{exc}",
+                "WARN",
+            )
+            return None
+        self._process_restart_handoff = (
+            dict(handoff) if handoff else None
+        )
+        return dict(handoff) if handoff else None
 
     def transition_manual_control(
         self,
