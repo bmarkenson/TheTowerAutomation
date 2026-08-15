@@ -56,6 +56,31 @@ resolved dossier instead of copying its detail.
   `docs/new_thread.md` reading increased from 1,309 to 1,358 words. No live,
   service, device, or native-package action was applicable.
 
+### 2026-08-15 Save-backed battle lifecycle authority
+
+- The recurrence of
+  [`ISSUE-2026-045`](../issues/resolved-2026.md#start-battle-intent-was-rejected-after-its-strategy-applied-at-home)
+  is closed at its actual boundary: activity scope is now report metadata,
+  while the serialized save's `ActiveRoundIdentity` is the sole same/later
+  battle key. Home Start proves an inactive save before launch, and Start,
+  Attach, Resume, Retry, and post-Pause adoption force the current identity
+  before battle-local work.
+- Battle History no longer authorizes continuity, direct Retry performs no
+  History polling, and timed passive-save acquisition was removed. Only stable
+  Perk selection or exhaustion checkpoints may request a passive read; audit
+  and metrics consume already-owned forced, terminal, or Perk bundles.
+- Pause/Stop, hidden manual surrender, Home New Battle, manual successor,
+  same-battle restart, different-battle Attach, Home Resume's two-proof
+  sequence, and stale active-battle Strategy requests have explicit regression
+  coverage. The retained setup-inspection candidate worktree was audited and
+  quarantined because it still contains the obsolete scope/History model.
+- Exact code/test candidate `62b696f` passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,842 repository tests in 425.04 seconds. Current-main refresh
+  `a3227d7` is documentation-only relative to that candidate. The native
+  Control Surface and Tunnel Host portable suites passed 192 and 18 tests, and
+  both Release cross-builds completed with zero errors.
+
 ### 2026-08-15 Tournament save-backed one-shot confirmation
 
 - An explicitly authorized ordinary Tournament-validation battle accepted its

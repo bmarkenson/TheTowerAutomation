@@ -321,6 +321,18 @@ and actionable work lives in
   branch must be reimplemented narrowly on the current save-identity
   architecture. Other retained lifecycle, passive-save, and Retry branches
   are either already represented here or superseded by promoted mainline work.
+- **Final repository validation:** Exact code/test candidate `62b696f` passed
+  compilation, state-definition validation, clickmap integrity with zero
+  errors and the established 44 orphan notices, and all 2,842 repository tests
+  in 425.04 seconds using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  Current-main reconciliation candidate `a3227d7` changes only documentation
+  relative to that tested code candidate. The Control Surface and Tunnel Host
+  portable suites separately passed 192 and 18 tests, and both Release
+  cross-builds completed with zero errors.
+- **Final fixed by:** `454f936`, `ddcf697`, `dfbd70e`, `0ec9e18`, `5379785`,
+  `c003897`, `4e0243e`, `d01090b`, and `bcfedb5` (exact aggregate candidate
+  `a3227d7` plus its immediate completion-record successor).
 
 ### Global Module save identities were incomplete and conflated with slot authority
 
