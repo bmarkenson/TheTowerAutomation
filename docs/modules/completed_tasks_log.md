@@ -39,6 +39,12 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Tournament attachment Orb Distance save alias
+
+- [`ISSUE-2026-051`](../issues/resolved-2026.md#tournament-attachment-reopened-orb-distance-despite-a-bound-save)
+  closes the unnecessary UI fallback by recognizing the twice-paired exact
+  Tournament save encoding while preserving UI for every unenumerated tuple.
+
 ### 2026-08-15 Minimum-sufficient validation gates
 
 - Exact candidate `16e7e2d` makes validation risk-driven and composable. A

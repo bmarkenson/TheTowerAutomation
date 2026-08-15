@@ -8,6 +8,40 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament attachment reopened Orb Distance despite a bound save
+
+**Stable ID:** `ISSUE-2026-051` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-15 at 11:41 PDT, automation attached Tournament
+  Strategy to an already-running Tournament, forced a fresh version-1101
+  player save, and bound its exact active-round identity.
+- **Symptom:** Damage Slider and the other supported configuration checks used
+  the bound save, but Orb Distance opened Attack and the distance-adjuster UI.
+  It observed the requested 98.38m / 87.16m / 80.37m tuple and changed nothing.
+  Two bounded save/UI pairings are retained in
+  [durable evidence](evidence/tournament-orb-distance-save-alias-2026-08-15.md).
+- **Safety response:** The decoder treated the unknown raw tuple as unmapped,
+  omitted it from attachment facts, and retained the read-only UI fallback. It
+  did not infer a nearby value or authorize a repair.
+- **Cause:** The versioned mapping recognized
+  `workshopOrbDistance=8.036911010742188` for visible 80.37m. Both guarded
+  version-1101 saves instead contained `8.036909103393555` in the same complete
+  Tournament Cards, Tourney Workshop, Range, and Extra context. The exact miss
+  prevented Orb Distance from entering the bound attachment carrier.
+- **Resolution:** Both canonical mapping owners now enumerate the independently
+  observed raw value as a second exact alias for the same Tournament tuple.
+  No conversion formula or numeric tolerance was added; every unenumerated or
+  context-mismatched tuple still requires UI.
+- **Regression and validation:** The Tournament decoder regression exercises
+  both exact raw encodings through the authoritative version-1073 and
+  compatible version-1101 mappings. All 194 player-save, 31 attachment/history,
+  and 33 save-backed action tests passed. Exact candidate `824ac94` passed
+  compilation, state definitions, clickmap integrity with zero errors and the
+  established 44 orphan notices, and all 2,844 repository tests in 420.70
+  seconds using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Fixed by:** `824ac94`.
+
 ### Exclusive Tournament validation discarded complete Home save evidence
 
 **Stable ID:** `ISSUE-2026-050` · **Lifecycle:** `resolved`
