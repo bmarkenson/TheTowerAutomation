@@ -595,8 +595,9 @@ class App:
                 )
             except Exception:
                 log(
-                    "[PLAYER_SAVE_PASSIVE] Perk checkpoint scheduling was "
-                    "unavailable; terminal Perks UI fallback remains active",
+                    "[PLAYER_SAVE_PASSIVE] Passive save observation scheduling "
+                    "was unavailable; forced and terminal save paths remain "
+                    "available",
                     "WARN",
                 )
         self._blind_tapper_suspended = False
@@ -1537,7 +1538,7 @@ class App:
         context: PlayerSaveObservationContext,
         reason_code: str,
     ) -> None:
-        """Fan one Perk-requested bundle through all passive projectors."""
+        """Fan one scheduler-owned passive bundle through all projectors."""
 
         self._publish_player_save_observation(
             acquisition,

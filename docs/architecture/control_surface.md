@@ -1151,9 +1151,10 @@ continues while every automatic option is disabled. It exposes three lanes:
   teach itself that a slow leak is normal. This is a provisional maintenance
   threshold based on low restart cost and observed correlation, not a claim
   that handle count alone proves a performance bottleneck.
-- **Severe in-run loss.** Perk-requested player-save checkpoints may supply
-  interval CPH, wave, and effective speed to the metric consumer without
-  another save read. There is no timed scheduler. Three fresh consecutive
+- **Severe in-run loss.** Periodic and Perk-requested player-save checkpoints
+  may supply interval CPH, wave, and effective speed to the metric consumer
+  without another save read. The independent passive scheduler observes on a
+  300-second cadence without claiming save freshness. Three fresh consecutive
   intervals must each be at or below 60% of a
   conservative lower envelope built from at least six intervals across two
   completed runs in the same Strategy, exact run configuration, save-mapping
