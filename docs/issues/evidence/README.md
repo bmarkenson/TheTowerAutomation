@@ -8,7 +8,8 @@ not mirror runtime databases or make claims about current runtime state.
 
 [`tournament-orb-distance-save-alias-2026-08-15.md`](tournament-orb-distance-save-alias-2026-08-15.md)
 preserves the two exact version-1101 save/UI pairings that establish the
-second Tournament `workshopOrbDistance` encoding for `ISSUE-2026-051`.
+second Tournament `workshopOrbDistance` observation for `ISSUE-2026-051` and
+the corrected effective-Range boundary in `ISSUE-2026-052`.
 
 ## 2026-08-15 Tournament validation repair confirmation
 

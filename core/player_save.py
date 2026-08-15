@@ -24,6 +24,10 @@ import re
 import time
 from typing import Any, Optional
 
+from core.attack_range import (
+    AttackRangeEvidence,
+    effective_attack_range_from_save,
+)
 from core.runtime_save import (
     NormalizedRuntimeSave,
     RuntimeSaveNormalizationError,
@@ -2684,7 +2688,22 @@ def _build_checks(
         mapping,
     )
     checks["damage_slider"] = _damage_slider_evidence(decoded, mapping)
-    checks["orb_distance"] = _orb_distance_evidence(decoded, mapping)
+    attack_range = effective_attack_range_from_save(decoded, mapping)
+    checks["attack_range"] = SaveCheckEvidence(
+        check_id="attack_range",
+        status=attack_range.status,
+        value=attack_range.value,
+        source_fields=attack_range.source_fields,
+        complete=attack_range.complete,
+        reason=attack_range.reason,
+        authority=attack_range.authority,
+        diagnostics=attack_range.diagnostics,
+    )
+    checks["orb_distance"] = _orb_distance_evidence(
+        decoded,
+        mapping,
+        attack_range=attack_range,
+    )
 
     perk_ids = mapping.get("perk_ids") or {}
     first_id = _exact_int(decoded.get("firstPerkIndex"))
@@ -2957,7 +2976,6 @@ def _unmapped_check_candidate_diagnostics(
         fields = ("damageAdjustmentLog",)
     elif check_id == "orb_distance":
         fields = (
-            "rangeLevelSelected",
             "innerOrbDistance",
             "workshopOrbDistance",
         )
@@ -3072,21 +3090,17 @@ def _damage_slider_evidence(
 def _orb_distance_evidence(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
+    *,
+    attack_range: AttackRangeEvidence,
 ) -> SaveCheckEvidence:
-    """Decode one unique Orb tuple in its exact preset context and tolerance."""
+    """Decode one unique Orb tuple under a proved effective Attack Range."""
 
     expected_fields = {
-        "range_basis": "rangeLevelSelected",
         "extra": "innerOrbDistance",
         "workshop": "workshopOrbDistance",
     }
     spec = mapping.get("orb_distance")
     source_fields = spec.get("source_fields") if isinstance(spec, Mapping) else None
-    context_checks = (
-        tuple(spec.get("context_checks") or ())
-        if isinstance(spec, Mapping)
-        else ()
-    )
     raw_float_tolerance = (
         spec.get("raw_float_tolerance")
         if isinstance(spec, Mapping)
@@ -3096,7 +3110,6 @@ def _orb_distance_evidence(
     if (
         not isinstance(source_fields, Mapping)
         or dict(source_fields) != expected_fields
-        or context_checks != ("cards_deck", "workshop_preset")
         or isinstance(raw_float_tolerance, bool)
         or not isinstance(raw_float_tolerance, float)
         or not math.isfinite(raw_float_tolerance)
@@ -3113,62 +3126,33 @@ def _orb_distance_evidence(
             reason="Orb Distance mapping is malformed",
         )
 
-    observed_context: dict[str, str] = {}
-    context_source_fields: list[str] = []
-    preset_specs = mapping.get("presets")
-    if not isinstance(preset_specs, Mapping):
-        preset_specs = {}
-    for check_id in context_checks:
-        preset_spec = preset_specs.get(check_id)
-        if not isinstance(preset_spec, Mapping):
-            observed_context.clear()
-            break
-        selected = _selected_preset(decoded, preset_spec)
-        active_name = selected.get("active_name")
-        names_field = str(preset_spec.get("names_field") or "")
-        active_field = str(preset_spec.get("active_field") or "")
-        if not isinstance(active_name, str) or not active_name or not all(
-            (names_field, active_field)
-        ):
-            observed_context.clear()
-            break
-        observed_context[check_id] = active_name
-        context_source_fields.extend((names_field, active_field))
-
     evidence_source_fields = tuple(
-        dict.fromkeys((*expected_fields.values(), *context_source_fields))
+        dict.fromkeys((*attack_range.source_fields, *expected_fields.values()))
     )
     raw_options: list[
-        tuple[
-            tuple[int, float, float, tuple[str, ...]],
-            dict[str, str],
-        ]
+        tuple[tuple[str, float, float], dict[str, str]]
     ] = []
-    raw_keys: set[tuple[int, float, float, tuple[str, ...]]] = set()
+    raw_keys: set[tuple[str, float, float]] = set()
     raw_tolerance_decimal = Decimal(str(raw_float_tolerance))
     semantic_values: list[dict[str, str]] = []
-    malformed = len(observed_context) != len(context_checks)
+    malformed = False
     for option in values:
         if (
             not isinstance(option, Mapping)
-            or set(option) != {"raw", "context", "value"}
+            or set(option) != {"raw", "value"}
         ):
             malformed = True
             break
         raw = option.get("raw")
-        context = option.get("context")
         value = option.get("value")
         if (
             not isinstance(raw, Mapping)
             or set(raw) != set(expected_fields)
-            or not isinstance(context, Mapping)
-            or set(context) != set(context_checks)
             or not isinstance(value, Mapping)
-            or set(value) != set(expected_fields)
+            or set(value) != {"range_basis", "extra", "workshop"}
         ):
             malformed = True
             break
-        range_raw = _exact_int(raw.get("range_basis"))
         extra_raw = raw.get("extra")
         workshop_raw = raw.get("workshop")
         try:
@@ -3181,13 +3165,8 @@ def _orb_distance_evidence(
         except (TypeError, ValueError):
             malformed = True
             break
-        normalized_context = {
-            key: str(context.get(key) or "").strip()
-            for key in context_checks
-        }
         if (
-            range_raw is None
-            or isinstance(extra_raw, bool)
+            isinstance(extra_raw, bool)
             or not isinstance(extra_raw, float)
             or not math.isfinite(extra_raw)
             or isinstance(workshop_raw, bool)
@@ -3196,15 +3175,13 @@ def _orb_distance_evidence(
             or round(extra_raw, 1) != extra_raw
             or round(workshop_raw, 1) != workshop_raw
             or not all(semantic.values())
-            or not all(normalized_context.values())
         ):
             malformed = True
             break
         raw_key = (
-            range_raw,
+            semantic["range_basis"],
             extra_raw,
             workshop_raw,
-            tuple(normalized_context[key] for key in context_checks),
         )
         if raw_key in raw_keys:
             malformed = True
@@ -3223,30 +3200,55 @@ def _orb_distance_evidence(
             reason="Orb Distance mapping values are malformed",
         )
 
-    range_raw = _exact_int(decoded.get(expected_fields["range_basis"]))
+    range_complete = bool(
+        attack_range.status == "observed"
+        and attack_range.complete
+        and attack_range.stable
+        and attack_range.value
+        and attack_range.scope == "current_active_round"
+    )
+    if not range_complete:
+        return SaveCheckEvidence(
+            check_id="orb_distance",
+            status="unmapped",
+            value=None,
+            source_fields=evidence_source_fields,
+            complete=False,
+            reason=(
+                "Orb Distance requires stable effective Attack Range: "
+                + (
+                    attack_range.reason
+                    or (
+                        "range scope is not current_active_round"
+                        if attack_range.scope != "current_active_round"
+                        else "range evidence incomplete"
+                    )
+                )
+            ),
+            authority={
+                "kind": "exact_values",
+                "values": semantic_values,
+                "raw_float_tolerance": raw_float_tolerance,
+                "attack_range": dict(attack_range.authority),
+            },
+        )
+
     extra_raw = decoded.get(expected_fields["extra"])
     workshop_raw = decoded.get(expected_fields["workshop"])
     raw_valid = bool(
-        range_raw is not None
-        and not isinstance(extra_raw, bool)
+        not isinstance(extra_raw, bool)
         and isinstance(extra_raw, float)
         and math.isfinite(extra_raw)
         and not isinstance(workshop_raw, bool)
         and isinstance(workshop_raw, float)
         and math.isfinite(workshop_raw)
     )
-    observed_context_key = tuple(
-        observed_context[key] for key in context_checks
-    )
     matched_values: list[dict[str, str]] = []
     if raw_valid:
         for raw_key, semantic in raw_options:
-            expected_range, expected_extra, expected_workshop, context_key = (
-                raw_key
-            )
+            expected_range, expected_extra, expected_workshop = raw_key
             if (
-                range_raw == expected_range
-                and observed_context_key == context_key
+                expected_range == attack_range.value
                 and abs(
                     Decimal(str(extra_raw)) - Decimal(str(expected_extra))
                 )
@@ -3274,26 +3276,29 @@ def _orb_distance_evidence(
                 "Orb Distance raw tuple matches multiple mapped values within "
                 "tolerance"
                 if len(matched_values) > 1
-                else "Orb Distance tuple and preset context are outside the "
-                "mapped raw tolerance"
+                else "Orb Distance tuple and effective Attack Range are "
+                "outside the mapped raw tolerance"
             )
         ),
         authority={
             "kind": "exact_values",
             "values": semantic_values,
             "raw_float_tolerance": raw_float_tolerance,
+            "attack_range": dict(attack_range.authority),
         },
         diagnostics=(
             {}
             if complete
-            else (
-                _unmapped_check_candidate_diagnostics(
-                    "orb_distance",
-                    decoded,
-                    scope_context=observed_context,
-                )
-                if len(observed_context) == len(context_checks)
-                else {}
+            else _unmapped_check_candidate_diagnostics(
+                "orb_distance",
+                decoded,
+                scope_context={
+                    "attack_range": str(attack_range.value),
+                    "attack_range_contract": str(
+                        attack_range.authority.get("semantic_fingerprint")
+                        or ""
+                    ),
+                },
             )
         ),
     )
@@ -4687,6 +4692,8 @@ def _requirement_is_supported(
 ) -> bool:
     authority = evidence.authority
     kind = str(authority.get("kind") or "")
+    if check_id == "attack_range" and kind == "versioned_calculation":
+        return _normal_scalar(expected) == _normal_scalar(evidence.value)
     if check_id == "orb_distance" and kind == "exact_values":
         options = _normalized_orb_requirement_options(expected)
         allowed = [

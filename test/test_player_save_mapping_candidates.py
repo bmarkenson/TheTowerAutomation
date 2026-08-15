@@ -1119,37 +1119,37 @@ def test_same_save_discriminator_with_different_ui_semantics_is_ambiguous():
     )
 
 
-def _resolved_orb_range_candidate(
+def _resolved_orb_distance_candidate(
     *,
-    cards_deck: str,
-    workshop_preset: str,
-    range_basis: str,
+    attack_range: str,
+    semantic_value: str,
 ) -> dict:
     pending = pending_mapping_candidate(
         value_kind="orb_distance_calibration",
-        raw_value=0,
+        raw_value=8.7,
         pairing_method="calibration_sample",
-        locator="rangeLevelSelected",
-        expected_observation_count=3,
+        locator="innerOrbDistance",
+        expected_observation_count=2,
         minimum_evidence_count=2,
         scope={
-            "field": "rangeLevelSelected",
-            "cards_deck": cards_deck,
-            "workshop_preset": workshop_preset,
+            "field": "innerOrbDistance",
+            "attack_range": attack_range,
+            "attack_range_contract": "a" * 64,
         },
     )
     evidence = build_mapping_candidate_ui_evidence(
         "orb_distance",
-        canonical_values=[range_basis, "87.16m", "80.37m"],
+        canonical_values=[semantic_value, "80.37m"],
         locator_values={
-            "rangeLevelSelected": range_basis,
-            "innerOrbDistance": "87.16m",
+            "innerOrbDistance": semantic_value,
             "workshopOrbDistance": "80.37m",
         },
         locator_scopes={
-            field: {"field": field}
+            field: {
+                "field": field,
+                "attack_range": attack_range,
+            }
             for field in (
-                "rangeLevelSelected",
                 "innerOrbDistance",
                 "workshopOrbDistance",
             )
@@ -1159,16 +1159,58 @@ def _resolved_orb_range_candidate(
     return resolve_mapping_candidates("orb_distance", [pending], evidence)[0]
 
 
-def test_orb_raw_value_may_have_distinct_semantics_in_distinct_preset_contexts():
-    farm = _resolved_orb_range_candidate(
-        cards_deck="Farm",
-        workshop_preset="Farm",
-        range_basis="30.00m",
+def test_orb_calibration_requires_ui_range_to_match_calculated_range():
+    pending = pending_mapping_candidate(
+        value_kind="orb_distance_calibration",
+        raw_value=8.7,
+        pairing_method="calibration_sample",
+        locator="innerOrbDistance",
+        expected_observation_count=2,
+        minimum_evidence_count=2,
+        scope={
+            "field": "innerOrbDistance",
+            "attack_range": "98.38m",
+            "attack_range_contract": "a" * 64,
+        },
     )
-    tournament = _resolved_orb_range_candidate(
-        cards_deck="Tournament",
-        workshop_preset="Tourney",
-        range_basis="98.38m",
+    evidence = build_mapping_candidate_ui_evidence(
+        "orb_distance",
+        canonical_values=["30.00m", "39.00m"],
+        locator_values={
+            "innerOrbDistance": "30.00m",
+            "workshopOrbDistance": "39.00m",
+        },
+        locator_scopes={
+            "innerOrbDistance": {
+                "field": "innerOrbDistance",
+                "attack_range": "30.00m",
+            },
+            "workshopOrbDistance": {
+                "field": "workshopOrbDistance",
+                "attack_range": "30.00m",
+            },
+        },
+        observed_at=OBSERVED_AT,
+    )
+
+    candidate = resolve_mapping_candidates(
+        "orb_distance",
+        [pending],
+        evidence,
+    )[0]
+
+    assert candidate["semantic_value"] is None
+    assert candidate["status"] == "ambiguous"
+
+
+def test_orb_raw_value_may_have_distinct_semantics_at_distinct_attack_ranges():
+    farm = _resolved_orb_distance_candidate(
+        attack_range="30.00m",
+        semantic_value="30.00m",
+    )
+    tournament = _resolved_orb_distance_candidate(
+        attack_range="98.38m",
+        semantic_value="87.16m",
     )
 
     reconciled = reconcile_mapping_candidate_resolutions(
@@ -1180,22 +1222,20 @@ def test_orb_raw_value_may_have_distinct_semantics_in_distinct_preset_contexts()
 
     assert [
         item["candidate"]["semantic_value"] for item in reconciled
-    ] == ["30.00m", "98.38m"]
+    ] == ["30.00m", "87.16m"]
     assert {item["candidate"]["status"] for item in reconciled} == {
         "needs_more_evidence"
     }
 
 
-def test_orb_raw_value_conflict_in_same_preset_context_is_ambiguous():
-    first = _resolved_orb_range_candidate(
-        cards_deck="Farm",
-        workshop_preset="Farm",
-        range_basis="30.00m",
+def test_orb_raw_value_conflict_at_same_attack_range_is_ambiguous():
+    first = _resolved_orb_distance_candidate(
+        attack_range="98.38m",
+        semantic_value="87.16m",
     )
-    second = _resolved_orb_range_candidate(
-        cards_deck="Farm",
-        workshop_preset="Farm",
-        range_basis="98.38m",
+    second = _resolved_orb_distance_candidate(
+        attack_range="98.38m",
+        semantic_value="86.00m",
     )
 
     reconciled = reconcile_mapping_candidate_resolutions(
@@ -1211,6 +1251,17 @@ def test_orb_raw_value_conflict_in_same_preset_context_is_ambiguous():
     assert all(
         item["candidate"]["semantic_value"] is None for item in reconciled
     )
+
+
+def test_orb_calibration_never_labels_displayed_range_as_lab_selector():
+    candidate = _resolved_orb_distance_candidate(
+        attack_range="98.38m",
+        semantic_value="87.16m",
+    )
+
+    assert candidate["locator"] == "innerOrbDistance"
+    assert candidate["scope"]["attack_range"] == "98.38m"
+    assert "rangeLevelSelected" not in json.dumps(candidate)
 
 
 def test_module_discriminator_with_same_name_but_different_family_is_ambiguous():

@@ -4,6 +4,13 @@ This narrow dated extract supports `ISSUE-2026-051`. It records historical
 production evidence for an exact versioned player-save mapping; it is not a
 statement about current runtime state.
 
+> **Factual correction (2026-08-15):** `rangeLevelSelected=0` is the selected
+> Range lab level, not visible Attack Range `98.38m`. Cards/Workshop preset
+> names also do not prove effective Range. These pairings remain valid evidence
+> for the two Orb raw fields and the contemporaneous UI values, but the original
+> Range alias interpretation was insufficient for UI-suppression authority.
+> `ISSUE-2026-052` records the corrected calculation and lifecycle boundary.
+
 ## Source and extraction
 
 - Sources: production `logs/actions.log` and
@@ -27,9 +34,12 @@ statement about current runtime state.
 
 ## Mapping boundary
 
-The existing Tournament authority recognized
+The existing mapping recognized
 `workshopOrbDistance=8.036911010742188` for the same visible 80.37m value. The
 two independent version-1101 observations establish
-`8.036909103393555` as a second exact alias in the same complete Tournament
-tuple. They do not establish a conversion formula, rounding rule, neighboring
-value, or numeric tolerance; every unenumerated tuple continues to use UI.
+`8.036909103393555` as a second observation within the reviewed one-decimal
+center. They do not establish effective Attack Range: that requires the
+separate versioned Workshop/current level, selected/researched lab, live Card,
+Module, compression, and display calculation. They also do not establish an
+Orb conversion formula or a neighboring semantic tuple; unmapped or ambiguous
+tuples continue to use UI.

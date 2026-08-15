@@ -12,6 +12,7 @@ from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
 )
 from core.module_icon_index import EMPTY_MODULE_ASSIGNMENT
+from core.orb_distance import OrbDistanceReading, OrbDistanceResult
 
 
 ORDER = [
@@ -776,6 +777,92 @@ def test_orb_carry_uses_preset_for_observed_range_without_opening_ui():
     assert observation["range_basis"] == "30.00m"
     assert observation["matches"] is True
     assert observation["source"] == "bound_player_save_preflight"
+
+
+def test_orb_ui_calibration_records_only_real_orb_save_fields():
+    mapping_observations = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            assert check_id == "orb_distance"
+            return None
+
+        def record_mapping_observation(self, check_id, evidence):
+            mapping_observations.append((check_id, evidence))
+            return 2
+
+    def configure(**kwargs):
+        kwargs["initial_evidence_observer_fn"](
+            "98.38m",
+            OrbDistanceReading(
+                visible=True,
+                extra="87.16m",
+                workshop="80.37m",
+                extra_ocr_text="87.16m",
+                workshop_ocr_text="80.37m",
+                extra_ocr_confidence=99.0,
+                workshop_ocr_confidence=99.0,
+                panel_confidence=0.99,
+            ),
+        )
+        return OrbDistanceResult(
+            mode="enforce",
+            range_basis="98.38m",
+            range_observed="98.38m",
+            expected_extra="87.16m",
+            expected_workshop="80.37m",
+            initial_extra="87.16m",
+            initial_workshop="80.37m",
+            final_extra="87.16m",
+            final_workshop="80.37m",
+            observed=True,
+            matches=True,
+            changed=False,
+            extra_steps=0,
+            workshop_steps=0,
+            dismissed=True,
+            reason="matched",
+        )
+
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+    action = {
+        "type": "orb_distance_configure",
+        "mode": "enforce",
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
+    }
+
+    with patch(
+        "core.action_executor.configure_orb_distance",
+        side_effect=configure,
+    ):
+        execute_actions(None, [action], ctx, action_guard_fn=lambda: True)
+
+    assert len(mapping_observations) == 1
+    check_id, evidence = mapping_observations[0]
+    assert check_id == "orb_distance"
+    assert evidence["canonical_values"] == ["87.16m", "80.37m"]
+    assert evidence["locator_values"] == {
+        "innerOrbDistance": "87.16m",
+        "workshopOrbDistance": "80.37m",
+    }
+    assert evidence["locator_scopes"] == {
+        "innerOrbDistance": {
+            "field": "innerOrbDistance",
+            "attack_range": "98.38m",
+        },
+        "workshopOrbDistance": {
+            "field": "workshopOrbDistance",
+            "attack_range": "98.38m",
+        },
+    }
+    assert "rangeLevelSelected" not in evidence["locator_values"]
 
 
 @pytest.mark.parametrize(

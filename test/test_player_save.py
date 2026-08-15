@@ -12,6 +12,7 @@ import nrbf
 import pytest
 
 from core.adb_utils import read_device_file
+from core.attack_range import effective_attack_range_from_save
 from core.app import App
 from core.control_model import validate_setup_capture_preview
 from core.player_save import (
@@ -40,6 +41,10 @@ from core.player_save_mapping_candidates import (
     build_mapping_candidate_ui_evidence,
     fingerprint_json,
     resolve_mapping_candidates,
+)
+from core.player_save_history import (
+    PlayerSaveAttachmentContext,
+    running_attachment_observations_from_acquisition,
 )
 from core.module_icon_index import EMPTY_MODULE_ASSIGNMENT
 from core.player_save_acquisition import (
@@ -98,8 +103,9 @@ def test_raw_field_manifest_is_complete_disjoint_and_canonical():
     assert manifest["field_count"] == len(names) == 739
     assert manifest["field_name_sha256"] == _raw_field_name_sha256(names)
     assert len(names) == len(set(names))
-    assert len(manifest["dispositions"]["automation_gating"]) == 35
-    assert len(manifest["dispositions"]["unknown"]) == 537
+    assert len(manifest["dispositions"]["automation_gating"]) == 40
+    assert len(manifest["dispositions"]["profile_observation"]) == 48
+    assert len(manifest["dispositions"]["unknown"]) == 535
 
     progression_sources = {
         spec["source"]
@@ -137,8 +143,9 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
     assert manifest["audit_id"] == "V1101-RAW-001"
     assert manifest["field_count"] == len(names) == 741
     assert manifest["field_name_sha256"] == _raw_field_name_sha256(names)
-    assert len(manifest["dispositions"]["automation_gating"]) == 35
-    assert len(manifest["dispositions"]["unknown"]) == 510
+    assert len(manifest["dispositions"]["automation_gating"]) == 40
+    assert len(manifest["dispositions"]["profile_observation"]) == 48
+    assert len(manifest["dispositions"]["unknown"]) == 508
     assert set(names) - old_names == {
         "enemiesKilledThisWave",
         "enemiesSpawnedThisWave",
@@ -162,6 +169,7 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
         "card_recharge_modes",
         "cards",
         "damage_slider",
+        "effective_attack_range",
         "free_upgrade_lock_fields",
         "guardian_chip_ids",
         "guardian_chips",
@@ -421,6 +429,8 @@ def _decoded_save() -> dict:
             "leagueID": 5,
             "researchLevel": [0] * 250,
             "upgradeWorkshopLevel": [0] * 20,
+            "upgradeLevel": [0] * 20,
+            "rangeLevelSelected": 0,
             "upgradeWorkshopDefenseLevel": [0] * 20,
             "upgradeWorkshopUtilityLevel": [0] * 20,
             "enhancementLevel": [0] * 20,
@@ -430,6 +440,7 @@ def _decoded_save() -> dict:
             "enhancementDefenseTierUnlocked": [False] * 20,
             "enhancementUtilityTierUnlocked": [False] * 20,
             "cardLevel": [0] * 40,
+            "cardActive": [False] * 40,
             "cardUnlocked": [True] * 31 + [False] * 9,
             "cardMasteryUnlocked": [True] * 8 + [False] * 32,
             "slotPresetCardInt": [0] * 140,
@@ -769,7 +780,7 @@ def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     )
     assert plan["checks"]["cards_deck"]["save_evidence_authoritative"]
 
-    decoded = _decoded_save_v1101()
+    decoded = _stable_tournament_range_save()
     decoded["enemiesKilledThisWave"] = "must-not-publish-v1101-wave-counter"
     redacted = _snapshot_v1101(monkeypatch, decoded)
     assert "must-not-publish-v1101-wave-counter" not in json.dumps(
@@ -954,11 +965,15 @@ def test_runtime_extension_rejects_duplicate_terminal_sources():
 
 def test_v1101_compatible_snapshot_projects_setup_capture_allowlist(monkeypatch):
     decoded = _decoded_save_v1101()
+    decoded["upgradeWorkshopLevel"][4] = 79
+    decoded["upgradeLevel"][4] = 79
+    decoded["cardActive"][4] = True
+    decoded["cardLevel"][4] = 7
     decoded.update(
         damageAdjustmentLog=9,
         rangeLevelSelected=0,
-        innerOrbDistance=3.0,
-        workshopOrbDistance=3.8999998569488525,
+        innerOrbDistance=8.71588134765625,
+        workshopOrbDistance=8.036911010742188,
     )
     snapshot = _snapshot_v1101(monkeypatch, decoded)
     acquisition = PlayerSaveAcquisitionBundle(
@@ -979,7 +994,8 @@ def test_v1101_compatible_snapshot_projects_setup_capture_allowlist(monkeypatch)
     assert preview["mapping_maturity"] == "candidate"
     assert preview["settings"]["cards_deck"] == "Farm"
     assert set(preview["captured_check_ids"]) == (
-        set(snapshot.validated_checks) - {"perk_first_choice"}
+        set(snapshot.validated_checks)
+        - {"attack_range", "perk_first_choice"}
     )
     assert "tournament_conditions" not in preview["captured_check_ids"]
     assert any(
@@ -1294,6 +1310,7 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "guardian_chips",
         "modules",
         "damage_slider",
+        "attack_range",
         "orb_distance",
         "auto_pick_perks",
         "target_priority",
@@ -1951,51 +1968,16 @@ def test_v1101_exact_t18_damage_value_is_save_backed(monkeypatch):
     assert evidence.value == "1E-22%"
 
 
-@pytest.mark.parametrize(
-    ("extra_raw", "workshop_raw", "semantic_value"),
-    (
-        (
-            3.0,
-            3.8999998569488525,
-            {
-                "range_basis": "30.00m",
-                "extra": "30.00m",
-                "workshop": "39.00m",
-            },
-        ),
-        (
-            3.180000066757202,
-            3.7199997901916504,
-            {
-                "range_basis": "30.00m",
-                "extra": "31.80m",
-                "workshop": "37.20m",
-            },
-        ),
-    ),
-)
-def test_orb_distance_tenths_tolerance_maps_farm_tuples(
-    monkeypatch,
-    extra_raw,
-    workshop_raw,
-    semantic_value,
-):
-    decoded = _decoded_save()
-    decoded.update(
-        rangeLevelSelected=0,
-        innerOrbDistance=extra_raw,
-        workshopOrbDistance=workshop_raw,
-    )
-
-    evidence = _snapshot(monkeypatch, decoded).checks["orb_distance"]
-    assert evidence.status == "observed"
-    assert evidence.complete is True
-    assert evidence.value == semantic_value
-    assert evidence.diagnostics == {}
-    assert evidence.authority["raw_float_tolerance"] == 0.1
+def _stable_tournament_range_save() -> dict:
+    decoded = _decoded_save_v1101()
+    decoded["upgradeWorkshopLevel"][4] = 79
+    decoded["upgradeLevel"][4] = 79
+    decoded["rangeLevelSelected"] = 0
+    decoded["cardActive"][4] = True
+    decoded["cardLevel"][4] = 7
+    return decoded
 
 
-@pytest.mark.parametrize("snapshot_fn", (_snapshot, _snapshot_v1101))
 @pytest.mark.parametrize(
     ("extra_raw", "workshop_raw"),
     (
@@ -2008,25 +1990,22 @@ def test_orb_distance_tenths_tolerance_maps_farm_tuples(
 )
 def test_orb_distance_tenths_tolerance_maps_tournament_tuple(
     monkeypatch,
-    snapshot_fn,
     extra_raw,
     workshop_raw,
 ):
-    decoded = (
-        _decoded_save_v1101()
-        if snapshot_fn is _snapshot_v1101
-        else _decoded_save()
-    )
+    decoded = _stable_tournament_range_save()
     decoded.update(
-        currentPreset=1,
-        currentWorkshopPreset=1,
-        rangeLevelSelected=0,
         innerOrbDistance=extra_raw,
         workshopOrbDistance=workshop_raw,
     )
 
-    evidence = snapshot_fn(monkeypatch, decoded).checks["orb_distance"]
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+    attack_range = snapshot.checks["attack_range"]
+    evidence = snapshot.checks["orb_distance"]
 
+    assert attack_range.status == "observed"
+    assert attack_range.complete is True
+    assert attack_range.value == "98.38m"
     assert evidence.status == "observed"
     assert evidence.complete is True
     assert evidence.value == {
@@ -2038,14 +2017,36 @@ def test_orb_distance_tenths_tolerance_maps_tournament_tuple(
     assert evidence.authority["raw_float_tolerance"] == 0.1
 
 
-def test_orb_distance_save_match_selects_observed_range_preset(monkeypatch):
+def test_v1073_stable_range_authorizes_the_same_orb_tuple(monkeypatch):
     decoded = _decoded_save()
+    decoded["upgradeWorkshopLevel"][4] = 79
+    decoded["upgradeLevel"][4] = 79
+    decoded["cardActive"][4] = True
+    decoded["cardLevel"][4] = 7
     decoded.update(
-        rangeLevelSelected=0,
-        innerOrbDistance=3.0,
-        workshopOrbDistance=3.8999998569488525,
+        innerOrbDistance=8.71588134765625,
+        workshopOrbDistance=8.036911010742188,
     )
+
     snapshot = _snapshot(monkeypatch, decoded)
+
+    assert snapshot.checks["attack_range"].value == "98.38m"
+    assert snapshot.checks["attack_range"].complete is True
+    assert snapshot.checks["orb_distance"].value == {
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
+    }
+    assert snapshot.checks["orb_distance"].complete is True
+
+
+def test_orb_distance_save_match_uses_calculated_attack_range(monkeypatch):
+    decoded = _stable_tournament_range_save()
+    decoded.update(
+        innerOrbDistance=8.71588134765625,
+        workshopOrbDistance=8.036911010742188,
+    )
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
 
     decision = reconcile_requirements(
         snapshot,
@@ -2077,68 +2078,194 @@ def test_orb_distance_save_match_selects_observed_range_preset(monkeypatch):
     assert decision["disposition"] == "save_match"
     assert decision["ui_required"] is False
     assert decision["observed"] == {
-        "range_basis": "30.00m",
-        "extra": "30.00m",
-        "workshop": "39.00m",
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
     }
 
 
-def test_orb_distance_mapping_allows_same_semantics_in_distinct_contexts():
-    mapping = copy.deepcopy(VERSION_MAPPING)
-    repeated = copy.deepcopy(mapping["orb_distance"]["values"][0])
-    repeated["context"] = {
-        "cards_deck": "Tournament",
-        "workshop_preset": "Tournament",
-    }
-    mapping["orb_distance"]["values"].append(repeated)
-    decoded = _decoded_save()
-    decoded.update(
-        rangeLevelSelected=0,
-        innerOrbDistance=3.0,
-        workshopOrbDistance=3.8999998569488525,
+def test_calculated_attack_range_supports_its_exact_requirement(monkeypatch):
+    decoded = _stable_tournament_range_save()
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+    evidence = snapshot.checks["attack_range"]
+
+    assert save_observation_supports_requirement(
+        "attack_range",
+        "98.38m",
+        evidence,
+    )
+    assert not save_observation_supports_requirement(
+        "attack_range",
+        "98.39m",
+        evidence,
     )
 
-    evidence = _orb_distance_evidence(decoded, mapping)
+
+def test_orb_distance_preset_names_do_not_change_range_authority(monkeypatch):
+    decoded = _stable_tournament_range_save()
+    decoded.update(
+        presetName=["Wrong"] * 5,
+        workshopPresetName=["Also Wrong"] * 5,
+        currentPreset=4,
+        currentWorkshopPreset=3,
+        innerOrbDistance=8.71588134765625,
+        workshopOrbDistance=8.036911010742188,
+    )
+
+    evidence = _snapshot_v1101(monkeypatch, decoded).checks["orb_distance"]
 
     assert evidence.status == "observed"
     assert evidence.complete is True
     assert evidence.value == {
-        "range_basis": "30.00m",
-        "extra": "30.00m",
-        "workshop": "39.00m",
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
     }
-    assert evidence.authority["values"].count(evidence.value) == 1
 
 
-def test_orb_distance_exact_tuple_requires_its_preset_context(monkeypatch):
-    decoded = _decoded_save()
+def test_mutable_attack_range_keeps_orb_distance_on_ui(monkeypatch):
+    decoded = _decoded_save_v1101()
     decoded.update(
-        currentWorkshopPreset=1,
-        rangeLevelSelected=0,
         innerOrbDistance=3.0,
         workshopOrbDistance=3.8999998569488525,
     )
 
-    evidence = _snapshot(monkeypatch, decoded).checks["orb_distance"]
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+    attack_range = snapshot.checks["attack_range"]
+    evidence = snapshot.checks["orb_distance"]
 
+    assert attack_range.status == "observed"
+    assert attack_range.value == "30.00m"
+    assert attack_range.complete is False
+    assert attack_range.reason == "effective_attack_range_can_still_upgrade"
     assert evidence.status == "unmapped"
     assert evidence.value is None
-    assert "preset context" in evidence.reason
+    assert "requires stable effective Attack Range" in evidence.reason
+
+
+def test_unproved_v1073_range_keeps_orb_distance_on_ui(monkeypatch):
+    decoded = _decoded_save()
+    decoded.update(
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert snapshot.checks["attack_range"].status == "observed"
+    assert snapshot.checks["attack_range"].complete is False
+    assert snapshot.checks["orb_distance"].status == "unmapped"
+    assert "can_still_upgrade" in snapshot.checks["orb_distance"].reason
+
+
+def test_out_of_round_attack_range_never_suppresses_live_orb_ui(monkeypatch):
+    decoded = _decoded_save_v1101()
+    decoded.update(
+        roundActiveBool=False,
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+    attack_range = snapshot.checks["attack_range"]
+    orb_distance = snapshot.checks["orb_distance"]
+
+    assert attack_range.status == "observed"
+    assert attack_range.complete is True
+    assert attack_range.value == "30.00m"
+    assert attack_range.authority["scope"] == "configured_out_of_round"
+    assert orb_distance.status == "unmapped"
+    assert orb_distance.complete is False
+    assert "scope is not current_active_round" in orb_distance.reason
+
+
+@pytest.mark.parametrize("stable", (False, True))
+def test_attachment_projects_orb_only_with_stable_live_attack_range(
+    monkeypatch,
+    stable,
+):
+    decoded = (
+        _stable_tournament_range_save()
+        if stable
+        else _decoded_save_v1101()
+    )
+    decoded.update(
+        innerOrbDistance=(8.71588134765625 if stable else 3.0),
+        workshopOrbDistance=(
+            8.036911010742188 if stable else 3.8999998569488525
+        ),
+    )
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="captured",
+        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        acquisition_started_at=CAPTURED_AT - timedelta(milliseconds=1),
+        captured_at=CAPTURED_AT,
+        acquisition_completed_at=CAPTURED_AT + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=snapshot,
+    )
+    context = PlayerSaveAttachmentContext(
+        runtime_session_id="runtime-1",
+        activity_scope_id="scope-1",
+        active_round_identity_fingerprint="round-1",
+        target="localhost:5555",
+        target_generation=7,
+        active_battle_observed=True,
+    )
+
+    observations = running_attachment_observations_from_acquisition(
+        acquisition,
+        context=context,
+        active_round_identity_fingerprint="round-1",
+    )
+
+    assert observations is not None
+    projected = {fact.check_id for fact in observations.facts}
+    if stable:
+        assert {"attack_range", "orb_distance"} <= projected
+        facts = {fact.check_id: fact for fact in observations.facts}
+        assert facts["attack_range"].temporal_class.value == "round_invariant"
+    else:
+        assert "attack_range" not in projected
+        assert "orb_distance" not in projected
+
+
+def test_malformed_range_dependency_does_not_invalidate_unrelated_checks(
+    monkeypatch,
+):
+    decoded = _stable_tournament_range_save()
+    decoded.update(
+        upgradeLevel=[0] * 19,
+        damageAdjustmentLog=9,
+        innerOrbDistance=8.7,
+        workshopOrbDistance=8.0,
+    )
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+
+    assert snapshot.shape_valid is True
+    assert snapshot.checks["damage_slider"].status == "observed"
+    assert snapshot.checks["damage_slider"].value == "1E-19%"
+    assert snapshot.checks["attack_range"].status == "unmapped"
+    assert snapshot.checks["orb_distance"].status == "unmapped"
 
 
 def test_unknown_battle_controls_expose_only_safe_calibration_discriminators(
     monkeypatch,
 ):
-    decoded = _decoded_save()
+    decoded = _stable_tournament_range_save()
     decoded.update(
         damageAdjustmentLog=8,
         rangeLevelSelected=0,
-        innerOrbDistance=3.1,
+        innerOrbDistance=8.5,
         savedWorkshopOrbDistance=8.715879440307617,
-        workshopOrbDistance=3.8,
+        workshopOrbDistance=7.5,
     )
 
-    snapshot = _snapshot(monkeypatch, decoded)
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
 
     damage = snapshot.checks["damage_slider"]
     assert damage.status == "unmapped"
@@ -2162,20 +2289,21 @@ def test_unknown_battle_controls_expose_only_safe_calibration_discriminators(
         )
         for item in orb.diagnostics["mapping_candidates"]
     ] == [
-        ("orb_distance_calibration", "rangeLevelSelected", 0),
-        ("orb_distance_calibration", "innerOrbDistance", 3.1),
+        ("orb_distance_calibration", "innerOrbDistance", 8.5),
         (
             "orb_distance_calibration",
             "workshopOrbDistance",
-            3.8,
+            7.5,
         ),
     ]
     assert all(
         item["scope"]
         == {
             "field": item["locator"],
-            "cards_deck": "Farm",
-            "workshop_preset": "Farm",
+            "attack_range": "98.38m",
+            "attack_range_contract": snapshot.checks["attack_range"].authority[
+                "semantic_fingerprint"
+            ],
         }
         for item in orb.diagnostics["mapping_candidates"]
     )
@@ -2226,41 +2354,78 @@ def test_malformed_damage_slider_mapping_fails_closed(mutation):
         lambda decoded: decoded.update(rangeLevelSelected=True),
         lambda decoded: decoded.update(innerOrbDistance=3),
         lambda decoded: decoded.update(workshopOrbDistance=float("inf")),
-        lambda decoded: decoded.update(innerOrbDistance=2.89),
-        lambda decoded: decoded.update(workshopOrbDistance=4.01),
-        lambda decoded: decoded.update(innerOrbDistance=3.11),
+        lambda decoded: decoded.update(innerOrbDistance=8.59),
+        lambda decoded: decoded.update(workshopOrbDistance=8.11),
+        lambda decoded: decoded.update(innerOrbDistance=8.81),
     ),
 )
 def test_orb_distance_invalid_or_outside_tolerance_fails_closed(mutation):
-    decoded = _decoded_save()
+    decoded = _stable_tournament_range_save()
     decoded.update(
-        rangeLevelSelected=0,
-        innerOrbDistance=3.0,
-        workshopOrbDistance=3.8999998569488525,
+        innerOrbDistance=8.7,
+        workshopOrbDistance=8.0,
     )
     mutation(decoded)
+    attack_range = effective_attack_range_from_save(
+        decoded,
+        VERSION_1101_MAPPING,
+    )
 
-    evidence = _orb_distance_evidence(decoded, VERSION_MAPPING)
+    evidence = _orb_distance_evidence(
+        decoded,
+        VERSION_1101_MAPPING,
+        attack_range=attack_range,
+    )
 
     assert evidence.status == "unmapped"
     assert evidence.value is None
 
 
 def test_orb_distance_ambiguous_tolerance_overlap_fails_closed():
-    decoded = _decoded_save()
+    decoded = _stable_tournament_range_save()
     decoded.update(
-        rangeLevelSelected=0,
         innerOrbDistance=3.1,
         workshopOrbDistance=3.8,
     )
+    attack_range = replace(
+        effective_attack_range_from_save(decoded, VERSION_1101_MAPPING),
+        value="30.00m",
+    )
 
-    evidence = _orb_distance_evidence(decoded, VERSION_MAPPING)
+    evidence = _orb_distance_evidence(
+        decoded,
+        VERSION_1101_MAPPING,
+        attack_range=attack_range,
+    )
 
     assert evidence.status == "unmapped"
     assert evidence.value is None
     assert evidence.reason == (
         "Orb Distance raw tuple matches multiple mapped values within tolerance"
     )
+
+
+def test_orb_raw_tuple_may_be_reused_at_a_distinct_attack_range():
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    tournament = mapping["orb_distance"]["values"][2]
+    tournament["raw"] = copy.deepcopy(
+        mapping["orb_distance"]["values"][0]["raw"]
+    )
+    decoded = _stable_tournament_range_save()
+    decoded.update(
+        innerOrbDistance=3.0,
+        workshopOrbDistance=3.8999998569488525,
+    )
+    attack_range = effective_attack_range_from_save(decoded, mapping)
+
+    evidence = _orb_distance_evidence(
+        decoded,
+        mapping,
+        attack_range=attack_range,
+    )
+
+    assert evidence.status == "observed"
+    assert evidence.value == tournament["value"]
 
 
 @pytest.mark.parametrize(
@@ -2281,16 +2446,20 @@ def test_orb_distance_ambiguous_tolerance_overlap_fails_closed():
     ),
 )
 def test_malformed_orb_distance_mapping_fails_closed(mutation):
-    mapping = copy.deepcopy(VERSION_MAPPING)
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
     mutation(mapping)
-    decoded = _decoded_save()
+    decoded = _stable_tournament_range_save()
     decoded.update(
-        rangeLevelSelected=0,
-        innerOrbDistance=3.0,
-        workshopOrbDistance=3.8999998569488525,
+        innerOrbDistance=8.7,
+        workshopOrbDistance=8.0,
     )
+    attack_range = effective_attack_range_from_save(decoded, mapping)
 
-    evidence = _orb_distance_evidence(decoded, mapping)
+    evidence = _orb_distance_evidence(
+        decoded,
+        mapping,
+        attack_range=attack_range,
+    )
 
     assert evidence.status == "unmapped"
     assert evidence.reason == "Orb Distance mapping values are malformed"
@@ -2303,10 +2472,16 @@ def test_malformed_orb_distance_mapping_fails_closed(mutation):
 def test_malformed_orb_distance_tolerance_fails_closed(
     raw_float_tolerance,
 ):
-    mapping = copy.deepcopy(VERSION_MAPPING)
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
     mapping["orb_distance"]["raw_float_tolerance"] = raw_float_tolerance
+    decoded = _stable_tournament_range_save()
+    attack_range = effective_attack_range_from_save(decoded, mapping)
 
-    evidence = _orb_distance_evidence(_decoded_save(), mapping)
+    evidence = _orb_distance_evidence(
+        decoded,
+        mapping,
+        attack_range=attack_range,
+    )
 
     assert evidence.status == "unmapped"
     assert evidence.reason == "Orb Distance mapping is malformed"
@@ -3171,14 +3346,13 @@ def test_tournament_variation_is_reported_without_enforcement(monkeypatch):
 
 
 def test_observe_mode_accepts_mapped_damage_and_orb_mismatches(monkeypatch):
-    decoded = _decoded_save()
+    decoded = _stable_tournament_range_save()
     decoded.update(
         damageAdjustmentLog=9,
-        rangeLevelSelected=0,
-        innerOrbDistance=3.0,
-        workshopOrbDistance=3.8999998569488525,
+        innerOrbDistance=8.7,
+        workshopOrbDistance=8.0,
     )
-    snapshot = _snapshot(monkeypatch, decoded)
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
     requirements = {
         "damage_slider": {"mode": "observe", "value": "1E2%"},
         "orb_distance": {
@@ -3200,7 +3374,7 @@ def test_observe_mode_accepts_mapped_damage_and_orb_mismatches(monkeypatch):
     for check_id in ("damage_slider", "orb_distance"):
         decision = decisions["checks"][check_id]
         assert decision["disposition"] == "save_observation"
-        assert decision["reason"] == "exact_version_save_observation"
+        assert decision["reason"] == "compatible_revision_save_observation"
         assert decision["matches"] is False
         assert decision["policy"] == "observe"
         assert decision["ui_required"] is False

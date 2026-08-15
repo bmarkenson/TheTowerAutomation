@@ -62,3 +62,24 @@ def test_candidate_gate_guidance_uses_minimum_sufficient_validation() -> None:
     assert "retain unaffected component results" in promotion
     assert "pytest temporary directories" in new_thread
     assert "they must not populate the repository's ignored" in promotion
+
+
+def test_promotion_closure_uses_the_source_retirement_guard() -> None:
+    promotion = " ".join(
+        (ROOT / "docs/operations/production_promotion.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    architecture = " ".join(
+        (ROOT / "docs/architecture/development_isolation.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+
+    assert "tools/outcome_retirement.py begin" in promotion
+    assert "Repeat `--source` for every delegated branch" in promotion
+    assert "the `+` at `M`, `-` at `D` transition" in promotion
+    assert "tools/outcome_retirement.py disposition" in promotion
+    assert "tools/outcome_retirement.py close --candidate <D>" in promotion
+    assert "Never directly delete the owner ref during ordinary closure" in promotion
+    assert "one small exact-source retirement inventory" in architecture
