@@ -868,6 +868,18 @@ def test_tracks_whole_run_and_interval_rates_then_reconciles_terminal():
         "waves_per_hour": "3600",
         "effective_game_speed": "5",
     }
+    performance = monitor.performance_evidence(_context(), limit=3)
+    assert performance is not None
+    assert performance["mapping_id"]
+    assert performance["semantic_fingerprint"]
+    assert performance["checkpoints"] == [
+        {
+            "captured_at": summary["captured_at"],
+            "save_revision": summary["save_revision"],
+            "saved_wave": 200,
+            "interval": summary["interval"],
+        }
+    ]
 
     evidence = monitor.terminal_evidence(
         context=_context(),

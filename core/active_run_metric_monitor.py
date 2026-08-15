@@ -209,6 +209,46 @@ class ActiveRunMetricMonitor:
             },
         }
 
+    def performance_evidence(
+        self,
+        context: Optional[PlayerSaveObservationContext],
+        *,
+        limit: int = 3,
+    ) -> Optional[dict[str, Any]]:
+        """Return bounded save-backed intervals for passive health assessment.
+
+        This is deliberately an observation-only projection.  It carries the
+        exact save-mapping semantics that produced the rates, but no input or
+        lifecycle authority.
+        """
+
+        if context is None or context != self._context or self._identity is None:
+            return None
+        economy = self._components.get("economy")
+        if not isinstance(economy, Mapping):
+            return None
+        bounded_limit = max(1, min(int(limit), 12))
+        samples = [
+            {
+                "captured_at": sample.get("captured_at"),
+                "save_revision": sample.get("save_revision"),
+                "saved_wave": sample.get("saved_wave"),
+                "interval": copy.deepcopy(sample.get("interval")),
+            }
+            for sample in economy.get("samples") or ()
+            if isinstance(sample, Mapping)
+            and isinstance(sample.get("interval"), Mapping)
+        ][-bounded_limit:]
+        return {
+            "schema_version": ACTIVE_RUN_METRIC_TIMELINE_SCHEMA_VERSION,
+            "status": str(economy.get("status") or "unavailable"),
+            "reason": str(economy.get("reason") or ""),
+            "mapping_id": self._mapping_id,
+            "semantic_fingerprint": self._semantic_fingerprint,
+            "capability_resolution": self._capability_resolution,
+            "checkpoints": samples,
+        }
+
     def terminal_evidence(
         self,
         *,

@@ -1515,6 +1515,12 @@
                                    Foreground="{StaticResource MutedBrush}"
                                    FontSize="10"
                                    Margin="0,3,0,0" />
+                        <TextBlock x:Name="BlueStacksAutomaticPolicyText"
+                                   Text="Automatic policy: waiting for trigger evidence."
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontSize="10"
+                                   Margin="0,3,0,0" />
                       </StackPanel>
                       <Button Grid.Column="1"
                               x:Name="BlueStacksRestartButton"

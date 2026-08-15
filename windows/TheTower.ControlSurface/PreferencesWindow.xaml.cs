@@ -33,6 +33,14 @@ public partial class PreferencesWindow : Window
             settings.HostPerformanceSamplingEnabled;
         BlueStacksAutomaticRecoveryBox.IsChecked =
             settings.BlueStacksAutomaticRecoveryEnabled;
+        BlueStacksPreventiveHandleRecoveryBox.IsChecked =
+            settings.BlueStacksPreventiveHandleRecoveryEnabled;
+        BlueStacksInRunPerformanceRecoveryBox.IsChecked =
+            settings.BlueStacksInRunPerformanceRecoveryEnabled;
+        BlueStacksCompletedRunRecoveryBox.IsChecked =
+            settings.BlueStacksCompletedRunRecoveryEnabled;
+        BlueStacksDeferDuringExternalContentionBox.IsChecked =
+            settings.BlueStacksDeferDuringExternalContention;
         BlueStacksPlayerPathBox.Text = settings.BlueStacksPlayerExecutablePath;
         BlueStacksInstanceNameBox.Text = settings.BlueStacksInstanceName;
         if (blueStacksRecoveryTargetLocked)
@@ -101,6 +109,10 @@ public partial class PreferencesWindow : Window
                 configuration,
                 HostPerformanceSamplingBox.IsChecked == true,
                 recoveryEnabled,
+                BlueStacksPreventiveHandleRecoveryBox.IsChecked == true,
+                BlueStacksInRunPerformanceRecoveryBox.IsChecked == true,
+                BlueStacksCompletedRunRecoveryBox.IsChecked == true,
+                BlueStacksDeferDuringExternalContentionBox.IsChecked == true,
                 playerPath,
                 BlueStacksInstanceController.ValidateInstanceName(
                     BlueStacksInstanceNameBox.Text));
@@ -153,5 +165,9 @@ public sealed record PreferencesResult(
     TunnelHostConfiguration TunnelConfiguration,
     bool HostPerformanceSamplingEnabled,
     bool BlueStacksAutomaticRecoveryEnabled,
+    bool BlueStacksPreventiveHandleRecoveryEnabled,
+    bool BlueStacksInRunPerformanceRecoveryEnabled,
+    bool BlueStacksCompletedRunRecoveryEnabled,
+    bool BlueStacksDeferDuringExternalContention,
     string BlueStacksPlayerExecutablePath,
     string BlueStacksInstanceName);

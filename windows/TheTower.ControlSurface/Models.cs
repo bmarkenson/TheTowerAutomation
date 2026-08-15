@@ -122,6 +122,75 @@ public sealed class EmulatorDegradationStatus
 
     [JsonPropertyName("host_evidence")]
     public EmulatorHostEvidenceStatus? HostEvidence { get; set; }
+
+    [JsonPropertyName("host_contention")]
+    public EmulatorHostContentionStatus? HostContention { get; set; }
+
+    [JsonPropertyName("automatic_triggers")]
+    public EmulatorAutomaticTriggersStatus AutomaticTriggers { get; set; } = new();
+
+    [JsonPropertyName("automatic_request_gate")]
+    public BetterControlActionAvailability AutomaticRequestGate { get; set; } = new();
+}
+
+public sealed class EmulatorAutomaticTriggersStatus
+{
+    [JsonPropertyName("preventive_handle_ceiling")]
+    public EmulatorAutomaticTriggerStatus PreventiveHandleCeiling { get; set; } = new();
+
+    [JsonPropertyName("severe_in_run_loss")]
+    public EmulatorAutomaticTriggerStatus SevereInRunLoss { get; set; } = new();
+
+    [JsonPropertyName("completed_run_degradation")]
+    public EmulatorAutomaticTriggerStatus CompletedRunDegradation { get; set; } = new();
+}
+
+public sealed class EmulatorAutomaticTriggerStatus
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("ready")]
+    public bool Ready { get; set; }
+
+    [JsonPropertyName("deferred_by_contention")]
+    public bool DeferredByContention { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("handle_recent_median")]
+    public double? HandleRecentMedian { get; set; }
+
+    [JsonPropertyName("handle_low_water")]
+    public double? HandleLowWater { get; set; }
+
+    [JsonPropertyName("handle_delta")]
+    public double? HandleDelta { get; set; }
+
+    [JsonPropertyName("sampled_coverage_seconds")]
+    public double? SampledCoverageSeconds { get; set; }
+
+    [JsonPropertyName("interval_count")]
+    public int? IntervalCount { get; set; }
+
+    [JsonPropertyName("interval_cph_ratios")]
+    public List<double> IntervalCphRatios { get; set; } = [];
+}
+
+public sealed class EmulatorHostContentionStatus
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("other_cpu_percent_median")]
+    public double? OtherCpuPercentMedian { get; set; }
+
+    [JsonPropertyName("other_gpu_percent_median")]
+    public double? OtherGpuPercentMedian { get; set; }
 }
 
 public sealed class EmulatorHostEvidenceStatus
@@ -3211,6 +3280,10 @@ public sealed class ClientSettings
     public int LinuxAdbForwardPort { get; set; } = 5555;
     public bool HostPerformanceSamplingEnabled { get; set; } = true;
     public bool BlueStacksAutomaticRecoveryEnabled { get; set; }
+    public bool BlueStacksPreventiveHandleRecoveryEnabled { get; set; }
+    public bool BlueStacksInRunPerformanceRecoveryEnabled { get; set; }
+    public bool BlueStacksCompletedRunRecoveryEnabled { get; set; } = true;
+    public bool BlueStacksDeferDuringExternalContention { get; set; } = true;
     public string BlueStacksPlayerExecutablePath { get; set; } =
         @"C:\Program Files\BlueStacks_nxt\HD-Player.exe";
     public string BlueStacksInstanceName { get; set; } = "Nougat32";

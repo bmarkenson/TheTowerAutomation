@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import os
 import threading
 import time
@@ -1198,6 +1199,9 @@ class App:
                 "run_configuration": (
                     strategy.run_configuration() if strategy else {}
                 ),
+                "strategy_definition_fingerprint": (
+                    strategy.definition_fingerprint() if strategy else None
+                ),
                 "last_wave": self._last_wave_value,
                 "last_wave_confidence": self._last_wave_conf,
                 "coin_rate_samples": self._status_reporter.coin_rate_samples,
@@ -2024,6 +2028,9 @@ class App:
                 "observation": copy.deepcopy(
                     getattr(self, "_control_observation", None)
                 ),
+                "active_run_performance": (
+                    self._active_run_performance_evidence(current_strategy)
+                ),
                 "battle_lifecycle": {
                     "awaiting_initial_intent": bool(
                         awaiting_intent()
@@ -2088,6 +2095,46 @@ class App:
                 },
             },
         )
+
+    def _active_run_performance_evidence(
+        self,
+        current_strategy: str,
+    ) -> Optional[dict[str, Any]]:
+        """Publish a bounded, passive, exact-regime performance projection."""
+
+        monitor = getattr(self, "_active_run_metric_monitor", None)
+        manager = getattr(self, "_mission_mgr", None)
+        strategy = getattr(manager, "strategy", None)
+        if monitor is None or strategy is None:
+            return None
+        context = self._current_player_save_observation_context()
+        if context is None:
+            return None
+        try:
+            with self._perk_save_monitor_guard():
+                evidence = monitor.performance_evidence(context, limit=3)
+            if not isinstance(evidence, Mapping):
+                return None
+            run_configuration = strategy.run_configuration()
+            if not isinstance(run_configuration, Mapping):
+                return None
+            encoded = json.dumps(
+                dict(run_configuration),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            return {
+                **copy.deepcopy(dict(evidence)),
+                "strategy": str(current_strategy or "").strip().lower(),
+                "strategy_definition_fingerprint": (
+                    strategy.definition_fingerprint()
+                ),
+                "configuration_fingerprint": hashlib.sha256(encoded).hexdigest(),
+                "tier": run_configuration.get("tier"),
+            }
+        except (TypeError, ValueError):
+            return None
 
     def _record_control_observation(
         self,

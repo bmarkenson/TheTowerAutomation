@@ -1768,6 +1768,149 @@ def test_host_maintenance_request_rejects_an_unready_detector(tmp_path):
     assert rejected.value.code == "emulator_degradation_not_ready"
 
 
+def test_policy_host_maintenance_records_selected_preventive_trigger(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    policy_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "status": "insufficient_history",
+        "automatic_ready": False,
+        "reason": "completed-run history is incomplete",
+        "candidate_battle_ids": [],
+        "baseline_battle_ids": [],
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+            "sample_count": 120,
+            "handle_ratio": 8.0,
+            "handle_delta": 24_000,
+        },
+        "host_contention": {"status": "clear"},
+        "automatic_triggers": {
+            "preventive_handle_ceiling": {
+                "status": "ready",
+                "ready": True,
+                "deferred_by_contention": False,
+                "reason": "sustained exact-listener handle ceiling met",
+            },
+            "severe_in_run_loss": {
+                "status": "insufficient",
+                "ready": False,
+                "reason": "insufficient intervals",
+            },
+            "completed_run_degradation": {
+                "status": "insufficient_history",
+                "ready": False,
+                "reason": "insufficient history",
+            },
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=policy_ready,
+        ):
+            requested = service.apply_host_maintenance(
+                {
+                    "operation": "request_automatic",
+                    "trigger_kind": "preventive_handle_ceiling",
+                    "defer_during_external_contention": True,
+                    **listener,
+                },
+                now=now.timestamp(),
+            )
+        maintenance = requested["host_maintenance"]["request"]
+        assert maintenance["source"] == "windows-control-surface-policy"
+        assert maintenance["initiator"] == "automatic_detector"
+        assert maintenance["trigger"]["trigger_kind"] == (
+            "preventive_handle_ceiling"
+        )
+        assert maintenance["trigger"]["policy_status"] == "ready"
+        assert maintenance["reason"] == (
+            "sustained exact-listener handle ceiling met"
+        )
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_policy_preventive_request_honors_contention_deferral(tmp_path):
+    (
+        now,
+        _run_id,
+        _owner,
+        lock_handle,
+        service,
+        _control,
+        _authority,
+        _publisher,
+        listener,
+    ) = _host_maintenance_context(tmp_path)
+    policy_ready = {
+        "schema_version": 1,
+        "assessed_at": now.isoformat(),
+        "status": "insufficient_history",
+        "automatic_ready": False,
+        "reason": "completed-run history is incomplete",
+        "host_evidence": {
+            "status": "confirmed_growth",
+            "identity_scope": "exact_listener_lifetime",
+            "listener_identity": listener,
+        },
+        "automatic_triggers": {
+            "preventive_handle_ceiling": {
+                "status": "ready_contended",
+                "ready": True,
+                "deferred_by_contention": True,
+                "reason": "external host contention is present",
+            },
+        },
+    }
+    try:
+        with patch(
+            "core.control_surface.assess_emulator_degradation",
+            return_value=policy_ready,
+        ):
+            with pytest.raises(ControlSurfaceRequestError) as rejected:
+                service.apply_host_maintenance(
+                    {
+                        "operation": "request_automatic",
+                        "trigger_kind": "preventive_handle_ceiling",
+                        "defer_during_external_contention": True,
+                        **listener,
+                    },
+                    now=now.timestamp(),
+                )
+            requested = service.apply_host_maintenance(
+                {
+                    "operation": "request_automatic",
+                    "trigger_kind": "preventive_handle_ceiling",
+                    "defer_during_external_contention": False,
+                    **listener,
+                },
+                now=now.timestamp() + 0.5,
+            )
+        assert rejected.value.code == "host_contention_deferred"
+        assert requested["host_maintenance"]["request"]["state"] == "requested"
+        assert requested["host_maintenance"]["request"]["trigger"][
+            "defer_during_external_contention"
+        ] is False
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
 def test_automatic_host_maintenance_rejects_live_listener_mismatch(tmp_path):
     (
         now,
@@ -3223,7 +3366,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 42" in native_compatibility
+    assert "MinimumServerRevision = 43" in native_compatibility
     assert '"bluestacks_maintenance_v1"' not in native_compatibility
     assert '"bluestacks_maintenance_v2"' in native_compatibility
     assert '"bluestacks_operator_restart_v1"' in native_compatibility
@@ -3231,6 +3374,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
         '"bluestacks_listener_lifetime_telemetry_v1"'
         in native_compatibility
     )
+    assert '"bluestacks_maintenance_policy_v1"' in native_compatibility
     assert '"strategy_aware_attach_v1"' in native_compatibility
     assert '"confirmed_local_mapping_status_v2"' in native_compatibility
     assert "confirmed_local_mapping_status_v2" in CONTROL_SURFACE_CAPABILITIES
@@ -3388,6 +3532,19 @@ def test_native_preferences_are_bounded_and_adb_drafts_survive_status_polling():
         assert f'x:Name="{field}"' in preferences_xaml
         assert f'x:Name="{field}"' not in native_xaml
     assert "PreferencesResult" in preferences_code
+    for recovery_option in (
+        "BlueStacksAutomaticRecoveryBox",
+        "BlueStacksPreventiveHandleRecoveryBox",
+        "BlueStacksInRunPerformanceRecoveryBox",
+        "BlueStacksCompletedRunRecoveryBox",
+        "BlueStacksDeferDuringExternalContentionBox",
+    ):
+        assert f'x:Name="{recovery_option}"' in preferences_xaml
+    assert 'x:Name="BlueStacksAutomaticPolicyText"' in native_xaml
+    assert "would trigger (disabled)" in native_code
+    assert 'operation = "request_automatic"' in (
+        native_root / "BlueStacksMaintenanceCoordinator.cs"
+    ).read_text(encoding="utf-8")
     assert "requireDestination: false" in preferences_code
     assert "public string Token" not in native_models
     assert 'private string _apiToken = "";' in native_code

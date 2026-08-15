@@ -551,6 +551,254 @@ def test_degradation_requires_sampled_coverage_not_partial_window_count():
     assert assessment["host_evidence"]["sampled_coverage_seconds"] == 121.0
 
 
+def _attributed_host_aggregates(
+    now: datetime,
+    *,
+    handles: int = 27_000,
+    other_cpu: int = 15,
+    memory_percent: int = 72,
+    available_memory: int = 8 * 1024**3,
+    bluestacks_memory: int = 600 * 1024**2,
+) -> list[dict]:
+    aggregates = _host_aggregates(now)
+    for aggregate in aggregates:
+        aggregate["metrics"].update(
+            {
+                "bluestacks_handle_count_avg": handles,
+                "host_cpu_percent_avg": other_cpu + 21,
+                "bluestacks_cpu_percent_avg": 20,
+                "control_surface_cpu_percent_avg": 1,
+                "host_memory_used_percent_avg": memory_percent,
+                "host_available_memory_bytes_min": available_memory,
+                "bluestacks_working_set_bytes_avg": bluestacks_memory,
+                "host_gpu_percent_avg": 30,
+                "bluestacks_gpu_percent_avg": 24,
+                "host_cpu_frequency_ratio_min": 1.0,
+            }
+        )
+    return aggregates
+
+
+def _lifetime_summary(aggregates: list[dict], *, low_water: int = 3_000):
+    return {
+        "identity_scope": "exact_listener_lifetime",
+        "listener_identity": aggregates[-1]["bluestacks_listener"],
+        "handle_low_water": low_water,
+        "handle_low_water_by_process_count": {"3": low_water},
+        "sampler_session_count": 2,
+    }
+
+
+def test_preventive_handle_lane_uses_full_listener_lifetime_low_water():
+    now = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
+    aggregates = _attributed_host_aggregates(now)
+
+    assessment = assess_emulator_degradation(
+        [],
+        aggregates,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        lifetime_handle_summary=_lifetime_summary(aggregates),
+        assessed_at=now,
+    )
+
+    trigger = assessment["automatic_triggers"]["preventive_handle_ceiling"]
+    assert trigger["status"] == "ready"
+    assert trigger["ready"] is True
+    assert trigger["handle_recent_median"] == 27_000
+    assert trigger["handle_low_water"] == 3_000
+    assert trigger["handle_delta"] == 24_000
+    assert assessment["host_contention"]["status"] == "clear"
+
+
+def test_preventive_handle_lane_reports_contention_without_losing_evidence():
+    now = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
+    aggregates = _attributed_host_aggregates(now, other_cpu=65)
+
+    assessment = assess_emulator_degradation(
+        [],
+        aggregates,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        lifetime_handle_summary=_lifetime_summary(aggregates),
+        assessed_at=now,
+    )
+
+    trigger = assessment["automatic_triggers"]["preventive_handle_ceiling"]
+    assert assessment["host_contention"]["status"] == "external_contention"
+    assert trigger["ready"] is True
+    assert trigger["deferred_by_contention"] is True
+    assert trigger["status"] == "ready_contended"
+
+
+def test_contention_attributes_memory_outside_bluestacks():
+    now = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
+    external = _attributed_host_aggregates(
+        now,
+        memory_percent=95,
+        available_memory=2 * 1024**3,
+        bluestacks_memory=1024**3,
+    )
+    bluestacks_heavy = _attributed_host_aggregates(
+        now,
+        memory_percent=95,
+        available_memory=2 * 1024**3,
+        bluestacks_memory=35 * 1024**3,
+    )
+
+    external_assessment = assess_emulator_degradation(
+        [],
+        external,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        lifetime_handle_summary=_lifetime_summary(external),
+        assessed_at=now,
+    )
+    bluestacks_assessment = assess_emulator_degradation(
+        [],
+        bluestacks_heavy,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        lifetime_handle_summary=_lifetime_summary(bluestacks_heavy),
+        assessed_at=now,
+    )
+
+    assert external_assessment["host_contention"]["status"] == (
+        "external_contention"
+    )
+    assert bluestacks_assessment["host_contention"]["status"] == "clear"
+
+
+def _performance_checkpoint(
+    captured_at: datetime,
+    *,
+    wave: int,
+    cph: int,
+) -> dict:
+    return {
+        "captured_at": captured_at.isoformat(),
+        "saved_wave": wave,
+        "interval": {
+            "real_time_seconds": "300",
+            "coins_per_hour": str(cph),
+            "effective_game_speed": "6",
+        },
+    }
+
+
+def test_severe_in_run_loss_requires_three_catastrophic_same_regime_intervals():
+    now = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
+    aggregates = _attributed_host_aggregates(now, handles=6_000)
+    baseline_samples = [
+        _performance_checkpoint(
+            now - timedelta(days=1, minutes=index * 5),
+            wave=1_400 + index * 20,
+            cph=100,
+        )
+        for index in range(3)
+    ]
+    battles = [
+        {
+            **_battle(f"baseline-{run}", "100"),
+            "metric_mapping_id": "mapping-1",
+            "metric_semantic_fingerprint": "semantic-1",
+            "metric_intervals": baseline_samples,
+        }
+        for run in range(2)
+    ]
+    active = {
+        "strategy": "farm_t18",
+        "strategy_definition_fingerprint": "definition-1",
+        "configuration_fingerprint": "same-config",
+        "mapping_id": "mapping-1",
+        "semantic_fingerprint": "semantic-1",
+        "checkpoints": [
+            _performance_checkpoint(
+                now - timedelta(minutes=10 - index * 5),
+                wave=1_500 + index * 20,
+                cph=50,
+            )
+            for index in range(3)
+        ],
+    }
+
+    assessment = assess_emulator_degradation(
+        battles,
+        aggregates,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        active_run_performance=active,
+        lifetime_handle_summary=_lifetime_summary(
+            aggregates,
+            low_water=1_000,
+        ),
+        assessed_at=now,
+    )
+
+    trigger = assessment["automatic_triggers"]["severe_in_run_loss"]
+    assert trigger["status"] == "ready"
+    assert trigger["ready"] is True
+    assert trigger["interval_cph_ratios"] == [0.5, 0.5, 0.5]
+
+    active["checkpoints"][-1]["interval"]["coins_per_hour"] = "80"
+    relaxed = assess_emulator_degradation(
+        battles,
+        aggregates,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        active_run_performance=active,
+        lifetime_handle_summary=_lifetime_summary(
+            aggregates,
+            low_water=1_000,
+        ),
+        assessed_at=now,
+    )
+    relaxed_trigger = relaxed["automatic_triggers"]["severe_in_run_loss"]
+    assert relaxed_trigger["status"] == "within_relaxed_band"
+    assert relaxed_trigger["ready"] is False
+
+    active["checkpoints"][-1]["interval"]["coins_per_hour"] = "50"
+    contended_aggregates = _attributed_host_aggregates(
+        now,
+        handles=6_000,
+        other_cpu=65,
+    )
+    contended = assess_emulator_degradation(
+        battles,
+        contended_aggregates,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        active_run_performance=active,
+        lifetime_handle_summary=_lifetime_summary(
+            contended_aggregates,
+            low_water=1_000,
+        ),
+        assessed_at=now,
+    )
+    contended_trigger = contended["automatic_triggers"]["severe_in_run_loss"]
+    assert contended_trigger["status"] == "deferred_host_contention"
+    assert contended_trigger["ready"] is False
+
+    active["checkpoints"][-1]["captured_at"] = (
+        now + timedelta(minutes=3)
+    ).isoformat()
+    future = assess_emulator_degradation(
+        battles,
+        aggregates,
+        current_strategy="farm_t18",
+        current_run_id="run-1",
+        active_run_performance=active,
+        lifetime_handle_summary=_lifetime_summary(
+            aggregates,
+            low_water=1_000,
+        ),
+        assessed_at=now,
+    )
+    future_trigger = future["automatic_triggers"]["severe_in_run_loss"]
+    assert future_trigger["status"] == "stale_or_discontinuous"
+    assert future_trigger["ready"] is False
+
+
 def test_completed_recovery_runs_do_not_calibrate_degradation(tmp_path):
     battles_dir = tmp_path / "battles"
     battles_dir.mkdir()

@@ -422,6 +422,55 @@ def test_listener_lifetime_preserves_distinct_runtime_and_windows_ports(tmp_path
     assert history[0]["bluestacks_listener"]["adb_port"] == 5555
 
 
+def test_listener_lifetime_handle_summary_keeps_cross_gui_low_water(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    listener = _listener()
+    low = _aggregate(
+        aggregate_id="81111111-1111-4111-8111-111111111111",
+        session_id="11111111-1111-4111-8111-111111111111",
+        sequence=1,
+        run_id="prior-run",
+        window_start_utc="2026-07-30T14:00:00+00:00",
+        window_end_utc="2026-07-30T14:00:09+00:00",
+        bluestacks_listener=listener,
+        metrics={
+            **_aggregate()["metrics"],
+            "bluestacks_handle_count_avg": 3_100,
+            "bluestacks_process_count_min": 2,
+            "bluestacks_process_count_max": 2,
+        },
+    )
+    high = _aggregate(
+        aggregate_id="84444444-4444-4444-8444-444444444444",
+        session_id="44444444-4444-4444-8444-444444444444",
+        sequence=1,
+        run_id="current-run",
+        window_start_utc="2026-07-30T15:00:00+00:00",
+        window_end_utc="2026-07-30T15:00:09+00:00",
+        bluestacks_listener=listener,
+        metrics={
+            **_aggregate()["metrics"],
+            "bluestacks_handle_count_avg": 27_400,
+            "bluestacks_process_count_min": 2,
+            "bluestacks_process_count_max": 2,
+        },
+    )
+    service.publish_host_performance(_request(low, high))
+
+    summary = (
+        service.host_performance_store.bluestacks_lifetime_handle_summary(
+            current_run_id="current-run"
+        )
+    )
+
+    assert summary is not None
+    assert summary["handle_low_water"] == 3_100
+    assert summary["aggregate_count"] == 2
+    assert summary["sampler_session_count"] == 2
+    assert summary["handle_low_water_by_process_count"] == {"2": 3_100}
+    assert summary["listener_identity"] == listener
+
+
 def test_listener_lifetime_requires_a_valid_runtime_target_port(tmp_path):
     service = ControlSurfaceService(repository_root=tmp_path)
     current = _aggregate(

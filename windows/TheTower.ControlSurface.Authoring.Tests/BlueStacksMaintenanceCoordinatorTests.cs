@@ -45,6 +45,18 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void NewProactiveLanesRequireExplicitOptIn()
+    {
+        var settings = new ClientSettings();
+
+        Assert.False(settings.BlueStacksAutomaticRecoveryEnabled);
+        Assert.False(settings.BlueStacksPreventiveHandleRecoveryEnabled);
+        Assert.False(settings.BlueStacksInRunPerformanceRecoveryEnabled);
+        Assert.True(settings.BlueStacksCompletedRunRecoveryEnabled);
+        Assert.True(settings.BlueStacksDeferDuringExternalContention);
+    }
+
+    [Fact]
     public async Task RequestBindsImmutableTargetBeforeAcknowledgement()
     {
         var settings = Settings(enabled: true);
@@ -70,6 +82,16 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
             CancellationToken.None);
         Assert.Equal(RequestId, coordinator.ActiveRequestId);
         Assert.True(coordinator.TargetEditsLocked);
+        Assert.Equal(
+            "request_automatic",
+            api.Payloads[0].GetProperty("operation").GetString());
+        Assert.Equal(
+            "completed_run_degradation",
+            api.Payloads[0].GetProperty("trigger_kind").GetString());
+        Assert.True(
+            api.Payloads[0]
+                .GetProperty("defer_during_external_contention")
+                .GetBoolean());
 
         settings.BlueStacksPlayerExecutablePath = _otherPlayerPath;
         settings.BlueStacksInstanceName = "Pie64_Changed";
@@ -649,6 +671,59 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
         Assert.False(coordinator.TargetEditsLocked);
     }
 
+    [Fact]
+    public void AutomaticTriggerSelectionUsesEnabledLanePriorityAndDeferral()
+    {
+        var degradation = new EmulatorDegradationStatus
+        {
+            AutomaticTriggers = new EmulatorAutomaticTriggersStatus
+            {
+                SevereInRunLoss = new EmulatorAutomaticTriggerStatus
+                {
+                    Ready = true,
+                },
+                PreventiveHandleCeiling = new EmulatorAutomaticTriggerStatus
+                {
+                    Ready = true,
+                    DeferredByContention = true,
+                },
+                CompletedRunDegradation = new EmulatorAutomaticTriggerStatus
+                {
+                    Ready = true,
+                },
+            },
+        };
+        var settings = Settings(enabled: true);
+        settings.BlueStacksPreventiveHandleRecoveryEnabled = true;
+        settings.BlueStacksInRunPerformanceRecoveryEnabled = true;
+
+        Assert.Equal(
+            "severe_in_run_loss",
+            BlueStacksMaintenanceCoordinator.SelectAutomaticTrigger(
+                degradation,
+                settings)?.Kind);
+
+        settings.BlueStacksInRunPerformanceRecoveryEnabled = false;
+        Assert.Equal(
+            "completed_run_degradation",
+            BlueStacksMaintenanceCoordinator.SelectAutomaticTrigger(
+                degradation,
+                settings)?.Kind);
+
+        settings.BlueStacksCompletedRunRecoveryEnabled = false;
+        Assert.Null(
+            BlueStacksMaintenanceCoordinator.SelectAutomaticTrigger(
+                degradation,
+                settings));
+
+        settings.BlueStacksDeferDuringExternalContention = false;
+        Assert.Equal(
+            "preventive_handle_ceiling",
+            BlueStacksMaintenanceCoordinator.SelectAutomaticTrigger(
+                degradation,
+                settings)?.Kind);
+    }
+
     private BlueStacksMaintenanceCoordinator Coordinator(
         FakeHostMaintenanceApi api,
         FakeBlueStacksController controller,
@@ -704,6 +779,7 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
                 "bluestacks_maintenance_v2",
                 "bluestacks_operator_restart_v1",
                 "bluestacks_listener_lifetime_telemetry_v1",
+                "bluestacks_maintenance_policy_v1",
             ],
             HostMaintenance = new HostMaintenanceStatus
             {
@@ -719,6 +795,21 @@ public sealed class BlueStacksMaintenanceCoordinatorTests : IDisposable
                 AssessedAt = "2026-08-12T12:00:00+00:00",
                 Status = degradationReady ? "automatic_ready" : "healthy",
                 AutomaticReady = degradationReady,
+                AutomaticRequestGate = new BetterControlActionAvailability
+                {
+                    Available = degradationReady,
+                    Code = degradationReady ? "available" : "no_trigger_ready",
+                    Reason = degradationReady ? "available" : "not ready",
+                },
+                AutomaticTriggers = new EmulatorAutomaticTriggersStatus
+                {
+                    CompletedRunDegradation = new EmulatorAutomaticTriggerStatus
+                    {
+                        Status = degradationReady ? "ready" : "healthy",
+                        Ready = degradationReady,
+                        Reason = degradationReady ? "confirmed" : "healthy",
+                    },
+                },
                 HostEvidence = new EmulatorHostEvidenceStatus
                 {
                     Status = degradationReady ? "confirmed_growth" : "stable",

@@ -1113,8 +1113,15 @@ adds the exact-target `bluestacks_maintenance_v2`, operator command
 Revision 41 supersedes and no longer advertises the v1 request contract, so a
 server-first rollout makes an older native client fail its compatibility check
 instead of submitting an unbound recovery request.
-Automatic creation remains disabled by default in the native client's local
-Preferences. Before enabling it—or using the operator restart—the operator
+Revision 43 adds `bluestacks_maintenance_policy_v1` and three independently
+observable automatic trigger lanes. Automatic creation remains disabled by
+default behind one master option. Preferences retain separate child options
+for the preventive handle ceiling, severe in-run loss, completed-run
+confirmation, and deferral of the preventive lane during external contention.
+The two new proactive lanes default off, completed-run confirmation retains the
+prior child behavior, and contention deferral defaults on.
+Changing any option affects only new requests; an accepted durable request is
+always reconciled. Before enabling it—or using the operator restart—the operator
 must verify the absolute `HD-Player.exe` path, the Windows ADB listener port,
 and the instance name against a shortcut created by the installed BlueStacks
 version. The client launches only
@@ -1122,18 +1129,41 @@ version. The client launches only
 configurable because BlueStacks documents per-instance shortcuts but does not
 publish a stable raw command-line contract.
 
-The Linux assessment is intentionally conservative and side-effect free. It
-compares the newest two representative completed Farm runs with the preceding
-three to five runs having the same Strategy and exact run-configuration
-fingerprint. Both candidates must be at or below 93% of the baseline median,
-their median must be at or below 90%, and their effective-game-speed median
-must remain at least 97% of baseline. A stable Windows host plus Linux runtime
-ADB target and exact Windows BlueStacks listener lifetime must also cover at
-least 16 minutes with a stable nonzero BlueStacks process set, recent median handle
-count at least 1.8 times and 4,000 handles above its cross-run low-water mark,
-and no host CPU or memory maximum at or above 95%. This preserves aging
-evidence across battle boundaries and Windows GUI sessions without mixing
-another PC, runtime target, listener port, instance, or BlueStacks process.
+The Linux assessment is intentionally conservative, side-effect free, and
+continues while every automatic option is disabled. It exposes three lanes:
+
+- **Preventive handle ceiling.** The recent median must remain at least 25,000
+  OS handles for ten sampled minutes, remain at least 10,000 above the retained
+  low-water of the exact BlueStacks listener process lifetime, and keep a
+  stable nonzero process set. The low-water query crosses Windows GUI sampling
+  sessions and completed battle scopes; a twelve-hour sliding baseline cannot
+  teach itself that a slow leak is normal. This is a provisional maintenance
+  threshold based on low restart cost and observed correlation, not a claim
+  that handle count alone proves a performance bottleneck.
+- **Severe in-run loss.** The passive five-minute player-save scheduler
+  supplies interval CPH, wave, and effective speed without another save read.
+  Three fresh consecutive intervals must each be at or below 60% of a
+  conservative lower envelope built from at least six intervals across two
+  completed runs in the same Strategy, exact run configuration, save-mapping
+  semantics, and broad 1,000-wave band. Effective speed must remain at least
+  97% of its comparable baseline and sustained handle growth must also be
+  present. Missing history, a changed loadout/configuration, ordinary variance,
+  or partial attribution therefore cannot trigger this lane.
+- **Completed-run confirmation.** The legacy conservative detector compares
+  the newest two representative completed Farm runs with the preceding three
+  to five exact-configuration runs. Both candidates must be at or below 93% of
+  baseline, their median at or below 90%, and effective speed at least 97% of
+  baseline, with sustained handle growth.
+
+Recent CPU, GPU, memory, available-memory, and clock evidence is evaluated over
+the current host window. Sustained load outside BlueStacks is reported as
+external contention. Ambiguous or external contention always prevents the
+performance-attributed lane; the default Preferences policy also defers a
+preventive handle restart because that restart would not remove the competing
+load. An operator may disable only that preventive deferral. Exact-lifetime
+correlation preserves aging evidence across battle boundaries and Windows GUI
+sessions without mixing another PC, runtime target, listener port, instance,
+or BlueStacks process.
 The Linux runtime port and Windows listener port are correlated independently
 and need not be numerically equal. Missing exact-lifetime host
 corroboration produces a recommendation only; host saturation defers recovery.
@@ -1143,8 +1173,10 @@ and retains the completed-run cohort until the battle directory changes, so
 five-second status polling does not repeatedly parse completed reports and
 thousands of retained host windows.
 
-When the detector reports `automatic_ready`, an opted-in Windows client may
-request one restart. The client first proves that its freshly inspected
+When an enabled lane is ready and the shared automatic request gate is open, an
+opted-in Windows client may request one restart and records the selected lane
+in durable trigger provenance. A disabled ready lane remains visible as
+"would trigger (disabled)." The client first proves that its freshly inspected
 listener is the same exact process lifetime named by the detector. Request
 creation still requires a fresh owner-matched
 `RUNNING` Farm battle, exact active Strategy and activity scope, Enabled
@@ -1217,7 +1249,9 @@ and thread counts, refreshed with process discovery. A separate detector line
 shows the exact-lifetime recent median, low-water, ratio, delta, stable window
 count, PID, and number of contributing GUI sessions. Coordinator progress is a
 separate field so restart messages and status polling do not erase the detector
-evidence.
+evidence. The automatic-policy line independently shows the master state, all
+three lane states, contention attribution, disabled-but-ready evidence, and
+contention deferral.
 
 Control request examples:
 
@@ -1261,10 +1295,11 @@ Process request examples:
   header groups four separately labelled Linux service, HTTP, API SSH, and ADB
   SSH signals and routes routine navigation through **View**, **Tools**, and
   **Preferences** menus.
-- Preferences also contains the default-off BlueStacks recovery opt-in and its
-  exact executable/instance settings. Enabling it permits automatic request
-  creation only when Linux reports the revision-41 exact-lifetime degradation
-  decision; **System > Diagnostics** separately offers a confirmed operator
+- Preferences also contains the default-off BlueStacks recovery master, its
+  independently retained lane/deferral options, and exact executable/instance
+  settings. Enabling it permits automatic request creation only when Linux
+  reports a revision-43 policy lane plus fresh authority; **System >
+  Diagnostics** separately offers a confirmed operator
   restart under fresh server-owned Farm authority. An accepted request is
   reconciled independently of later Preference changes. Recovery progress is
   presented as host-maintenance state rather than as an Automation Pause or a

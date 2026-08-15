@@ -275,6 +275,14 @@ public partial class MainWindow : Window
             preferences.HostPerformanceSamplingEnabled;
         _settings.BlueStacksAutomaticRecoveryEnabled =
             preferences.BlueStacksAutomaticRecoveryEnabled;
+        _settings.BlueStacksPreventiveHandleRecoveryEnabled =
+            preferences.BlueStacksPreventiveHandleRecoveryEnabled;
+        _settings.BlueStacksInRunPerformanceRecoveryEnabled =
+            preferences.BlueStacksInRunPerformanceRecoveryEnabled;
+        _settings.BlueStacksCompletedRunRecoveryEnabled =
+            preferences.BlueStacksCompletedRunRecoveryEnabled;
+        _settings.BlueStacksDeferDuringExternalContention =
+            preferences.BlueStacksDeferDuringExternalContention;
         if (!recoveryTargetLocked)
         {
             _settings.BlueStacksPlayerExecutablePath =
@@ -3524,6 +3532,8 @@ public partial class MainWindow : Window
             maintenance.Active
                 ? Color.FromRgb(98, 213, 255)
                 : degradation.AutomaticReady
+                    || degradation.AutomaticTriggers.PreventiveHandleCeiling.Ready
+                    || degradation.AutomaticTriggers.SevereInRunLoss.Ready
                     ? Color.FromRgb(241, 191, 91)
                     : request?.State == "terminal"
                         ? Color.FromRgb(101, 230, 166)
@@ -3579,6 +3589,57 @@ public partial class MainWindow : Window
                 ? Color.FromRgb(241, 191, 91)
                 : Color.FromRgb(139, 153, 176));
 
+        var triggers = degradation.AutomaticTriggers;
+        var masterEnabled = _settings.BlueStacksAutomaticRecoveryEnabled;
+        var policyParts = new List<string>
+        {
+            "Automatic policy: " + (masterEnabled ? "enabled" : "disabled"),
+            FormatAutomaticLane(
+                "handles",
+                triggers.PreventiveHandleCeiling,
+                masterEnabled
+                    && _settings.BlueStacksPreventiveHandleRecoveryEnabled,
+                masterEnabled
+                    && _settings.BlueStacksDeferDuringExternalContention),
+            FormatAutomaticLane(
+                "in-run",
+                triggers.SevereInRunLoss,
+                masterEnabled
+                    && _settings.BlueStacksInRunPerformanceRecoveryEnabled,
+                deferForContention: false),
+            FormatAutomaticLane(
+                "completed-run",
+                triggers.CompletedRunDegradation,
+                masterEnabled
+                    && _settings.BlueStacksCompletedRunRecoveryEnabled,
+                deferForContention: false),
+        };
+        if (degradation.HostContention is { } contention)
+        {
+            policyParts.Add(
+                "host " + FormatStatusToken(contention.Status)
+                    + (contention.OtherCpuPercentMedian is double otherCpu
+                        ? $" ({otherCpu:F0}% other CPU)"
+                        : ""));
+        }
+        if (!degradation.AutomaticRequestGate.Available
+            && (triggers.PreventiveHandleCeiling.Ready
+                || triggers.SevereInRunLoss.Ready
+                || triggers.CompletedRunDegradation.Ready))
+        {
+            policyParts.Add(
+                "request gate "
+                    + FormatStatusToken(
+                        degradation.AutomaticRequestGate.Code));
+        }
+        BlueStacksAutomaticPolicyText.Text = string.Join(" · ", policyParts);
+        BlueStacksAutomaticPolicyText.Foreground = new SolidColorBrush(
+            BlueStacksMaintenanceCoordinator.SelectAutomaticTrigger(
+                degradation,
+                _settings) is not null
+                ? Color.FromRgb(241, 191, 91)
+                : Color.FromRgb(139, 153, 176));
+
         _blueStacksMaintenanceCompatible =
             BlueStacksMaintenanceCoordinator.HasOperatorRestartContract(status);
         _blueStacksOperatorAvailability = maintenance.OperatorRestart;
@@ -3605,6 +3666,31 @@ public partial class MainWindow : Window
                         + (request.TerminalReason ?? maintenance.Reason)
                     : "No BlueStacks maintenance is active.";
         }
+    }
+
+    private static string FormatAutomaticLane(
+        string label,
+        EmulatorAutomaticTriggerStatus trigger,
+        bool enabled,
+        bool deferForContention)
+    {
+        var handleDetail = trigger.HandleRecentMedian is double recent
+            && trigger.HandleLowWater is double low
+                ? $" ({recent:N0} / {low:N0} low"
+                    + (trigger.HandleDelta is double delta
+                        ? $", {delta:+#,##0;-#,##0;0}"
+                        : "")
+                    + ")"
+                : "";
+        if (trigger.Ready && !enabled)
+        {
+            return $"{label} would trigger (disabled){handleDetail}";
+        }
+        if (trigger.Ready && deferForContention && trigger.DeferredByContention)
+        {
+            return $"{label} deferred for contention{handleDetail}";
+        }
+        return $"{label} {FormatStatusToken(trigger.Status)}{handleDetail}";
     }
 
     private void UpdateBlueStacksRestartAvailability()
