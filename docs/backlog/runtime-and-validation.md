@@ -285,14 +285,14 @@ as checked checkpoint narrative here.
   At an explicitly authorized natural Home boundary, select No Strategy and
   immediately Start. Confirm the workflow, activity entry, and acknowledgement
   retain `none`, with no Tournament setup or exclusive-validation receipt.
-- [ ] Live-confirm deployed production commit `95bd630` for the exclusive-
-  validation typed-authority repair recorded in
+- [ ] Checkpoint and promote current-main cross-owner hardening candidate
+  `f3cf804`, then live-confirm the resulting production commit for the
+  exclusive-validation typed-authority repair recorded in
   [ISSUE-2026-046](../issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
   and the same-family later-battle release in
   [ISSUE-2026-001](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
-  Promote the current-main cross-owner hardening before live confirmation,
-  then use only a newly and explicitly authorized ordinary validation battle
-  at a natural safe boundary. Confirm each declared phase,
+  Use only a newly and explicitly authorized ordinary validation battle at a
+  natural safe boundary. Confirm each declared phase,
   exactly owned Surrender when required, verified Home cleanup and authority
   release, plus Pause or operator-workflow interruption before the next input.
   Do not manufacture the historical later-`RUNNING` transition; if it recurs
