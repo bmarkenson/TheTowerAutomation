@@ -57,12 +57,35 @@ resolved dossier instead of copying its detail.
   retain the existing per-field guarded fallback, and attachment remains
   observational. The bundled Tournament source still rebuilds to its existing
   generated plan exactly.
-- The complete non-live checkpoint passed compilation, state definitions,
-  clickmap integrity with zero errors and 44 established informational orphans,
-  and all 2,732 Python tests in 428.15 seconds. Portable native authoring tests
-  passed all 192 tests. The Linux SDK lacks WindowsDesktop targets, so the WPF
-  application cross-build remains unavailable on this host; repository WPF
-  source-contract coverage passed. No process or device interaction was used.
+- Exact candidate `fe77778` passed compilation, state definitions, clickmap
+  integrity with zero errors and 44 established informational orphans, and all
+  2,732 Python tests in 410.64 seconds. Portable native authoring tests passed
+  all 192 tests, and the supported Microsoft SDK completed the Release WPF
+  cross-build with zero errors. Its read-only NuGet vulnerability-cache warning
+  did not affect restore or compilation.
+- Production advanced from `41832bd` to `fe77778` behind rollback tag
+  `production-before-20260815T075605Z-41832bd`. Control-surface PID `2182129`
+  served the Tournament Modules and Orb Distance authoring contract, and
+  replacement automation PID `2182512` / runtime
+  `23dc0710548e4296b99f96d3bb569207` held exact target `localhost:5555`,
+  acknowledged Pause, and freshly observed Home. Deployment sent no device or
+  battle input.
+- The complete native package was published from `fe77778` and inventoried at
+  `2026-08-15T07:59:14Z`. Current Control Surface is 72,489,449 bytes with
+  SHA-256
+  `a4da12427abe04a62f15cad3f00b55c3da2dfef157864cdd2e631430e15fcbbe`;
+  current Tunnel Host is 35,172,102 bytes with SHA-256
+  `9a2da678ace3e52e97afd9b6ef7c7b71cd1b1d7721801263fe604f7e3354b871`.
+  Retained slot 1 is the prior `59c86a5` pair: 72,489,144-byte Control Surface
+  `0a125701f11557d3cf4b4ffbd6489afa9e8f7aedb841f53417e3d18e5253e2e5`
+  and 35,172,110-byte Tunnel Host
+  `a3be1c2cf0092af7e0f2d2c41a9dab4482f08692d2eddd278acfd6300867aa98`.
+  Retained slot 2 is the prior `2c8d842` pair: 72,488,788-byte Control Surface
+  `9ac69dbbe2d52d57c8af076f16553aa19beed3a1fd2b51ae24da76fdaf91fc8b`
+  and 35,172,127-byte Tunnel Host
+  `f8354c3bd5f6a579395c831f4ebaaefad2387397902758ad4c23a161eaeae28d`.
+  Cross-publication does not establish Windows WPF runtime behavior; the
+  operator-side authoring smoke remains pending.
 
 ### 2026-08-14 proactive BlueStacks maintenance policy
 
