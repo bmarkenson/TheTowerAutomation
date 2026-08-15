@@ -54,9 +54,10 @@ The unit also reads the separate optional
 `~/.config/thetower/player-save-audit.env`. It is intentionally not rewritten
 by the control surface. The file can explicitly enable the observation-only
 player-save projector. It consumes only bundles already acquired by a forced
-lifecycle boundary, a natural terminal boundary, or an explicit Perk
-selection/exhaustion checkpoint; it has no cadence or independent acquisition
-setting. See
+lifecycle boundary, a natural terminal boundary, the runtime's independent
+300-second passive scheduler, or an explicit Perk selection/exhaustion
+checkpoint. The audit option has no cadence or independent acquisition setting
+of its own. See
 [`docs/operations/player_save_audit.md`](../../docs/operations/player_save_audit.md)
 for the exact interface, receipt path, and authority limits. Absence leaves the
 projector disabled.
