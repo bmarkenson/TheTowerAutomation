@@ -3466,7 +3466,7 @@ class App:
         workflow: Mapping[str, Any],
         current: Mapping[str, Any],
     ) -> Optional[str]:
-        """Validate one accepted lifecycle input against its exact owner."""
+        """Validate one accepted input against its process/control owner."""
 
         raw_receipt = workflow.get("acknowledgement")
         receipt = validate_workflow_evidence(raw_receipt)
@@ -3481,7 +3481,6 @@ class App:
             "pid",
             "adb_target",
             "target_generation",
-            "activity_scope_run_id",
             "observation_id",
         )
         if any(receipt.get(field) in {None, ""} for field in required):
@@ -3491,10 +3490,6 @@ class App:
                 return f"dispatch owner changed at {field}"
             if receipt.get(field) != current_evidence.get(field):
                 return f"runtime evidence changed at {field}"
-        if receipt.get("activity_scope_run_id") != current_evidence.get(
-            "activity_scope_run_id"
-        ):
-            return "battle activity scope changed"
         identity = self._current_control_request_identity()
         if not isinstance(raw_receipt, Mapping):
             return "dispatch control identity is unavailable"
@@ -3797,10 +3792,8 @@ class App:
         current: Mapping[str, Any],
         *,
         intent: str,
-        allow_new_run_scope: bool = False,
-        allowed_activity_scope_transition: Optional[Tuple[str, str]] = None,
     ) -> tuple[bool, str]:
-        """Revalidate target/session/battle evidence without changing intent."""
+        """Revalidate process/target ownership and the visible intent."""
 
         for field in ("runtime_id", "pid", "adb_target"):
             if requested.get(field) != current.get(field):
@@ -3812,38 +3805,6 @@ class App:
             and current_generation != requested_generation
         ):
             return False, "ADB target generation changed"
-        scope_changed = requested.get("activity_scope_run_id") != current.get(
-            "activity_scope_run_id"
-        )
-        allowed_source_scope = ""
-        allowed_target_scope = ""
-        if (
-            isinstance(allowed_activity_scope_transition, tuple)
-            and len(allowed_activity_scope_transition) == 2
-        ):
-            allowed_source_scope = str(
-                allowed_activity_scope_transition[0] or ""
-            ).strip()
-            allowed_target_scope = str(
-                allowed_activity_scope_transition[1] or ""
-            ).strip()
-        attachment_scope_transition = bool(
-            intent == "attach_battle"
-            and current.get("game_state") == "active_battle"
-            and allowed_source_scope
-            and allowed_target_scope
-            and requested.get("activity_scope_run_id") == allowed_source_scope
-            and current.get("activity_scope_run_id") == allowed_target_scope
-        )
-        if scope_changed and not (
-            (
-                allow_new_run_scope
-                and intent == "start_battle"
-                and current.get("game_state") == "home_new_battle"
-            )
-            or attachment_scope_transition
-        ):
-            return False, "battle activity scope changed"
         if not intent_matches_evidence(intent, current):
             return (
                 False,
@@ -4523,23 +4484,10 @@ class App:
                 return
             requested = workflow.get("evidence")
             if isinstance(requested, Mapping):
-                temporal = claim.get("temporal_binding")
-                allowed_scope_transition = (
-                    (
-                        temporal.source_activity_scope_id,
-                        temporal.activity_scope_id,
-                    )
-                    if isinstance(temporal, RunningAttachmentTemporalBinding)
-                    and temporal.activity_scope_id is not None
-                    else None
-                )
                 matches, reason = self._workflow_evidence_matches_runtime(
                     requested,
                     current,
                     intent=intent,
-                    allowed_activity_scope_transition=(
-                        allowed_scope_transition
-                    ),
                 )
                 if matches:
                     if self._mission_mgr.active_battle_observed():
@@ -4627,9 +4575,6 @@ class App:
             requested,
             current,
             intent=intent,
-            allow_new_run_scope=(
-                status == "acknowledged" and intent == "start_battle"
-            ),
         )
         if not matches:
             self._mission_mgr.revoke_initial_battle_intent(
@@ -6590,10 +6535,6 @@ class App:
                 evidence,
                 current,
                 intent="attach_battle",
-                allowed_activity_scope_transition=(
-                    temporal.source_activity_scope_id,
-                    temporal.activity_scope_id or "",
-                ),
             )[0]
         ):
             self._running_reconciliation_claims().pop(workflow_id, None)

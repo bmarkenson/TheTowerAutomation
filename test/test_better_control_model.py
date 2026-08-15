@@ -428,7 +428,7 @@ def test_terminal_ordinary_launch_yields_instead_of_adopting_tournament():
     ) is False
 
 
-def test_dispatch_receipt_requires_complete_exact_owner_scope_and_requests():
+def test_dispatch_receipt_requires_runtime_target_and_control_owner_not_scope():
     requested = _evidence(scope="scope-request")
     current = _evidence(
         observation_id="runtime-1:dispatch",
@@ -467,19 +467,45 @@ def test_dispatch_receipt_requires_complete_exact_owner_scope_and_requests():
     assert app._workflow_dispatch_receipt_mismatch(
         missing_generation,
         current,
-    ) is not None
+    ) == "dispatch receipt is incomplete"
+
     changed_scope = {**current, "activity_scope_run_id": "scope-other"}
-    assert app._workflow_dispatch_receipt_mismatch(
-        workflow,
-        changed_scope,
-    ) == "battle activity scope changed"
-    app._supervisor.control_request_identity = {
-        "state_request_id": "state-2",
-        "mode_request_id": "mode-1",
-    }
-    assert "state_request_id" in str(
-        app._workflow_dispatch_receipt_mismatch(workflow, current)
+    assert (
+        app._workflow_dispatch_receipt_mismatch(workflow, changed_scope)
+        is None
     )
+
+    receipt_without_scope = {
+        key: value
+        for key, value in receipt.items()
+        if key != "activity_scope_run_id"
+    }
+    assert app._workflow_dispatch_receipt_mismatch(
+        {**workflow, "acknowledgement": receipt_without_scope},
+        changed_scope,
+    ) is None
+
+    for field, replacement in (
+        ("runtime_id", "runtime-other"),
+        ("pid", os.getpid() + 1),
+        ("adb_target", "localhost:5565"),
+        ("target_generation", 8),
+    ):
+        assert app._workflow_dispatch_receipt_mismatch(
+            workflow,
+            {**current, field: replacement},
+        ) == f"runtime evidence changed at {field}"
+
+    for field in ("state_request_id", "mode_request_id"):
+        app._supervisor.control_request_identity = {
+            "state_request_id": "state-1",
+            "mode_request_id": "mode-1",
+            field: f"changed-{field}",
+        }
+        assert app._workflow_dispatch_receipt_mismatch(
+            workflow,
+            current,
+        ) == f"control request identity changed at {field}"
 
 
 def test_modal_retry_preserves_same_owner_dispatched_player_save_carry():
@@ -529,6 +555,15 @@ def test_modal_retry_preserves_same_owner_dispatched_player_save_carry():
     app._current_control_workflow_evidence.return_value = {
         **current,
         "activity_scope_run_id": "scope-other",
+    }
+    assert app._same_owner_free_ticket_retry_ready(
+        source=None,
+        request_id="",
+    ) is True
+
+    app._current_control_workflow_evidence.return_value = {
+        **current,
+        "adb_target": "localhost:5565",
     }
     assert app._same_owner_free_ticket_retry_ready(
         source=None,
@@ -1242,28 +1277,65 @@ def test_attachment_context_allows_one_expected_scope_rebind(monkeypatch):
     )
 
 
-def test_attachment_scope_transition_requires_exact_typed_source_and_target():
+@pytest.mark.parametrize(
+    ("intent", "game_state"),
+    (
+        ("start_battle", "home_new_battle"),
+        ("attach_battle", "active_battle"),
+    ),
+)
+def test_workflow_evidence_treats_activity_scope_as_observational(
+    intent,
+    game_state,
+):
     app = App.__new__(App)
-    requested = _evidence(game_state="active_battle", scope="scope-before")
-    expected = _evidence(game_state="active_battle", scope="scope-after")
-    unexpected = _evidence(game_state="active_battle", scope="scope-other")
+    requested = _evidence(game_state=game_state, scope="scope-before")
+    current = _evidence(game_state=game_state, scope="scope-after")
 
-    allowed, _ = app._workflow_evidence_matches_runtime(
+    allowed, reason = app._workflow_evidence_matches_runtime(
         requested,
-        expected,
-        intent="attach_battle",
-        allowed_activity_scope_transition=("scope-before", "scope-after"),
-    )
-    rejected, reason = app._workflow_evidence_matches_runtime(
-        requested,
-        unexpected,
-        intent="attach_battle",
-        allowed_activity_scope_transition=("scope-before", "scope-after"),
+        current,
+        intent=intent,
     )
 
     assert allowed is True
-    assert rejected is False
-    assert reason == "battle activity scope changed"
+    assert reason == "fresh runtime evidence still matches the explicit intent"
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "reason"),
+    (
+        (
+            "runtime_id",
+            "runtime-other",
+            "runtime evidence changed at runtime_id",
+        ),
+        ("pid", 123456789, "runtime evidence changed at pid"),
+        (
+            "adb_target",
+            "localhost:5565",
+            "runtime evidence changed at adb_target",
+        ),
+        ("target_generation", 8, "ADB target generation changed"),
+    ),
+)
+def test_workflow_evidence_requires_exact_runtime_target_and_generation(
+    field,
+    replacement,
+    reason,
+):
+    app = App.__new__(App)
+    requested = _evidence()
+    current = {**requested, field: replacement}
+
+    allowed, mismatch = app._workflow_evidence_matches_runtime(
+        requested,
+        current,
+        intent="start_battle",
+    )
+
+    assert allowed is False
+    assert mismatch == reason
 
 
 def test_observed_game_dimensions_do_not_infer_a_workflow():
@@ -5166,6 +5238,55 @@ def test_runtime_rejects_changed_boundary_before_first_acknowledgement(
 
     assert supervisor.battle_workflow["status"] == "rejected"
     assert manager.awaiting_initial_battle_intent() is True
+
+
+def test_runtime_accepts_scope_rotation_before_first_start_acknowledgement(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    requested = _evidence(
+        runtime_id=str(owner["runtime_id"]),
+        scope="scope-published-with-request",
+    )
+    requested["pid"] = owner["pid"]
+    store.request_battle_workflow("start_battle", evidence=requested)
+    supervisor.apply_control()
+
+    current = _evidence(
+        observation_id="runtime-1:after-scope-rotation",
+        runtime_id=str(owner["runtime_id"]),
+        scope="scope-current-before-ack",
+    )
+    current["pid"] = owner["pid"]
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in current.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+
+    workflow = supervisor.battle_workflow
+    assert workflow["status"] == "acknowledged"
+    assert workflow["evidence"]["activity_scope_run_id"] == (
+        "scope-published-with-request"
+    )
+    assert workflow["acknowledgement"]["activity_scope_run_id"] == (
+        "scope-current-before-ack"
+    )
+    assert manager.awaiting_initial_battle_intent() is False
 
 
 def test_runtime_interrupts_and_revokes_start_if_boundary_changes_after_ack(

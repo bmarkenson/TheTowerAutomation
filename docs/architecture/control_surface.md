@@ -238,11 +238,14 @@ five dimensions independent:
 The status also carries exact workflow evidence, durable battle/manual-control
 ledgers, and per-action `available`, stable `code`, and operator-facing
 `reason`. A client disables unavailable actions but the server independently
-rechecks every request. Missing, stale, wrong-owner, wrong-target, changed-
-generation, changed-scope, and mismatched-state evidence fails closed. A fresh
-authority heartbeat cannot renew the nested game observation: both timestamps
-must remain inside their freshness windows. Malformed control JSON makes every
-Better Control Model action unavailable with `control_invalid`.
+rechecks every request. Missing or stale evidence, a wrong runtime/process
+owner or target, a changed target generation or control-operation identity,
+and a mismatched visible state all fail closed. Activity scope remains
+observational and available for logging, but its process-local token may rotate
+without rejecting a lifecycle operation. A fresh authority heartbeat cannot
+renew the nested game observation: both timestamps must remain inside their
+freshness windows. Malformed control JSON makes every Better Control Model
+action unavailable with `control_invalid`.
 
 State, terminal-policy, game-speed, ADB-target, and Strategy directives carry
 separate request IDs. The runtime records a receipt only after it applies the
