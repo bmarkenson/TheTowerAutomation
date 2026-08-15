@@ -1005,6 +1005,7 @@ def test_active_strategy_request_waits_for_validation_start_proof(
     tmp_path,
 ):
     app, store, manager = _app_for_pending_validation(tmp_path)
+    battle_identity = "a" * 64
     with (
         patch("core.app.tap_verified_new_battle", return_value=True),
         patch("core.app.log"),
@@ -1018,6 +1019,7 @@ def test_active_strategy_request_waits_for_validation_start_proof(
     replacement = store.set_strategy(
         "farm_t18",
         apply_mode="active_battle",
+        active_battle_identity=battle_identity,
         source="test",
     )
     app._pending_strategy_request = (
@@ -1025,6 +1027,8 @@ def test_active_strategy_request_waits_for_validation_start_proof(
         replacement["strategy_request_id"],
         "active_battle",
     )
+    app._pending_strategy_active_battle_identity = battle_identity
+    app._active_round_identity_fingerprint = battle_identity
     detection = {"state": "RUNNING", "secondary_states": []}
     manager.adopt_strategy_for_active_battle = Mock()
 
@@ -3854,6 +3858,7 @@ def test_active_strategy_request_waits_for_consumed_launch_start_proof(
     tmp_path,
 ):
     app, store, manager, ready, definition = _app_for_ready_launch(tmp_path)
+    battle_identity = "a" * 64
     store.resolve_exclusive_validation_launch(
         ready["request_id"],
         "start",
@@ -3878,6 +3883,7 @@ def test_active_strategy_request_waits_for_consumed_launch_start_proof(
     replacement = store.set_strategy(
         "farm_t18",
         apply_mode="active_battle",
+        active_battle_identity=battle_identity,
         source="test",
     )
     app._pending_strategy_request = (
@@ -3885,6 +3891,8 @@ def test_active_strategy_request_waits_for_consumed_launch_start_proof(
         replacement["strategy_request_id"],
         "active_battle",
     )
+    app._pending_strategy_active_battle_identity = battle_identity
+    app._active_round_identity_fingerprint = battle_identity
     manager.adopt_strategy_for_active_battle = Mock()
 
     app._process_strategy_boundary(tournament)

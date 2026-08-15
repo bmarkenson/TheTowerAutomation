@@ -25,6 +25,7 @@ from core.action_authority import (
 )
 from core.app import App
 from core.automation_supervisor import AutomationSupervisor
+from core.battle_identity import BattleIdentityRelation
 from core.battle_lifecycle import HomeBattleControl
 from core.control_directives import ControlDirectiveStore
 from core.dispatch_control_boundary import dispatch_control_boundary
@@ -1836,6 +1837,25 @@ def test_adopted_active_battle_makes_redundant_attach_unavailable(tmp_path):
     assert attach["code"] == "battle_already_adopted"
 
 
+def test_manage_active_battle_requires_forced_save_identity(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    evidence = _evidence(game_state="active_battle")
+    evidence.pop("active_round_identity_fingerprint")
+    _publish_runtime_observation(
+        service,
+        evidence,
+        active_battle_adopted=True,
+        active_strategy="farm_t18",
+    )
+
+    action = service.status()["control_model"]["actions"][
+        "manage_active_battle"
+    ]
+
+    assert action["available"] is False
+    assert action["code"] == "battle_identity_unavailable"
+
+
 def test_strategy_scope_keeps_active_and_pending_values_separate(tmp_path):
     service = ControlSurfaceService(repository_root=tmp_path)
     service.control_store.set_strategy("farm_t19", source="test")
@@ -2522,6 +2542,8 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
         runtime_id=str(owner["runtime_id"]),
     )
     evidence["pid"] = owner["pid"]
+    identity_fingerprint = "b" * 64
+    evidence.pop("active_round_identity_fingerprint")
     workflow = store.request_battle_workflow(
         "attach_battle",
         evidence=evidence,
@@ -2541,9 +2563,14 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
         for key, value in evidence.items()
         if key not in {"runtime_id", "pid", "adb_target"}
     }
-    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
-    assert app._mark_operator_battle_action_dispatched(True) is True
-
+    app._player_save_runtime_session_id = "save-runtime-1"
+    app._adb_target_session = SimpleNamespace(
+        snapshot=lambda: SimpleNamespace(
+            owned=True,
+            target="localhost:5555",
+            generation=7,
+        )
+    )
     active = _evidence(
         game_state="active_battle",
         observation_id="runtime-1:active",
@@ -2551,25 +2578,90 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
         scope=str(evidence["activity_scope_run_id"]),
     )
     active["pid"] = owner["pid"]
+    active["active_round_identity_fingerprint"] = identity_fingerprint
+    snapshot = replace(
+        _player_save_snapshot(
+            "cards_deck",
+            "Farm",
+            runtime_save=SimpleNamespace(
+                round_active=True,
+                active_round_identity=SimpleNamespace(
+                    fingerprint=identity_fingerprint
+                ),
+            ),
+        ),
+        effective_mapping_fingerprint="9" * 64,
+    )
+    acquisition = _running_reconciliation_objects(
+        active,
+        snapshot=snapshot,
+    )[0]
+    result = SimpleNamespace(
+        complete=True,
+        identity=SimpleNamespace(fingerprint=identity_fingerprint),
+        relation=BattleIdentityRelation.SAME_BATTLE,
+        acquisition=acquisition,
+    )
+    app._battle_identity_coordinator = MagicMock()
+    app._battle_identity_coordinator.bind.return_value = result
+    app._battle_identity_store = MagicMock()
+    app._battle_identity_store.active.return_value = None
+    app._retained_battle_identity_record = SimpleNamespace(
+        fingerprint=identity_fingerprint
+    )
+    app._observed_active_round_identity_fingerprint = None
+    app._active_round_identity = None
+    app._active_round_identity_fingerprint = None
+    app._terminal_round_identity_fingerprint = None
+    app._battle_identity_reconciliation_required = True
+    app._update_action_authority = MagicMock()
+    app._runtime_action_guard = MagicMock(return_value=True)
+    app._publish_player_save_observation = MagicMock()
+    app._current_run_scope_id = lambda: str(
+        evidence["activity_scope_run_id"]
+    )
+
+    assert app._force_battle_identity(
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "RESUME_BATTLE",
+        },
+        object(),
+    )
+    assert supervisor.battle_workflow["status"] == "validating_save"
+    assert manager.active_battle_observed() is False
+    assert app._running_reconciliation_claims() == {}
+
+    assert app._mark_operator_battle_action_dispatched(True) is True
+    app._rearm_battle_identity_after_home_resume_dispatch()
+    assert app._battle_identity_reconciliation_required is True
+    assert app._active_round_identity_fingerprint is None
+
     app._control_observation = {
         key: value
         for key, value in active.items()
-        if key not in {"runtime_id", "pid", "adb_target"}
+        if key
+        not in {
+            "runtime_id",
+            "pid",
+            "adb_target",
+            "active_round_identity_fingerprint",
+        }
     }
-    claim = _running_save_claim(workflow["request_id"], active)
-    store.transition_battle_workflow(
-        workflow["request_id"],
-        "ready",
-        acknowledgement=active,
-        save_receipt=claim[0],
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
+
+    assert app._force_battle_identity(
+        {"state": "RUNNING"},
+        object(),
     )
-    _retain_running_save_claim(
-        app,
-        workflow["request_id"],
-        active,
-        claim,
-    )
-    supervisor.apply_control()
+    assert app._battle_identity_coordinator.bind.call_count == 2
+    assert app._control_observation[
+        "active_round_identity_fingerprint"
+    ] == identity_fingerprint
+    assert supervisor.battle_workflow["status"] == "ready"
+    assert manager.active_battle_observed() is False
+
     app._sync_operator_control_workflows({"state": "RUNNING"})
     assert manager.maybe_run_start({"state": "RUNNING"}) is False
 
@@ -2615,6 +2707,7 @@ def test_attach_completion_report_failure_never_reclaims_terminal_hold(
     later_strategy = store.set_strategy(
         "farm_t18",
         apply_mode="active_battle",
+        active_battle_identity="a" * 64,
         source="request-after-attach",
     )
     supervisor.apply_control()

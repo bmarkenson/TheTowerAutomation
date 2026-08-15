@@ -128,6 +128,9 @@ class AutomationSupervisor:
             # only when apply_control() consumes the directive normally.
             AUTOMATION.state = initial_state.strip().upper()
         self._strategy_request = self._parse_strategy_request(initial_directives)
+        self._strategy_active_battle_identity = (
+            self._parse_strategy_active_battle_identity(initial_directives)
+        )
         self._game_speed_target = self._parse_game_speed_target(
             initial_directives.get("game_speed_target")
         )
@@ -228,6 +231,12 @@ class AutomationSupervisor:
         """Return the latest validated strategy directive and its identity."""
 
         return self._strategy_request
+
+    @property
+    def strategy_active_battle_identity(self) -> Optional[str]:
+        """Return the canonical target of an active-battle Strategy request."""
+
+        return self._strategy_active_battle_identity
 
     @property
     def game_speed_target(self) -> float:
@@ -432,6 +441,7 @@ class AutomationSupervisor:
         ):
             return False
         self._strategy_request = parsed
+        self._strategy_active_battle_identity = None
         return True
 
     @property
@@ -564,6 +574,9 @@ class AutomationSupervisor:
                 or game_speed_target_changed
             )
             self._strategy_request = self._parse_strategy_request(directives)
+            self._strategy_active_battle_identity = (
+                self._parse_strategy_active_battle_identity(directives)
+            )
             self._gate_decision = self._parse_gate_decision(directives)
             self._exclusive_validation = self._parse_exclusive_validation(
                 directives
@@ -666,6 +679,23 @@ class AutomationSupervisor:
         if apply_mode not in {"next_boundary", "active_battle"}:
             apply_mode = "next_boundary"
         return strategy, identity, apply_mode
+
+    @staticmethod
+    def _parse_strategy_active_battle_identity(
+        directives: Mapping[str, object],
+    ) -> Optional[str]:
+        if str(
+            directives.get("strategy_apply_mode") or "next_boundary"
+        ).strip().lower() != "active_battle":
+            return None
+        identity = str(
+            directives.get("strategy_active_battle_identity") or ""
+        ).strip().lower()
+        if len(identity) != 64 or any(
+            character not in "0123456789abcdef" for character in identity
+        ):
+            return None
+        return identity
 
     @staticmethod
     def _parse_game_speed_target(value: object) -> float:

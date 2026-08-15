@@ -3401,6 +3401,13 @@ class ControlSurfaceService:
                                 or "active_battle_unavailable"
                             ),
                         )
+                    active_battle_identity = _valid_battle_identity_fingerprint(
+                        current.get("control_model", {})
+                        .get("observation", {})
+                        .get("active_round_identity_fingerprint")
+                    )
+                else:
+                    active_battle_identity = None
                 apply_mode = (
                     "active_battle" if apply_to_active_run else "next_boundary"
                 )
@@ -3412,6 +3419,7 @@ class ControlSurfaceService:
                     self.control_store.set_strategy(
                         strategy,
                         apply_mode=apply_mode,
+                        active_battle_identity=active_battle_identity,
                         source="control-surface-strategy",
                     )
                 except (
@@ -5549,6 +5557,10 @@ class ControlSurfaceService:
             and process_live
             and evidence is not None
             and observation.get("game_state") == "active_battle"
+            and _valid_battle_identity_fingerprint(
+                observation.get("active_round_identity_fingerprint")
+            )
+            is not None
             and runtime_lifecycle.get("active_battle_adopted") is True
             and runtime_lifecycle.get("awaiting_initial_intent") is not True
             and not manual_busy
@@ -5570,6 +5582,13 @@ class ControlSurfaceService:
             manage_active_battle_code = "intent_mismatch"
             manage_active_battle_reason = (
                 "Manage this battle is available only for a verified active battle"
+            )
+        elif _valid_battle_identity_fingerprint(
+            observation.get("active_round_identity_fingerprint")
+        ) is None:
+            manage_active_battle_code = "battle_identity_unavailable"
+            manage_active_battle_reason = (
+                "Manage this battle requires the current forced save battle identity"
             )
         elif (
             runtime_lifecycle.get("active_battle_adopted") is not True
@@ -6506,6 +6525,15 @@ def _parse_timestamp(value: object) -> Optional[datetime]:
 def _none_if_dash(value: str) -> Optional[str]:
     normalized = value.strip()
     return None if normalized in {"", "—", "-"} else normalized
+
+
+def _valid_battle_identity_fingerprint(value: object) -> Optional[str]:
+    normalized = str(value or "").strip().lower()
+    if len(normalized) != 64 or any(
+        character not in "0123456789abcdef" for character in normalized
+    ):
+        return None
+    return normalized
 
 
 def _split_status_list(value: str) -> list[str]:

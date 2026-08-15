@@ -125,12 +125,21 @@ and actionable work lives in
   direct Retry, terminal continuation, Pause/Enable revalidation, and the two
   manual-surrender successor shapes. Structural tests prove the report-only
   activity owner has no save/UI/lifecycle entry points and the passive
-  scheduler accepts only Perk checkpoint reasons.
+  scheduler accepts only Perk checkpoint reasons. Active-battle Strategy
+  requests also retain the exact forced identity they targeted and downshift
+  to the next boundary instead of transferring to a hidden successor.
 - **Supersession:** The earlier sentence preserving general changed-scope
   rejection and its corresponding test expectation are obsolete. Exact
   runtime, target generation, workflow/control operation, visible boundary,
   source restoration, and canonical save identity remain fail-closed guards;
   log-scope change is not one.
+- **Unpromoted-work audit:** The retained
+  `feature/capture-ui-resolution-mapping-candidates` worktree still contains
+  the obsolete scope rejection and History-based continuity model and must not
+  be merged or cherry-picked. Any still-wanted setup-inspection UX from that
+  branch must be reimplemented narrowly on the current save-identity
+  architecture. Other retained lifecycle, passive-save, and Retry branches
+  are either already represented here or superseded by promoted mainline work.
 
 ### Global Module save identities were incomplete and conflated with slot authority
 

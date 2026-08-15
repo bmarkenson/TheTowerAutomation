@@ -272,6 +272,9 @@ def _write_running_runtime_evidence(
                 "active_battle": primary_state == "RUNNING",
                 "activity_scope_run_id": "attached-restart",
                 "target_generation": target_generation,
+                "active_round_identity_fingerprint": (
+                    "a" * 64 if primary_state == "RUNNING" else None
+                ),
             },
             "battle_lifecycle": {
                 "active_battle_adopted": primary_state == "RUNNING",
@@ -1265,6 +1268,32 @@ def test_control_surface_rejects_active_battle_adoption_without_runtime(tmp_path
         )
 
     assert manager.calls == []
+
+
+def test_control_surface_binds_active_strategy_to_forced_battle_identity(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    control = service.control_store.set_state("RUNNING", source="test")
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        response = service.apply_process_action(
+            {
+                "action": "set_strategy",
+                "strategy": "farm_t18",
+                "apply_to_active_run": True,
+            }
+        )
+
+    assert response["request"]["disposition"] == "active_battle_requested"
+    assert service.control_store.status()[
+        "strategy_active_battle_identity"
+    ] == "a" * 64
 
 
 @pytest.mark.parametrize("strategy", [None, "", "unknown", 123])

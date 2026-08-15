@@ -169,6 +169,16 @@ class ControlDirectiveStore:
             ),
             "strategy_updated_at": data.get("strategy_updated_at"),
             "strategy_request_id": data.get("strategy_request_id"),
+            "strategy_active_battle_identity": (
+                _valid_active_battle_identity(
+                    data.get("strategy_active_battle_identity")
+                )
+                if _valid_strategy_apply_mode(
+                    data.get("strategy_apply_mode")
+                )
+                == "active_battle"
+                else None
+            ),
             "gate_decision": _valid_gate_decision(data.get("gate_decision")),
             "startup_gate_waivers": _valid_startup_gate_waivers(
                 data.get("startup_gate_waivers")
@@ -1980,6 +1990,7 @@ class ControlDirectiveStore:
         strategy: str,
         *,
         apply_mode: str = "next_boundary",
+        active_battle_identity: Optional[str] = None,
         source: Optional[str] = None,
     ) -> dict[str, Any]:
         """Persist a validated runtime strategy request."""
@@ -2002,6 +2013,16 @@ class ControlDirectiveStore:
                 "Strategy apply mode must be one of: "
                 + ", ".join(sorted(STRATEGY_APPLY_MODES))
             )
+        normalized_battle_identity = _valid_active_battle_identity(
+            active_battle_identity
+        )
+        if (
+            normalized_apply_mode == "active_battle"
+            and normalized_battle_identity is None
+        ):
+            raise ValueError(
+                "Active-battle Strategy requests require a canonical battle identity"
+            )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
@@ -2009,6 +2030,12 @@ class ControlDirectiveStore:
             strategy_request_id = uuid4().hex
             data["strategy"] = normalized
             data["strategy_apply_mode"] = normalized_apply_mode
+            if normalized_apply_mode == "active_battle":
+                data["strategy_active_battle_identity"] = (
+                    normalized_battle_identity
+                )
+            else:
+                data.pop("strategy_active_battle_identity", None)
             if previous != normalized:
                 data["startup_gate_waivers"] = {}
             data["updated_at"] = timestamp
@@ -2070,6 +2097,7 @@ class ControlDirectiveStore:
                 return dict(current)
             timestamp = _updated_at()
             current["strategy_apply_mode"] = "next_boundary"
+            current.pop("strategy_active_battle_identity", None)
             current["strategy_updated_at"] = timestamp
             current["updated_at"] = timestamp
             current["updated_by"] = source or "runtime-strategy-deferral"
@@ -3598,6 +3626,15 @@ def _same_emulator_host_identity(
 def _valid_strategy_apply_mode(value: object) -> str:
     normalized = str(value or "next_boundary").strip().lower()
     return normalized if normalized in STRATEGY_APPLY_MODES else "next_boundary"
+
+
+def _valid_active_battle_identity(value: object) -> Optional[str]:
+    normalized = str(value or "").strip().lower()
+    if len(normalized) != 64 or any(
+        character not in "0123456789abcdef" for character in normalized
+    ):
+        return None
+    return normalized
 
 
 def _valid_gate_options(value: object) -> list[dict[str, str]]:

@@ -1455,6 +1455,7 @@ def test_runtime_exposes_latest_valid_strategy_request(tmp_path):
     store.set_strategy(
         "tournament",
         apply_mode="active_battle",
+        active_battle_identity="a" * 64,
         source="test",
     )
     supervisor.apply_control()
@@ -1464,6 +1465,7 @@ def test_runtime_exposes_latest_valid_strategy_request(tmp_path):
     assert second_request[0] == "tournament"
     assert second_request[1] != first_request[1]
     assert second_request[2] == "active_battle"
+    assert supervisor.strategy_active_battle_identity == "a" * 64
 
 
 def test_gate_decision_has_guarded_lifecycle(tmp_path):

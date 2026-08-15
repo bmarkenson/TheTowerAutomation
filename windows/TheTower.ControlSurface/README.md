@@ -742,7 +742,10 @@ repository/profile catalog, never the operator's real
    action without duplicating an in-flight request. Confirm selecting Current
    replaces a different pending Strategy, while reselecting already-pending or
    unchanged Current is a no-op. **Switch this battle** must remain the only
-   explicit active-adoption path. While still active, publish a disposable Base
+   explicit active-adoption path. It is available only with a fresh force-bound
+   battle identity; the request is bound to that identity and is queued for the
+   next boundary if the battle changes before Linux adopts it. While still
+   active, publish a disposable Base
    revision and confirm it sends no process request. Return the disposable
    process to stopped before continuing.
 5. Open an editable disposable existing Strategy with **No Base** (including a

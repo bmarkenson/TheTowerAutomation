@@ -1775,7 +1775,8 @@ evidence proves that Resume returned to the same `RUNNING` battle, the hold
 continues to exclude run-progression and lifecycle work but allows the existing
 typed independent-collector lane: in-battle ad gems, floating-gem scans, daily
 gems, and Daily/Weekly/Event/Guild rewards. Every collector retains its normal
-fresh-screen, battle-scope, route-ownership, and final Pause rechecks. Pause and
+fresh-screen, canonical battle-identity, route-ownership, and final Pause
+rechecks. Pause and
 Stop cannot be bypassed by the hold. Pause before host acknowledgement prevents
 authorization; after an accepted Windows restart it blocks Linux game input
 while the durable host result remains available for later reconciliation.

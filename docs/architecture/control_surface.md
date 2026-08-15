@@ -174,13 +174,18 @@ agnostic.
   Tournament completes. An attached non-Tournament battle retains the request
   for a later verified Home boundary before Tournament start.
 - An explicit `apply_to_active_run` strategy request may instead be adopted
-  after fresh `RUNNING` or Home `RESUME_BATTLE` evidence. Adoption changes
-  normal strategy behavior and the strategy/profile identity used by Battle
-  End reporting, but uses attachment semantics: run initialization, session
-  preflight, and Home-only gates remain deferred until the next genuine
-  new-run boundary, except for an explicitly declared read-only observer check.
-  If `NEW_BATTLE` is observed first, the request follows the normal
-  boundary-install path and all new-run gates remain active.
+  only when fresh `RUNNING` or Home `RESUME_BATTLE` evidence carries the
+  current force-bound `ActiveRoundIdentity`. The control directive binds both
+  its request ID and that exact battle identity; Linux compares the binding
+  again immediately before adoption. If Pause, manual play, or another
+  boundary replaces or clears the identity, the exact request is atomically
+  downshifted to the next safe boundary instead of transferring to the later
+  battle. Adoption changes normal strategy behavior and the strategy/profile
+  identity used by Battle End reporting, but uses attachment semantics: run
+  initialization, session preflight, and Home-only gates remain deferred until
+  the next genuine new-run boundary, except for an explicitly declared
+  read-only observer check. If `NEW_BATTLE` is observed first, the request
+  follows the normal boundary-install path and all new-run gates remain active.
 - The API never accepts an arbitrary executable, service name, shell command,
   or process-mutation target from the Windows client. The Linux server is
   configured with one validated unit name. BlueStacks maintenance is the

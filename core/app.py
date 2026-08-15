@@ -390,6 +390,8 @@ class App:
         self._startup_gate_waivers: Dict[str, Dict[str, Any]] = {}
         self._last_strategy_request: Optional[Tuple[str, object, str]] = None
         self._pending_strategy_request: Optional[Tuple[str, object, str]] = None
+        self._last_strategy_active_battle_identity: Optional[str] = None
+        self._pending_strategy_active_battle_identity: Optional[str] = None
         self._strategy_boundary_confirmed = False
         self._active_exclusive_validation_request_id: Optional[str] = None
         self._active_exclusive_validation_launch_request_id: Optional[str] = None
@@ -14821,17 +14823,48 @@ class App:
         if apply_mode not in {"next_boundary", "active_battle"}:
             apply_mode = "next_boundary"
         normalized_request = (request[0], request[1], apply_mode)
-        if normalized_request == getattr(self, "_last_strategy_request", None):
+        raw_battle_identity = (
+            getattr(
+                self._supervisor,
+                "strategy_active_battle_identity",
+                None,
+            )
+            if apply_mode == "active_battle"
+            else None
+        )
+        battle_identity = str(raw_battle_identity or "").strip().lower()
+        if len(battle_identity) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in battle_identity
+        ):
+            battle_identity = None
+        if (
+            normalized_request
+            == getattr(self, "_last_strategy_request", None)
+            and battle_identity
+            == getattr(self, "_last_strategy_active_battle_identity", None)
+        ):
             return
         self._last_strategy_request = normalized_request
+        self._last_strategy_active_battle_identity = battle_identity
         requested_name = normalized_request[0]
         current_name = self._current_strategy_name()
         same_name_reload = requested_name == current_name
         if (
             same_name_reload
             and self._current_strategy_definition_matches(requested_name)
+            and (
+                apply_mode != "active_battle"
+                or battle_identity
+                == getattr(
+                    self,
+                    "_active_round_identity_fingerprint",
+                    None,
+                )
+            )
         ):
             self._pending_strategy_request = None
+            self._pending_strategy_active_battle_identity = None
             self._supervisor.acknowledge_strategy(
                 requested_name,
                 normalized_request[1],
@@ -14843,6 +14876,7 @@ class App:
             )
             return
         self._pending_strategy_request = normalized_request
+        self._pending_strategy_active_battle_identity = battle_identity
         if apply_mode == "active_battle":
             message = (
                 f"[CTRL] Strategy {requested_name} requested for the active battle; "
@@ -14965,6 +14999,7 @@ class App:
             request_id,
             "next_boundary",
         )
+        self._pending_strategy_active_battle_identity = None
         if not deferred:
             self._flag_recoverable_runtime_failure(
                 RuntimeFailureKind.REPORTING_FAILURE,
@@ -15089,6 +15124,29 @@ class App:
             return False
         if self._attach_workflow_in_progress():
             return False
+        expected_battle_identity = str(
+            getattr(
+                self,
+                "_pending_strategy_active_battle_identity",
+                None,
+            )
+            or ""
+        ).strip().lower()
+        current_battle_identity = str(
+            getattr(self, "_active_round_identity_fingerprint", None) or ""
+        ).strip().lower()
+        if (
+            len(expected_battle_identity) != 64
+            or expected_battle_identity != current_battle_identity
+        ):
+            self._defer_active_strategy_request_to_boundary(
+                request,
+                reason=(
+                    "its forced save battle identity is unavailable or the "
+                    "active battle changed before adoption"
+                ),
+            )
+            return False
         if self._attached_observer_requires_strategy_boundary():
             self._defer_active_strategy_request_to_boundary(
                 request,
@@ -15150,6 +15208,7 @@ class App:
             request_id,
         )
         self._pending_strategy_request = None
+        self._pending_strategy_active_battle_identity = None
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False

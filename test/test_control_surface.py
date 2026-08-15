@@ -418,26 +418,34 @@ def test_game_speed_targets_cover_half_steps_and_maximum_available(tmp_path):
 
 def test_control_store_persists_active_battle_strategy_adoption(tmp_path):
     path = tmp_path / "automation_ctl.json"
+    battle_identity = "a" * 64
 
     saved = ControlDirectiveStore(path).set_strategy(
         "farm_t18",
         apply_mode="active_battle",
+        active_battle_identity=battle_identity,
         source="test",
     )
 
     assert saved["strategy"] == "farm_t18"
     assert saved["strategy_apply_mode"] == "active_battle"
+    assert saved["strategy_active_battle_identity"] == battle_identity
     assert ControlDirectiveStore(path).status()["strategy_apply_mode"] == (
         "active_battle"
     )
+    assert ControlDirectiveStore(path).status()[
+        "strategy_active_battle_identity"
+    ] == battle_identity
 
 
 def test_control_store_defers_only_exact_active_battle_strategy_request(tmp_path):
     path = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(path)
+    battle_identity = "a" * 64
     accepted = store.set_strategy(
         "farm_t18",
         apply_mode="active_battle",
+        active_battle_identity=battle_identity,
         source="test",
     )
     request_id = accepted["strategy_request_id"]
@@ -457,12 +465,14 @@ def test_control_store_defers_only_exact_active_battle_strategy_request(tmp_path
 
     assert deferred is not None
     assert deferred["strategy_apply_mode"] == "next_boundary"
+    assert "strategy_active_battle_identity" not in deferred
     assert deferred["strategy_request_id"] == request_id
     assert deferred["updated_by"] == "test-deferral"
 
     replacement = store.set_strategy(
         "farm_t19",
         apply_mode="active_battle",
+        active_battle_identity="b" * 64,
         source="newer-request",
     )
     assert store.defer_strategy_request_to_next_boundary(
@@ -480,6 +490,14 @@ def test_control_store_rejects_unknown_strategy_apply_mode(tmp_path):
         ControlDirectiveStore(tmp_path / "automation_ctl.json").set_strategy(
             "farm_t18",
             apply_mode="immediate",
+        )
+
+
+def test_control_store_requires_identity_for_active_battle_strategy(tmp_path):
+    with pytest.raises(ValueError, match="canonical battle identity"):
+        ControlDirectiveStore(tmp_path / "automation_ctl.json").set_strategy(
+            "farm_t18",
+            apply_mode="active_battle",
         )
 
 

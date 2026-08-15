@@ -565,6 +565,7 @@ class RunBoundaryTests(unittest.TestCase):
 
     def test_app_adopts_requested_strategy_on_fresh_running_evidence(self):
         app = App.__new__(App)
+        battle_identity = "a" * 64
         app._mission_mgr = MagicMock()
         app._mission_mgr.strategy = None
         app._supervisor = MagicMock()
@@ -573,6 +574,8 @@ class RunBoundaryTests(unittest.TestCase):
             "request-active",
             "active_battle",
         )
+        app._supervisor.strategy_active_battle_identity = battle_identity
+        app._active_round_identity_fingerprint = battle_identity
         app._config = SimpleNamespace(strategy_name="none")
         app._last_strategy_request = None
         app._pending_strategy_request = None
@@ -598,6 +601,41 @@ class RunBoundaryTests(unittest.TestCase):
         self.assertEqual(app._config.strategy_name, "farm_t18")
         self.assertIsNone(app._pending_strategy_request)
         self.assertEqual(app._startup_gate_waivers, {})
+
+    def test_active_strategy_request_is_deferred_when_battle_identity_changes(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._mission_mgr.strategy = None
+        app._supervisor = MagicMock()
+        app._supervisor.strategy_request = (
+            "farm_t18",
+            "request-active",
+            "active_battle",
+        )
+        app._supervisor.strategy_active_battle_identity = "a" * 64
+        app._supervisor.defer_strategy_request_to_next_boundary.return_value = (
+            True
+        )
+        app._active_round_identity_fingerprint = "b" * 64
+        app._last_strategy_request = None
+        app._pending_strategy_request = None
+
+        with patch("core.app.log"):
+            app._observe_strategy_request()
+            applied = app._apply_pending_strategy_to_active_battle()
+
+        self.assertFalse(applied)
+        app._mission_mgr.adopt_strategy_for_active_battle.assert_not_called()
+        app._supervisor.defer_strategy_request_to_next_boundary.assert_called_once_with(
+            "farm_t18",
+            "request-active",
+            source="runtime-attachment-strategy-deferral",
+        )
+        self.assertEqual(
+            app._pending_strategy_request,
+            ("farm_t18", "request-active", "next_boundary"),
+        )
+        self.assertIsNone(app._pending_strategy_active_battle_identity)
 
     def test_app_reloads_changed_definition_for_same_strategy_id_at_boundary(self):
         app = App.__new__(App)
@@ -736,6 +774,7 @@ class RunBoundaryTests(unittest.TestCase):
 
     def test_app_adopts_requested_strategy_at_resumable_home(self):
         app = App.__new__(App)
+        battle_identity = "a" * 64
         app._mission_mgr = MagicMock()
         app._supervisor = MagicMock()
         app._pending_strategy_request = (
@@ -743,6 +782,8 @@ class RunBoundaryTests(unittest.TestCase):
             "request-active",
             "active_battle",
         )
+        app._pending_strategy_active_battle_identity = battle_identity
+        app._active_round_identity_fingerprint = battle_identity
         app._strategy_boundary_confirmed = False
         app._config = SimpleNamespace(strategy_name="none")
         app._startup_gate_waivers = {}
@@ -789,6 +830,7 @@ class RunBoundaryTests(unittest.TestCase):
 
     def test_active_strategy_request_cannot_convert_degraded_attach_observer(self):
         app = App.__new__(App)
+        battle_identity = "a" * 64
         app._mission_mgr = MagicMock()
         app._mission_mgr.strategy = None
         app._mission_mgr.running_configuration_degradation.return_value = {
@@ -808,6 +850,8 @@ class RunBoundaryTests(unittest.TestCase):
             "request-after-attach",
             "active_battle",
         )
+        app._pending_strategy_active_battle_identity = battle_identity
+        app._active_round_identity_fingerprint = battle_identity
         app._strategy_boundary_confirmed = False
 
         with patch("core.app.log"):
