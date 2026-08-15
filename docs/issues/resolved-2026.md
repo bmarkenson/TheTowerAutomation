@@ -1024,6 +1024,11 @@ and actionable work lives in
 
 - **Observed:** 2026-08-05 during an ordinary Home transition from Tournament
   configuration to Farm configuration.
+- **Recurrence:** 2026-08-14 during an ordinary Farm Home boundary.
+  The authoritative `data-9-game-1101` projection accepted 13 requested checks
+  and reported only `cards_deck` as a trusted mismatch. After Cards was
+  repaired to Farm, snapshot-wide invalidation unnecessarily reopened Demon
+  Mode, Nuke, First Perk Choice, and other independently accepted checks in UI.
 - **Symptom:** One authoritative version-1073 snapshot accepted First Perk
   Choice, Ban Perks, Auto Pick order, Free Upgrade locks, and other checks while
   reporting several exact strategy mismatches. Cards Deck was repaired first,
@@ -1037,11 +1042,13 @@ and actionable work lives in
   blanket invalidation, and the resulting Perks navigation. The later boundary
   supplied the control comparison. No raw save, decoded root, account field,
   arbitrary history, or Module record was needed or retained.
-- **Cause:** Reconciliation represented both a complete trusted mismatch and
-  unsupported/incomplete evidence as `ui_required`, while every Home or
-  in-battle repair used blanket snapshot/carry invalidation. The system
-  therefore could not preserve independent per-check authority after one
-  verified mutation.
+- **Cause:** The original defect conflated complete trusted mismatches with
+  unsupported/incomplete `ui_required` evidence. Its targeted correction was
+  later superseded by `86602a2470c02c7030161132fa01f6fe3a9ecfa5`, which
+  coupled the pre-action mapping-correlation boundary to blanket snapshot/carry
+  invalidation and a complete Home restart. A known, independently verified
+  repair therefore discarded unrelated save facts even though it supplied no
+  evidence that those facts were stale or contradictory.
 - **Resolution:** Reconciliation now emits explicit `save_mismatch` evidence
   only when acquisition, serialization, freshness, ownership, restored Home
   boundary, exact version/mapping, per-check completeness, validation, and
@@ -1050,7 +1057,10 @@ and actionable work lives in
   own observation, mutation guard, and post-action verification remain
   authoritative. The repair is UI-proven and never added to save carry;
   unrelated accepted Home and exact-next-battle values survive independent
-  repairs.
+  repairs. Home, Target Priority, Poison Swamp Stun, Damage Slider, and Orb
+  Distance repairs retire only their affected check and close pre-action
+  mapping correlation. Level-skip input closes that correlation window without
+  discarding independent configuration values.
 - **Contradictions and continuity:** UI already matching a trusted saved
   mismatch before coordinator-owned repair, or inspected UI disagreeing with a
   `save_match`, invalidates the complete snapshot and fails closed. Global
@@ -1074,16 +1084,22 @@ and actionable work lives in
   compilation, state definitions, clickmap integrity with zero errors and 44
   known orphans, and all 1,495 tests. Dependency locks and changed local
   documentation links/anchors passed validation.
+- **Recurrence validation:** The exact Cards-to-recharge/Perks regression and
+  adjacent Home/in-battle slice passed 300 tests. A separate decoder, carry,
+  mapping-candidate, Card Recharge, Perk, Poison Stun, Free Upgrade, terminal,
+  and control-model compatibility slice passed 514 tests. Modified modules
+  compiled, documentation lifecycle passed both tests, and the candidate has
+  no whitespace errors.
 - **Safety:** This correction used only fakes and retained fixtures. It did not
   inspect or interact with the production process, systemd, ADB, emulator,
   shared live frame, or battle, and did not deploy or modify installed files.
-- **Fixed by:** `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b`.
-- **Superseded safety refinement:** Later save-backed Damage/Orb and
-  level-skip ordering made blanket preservation unsafe. Current behavior still
-  plans each mismatch independently while read-only, but the first actual UI
-  mutation invalidates every remaining save-derived decision before input.
-  Home setup restarts without save decisions when necessary, and only
-  independently UI-verified sections survive with explicit UI provenance.
+- **Recurrence safety:** The 2026-08-14 diagnosis completed the required live
+  preflight and used only read-only status and retained action-log evidence. It
+  sent no game input, did not restart or alter production, and made all code and
+  test changes in an isolated feature worktree.
+- **Fixed by:** `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b` originally;
+  the 2026-08-14 recurrence is corrected by the feature candidate recorded in
+  the completed-task log.
 
 ### First Perk Choice compared a value-bearing OCR slug to its semantic key
 

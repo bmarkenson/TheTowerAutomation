@@ -15,7 +15,6 @@ from core.auto_pick_perks import measure_auto_pick_perks
 from core.gc_module_loadout import gc_module_loadout_evidence_from_assignments
 from core.gc_preflight import (
     GcSessionPreflightEvidence,
-    configuration_ui_boundary_sections,
     merge_ultimate_weapon_observations,
     summarize_gc_preflight_mismatch,
     summarize_gc_preflight_variations,
@@ -919,77 +918,21 @@ def run_read_only_gc_preflight(
                     f"{check_id}"
                 )
 
-        save_repair_invalidated_checks: set[str] = set()
+        save_repair_fallback_checks: set[str] = set()
 
-        def invalidate_save_evidence_before_repair(check_id: str) -> None:
-            nonlocal auto_pick_boundary_evidence
-            nonlocal configuration_boundary_evidence
-            nonlocal module_boundary_evidence
-            nonlocal ultimate_boundary_observations
-            nonlocal ultimate_boundary_payload
-            nonlocal ultimate_boundary_save_backed
-            nonlocal use_no_battle_evidence
-            nonlocal free_upgrade_lock_boundary_evidence
-            nonlocal carried_module_boundary_evidence
-
-            if check_id in save_repair_invalidated_checks:
+        def fallback_save_check_before_repair(check_id: str) -> None:
+            if check_id in save_repair_fallback_checks:
                 return
-            save_repair_invalidated_checks.add(check_id)
-            invalidate = getattr(player_save_preflight, "invalidate", None)
-            if callable(invalidate):
-                invalidate(
-                    f"{check_id}_repair_started",
-                    check_ids=(check_id,),
-                )
-            if boundary_evidence_is_save_backed(
-                configuration_boundary_evidence
-            ):
-                accepted_sections.update(
-                    configuration_ui_boundary_sections(
-                        configuration_boundary_evidence
-                    )
-                )
-                configuration_boundary_evidence = None
-            if boundary_evidence_is_save_backed(module_boundary_evidence):
-                module_boundary_evidence = None
-            if ultimate_boundary_save_backed:
-                ultimate_boundary_observations = {}
-                ultimate_boundary_payload = None
-                ultimate_boundary_save_backed = False
-            if boundary_evidence_is_save_backed(
-                free_upgrade_lock_boundary_evidence
-            ):
-                free_upgrade_lock_boundary_evidence = None
-            if boundary_evidence_is_save_backed(
-                auto_pick_boundary_evidence
-            ):
-                auto_pick_boundary_evidence = None
-            retained_ui_sections = {
-                section: provenance
-                for section, provenance in accepted_sections.items()
-                if provenance.get("source") == "home_ui_boundary"
-                and provenance.get("disposition") == "ui_verified"
-            }
-            accepted_sections.clear()
-            accepted_sections.update(retained_ui_sections)
-            use_no_battle_evidence = bool(
-                isinstance(configuration_boundary_evidence, Mapping)
-                and (
-                    module_mode == "preserve"
-                    or isinstance(module_boundary_evidence, Mapping)
-                )
+            save_repair_fallback_checks.add(check_id)
+            reason = f"{check_id}_repair_started"
+            fallback_carried_check(check_id, reason)
+            close_mapping_window = getattr(
+                player_save_preflight,
+                "close_mapping_candidate_window",
+                None,
             )
-            carried_module_boundary_evidence = (
-                module_boundary_evidence
-                if (
-                    not use_no_battle_evidence
-                    and isinstance(module_boundary_evidence, Mapping)
-                    and not boundary_evidence_is_save_backed(
-                        module_boundary_evidence
-                    )
-                )
-                else None
-            )
+            if callable(close_mapping_window):
+                close_mapping_window(reason)
 
         _wait_for(
             state="RUNNING",
@@ -1060,7 +1003,7 @@ def run_read_only_gc_preflight(
                     sleep_fn=sleep_fn,
                     measure_fn=measure_auto_pick_fn,
                     repair_observer_fn=lambda: (
-                        invalidate_save_evidence_before_repair(
+                        fallback_save_check_before_repair(
                             "auto_pick_perks"
                         )
                     ),
@@ -1389,14 +1332,41 @@ def run_read_only_gc_preflight(
             nonlocal ultimate_observations
             nonlocal ultimate_weapons_source
 
-            invalidate_save_evidence_before_repair("poison_swamp_stun")
+            fallback_save_check_before_repair("poison_swamp_stun")
+            retained_save_observations: dict[str, dict[str, str]] = {}
+            for label, toggles in save_ultimate_observations.items():
+                retained_toggles = {
+                    str(toggle): str(state)
+                    for toggle, state in toggles.items()
+                    if not (
+                        str(label).strip().casefold() == "poison swamp"
+                        and str(toggle).strip().casefold() == "stun"
+                    )
+                }
+                if retained_toggles:
+                    retained_save_observations[str(label)] = retained_toggles
+            save_ultimate_observations = retained_save_observations
             ultimate_observations = {
                 label: dict(toggles)
-                for label, toggles in ui_ultimate_observations.items()
+                for label, toggles in save_ultimate_observations.items()
             }
-            save_ultimate_observations = {}
-            normalized_save_ultimate_observations = {}
-            ultimate_weapons_source = "ui"
+            for label, toggles in ui_ultimate_observations.items():
+                ultimate_observations.setdefault(str(label), {}).update(
+                    {
+                        str(toggle): str(state)
+                        for toggle, state in toggles.items()
+                    }
+                )
+            normalized_save_ultimate_observations = {
+                str(label).strip().casefold(): {
+                    str(toggle).strip().casefold(): str(state).strip().casefold()
+                    for toggle, state in toggles.items()
+                }
+                for label, toggles in save_ultimate_observations.items()
+            }
+            ultimate_weapons_source = (
+                "mixed" if save_ultimate_observations else "ui"
+            )
 
         if ultimate_ui_required:
             _select_running_menu(
