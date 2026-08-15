@@ -68,6 +68,39 @@ def test_ensure_menu_open_rechecks_ownership_before_tap():
     tap.assert_not_called()
 
 
+def test_ensure_menu_open_binds_guard_to_final_verified_tap():
+    screenshot = _frame()
+    detections = iter(
+        (
+            {"state": "RUNNING", "overlays": ["MENU_CLOSED"]},
+            {"state": "RUNNING", "overlays": ["MENU_OPEN"]},
+        )
+    )
+
+    def action_guard():
+        return True
+    with (
+        patch("core.run_controls.capture_adb_screenshot", return_value=screenshot),
+        patch(
+            "core.run_controls.detect_state_and_overlays",
+            side_effect=detections,
+        ),
+        patch("core.run_controls.tap_if_visible", return_value=True) as tap,
+        patch("core.run_controls.time.sleep"),
+    ):
+        assert ensure_menu_open(
+            timeout_s=2.0,
+            action_guard=action_guard,
+        )
+
+    tap.assert_called_once_with(
+        "navigation.menu_open_button",
+        screenshot=screenshot,
+        retries=1,
+        action_guard_fn=action_guard,
+    )
+
+
 def test_restart_run_is_the_surrender_compatibility_action():
     with patch("core.run_controls.surrender_run", return_value=True) as surrender:
         assert restart_run(timeout_s=7.0)

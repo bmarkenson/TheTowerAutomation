@@ -1364,6 +1364,34 @@ def test_paused_runtime_applies_adb_port_handoff(tmp_path):
     )
 
 
+def test_paused_runtime_retries_deferred_adb_port_handoff(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("PAUSED", source="test")
+    store.set_adb_port(5565, source="test")
+    attempts = []
+
+    def handoff(port):
+        attempts.append(port)
+        return len(attempts) >= 2
+
+    supervisor = AutomationSupervisor(
+        control_file=str(control_file),
+        auto_return_enabled=False,
+        adb_port_handoff=handoff,
+    )
+
+    with patch(
+        "core.automation_supervisor.time.monotonic",
+        side_effect=(100.0, 105.0, 111.0),
+    ):
+        supervisor.apply_control()
+        supervisor.apply_control()
+        supervisor.apply_control()
+
+    assert attempts == [5565, 5565]
+
+
 def test_running_runtime_defers_adb_port_until_paused(tmp_path, monkeypatch):
     monkeypatch.delenv("ADB_DEVICE", raising=False)
     control_file = tmp_path / "automation_ctl.json"

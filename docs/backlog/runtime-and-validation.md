@@ -144,8 +144,11 @@ as checked checkpoint narrative here.
 - [ ] Diagnose the transient Home Poison Swamp Stun verification timeout
   recorded in
   [open issue dossier](../issues/open-2026.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).
-  Retain the failing frame and individual detail/off/on match confidences on
-  recurrence, then distinguish a missed detail-open tap from unsettled
+  A second first-attempt timeout followed by a successful complete retry was
+  recorded on 2026-08-12, again with a dynamically relocated source, but it
+  still retained no failing frame or per-poll confidences. Instrument the next
+  attempt to retain the final frame and individual detail/off/on match
+  confidences, then distinguish a missed detail-open tap from unsettled
   Workshop scroll geometry or a detail-template miss before changing retry or
   stabilization behavior.
 - [ ] Confirm normal gate re-arming after explicit **Stop Automation**, **Start
@@ -269,6 +272,23 @@ as checked checkpoint narrative here.
   action authority, and perform no Retry, Surrender, or other recovery input,
   as recorded in
   [open issue dossier](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
+- [ ] Deploy and live-confirm atomic Start Battle Strategy selection from
+  [ISSUE-2026-047](../issues/open-2026.md#start-battle-replaced-a-newer-no-strategy-selection-with-stale-tournament-state).
+  At an explicitly authorized natural Home boundary, select No Strategy and
+  immediately Start. Confirm the workflow, activity entry, and acknowledgement
+  retain `none`, with no Tournament setup or exclusive-validation receipt.
+- [ ] Deploy and live-confirm the exclusive-validation typed-authority repair
+  recorded in
+  [ISSUE-2026-046](../issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
+  and the same-family later-battle release in
+  [ISSUE-2026-001](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
+  After integration, use only a newly and explicitly authorized ordinary
+  validation battle at a natural safe boundary. Confirm each declared phase,
+  exactly owned Surrender when required, verified Home cleanup and authority
+  release, plus Pause or operator-workflow interruption before the next input.
+  Do not manufacture the historical later-`RUNNING` transition; if it recurs
+  naturally, confirm the old receipt fails and releases without any recovery
+  input before the successor is adopted.
 - [ ] Confirm the deployed `STOPPED` interruption at a natural Home setup
   boundary: Pause, Stop, or Take Manual Control must yield before another
   device input, and only a later same-owner Enable may attempt one bounded

@@ -32,15 +32,54 @@ current runtime state.
 
 ### Owned validation cleanup survived a later running-battle transition
 
-**Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `confirmed_unresolved`
+**Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `repair_awaiting_confirmation`
 
 - A cleanup receipt kept exclusive authority after its
   claimed battle reached Game Over and a different battle appeared; after that
   sequence, fail closed, release the receipt, and perform no recovery input.
 - Load the [dossier](issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition)
   before claiming, cleaning, replacing, or recovering an exclusive-validation
-  battle. Next: prove the same-runtime later-`RUNNING` closure path without
-  Retry or Surrender; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+  battle. The missing same-battle Game Over dispatch and the fail-closed later-
+  `RUNNING` release now have one repository repair under `ISSUE-2026-046`; the
+  source of the historical later transition remains unknown. Next: deploy and
+  safely confirm the repair without manufacturing a battle transition;
+  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+
+### Exclusive validation denied its own strategy and cleanup input
+
+**Stable ID:** `ISSUE-2026-046` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- The exact-owner hold for an ordinary Tournament-validation battle conflicted
+  with its session-preflight caller, so the battle free-ran until timeout; the
+  same hold also had no matching Game Over lifecycle dispatch. The repair gives
+  validation, cleanup, and confirmed launch one exact typed owner while still
+  letting Pause or a stronger operator workflow interrupt every final input;
+  single-frame start/terminal proof survives Pause, continuity, and receipt
+  failures; terminal or passive-battle proof quarantines successor adoption,
+  Strategy replacement, and target handoff until the old boundary is durably
+  released. Unknown and incompletely classified post-dispatch screens retain
+  that suppressive boundary; they are not treated as proof that no battle
+  started.
+- Load the [dossier](issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
+  before running or changing exclusive validation, confirmed Tournament launch,
+  or typed action-authority routing. Next: deploy and confirm the complete
+  multi-phase validation and verified Home cleanup at an explicitly authorized
+  safe boundary; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+
+### Start Battle replaced a newer No Strategy selection with stale Tournament state
+
+**Stable ID:** `ISSUE-2026-047` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- Immediate Start Battle twice replaced a just-accepted No Strategy selection
+  with the runtime publication's stale Tournament value. The first recurrence
+  launched a disposable Tournament validation battle; the second was rejected
+  before Battle input. Start must snapshot the directive store's latest
+  accepted Strategy atomically and activity must name the bound Strategy.
+- Load the [dossier](issues/open-2026.md#start-battle-replaced-a-newer-no-strategy-selection-with-stale-tournament-state)
+  before changing Strategy/Start ordering or diagnosing a Strategy selection
+  that appears to reverse. Next: integrate and safely confirm immediate Start
+  from a natural Home boundary; [runtime
+  backlog](backlog/runtime-and-validation.md#runtime-control).
 
 ### Stopped control could not interrupt an in-progress Home setup guard
 
@@ -111,10 +150,10 @@ current runtime state.
 
 **Stable ID:** `ISSUE-2026-005` · **Lifecycle:** `unresolved_pending_recurrence_evidence`
 
-- One authorized source tap yielded only `unknown`
-  post-tap evidence although Retry verified Stun off. Preserve the diagnostic
-  evidence, but a bounded verifier failure must release Battle launch in
-  degraded mode under the global runtime failure policy.
+- Two authorized setups on separate dates yielded only `unknown` post-tap
+  evidence on their first attempt, although each complete Retry succeeded.
+  Preserve the diagnostic evidence, but a bounded verifier failure must release
+  Battle launch in degraded mode under the global runtime failure policy.
 - Load the [dossier](issues/open-2026.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap)
   on recurrence or before changing this verifier. Next: retain the final frame
   and detail/off/on confidences; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).

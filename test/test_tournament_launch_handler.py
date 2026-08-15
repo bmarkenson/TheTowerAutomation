@@ -86,6 +86,9 @@ def test_dispatch_from_home_rechecks_authority_before_each_tap():
     home = _load(HOME_OPEN)
     entry = _load(TOURNAMENT_ENTRY)
     authority = iter((True, True, True))
+
+    def action_guard():
+        return next(authority)
     with (
         patch(
             "handlers.tournament_launch_handler.detect_state_and_overlays",
@@ -113,15 +116,21 @@ def test_dispatch_from_home_rechecks_authority_before_each_tap():
     ):
         result = dispatch_tournament_launch(
             home,
-            action_guard=lambda: next(authority),
+            action_guard=action_guard,
             capture_fn=lambda: entry,
             sleep_fn=lambda _seconds: None,
             monotonic_fn=iter((0.0, 0.0)).__next__,
         )
 
     assert result.dispatched
-    open_tournament.assert_called_once_with(home)
-    battle.assert_called_once_with(entry)
+    open_tournament.assert_called_once_with(
+        home,
+        action_guard=action_guard,
+    )
+    battle.assert_called_once_with(
+        entry,
+        action_guard=action_guard,
+    )
 
 
 def test_dispatch_fails_closed_when_authority_is_withdrawn():
