@@ -37,7 +37,7 @@ public partial class SaveMappingIntegrationWindow : Window
     {
         await RunAsync(async cancellationToken =>
         {
-            ClearReview("Review an exact proposal before staging.");
+            ClearReview("Review an exact proposal before integration.");
             var catalog = await _api.GetSaveMappingIntegrationAsync(
                 cancellationToken);
             if (catalog.SchemaVersion != 3
@@ -68,8 +68,8 @@ public partial class SaveMappingIntegrationWindow : Window
                 SaveMappingIntegrationViewModels.RepositoryText(
                     catalog.Repository);
             var readiness = catalog.Repository?.IntegrationAvailable is true
-                ? "main/private staging eligible"
-                : "private staging unavailable";
+                ? "automatic integration eligible"
+                : "automatic integration unavailable";
             CatalogStatusText.Text = catalog.Available
                 ? !string.IsNullOrWhiteSpace(catalog.Transaction?.Reason)
                     ? catalog.Transaction.Reason
@@ -98,6 +98,9 @@ public partial class SaveMappingIntegrationWindow : Window
         CandidateDetailText.Text = candidate is null
             ? "Choose one durable observation."
             : SaveMappingIntegrationViewModels.CandidateDetail(candidate);
+        ReviewButton.Visibility = candidate?.ReviewAvailable == false
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         ReviewButton.IsEnabled = !_busy
             && candidate?.ReviewAvailable == true;
         ReviewButton.ToolTip = candidate?.ReviewAvailable == false
@@ -109,11 +112,18 @@ public partial class SaveMappingIntegrationWindow : Window
                 : Visibility.Visible;
         CopyAgentReviewButton.IsEnabled = !_busy
             && !string.IsNullOrWhiteSpace(candidate?.AgentReviewPrompt);
+        DismissButton.Visibility = candidate is not null
+            && candidate.DismissAvailable == false
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         DismissButton.IsEnabled = !_busy
             && candidate?.DismissAvailable == true;
         DismissButton.ToolTip = candidate?.DismissAvailable == false
             ? candidate.DismissReason
             : "Hide this observation from the active queue while preserving its receipt.";
+        IntegrateButton.Visibility = candidate?.ReviewAvailable == false
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         if (candidate?.ReviewAvailable == false)
         {
             ProposalText.Text =
@@ -121,14 +131,16 @@ public partial class SaveMappingIntegrationWindow : Window
                     candidate);
             IntegrateStatusText.Text = string.IsNullOrWhiteSpace(
                 candidate.NextAction)
-                    ? "The exact proposal must be resolved before staging."
+                    ? candidate.AutomaticIntegration
+                        ? "No review is needed; automatic integration is queued."
+                        : "The exact proposal must be resolved before integration."
                     : candidate.NextAction;
         }
         else
         {
             IntegrateStatusText.Text = candidate is null
                 ? "Choose an observation to see its available actions."
-                : "Review this exact candidate before staging, or dismiss it if it is incorrect.";
+                : "Review this exact candidate before integration, or dismiss it if it is incorrect.";
         }
     }
 
@@ -142,7 +154,7 @@ public partial class SaveMappingIntegrationWindow : Window
         try
         {
             Clipboard.SetText(prompt);
-            IntegrateStatusText.Text = "Agent-review request copied to the clipboard.";
+            IntegrateStatusText.Text = "Agent request copied to the clipboard.";
         }
         catch (Exception exc)
         {
@@ -263,9 +275,9 @@ public partial class SaveMappingIntegrationWindow : Window
                     candidate.RecordId);
             IntegrateButton.IsEnabled = availability.Available;
             IntegrateStatusText.Text = availability.Available
-                ? "Ready to create one verified staged commit without moving main."
+                ? "Ready to integrate this exact proposal into production and origin/main."
                 : string.IsNullOrWhiteSpace(availability.Reason)
-                    ? "Private-ref staging is unavailable."
+                    ? "Automatic integration is unavailable."
                     : availability.Reason;
             if (review.RecoveryRequired)
             {
@@ -295,23 +307,24 @@ public partial class SaveMappingIntegrationWindow : Window
         var confirmation =
             (_review.RecoveryRequired
                 ? "Recover and verify this exact durable integration?\n\n"
-                : "Stage this exact proposal for production promotion?\n\n")
+                : "Integrate this exact proposal into production?\n\n")
             + $"{_review.Repository.StagingRef}\n\n"
             + $"Fingerprint: {_review.ReviewedProposalFingerprint}\n"
             + $"Targets: {targets.Count}\n\n"
             + (_review.RecoveryRequired
                 ? "This retries only the durable reviewed identity and verifies "
-                    + "exact Git refs and mappings. It does not create a second "
-                    + "commit, promote, restart services, send device input, change "
+                    + "exact Git refs and mappings, then automatically completes "
+                    + "safe promotion and publication. It does not create a second "
+                    + "mapping commit, restart services, send device input, change "
                     + "runtime authority, or alter the current battle."
-                : "This creates one verified child of current main under a private "
-                    + "staging ref. It does not move main, touch the production index "
-                    + "or worktree, restart services, send device input, change runtime "
-                    + "authority, or alter the current battle.");
+                : "This creates one verified child of current main, then automatically "
+                    + "fast-forwards production and publishes origin/main under the "
+                    + "narrow mapping authority. It does not restart services, send "
+                    + "device input, change runtime authority, or alter the current battle.");
         if (MessageBox.Show(
             this,
             confirmation,
-            "Stage canonical save mapping",
+            "Integrate canonical save mapping",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
             MessageBoxResult.Cancel) != MessageBoxResult.OK)
@@ -353,7 +366,7 @@ public partial class SaveMappingIntegrationWindow : Window
         ResultText.Text = "";
         IntegrateButton.IsEnabled = false;
         IntegrateStatusText.Text =
-            "Staging remains disabled until this exact candidate is reviewed.";
+            "Candidates needing judgment must be reviewed; exact causal proofs integrate automatically.";
     }
 
     private async Task RunAsync(
@@ -441,14 +454,24 @@ public partial class SaveMappingIntegrationWindow : Window
         _integratedResult = result;
         ResultPanel.Visibility = Visibility.Visible;
         ResultPanel.BorderBrush = new SolidColorBrush(
-            Color.FromRgb(73, 214, 157));
+            result.Published is true && result.Disposition != "promotion_queued"
+                ? Color.FromRgb(73, 214, 157)
+                : Color.FromRgb(241, 191, 91));
         ResultText.Text = SaveMappingIntegrationViewModels.IntegratedResultText(
             result,
             review);
         IntegrateStatusText.Text =
-            result.Promoted is true
-                ? "Deployed — a fresh stable decode remains pending."
-                : "Staged privately — production promotion and a fresh stable decode remain pending.";
+            result.Disposition == "promotion_queued"
+                ? result.Published is true
+                    ? "Published — automatic transaction cleanup is queued."
+                    : result.Promoted is true
+                        ? "Promoted locally — automatic publication is pending."
+                        : "Automatic production promotion is queued."
+            : result.Published is true
+                ? "Integrated and published — a fresh stable decode remains pending."
+                : result.Promoted is true
+                    ? "Promoted locally — automatic publication is pending."
+                    : "Automatic production promotion is queued.";
         IntegrateButton.IsEnabled = false;
     }
 

@@ -57,6 +57,34 @@ internal static class SaveMappingIntegrationViewModels
         SaveMappingIntegrationItem item)
     {
         var text = new StringBuilder();
+        if (item.AutomaticIntegration)
+        {
+            var verification = item.MachineVerification;
+            text.AppendLine("MACHINE-VERIFIED EVIDENCE");
+            text.AppendLine(verification?.Reason ?? item.Reason);
+            if (verification is not null
+                && verification.Proof.ValueKind is not (
+                    JsonValueKind.Undefined or JsonValueKind.Null))
+            {
+                text.AppendLine();
+                text.AppendLine("EXACT CAUSAL PROOF");
+                text.AppendLine(JsonSerializer.Serialize(
+                    verification.Proof,
+                    new JsonSerializerOptions { WriteIndented = true }));
+            }
+            text.AppendLine();
+            text.AppendLine("WHAT HAPPENS NEXT");
+            text.AppendLine(string.IsNullOrWhiteSpace(item.NextAction)
+                ? "No review is needed; automatic integration is queued."
+                : item.NextAction);
+            if (!string.IsNullOrWhiteSpace(item.AgentReviewPrompt))
+            {
+                text.AppendLine();
+                text.AppendLine("AGENT RECOVERY REQUEST");
+                text.AppendLine(item.AgentReviewPrompt);
+            }
+            return text.ToString().TrimEnd();
+        }
         text.AppendLine("EXACT PROPOSAL UNAVAILABLE");
         text.AppendLine(string.IsNullOrWhiteSpace(item.ReviewReason)
             ? item.Reason
@@ -183,12 +211,12 @@ internal static class SaveMappingIntegrationViewModels
     {
         if (repository is null)
         {
-            return "Private staging eligibility is unavailable.";
+            return "Automatic integration readiness is unavailable.";
         }
         var readiness = repository.IntegrationAvailable
-            ? "Eligible: main is clean and the private staging ref is empty."
+            ? "Eligible: main is clean and automatic integration is available."
             : string.IsNullOrWhiteSpace(repository.Reason)
-                ? "Private-ref staging is unavailable."
+                ? "Automatic integration is temporarily unavailable."
                 : repository.Reason;
         return $"main        {repository.MainCommit}{Environment.NewLine}"
             + $"staging ref {repository.StagingRef}{Environment.NewLine}"
@@ -247,13 +275,25 @@ internal static class SaveMappingIntegrationViewModels
         var reviewedTargetKeys = reviewedTargets?
             .Select(target => $"{target.Path}\0{target.MappingId}")
             .ToHashSet(StringComparer.Ordinal);
+        var promoted = result?.Disposition == "promoted"
+            && result.Promoted is true
+            && result.Published is true
+            && result.AutomaticRetry is false;
+        var queued = result?.Disposition == "promotion_queued"
+            && result.Promoted.HasValue
+            && result.Published.HasValue
+            && (result.Published is false || result.Promoted is true)
+            && result.AutomaticRetry is true
+            && !string.IsNullOrWhiteSpace(result.Code)
+            && !string.IsNullOrWhiteSpace(result.Reason)
+            && result.AgentReviewPrompt is not null;
         var valid = result is not null
             && review is not null
             && ReviewMatches(review, review.CandidateRecordId)
             && result.SchemaVersion == 3
             && result.Capability == "save_mapping_staged_candidate_v1"
-            && result.Operation == "stage"
-            && result.Disposition == "staged_for_promotion"
+            && result.Operation == "integrate"
+            && (promoted || queued)
             && result.Idempotent.HasValue
             && result.CandidateRecordId == review.CandidateRecordId
             && result.ReviewedProposalFingerprint
@@ -264,7 +304,9 @@ internal static class SaveMappingIntegrationViewModels
             && result.Committed is true
             && result.Staged is true
             && result.Promoted.HasValue
-            && (result.Promoted is not true || result.Idempotent is true)
+            && result.Published.HasValue
+            && result.AgentRequired.HasValue
+            && !string.IsNullOrWhiteSpace(result.NextAction)
             && result.MappingInvariants == "passed"
             && result.PromotionValidation == "pending"
             && targets is { Count: > 0 }
@@ -296,7 +338,7 @@ internal static class SaveMappingIntegrationViewModels
             valid ? "" : "integrated_result_invalid",
             valid
                 ? ""
-                : "The server response did not prove this exact reviewed proposal was staged without moving main.");
+                : "The server response did not prove this exact reviewed proposal was promoted or durably queued for automatic promotion.");
     }
 
     public static SaveMappingDismissedResultValidation ValidateDismissedResult(
@@ -358,23 +400,32 @@ internal static class SaveMappingIntegrationViewModels
         {
             return new(
                 false,
-                "Staging outcome is unconfirmed",
+                "Integration outcome is unconfirmed",
                 validation.Reason
                     + " Refresh the catalog before taking another action.",
                 validation.Code);
         }
         var changed = result!.Targets!.Count(target => target.Changed is true);
         var commit = result.StagedCommit[..Math.Min(12, result.StagedCommit.Length)];
+        if (result.Disposition == "promotion_queued")
+        {
+            return new(
+                false,
+                result.Published is true
+                    ? "Mapping published; cleanup queued"
+                    : result.Promoted is true
+                    ? "Mapping promoted; publication queued"
+                    : "Automatic promotion queued",
+                $"{changed} canonical mapping file{(changed == 1 ? "" : "s")} "
+                    + $"committed as {commit}. {result.Reason} {result.NextAction}",
+                result.Code);
+        }
         return new(
             true,
-            result.Idempotent is true
-                ? "Already staged for promotion"
-                : "Staged for promotion",
+            "Mapping integrated and published",
             $"{changed} canonical mapping file{(changed == 1 ? "" : "s")} "
-                + $"committed as {commit}. Mapping invariants passed; "
-                + (result.Promoted is true
-                    ? "a fresh stable decode remains pending."
-                    : "production promotion and a fresh stable decode remain pending."),
+                + $"committed as {commit}. Production and origin contain it; "
+                + "only a fresh stable decode remains pending.",
             "");
     }
 
@@ -388,19 +439,23 @@ internal static class SaveMappingIntegrationViewModels
         var text = new StringBuilder();
         text.AppendLine(presentation.Title);
         text.AppendLine(presentation.Detail);
-        if (!presentation.Success)
+        if (presentation.Code == "integrated_result_invalid")
         {
             return text.ToString().TrimEnd();
         }
         text.AppendLine();
         text.AppendLine($"base: {result.BaseCommit}");
         text.AppendLine($"staging ref: {result.StagingRef}");
-        text.AppendLine($"staged commit: {result.StagedCommit}");
+        text.AppendLine($"commit: {result.StagedCommit}");
         text.AppendLine($"committed: {Lower(result.Committed)}");
         text.AppendLine($"staged: {Lower(result.Staged)}");
         text.AppendLine($"promoted: {Lower(result.Promoted)}");
+        text.AppendLine($"published: {Lower(result.Published)}");
+        text.AppendLine($"automatic retry: {Lower(result.AutomaticRetry)}");
         text.AppendLine($"mapping invariants: {result.MappingInvariants}");
         text.AppendLine($"production validation: {result.PromotionValidation}");
+        text.AppendLine($"rollback tag: {result.RollbackTag ?? "owned by enclosing promotion or pending"}");
+        text.AppendLine($"remote main: {result.RemoteMainCommit ?? "pending"}");
         foreach (var target in result.Targets!)
         {
             text.AppendLine();
@@ -413,6 +468,12 @@ internal static class SaveMappingIntegrationViewModels
             text.AppendLine();
             text.AppendLine("AUDIT WARNING");
             text.AppendLine(result.Warning);
+        }
+        if (!string.IsNullOrWhiteSpace(result.AgentReviewPrompt))
+        {
+            text.AppendLine();
+            text.AppendLine("AGENT RECOVERY REQUEST");
+            text.AppendLine(result.AgentReviewPrompt);
         }
         return text.ToString().TrimEnd();
     }

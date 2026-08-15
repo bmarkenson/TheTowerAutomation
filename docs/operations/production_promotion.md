@@ -98,7 +98,10 @@ table row and additional coverage that made it necessary.
 The final candidate gate is not a pre-commit check. First create a clean exact
 candidate `V`. While its inputs are mutable, run focused checks only; do not use
 the complete checkpoint as a rehearsal. Run a selected complete checkpoint at
-most once for unchanged `V`.
+most once for unchanged `V`. The canonical `development.py checkpoint`
+entry point mechanically refuses staged, unstaged, or untracked input and
+rechecks exact `V` before it can report `PASS`; do not bypass that entry point
+with its component commands and call the aggregate a checkpoint.
 
 Repeat a complete checkpoint only when its prior run failed or was incomplete,
 a later change invalidates its production, checkpoint-machinery, or relevant
@@ -259,15 +262,16 @@ Enter this section only while `refs/thetower/promotion-owner` names exact `D`.
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
 
-### Direct save-mapping staging
+### Automatic save-mapping integration
 
-The control-surface save-mapping action stages one exact Git object; it does not
-move `main` or touch the production index or worktree. Its routine lane is
-available only when production is a clean `main` checkout at its tip and
-`refs/thetower/save-mapping-candidate` is empty. In either GUI, select the
-durable observation, inspect **Private staging eligibility**, review the exact
-proposal and target hashes, then confirm **Stage reviewed mapping for
-promotion…**.
+The control-surface save-mapping lane owns its complete narrow transaction.
+Private staging is an internal crash-safe boundary and always has a consumer;
+`staged_for_promotion` is not a successful terminal result. In either GUI,
+inspect **Automatic integration readiness**. A candidate that requires semantic
+judgment still exposes **Review exact proposal** followed by **Integrate
+reviewed mapping…**. A deterministic `battle_history_killed_by_id` observation
+with exact terminal Game Over/save evidence is machine-verified and needs no
+operator click; its proof and automatic status remain visible.
 
 A Module `infoIndex` proposal adds only its global name/family identity; the
 observed slot remains pairing provenance and is not patched. Once ordinary
@@ -292,41 +296,53 @@ current `main`. If the mapping inputs are unchanged, it constructs the commit
 with a private index using current `main` as parent, verifies that only the
 allowlisted mapping JSON paths differ, and atomically creates the fixed private
 ref while verifying `main` did not move. Thus an unrelated `main` advance
-before confirmation does not force a new operator review, while the resulting
-candidate is still a direct fast-forward child of the current tip.
+before confirmation does not force a new operator review.
 
-Success must identify the fixed staging ref, actual base, staged commit, exact
-canonical target hashes, passed mapping invariants, `committed=true`,
-`staged=true`, and `promoted=false`. Treat that exact staged object as
-candidate `D`: inspect its diff and provenance trailers, run the mapping-only
-candidate gate, then continue at step 2 of this production procedure. Do not
-substitute a full repository checkpoint merely because the object is being
-promoted.
+The consumer then performs the mapping-only candidate gate mechanically; do
+not run the complete repository checkpoint solely for this allowlisted JSON
+child. When live `origin/main` is readable, a tip that is not the candidate or
+its ancestor queues coordinator/agent reconciliation before local production
+is changed. The consumer changes production only after acquiring the same global
+`refs/thetower/promotion-owner` used by ordinary outcomes. It creates one
+deterministic annotated rollback tag at the exact base, takes the mapping-file
+write lock, fast-forwards `main`, and rechecks `HEAD == main`, cleanliness,
+target hashes/modes, candidate ownership, and the canonical mapping-set
+fingerprint. It publishes `<candidate>:refs/heads/main` without force, verifies
+that live `origin/main` contains the candidate, and compare-releases only its
+own promotion owner.
 
-Do not clear the persistent warning when staging succeeds. It becomes **Save
-mapping awaiting production promotion**, then **Deployed save mapping awaiting
-fresh validation** after `main` contains the commit, and retires only when a
-later complete stable save proves the running decoder loaded the matching
-canonical mapping set. The application then removes the exact private ref and
-journal; the commit remains reachable from `main`. That passive observation
+Success reports `disposition=promoted`, `committed=true`, `promoted=true`,
+`published=true`, the base and commit, exact target hashes, passed invariants,
+rollback tag when this lane created it, and verified remote commit. Owner
+contention, dirty production, unavailable/rejected remote publication, or an
+exact owner-release failure reports `disposition=promotion_queued` with the
+durable commit, actual local and published state, bounded automatic retry,
+concrete reason, and an agent-ready request. Published work whose exact owner
+still needs release remains `promotion_cleanup_pending` and is an automatic
+consumer input; it cannot wait silently for the later decode. The lane never
+reports private staging alone as completion. If `main`
+contains the mapping inside a larger coordinated outcome, this lane waits for
+that outcome's coordinator to publish; it never pushes unrelated enclosing
+commits.
+
+The running decoder holds a shared mapping-file lock while loading one
+signature-keyed canonical set, so a local mapping checkout is seen entirely
+before or after and the next acquisition notices it without a process restart.
+After verified remote publication, one complete stable save whose acquisition
+started under a `main` commit containing the mapping and whose identity and
+canonical fingerprint match records the decode receipt. Only then does the
+application retire the exact private ref and journal. This passive observation
 cannot change runtime authority or send input.
 
-A stale mapping review, target/hash/mode drift, dirty production worktree,
-occupied staging ref, busy lock, or other proven pre-write rejection requires a
-fresh catalog and review; never retry automatically. If the catalog reports
-exact integration recovery, only the same durable candidate remains actionable:
-inspect its stored target hashes and fingerprint, then invoke the staging action
-once to continue its transaction. A response lost after the ref was created
-reappears as the same promotion-pending commit rather than another write.
-
-If `main` advances after staging without containing the candidate, the old
-object is no longer a fast-forward candidate and the status reports
-`restaging_required`. Do not merge, cherry-pick, or promote it. Inspect and
-retire only that exact stale transaction/ref through a reviewed recovery, then
-review the unchanged mapping inputs and stage a new child of current `main`.
-A malformed or legacy journal, moved ref, target supersession, or any outcome
-that cannot be proved exact is unconfirmed: do not edit targets or move refs
-ad hoc; route the repair through ordinary owned development.
+An advance after staging that does not contain the candidate is recovered by
+retiring only the exact old ref and regenerating the same reviewed mapping
+change on current `main`, provided all target inputs remain unchanged. A
+response loss at any transaction phase resumes the same commit, rollback tag,
+owner, and publication boundary. A changed target, contradictory evidence,
+foreign/moved ref, malformed journal, superseded canonical result, or any
+unprovable state fails closed and tells the operator to involve an agent; never
+edit targets, clear an owner, force-push, or create a second mapping commit ad
+hoc.
 
 ### Required Windows package publication
 

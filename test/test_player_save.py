@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 import nrbf
 import pytest
 
+import core.player_save as player_save
 from core.adb_utils import read_device_file
 from core.attack_range import effective_attack_range_from_save
 from core.app import App
@@ -89,6 +90,54 @@ def test_default_device_path_matches_operator_adb_pull():
         "/sdcard/Android/data/"
         "com.TechTreeGames.TheTower/files/playerInfo.dat"
     )
+
+
+def test_mapping_loader_notices_atomic_mapping_promotion_without_restart(
+    tmp_path,
+    monkeypatch,
+):
+    mapping_dir = tmp_path / "mappings"
+    mapping_dir.mkdir()
+    for source in sorted(
+        (ROOT / "config/player_save_versions").glob("*.json")
+    ):
+        (mapping_dir / source.name).write_bytes(source.read_bytes())
+    monkeypatch.setattr(player_save, "PLAYER_SAVE_MAPPING_DIR", mapping_dir)
+    monkeypatch.setattr(
+        player_save,
+        "PLAYER_SAVE_MAPPING_SET_LOCK",
+        tmp_path / "canonical-mapping-files.lock",
+    )
+    player_save._load_mappings_for_signature.cache_clear()
+
+    before = {
+        mapping["mapping_id"]: mapping
+        for mapping in player_save._load_mappings()
+    }
+    authority_path = mapping_dir / "data_9_game_1073.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    authority["runtime_save"]["battle_history"]["killed_by_ids"][
+        "987654321"
+    ] = "Dynamic Reload Fixture"
+    replacement = authority_path.with_name(".data_9_game_1073.json.promoted")
+    replacement.write_text(
+        json.dumps(authority, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    replacement.replace(authority_path)
+
+    after = {
+        mapping["mapping_id"]: mapping
+        for mapping in player_save._load_mappings()
+    }
+
+    assert "987654321" not in before["data-9-game-1073"]["runtime_save"][
+        "battle_history"
+    ]["killed_by_ids"]
+    assert after["data-9-game-1073"]["runtime_save"]["battle_history"][
+        "killed_by_ids"
+    ]["987654321"] == "Dynamic Reload Fixture"
+    player_save._load_mappings_for_signature.cache_clear()
 
 
 def test_raw_field_manifest_is_complete_disjoint_and_canonical():

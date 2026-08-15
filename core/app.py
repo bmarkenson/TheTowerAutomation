@@ -443,9 +443,6 @@ class App:
         self._player_save_preflight_activity_scope_id = None
         self._player_save_history_baseline_outcome = None
         runtime_repository_root = Path(__file__).resolve().parents[1]
-        runtime_mapping_main_commit = canonical_mapping_runtime_commit(
-            repository_root=runtime_repository_root,
-        )
         self._player_save_parser = PlayerSaveParser()
         self._player_save_acquirer = (
             StablePlayerSaveAcquirer(
@@ -453,7 +450,9 @@ class App:
                 parser=self._player_save_parser,
                 acquisition_start_observer=lambda started_at: (
                     canonical_mapping_decode_start(
-                        runtime_main_commit=runtime_mapping_main_commit,
+                        runtime_main_commit=canonical_mapping_runtime_commit(
+                            repository_root=runtime_repository_root,
+                        ),
                         acquired_at=started_at,
                     )
                 ),

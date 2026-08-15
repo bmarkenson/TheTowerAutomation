@@ -59,7 +59,7 @@ internal static class ControlSurfaceCompatibility
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 45;
+    public const int MinimumServerRevision = 46;
 
     private static readonly string[] RequiredCapabilities =
     [
@@ -88,6 +88,8 @@ internal static class ControlSurfaceCompatibility
         "save_backed_setup_capture_v2",
         "save_mapping_staged_candidate_v1",
         "save_mapping_candidate_disposition_v1",
+        "save_mapping_automatic_promotion_v1",
+        "save_mapping_machine_verification_v1",
         "save_mapping_review_status_v2",
         "strategy_aware_attach_v1",
         "strategy_action_gate_v1",
@@ -254,6 +256,9 @@ internal static class ControlSurfaceCompatibility
             "integration_recovery_required",
             "restaging_required",
             "promotion_pending",
+            "automatic_integration_pending",
+            "promotion_cleanup_pending",
+            "remote_publication_pending",
             "production_validation_pending",
         };
         var visibleItems = (status.Items ?? [])
@@ -295,7 +300,13 @@ internal static class ControlSurfaceCompatibility
             : winningState == "restaging_required"
                 ? "Save mapping must be restaged on current main"
             : winningState == "promotion_pending"
-                ? "Save mapping awaiting production promotion"
+                ? "Verified save mapping queued for automatic promotion"
+            : winningState == "automatic_integration_pending"
+                ? "Verified save mapping queued for automatic integration"
+            : winningState == "promotion_cleanup_pending"
+                ? "Published save mapping awaiting automatic cleanup"
+            : winningState == "remote_publication_pending"
+                ? "Save mapping awaiting automatic publication"
             : winningState == "production_validation_pending"
                 ? "Deployed save mapping awaiting fresh validation"
             : winningState == "authority_pending"
@@ -346,8 +357,9 @@ internal static class ControlSurfaceCompatibility
                 or "invalid_local_store" or "reconfirmation_required"
                 or "evidence_ambiguous" or "integration_unconfirmed" => 0,
             "integration_recovery_required" or "restaging_required" => 1,
-            "promotion_pending" => 2,
-            "production_validation_pending" => 3,
+            "promotion_pending" or "automatic_integration_pending" => 2,
+            "promotion_cleanup_pending" or "remote_publication_pending" => 3,
+            "production_validation_pending" => 4,
             "authority_pending" => 4,
             "active_local" => 5,
             "review_required" => 6,

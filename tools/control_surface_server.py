@@ -40,6 +40,8 @@ DEFAULT_TOKEN_ENV = "THETOWER_CONTROL_TOKEN"
 MAX_REQUEST_BYTES = 8192
 MAX_HOST_PERFORMANCE_REQUEST_BYTES = 512 * 1024
 DISCARD_PURGE_INTERVAL_SECONDS = 6 * 60 * 60
+SAVE_MAPPING_RECONCILIATION_INTERVAL_SECONDS = 5
+SAVE_MAPPING_RECONCILIATION_MAX_BACKOFF_SECONDS = 5 * 60
 
 
 class ControlSurfaceHTTPServer(ThreadingHTTPServer):
@@ -401,6 +403,38 @@ def _discard_retention_loop(
             return
 
 
+def _save_mapping_reconciliation_loop(
+    service: ControlSurfaceService,
+    stop_event: threading.Event,
+) -> None:
+    """Consume reviewed or machine-verified mapping work until it closes."""
+
+    delay = 0
+    while not stop_event.wait(delay):
+        try:
+            result = service.reconcile_save_mapping_integration()
+        except Exception as exc:
+            print(
+                f"Save-mapping reconciliation failed: {exc}",
+                file=sys.stderr,
+            )
+            result = {"needed": True, "disposition": "unconfirmed"}
+        if result.get("needed") is True or result.get("disposition") in {
+            "promotion_queued",
+            "failed",
+            "unconfirmed",
+        }:
+            delay = min(
+                max(
+                    SAVE_MAPPING_RECONCILIATION_INTERVAL_SECONDS,
+                    delay * 2,
+                ),
+                SAVE_MAPPING_RECONCILIATION_MAX_BACKOFF_SECONDS,
+            )
+        else:
+            delay = SAVE_MAPPING_RECONCILIATION_INTERVAL_SECONDS
+
+
 def _persistent_adb_target_provider(
     process_manager: SystemdAutomationManager,
 ) -> Callable[[], str]:
@@ -589,8 +623,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         daemon=True,
         name="persistent-adb-connection",
     )
+    mapping_reconciliation_thread = threading.Thread(
+        target=_save_mapping_reconciliation_loop,
+        args=(service, background_stop),
+        daemon=True,
+        name="save-mapping-reconciliation",
+    )
     retention_thread.start()
     adb_connection_thread.start()
+    mapping_reconciliation_thread.start()
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
@@ -599,6 +640,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         background_stop.set()
         retention_thread.join(timeout=2)
         adb_connection_thread.join(timeout=2)
+        mapping_reconciliation_thread.join(timeout=2)
         server.server_close()
     return 0
 

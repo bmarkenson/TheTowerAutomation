@@ -2030,7 +2030,7 @@ public partial class MainWindow : Window
         {
             ShowError(new InvalidOperationException(
                 $"Linux API revision {ControlSurfaceCompatibility.MinimumServerRevision} "
-                + "with save-mapping staging and disposition capabilities is required."));
+                + "with automatic save-mapping integration capabilities is required."));
             return;
         }
         try
@@ -3989,9 +3989,9 @@ public partial class MainWindow : Window
                 _serverCompatibility);
         SaveMappingIntegrationMenuItem.IsEnabled = compatible;
         SaveMappingIntegrationMenuItem.ToolTip = compatible
-            ? "Review, dismiss, or stage a save-mapping observation."
+            ? "Inspect, dismiss, or automatically integrate a save-mapping observation."
             : $"Linux API revision {ControlSurfaceCompatibility.MinimumServerRevision} "
-                + "with save-mapping staging and disposition capabilities is required.";
+                + "with automatic save-mapping integration capabilities is required.";
         ReviewSaveMappingsButton.IsEnabled = compatible;
         ReviewSaveMappingsButton.ToolTip =
             SaveMappingIntegrationMenuItem.ToolTip;

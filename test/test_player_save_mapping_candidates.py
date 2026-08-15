@@ -173,6 +173,27 @@ def _compatible_killed_by_record() -> dict:
     )
 
 
+def _copy_mapping_pair_without_ray(repository_root: Path) -> Path:
+    mapping_dir = repository_root / "config" / "player_save_versions"
+    mapping_dir.mkdir(parents=True)
+    for name in ("data_9_game_1073.json", "data_9_game_1101.json"):
+        shutil.copyfile(
+            ROOT / "config/player_save_versions" / name,
+            mapping_dir / name,
+        )
+    authority_path = mapping_dir / "data_9_game_1073.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    authority["runtime_save"]["battle_history"]["killed_by_ids"].pop(
+        "9",
+        None,
+    )
+    authority_path.write_text(
+        json.dumps(authority, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return mapping_dir
+
+
 def _module_info_record(
     *,
     raw_value: int,
@@ -615,10 +636,11 @@ def test_compatible_exact_revision_proposal_updates_owner_and_mirror_atomically(
     assert all(target["operations"] for target in proposal["targets"])
 
 
-def test_compatible_killed_by_proposal_targets_only_runtime_authority():
+def test_compatible_killed_by_proposal_targets_only_runtime_authority(tmp_path):
+    _copy_mapping_pair_without_ray(tmp_path)
     proposal = proposed_mapping_patch(
         _compatible_killed_by_record(),
-        repository_root=ROOT,
+        repository_root=tmp_path,
     )
 
     assert [target["mapping_id"] for target in proposal["targets"]] == [
@@ -634,13 +656,7 @@ def test_compatible_killed_by_proposal_targets_only_runtime_authority():
 
 
 def test_compatible_killed_by_status_tracks_only_runtime_authority(tmp_path):
-    mapping_dir = tmp_path / "config" / "player_save_versions"
-    mapping_dir.mkdir(parents=True)
-    for name in ("data_9_game_1073.json", "data_9_game_1101.json"):
-        shutil.copyfile(
-            ROOT / "config/player_save_versions" / name,
-            mapping_dir / name,
-        )
+    mapping_dir = _copy_mapping_pair_without_ray(tmp_path)
     store = AppendOnlyMappingCandidateStore(tmp_path / "receipts.jsonl")
     store.append_once(_compatible_killed_by_record())
 

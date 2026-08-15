@@ -425,27 +425,27 @@
           <p id="saveMappingCandidateDetail" class="fine-print">Choose one durable observation.</p>
         </section>
         <section>
-          <h3>2. Private staging eligibility</h3>
-          <div id="saveMappingRepositoryDetail" class="mapping-proposal muted">Loading main/staging readiness…</div>
+          <h3>2. Automatic integration readiness</h3>
+          <div id="saveMappingRepositoryDetail" class="mapping-proposal muted">Loading promotion/publication readiness…</div>
         </section>
       </div>
       <div class="dialog-actions mapping-review-actions">
         <button id="refreshSaveMappingCatalogButton" type="button">Refresh catalog</button>
         <button id="reviewSaveMappingProposalButton" type="button" disabled>Review exact proposal</button>
-        <button id="copySaveMappingAgentPromptButton" type="button" hidden disabled>Copy agent-review request</button>
+        <button id="copySaveMappingAgentPromptButton" type="button" hidden disabled>Copy agent request</button>
         <button id="dismissSaveMappingObservationButton" type="button" disabled>Dismiss observation…</button>
       </div>
       <section class="mapping-proposal-section">
-        <h3>3. Exact proposal</h3>
+        <h3>3. Exact proposal or verification</h3>
         <div id="saveMappingProposal" class="mapping-proposal muted">Review an exact proposal before integration.</div>
       </section>
-      <p id="saveMappingIntegrateStatus" class="fine-print">Staging remains disabled until this exact candidate is reviewed.</p>
+      <p id="saveMappingIntegrateStatus" class="fine-print">Candidates needing judgment must be reviewed; exact causal proofs integrate automatically.</p>
       <div id="saveMappingResult" class="callout" hidden></div>
       <div class="dialog-actions mapping-review-actions">
         <button type="button" data-close-dialog="saveMappingIntegrationDialog">Close</button>
-        <button id="integrateSaveMappingButton" class="primary" type="button" disabled>Stage reviewed mapping for promotion…</button>
+        <button id="integrateSaveMappingButton" class="primary" type="button" disabled>Integrate reviewed mapping…</button>
       </div>
-      <p class="fine-print">Review and staging create one verified child commit from current <code>main</code> under a private staging ref. Dismissal only records an append-only disposition and preserves the original observation receipt. Neither action moves <code>main</code>, touches the production index or worktree, restarts services, changes runtime authority, sends device input, or alters the current battle. When an exact proposal is unavailable, copy the displayed request to an agent for ordinary development review.</p>
+      <p class="fine-print">A reviewed proposal is staged durably and then automatically consumed: the server guards production ownership, fast-forwards <code>main</code>, publishes <code>origin/main</code> without force, and waits for a fresh matching save decode. Exact terminal Game Over/save proofs need no operator review. A blocker remains visible with automatic retry and an agent-ready recovery request. Dismissal preserves the original receipt. No mapping action restarts services, changes runtime authority, sends device input, or alters the current battle.</p>
     </div>
   </dialog>
 

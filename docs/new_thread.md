@@ -77,7 +77,10 @@ requires its additional coverage.
 Before a required complete checkpoint, finish and commit every gate input as
 exact candidate `V`, then run it once for that unchanged candidate. Do not run
 it against a mutable or uncommitted working tree; use focused checks until `V`
-exists. Repeat only when the production procedure's
+exists. The `development.py checkpoint` entry point enforces that boundary: it
+refuses staged, unstaged, or untracked candidate input before starting and
+rechecks the same exact commit before reporting `PASS`. Repeat only when the
+production procedure's
 [invalidation rule](operations/production_promotion.md#exact-candidate-before-the-final-gate)
 says the retained evidence no longer applies; otherwise rerun only newly
 affected checks.

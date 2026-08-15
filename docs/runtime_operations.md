@@ -19,7 +19,7 @@ work, load only the matching operation.
 | Run the No Strategy observation profile | [`operations/no_strategy.md`](operations/no_strategy.md) |
 | Validate or passively observe an active Tournament | [`operations/tournament_validation.md`](operations/tournament_validation.md) |
 | Enable, inspect, or stop a bounded player-save temporal-audit campaign | [`operations/player_save_audit.md`](operations/player_save_audit.md) |
-| Review, stage, or promote a confirmed player-save identity candidate | [`operations/production_promotion.md`](operations/production_promotion.md#direct-save-mapping-staging) |
+| Review or recover automatic integration of a player-save mapping candidate | [`operations/production_promotion.md`](operations/production_promotion.md#automatic-save-mapping-integration) |
 | Retain, discard, or sweep generated runtime evidence | [`operations/evidence_retention.md`](operations/evidence_retention.md) |
 | Decide whether an input, Surrender, Exit Battle, test battle, or Pause is authorized | [`live_action_authority.md`](live_action_authority.md) |
 | Implement or review operator-facing action logs | [`action_log_contract.md`](action_log_contract.md) |

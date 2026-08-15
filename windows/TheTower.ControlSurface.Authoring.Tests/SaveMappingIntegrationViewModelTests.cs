@@ -7,7 +7,7 @@ public sealed class SaveMappingIntegrationViewModelTests
     private static readonly string CandidateId = new('a', 64);
 
     [Fact]
-    public void Revision_42_review_contract_deserializes_without_workspace()
+    public void Revision_45_review_contract_deserializes_without_workspace()
     {
         const string payload = """
         {
@@ -108,6 +108,64 @@ public sealed class SaveMappingIntegrationViewModelTests
     }
 
     [Fact]
+    public void Machine_verified_candidate_exposes_proof_without_review_request()
+    {
+        var item = new SaveMappingIntegrationItem
+        {
+            MappingId = "data-9-game-1101",
+            State = "automatic_integration_pending",
+            Reason = "Exact evidence verified.",
+            AutomaticIntegration = true,
+            NextAction = "No review is needed. Automatic integration is queued.",
+            MachineVerification = new SaveMappingMachineVerification
+            {
+                Capability = "save_mapping_machine_verification_v1",
+                Eligible = true,
+                Reason = "The Game Over and save evidence prove 9 → Ray.",
+                Proof = JsonValue("{\"raw_value\":9,\"semantic_value\":\"Ray\"}"),
+            },
+        };
+
+        var proposal =
+            SaveMappingIntegrationViewModels.NonReviewableProposalText(item);
+
+        Assert.Contains("MACHINE-VERIFIED EVIDENCE", proposal);
+        Assert.Contains("EXACT CAUSAL PROOF", proposal);
+        Assert.Contains("Ray", proposal);
+        Assert.Contains("No review is needed", proposal);
+        Assert.DoesNotContain("AGENT-REVIEW REQUEST", proposal);
+    }
+
+    [Fact]
+    public void Machine_verified_candidate_exposes_recovery_request_when_blocked()
+    {
+        var item = new SaveMappingIntegrationItem
+        {
+            MappingId = "data-9-game-1073",
+            State = "automatic_integration_pending",
+            Reason = "Exact evidence verified.",
+            AutomaticIntegration = true,
+            NextAction = "No semantic review is needed, but production is dirty.",
+            AgentReviewPrompt =
+                "Please recover this automatic integration; do not repeat semantic review.",
+            MachineVerification = new SaveMappingMachineVerification
+            {
+                Capability = "save_mapping_machine_verification_v1",
+                Eligible = true,
+                Reason = "The terminal and save evidence prove 9 → Ray.",
+                Proof = JsonValue("{\"raw_value\":9,\"semantic_value\":\"Ray\"}"),
+            },
+        };
+
+        var proposal =
+            SaveMappingIntegrationViewModels.NonReviewableProposalText(item);
+
+        Assert.Contains("MACHINE-VERIFIED EVIDENCE", proposal);
+        Assert.Contains("AGENT RECOVERY REQUEST", proposal);
+        Assert.Contains("do not repeat semantic review", proposal);
+    }
+
+    [Fact]
     public void Exact_dismissal_result_proves_evidence_was_preserved()
     {
         var result = new SaveMappingDismissedResult
@@ -205,10 +263,12 @@ public sealed class SaveMappingIntegrationViewModelTests
             result,
             review);
         Assert.True(presentation.Success);
-        Assert.Contains("Mapping invariants passed", presentation.Detail);
+        Assert.Contains("Production and origin contain it", presentation.Detail);
         Assert.Contains("committed: true", detail);
         Assert.Contains("staged: true", detail);
-        Assert.Contains("promoted: false", detail);
+        Assert.Contains("promoted: true", detail);
+        Assert.Contains("published: true", detail);
+        Assert.Contains("automatic retry: false", detail);
         Assert.Contains("production validation: pending", detail);
         Assert.Contains("Audit logging needs inspection.", detail);
     }
@@ -246,21 +306,33 @@ public sealed class SaveMappingIntegrationViewModelTests
             result,
             Review()).Valid);
         result = IntegratedResult();
-        result.Promoted = true;
+        result.Promoted = false;
         Assert.False(SaveMappingIntegrationViewModels.ValidateIntegratedResult(
             result,
             Review()).Valid);
-        result.Idempotent = true;
-        var recovery = Review();
-        recovery.RecoveryRequired = true;
-        recovery.Repository.MainCommit = result.StagedCommit;
-        recovery.Repository.StagedCommit = result.StagedCommit;
-        recovery.Repository.IntegrationAvailable = false;
-        recovery.Repository.Code = "transaction_recovery_required";
-        recovery.Proposal.Targets[0].Operations = [];
+        result = IntegratedResult();
+        result.Disposition = "promotion_queued";
+        result.Promoted = false;
+        result.Published = false;
+        result.AutomaticRetry = true;
+        result.Code = "promotion_owner_busy";
+        result.Reason = "Another promotion owns the transaction.";
+        result.AgentReviewPrompt = "Ask an agent if this persists.";
         Assert.True(SaveMappingIntegrationViewModels.ValidateIntegratedResult(
             result,
-            recovery).Valid);
+            Review()).Valid);
+        result.Promoted = true;
+        result.Published = true;
+        result.Code = "promotion_owner_release_failed";
+        result.Reason = "Exact promotion owner still needs release.";
+        Assert.True(SaveMappingIntegrationViewModels.ValidateIntegratedResult(
+            result,
+            Review()).Valid);
+        Assert.Contains(
+            "cleanup queued",
+            SaveMappingIntegrationViewModels.IntegratedResult(
+                result,
+                Review()).Title);
         result = IntegratedResult();
         result.Targets = [result.Targets![0], result.Targets[0]];
         Assert.False(SaveMappingIntegrationViewModels.ValidateIntegratedResult(
@@ -275,8 +347,8 @@ public sealed class SaveMappingIntegrationViewModelTests
         {
           "schema_version":3,
           "capability":"save_mapping_staged_candidate_v1",
-          "operation":"stage",
-          "disposition":"staged_for_promotion",
+          "operation":"integrate",
+          "disposition":"promoted",
           "candidate_record_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "reviewed_proposal_fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "base_commit":"cccccccccccccccccccccccccccccccccccccccc",
@@ -403,8 +475,8 @@ public sealed class SaveMappingIntegrationViewModelTests
     {
         SchemaVersion = 3,
         Capability = "save_mapping_staged_candidate_v1",
-        Operation = "stage",
-        Disposition = "staged_for_promotion",
+        Operation = "integrate",
+        Disposition = "promoted",
         Idempotent = false,
         CandidateRecordId = CandidateId,
         ReviewedProposalFingerprint = new string('a', 64),
@@ -413,7 +485,16 @@ public sealed class SaveMappingIntegrationViewModelTests
         StagedCommit = new string('b', 40),
         Committed = true,
         Staged = true,
-        Promoted = false,
+        Promoted = true,
+        Published = true,
+        AutomaticRetry = false,
+        AgentRequired = false,
+        Code = "",
+        Reason = "",
+        NextAction = "Await a fresh stable decode.",
+        AgentReviewPrompt = "",
+        RollbackTag = "production-before-save-mapping-fixture",
+        RemoteMainCommit = new string('b', 40),
         MappingInvariants = "passed",
         PromotionValidation = "pending",
         Targets =

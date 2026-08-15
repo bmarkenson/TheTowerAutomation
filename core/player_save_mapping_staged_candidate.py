@@ -1,11 +1,11 @@
-"""Narrow, reviewed staging lane for deterministic save mappings.
+"""Narrow, durable integration lane for deterministic save mappings.
 
 This module intentionally does not implement a general development workflow.
 It accepts only server-generated mapping proposals, creates one verified child
 commit from clean ``main`` with a private Git index, and publishes that object
-under one private staging ref.  The production branch, index, and worktree are
-never advanced by this action.  Promotion and runtime validation remain
-separate checkpoints.
+under one private staging ref.  That staging ref is a durable transaction
+boundary, not a terminal queue: the integration owner consumes it through a
+guarded fast-forward, remote publication, and fresh runtime decode.
 """
 
 from __future__ import annotations
@@ -53,7 +53,14 @@ SAVE_MAPPING_INTEGRATION_CAPABILITY = "save_mapping_staged_candidate_v1"
 SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION = 3
 SAVE_MAPPING_REVIEW_STATUS_CAPABILITY = "save_mapping_review_status_v2"
 SAVE_MAPPING_DISPOSITION_CAPABILITY = "save_mapping_candidate_disposition_v1"
+SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY = (
+    "save_mapping_automatic_promotion_v1"
+)
+SAVE_MAPPING_MACHINE_VERIFICATION_CAPABILITY = (
+    "save_mapping_machine_verification_v1"
+)
 SAVE_MAPPING_STAGING_REF = "refs/thetower/save-mapping-candidate"
+PROMOTION_OWNER_REF = "refs/thetower/promotion-owner"
 
 _TRANSACTION_KIND = "save_mapping_staged_candidate_transaction"
 _TRANSACTION_SCHEMA_VERSION = 3
@@ -62,6 +69,19 @@ _COMMIT_SUBJECT_PREFIX = "Stage save mapping candidate"
 _CANDIDATE_TRAILER = "Save-Mapping-Candidate-ID"
 _PROPOSAL_TRAILER = "Save-Mapping-Proposal-Fingerprint"
 _RECEIPT_SCHEMA_VERSION = 2
+_ZERO_OBJECT_ID = "0" * 40
+_PROMOTION_PHASES = frozenset({"commit_ready", "staged", "promoting", "published"})
+_QUEUEABLE_PROMOTION_CODES = frozenset(
+    {
+        "integration_busy",
+        "local_promotion_failed",
+        "promotion_owner_busy",
+        "promotion_owner_release_failed",
+        "production_worktree_dirty",
+        "remote_publication_pending",
+        "rollback_tag_failed",
+    }
+)
 
 _DISMISSIBLE_CANDIDATE_STATES = frozenset(
     {
@@ -80,6 +100,10 @@ def _is_hex(value: object, length: int) -> bool:
     return len(text) == length and all(
         character in "0123456789abcdef" for character in text
     )
+
+
+def _is_evidence_fingerprint(value: object) -> bool:
+    return _is_hex(value, 64) and str(value) != "0" * 64
 
 
 def _utc_datetime(value: object) -> Optional[datetime]:
@@ -237,7 +261,7 @@ def _validate_transaction_document(raw: object) -> dict[str, Any]:
     if (
         raw.get("schema_version") != _TRANSACTION_SCHEMA_VERSION
         or raw.get("kind") != _TRANSACTION_KIND
-        or raw.get("phase") not in {"commit_ready", "staged"}
+        or raw.get("phase") not in _PROMOTION_PHASES
         or not _is_hex(raw.get("transaction_id"), 32)
         or not _is_hex(raw.get("candidate_record_id"), 64)
         or not _is_hex(raw.get("reviewed_proposal_fingerprint"), 64)
@@ -615,7 +639,7 @@ class CanonicalDecodeReceiptStore:
 
 
 class SaveMappingIntegrationManager:
-    """Review and stage one deterministic child commit without moving ``main``."""
+    """Review, stage, and consume one deterministic mapping transaction."""
 
     def __init__(
         self,
@@ -624,6 +648,7 @@ class SaveMappingIntegrationManager:
         candidate_store: AppendOnlyMappingCandidateStore,
         disposition_path: Path | str | None = None,
         lock_path: Path | str | None = None,
+        mapping_set_lock_path: Path | str | None = None,
         transaction_path: Path | str | None = None,
         decode_receipt_path: Path | str | None = None,
         transaction_fault_hook: Optional[Callable[[str], None]] = None,
@@ -640,6 +665,11 @@ class SaveMappingIntegrationManager:
             if lock_path is not None
             else candidate_store.path.with_name("canonical-integration.lock")
         )
+        self.mapping_set_lock_path = (
+            Path(mapping_set_lock_path)
+            if mapping_set_lock_path is not None
+            else candidate_store.path.with_name("canonical-mapping-files.lock")
+        )
         self.transaction_path = (
             Path(transaction_path)
             if transaction_path is not None
@@ -654,6 +684,120 @@ class SaveMappingIntegrationManager:
         )
         self.decode_receipts = CanonicalDecodeReceiptStore(receipt_path)
         self._transaction_fault_hook = transaction_fault_hook
+
+    def machine_verification(
+        self,
+        *,
+        candidate_record_id: object,
+    ) -> dict[str, Any]:
+        """Certify the one evidence class that needs no operator judgment.
+
+        A killed-by identifier is self-verifying only when the durable receipt
+        binds one exact terminal UI observation to one pre-mutation save
+        snapshot and retains every runtime, target, round, activity, and
+        boundary fingerprint.  All other mapping classes continue through
+        explicit review.
+        """
+
+        try:
+            record = self.candidate_store.get(candidate_record_id)
+            records = self.candidate_store.list_records()
+            self._require_candidate_not_dismissed(record)
+        except (OSError, PlayerSaveMappingCandidateError) as exc:
+            return _machine_verification_result(
+                None,
+                eligible=False,
+                code=_proposal_error_code(exc),
+                reason=_proposal_error_message(exc),
+            )
+        return self._machine_verification_record(record, records)
+
+    def _machine_verification_record(
+        self,
+        record: Mapping[str, Any],
+        records: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        candidate = record.get("candidate")
+        evidence = record.get("evidence")
+        workflow = evidence.get("workflow") if isinstance(evidence, Mapping) else None
+        mapping = record.get("mapping")
+        checks = (
+            isinstance(candidate, Mapping)
+            and candidate.get("status") == "ready_for_review"
+            and candidate.get("check_id") == "battle_history_killed_by"
+            and candidate.get("value_kind") == "battle_history_killed_by_id"
+            and isinstance(candidate.get("semantic_value"), str)
+            and bool(str(candidate.get("semantic_value") or "").strip())
+            and isinstance(candidate.get("raw_discriminator"), Mapping)
+            and candidate["raw_discriminator"].get("kind") == "integer_id"
+            and isinstance(candidate["raw_discriminator"].get("value"), int)
+            and not isinstance(candidate["raw_discriminator"].get("value"), bool)
+            and isinstance(mapping, Mapping)
+            and mapping.get("resolution") in {"exact", "compatible_exact_revision"}
+            and isinstance(evidence, Mapping)
+            and evidence.get("evidence_strength") == "deterministic"
+            and evidence.get("pairing_method") == "exact_locator"
+            and evidence.get("pre_mutation") is True
+            and all(
+                _is_evidence_fingerprint(evidence.get(name))
+                for name in (
+                    "snapshot_fingerprint",
+                    "ui_evidence_fingerprint",
+                    "source_observation_fingerprint",
+                )
+            )
+            and isinstance(workflow, Mapping)
+            and workflow.get("game_state")
+            in {"terminal_game_over", "terminal_tournament_results"}
+            and all(
+                _is_evidence_fingerprint(workflow.get(name))
+                for name in (
+                    "runtime_session_fingerprint",
+                    "target_generation_fingerprint",
+                    "activity_scope_fingerprint",
+                    "active_round_identity_fingerprint",
+                    "boundary_fingerprint",
+                )
+            )
+        )
+        if not checks:
+            return _machine_verification_result(
+                record,
+                eligible=False,
+                code="operator_review_required",
+                reason=(
+                    "This observation is not a complete exact-boundary killed-by "
+                    "proof, so its meaning still requires operator review."
+                ),
+            )
+        try:
+            self._require_routine_candidate_records(record, records)
+            current = mapping_candidate_record_status(
+                record,
+                repository_root=self.repository_root,
+            )
+            if current.get("state") != "integrated":
+                proposed_mapping_patch(
+                    record,
+                    repository_root=self.repository_root,
+                )
+        except (OSError, PlayerSaveMappingCandidateError) as exc:
+            return _machine_verification_result(
+                record,
+                eligible=False,
+                code=_proposal_error_code(exc),
+                reason=_proposal_error_message(exc),
+            )
+        return _machine_verification_result(
+            record,
+            eligible=True,
+            code="machine_verified",
+            reason=(
+                "The exact terminal UI observation and its paired "
+                "pre-mutation save prove this killed-by mapping without "
+                "operator judgment."
+            ),
+        )
 
     def catalog(self) -> dict[str, Any]:
         """Return staged-candidate review state without leaking projection failures."""
@@ -729,8 +873,13 @@ class SaveMappingIntegrationManager:
             if item.get("state") == "integrated":
                 continue
             projected = dict(item)
+            verification = self.machine_verification(
+                candidate_record_id=item.get("record_id")
+            )
             if item.get("state") in {
                 "promotion_pending",
+                "promotion_cleanup_pending",
+                "remote_publication_pending",
                 "production_validation_pending",
                 "integration_unconfirmed",
             }:
@@ -786,27 +935,92 @@ class SaveMappingIntegrationManager:
                         review_code=("" if base["integration_available"] else base["code"]),
                         review_reason=("" if base["integration_available"] else base["reason"]),
                     )
+            automatic_integration = verification.get("eligible") is True
+            preautomatic_code = str(projected.get("review_code") or "")
+            preautomatic_reason = str(projected.get("review_reason") or "")
+            automatic_blocked = bool(
+                automatic_integration
+                and (
+                    item.get("state")
+                    in {
+                        "integration_recovery_required",
+                        "integration_unconfirmed",
+                        "promotion_pending",
+                        "promotion_cleanup_pending",
+                        "remote_publication_pending",
+                        "restaging_required",
+                    }
+                    or (
+                        item.get("state") == "automatic_integration_pending"
+                        and (
+                            active_transaction is not None
+                            or base["integration_available"] is not True
+                        )
+                    )
+                )
+            )
+            automatic_blocker_code = preautomatic_code if automatic_blocked else ""
+            automatic_blocker_reason = (
+                preautomatic_reason if automatic_blocked else ""
+            )
+            if automatic_integration:
+                projected.update(
+                    review_available=False,
+                    review_code="machine_verified",
+                    review_reason=str(verification["reason"]),
+                )
             dismiss_available = bool(
-                active_transaction is None
+                not automatic_integration
+                and active_transaction is None
                 and item.get("state") in _DISMISSIBLE_CANDIDATE_STATES
             )
+            integration_recovery = item.get("state") in {
+                "integration_recovery_required",
+                "integration_unconfirmed",
+                "promotion_pending",
+                "promotion_cleanup_pending",
+                "remote_publication_pending",
+                "restaging_required",
+            }
             review_available = projected.get("review_available") is True
             projected.update(
+                machine_verification=verification,
+                automatic_integration=automatic_integration,
+                automatic_integration_blocked=automatic_blocked,
+                automatic_integration_blocker_code=automatic_blocker_code,
+                automatic_integration_blocker_reason=automatic_blocker_reason,
                 dismiss_available=dismiss_available,
                 dismiss_reason=(
                     "Dismiss this observation while preserving its durable receipt."
                     if dismiss_available
-                    else _dismiss_unavailable_reason(projected, active_transaction)
+                    else (
+                        "This exact causal proof is machine-verified and is being "
+                        "integrated automatically."
+                        if automatic_integration
+                        else _dismiss_unavailable_reason(
+                            projected,
+                            active_transaction,
+                        )
+                    )
                 ),
                 agent_review_prompt=(
                     ""
                     if review_available
+                    or (automatic_integration and not automatic_blocked)
                     else _agent_review_prompt(
                         projected,
                         dismiss_available=dismiss_available,
+                        automatic_integration=automatic_integration,
+                        integration_recovery=integration_recovery,
                     )
                 ),
                 next_action=(
+                    _automatic_integration_next_action(
+                        projected,
+                        blocker_reason=automatic_blocker_reason,
+                    )
+                    if automatic_integration
+                    else
                     "Review the exact proposal, or dismiss this observation if "
                     "you know it is incorrect."
                     if review_available
@@ -847,6 +1061,18 @@ class SaveMappingIntegrationManager:
             str(item.get("candidate_record_id")): dict(item)
             for item in main_status.get("items") or ()
         }
+        for candidate_id, item in main_items.items():
+            verification = self.machine_verification(
+                candidate_record_id=candidate_id
+            )
+            if (
+                verification.get("eligible") is True
+                and item.get("state") == "review_required"
+            ):
+                item.update(
+                    state="automatic_integration_pending",
+                    reason=str(verification["reason"]),
+                )
         if transaction is not None:
             candidate_id = transaction["candidate_record_id"]
             record = self.candidate_store.get(candidate_id)
@@ -1200,6 +1426,7 @@ class SaveMappingIntegrationManager:
                     idempotent=True,
                     promoted=True,
                 )
+                self._release_owned_promotion_owner(transaction)
                 self._retire_staging_ref(transaction)
                 _remove_transaction(self.transaction_path)
                 if exact_retry:
@@ -1279,6 +1506,281 @@ class SaveMappingIntegrationManager:
         finally:
             os.close(descriptor)
 
+    def integrate_reviewed(
+        self,
+        *,
+        candidate_record_id: object,
+        reviewed_proposal_fingerprint: object,
+    ) -> dict[str, Any]:
+        """Stage and immediately consume one explicitly reviewed proposal."""
+
+        self.stage(
+            candidate_record_id=candidate_record_id,
+            reviewed_proposal_fingerprint=reviewed_proposal_fingerprint,
+        )
+        return self._promote_or_queue()
+
+    def automatic_reconciliation_plan(self) -> dict[str, Any]:
+        """Describe one pending automatic action without changing state."""
+
+        try:
+            transaction = _load_transaction(self.transaction_path)
+            if transaction is not None:
+                needs_cleanup = bool(
+                    transaction["phase"] == "published"
+                    and self._matching_decode_receipt(transaction)
+                )
+                owner_cleanup = bool(
+                    transaction["phase"] == "published"
+                    and self._promotion_owner_is_owned(transaction)
+                )
+                if (
+                    transaction["phase"] != "published"
+                    or needs_cleanup
+                    or owner_cleanup
+                ):
+                    return {
+                        "capability": SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY,
+                        "needed": True,
+                        "action": (
+                            "retire_validated_transaction"
+                            if needs_cleanup
+                            else "release_promotion_owner"
+                            if owner_cleanup
+                            else "consume_staged_transaction"
+                        ),
+                        "candidate_record_id": transaction[
+                            "candidate_record_id"
+                        ],
+                    }
+                return _automatic_reconciliation_idle()
+            catalog = self._catalog()
+            if catalog.get("available") is not True:
+                return _automatic_reconciliation_idle(
+                    reason=str(catalog.get("reason") or "Catalog unavailable")
+                )
+            candidate = next(
+                (
+                    item
+                    for item in catalog.get("items") or ()
+                    if item.get("automatic_integration") is True
+                ),
+                None,
+            )
+            if candidate is None:
+                return _automatic_reconciliation_idle()
+            return {
+                "capability": SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY,
+                "needed": True,
+                "action": "machine_verify_and_integrate",
+                "candidate_record_id": candidate["candidate_record_id"],
+            }
+        except (
+            OSError,
+            PlayerSaveMappingCandidateError,
+            SaveMappingIntegrationError,
+        ) as exc:
+            return _automatic_reconciliation_idle(reason=str(exc))
+
+    def reconcile_automatic(self) -> dict[str, Any]:
+        """Consume staged work or integrate one machine-verifiable candidate."""
+
+        plan = self.automatic_reconciliation_plan()
+        if plan.get("needed") is not True:
+            return plan
+        if plan["action"] == "machine_verify_and_integrate":
+            candidate_id = plan["candidate_record_id"]
+            verification = self.machine_verification(
+                candidate_record_id=candidate_id
+            )
+            if verification.get("eligible") is not True:
+                raise SaveMappingIntegrationError(
+                    str(
+                        verification.get("code")
+                        or "machine_verification_invalidated"
+                    ),
+                    str(
+                        verification.get("reason")
+                        or "Machine verification was invalidated."
+                    ),
+                )
+            review = self.review(candidate_record_id=candidate_id)
+            self.stage(
+                candidate_record_id=candidate_id,
+                reviewed_proposal_fingerprint=review[
+                    "reviewed_proposal_fingerprint"
+                ],
+            )
+        return self._promote_or_queue()
+
+    def _promote_or_queue(
+        self,
+        *,
+        restaging_attempted: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            return self.promote_staged()
+        except SaveMappingIntegrationError as exc:
+            if exc.code == "restaging_required" and not restaging_attempted:
+                transaction = _load_transaction(self.transaction_path)
+                if transaction is None:
+                    raise
+                recovery = self._recovery_review(
+                    transaction,
+                    self._lightweight_transaction_state(transaction),
+                )
+                self.stage(
+                    candidate_record_id=transaction["candidate_record_id"],
+                    reviewed_proposal_fingerprint=recovery[
+                        "reviewed_proposal_fingerprint"
+                    ],
+                )
+                return self._promote_or_queue(restaging_attempted=True)
+            if exc.code not in _QUEUEABLE_PROMOTION_CODES:
+                raise
+            transaction = _load_transaction(self.transaction_path)
+            if transaction is None:
+                raise
+            return _promotion_queued_result(
+                transaction,
+                repository_root=self.repository_root,
+                code=exc.code,
+                reason=str(exc),
+            )
+
+    def promote_staged(self) -> dict[str, Any]:
+        """Consume the durable private candidate through publication.
+
+        The global promotion-owner ref serializes the local production
+        mutation.  All Git updates are exact and non-forcing.  If publication
+        cannot be completed, the durable transaction and owner remain for the
+        background reconciler or an agent to finish.
+        """
+
+        descriptor = self._acquire_lock()
+        try:
+            transaction = _load_transaction(self.transaction_path)
+            if transaction is None:
+                raise SaveMappingIntegrationError(
+                    "staged_transaction_missing",
+                    "No durable save-mapping transaction is available to promote.",
+                )
+            if transaction["phase"] == "commit_ready":
+                self._apply_transaction(transaction, idempotent=True)
+                transaction = _load_transaction(self.transaction_path)
+                if transaction is None:
+                    raise SaveMappingIntegrationError(
+                        "commit_state_uncertain",
+                        "The staged transaction disappeared during recovery.",
+                    )
+            self._verify_transaction_binding(transaction)
+            expected = transaction["staging"]["expected_commit"]
+            base_commit = transaction["repository"]["base_commit"]
+            main_commit = _git_output(
+                self.repository_root,
+                "rev-parse",
+                "refs/heads/main",
+            )
+            main_contains = _git_success(
+                self.repository_root,
+                "merge-base",
+                "--is-ancestor",
+                expected,
+                main_commit,
+            )
+
+            if not main_contains:
+                if main_commit != base_commit:
+                    raise SaveMappingIntegrationError(
+                        "restaging_required",
+                        "main advanced without the staged mapping; the exact "
+                        "candidate must be regenerated on the current tip.",
+                    )
+                self._verify_staged_state(transaction)
+                try:
+                    observed_remote = self._remote_main_commit()
+                except SaveMappingIntegrationError:
+                    observed_remote = ""
+                if (
+                    observed_remote
+                    and observed_remote != expected
+                    and not _git_success(
+                        self.repository_root,
+                        "merge-base",
+                        "--is-ancestor",
+                        observed_remote,
+                        expected,
+                    )
+                ):
+                    raise SaveMappingIntegrationError(
+                        "remote_publication_pending",
+                        "origin/main has advanced outside this exact mapping "
+                        "candidate. Local production was not changed; an outcome "
+                        "coordinator or agent must reconcile the remote boundary.",
+                    )
+                if transaction["phase"] != "promoting":
+                    transaction = _set_transaction_phase(
+                        self.transaction_path,
+                        transaction,
+                        "promoting",
+                    )
+                self._acquire_promotion_owner(transaction)
+                self._fault("promotion_owner_acquired")
+                rollback_tag = self._ensure_rollback_tag(transaction)
+                self._fault("rollback_tag_created")
+                self._fast_forward_production(transaction)
+                main_commit = expected
+            else:
+                rollback_tag = self._verified_rollback_tag(transaction)
+                self._verify_promoted_state(transaction)
+                if transaction["phase"] != "published":
+                    transaction = _set_transaction_phase(
+                        self.transaction_path,
+                        transaction,
+                        "promoting",
+                    )
+                try:
+                    observed_remote = self._remote_main_commit()
+                except SaveMappingIntegrationError:
+                    observed_remote = ""
+                if (
+                    main_commit == expected
+                    and not (
+                        observed_remote
+                        and self._remote_contains(expected, observed_remote)
+                    )
+                ):
+                    self._acquire_promotion_owner(transaction)
+                    self._fault("promotion_owner_acquired")
+                    rollback_tag = self._ensure_rollback_tag(transaction)
+                    self._fault("rollback_tag_created")
+
+            remote_commit = self._publish_promoted_transaction(
+                transaction,
+                main_commit=main_commit,
+            )
+            self._verify_promoted_state(transaction)
+            if transaction["phase"] != "published":
+                transaction = _set_transaction_phase(
+                    self.transaction_path,
+                    transaction,
+                    "published",
+                )
+            self._fault("remote_published")
+            self._release_owned_promotion_owner(transaction)
+            self._fault("promotion_owner_released")
+            result = _promoted_result(
+                transaction,
+                rollback_tag=rollback_tag,
+                remote_main_commit=remote_commit,
+            )
+            if self._matching_decode_receipt(transaction):
+                self._retire_staging_ref(transaction)
+                _remove_transaction(self.transaction_path)
+            return result
+        finally:
+            os.close(descriptor)
+
     def observe_canonical_decode(
         self,
         snapshot: object,
@@ -1289,7 +1791,11 @@ class SaveMappingIntegrationManager:
 
         try:
             transaction = _load_transaction(self.transaction_path)
-            if transaction is None or transaction["phase"] != "staged":
+            if transaction is None or transaction["phase"] not in {
+                "staged",
+                "promoting",
+                "published",
+            }:
                 return False
             expected = transaction["staging"]["expected_commit"]
             if not isinstance(start_evidence, Mapping):
@@ -1383,10 +1889,13 @@ class SaveMappingIntegrationManager:
                 current = _load_transaction(self.transaction_path)
                 if (
                     current is not None
-                    and current["transaction_fingerprint"]
-                    == transaction["transaction_fingerprint"]
+                    and current["candidate_record_id"]
+                    == transaction["candidate_record_id"]
+                    and current["staging"]["expected_commit"] == expected
+                    and current["phase"] == "published"
                     and self._matching_decode_receipt(current)
                 ):
+                    self._release_owned_promotion_owner(current)
                     self._retire_staging_ref(current)
                     _remove_transaction(self.transaction_path)
             finally:
@@ -1431,7 +1940,7 @@ class SaveMappingIntegrationManager:
                         _proposal_error_message(exc),
                     ) from exc
             self._verify_staged_state(transaction)
-            if transaction["phase"] != "staged":
+            if transaction["phase"] == "commit_ready":
                 transaction = _set_transaction_phase(
                     self.transaction_path,
                     transaction,
@@ -1449,7 +1958,7 @@ class SaveMappingIntegrationManager:
                 ),
             )
 
-        if transaction["phase"] == "staged":
+        if transaction["phase"] in {"staged", "promoting", "published"}:
             raise SaveMappingIntegrationError(
                 "commit_state_uncertain",
                 "The private staging ref no longer points to the exact durable "
@@ -1726,10 +2235,388 @@ class SaveMappingIntegrationManager:
             )
         if _git_status(self.repository_root):
             raise SaveMappingIntegrationError(
-                "commit_state_uncertain",
-                "Production is not clean after staging.",
+                "production_worktree_dirty",
+                "Production changed after staging. Automatic integration will "
+                "retry after the worktree is clean; ask an agent if it persists.",
             )
         self._verify_transaction_binding(transaction)
+
+    def _verify_promoted_state(self, transaction: Mapping[str, Any]) -> None:
+        """Verify a locally integrated candidate without requiring its ref."""
+
+        base_commit = transaction["repository"]["base_commit"]
+        expected = transaction["staging"]["expected_commit"]
+        self._verify_commit(
+            expected,
+            base_commit=base_commit,
+            targets=_transaction_targets(transaction),
+            commit_message=transaction["commit_message"],
+        )
+        staged_commit = self._staging_ref_commit()
+        if staged_commit not in {None, expected}:
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The private staging ref moved to another object.",
+            )
+        main_commit = _git_output(
+            self.repository_root,
+            "rev-parse",
+            "refs/heads/main",
+        )
+        if not _git_success(
+            self.repository_root,
+            "merge-base",
+            "--is-ancestor",
+            expected,
+            main_commit,
+        ):
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "Production does not contain the exact staged mapping commit.",
+            )
+        if not self._ref_targets_match(transaction, main_commit):
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "Production superseded the staged canonical mapping targets.",
+            )
+        if (
+            self._canonical_mapping_fingerprint_at_commit(
+                expected,
+                transaction["mapping_identity"],
+            )
+            != transaction["canonical_mapping_fingerprint"]
+        ):
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The promoted mapping set differs from the reviewed invariants.",
+            )
+        record = self.candidate_store.get(transaction["candidate_record_id"])
+        if mapping_candidate_record_status(
+            record,
+            repository_root=self.repository_root,
+        ).get("state") != "integrated":
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "Production contains the commit but no longer owns its mapping.",
+            )
+        if _git_status(self.repository_root):
+            raise SaveMappingIntegrationError(
+                "production_worktree_dirty",
+                "Production is not clean after local mapping promotion.",
+            )
+        self._verify_transaction_binding(transaction)
+
+    @staticmethod
+    def _promotion_owner_message(transaction: Mapping[str, Any]) -> str:
+        return f"save-mapping promotion {transaction['transaction_id']}"
+
+    def _promotion_owner_commit(self) -> Optional[str]:
+        value = _git_output(
+            self.repository_root,
+            "for-each-ref",
+            "--format=%(objectname)",
+            PROMOTION_OWNER_REF,
+        ).strip()
+        if not value:
+            return None
+        if not _is_git_object(value):
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The global promotion-owner ref is invalid.",
+            )
+        return value
+
+    def _promotion_owner_reflog_message(self) -> str:
+        return _git_output(
+            self.repository_root,
+            "reflog",
+            "show",
+            "-1",
+            "--format=%gs",
+            PROMOTION_OWNER_REF,
+        ).strip()
+
+    def _acquire_promotion_owner(
+        self,
+        transaction: Mapping[str, Any],
+    ) -> None:
+        expected = transaction["staging"]["expected_commit"]
+        message = self._promotion_owner_message(transaction)
+        observed = self._promotion_owner_commit()
+        if observed == expected and self._promotion_owner_reflog_message() == message:
+            return
+        if observed is not None:
+            raise SaveMappingIntegrationError(
+                "promotion_owner_busy",
+                "Another production promotion owns the mutable repository "
+                "transaction. Automatic integration will retry after it closes.",
+            )
+        result = _git_mutate(
+            self.repository_root,
+            "update-ref",
+            "--create-reflog",
+            "-m",
+            message,
+            PROMOTION_OWNER_REF,
+            expected,
+            _ZERO_OBJECT_ID,
+            check=False,
+        )
+        observed = self._promotion_owner_commit()
+        if (
+            observed == expected
+            and self._promotion_owner_reflog_message() == message
+        ):
+            return
+        if result.returncode != 0 or observed is not None:
+            raise SaveMappingIntegrationError(
+                "promotion_owner_busy",
+                "Another production promotion won the ownership boundary. "
+                "Automatic integration will retry after it closes.",
+            )
+        raise SaveMappingIntegrationError(
+            "commit_state_uncertain",
+            "The global promotion-owner acquisition could not be proved exact.",
+        )
+
+    def _release_owned_promotion_owner(
+        self,
+        transaction: Mapping[str, Any],
+    ) -> bool:
+        expected = transaction["staging"]["expected_commit"]
+        if self._promotion_owner_commit() != expected:
+            return False
+        if (
+            self._promotion_owner_reflog_message()
+            != self._promotion_owner_message(transaction)
+        ):
+            return False
+        _git_mutate(
+            self.repository_root,
+            "update-ref",
+            "-d",
+            PROMOTION_OWNER_REF,
+            expected,
+            check=False,
+        )
+        remaining = self._promotion_owner_commit()
+        if remaining is None:
+            return True
+        if remaining != expected:
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The promotion-owner ref changed during guarded release.",
+            )
+        raise SaveMappingIntegrationError(
+            "promotion_owner_release_failed",
+            "Published integration is complete, but its exact promotion-owner "
+            "ref could not be released.",
+        )
+
+    def _promotion_owner_is_owned(
+        self,
+        transaction: Mapping[str, Any],
+    ) -> bool:
+        expected = transaction["staging"]["expected_commit"]
+        return bool(
+            self._promotion_owner_commit() == expected
+            and self._promotion_owner_reflog_message()
+            == self._promotion_owner_message(transaction)
+        )
+
+    @staticmethod
+    def _rollback_tag_name(transaction: Mapping[str, Any]) -> str:
+        return (
+            "production-before-save-mapping-"
+            f"{transaction['transaction_id'][:12]}-"
+            f"{transaction['repository']['base_commit'][:7]}"
+        )
+
+    def _ensure_rollback_tag(self, transaction: Mapping[str, Any]) -> str:
+        tag = self._rollback_tag_name(transaction)
+        base_commit = transaction["repository"]["base_commit"]
+        inspected = _git_mutate(
+            self.repository_root,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"refs/tags/{tag}^{{commit}}",
+            check=False,
+        )
+        observed = inspected.stdout.decode("ascii", "replace").strip()
+        if observed:
+            if observed != base_commit:
+                raise SaveMappingIntegrationError(
+                    "commit_state_uncertain",
+                    "The deterministic mapping rollback tag names another commit.",
+                )
+            return tag
+        result = _git_mutate(
+            self.repository_root,
+            "tag",
+            "-a",
+            tag,
+            "-m",
+            (
+                "Production before automatic save-mapping integration "
+                f"{transaction['candidate_record_id'][:12]}"
+            ),
+            base_commit,
+            check=False,
+        )
+        inspected = _git_mutate(
+            self.repository_root,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"refs/tags/{tag}^{{commit}}",
+            check=False,
+        )
+        observed = inspected.stdout.decode("ascii", "replace").strip()
+        if observed == base_commit:
+            return tag
+        if result.returncode != 0 and not observed:
+            raise SaveMappingIntegrationError(
+                "rollback_tag_failed",
+                "The rollback tag could not be created; main was not changed.",
+            )
+        raise SaveMappingIntegrationError(
+            "commit_state_uncertain",
+            "The rollback tag result could not be proved exact.",
+        )
+
+    def _verified_rollback_tag(
+        self,
+        transaction: Mapping[str, Any],
+    ) -> Optional[str]:
+        tag = self._rollback_tag_name(transaction)
+        inspected = _git_mutate(
+            self.repository_root,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"refs/tags/{tag}^{{commit}}",
+            check=False,
+        )
+        observed = inspected.stdout.decode("ascii", "replace").strip()
+        if not observed:
+            return None
+        if observed != transaction["repository"]["base_commit"]:
+            raise SaveMappingIntegrationError(
+                "commit_state_uncertain",
+                "The deterministic mapping rollback tag names another commit.",
+            )
+        return tag
+
+    def _remote_main_commit(self) -> str:
+        try:
+            result = _git_mutate(
+                self.repository_root,
+                "ls-remote",
+                "--refs",
+                "origin",
+                "refs/heads/main",
+                check=False,
+            )
+        except SaveMappingIntegrationError as exc:
+            raise SaveMappingIntegrationError(
+                "remote_publication_pending",
+                "origin/main could not be read. Local promotion is durable and "
+                "automatic publication will retry; ask an agent if this persists.",
+            ) from exc
+        if result.returncode != 0:
+            raise SaveMappingIntegrationError(
+                "remote_publication_pending",
+                "origin/main could not be read. Local promotion is durable and "
+                "automatic publication will retry; ask an agent if this persists.",
+            )
+        lines = [line for line in result.stdout.decode("utf-8", "replace").splitlines() if line]
+        if len(lines) != 1:
+            raise SaveMappingIntegrationError(
+                "remote_publication_pending",
+                "origin/main is absent or ambiguous. Local promotion is durable; "
+                "ask an agent to inspect publication if this persists.",
+            )
+        object_id, separator, reference = lines[0].partition("\t")
+        if (
+            not separator
+            or reference != "refs/heads/main"
+            or not _is_git_object(object_id)
+        ):
+            raise SaveMappingIntegrationError(
+                "remote_publication_pending",
+                "origin/main returned an invalid identity. Local promotion is "
+                "durable; ask an agent to inspect publication.",
+            )
+        return object_id
+
+    def _remote_contains(self, expected: str, remote_commit: str) -> bool:
+        return remote_commit == expected or _git_success(
+            self.repository_root,
+            "merge-base",
+            "--is-ancestor",
+            expected,
+            remote_commit,
+        )
+
+    def _publish_promoted_transaction(
+        self,
+        transaction: Mapping[str, Any],
+        *,
+        main_commit: str,
+    ) -> str:
+        expected = transaction["staging"]["expected_commit"]
+        try:
+            remote_commit = self._remote_main_commit()
+        except SaveMappingIntegrationError:
+            remote_commit = ""
+        if remote_commit and self._remote_contains(expected, remote_commit):
+            return remote_commit
+        if main_commit != expected:
+            raise SaveMappingIntegrationError(
+                "remote_publication_pending",
+                "Production contains this mapping inside a larger coordinated "
+                "outcome, but origin/main does not contain it yet. The outcome "
+                "coordinator must publish current main; automatic verification "
+                "will then close this mapping transaction.",
+            )
+        try:
+            push = _git_mutate(
+                self.repository_root,
+                "push",
+                "origin",
+                f"{expected}:refs/heads/main",
+                check=False,
+            )
+        except SaveMappingIntegrationError as exc:
+            raise SaveMappingIntegrationError(
+                "remote_publication_pending",
+                "The exact non-forcing origin/main publication could not run. "
+                "Local promotion is durable and automatic publication will retry; "
+                "ask an agent if this persists.",
+            ) from exc
+        try:
+            remote_commit = self._remote_main_commit()
+        except SaveMappingIntegrationError as exc:
+            raise SaveMappingIntegrationError(
+                "remote_publication_pending",
+                "The exact non-forcing origin/main publication could not be "
+                "verified. Automatic publication will retry; ask an agent if "
+                "this persists.",
+            ) from exc
+        if self._remote_contains(expected, remote_commit):
+            return remote_commit
+        if push.returncode != 0:
+            raise SaveMappingIntegrationError(
+                "remote_publication_pending",
+                "origin/main rejected the exact non-forcing publication. Local "
+                "promotion remains durable; an agent must reconcile the remote.",
+            )
+        raise SaveMappingIntegrationError(
+            "remote_publication_pending",
+            "The remote publication response could not be proved exact. Local "
+            "promotion remains durable for automatic recovery.",
+        )
 
     def _verify_transaction_binding(self, transaction: Mapping[str, Any]) -> None:
         if transaction["staging"]["ref"] != SAVE_MAPPING_STAGING_REF:
@@ -1760,6 +2647,7 @@ class SaveMappingIntegrationManager:
             self.repository_root,
             _transaction_targets(transaction),
         )
+
     def _build_commit(
         self,
         repository_root: Path,
@@ -2185,6 +3073,18 @@ class SaveMappingIntegrationManager:
                     "Production contains the staged commit but its current canonical "
                     "mapping no longer owns this candidate",
                 )
+            if transaction["phase"] != "published":
+                return (
+                    "remote_publication_pending",
+                    f"Production contains {expected[:12]}; automatic origin/main "
+                    "publication is pending",
+                )
+            if self._promotion_owner_is_owned(transaction):
+                return (
+                    "promotion_cleanup_pending",
+                    "Production and origin contain the mapping; automatic "
+                    "release of its exact promotion owner is pending",
+                )
             if self._matching_decode_receipt(transaction):
                 return (
                     "integrated",
@@ -2205,7 +3105,8 @@ class SaveMappingIntegrationManager:
                 )
             return (
                 "promotion_pending",
-                f"Staged as {expected[:12]}; awaiting production promotion",
+                f"Staged as {expected[:12]}; automatic production promotion "
+                "is queued",
             )
 
         if (
@@ -2377,6 +3278,89 @@ class SaveMappingIntegrationManager:
             ) from exc
         return descriptor
 
+    def _acquire_mapping_set_lock(self) -> int:
+        """Exclude runtime mapping loads only across the local checkout."""
+
+        descriptor: Optional[int] = None
+        try:
+            self.mapping_set_lock_path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(
+                self.mapping_set_lock_path,
+                os.O_RDWR | os.O_CREAT,
+                0o600,
+            )
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            os.fchmod(descriptor, 0o600)
+            return descriptor
+        except OSError as exc:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            raise SaveMappingIntegrationError(
+                "integration_lock_unavailable",
+                "Canonical mapping-file coordination is unavailable.",
+            ) from exc
+
+    def _fast_forward_production(
+        self,
+        transaction: Mapping[str, Any],
+    ) -> None:
+        base_commit = transaction["repository"]["base_commit"]
+        expected = transaction["staging"]["expected_commit"]
+        descriptor = self._acquire_mapping_set_lock()
+        try:
+            if (
+                _git_output(
+                    self.repository_root,
+                    "rev-parse",
+                    "refs/heads/main",
+                )
+                != base_commit
+                or self._staging_ref_commit() != expected
+            ):
+                raise SaveMappingIntegrationError(
+                    "commit_state_uncertain",
+                    "Production changed at the exact promotion boundary.",
+                )
+            if _git_status(self.repository_root):
+                raise SaveMappingIntegrationError(
+                    "production_worktree_dirty",
+                    "Production changed at the exact promotion boundary. "
+                    "Automatic integration will retry after the worktree is clean.",
+                )
+            result = _git_mutate(
+                self.repository_root,
+                "merge",
+                "--ff-only",
+                "--no-edit",
+                expected,
+                check=False,
+            )
+            observed_main = _git_output(
+                self.repository_root,
+                "rev-parse",
+                "refs/heads/main",
+            )
+            if result.returncode != 0 or observed_main != expected:
+                if observed_main == base_commit and not _git_status(
+                    self.repository_root
+                ):
+                    raise SaveMappingIntegrationError(
+                        "local_promotion_failed",
+                        "The exact fast-forward was rejected; production "
+                        "remains at the reviewed base.",
+                    )
+                raise SaveMappingIntegrationError(
+                    "commit_state_uncertain",
+                    "The local save-mapping promotion could not be proved exact.",
+                )
+            self._fault("main_promoted")
+            self._verify_promoted_state(transaction)
+        finally:
+            os.close(descriptor)
+
     def _require_routine_candidate(self, record: Mapping[str, Any]) -> None:
         self._require_candidate_not_dismissed(record)
         self._require_routine_candidate_records(
@@ -2455,6 +3439,105 @@ def _public_target(target: _PreparedTarget) -> dict[str, Any]:
     }
 
 
+def _machine_verification_result(
+    record: Optional[Mapping[str, Any]],
+    *,
+    eligible: bool,
+    code: str,
+    reason: str,
+) -> dict[str, Any]:
+    proof: Optional[dict[str, Any]] = None
+    if eligible and record is not None:
+        candidate = record["candidate"]
+        evidence = record["evidence"]
+        workflow = evidence["workflow"]
+        proof = {
+            "check_id": candidate["check_id"],
+            "value_kind": candidate["value_kind"],
+            "raw_value": candidate["raw_discriminator"]["value"],
+            "semantic_value": candidate["semantic_value"],
+            "evidence_strength": evidence["evidence_strength"],
+            "pairing_method": evidence["pairing_method"],
+            "pre_mutation": evidence["pre_mutation"],
+            "game_state": workflow["game_state"],
+            "snapshot_fingerprint": evidence["snapshot_fingerprint"],
+            "ui_evidence_fingerprint": evidence["ui_evidence_fingerprint"],
+            "source_observation_fingerprint": evidence[
+                "source_observation_fingerprint"
+            ],
+            "runtime_session_fingerprint": workflow[
+                "runtime_session_fingerprint"
+            ],
+            "target_generation_fingerprint": workflow[
+                "target_generation_fingerprint"
+            ],
+            "activity_scope_fingerprint": workflow[
+                "activity_scope_fingerprint"
+            ],
+            "active_round_identity_fingerprint": workflow[
+                "active_round_identity_fingerprint"
+            ],
+            "boundary_fingerprint": workflow["boundary_fingerprint"],
+        }
+    return {
+        "capability": SAVE_MAPPING_MACHINE_VERIFICATION_CAPABILITY,
+        "eligible": eligible,
+        "code": code,
+        "reason": reason,
+        "proof": proof,
+    }
+
+
+def _automatic_integration_next_action(
+    item: Mapping[str, Any],
+    *,
+    blocker_reason: str = "",
+) -> str:
+    state = str(item.get("state") or "")
+    if state == "production_validation_pending":
+        return (
+            "No review is needed. Production and origin contain the verified "
+            "mapping; a fresh stable save decode will close the transaction."
+        )
+    if state == "remote_publication_pending":
+        return (
+            "No review is needed. Local promotion completed and automatic "
+            "origin/main publication is being reconciled. If it persists, ask "
+            "an agent to complete the reported publication boundary."
+        )
+    if state == "promotion_cleanup_pending":
+        return (
+            "No review is needed. Production and origin contain the mapping; "
+            "automatic promotion-owner cleanup is being retried. If it "
+            "persists, copy the agent request."
+        )
+    if state in {"integration_unconfirmed", "restaging_required"}:
+        return (
+            "The evidence needs no review, but its repository transaction needs "
+            "an agent to recover the exact reported boundary."
+        )
+    if blocker_reason:
+        return (
+            "No semantic review is needed, but automatic integration is blocked: "
+            f"{blocker_reason} Automatic reconciliation will retry where safe; "
+            "copy the agent request if the blocker persists."
+        )
+    return (
+        "No review is needed. The exact Game Over/save proof is verified and "
+        "automatic integration is queued."
+    )
+
+
+def _automatic_reconciliation_idle(*, reason: str = "") -> dict[str, Any]:
+    return {
+        "capability": SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY,
+        "needed": False,
+        "action": "idle",
+        "candidate_record_id": None,
+        "reason": reason,
+    }
+
+
 def _dismissal_result(
     disposition: Mapping[str, Any],
     *,
@@ -2512,6 +3595,102 @@ def _integration_result(
             for item in transaction["targets"]
         ],
     }
+
+
+def _promotion_agent_prompt(
+    transaction: Mapping[str, Any],
+    *,
+    code: str,
+    reason: str,
+) -> str:
+    return (
+        "Please finish TheTower automatic save-mapping integration "
+        f"{transaction['candidate_record_id']}.\n"
+        f"Staged commit: {transaction['staging']['expected_commit']}\n"
+        f"Transaction: {transaction['transaction_id']}\n"
+        f"Blocker: {code}: {reason}\n"
+        "Inspect the durable transaction, private staging ref, production main, "
+        "promotion-owner ref, rollback tag, and origin/main. Preserve the exact "
+        "candidate and finish or recover the guarded publication boundary; do "
+        "not create a second mapping commit or repeat unrelated validation."
+    )
+
+
+def _promotion_queued_result(
+    transaction: Mapping[str, Any],
+    *,
+    repository_root: Path,
+    code: str,
+    reason: str,
+) -> dict[str, Any]:
+    result = _integration_result(
+        transaction,
+        idempotent=True,
+        promoted=_git_success(
+            repository_root,
+            "merge-base",
+            "--is-ancestor",
+            transaction["staging"]["expected_commit"],
+            "refs/heads/main",
+        ),
+    )
+    published = transaction["phase"] == "published"
+    result.update(
+        operation="integrate",
+        disposition="promotion_queued",
+        published=published,
+        automatic_retry=True,
+        agent_required=code in {
+            "production_worktree_dirty",
+            "remote_publication_pending",
+        },
+        code=code,
+        reason=reason,
+        next_action=(
+            "Production and origin contain the mapping. Automatic reconciliation "
+            "will retry its exact transaction cleanup; copy the agent request if "
+            "that state persists."
+            if published
+            else "Automatic reconciliation will retry. If this state persists, "
+            "copy the agent request shown with this result."
+        ),
+        agent_review_prompt=_promotion_agent_prompt(
+            transaction,
+            code=code,
+            reason=reason,
+        ),
+    )
+    return result
+
+
+def _promoted_result(
+    transaction: Mapping[str, Any],
+    *,
+    rollback_tag: Optional[str],
+    remote_main_commit: str,
+) -> dict[str, Any]:
+    result = _integration_result(
+        transaction,
+        idempotent=False,
+        promoted=True,
+    )
+    result.update(
+        operation="integrate",
+        disposition="promoted",
+        published=True,
+        automatic_retry=False,
+        agent_required=False,
+        code="",
+        reason="",
+        next_action=(
+            "Production and origin contain the mapping. A fresh stable save "
+            "decode will retire the durable integration transaction."
+        ),
+        agent_review_prompt="",
+        rollback_tag=rollback_tag,
+        remote_main_commit=remote_main_commit,
+    )
+    return result
 
 
 def _git_command(repository_root: Path, *arguments: str) -> list[str]:
@@ -2640,31 +3819,83 @@ def _agent_review_prompt(
     item: Mapping[str, Any],
     *,
     dismiss_available: bool,
+    automatic_integration: bool = False,
+    integration_recovery: bool = False,
 ) -> str:
     candidate_id = str(
         item.get("candidate_record_id") or item.get("record_id") or "unknown"
     )
-    return (
-        "Please review TheTower save-mapping observation "
-        f"{candidate_id}. The GUI cannot safely complete it.\n"
-        f"Mapping: {item.get('mapping_id') or 'unknown'}\n"
-        f"Check: {item.get('check_id') or 'unknown'}\n"
-        f"State: {item.get('state') or 'unknown'}\n"
-        f"Reason: {item.get('review_reason') or item.get('reason') or 'unknown'}\n"
-        "Inspect the durable receipt and the current canonical mapping owners. "
-        + (
+    prefix = (
+        "Please recover TheTower automatic save-mapping integration "
+        if automatic_integration or integration_recovery
+        else "Please review TheTower save-mapping observation "
+    )
+    reason = str(
+        item.get("automatic_integration_blocker_reason")
+        or item.get("review_reason")
+        or item.get("reason")
+        or "unknown"
+    )
+    if automatic_integration:
+        resolution = (
+            "The terminal/save evidence is already machine-verified; do not "
+            "repeat semantic review. Resolve the reported repository or "
+            "publication blocker, preserve the exact candidate, and let the "
+            "automatic consumer finish."
+        )
+    elif integration_recovery:
+        resolution = (
+            "The exact proposal was already reviewed; do not repeat review or "
+            "unrelated validation. Resolve the reported repository or "
+            "publication boundary, preserve the exact candidate, and let the "
+            "automatic consumer finish."
+        )
+    elif dismiss_available:
+        resolution = (
             "Either implement and validate the correct mapping through the "
             "normal feature-branch workflow, or dismiss this exact observation "
             "if it is incorrect. Preserve the original receipt and report what "
             "changed."
-            if dismiss_available
-            else "Resolve or complete the reported staging lifecycle without "
-                "bypassing or dismissing it, then report what changed."
         )
+    else:
+        resolution = (
+            "Resolve or complete the reported integration lifecycle without "
+            "bypassing or dismissing it, then report what changed."
+        )
+    return (
+        f"{prefix}{candidate_id}. The GUI cannot safely complete it.\n"
+        f"Mapping: {item.get('mapping_id') or 'unknown'}\n"
+        f"Check: {item.get('check_id') or 'unknown'}\n"
+        f"State: {item.get('state') or 'unknown'}\n"
+        f"Reason: {reason}\n"
+        "Inspect the durable receipt and the current canonical mapping owners. "
+        f"{resolution}"
     )
 
 
 def _nonreviewable_next_action(item: Mapping[str, Any]) -> str:
+    state = str(item.get("state") or "")
+    if state == "promotion_pending":
+        return (
+            "The reviewed mapping is durably queued for automatic promotion. "
+            "If the reported blocker persists, copy the agent request."
+        )
+    if state == "remote_publication_pending":
+        return (
+            "Local promotion completed; automatic publication is being retried. "
+            "If it persists, copy the agent request."
+        )
+    if state == "promotion_cleanup_pending":
+        return (
+            "Production and origin contain the mapping; automatic release of "
+            "its exact promotion owner is being retried. If it persists, copy "
+            "the agent request."
+        )
+    if state == "production_validation_pending":
+        return (
+            "Production and origin contain the mapping. Wait for one fresh "
+            "stable save decode; no further review is needed."
+        )
     reason = str(
         item.get("review_reason")
         or item.get("reason")
@@ -2746,9 +3977,12 @@ def observe_canonical_mapping_decode(
 
 __all__ = [
     "CanonicalDecodeReceiptStore",
+    "PROMOTION_OWNER_REF",
+    "SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY",
     "SAVE_MAPPING_DISPOSITION_CAPABILITY",
     "SAVE_MAPPING_INTEGRATION_CAPABILITY",
     "SAVE_MAPPING_INTEGRATION_SCHEMA_VERSION",
+    "SAVE_MAPPING_MACHINE_VERIFICATION_CAPABILITY",
     "SAVE_MAPPING_REVIEW_STATUS_CAPABILITY",
     "SAVE_MAPPING_STAGING_REF",
     "SaveMappingIntegrationError",

@@ -34,20 +34,20 @@
           <ComboBox x:Name="CandidateBox" DisplayMemberPath="Label" SelectionChanged="Selection_Changed" Margin="0,5,0,0" />
           <TextBlock x:Name="CandidateDetailText" Text="Choose one durable observation." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,5,0,0" />
           <WrapPanel Margin="0,6,0,0">
-            <Button x:Name="CopyAgentReviewButton" Content="Copy agent-review request" Click="CopyAgentReview_Click" Margin="0,2,6,2" Visibility="Collapsed" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+            <Button x:Name="CopyAgentReviewButton" Content="Copy agent request" Click="CopyAgentReview_Click" Margin="0,2,6,2" Visibility="Collapsed" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
             <Button x:Name="DismissButton" Content="Dismiss observation…" Click="Dismiss_Click" Margin="0,2,0,2" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
           </WrapPanel>
         </StackPanel>
       </Border>
       <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="10">
         <StackPanel>
-          <TextBlock Text="2. PRIVATE STAGING ELIGIBILITY" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" />
-          <TextBox x:Name="RepositoryDetailText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="10" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" Text="Loading main/staging readiness…" />
+          <TextBlock Text="2. AUTOMATIC INTEGRATION READINESS" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" />
+          <TextBox x:Name="RepositoryDetailText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="10" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" Text="Loading promotion/publication readiness…" />
         </StackPanel>
       </Border>
     </Grid>
 
-    <GroupBox Grid.Row="2" Header="3. Exact reviewed proposal">
+    <GroupBox Grid.Row="2" Header="3. Exact proposal or verification">
       <TextBox x:Name="ProposalText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="10" Text="Review an exact proposal before integration." />
     </GroupBox>
 
@@ -67,7 +67,7 @@
       <Button Grid.Column="1" x:Name="CloseButton" Content="Close" Click="Close_Click" Margin="3" />
       <Button Grid.Column="2" x:Name="RefreshButton" Content="Refresh catalog" Click="Refresh_Click" Margin="3" />
       <Button Grid.Column="3" x:Name="ReviewButton" Content="Review exact proposal" Click="Review_Click" Margin="3" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-      <Button Grid.Column="4" x:Name="IntegrateButton" Content="Stage reviewed mapping for promotion…" Click="Integrate_Click" Style="{StaticResource PrimaryButton}" Margin="3" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+      <Button Grid.Column="4" x:Name="IntegrateButton" Content="Integrate reviewed mapping…" Click="Integrate_Click" Style="{StaticResource PrimaryButton}" Margin="3" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
     </Grid>
   </Grid>
 </Window>

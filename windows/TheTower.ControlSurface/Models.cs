@@ -498,6 +498,12 @@ public sealed class SaveMappingIntegrationItem
     [JsonPropertyName("review_reason")]
     public string ReviewReason { get; set; } = "";
 
+    [JsonPropertyName("automatic_integration")]
+    public bool AutomaticIntegration { get; set; }
+
+    [JsonPropertyName("machine_verification")]
+    public SaveMappingMachineVerification? MachineVerification { get; set; }
+
     [JsonPropertyName("dismiss_available")]
     public bool DismissAvailable { get; set; }
 
@@ -509,6 +515,24 @@ public sealed class SaveMappingIntegrationItem
 
     [JsonPropertyName("next_action")]
     public string NextAction { get; set; } = "";
+}
+
+public sealed class SaveMappingMachineVerification
+{
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    [JsonPropertyName("eligible")]
+    public bool Eligible { get; set; }
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("proof")]
+    public JsonElement Proof { get; set; }
 }
 
 public sealed class SaveMappingIntegrationReview
@@ -648,6 +672,33 @@ public sealed class SaveMappingIntegratedResult
 
     [JsonPropertyName("promoted")]
     public bool? Promoted { get; set; }
+
+    [JsonPropertyName("published")]
+    public bool? Published { get; set; }
+
+    [JsonPropertyName("automatic_retry")]
+    public bool? AutomaticRetry { get; set; }
+
+    [JsonPropertyName("agent_required")]
+    public bool? AgentRequired { get; set; }
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("next_action")]
+    public string NextAction { get; set; } = "";
+
+    [JsonPropertyName("agent_review_prompt")]
+    public string AgentReviewPrompt { get; set; } = "";
+
+    [JsonPropertyName("rollback_tag")]
+    public string? RollbackTag { get; set; }
+
+    [JsonPropertyName("remote_main_commit")]
+    public string? RemoteMainCommit { get; set; }
 
     [JsonPropertyName("mapping_invariants")]
     public string MappingInvariants { get; set; } = "";

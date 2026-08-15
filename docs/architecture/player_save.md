@@ -804,7 +804,7 @@ inherited claims continue to cite their originating authority.
 | `V1073-RUNTIME-007` structural tail identity and complete `BattleHistory` More Stats projection | Source-ordered capped `battleHistory[<=30]`; required newest-entry identity and 144 allowlisted More Stats rows | **Shortcut-ready and implemented** for report metadata and causally bound terminal report construction when the cause and value domain are mapped. Retained saves prove mixed UTC/local DateTime kinds and capped rollover. The prior 21 UI-captured battles plus the Tier 22 terminal confirm the complete ordered 144-row projection within UI precision. | Structural History identity is report-only and never determines active battle identity. Optional time/cause changes cannot manufacture a rollover. Unknown `killedBy` preserves structural report metadata but forces More Stats for the report. |
 | `V1073-RUNTIME-008` Game Over history serialization timing | Pre-run history tail, Game Over observation, post-run stable save | **Causal and implemented.** The known pre-battle tail changed in the immediate stable post-death save while the natural Tier 22 terminal was preserved, proving publication at the Game Over boundary without an exact timestamp. The first enabled Tier 19 run independently recorded clearing and tail publication before normal Retry. | One immediate stable read at Game Over or Tournament Results supplies profile progression, available Tournament conditions, and the candidate report. An unchanged or unavailable tail preserves the UI fallback. `b137ea4` separately adds guarded same-session direct-Retry baseline rollover; state-machine coverage is complete. A future ordinary receipt is optional campaign evidence, not a standing rollout gate. |
 | `V1073-RUNTIME-009` terminal history-tail attachment | Pre-boundary structural tail fingerprint plus newest post-boundary entry tier/time/wave | **Causal and implemented.** The pre-battle baseline changed at capped rollover to a newest Tier 22, wave 751, Boss entry whose complete semantic projection agreed with terminal tier/time/wave evidence. | Normal and Tournament report attachment requires a bound current-process terminal, matching canonical active-round identity, compatible player-save baseline, exactly one valid append or capped rollover, inactive save, complete semantic entry, matching terminal kind, and no available compact-identity contradiction. A terminal-only restart, invalid transition, unknown cause, mismatch, or acquisition failure forces More Stats. |
-| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, `3=Boss`, `6=Vampire`, `8=Scatter`, and `99=Surrender`; Tier 22 reconfirmed `3=Boss`, but the whole enum claim remains incomplete. Surrender identifies only the terminal cause, not its initiator. | An unknown numeric cause preserves structural tail evidence, keeps the semantic report on UI fallback, and may create a durable review receipt only after the same bound terminal supplies a normalized Game Stats/More Stats value. Reviewed canonical integration extends `runtime_save.battle_history.killed_by_ids`; `Enemy N` is never synthesized. |
+| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, `3=Boss`, `6=Vampire`, `8=Scatter`, `9=Ray`, and `99=Surrender`; Tier 22 reconfirmed `3=Boss`, but the whole enum claim remains incomplete. Surrender identifies only the terminal cause, not its initiator. | An unknown numeric cause preserves structural tail evidence and keeps the semantic report on UI fallback. When the same exact terminal Game Over or Tournament Results observation supplies the normalized cause and a deterministic pre-mutation save supplies the raw ID, their complete causal fingerprints can machine-certify the narrow canonical addition; no operator review is needed. Evidence outside that exact shape remains review-only. `Enemy N` is never synthesized. |
 | `V1073-RUNTIME-011` passive base/ad coin split augmentation | Compact Game Stats screenshot/OCR; `battleHistory.coinsEarned` total | **Cross-channel and implemented as optional augmentation.** The Tier 22 compact panel showed `28.56T` base plus `14.28T` ad equaling the `42.84T` total. `battleHistory` still contains only total coins. | Keep one passive compact capture when available. Missing compact OCR never invalidates an otherwise authoritative save report; available wave/tier/cause contradictions force UI fallback. The split remains UI-supplied rather than a save claim. |
 | `V1073-RUNTIME-012` forced terminal UI audit/fallback | Existing Game Stats, Perks, clipboard/OCR More Stats, and verified terminal controls | **Shortcut-ready and preserved.** Compact Game Stats remains first and passive; More Stats retains its conditional clipboard/OCR fallback. Perks has three explicit routes: no navigation for proven save finality, saved-recency-bounded reconciliation for a usable nonfinal saved prefix, and complete traversal when no usable prefix exists. | The bounded route always proves the newest/top edge first. Its first frame is tested before any downward gesture; if necessary, it then captures toward older rows until the first unchanged saved-recency marker or the actual list edge. It may promote a tail row to an exact pick only when complete passive boundaries and terminal recency have one unique correspondence; otherwise the record keeps exact saved picks plus bounded aggregates and unresolved fields. Force the complete Perks traversal on absent, unbound, malformed, or round-conflicted prefix evidence. Force More Stats on its independent audit/fallback conditions. Wait/Retry/Home and mutation/transition confirmation always remain verified UI actions. |
 | `V1073-RUNTIME-013` natural-boundary temporal auditor | Bounded normalized runtime projections plus passive boundary observations | **Structural and implemented.** The append-only schema, exact-target/session guards, core state machine, and bounded-evidence/nonblocking regressions are available for explicitly named campaigns. `V1073` identifies the originating semantic-evidence authority, not a literal runtime version lock: the decoder must publish the matching normalized runtime audit capability from an exact or declared-compatible, shape-valid mapping. The actual mapping/version remains in every receipt, and a session fails closed on capability, mapping, version, identity, or progression discontinuity. Past Tier 19 campaigns recorded Home-to-terminal progression and exposed direct-Retry identity retention plus missing Perk IDs, which were repaired without changing the authoritative UI pipeline. | Default off and campaign-only. In normal App runtime it projects shared typed periodic/Perk passive, forced-attachment, and natural-terminal bundles; it has no acquisition or cadence authority of its own. Receipts have no automated consumer and are reviewed by a human against the campaign question. This is not unknown-field discovery; targeted mapping calibration gathers its own purpose-specific evidence, while the narrow exact-wave Perk resolver remains version-specific. The auditor emits candidates only: no attachment, record construction, Strategy fact, input, lifecycle/dispatch change, Perks-navigation decision, or UI suppression. Target/process or mapping-context changes fail closed. Upgrade and survival components remain unavailable. |
@@ -924,55 +924,82 @@ atomically updated in both the authority owner and exact structural mirror.
 An inherited `runtime_save.battle_history.killed_by_ids` value is owned only by
 the authority mapping; the compatible structural revision deliberately has no
 duplicate `runtime_save` document to patch. The runtime decoder never applies
-the proposal. Server revision 42 introduced the same narrow operator workflow
-in both control-surface GUIs. It has no
-feature-worktree selection: the operator reviews one exact candidate and its
-mapping target hashes, then separately confirms creation of one verified child
-of current `main` under `refs/thetower/save-mapping-candidate`. The client
-cannot supply a path, ref, target, operation, value, commit message, or Git
-identity.
+the proposal. Server revision 42 introduced the same narrow workflow in both
+control-surface GUIs. It has no feature-worktree selection: the client can
+select one durable candidate, review a server-generated proposal when judgment
+is required, and confirm integration. It cannot supply a path, ref, target,
+operation, value, commit message, or Git identity.
 
-Server revision 44 adds an explicit outcome for observations that should not
+Server revision 44 added an explicit outcome for observations that should not
 be integrated. **Dismiss observation…** appends a mode-0600 disposition event
 under `logs/player_save_mapping_candidates/` and removes only that exact
 receipt from the active queue; it never deletes or rewrites the source receipt.
-Dismissal shares the canonical-integration lock with staging and is unavailable
-while a staging transaction must be completed or recovered. A dismissed
-candidate cannot subsequently be reviewed or staged. When an item is not
-safely reviewable, both GUIs show the server reason, a concrete next action,
-and a selectable/copyable request that tells an agent which durable receipt,
-mapping, check, state, and blocker to inspect. The GUI never launches or grants
-authority to an agent itself.
+A dismissed candidate cannot subsequently be reviewed or integrated. When an
+item is not safely actionable, both GUIs show the server reason, a concrete
+next action, and a selectable/copyable request that tells an agent which
+durable receipt, mapping, check, state, and blocker to inspect. The GUI never
+launches or grants authority to an agent itself.
 
-Review binds the candidate, every canonical base/result hash and file mode, the
-prospective canonical mapping-set fingerprint, and the standardized commit
-contract. It records but does not fingerprint the whole `main` commit, so an
-unrelated advance does not stale otherwise identical mapping inputs. Staging
-rechecks the proposal against current `main` under a process-shared lock,
-holds one final candidate-receipt snapshot, constructs the commit with a private
-Git index, and durably records its exact identity. One atomic Git ref
-transaction verifies the current parent while creating only the fixed private
-ref. Production `main`, its index, and its worktree are never changed.
-Relevant Git crash locks make recovery unconfirmed and are never removed
-automatically. Ref, target, mode, journal, or unrelated-state ambiguity is
-preserved for inspection; no automatic reset or unconfirmed retry occurs.
+Server revision 45 adds `save_mapping_machine_verification_v1` and
+`save_mapping_automatic_promotion_v1`. A `battle_history_killed_by_id`
+candidate is machine-verified only when it is deterministic and exact-locator,
+the saved raw integer is paired pre-mutation with the same terminal Game Over
+or Tournament Results semantic value, every snapshot/UI/source and
+runtime/target/activity/round/boundary fingerprint is complete, revision
+ownership is exact or explicitly compatible, and the routine candidate set is
+conflict-free. Its catalog entry exposes that proof and enters
+`automatic_integration_pending`; it cannot be dismissed and needs no operator
+review or confirmation. Any missing or contradictory proof falls back to the
+ordinary review or agent route rather than weakening this certification.
 
-The warning remains `promotion_pending` while the commit exists under the
-private ref and becomes `production_validation_pending` after production
-contains it. If `main` advances first, exact unchanged target before-hashes
-permit an explicitly confirmed retirement and restaging on the new tip;
-changed targets fail closed. A later complete stable save acquisition records a
-bounded confirmation receipt only when the running decoder's mapping identity
-and canonical mapping-set fingerprint match the deployed commit. The receipt also
-binds acquisition start time and the production commit captured when that
-runtime loaded; an acquisition begun before staging cannot clear the
-checkpoint. Receipt work is deferred until the outer save-operation and
-mutation boundaries have released, so it cannot delay Android foreground
-restoration. The observer is advisory: failure cannot invalidate the save or
-block automation, but it leaves the warning visible. Only the matching
-post-deployment decode durably records the receipt and then retires the exact
-private ref and transaction. Candidate and local-store failures remain
-diagnostic and do not become startup gates.
+Operator review binds the candidate, every canonical base/result hash and file
+mode, the prospective canonical mapping-set fingerprint, and the standardized
+commit contract. It records but does not fingerprint the whole `main` commit,
+so an unrelated advance does not stale otherwise identical mapping inputs. On
+**Integrate reviewed mapping…**, or automatically for a machine-certified
+candidate, the server rechecks the proposal against current `main`, takes one
+final candidate-receipt snapshot, constructs one standardized child with a
+private Git index, and atomically creates the fixed
+`refs/thetower/save-mapping-candidate` ref while verifying its parent. That ref
+and its transaction journal are an internal crash-safe boundary, never a
+successful terminal result.
+
+The integration consumer starts with the service and retries queued work with
+bounded backoff. It runs the mapping-only candidate invariants, acquires the
+global `refs/thetower/promotion-owner`, creates one deterministic annotated
+rollback tag, takes the mapping-file write lock, and fast-forwards clean
+production `main`. It re-verifies the branch, worktree, exact targets, commit
+ownership, and mapping-set fingerprint, publishes the exact candidate to
+`origin/main` without force, verifies remote ancestry, and compare-releases
+only its own owner ref. If a larger coordinated outcome already contains the
+candidate, the application verifies it but does not publish the enclosing
+commit; that outcome's coordinator remains the publisher.
+
+A completed request therefore reports `disposition=promoted`,
+`promoted=true`, and `published=true`. Owner contention, dirty production, or
+an unavailable/rejected remote or exact owner-release failure reports
+`disposition=promotion_queued` with the durable commit, actual published state,
+bounded automatic retry, the concrete blocker, and an agent-ready request. A
+published transaction retains `promotion_cleanup_pending` until its exact owner
+is compare-released; the background consumer does not wait for a decode to
+retry that cleanup. Response loss or a crash resumes the same commit, tag,
+owner, and publication boundary. If `main` advanced without the commit, exact
+unchanged target inputs permit automatic retirement and restaging on the new
+tip. A changed target, moved ref, malformed journal, Git crash lock, or other
+unprovable state fails closed for agent inspection; it is never reset,
+force-pushed, or converted into a second ad-hoc candidate.
+
+The runtime loader takes a shared mapping-file lock and caches by the complete
+canonical file signature, so it observes the promoted set atomically on the
+next acquisition without a process restart. A later complete stable save
+records a bounded confirmation receipt only when its acquisition began under a
+production commit containing the mapping and its exact mapping identity and
+canonical fingerprint match. Receipt work remains outside the outer
+save-operation and mutation boundaries, so it cannot delay Android foreground
+restoration. Only verified remote publication plus that matching fresh decode
+retires the exact private ref and transaction. Observer, candidate, and local-
+store failures remain diagnostic and do not become startup or automation
+gates.
 
 ## Acquisition provenance and temporal authority
 

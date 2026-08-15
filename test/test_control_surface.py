@@ -38,7 +38,12 @@ from core.exclusive_validation import (
 )
 from core.gate_decisions import build_gate_decision_options
 from core.player_save_mapping_staged_candidate import SaveMappingIntegrationError
-from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
+from tools.control_surface_server import (
+    ControlSurfaceHTTPServer,
+    STATIC_DIR,
+    _save_mapping_reconciliation_loop,
+    main,
+)
 
 
 ACTIVE_BATTLE_IDENTITY = "a" * 64
@@ -1095,6 +1100,81 @@ def test_save_mapping_integration_catalog_and_review_are_non_mutating(tmp_path):
     assert not (tmp_path / "logs" / "actions.log").exists()
 
 
+def test_automatic_save_mapping_reconciliation_is_audited_as_one_pair(tmp_path):
+    service = _service(tmp_path)
+    plan = {
+        "capability": "save_mapping_automatic_promotion_v1",
+        "needed": True,
+        "action": "machine_verify_and_integrate",
+        "candidate_record_id": "a" * 64,
+    }
+    promoted = {
+        "operation": "integrate",
+        "disposition": "promoted",
+        "candidate_record_id": "a" * 64,
+        "staged_commit": "b" * 40,
+        "promoted": True,
+        "published": True,
+    }
+    manager = service.save_mapping_integration_manager
+    manager.automatic_reconciliation_plan = Mock(return_value=plan)
+    manager.reconcile_automatic = Mock(return_value=promoted)
+
+    result = service.reconcile_save_mapping_integration()
+
+    assert result == promoted
+    activity = (tmp_path / "logs" / "actions.log").read_text(
+        encoding="utf-8"
+    )
+    assert activity.count("[ACTION ") == 1
+    assert activity.count("[RESULT ") == 1
+    assert "action=machine_verify_and_integrate" in activity
+    assert "disposition=promoted" in activity
+    operation_ids = [
+        line.partition("[OPERATION] id=")[2]
+        for line in activity.splitlines()
+        if "[OPERATION] id=" in line
+    ]
+    assert len(set(operation_ids)) == 1
+
+
+def test_idle_save_mapping_reconciliation_does_not_write_audit(tmp_path):
+    service = _service(tmp_path)
+    idle = {
+        "capability": "save_mapping_automatic_promotion_v1",
+        "needed": False,
+        "action": "idle",
+        "candidate_record_id": None,
+        "reason": "",
+    }
+    service.save_mapping_integration_manager.automatic_reconciliation_plan = (
+        Mock(return_value=idle)
+    )
+
+    assert service.reconcile_save_mapping_integration() == idle
+    assert not (tmp_path / "logs" / "actions.log").exists()
+
+
+def test_save_mapping_reconciliation_loop_runs_immediately_and_backs_off():
+    service = Mock()
+    service.reconcile_save_mapping_integration.side_effect = [
+        {"disposition": "promotion_queued"},
+        {"disposition": "promotion_queued"},
+        {"disposition": "promoted"},
+    ]
+    delays: list[int] = []
+
+    class StopAfterThreeAttempts:
+        def wait(self, delay: int) -> bool:
+            delays.append(delay)
+            return len(delays) == 4
+
+    _save_mapping_reconciliation_loop(service, StopAfterThreeAttempts())
+
+    assert service.reconcile_save_mapping_integration.call_count == 3
+    assert delays == [0, 5, 10, 5]
+
+
 def test_save_mapping_integrate_requires_exact_review_and_logs_one_pair(tmp_path):
     service = _service(tmp_path)
     review = {
@@ -1108,15 +1188,16 @@ def test_save_mapping_integrate_requires_exact_review_and_logs_one_pair(tmp_path
         "stage": {"available": True, "code": "", "reason": ""},
     }
     integrated = {
-        "operation": "stage",
-        "disposition": "staged_for_promotion",
+        "operation": "integrate",
+        "disposition": "promoted",
         "staged_commit": "e" * 40,
         "committed": True,
-        "promoted": False,
+        "promoted": True,
+        "published": True,
         "mapping_invariants": "passed",
     }
     service.save_mapping_integration_manager.review = Mock(return_value=review)
-    service.save_mapping_integration_manager.stage = Mock(
+    service.save_mapping_integration_manager.integrate_reviewed = Mock(
         return_value=integrated
     )
 
@@ -1142,7 +1223,10 @@ def test_save_mapping_integrate_requires_exact_review_and_logs_one_pair(tmp_path
         "save-mapping-aaaaaaaaaaaa-bbbbbbbbbbbb-"
     )
     assert len(operation_ids[0].rsplit("-", 1)[1]) == 12
-    assert "staged=true promoted=false mapping_invariants=passed" in activity
+    assert (
+        "staged=true promoted=true published=true mapping_invariants=passed"
+        in activity
+    )
 
 
 def test_save_mapping_dismiss_preserves_evidence_and_logs_one_pair(tmp_path):
@@ -1193,7 +1277,7 @@ def test_save_mapping_integrate_attempts_have_unique_audit_identities(tmp_path):
         "stage": {"available": True, "code": "", "reason": ""},
     }
     service.save_mapping_integration_manager.review = Mock(return_value=review)
-    service.save_mapping_integration_manager.stage = Mock(
+    service.save_mapping_integration_manager.integrate_reviewed = Mock(
         side_effect=SaveMappingIntegrationError(
             "commit_state_uncertain",
             "Inspect main, develop, and the transaction.",
@@ -1230,7 +1314,7 @@ def test_save_mapping_integrate_attempts_have_unique_audit_identities(tmp_path):
 
 def test_post_ref_transaction_write_failure_is_audited_as_unconfirmed(tmp_path):
     service = _service(tmp_path)
-    service.save_mapping_integration_manager.stage = Mock(
+    service.save_mapping_integration_manager.integrate_reviewed = Mock(
         side_effect=SaveMappingIntegrationError(
             "transaction_write_failed",
             "The durable phase update could not be confirmed.",
@@ -1272,7 +1356,7 @@ def test_legacy_save_mapping_prepare_operation_is_rejected_without_audit(tmp_pat
 
 def test_save_mapping_integrate_audits_stale_fingerprint_rejection(tmp_path):
     service = _service(tmp_path)
-    service.save_mapping_integration_manager.stage = Mock(
+    service.save_mapping_integration_manager.integrate_reviewed = Mock(
         side_effect=SaveMappingIntegrationError(
             "reviewed_proposal_stale",
             "The reviewed proposal changed.",
@@ -3651,7 +3735,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 45" in native_compatibility
+    assert "MinimumServerRevision = 46" in native_compatibility
     assert '"emulator_host_selection_v1"' in native_compatibility
     assert "emulator_host_selection_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'x:Name="UseThisEmulatorButton"' in native_xaml
@@ -3674,6 +3758,10 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "save_mapping_staged_candidate_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"save_mapping_candidate_disposition_v1"' in native_compatibility
     assert "save_mapping_candidate_disposition_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_automatic_promotion_v1"' in native_compatibility
+    assert "save_mapping_automatic_promotion_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"save_mapping_machine_verification_v1"' in native_compatibility
+    assert "save_mapping_machine_verification_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'id="confirmedLocalMappingAlert"' in html
     assert 'x:Name="ConfirmedLocalMappingBanner"' in native_xaml
     assert 'JsonPropertyName("confirmed_local_mappings")' in native_models
@@ -4318,24 +4406,32 @@ assert.strictEqual(
 );
 assert.strictEqual(model.saveMappingIntegrationCompatible({{
   api_version: 1,
-  server_revision: 44,
+  server_revision: 45,
   capabilities: [
     'save_mapping_staged_candidate_v1',
     'save_mapping_candidate_disposition_v1',
+    'save_mapping_automatic_promotion_v1',
+    'save_mapping_machine_verification_v1',
   ],
 }}), true);
 assert.strictEqual(model.saveMappingIntegrationCompatible({{
   api_version: 1,
-  server_revision: 43,
+  server_revision: 44,
   capabilities: [
     'save_mapping_staged_candidate_v1',
     'save_mapping_candidate_disposition_v1',
+    'save_mapping_automatic_promotion_v1',
+    'save_mapping_machine_verification_v1',
   ],
 }}), false);
 assert.strictEqual(model.saveMappingIntegrationCompatible({{
   api_version: 1,
-  server_revision: 44,
-  capabilities: ['save_mapping_staged_candidate_v1'],
+  server_revision: 45,
+  capabilities: [
+    'save_mapping_staged_candidate_v1',
+    'save_mapping_candidate_disposition_v1',
+    'save_mapping_automatic_promotion_v1',
+  ],
 }}), false);
 const dismissedResult = {{
   schema_version: 1,
@@ -4363,8 +4459,8 @@ assert.strictEqual(model.saveMappingDismissedResultValidation(
 const integratedResult = {{
   schema_version: 3,
   capability: 'save_mapping_staged_candidate_v1',
-  operation: 'stage',
-  disposition: 'staged_for_promotion',
+  operation: 'integrate',
+  disposition: 'promoted',
   idempotent: false,
   candidate_record_id: 'a'.repeat(64),
   reviewed_proposal_fingerprint: 'c'.repeat(64),
@@ -4373,7 +4469,14 @@ const integratedResult = {{
   staged_commit: 'b'.repeat(40),
   committed: true,
   staged: true,
-  promoted: false,
+  promoted: true,
+  published: true,
+  automatic_retry: false,
+  agent_required: false,
+  code: '',
+  reason: '',
+  next_action: 'Await a fresh stable decode.',
+  agent_review_prompt: '',
   mapping_invariants: 'passed',
   promotion_validation: 'pending',
   targets: [{{
@@ -4394,16 +4497,45 @@ assert.match(
     integratedResult,
     mappingReview,
   ).detail,
-  /Mapping invariants passed/,
+  /Production and origin contain it/,
 );
 assert.strictEqual(model.saveMappingIntegratedResultValidation(
-  {{...integratedResult, promoted: true}},
+  {{...integratedResult, promoted: false}},
   mappingReview,
 ).valid, false);
+const queuedResult = {{
+  ...integratedResult,
+  disposition: 'promotion_queued',
+  promoted: false,
+  published: false,
+  automatic_retry: true,
+  agent_required: false,
+  code: 'promotion_owner_busy',
+  reason: 'Another promotion owns the transaction.',
+  agent_review_prompt: 'Ask an agent if this persists.',
+}};
 assert.strictEqual(model.saveMappingIntegratedResultValidation(
-  {{...integratedResult, promoted: true, idempotent: true}},
-  recoveryReview,
+  queuedResult,
+  mappingReview,
 ).valid, true);
+const cleanupQueuedResult = {{
+  ...queuedResult,
+  promoted: true,
+  published: true,
+  code: 'promotion_owner_release_failed',
+  reason: 'Exact promotion owner still needs release.',
+}};
+assert.strictEqual(model.saveMappingIntegratedResultValidation(
+  cleanupQueuedResult,
+  mappingReview,
+).valid, true);
+assert.match(
+  model.saveMappingIntegratedPresentation(
+    cleanupQueuedResult,
+    mappingReview,
+  ).title,
+  /cleanup queued/,
+);
 for (const invalid of [
   {{...integratedResult, candidate_record_id: 'f'.repeat(64)}},
   {{...integratedResult, committed: false}},
@@ -4433,7 +4565,7 @@ const promotion = model.confirmedLocalMappingPresentation({{
   items: [{{state: 'promotion_pending', reason: 'awaiting production'}}],
 }});
 assert.strictEqual(promotion.severity, 'info');
-assert.match(promotion.title, /production promotion/);
+assert.match(promotion.title, /automatic promotion/);
 const restaging = model.confirmedLocalMappingPresentation({{
   schema_version: 2,
   available: true,
@@ -4449,8 +4581,14 @@ const promotionDominatesQueue = model.confirmedLocalMappingPresentation({{
     {{state: 'promotion_pending', reason: 'awaiting exact production promotion'}},
   ],
 }});
-assert.match(promotionDominatesQueue.title, /production promotion/);
+assert.match(promotionDominatesQueue.title, /automatic promotion/);
 assert.match(promotionDominatesQueue.detail, /awaiting exact production promotion/);
+const cleanup = model.confirmedLocalMappingPresentation({{
+  schema_version: 2,
+  available: true,
+  items: [{{state: 'promotion_cleanup_pending', reason: 'owner release pending'}}],
+}});
+assert.match(cleanup.title, /automatic cleanup/);
 """
     completed = subprocess.run(
         ["node", "-e", script],
@@ -4469,7 +4607,11 @@ assert.match(promotionDominatesQueue.detail, /awaiting exact production promotio
     assert 'id="saveMappingIntegrationDialog"' in html
     assert 'id="saveMappingWorkspaceSelect"' not in html
     assert "reviewed_proposal_fingerprint" in browser
-    assert "Stage reviewed mapping for promotion" in html
+    assert "Integrate reviewed mapping" in html
+    assert "reviewButton.hidden = Boolean(item && item.review_available !== true)" in browser
+    assert "dismissButton.hidden = Boolean(item && item.dismiss_available !== true)" in browser
+    assert "integrateButton.hidden = Boolean(item && item.review_available !== true)" in browser
+    assert "Exact terminal Game Over/save proofs need no operator review" in html
     assert "private staging ref" in browser
     assert "saveMappingIntegratedResultValidation" in browser
     assert "saveMappingDismissedResultValidation" in browser

@@ -50,6 +50,12 @@ public sealed class ControlSurfaceCompatibilityTests
             "save_mapping_candidate_disposition_v1",
             result.MissingCapabilities);
         Assert.Contains(
+            "save_mapping_automatic_promotion_v1",
+            result.MissingCapabilities);
+        Assert.Contains(
+            "save_mapping_machine_verification_v1",
+            result.MissingCapabilities);
+        Assert.Contains(
             "save_mapping_review_status_v2",
             result.MissingCapabilities);
         Assert.Contains(
@@ -329,7 +335,7 @@ public sealed class ControlSurfaceCompatibilityTests
             """
             {
               "api_version": 1,
-              "server_revision": 45,
+              "server_revision": 46,
               "control": {
                 "emulator_location": {
                   "schema_version": 1,
@@ -414,6 +420,8 @@ public sealed class ControlSurfaceCompatibilityTests
                 "selected_strategy_process_start",
                 "save_backed_setup_capture_v2",
                 "save_mapping_candidate_disposition_v1",
+                "save_mapping_automatic_promotion_v1",
+                "save_mapping_machine_verification_v1",
                 "save_mapping_staged_candidate_v1",
                 "save_mapping_review_status_v2",
                 "strategy_aware_attach_v1",
@@ -521,8 +529,20 @@ public sealed class ControlSurfaceCompatibilityTests
             },
         ];
         presentation = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
-        Assert.Contains("production promotion", presentation.Title);
+        Assert.Contains("automatic promotion", presentation.Title);
         Assert.Contains("awaiting exact production promotion", presentation.Detail);
+
+        active.Items =
+        [
+            new ConfirmedLocalMappingItem
+            {
+                State = "promotion_cleanup_pending",
+                Reason = "owner release pending",
+            },
+        ];
+        presentation = ControlSurfaceCompatibility.ConfirmedLocalMapping(active);
+        Assert.Contains("automatic cleanup", presentation.Title);
+        Assert.Contains("owner release pending", presentation.Detail);
 
         active.Items =
         [

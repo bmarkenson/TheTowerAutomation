@@ -193,34 +193,42 @@ application again restores and foregrounds the existing main window, or flashes
 it on the taskbar if Windows declines the foreground request.
 
 **Tools > Save mapping integration…** and the persistent save-mapping banner's
-**Review mappings…** action open the revision-44 review, disposition, and
-private-staging UI. Choose one durable observation and verify the read-only
-Private staging eligibility panel. A safely patchable observation can be
-reviewed and separately confirmed for staging. **Dismiss observation…** hides
-only that exact observation from the active queue while preserving its durable
-receipt. When review is unavailable, the panel shows the actual reason, next
-action, and a copyable request to give an agent; it does not launch the agent.
-The client never submits a filesystem path, ref, target, patch
-operation, mapping value, commit message, or Git identity. Success shows the
-fixed private ref, actual `main` parent, staged commit, target hashes, passed
-mapping invariants, and the still-pending production promotion and fresh-decode
-checkpoint. Unrelated `main` changes before confirmation are accepted when the
-reviewed mapping inputs remain exact. An exact lost response before transaction
-finalization reopens as a reviewable recovery and returns **Already staged for
-promotion** when the ref had already moved. A fully recorded commit reappears as
-**Save mapping awaiting production promotion** instead of offering another
-write. An unprovable outcome remains an inspection warning.
+**Review mappings…** action open the revision-45 review, disposition, and
+automatic-integration UI. Choose one durable observation and inspect the
+read-only **Automatic integration readiness** panel. A safely patchable
+observation that needs judgment can be reviewed and then confirmed with
+**Integrate reviewed mapping…**. A deterministic **Killed by** observation with
+the exact paired terminal Game Over/save proof displays that proof and proceeds
+automatically—there is nothing for the operator to review or confirm.
+**Dismiss observation…** hides only an ordinary unreviewed observation while
+preserving its durable receipt. When an item is not actionable, the panel shows
+the actual reason, next action, and a copyable request to give an agent; it does
+not launch or authorize the agent. Review, dismissal, and integration controls
+that do not apply to the selected state are hidden instead of remaining as
+unexplained disabled actions.
 
-While review, dismissal, or Stage is in flight, the selection, refresh, and Close
-controls are disabled and the window cannot be dismissed. Failed or lost
-requests are never retried automatically; the UI distinguishes a proven
-rejection from an unconfirmed outcome and surfaces any audit warning.
-Staging does not move `main` or its index/worktree, promote, control automation,
-restart a service, send device input, alter runtime authority, or change the
-current battle. The
-persistent banner says **Save mapping awaiting production promotion** until the
-commit reaches `main`, then **Deployed save mapping awaiting fresh validation**
-until a complete stable save proves the deployed mapping is loaded.
+The client never submits a filesystem path, ref, target, patch operation,
+mapping value, commit message, or Git identity. A completed result proves the
+actual `main` parent, mapping commit, exact target hashes and invariants, local
+fast-forward, and verified `origin/main` publication. Private staging is an
+internal crash-safe boundary and never a successful terminal result. If an
+owner, remote, or exact owner release temporarily blocks completion, the window
+shows the durable automatic queue, its actual local/published state, retry
+reason, and agent-ready recovery request. Published work remains visibly
+**automatic cleanup pending** until its exact owner is released. The service
+consumer retries it with bounded backoff; reopening or refreshing the GUI is
+not required.
+
+While an operator review, dismissal, or integration request is in flight, the
+selection, refresh, and Close controls are disabled and the window cannot be
+dismissed. A lost response resumes the same commit, rollback tag, promotion
+owner, and publication boundary rather than producing another commit.
+Integration never controls automation, restarts a service, sends device input,
+alters runtime authority, or changes the current battle. After verified
+publication, the persistent banner says **Deployed save mapping awaiting fresh
+validation** until a later complete stable acquisition proves the promoted
+mapping is loaded; the signature-aware runtime loader does not require a
+restart to see it.
 
 Overview keeps a compact, normally collapsed summary of the most recent
 completed battle without devoting the normal workspace to the full history.
@@ -1079,12 +1087,14 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 45, `current_battle_perks_v1`,
+current Windows build requires revision 46, `current_battle_perks_v1`,
 `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,
 `emulator_host_selection_v1`,
 `save_backed_setup_capture_v2`, `save_mapping_staged_candidate_v1`,
 `save_mapping_candidate_disposition_v1`,
+`save_mapping_automatic_promotion_v1`,
+`save_mapping_machine_verification_v1`,
 `save_mapping_review_status_v2`, `confirmed_local_mapping_status_v2`,
 `host_performance_process_attribution_v1`,
 `terminal_dispositions_v2`,
@@ -1150,18 +1160,22 @@ already configured:
 7. With no desired tunnel, close the GUI and confirm the companion exits after
    about 15 seconds. Then start a desired tunnel, sign out of Windows, sign back
    in, and confirm neither the host nor a tunnel starts automatically.
-8. With one durable mapping observation, clean `main`, and an empty private
-   save-mapping ref, open the workflow from both **Tools** and the persistent
-   banner. Verify Private staging eligibility, review the exact proposal,
-   change the candidate and confirm staging disables, then review again. Cancel
-   the warning once and prove `main`, its index/worktree, and the private ref
-   stay unchanged. Confirm staging once and verify one exact child of current
-   `main` reaches only `refs/thetower/save-mapping-candidate`; `main` remains
-   unchanged and clean, and the result keeps promotion and fresh validation
-   pending. Advance `main` with an unrelated test commit, confirm the same
-   mapping review can be explicitly restaged on that new tip, and exercise the
-   documented lost-response recovery without automatic retry, service restart,
-   runtime-control change, or device input.
+8. With one ordinary durable mapping observation and clean `main`, open the
+   workflow from both **Tools** and the persistent banner. Verify **Automatic
+   integration readiness**, review the exact proposal, change the candidate and
+   confirm integration disables, then review again. Cancel once and prove
+   `main`, its index/worktree, and the private ref stay unchanged. Confirm once
+   and verify the one allowlisted child passes through the private ref, then
+   fast-forwards `main`, publishes to `origin/main` without force, and leaves no
+   orphaned promotion stage. Repeat with exact paired terminal `killedBy`
+   evidence and confirm its proof is visible while review and confirmation are
+   unnecessary. Exercise promotion-owner contention, a recoverable remote
+   failure, an unrelated `main` advance with unchanged mapping inputs, and a
+   lost response; verify the queue retries the same commit and exposes an agent
+   request when blocked, without service restart, runtime-control change,
+   duplicate commit, or device input. Finally prove a fresh acquisition sees
+   the mapping without restart and retires the exact transaction only after
+   verified remote publication.
 9. For revision 40, connect to a fresh exact-owner runtime snapshot after the
    relevant acknowledgement lines have moved more than 262 KiB behind the log
    tail, then after log rotation. Confirm Action Authority, terminal policy,
