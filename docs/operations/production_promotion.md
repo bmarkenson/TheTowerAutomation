@@ -46,14 +46,15 @@ turning branch cleanup into a release.
    review. If the new `main` is not an ancestor of `D`, reconcile in the
    candidate worktree; that reconciliation creates a new `D`.
 
-   A check completed at prior exact candidate `V` may carry to refreshed `D`
-   only when review of `V..D` proves that reconciliation changed none of the
-   source, tests, configuration, generated or runtime-read inputs,
-   dependencies, units, or other inputs that check exercises, and that its
-   result did not depend on the old production baseline. Record `V`, `D`, the
-   reviewed delta, and the retained result. Rerun every affected check and use
-   the strongest applicable candidate gate whenever input equivalence or
-   baseline independence is uncertain.
+   Treat a multi-command gate as composable evidence. A check or component
+   completed at prior exact candidate `V` may carry to refreshed `D` when
+   review of `V..D` proves that the inputs it exercises and any relevant
+   production baseline are unchanged. If the delta affects only some
+   components, retain the unaffected results and rerun only the affected
+   scope; do not repeat a wrapper merely to obtain one all-at-`D` label.
+   Record `V`, `D`, the reviewed delta, each retained result, and each fresh
+   result. When input equivalence or baseline independence is uncertain,
+   broaden only the affected scope enough to resolve that uncertainty.
 
 Unrelated branches and worktrees may remain dirty or continue independently;
 they block promotion only if their work is included in, overlaps, or obscures
@@ -62,36 +63,53 @@ the selected candidate.
 ## Choose the candidate gate
 
 Validation follows the aggregate `M..D` change and remaining uncertainty, not
-the number of branches or Git operations used to produce it. Run focused tests,
+the number of branches or Git operations used to produce it. Select the
+minimum sufficient gate that exercises the affected contract. A complete
+checkpoint is not a generic confidence or closeout step: its extra compilation,
+state-definition, clickmap, and full-suite coverage is justified only by a
+listed production-consumed or cross-cutting validation risk. Run focused tests,
 generators, static checks, and native builds while the candidate can still
 change. Finish and commit every source, test, configuration, generated, and
-other gate input before running the strongest applicable gate below on that
-exact candidate. When several feature tips form one release, validate each
-proportionately while developing and run the combined gate once on the final
-integrated candidate.
+other gate input before running the selected final gate. When several feature
+tips form one release, validate each proportionately while developing and run
+the combined gate once on the final integrated candidate.
 
 | Aggregate candidate contents | Required candidate gate |
 | --- | --- |
-| Documentation, process guidance, completion evidence, or test-only changes | Link/diff/static checks and affected tests. No automatic full Python checkpoint. |
-| Only canonical player-save mapping JSON produced by the reviewed fast lane | Exact allowlisted diff, target hashes/modes, mapping schema/set invariants, and focused mapping-loader/consumer tests. No automatic full Python checkpoint. |
-| Native Windows client inputs with no shared Linux/runtime change | Affected Python/JavaScript contract tests, portable .NET tests, and the Release cross-build. Reserve the state-changing complete-package publisher for the required publication boundary below. No automatic full Python checkpoint. |
-| Runtime Python, shared control-surface code, YAML, templates, runtime-read assets, generators, or broadly consumed configuration | Focused tests first, then one complete repository checkpoint at final `D`. |
-| Interpreter, lock files, persistent-state formats, installed units, migrations, or an otherwise uncertain cross-cutting change | One complete checkpoint at final `D` plus the specific rebuild, migration, or recovery proof. |
+| Documentation, process guidance, completion evidence, or test source, fixtures, and expected output not consumed by runtime | Link/diff/static checks and affected tests. A shared test-harness change may require broader pytest coverage. Do not run the complete checkpoint solely for this row. |
+| Only canonical player-save mapping JSON produced by the reviewed fast lane | Exact allowlisted diff, target hashes/modes, mapping schema/set invariants, and focused mapping-loader/consumer tests. Do not run the complete checkpoint solely for this row. |
+| Native Windows client inputs with no shared Linux/runtime change | Affected Python/JavaScript contract tests, portable .NET tests, and the Release cross-build. Reserve the state-changing complete-package publisher for the required publication boundary below; do not add the Python checkpoint solely for this row. |
+| Shared test, checkpoint, build, packaging, or release machinery with no runtime-input change | Direct contract tests plus only the broad or end-to-end command whose machinery changed. Run one complete checkpoint only when the checkpoint path itself changed or its full path is the affected contract. |
+| Runtime Python, shared control-surface code, YAML, templates, runtime-read assets, generators, or broadly consumed configuration | Focused tests first, then one complete repository checkpoint for the committed runtime-input state being promoted. |
+| Interpreter, lock files, persistent-state formats, installed units, migrations, or a cross-cutting change whose affected contracts cannot be bounded after review | One complete checkpoint for the committed input state plus the specific rebuild, migration, or recovery proof. Record the unbounded risk that required it. |
 
-If several rows apply, use their combined requirements.
+Transient or ignored test output is evidence, not a candidate input, and never
+selects the complete checkpoint by itself. A test-only change that reveals a
+runtime defect selects a runtime row only after a production-consumed input is
+changed. If several rows apply, combine their requirements without repeating
+unaffected checks.
 
 Record exact `D`, the selected gate and result, and the development-environment
-fingerprint when applicable.
+fingerprint when applicable. When using the complete checkpoint, also name the
+table row and additional coverage that made it necessary.
 
 ### Exact candidate before the final gate
 
 The final candidate gate is not a pre-commit check. First create a clean exact
-code/test candidate `V`, then run its complete checkpoint or other selected
-gate. A gate run against a mutable or uncommitted working tree remains useful
-development evidence but does not create the auditable `V` required for later
-reuse. If the gate exposes a needed source, test, configuration, generated, or
-other non-completion change, create the corrected exact candidate and apply the
-gate required by its reviewed delta.
+candidate `V`. While its inputs are mutable, run focused checks only; do not use
+the complete checkpoint as a rehearsal. Run a selected complete checkpoint at
+most once for unchanged `V`.
+
+Repeat a complete checkpoint only when its prior run failed or was incomplete,
+a later change invalidates its production, checkpoint-machinery, or relevant
+baseline coverage, or the operator explicitly requests a diagnostic rerun. A
+changed commit ID alone does not invalidate it. Documentation, ordinary
+test-only changes, transient test output, completion records, ref movement,
+contention, checkout, promotion, publication, and cleanup do not by themselves
+require another complete checkpoint; retain unaffected component results and
+run only their affected checks. If a gate exposes a needed change, create the
+corrected exact candidate and apply this invalidation rule to its reviewed
+delta.
 
 Before freezing `V`, inspect ignored non-cache output in its worktree. Tests
 must use pytest temporary directories or the checkpoint's isolated generated

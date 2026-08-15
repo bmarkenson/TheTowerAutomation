@@ -40,7 +40,7 @@ def test_active_work_owners_contain_no_completed_task_markers() -> None:
     )
 
 
-def test_candidate_gate_guidance_commits_before_checkpoint_and_isolates_output() -> None:
+def test_candidate_gate_guidance_uses_minimum_sufficient_validation() -> None:
     new_thread = " ".join(
         (ROOT / "docs/new_thread.md").read_text(encoding="utf-8").split()
     )
@@ -53,9 +53,12 @@ def test_candidate_gate_guidance_commits_before_checkpoint_and_isolates_output()
     assert "commit the exact candidate before running its final promotion gate" in (
         new_thread
     )
-    assert "mutable or uncommitted working tree is development evidence" in (
-        new_thread
-    )
-    assert "commit exact code/test candidate `V`" in promotion
+    assert "complete checkpoint is a risk-selected final gate" in new_thread
+    assert "Do not run it against a mutable or uncommitted working tree" in new_thread
+    assert "minimum sufficient gate" in promotion
+    assert "Do not run the complete checkpoint solely" in promotion
+    assert "Transient or ignored test output is evidence" in promotion
+    assert "Run a selected complete checkpoint at most once" in promotion
+    assert "retain unaffected component results" in promotion
     assert "pytest temporary directories" in new_thread
     assert "they must not populate the repository's ignored" in promotion
