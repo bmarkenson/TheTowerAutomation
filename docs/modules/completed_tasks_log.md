@@ -39,6 +39,27 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Explicit Windows emulator-host handoff and CPH attribution
+
+- The native client can now submit **Use this PC's emulator** from its active
+  ADB reverse forward. Linux requires acknowledged indefinite Pause, validates
+  a fresh frame, and advances the target generation even when the reused Linux
+  port is unchanged. A conflicting former tunnel remains visible and is never
+  terminated or adopted automatically.
+- Completed battle reports retain bounded Windows-host transitions. Only
+  complete single-host runs enter that host's CPH and severe in-run baseline;
+  partial or mixed-host battles remain reportable but are excluded. Live
+  listener-lifetime telemetry is likewise constrained to the explicitly
+  selected stable host ID.
+- Exact code/test candidate `532290f` passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,939 repository tests in 433.31 seconds using development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  All 195 portable .NET tests and the Release WindowsDesktop cross-build also
+  passed. A real Windows host move remains the confirmation boundary for
+  [`ISSUE-2026-017`](../issues/open-2026.md#live-adb-target-move-could-not-be-applied-by-a-paused-runtime).
+
 ### 2026-08-15 Save-backed effective Attack Range authority
 
 - [`ISSUE-2026-052`](../issues/resolved-2026.md#orb-distance-treated-selected-range-lab-level-as-live-attack-range)
