@@ -72,12 +72,14 @@ resolved dossier instead of copying its detail.
   visual absence, and local identity confirmations awaiting canonical
   integration remain fail-closed. This authority does not claim rarity, level,
   stars, effects, substats, inventory semantics, GUIDs, or private values.
-- The affected Python slice passed all 451 tests and the complete portable
-  native authoring suite passed all 190 tests. The native restore/test emitted
-  only the sandbox's read-only NuGet vulnerability-cache warning. The complete
-  isolated checkpoint then passed compilation, state definitions, clickmap
-  integrity with zero errors and the established 44 orphan notices, and all
-  2,720 Python tests in 413.98 seconds.
+- The original affected Python slice passed all 451 tests. After current-main
+  reconciliation, exact integrated candidate `da30279` passed an expanded
+  567-test affected slice, the complete 190-test portable native authoring
+  suite, and both documentation lifecycle tests. The native restore/test
+  emitted only the sandbox's read-only NuGet vulnerability-cache warning. The
+  integrated complete checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,721 Python tests in 439.21 seconds.
 - The implementation was validated code-only and has not been promoted,
   deployed, or live-validated. Promotion ownership and a later natural
   ordinary-boundary observation remain in the

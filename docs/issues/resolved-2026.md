@@ -179,11 +179,14 @@ and actionable work lives in
 - **Follow-up validation and deployment status:** The same-family and
   explicit-empty implementation passed all 451 affected Python tests, all 190
   portable native authoring tests, and the two documentation lifecycle tests.
-  The complete isolated checkpoint passed compilation, state definitions,
-  clickmap integrity with zero errors and 44 established orphan notices, and
-  all 2,720 Python tests in 413.98 seconds. It was validated code-only;
-  production deployment and a later natural ordinary-boundary observation
-  remain coordinator work.
+  After reconciliation onto current `main`, exact integrated candidate
+  `da30279` passed an expanded 567-test affected slice, all 190 portable native
+  authoring tests, and the two documentation lifecycle tests. Its complete
+  isolated checkpoint passed compilation, state definitions, clickmap
+  integrity with zero errors and 44 established orphan notices, and all 2,721
+  Python tests in 439.21 seconds. It was validated code-only; production
+  deployment and a later natural ordinary-boundary observation remain
+  coordinator work.
 - **Fixed by:** `888f101`, `1c977de`, `9f9062f`, and `86671b1`.
 
 ### Unbound manual terminal handoff permanently disabled Automation at Home
