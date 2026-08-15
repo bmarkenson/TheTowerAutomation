@@ -10,6 +10,7 @@ import re
 import pytest
 import yaml
 
+from automation.strategies import get_strategy
 import core.strategy_profiles as strategy_profiles_module
 from core.strategy_authoring import (
     EDITOR_METADATA_SCHEMA_VERSION,
@@ -22,6 +23,8 @@ from core.strategy_authoring import (
     normalize_strategy_source,
     resolve_strategy_source,
     setting_registry_catalog,
+    strategy_builder_source_from_resolution,
+    tournament_source_to_strategy_source,
 )
 from core.strategy_profiles import (
     StrategyProfileConflictError,
@@ -47,6 +50,13 @@ def _bundled_authoring(name: str = "farm_t18") -> dict:
     return legacy_farm_source_to_strategy_source(
         _yaml(STRATEGY_DIRECTORY / f"{name}.source.yaml"),
         display_name=f"{name} authoring",
+    )
+
+
+def _bundled_tournament_authoring() -> dict:
+    return tournament_source_to_strategy_source(
+        _yaml(STRATEGY_DIRECTORY / "tournament.source.yaml"),
+        display_name="Tournament",
     )
 
 
@@ -150,6 +160,7 @@ def test_farm_setting_registry_covers_the_complete_compact_builder_contract():
         assert item["display_name"]
         assert item["section"]
         assert item["editor_type"]
+        assert item["supported_families"]
         assert item["allowed_policies"]
         assert item["runtime_destination"]
         assert isinstance(item["dependencies"], list)
@@ -182,6 +193,189 @@ def test_farm_setting_registry_covers_the_complete_compact_builder_contract():
         "observe",
         "ignore",
     )
+    by_id = {item["id"]: item for item in catalog}
+    assert by_id["modules"]["supported_families"] == ["farm", "tournament"]
+    assert by_id["orb_distance"]["supported_families"] == [
+        "farm",
+        "tournament",
+    ]
+    assert by_id["target_priority"]["supported_families"] == ["farm"]
+
+
+def test_tournament_authoring_is_tierless_and_scoped_to_safe_loadout_settings():
+    source = _bundled_tournament_authoring()
+
+    assert source["family"] == "tournament"
+    assert source["tier"] is None
+    assert source["settings"] == {
+        "modules": {
+            "policy": "observe",
+            "value": {"preset": "tournament_standard"},
+        },
+        "orb_distance": {
+            "policy": "enforce",
+            "value": {"preset": "tournament_range_98_38"},
+        },
+    }
+    resolution = resolve_strategy_source(source)
+    assert set(resolution["settings"]) == {"modules", "orb_distance"}
+    compact = strategy_builder_source_from_resolution(source, resolution)
+    assert compact["builder"] == "tournament"
+    assert compact["run_profile"] == "tournament"
+    assert build_strategy_yaml(compact) == _yaml(
+        STRATEGY_DIRECTORY / "tournament.strategy.yaml"
+    )
+
+    with pytest.raises(StrategyAuthoringError, match="tier must be omitted"):
+        normalize_strategy_source({**source, "tier": 18})
+    with pytest.raises(StrategyAuthoringError, match="unknown setting ids"):
+        normalize_strategy_source(
+            {
+                **source,
+                "settings": {
+                    **source["settings"],
+                    "damage_slider": {
+                        "policy": "enforce",
+                        "value": "100%",
+                    },
+                },
+            }
+        )
+
+
+def test_tournament_clone_publishes_selected_modules_and_orb_with_protected_flow(
+    tmp_path,
+    monkeypatch,
+):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    tournament = next(
+        item
+        for item in store.authoring_catalog()["strategies"]["items"]
+        if item["id"] == "tournament"
+    )
+    assert tournament["authoring_supported"] is True
+    assert tournament["editable"] is False
+
+    source = copy.deepcopy(tournament["source"])
+    source.update(
+        id="tournament_custom",
+        display_name="Tournament Custom",
+    )
+    source["settings"]["modules"] = {
+        "policy": "enforce",
+        "value": {"preset": "farm_standard"},
+    }
+    source["settings"]["orb_distance"] = {
+        "policy": "enforce",
+        "value": {"preset": "farm_min_range"},
+    }
+
+    validation = store.validate(source)
+    plan = validation["plan"]
+    requirements = plan["session_preflight"]["requirements"]
+    assert validation["profile"]["family"] == "tournament"
+    assert validation["profile"]["tier"] is None
+    assert plan["runtime_policy"]["player_save_preflight"] == "save_first"
+    assert plan["runtime_policy"]["exclusive_validation"]["operator_launch"][
+        "kind"
+    ] == "tournament_battle"
+    assert requirements["loadout_policies"] == {"modules": "enforce"}
+    assert requirements["modules"]["generator_primary"] == (
+        "Black Hole Digestor"
+    )
+    assert requirements["orb_distance"]["resolved"] == {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    assert [rule["name"] for rule in plan["rules"]] == [
+        "initialize_tournament_level_skips",
+        "enforce_tournament_damage_slider",
+        "enforce_tournament_orb_distance",
+        "validate_tournament_session_preflight",
+    ]
+
+    published = store.publish_authoring_strategy(source)
+    assert published["profile"]["family"] == "tournament"
+    assert published["profile"]["tier"] is None
+    stored_plan = load_published_strategy_plan("tournament_custom", tmp_path)
+    assert stored_plan == plan
+
+    reloaded = StrategyProfileStore(profile_directory=tmp_path)
+    custom = next(
+        item
+        for item in reloaded.authoring_catalog()["strategies"]["items"]
+        if item["id"] == "tournament_custom"
+    )
+    assert custom["authoring_supported"] is True
+    assert custom["editable"] is True
+    assert set(custom["resolution"]["settings"]) == {
+        "modules",
+        "orb_distance",
+    }
+
+    monkeypatch.setenv("THETOWER_STRATEGY_PROFILE_DIR", str(tmp_path))
+    strategy = get_strategy("tournament_custom")
+    assert strategy is not None
+    assert strategy.name == "tournament_custom"
+    assert strategy.run_configuration()["loadout"]["modules"]["mode"] == (
+        "enforce"
+    )
+
+
+def test_tournament_ignore_preserves_optional_loadout_controls(tmp_path):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    source = _bundled_tournament_authoring()
+    source.update(id="tournament_preserve", display_name="Tournament Preserve")
+    source["settings"] = {
+        "modules": {"policy": "ignore"},
+        "orb_distance": {"policy": "ignore"},
+    }
+
+    plan = store.validate(source)["plan"]
+
+    assert plan["run_configuration"]["loadout"]["modules"] == {
+        "mode": "preserve"
+    }
+    assert plan["run_configuration"]["loadout"]["orb_distance"] == {
+        "mode": "preserve"
+    }
+    requirements = plan["session_preflight"]["requirements"]
+    assert requirements["loadout_policies"] == {"modules": "preserve"}
+    assert "modules" not in requirements
+    assert "orb_distance" not in requirements
+    assert plan["session_preflight"]["complete_when"] == [
+        "damage_slider_checked",
+        "gc_session_preflight_attempted",
+    ]
+    assert not any(
+        "orb_distance" in rule["name"] for rule in plan["rules"]
+    )
+
+
+def test_tournament_orb_observe_uses_observation_completion(tmp_path):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    source = _bundled_tournament_authoring()
+    source.update(id="tournament_observe", display_name="Tournament Observe")
+    source["settings"]["orb_distance"]["policy"] = "observe"
+
+    plan = store.validate(source)["plan"]
+
+    assert plan["session_preflight"]["complete_when"] == [
+        "damage_slider_checked",
+        "orb_distance_observed",
+        "gc_session_preflight_attempted",
+    ]
+    orb_rule = next(
+        rule
+        for rule in plan["rules"]
+        if rule["name"] == "observe_tournament_orb_distance"
+    )
+    assert orb_rule["assert"] == [
+        "damage_slider_checked",
+        "!orb_distance_observed",
+    ]
+    assert orb_rule["do"][0]["mode"] == "observe"
 
 
 def test_registry_editor_metadata_declares_every_specialized_constraint():

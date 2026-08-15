@@ -67,10 +67,16 @@ def test_wpf_authoring_shell_groups_catalogs_and_registry_sections():
     assert 'Text="{Binding EffectiveValueDisplay, Mode=OneWay}"' in xaml
     assert 'JsonPropertyName("observation_supported")' in models
     assert 'JsonPropertyName("repair_supported")' in models
+    assert 'JsonPropertyName("supported_families")' in models
     assert 'JsonPropertyName("initial_value")' in models
     assert 'JsonPropertyName("editor")' in models
     assert 'public StrategyAuthoringResolution Resolution { get; set; }' in models
     assert "resolution: item.Resolution" in code
+    assert "definition.SupportedFamilies.Contains(" in code
+    assert "source.Tier.HasValue" in code
+    assert "Observe compares and reports; it does not change this setting." in _text(
+        "StrategyAuthoringViewModels.cs"
+    )
     assert "Bases are never activatable" in xaml
     assert "Activate" not in xaml
 

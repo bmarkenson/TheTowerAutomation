@@ -326,7 +326,7 @@ public partial class StrategyProfilesWindow : Window
             TierBox.Text = source.Tier?.ToString(CultureInfo.InvariantCulture) ?? "";
             EntityIdBox.IsEnabled = editable && _isNew;
             DisplayNameBox.IsEnabled = editable;
-            TierBox.IsEnabled = editable && !_isBase;
+            TierBox.IsEnabled = editable && !_isBase && source.Tier.HasValue;
             ConfigureBasePin(source, editable);
             PopulateRows(source, resolution, editable);
             EditorHelpText.Text = help;
@@ -360,7 +360,11 @@ public partial class StrategyProfilesWindow : Window
         {
             return;
         }
-        foreach (var definition in _catalog.SettingRegistry)
+        foreach (var definition in _catalog.SettingRegistry.Where(definition =>
+                     definition.SupportedFamilies.Count == 0
+                     || definition.SupportedFamilies.Contains(
+                         source.Family,
+                         StringComparer.Ordinal)))
         {
             source.Settings.TryGetValue(definition.Id, out var directive);
             StrategyResolvedSetting? resolved = null;
@@ -1096,15 +1100,23 @@ public partial class StrategyProfilesWindow : Window
                 } choice
                 ? CloneBaseReference(choice.Reference)
                 : null;
-            if (!int.TryParse(
-                    TierBox.Text.Trim(),
-                    NumberStyles.None,
-                    CultureInfo.InvariantCulture,
-                    out var tier))
+            if (source.Tier.HasValue)
             {
-                throw new InvalidOperationException("Strategy Tier must be an integer.");
+                if (!int.TryParse(
+                        TierBox.Text.Trim(),
+                        NumberStyles.None,
+                        CultureInfo.InvariantCulture,
+                        out var tier))
+                {
+                    throw new InvalidOperationException(
+                        "Strategy Tier must be an integer.");
+                }
+                source.Tier = tier;
             }
-            source.Tier = tier;
+            else
+            {
+                source.Tier = null;
+            }
             source.Version ??= 1;
         }
         return source;

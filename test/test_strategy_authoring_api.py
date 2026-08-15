@@ -152,7 +152,15 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
     assert catalog["strategies"]["items"][0]["resolution"]["settings"][
         "damage_slider"
     ]["provenance"] == {"kind": "local"}
-    assert catalog["strategies"]["items"][2]["authoring_supported"] is False
+    tournament = catalog["strategies"]["items"][2]
+    assert tournament["authoring_supported"] is True
+    assert tournament["editable"] is False
+    assert tournament["source"]["family"] == "tournament"
+    assert tournament["source"]["tier"] is None
+    assert set(tournament["resolution"]["settings"]) == {
+        "modules",
+        "orb_distance",
+    }
     assert catalog["capabilities"]["publication_activates_strategy"] is False
     assert catalog["capabilities"]["profile_local_loadout_editors"] is True
     assert catalog["capabilities"]["preset_local_copy"] is True
@@ -185,7 +193,9 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
         "Ultimate Weapons",
     }
     assert all(
-        "observation_supported" in item and "repair_supported" in item
+        "observation_supported" in item
+        and "repair_supported" in item
+        and item["supported_families"]
         for item in catalog["setting_registry"]
     )
     assert all(

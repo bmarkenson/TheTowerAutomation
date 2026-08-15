@@ -82,6 +82,7 @@ BASE_PUBLICATION_SCHEMA_VERSION = 1
 LOADOUT_DEFINITION_SCHEMA_VERSION = 1
 MAX_AUTHORING_FILE_BYTES = 4 * 1024 * 1024
 AUTHORING_POLICIES = ("enforce", "observe", "ignore")
+SUPPORTED_AUTHORING_FAMILIES = ("farm", "tournament")
 EDITOR_METADATA_SCHEMA_VERSION = 1
 _SAFE_ID_RE = re.compile(r"[a-z][a-z0-9_]{2,47}")
 
@@ -146,6 +147,9 @@ class SettingDefinition:
             "display_name": self.display_name,
             "section": self.section,
             "editor_type": self.editor_type,
+            "supported_families": list(
+                _supported_families_for_setting(self.id)
+            ),
             "allowed_policies": list(self.allowed_policies),
             "dependencies": list(self.dependencies),
             "dependency_display_names": [
@@ -1044,6 +1048,13 @@ _SETTING_DEFINITIONS = (
 FARM_SETTING_REGISTRY: Mapping[str, SettingDefinition] = MappingProxyType(
     {definition.id: definition for definition in _SETTING_DEFINITIONS}
 )
+TOURNAMENT_SETTING_IDS = ("modules", "orb_distance")
+_SETTING_IDS_BY_FAMILY = MappingProxyType(
+    {
+        "farm": tuple(FARM_SETTING_REGISTRY),
+        "tournament": TOURNAMENT_SETTING_IDS,
+    }
+)
 FARM_SETUP_SETTING_IDS = tuple(
     definition.id
     for definition in _SETTING_DEFINITIONS
@@ -1059,6 +1070,38 @@ _IGNORED_SETUP_PLACEHOLDERS = {
     "perk_bans": [],
     "perk_auto_pick_order": ["damage"],
 }
+
+
+def _authoring_family(value: object) -> str:
+    family = str(value or "farm").strip().lower()
+    if family not in SUPPORTED_AUTHORING_FAMILIES:
+        raise StrategyAuthoringError(
+            "authoring family must be one of: "
+            + ", ".join(SUPPORTED_AUTHORING_FAMILIES)
+        )
+    return family
+
+
+def setting_registry_for_family(
+    family: object,
+) -> Mapping[str, SettingDefinition]:
+    """Return the settings authorable for one protected strategy family."""
+
+    normalized = _authoring_family(family)
+    return MappingProxyType(
+        {
+            setting_id: FARM_SETTING_REGISTRY[setting_id]
+            for setting_id in _SETTING_IDS_BY_FAMILY[normalized]
+        }
+    )
+
+
+def _supported_families_for_setting(setting_id: str) -> tuple[str, ...]:
+    return tuple(
+        family
+        for family, setting_ids in _SETTING_IDS_BY_FAMILY.items()
+        if setting_id in setting_ids
+    )
 
 
 def _metadata_value_key(value: object) -> str:
@@ -2110,9 +2153,7 @@ def normalize_base_source(
         raise StrategyAuthoringError("base source has the wrong kind")
     identifier = _safe_id(raw_source.get("id"), "base id")
     display_name = _display_name(raw_source.get("display_name"), identifier)
-    family = str(raw_source.get("family") or "farm").strip().lower()
-    if not _SAFE_ID_RE.fullmatch(family):
-        raise StrategyAuthoringError("base family must be a safe identifier")
+    family = _authoring_family(raw_source.get("family"))
     selected_revision = revision if revision is not None else raw_source.get("revision")
     if isinstance(selected_revision, bool):
         raise StrategyAuthoringError("base revision must be a positive integer")
@@ -2128,6 +2169,7 @@ def normalize_base_source(
         raw_source.get("settings"),
         base=True,
         schema_version=schema_version,
+        family=family,
     )
     return {
         "schema_version": schema_version,
@@ -2178,18 +2220,23 @@ def normalize_strategy_source(
         raise StrategyAuthoringError("strategy source has the wrong kind")
     identifier = _safe_id(raw_source.get("id"), "strategy id")
     display_name = _display_name(raw_source.get("display_name"), identifier)
-    family = str(raw_source.get("family") or "farm").strip().lower()
-    if family != "farm":
-        raise StrategyAuthoringError("strategy family must be farm")
+    family = _authoring_family(raw_source.get("family"))
     raw_tier = raw_source.get("tier")
-    if isinstance(raw_tier, bool):
-        raise StrategyAuthoringError("strategy tier must be an integer")
-    try:
-        tier = int(raw_tier)
-    except (TypeError, ValueError) as exc:
-        raise StrategyAuthoringError("strategy tier must be an integer") from exc
-    if not 1 <= tier <= 100:
-        raise StrategyAuthoringError("strategy tier must be between 1 and 100")
+    if family == "farm":
+        if isinstance(raw_tier, bool):
+            raise StrategyAuthoringError("strategy tier must be an integer")
+        try:
+            tier: Optional[int] = int(raw_tier)
+        except (TypeError, ValueError) as exc:
+            raise StrategyAuthoringError("strategy tier must be an integer") from exc
+        if not 1 <= tier <= 100:
+            raise StrategyAuthoringError("strategy tier must be between 1 and 100")
+    else:
+        if raw_tier is not None:
+            raise StrategyAuthoringError(
+                "tournament strategy tier must be omitted"
+            )
+        tier = None
     selected_version = version if version is not None else raw_source.get("version", 1)
     if isinstance(selected_version, bool):
         raise StrategyAuthoringError("strategy version must be a positive integer")
@@ -2238,6 +2285,7 @@ def normalize_strategy_source(
         raw_source.get("settings"),
         base=False,
         schema_version=schema_version,
+        family=family,
     )
     return normalized
 
@@ -2604,7 +2652,8 @@ def analyze_strategy_source(
     base_settings = base["settings"] if base is not None else {}
     local_settings = source["settings"]
     resolved: dict[str, dict[str, Any]] = {}
-    for setting_id in FARM_SETTING_REGISTRY:
+    family_registry = setting_registry_for_family(source["family"])
+    for setting_id in family_registry:
         inherited = base_settings.get(setting_id)
         local = local_settings.get(setting_id)
         if local is not None and local["policy"] == "ignore":
@@ -2645,7 +2694,7 @@ def analyze_strategy_source(
         }
 
     source_schema = source["schema_version"]
-    for setting_id, definition in FARM_SETTING_REGISTRY.items():
+    for setting_id, definition in family_registry.items():
         if definition.adapter != "loadout_definition":
             continue
         entry = resolved[setting_id]
@@ -2734,7 +2783,7 @@ def analyze_strategy_source(
         entry["definition_snapshot"] = snapshot
 
     errors: list[dict[str, Any]] = []
-    for setting_id, definition in FARM_SETTING_REGISTRY.items():
+    for setting_id, definition in family_registry.items():
         if resolved[setting_id]["state"] != "effective":
             continue
         missing = [
@@ -2790,7 +2839,7 @@ def describe_base_resolution(
             "id": base["id"],
             "display_name": base["display_name"],
             "family": base["family"],
-            "tier": 1,
+            "tier": 1 if base["family"] == "farm" else None,
             "version": 1,
             "base": {
                 "id": base["id"],
@@ -2854,9 +2903,15 @@ def diff_strategy_resolutions(
 
     before_settings = _resolution_settings(before_resolution)
     after_settings = _resolution_settings(after_resolution)
+    before_family = str(before_resolution.get("family") or "")
+    after_family = str(after_resolution.get("family") or "")
+    if before_family != after_family:
+        raise StrategyAuthoringError(
+            "strategy resolution review cannot change family"
+        )
     changed = []
     provenance_changed = []
-    for setting_id in FARM_SETTING_REGISTRY:
+    for setting_id in setting_registry_for_family(before_family):
         before_entry = before_settings[setting_id]
         after_entry = after_settings[setting_id]
         before_effective = _effective_resolution_view(before_entry)
@@ -2956,7 +3011,9 @@ def preview_strategy_rebase(
     local_overrides = []
     explicit_ignores = []
     local_settings = source["settings"]
-    for setting_id, definition in FARM_SETTING_REGISTRY.items():
+    for setting_id, definition in setting_registry_for_family(
+        source["family"]
+    ).items():
         local = local_settings.get(setting_id)
         before_entry = current_resolution["settings"][setting_id]
         after_entry = target_resolution["settings"][setting_id]
@@ -3111,6 +3168,64 @@ def legacy_farm_source_to_strategy_source(
     )
 
 
+def tournament_source_to_strategy_source(
+    source: object,
+    *,
+    display_name: object = None,
+) -> dict[str, Any]:
+    """Project the bundled Tournament contract into safe editable intent."""
+
+    if not isinstance(source, Mapping):
+        raise StrategyAuthoringError("Tournament source must be an object")
+    meta = source.get("meta")
+    if not isinstance(meta, Mapping):
+        raise StrategyAuthoringError("Tournament source requires meta")
+    if (
+        source.get("builder") != "tournament"
+        or source.get("run_profile") != "tournament"
+    ):
+        raise StrategyAuthoringError(
+            "source is not a protected Tournament profile"
+        )
+    if str(meta.get("family") or "tournament").strip().lower() != "tournament":
+        raise StrategyAuthoringError(
+            "Tournament source meta.family must be tournament"
+        )
+
+    from core.tournament_preflight import load_tournament_contract
+
+    contract = load_tournament_contract()
+    requirements = contract.requirements
+    settings: dict[str, dict[str, Any]] = {}
+    if contract.module_mode == "preserve":
+        settings["modules"] = {"policy": "ignore"}
+    else:
+        settings["modules"] = {
+            "policy": contract.module_mode,
+            "value": {"preset": contract.module_preset},
+        }
+    orb_distance = requirements["orb_distance"]
+    orb_mode = str(orb_distance.get("mode") or "").strip().lower()
+    if orb_mode == "preserve":
+        settings["orb_distance"] = {"policy": "ignore"}
+    else:
+        settings["orb_distance"] = {
+            "policy": orb_mode,
+            "value": {"preset": orb_distance.get("preset")},
+        }
+
+    return normalize_strategy_source(
+        {
+            "id": meta.get("name"),
+            "display_name": display_name,
+            "family": "tournament",
+            "tier": None,
+            "version": meta.get("version") or 1,
+            "settings": settings,
+        }
+    )
+
+
 def farm_source_from_resolution(
     strategy_source: object,
     resolution: object,
@@ -3231,6 +3346,85 @@ def farm_source_from_resolution(
             "settings": setup_settings,
         },
     }
+
+
+def tournament_source_from_resolution(
+    strategy_source: object,
+    resolution: object,
+) -> dict[str, Any]:
+    """Adapt editable Tournament loadouts into the protected builder input."""
+
+    source = normalize_strategy_source(strategy_source)
+    if source["family"] != "tournament":
+        raise StrategyAuthoringError(
+            "Tournament adapter requires a tournament strategy family"
+        )
+    resolved_settings = _resolution_settings(resolution)
+    loadout: dict[str, dict[str, Any]] = {}
+    for setting_id in TOURNAMENT_SETTING_IDS:
+        entry = resolved_settings[setting_id]
+        if entry.get("state") != "effective":
+            loadout[setting_id] = {"mode": "preserve"}
+            continue
+        policy = str(entry.get("policy") or "")
+        if policy not in {"enforce", "observe"}:
+            raise StrategyAuthoringError(
+                f"Tournament loadout setting {setting_id!r} has invalid "
+                f"policy {policy!r}"
+            )
+        snapshot = entry.get("definition_snapshot")
+        if not isinstance(snapshot, Mapping):
+            raise StrategyAuthoringError(
+                f"Tournament loadout setting {setting_id!r} lacks its "
+                "immutable definition snapshot"
+            )
+        definition = snapshot.get("definition")
+        if not isinstance(definition, Mapping):
+            raise StrategyAuthoringError(
+                f"Tournament loadout setting {setting_id!r} has an invalid "
+                "definition snapshot"
+            )
+        loadout_entry: dict[str, Any] = {
+            "mode": policy,
+            "resolved": copy.deepcopy(dict(definition)),
+        }
+        if snapshot.get("source") == "preset":
+            loadout_entry["preset"] = str(snapshot.get("preset") or "")
+        if setting_id == "orb_distance":
+            relationships = snapshot.get("range_relationships")
+            if not isinstance(relationships, list):
+                raise StrategyAuthoringError(
+                    "Tournament Orb Distance lacks retained range relationships"
+                )
+            loadout_entry["range_presets"] = copy.deepcopy(relationships)
+        loadout[setting_id] = loadout_entry
+
+    return {
+        "meta": {
+            "name": source["id"],
+            "family": "tournament",
+            "version": source["version"],
+        },
+        "builder": "tournament",
+        "run_profile": "tournament",
+        "loadout": loadout,
+    }
+
+
+def strategy_builder_source_from_resolution(
+    strategy_source: object,
+    resolution: object,
+) -> dict[str, Any]:
+    """Dispatch resolved intent to its protected family-specific adapter."""
+
+    source = normalize_strategy_source(strategy_source)
+    if source["family"] == "farm":
+        return farm_source_from_resolution(source, resolution)
+    if source["family"] == "tournament":
+        return tournament_source_from_resolution(source, resolution)
+    raise StrategyAuthoringError(
+        f"Unsupported strategy family {source['family']!r}"
+    )
 
 
 class StrategyBaseStore:
@@ -3586,10 +3780,16 @@ def _resolution_settings(resolution: object) -> Mapping[str, Any]:
     settings = resolution.get("settings")
     if not isinstance(settings, Mapping):
         raise StrategyAuthoringError("strategy resolution requires settings")
-    missing = [setting_id for setting_id in FARM_SETTING_REGISTRY if setting_id not in settings]
+    registry = setting_registry_for_family(resolution.get("family"))
+    missing = [setting_id for setting_id in registry if setting_id not in settings]
     if missing:
         raise StrategyAuthoringError(
             "strategy resolution is missing setting(s): " + ", ".join(missing)
+        )
+    extra = sorted(set(settings) - set(registry))
+    if extra:
+        raise StrategyAuthoringError(
+            "strategy resolution has unsupported setting(s): " + ", ".join(extra)
         )
     return settings
 
@@ -3607,19 +3807,21 @@ def _normalize_settings(
     *,
     base: bool,
     schema_version: int,
+    family: str,
 ) -> dict[str, Any]:
     if raw_settings is None:
         raw_settings = {}
     if not isinstance(raw_settings, Mapping):
         owner = "base" if base else "strategy"
         raise StrategyAuthoringError(f"{owner} settings must be an object")
-    unknown = sorted(set(raw_settings) - set(FARM_SETTING_REGISTRY))
+    registry = setting_registry_for_family(family)
+    unknown = sorted(set(raw_settings) - set(registry))
     if unknown:
         raise StrategyAuthoringError(
             "unknown setting ids: " + ", ".join(str(item) for item in unknown)
         )
     normalized: dict[str, Any] = {}
-    for setting_id in FARM_SETTING_REGISTRY:
+    for setting_id in registry:
         if setting_id not in raw_settings:
             continue
         directive = raw_settings[setting_id]
@@ -3842,6 +4044,8 @@ __all__ = [
     "FARM_LOADOUT_SETTING_IDS",
     "FARM_SETTING_REGISTRY",
     "FARM_SETUP_SETTING_IDS",
+    "SUPPORTED_AUTHORING_FAMILIES",
+    "TOURNAMENT_SETTING_IDS",
     "SettingDefinition",
     "StrategyAuthoringConflictError",
     "StrategyAuthoringError",
@@ -3860,6 +4064,10 @@ __all__ = [
     "preview_strategy_rebase",
     "rebase_review_fingerprint",
     "resolve_strategy_source",
+    "setting_registry_for_family",
     "setting_registry_catalog",
+    "strategy_builder_source_from_resolution",
+    "tournament_source_from_resolution",
+    "tournament_source_to_strategy_source",
     "upgrade_authoring_source_schema",
 ]

@@ -170,6 +170,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             Notify(nameof(EffectivePolicyDisplay));
             Notify(nameof(EffectiveValueDisplay));
             Notify(nameof(ProvenanceDisplay));
+            Notify(nameof(CapabilityDisplay));
         }
     }
 
@@ -457,9 +458,22 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         }
     }
 
-    public string CapabilityDisplay =>
-        $"Observation: {(_definition.ObservationSupported ? "available" : "unavailable")}"
-        + $" • Repair: {(_definition.RepairSupported ? "available" : "unavailable")}";
+    public string CapabilityDisplay
+    {
+        get
+        {
+            var behavior = SelectedSourceState?.Policy switch
+            {
+                "enforce" => "Enforce may change this setting at an authorized boundary.",
+                "observe" => "Observe compares and reports; it does not change this setting.",
+                "ignore" => "Ignore performs no check or change.",
+                _ => "Inherited or unmanaged behavior comes from the resolved source.",
+            };
+            return behavior
+                + $" Observation: {(_definition.ObservationSupported ? "available" : "unavailable")}"
+                + $" • Repair: {(_definition.RepairSupported ? "available" : "unavailable")}";
+        }
+    }
 
     public string EffectivePolicyDisplay => _resolution?.State switch
         {

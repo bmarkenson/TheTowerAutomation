@@ -858,13 +858,23 @@ the pending boundary set.
 ## Tournament exclusive validation and observer profile
 
 `Tournament` owns a one-shot exclusive validation before it becomes a passive
-single-battle observer. Its generated plan declares Tournament Cards, Demon
+single-battle observer. The immutable bundled default declares Tournament
+Cards, Demon
 Mode automatic recharge activation, Nuke manual-after-recharge activation,
 Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians,
 Tournament/Milestone modules, Poison Swamp Stun `on`, Damage Slider `100%`, the
 Range `98.38m` Orb Distance pair Extra `87.16m` / Workshop `80.37m`, all nine
 Ultimate Weapons, and Spotlight Missiles. Tournament battles have no Perks, so
 Perks and Auto Perks are outside this contract.
+
+Strategy Authoring exposes the bundled Tournament source for inspection and
+cloning while keeping it immutable. A custom Tournament-family variant may
+replace only its Module and Orb Distance directives, using either retained
+preset snapshots or profile-local definitions. `enforce` changes the setting
+at its existing authorized boundary, `observe` only compares and reports, and
+`ignore` preserves it. Every other Tournament requirement and every generated
+validation, launch, initialization, handler, and attachment rule remains the
+same protected builder output. Tournament variants remain tierless.
 
 Every explicit Tournament selection or managed process Start creates a durable
 validation request tied to the strategy request identity and the complete
@@ -886,9 +896,10 @@ following verified Home `NEW_BATTLE` before any Tournament begins.
 At verified Home `NEW_BATTLE`, the profile first completes every declared
 no-battle check: Tournament Cards, the Demon Mode/Nuke recharge activation
 modes, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians, the
-Tournament module loadout, and Poison Swamp Stun `on`. Damage Slider, Orb
-Distance, and Ultimate Weapon enablement remain explicitly deferred because
-their authoritative controls are battle-only.
+variant's enforced or observed module loadout, and Poison Swamp Stun `on`.
+An ignored Module directive performs no Module check or change. Damage Slider,
+Orb Distance, and Ultimate Weapon enablement remain explicitly deferred
+because their authoritative controls are battle-only.
 Exclusive validation claims staged one-run waivers tied to the same Tournament
 strategy request before Home setup, so a configured check skip applies to this
 path as well. An unwaived failed Home check consumes the request with its reason
@@ -900,8 +911,10 @@ never opens the Tournament screen or starts a Tournament battle.
 The disposable ordinary battle bypasses EHLS/EALS initialization without
 seeding either completion flag. It does not toggle Auto Perks. Session
 preflight enforces Damage Slider `100%`, reads Attack Range, enforces the
-matching configured Orb Distance pair for `30.00m` or `98.38m`, preserves any
-other readable experimental Range, then verifies all configured Ultimate
+matching configured Orb Distance relationship when that directive is
+enforced, only observes it when requested, or omits the check when ignored;
+the bundled relationships remain `30.00m` and `98.38m`, and any other readable
+experimental Range is preserved. It then verifies all configured Ultimate
 Weapon primary toggles and Spotlight Missiles. A
 conclusive pass or failure, or the bounded timeout, moves the same receipt to
 cleanup before any terminal input. Surrender is allowed only while the current
@@ -939,11 +952,11 @@ and continues observing normally.
 
 The genuine Tournament run performs the standard run-initialization route at
 its fresh boundary, maxing EHLS first and EALS second. Its battle-only session
-rules enforce Damage Slider `100%` and the configured Orb Distance pair before
-the remaining observer check completes. It then becomes passive except for
-game-speed maintenance, ad-gem collection, and terminal-result handling. An ad
-gem starts the same bounded floating-gem sweep used by Farm; the profile does
-not run an independent or continuous floating-gem handler. No Tournament
+rules enforce Damage Slider `100%` and apply the variant's Orb Distance policy
+before the remaining observer check completes. It then becomes passive except
+for game-speed maintenance, ad-gem collection, and terminal-result handling.
+An ad gem starts the same bounded floating-gem sweep used by Farm; the profile
+does not run an independent or continuous floating-gem handler. No Tournament
 battle gains validation-battle Surrender authority.
 
 Automatic validation of an already-running Tournament does not use the

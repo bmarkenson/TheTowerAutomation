@@ -61,6 +61,9 @@ from core.strategy_authoring import (
     rebase_review_fingerprint,
     resolve_strategy_source,
     setting_registry_catalog,
+    strategy_builder_source_from_resolution,
+    SUPPORTED_AUTHORING_FAMILIES,
+    tournament_source_to_strategy_source,
     upgrade_authoring_source_schema,
 )
 from tools.strategy_builders.lib import build_strategy_yaml
@@ -285,7 +288,7 @@ def load_published_strategy_plan(
 
 
 class StrategyProfileStore:
-    """Build, publish, and enumerate constrained Farm strategy profiles."""
+    """Build, publish, and enumerate constrained protected strategy profiles."""
 
     def __init__(
         self,
@@ -1260,6 +1263,14 @@ class StrategyProfileStore:
                     "Changing a published Strategy's pinned Base requires a "
                     "fresh reviewed rebase preview"
                 )
+        if (
+            current is not None
+            and current["source"].get("family") != proposed.get("family")
+        ):
+            raise StrategyProfileError(
+                "A published Strategy family is immutable; clone it under a "
+                "new id instead"
+            )
 
         validation = self.validate_authoring_strategy(raw_strategy)
         published = self.publish(
@@ -1389,6 +1400,15 @@ class StrategyProfileStore:
                 source,
                 display_name=_default_display_name(identifier),
             )
+        if identifier == "tournament":
+            source = _load_yaml_mapping(
+                self.builtin_strategies_directory / "tournament.source.yaml",
+                "bundled Tournament strategy source",
+            )
+            return tournament_source_to_strategy_source(
+                source,
+                display_name=_default_display_name(identifier),
+            )
         if identifier in _RESERVED_STRATEGY_IDS:
             return None
         path = _profile_path(self.profile_directory, identifier)
@@ -1504,7 +1524,10 @@ class StrategyProfileStore:
                 ),
                 module_preset_definitions=self._module_preset_definitions(),
             )
-            compact_source = farm_source_from_resolution(source, resolution)
+            compact_source = strategy_builder_source_from_resolution(
+                source,
+                resolution,
+            )
             plan = build_strategy_yaml(compact_source)
         except Exception as exc:
             raise StrategyProfileError(str(exc)) from exc
@@ -1524,13 +1547,13 @@ class StrategyProfileStore:
         rules = plan.get("rules")
         rule_count = len(rules) if isinstance(rules, list) else 0
         loadout = compact_source["loadout"]
-        setup = compact_source["setup"]
+        setup = compact_source.get("setup")
         return {
             "valid": True,
             "profile": {
                 "id": source["id"],
                 "display_name": normalized_display_name,
-                "family": "farm",
+                "family": source["family"],
                 "tier": source["tier"],
                 "version": source["version"],
                 "built_in": False,
@@ -1541,7 +1564,11 @@ class StrategyProfileStore:
                 "resolution_fingerprint": resolution_fingerprint,
                 "plan_fingerprint": plan_fingerprint,
                 "loadout": _copy_mapping(loadout),
-                "setup": _copy_mapping(setup),
+                "setup": (
+                    _copy_mapping(setup)
+                    if isinstance(setup, Mapping)
+                    else None
+                ),
             },
             "source": source,
             "base_snapshot": base_snapshot,
@@ -3242,11 +3269,14 @@ class StrategyProfileStore:
         identifier = normalize_strategy_id(strategy_id)
         if identifier is None:
             return None
-        if identifier in {"farm_t18", "farm_t19"}:
+        if identifier in {"farm_t18", "farm_t19", "tournament"}:
             source = self.authoring_source(identifier)
             if source is None:
                 return None
-            resolution = resolve_strategy_source(source)
+            resolution = resolve_strategy_source(
+                source,
+                module_preset_definitions=self._module_preset_definitions(),
+            )
             return {
                 "source": source,
                 "base_snapshot": None,
@@ -3312,7 +3342,7 @@ class StrategyProfileStore:
         item = _copy_mapping(summary)
         identifier = str(summary.get("id") or "")
         family = str(summary.get("family") or "").strip().lower()
-        if family != "farm" or identifier in {"tournament", "none"}:
+        if family not in SUPPORTED_AUTHORING_FAMILIES or identifier == "none":
             item.update(
                 {
                     "authoring_supported": False,
@@ -3322,9 +3352,9 @@ class StrategyProfileStore:
                     "compatible_base_revisions": [],
                     "base_update": None,
                     "read_only_reason": (
-                        "Tournament uses a dedicated protected strategy family."
-                        if identifier == "tournament"
-                        else "No Strategy contains no authorable runtime plan."
+                        "No Strategy contains no authorable runtime plan."
+                        if identifier == "none"
+                        else "This Strategy family has no authoring adapter."
                     ),
                 }
             )
@@ -3525,13 +3555,13 @@ class StrategyProfileStore:
     def _publication_item(publication: Mapping[str, Any]) -> dict[str, Any]:
         source = publication["source"]
         if publication["schema_version"] == STRATEGY_PUBLICATION_SCHEMA_VERSION:
-            compact_source = farm_source_from_resolution(
+            compact_source = strategy_builder_source_from_resolution(
                 source,
                 publication["resolution"],
             )
             meta = compact_source["meta"]
             loadout = compact_source["loadout"]
-            setup = compact_source["setup"]
+            setup = compact_source.get("setup")
         else:
             compact_source = source
             meta = source["meta"]
@@ -3549,7 +3579,11 @@ class StrategyProfileStore:
             "source_fingerprint": publication["source_fingerprint"],
             "plan_fingerprint": publication["plan_fingerprint"],
             "loadout": _copy_mapping(loadout),
-            "setup": _copy_mapping(setup),
+            "setup": (
+                _copy_mapping(setup)
+                if isinstance(setup, Mapping)
+                else None
+            ),
         }
 
     @staticmethod
@@ -4121,7 +4155,7 @@ def _current_revision_validation(revision: Mapping[str, Any]) -> dict[str, Any]:
             raise StrategyProfileError(
                 "stored resolution differs from current resolver output"
             )
-        compact = farm_source_from_resolution(source, resolution)
+        compact = strategy_builder_source_from_resolution(source, resolution)
         plan = build_strategy_yaml(compact)
         if plan != revision.get("plan"):
             raise StrategyProfileError(
@@ -4513,6 +4547,28 @@ def _default_display_name(identifier: str) -> str:
 
 
 def _profile_summary(source: Mapping[str, Any], rule_count: int) -> list[str]:
+    family = str(source.get("meta", {}).get("family") or "farm").strip().lower()
+    if family == "tournament":
+        loadout = source["loadout"]
+        summary = [
+            f"Tournament • protected generated workflow • {rule_count} rules",
+        ]
+        for setting in ("modules", "orb_distance"):
+            policy = loadout[setting]
+            detail = policy.get("preset")
+            if not detail and policy.get("resolved") is not None:
+                detail = "profile-local definition"
+            label = setting.replace("_", " ").title()
+            summary.append(
+                f"{label}: {policy['mode']}"
+                + (f" • {detail}" if detail else "")
+            )
+        summary.append(
+            "Validation battle, operator launch, session checks, and level-skip "
+            "rules remain protected."
+        )
+        return summary
+
     loadout = source["loadout"]
     setup = source["setup"]
     summary = [

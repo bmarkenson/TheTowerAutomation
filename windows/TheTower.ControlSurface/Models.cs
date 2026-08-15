@@ -2037,6 +2037,9 @@ public sealed class StrategySettingDefinition
     [JsonPropertyName("editor_type")]
     public string EditorType { get; set; } = "";
 
+    [JsonPropertyName("supported_families")]
+    public List<string> SupportedFamilies { get; set; } = [];
+
     [JsonPropertyName("allowed_policies")]
     public List<string> AllowedPolicies { get; set; } = [];
 

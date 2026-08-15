@@ -3,9 +3,12 @@
 This document defines the contract for GUI-authored strategy bases and
 strategies. The sparse model, immutable Base revisions, immutable custom
 Strategy lineages, restore-as-new workflow, and current Farm editors are
-implemented. Profile-local Module, Target Priority, and Orb definitions now
-have additive API discovery, managed native editors, and an explicit
-catalog-bound **Edit a copy...** transition from shared preset to local intent.
+implemented. The bundled Tournament profile is also projected as an immutable,
+cloneable authoring source whose custom variants may own Modules and Orb
+Distance while its validation, launch, and battle workflow remains protected.
+Profile-local Module, Target Priority, and Orb definitions have additive API
+discovery, managed native editors, and an explicit catalog-bound **Edit a
+copy...** transition from shared preset to local intent.
 Module presets also have one immutable installation-local custom catalog plus
 authoritative native eight-slot previews and save-as-new creation. The original
 Farm profile format remains supported as a compatibility facade.
@@ -18,7 +21,7 @@ the generic runtime already consumes.
 ## Goals and boundaries
 
 The editor should eventually expose every supported aspect of a strategy, not
-only Perk settings or the current Farm loadout fields. It must also allow an
+only the current family-scoped settings. It must also allow an
 operator to edit reusable bases such as `Farm` without making a base directly
 selectable as a runnable strategy.
 
@@ -43,9 +46,10 @@ additional resolution and review complexity.
 ### Setting definition
 
 A setting definition is registry metadata shared by validation, resolution,
-the API, and the GUI. It gives a stable setting ID its display label, section,
-editor type, allowed policies, normalizer and validator, dependencies, runtime
-destination, and observation or repair capabilities.
+the API, and the GUI. It gives a stable setting ID its supported strategy
+families, display label, section, editor type, allowed policies, normalizer and
+validator, dependencies, runtime destination, and observation or repair
+capabilities.
 
 The registry describes supported authoring inputs; it does not grant action
 authority. Generated-only rules, low-level taps, and executor sequencing are
@@ -88,6 +92,31 @@ An ignored local directive may retain a dormant value for authoring
 convenience. The resolver and generated runtime plan do not consume that value;
 it is available only so the operator can restore enforcement or observation
 without reconstructing the setting.
+
+### Tournament variants
+
+The bundled `Tournament` strategy is immutable but authoring-supported. The
+GUI shows its effective Modules and Orb Distance rows and enables **Clone
+Strategy**. A clone is a tierless custom Strategy in the `tournament` family;
+publication never edits the bundled source.
+
+Only Modules and Orb Distance are authorable for this family. Module
+`enforce` selects the resolved eight-slot loadout during the authorized Home
+preflight, `observe` compares and reports without equipping, and `ignore`
+preserves the current loadout. Orb Distance supports the same source policies;
+an active value is resolved to an exact retained range relationship, while
+`ignore` omits that battle-only check and change. Preset and profile-local
+definitions use the same immutable definition snapshots as Farm strategies.
+
+Cards, recharge modes, Workshop, Bots, Guardians, Ultimate Weapons, Damage
+Slider, the validation battle, explicit Tournament launch, EHLS/EALS order,
+handlers, and attachment behavior remain builder-owned. Tournament variants
+cannot edit or replace those generated rules. Their resolved Module and Orb
+requirements enter the ordinary `save_first` player-save preflight contract:
+an exact supported save match suppresses the corresponding UI route, while a
+missing, invalid, or differing boundary value retains the existing guarded UI
+behavior. Attachment remains observational and never gains repair authority
+from save evidence.
 
 ### Publication
 
@@ -244,9 +273,10 @@ each registered setting:
 | Absent | Absent | Unmanaged; no inspection or correction behavior is generated. |
 
 Resolution is generic and independent of strategy names. It returns both the
-resolved intent and provenance. The Farm builder then translates supported
-resolved settings into the existing compact builder contract and generated
-plan. `YamlStrategy` remains generic and never performs inheritance.
+resolved intent and provenance for the source family. The Farm and Tournament
+adapters then translate only their supported resolved settings into their
+existing protected builder contracts and generated plans. `YamlStrategy`
+remains generic and never performs inheritance.
 
 Resolution rejects unknown setting IDs, disallowed policies, invalid values,
 missing dependencies, incompatible base families, unavailable base revisions,
@@ -644,9 +674,9 @@ into the runtime evaluator:
   semantic history comparison, restore-as-new, and custom-Strategy retirement
   under the same catalog writer lock; the client never supplies a history,
   transaction, or archive path.
-- The Farm authoring adapter feeds resolved settings into the existing shared
-  strategy builder. Generated plans remain validated output, not user-authored
-  input.
+- Family-scoped Farm and Tournament authoring adapters feed resolved settings
+  into their existing protected strategy builders. Generated plans remain
+  validated output, not user-authored input.
 - The control-surface API is additive. Existing endpoints remain a compatibility
   facade while a capability/schema revision lets the new WPF client select the
   richer authoring model.
@@ -658,11 +688,12 @@ concurrency properties that the new stores must retain.
 
 ## Migration and delivery
 
-Existing schema-version-1 custom profiles are migrated conservatively: their
-current complete values become explicit local directives so behavior is
+Existing schema-version-1 custom Farm profiles are migrated conservatively:
+their current complete values become explicit local directives so behavior is
 preserved. Migration must not guess that a matching value was intended to be
-inherited. Bundled Farm and Tournament sources may be converted from known
-ownership because their source and generated plans are repository-controlled.
+inherited. Bundled Farm and Tournament sources are converted from known
+ownership because their source and generated plans are repository-controlled;
+the Tournament projection deliberately exposes only Modules and Orb Distance.
 
 Before the new publication format becomes active, regression fixtures must
 prove that resolving the migrated bundled and legacy examples produces the

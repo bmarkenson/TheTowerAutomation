@@ -39,6 +39,31 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-14 Tournament loadout authoring
+
+- This commit makes the immutable bundled Tournament source inspectable and
+  cloneable in Strategy Authoring. Custom tierless Tournament variants may
+  author Modules and Orb Distance through the existing preset or profile-local
+  editors; the GUI filters out unsupported Farm-only rows and explains that
+  `observe` never changes a setting while `enforce` may repair it only at its
+  authorized boundary.
+- The family-scoped resolver embeds exact Module and Orb definition snapshots,
+  and the Tournament adapter overlays them on the protected contract. Cards,
+  recharge modes, Workshop, Bots, Guardians, Damage Slider, Ultimate Weapons,
+  exclusive validation, operator launch, EHLS/EALS order, handlers, and
+  attachment behavior remain generated and uneditable.
+- Authored Tournament plans retain `save_first`. Exact supported save matches
+  suppress the corresponding UI route; mismatches and unsupported evidence
+  retain the existing per-field guarded fallback, and attachment remains
+  observational. The bundled Tournament source still rebuilds to its existing
+  generated plan exactly.
+- The complete non-live checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and 44 established informational orphans,
+  and all 2,732 Python tests in 428.15 seconds. Portable native authoring tests
+  passed all 192 tests. The Linux SDK lacks WindowsDesktop targets, so the WPF
+  application cross-build remains unavailable on this host; repository WPF
+  source-contract coverage passed. No process or device interaction was used.
+
 ### 2026-08-14 proactive BlueStacks maintenance policy
 
 - Code commit `5744255`, integrated at exact candidate `2c8d842`, adds three
