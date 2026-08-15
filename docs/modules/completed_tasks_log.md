@@ -57,7 +57,15 @@ resolved dossier instead of copying its detail.
   environment fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
   All 195 portable .NET tests and the Release WindowsDesktop cross-build also
-  passed. A real Windows host move remains the confirmation boundary for
+  passed.
+- After production advanced independently to `5d4065b`, refreshed merge
+  candidate `8baa874` retained that exact full-checkpoint evidence under the
+  invalidation rule and advanced the combined server/client contract to
+  revision 46. All 764 newly affected Python tests passed in 91.86 seconds,
+  all 197 portable .NET tests passed, and the Release WindowsDesktop
+  cross-build completed with zero errors. Its only warning was the established
+  read-only NuGet vulnerability-cache `NU1900`. A real Windows host move remains
+  the confirmation boundary for
   [`ISSUE-2026-017`](../issues/open-2026.md#live-adb-target-move-could-not-be-applied-by-a-paused-runtime).
 
 ### 2026-08-15 Automatic save-mapping promotion
