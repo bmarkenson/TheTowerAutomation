@@ -8,6 +8,186 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Exclusive Tournament validation discarded complete Home save evidence
+
+**Stable ID:** `ISSUE-2026-050` · **Lifecycle:** `resolved`
+
+- **Observed:** During the operator-authorized one-shot Tournament validation
+  on 2026-08-15 at 08:48 PDT, Home save-first preflight completed before the
+  runtime launched its owned ordinary battle.
+- **Symptom:** The version-1101 save supplied complete supported Cards,
+  Workshop, Bots, Guardians, and all eight Module assignments, yet the session
+  pass reopened every corresponding UI screen. The original bounded sequence
+  is retained in
+  [durable evidence](evidence/tournament-save-carry-gap-2026-08-15.md).
+- **Safety response:** The temporal owner rejected the unbound carrier instead
+  of associating it with RUNNING after the fact, so guarded UI remained
+  authoritative. The owned battle received exactly one Surrender, reached
+  Game Over, and returned Home.
+- **Cause:** The direct exclusive-validation launcher claimed its durable
+  battle owner and dispatched verified New Battle, but omitted the existing
+  `mark_runtime_launch()` transition used by ordinary Home launches. The first
+  stable RUNNING frame therefore found the carrier in `pending_launch` and
+  correctly invalidated it with `first_running_boundary_continuity_failed`.
+- **Resolution:** A conclusive exclusive-validation launch now advances a
+  pending save carrier only after retaining its required durable workflow
+  receipt. Uncertain dispatch or dispatched launch without a durable receipt
+  suspends the carrier; a conclusive miss discards it because the terminal
+  validation request has no replay. RUNNING observation still cannot
+  synthesize launch proof.
+- **Regression:** Tournament lifecycle coverage exercises a real
+  `CarriedPlayerSaveEvidence` through final-boundary authority, verified
+  dispatch, launch transition, stable RUNNING binding, and consumption of
+  Cards, Modules, Bots, and Guardians. Separate cases require suspension on
+  uncertainty and discard on a conclusive miss. The complete-bound-save
+  navigator regression requires zero Cards, Modules, Event/Bots,
+  Guild/Guardians, Workshop, or Ultimate Weapon UI navigation.
+- **Repository validation:** The focused Tournament lifecycle, player-save
+  preflight, and GC navigation suites passed all 184 tests. Exact code/test
+  candidate `67d442b` passed compilation, state-definition validation,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,850 repository tests in 426.68 seconds using development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Deployment:** Production advanced from `0d9f80e` to `9cc4a09` behind
+  rollback tag `production-before-20260815T161801Z-0d9f80e`; replacement
+  runtime `e3187359db534df19d1a69da77beae1b` acquired generation-1
+  `localhost:5555`, acknowledged Pause and Tournament, and published fresh
+  Home `NEW_BATTLE` evidence without device input.
+- **Production confirmation:** In the explicitly authorized 09:53 PDT
+  one-shot, the exact launch logged accepted `launch_dispatched`, and stable
+  RUNNING accepted the same carrier as `bound_running`. Session preflight
+  consumed save-backed Cards, Bots, Guardians, Workshop, Modules, and Ultimate
+  Weapons; the complete in-battle input inventory contained none of their UI
+  routes. Only the intentionally unmapped Orb Distance tuple used UI. The same
+  receipt then completed its one-Surrender cleanup and returned to verified
+  Home. The bounded confirmation is retained in
+  [durable evidence](evidence/tournament-validation-repair-confirmation-2026-08-15.md).
+- **Fixed by:** `d6511b5` (exact candidate `67d442b`, deployed in `9cc4a09`).
+
+### Assist module assignments always fell back to Modules UI
+
+**Stable ID:** `ISSUE-2026-048` · **Lifecycle:** `resolved`
+
+- **Observed:** Post-deployment Tournament save checks on 2026-08-14 and
+  2026-08-15 rejected version-1101 Assist assignments as a missing field.
+- **Symptom:** The otherwise complete save selected the full Modules UI
+  fallback. That observation-only screen named only four Primary assignments,
+  so it appeared inert while correctly performing no repair. The bounded
+  production and shape evidence is retained in
+  [durable evidence](evidence/assist-module-assignment-field-2026-08-15.md).
+- **Cause:** Both exact mappings and their synthetic fixture named the Assist
+  assignment member `module`; the stable serialized `AssistModuleSlot` shape
+  instead contains exactly one `equippedModule: ModuleItem` member.
+- **Safety response:** Diagnosis retained only member names and value types.
+  It retained no raw save, decoded object, Module ID, GUID, inventory, account
+  data, or screenshot, and changed no Module assignment.
+- **Resolution:** Both versioned mapping owners now name `equippedModule`, and
+  the independent synthetic shape matches it. Exact null remains the only
+  supported empty Assist assignment. Missing fields, changed types, extra
+  `ModuleItem` members, and ambiguous absence still fail closed to UI.
+- **Regression and validation:** A regression proves the old `module` alias
+  cannot satisfy the contract. All 192 player-save tests passed; exact
+  aggregate candidate `bb36ad8` passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 2,825 repository tests in 431.08 seconds.
+- **Production confirmation:** Production commit `95bd630` first decoded all
+  eight version-1101 assignments, but the independent carrier defect still
+  reopened Modules. The 09:53 PDT post-carrier-repair one-shot consumed all
+  eight assignments from `bound_player_save_preflight`, reported the expected
+  observation-only variations, and opened no Modules UI. The bounded
+  confirmation is retained in
+  [durable evidence](evidence/tournament-validation-repair-confirmation-2026-08-15.md).
+- **Fixed by:** `73dbb06` (exact candidate `bb36ad8`, deployed in `95bd630`).
+
+### Exclusive validation denied its own strategy and cleanup input
+
+**Stable ID:** `ISSUE-2026-046` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-12, and again on 2026-08-15, explicitly authorized
+  ordinary Tournament-validation battles started but received no Damage
+  Slider, Orb Distance, Ultimate Weapon, or session-preflight action. Each
+  free-ran to the five-minute timeout; the recurrence reached Game Over and
+  stayed there until the operator navigated manually. The bounded sequences
+  are retained in
+  [durable evidence](evidence/exclusive-validation-authority-mismatch-2026-08-12.md).
+- **Cause:** Strict typed-owner matching published `EXCLUSIVE_VALIDATION`
+  while the battle-only strategy tick requested `SESSION_PREFLIGHT`; exact
+  matching denied every validation action. Game Over had the same hold but no
+  matching exclusive-validation lifecycle dispatcher. The adjacent audit also
+  found incomplete guard transport into nested actions, confirmed-launch
+  inputs, blockers, target handoff, and fallible receipt boundaries.
+- **Resolution:** One heartbeat resolver now selects the typed hold once, and
+  the same exact `EXCLUSIVE_VALIDATION` owner drives claimed launch,
+  battle-only strategy ticks, timeout Surrender, Game Over cleanup, and
+  confirmed Tournament launch. Every final mutation refreshes operator and
+  stronger-owner state. Start and terminal proof is retained before fallible
+  persistence; retries write receipts only. Uncertain or failed post-dispatch
+  boundaries retain suppressive ownership, and a later unrelated RUNNING
+  frame after proved Game Over is quarantined and releases the old receipt
+  without recovery input before any successor adoption.
+- **Regression:** Main-loop and real-manager coverage exercises successive
+  Damage Slider, Orb Distance, session-preflight, timeout, Surrender, Game Over,
+  verified-Home, persistence-retry, later-RUNNING quarantine, Pause,
+  target-handoff, owner-priority, nested-input, Free Ticket, and uncertain
+  Tournament launch paths. Exact candidate `bb36ad8` passed all 2,825 tests;
+  cross-owner candidate `240b63f` later passed all 2,847 tests, compilation,
+  state definitions, and clickmap integrity with zero errors and the
+  established 44 orphan notices.
+- **Deployment:** The base repair reached production in `95bd630`; cross-owner
+  hardening reached production in `f902a91`. Both deployments started the
+  replacement automation Paused and preserved the then-current battle without
+  device input.
+- **Production confirmation:** The explicitly authorized 09:53 PDT one-shot
+  ran each declared phase under its exact receipt: save-backed Damage Slider,
+  Orb Distance verification, and complete session preflight. It then opened
+  Exit Battle, dispatched exactly one Surrender, proved Game Over, tapped Home
+  once, persisted `ready`, and freshly proved Home `NEW_BATTLE`. The following
+  Pause acknowledgement denied a raced Home ad-gem input at its final guard.
+  The bounded confirmation is retained in
+  [durable evidence](evidence/tournament-validation-repair-confirmation-2026-08-15.md).
+- **Fixed by:** `bb36ad8` (deployed in `95bd630`) and `f3cf804` (exact
+  aggregate candidate `240b63f`, deployed in `f902a91`).
+
+### Owned validation cleanup survived a later running-battle transition
+
+**Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `resolved`
+
+- **Observed:** During a 2026-08-02 one-shot ordinary Tournament validation,
+  automation Surrendered its claimed battle and proved Game Over, but a
+  different running Tier 21 battle appeared before verified Home cleanup. The
+  old receipt remained in `cleanup` for about 97 minutes and suppressed
+  otherwise eligible automation.
+- **Evidence:** The historical action log proved the claim, Surrender, Game
+  Over, later `GAME_OVER -> RUNNING` transition without an intervening
+  automation input, and eventual guarded owner replacement. The source of that
+  unlogged transition remains unknown.
+- **Safety response:** Recovery did not Surrender, exit, or restart the later
+  active battle. Guarded replacement failed the old receipt without device
+  input and restored eligible observation/collection. Commit `bba06e9` also
+  repaired the replacement-runtime hold after authoritative later-battle
+  continuity.
+- **Cause and resolution:** The missing typed Game Over cleanup dispatcher was
+  the same defect tracked in `ISSUE-2026-046`. Successful Surrender now retains
+  process-local Game Over proof. If verified Home cleanup fails and a later
+  RUNNING frame appears, the transition is quarantined before workflow or
+  battle adoption; the runtime persists a failed old result, performs no Home,
+  Surrender, Retry, strategy, or handler input, consumes the old lifecycle,
+  rotates scope, and allows only a later heartbeat to adopt the successor.
+- **Regression:** A real-manager/main-loop case proves successful Surrender,
+  failed Home cleanup, and later RUNNING cause zero transition-frame input,
+  one failed old result, one lifecycle finalization, and successor adoption
+  only on the following heartbeat.
+- **Production confirmation:** The 09:53 PDT owned one-shot exercised the
+  repaired ordinary path through exactly one Surrender, Game Over, verified
+  Home cleanup, durable result, released exclusive authority, and final Pause
+  denial. The unexplained historical successor transition was not
+  manufactured; its fail-closed behavior remains regression-proven. The
+  bounded success-path confirmation is retained in
+  [durable evidence](evidence/tournament-validation-repair-confirmation-2026-08-15.md).
+- **Fixed by:** `bba06e9`, `bb36ad8` (deployed in `95bd630`), and `f3cf804`
+  (exact aggregate candidate `240b63f`, deployed in `f902a91`).
+
 ### Tournament session preflight rejected its mapping-observation callback
 
 **Stable ID:** `ISSUE-2026-049` · **Lifecycle:** `resolved`
@@ -45,7 +225,7 @@ and actionable work lives in
   PDT, and completed the owned validation lifecycle without an unexpected-
   keyword exception. The separate reason those duplicate UI routes were
   selected is tracked as
-  [`ISSUE-2026-050`](open-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence).
+  [`ISSUE-2026-050`](#exclusive-tournament-validation-discarded-complete-home-save-evidence).
 - **Fixed by:** `bb36ad8` (deployed in `95bd630`).
 
 ### Start Battle intent was rejected after its Strategy applied at Home

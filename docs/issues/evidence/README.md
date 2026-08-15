@@ -4,6 +4,14 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-15 Tournament validation repair confirmation
+
+[`tournament-validation-repair-confirmation-2026-08-15.md`](tournament-validation-repair-confirmation-2026-08-15.md)
+preserves the accepted save-carrier launch and RUNNING bindings, save-backed
+session consumption without duplicate inventory UI, exact owned cleanup, and
+Pause final-input denial used to close `ISSUE-2026-001`, `ISSUE-2026-046`,
+`ISSUE-2026-048`, and `ISSUE-2026-050`.
+
 ## 2026-08-15 Tournament validation save-carry gap
 
 [`tournament-save-carry-gap-2026-08-15.md`](tournament-save-carry-gap-2026-08-15.md)

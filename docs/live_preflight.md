@@ -10,7 +10,7 @@ screen, or task scope changes.
 
 ## Required reading
 
-1. Read the 218-word
+1. Read the compact
    [`Global live-preflight hazards`](observed_issues.md#global-live-preflight-hazards)
    section. Load a domain issue row or full dossier only when its stated
    condition matches the task or observed symptom.

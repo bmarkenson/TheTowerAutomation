@@ -33,51 +33,6 @@ current runtime state.
   [state/recovery
   backlog](backlog/state-and-detection.md#state-coverage-and-recovery).
 
-### Owned validation cleanup survived a later running-battle transition
-
-**Stable ID:** `ISSUE-2026-001` · **Lifecycle:** `repair_awaiting_confirmation`
-
-- A cleanup receipt kept exclusive authority after its
-  claimed battle reached Game Over and a different battle appeared; after that
-  sequence, fail closed, release the receipt, and perform no recovery input.
-- Load the [dossier](issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition)
-  before claiming, cleaning, replacing, or recovering an exclusive-validation
-  battle. The missing same-battle Game Over dispatch and the fail-closed later-
-  `RUNNING` release now have one repository repair under `ISSUE-2026-046`; the
-  source of the historical later transition remains unknown. Production
-  commit `95bd630` contains the base repair, and current-main code candidate
-  `f3cf804` adds cross-owner hardening; exact aggregate candidate `240b63f`
-  passed the complete checkpoint and is deployed in production commit
-  `f902a91`. Next: safely confirm without manufacturing a battle transition;
-  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
-
-### Exclusive validation denied its own strategy and cleanup input
-
-**Stable ID:** `ISSUE-2026-046` · **Lifecycle:** `repair_awaiting_confirmation`
-
-- The exact-owner hold for an ordinary Tournament-validation battle conflicted
-  with its session-preflight caller, so the battle free-ran until timeout; the
-  same hold also had no matching Game Over lifecycle dispatch. The repair gives
-  validation, cleanup, and confirmed launch one exact typed owner while still
-  letting Pause or a stronger operator workflow interrupt every final input;
-  single-frame start/terminal proof survives Pause, continuity, and receipt
-  failures; terminal or passive-battle proof quarantines successor adoption,
-  Strategy replacement, and target handoff until the old boundary is durably
-  released. Unknown and incompletely classified post-dispatch screens retain
-  that suppressive boundary; they are not treated as proof that no battle
-  started. The same exact-owner handoff now covers a Free Ticket blocker,
-  typed Tournament-launch uncertainty, and durable owners that arrive between
-  a heartbeat and the next final input guard.
-- Load the [dossier](issues/open-2026.md#exclusive-validation-denied-its-own-strategy-and-cleanup-input)
-  before running or changing exclusive validation, confirmed Tournament launch,
-  Free Ticket recovery, or typed action-authority routing. Production commit
-  `95bd630` contains the base repair; current-main code candidate `f3cf804`
-  adds cross-owner hardening, and exact aggregate candidate `240b63f` passed
-  the complete checkpoint and is deployed in production commit `f902a91`.
-  Next: confirm the multi-phase validation and verified Home cleanup at an
-  explicitly authorized safe boundary; [runtime
-  backlog](backlog/runtime-and-validation.md#runtime-control).
-
 ### Start Battle replaced a newer No Strategy selection with stale Tournament state
 
 **Stable ID:** `ISSUE-2026-047` · **Lifecycle:** `repair_awaiting_confirmation`
@@ -248,39 +203,6 @@ current runtime state.
   wrapper termination, crash, and manual activity; [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ## Repairs awaiting confirmation
-
-### Exclusive Tournament validation discarded complete Home save evidence
-
-**Stable ID:** `ISSUE-2026-050` · **Lifecycle:** `repair_awaiting_confirmation`
-
-- An owned one-shot accepted complete version-1101 Cards, Workshop, Bots,
-  Guardians, and all eight Module assignments at Home, but its direct New
-  Battle launcher did not arm the carrier. The first RUNNING frame correctly
-  invalidated that unbound evidence, so session preflight reopened every UI
-  fallback.
-- Load the [dossier](issues/open-2026.md#exclusive-tournament-validation-discarded-complete-home-save-evidence)
-  before changing exclusive-validation launch, Home save carry, or duplicate
-  Tournament session navigation. Production commit `9cc4a09` contains the
-  repair. Next: confirm one explicitly authorized one-shot binds the carrier
-  and omits duplicate UI;
-  [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
-
-### Assist module assignments always fell back to Modules UI
-
-**Stable ID:** `ISSUE-2026-048` · **Lifecycle:** `repair_awaiting_confirmation`
-
-- The deployed version-1073/1101 mappings named the Assist assignment member
-  `module`, while stable version-1101 saves expose `equippedModule`; the
-  synthetic fixture repeated the wrong name. Complete assignments therefore
-  became `ui_required`, and Tournament's observation-only policy correctly
-  inspected but did not repair them.
-- Load the [dossier](issues/open-2026.md#assist-module-assignments-always-fell-back-to-modules-ui)
-  before changing Module save shape, exact empty-slot semantics, or the
-  save/UI fallback. Production commit `95bd630` contains the exact-field
-  repair. The next Home decode reported all eight, but the independent
-  `ISSUE-2026-050` carrier defect still selected session UI. Next: confirm one
-  post-repair ordinary boundary stays save-backed without opening Modules UI;
-  [validation backlog](backlog/runtime-and-validation.md#current-validation-gates).
 
 ### Farm Bot preset switch required more Event medals than were available
 
