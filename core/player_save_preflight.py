@@ -117,7 +117,18 @@ class PlayerSavePreflightContext:
     target_generation: int
 
     def matches(self, other: "PlayerSavePreflightContext") -> bool:
-        return self == other
+        """Match the operation owner; activity scope is report metadata only."""
+
+        return bool(
+            isinstance(other, PlayerSavePreflightContext)
+            and self.runtime_session_id == other.runtime_session_id
+            and self.preflight_session_id == other.preflight_session_id
+            and self.strategy_name == other.strategy_name
+            and self.configuration_fingerprint
+            == other.configuration_fingerprint
+            and self.target == other.target
+            and self.target_generation == other.target_generation
+        )
 
     def redacted(self) -> dict[str, Any]:
         return {

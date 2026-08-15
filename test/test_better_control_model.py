@@ -1233,7 +1233,9 @@ def _runtime_acknowledgements(
     }
 
 
-def test_attachment_context_allows_one_expected_scope_rebind(monkeypatch):
+def test_attachment_context_treats_scope_rebind_as_projection_metadata(
+    monkeypatch,
+):
     app = App.__new__(App)
     session = MagicMock()
     session.snapshot.return_value = SimpleNamespace(
@@ -1257,15 +1259,11 @@ def test_attachment_context_allows_one_expected_scope_rebind(monkeypatch):
         lambda: {"run_id": "scope-after-continuity"},
     )
 
-    with pytest.raises(RuntimeError, match="workflow binding changed"):
-        app._current_player_save_attachment_context()
-    with pytest.raises(RuntimeError, match="workflow binding changed"):
+    context = app._current_player_save_attachment_context()
+    unrelated_transition_context = (
         app._current_player_save_attachment_context(
             transition_source_activity_scope_id="unrelated-scope"
         )
-
-    context = app._current_player_save_attachment_context(
-        transition_source_activity_scope_id="scope-before-continuity"
     )
 
     assert context == PlayerSaveAttachmentContext(
@@ -1275,6 +1273,7 @@ def test_attachment_context_allows_one_expected_scope_rebind(monkeypatch):
         target_generation=7,
         active_battle_observed=True,
     )
+    assert unrelated_transition_context == context
 
 
 @pytest.mark.parametrize(
@@ -2045,6 +2044,15 @@ def test_start_dispatch_survives_preflight_scope_change_and_completes(
     assert supervisor.battle_workflow["status"] == "action_dispatched"
     battle_started = manager.maybe_run_start({"state": "RUNNING"})
     assert battle_started is True
+    start_workflow_completed = app._complete_started_battle_workflow(
+        battle_started
+    )
+    assert start_workflow_completed is False
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
+
+    # Visual RUNNING is not battle identity.  Start remains pending until the
+    # forced serialization binds the save's canonical active-round ID.
+    app._active_round_identity_fingerprint = "a" * 64
     start_workflow_completed = app._complete_started_battle_workflow(
         battle_started
     )

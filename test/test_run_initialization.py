@@ -3485,7 +3485,10 @@ class PausedStartupObservationTests(unittest.TestCase):
 
         thread.return_value.start.assert_called_once_with()
         detect.assert_called_once_with(frame, log_matches=False)
-        manager.maybe_run_start.assert_called_once()
+        # A paused RUNNING frame is not proof that the retained battle is
+        # still active.  Lifecycle adoption waits for the forced save ID after
+        # automation is enabled.
+        manager.maybe_run_start.assert_not_called()
         app._state_tracker.update.assert_called_once()
         app._status_reporter.maybe_report.assert_called_once_with(
             img=frame,
@@ -3562,7 +3565,9 @@ class PausedStartupObservationTests(unittest.TestCase):
         ):
             app.run()
 
-        manager.maybe_run_start.assert_called_once()
+        # Do not mutate visual lifecycle state while battle identity is
+        # deliberately non-authoritative during Pause.
+        manager.maybe_run_start.assert_not_called()
         manager.tick.assert_not_called()
         manager.handle_overlays.assert_not_called()
         manager.on_state.assert_not_called()

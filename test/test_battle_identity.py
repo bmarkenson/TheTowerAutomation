@@ -6,6 +6,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from automation.missions.manager import MissionManager
+from core.app import App
 from core.battle_identity import (
     ActiveBattleIdentityCoordinator,
     BattleIdentityCheckContext,
@@ -23,6 +25,10 @@ from core.player_save_acquisition import (
 from core.player_save_serialization import (
     GuardedSerializationResult,
     GuardedSerializationStatus,
+)
+from core.player_save_preflight import (
+    PlayerSavePreflightResult,
+    PlayerSavePreflightStatus,
 )
 from core.runtime_save import ActiveRoundIdentity
 
@@ -256,6 +262,137 @@ def test_coordinator_never_falls_back_from_inactive_or_unreadable_save(tmp_path)
     )
     assert result.source_restored
     assert result.recapture_required
+
+
+def test_visual_lifecycle_repairs_a_boundary_hidden_during_pause():
+    manager = MissionManager(None, None)
+    manager.start()
+    assert manager.maybe_run_start({"state": "RUNNING"}) is True
+    assert manager.active_battle_observed() is True
+
+    assert manager.observe_active_round_identity(
+        _identity().fingerprint,
+        changed_from_retained=False,
+    ) is False
+    assert manager.observe_active_round_identity(
+        _identity(seed=98765, counter=10).fingerprint,
+        changed_from_retained=True,
+    ) is True
+    assert manager.active_battle_observed() is False
+    assert manager.maybe_run_start({"state": "RUNNING"}) is True
+
+
+def test_home_new_battle_requires_forced_inactive_save(tmp_path):
+    app = App.__new__(App)
+    app._battle_identity_store = BattleIdentityStore(
+        tmp_path / "battle_identity.json"
+    )
+    app._player_save_preflight_session_id = "home-check-1"
+    app._player_save_preflight_coordinator = Mock()
+    app._flag_recoverable_runtime_failure = Mock()
+    result = PlayerSavePreflightResult(
+        PlayerSavePreflightStatus.READY,
+        "save_reconciled",
+        "save_first",
+        {},
+        {},
+        False,
+        acquisition=_acquisition(None),
+    )
+
+    bound = app._bind_forced_home_inactive_identity(result)
+
+    assert bound.ready
+    assert app._battle_identity_home_verified_preflight_id == "home-check-1"
+    assert app._battle_identity_store.active() is None
+    app._flag_recoverable_runtime_failure.assert_not_called()
+
+
+def test_home_new_battle_rejects_forced_active_save(tmp_path):
+    app = App.__new__(App)
+    app._battle_identity_store = BattleIdentityStore(
+        tmp_path / "battle_identity.json"
+    )
+    app._player_save_preflight_session_id = "home-check-1"
+    app._player_save_preflight_coordinator = Mock()
+    app._flag_recoverable_runtime_failure = Mock()
+    result = PlayerSavePreflightResult(
+        PlayerSavePreflightStatus.READY,
+        "save_reconciled",
+        "save_first",
+        {},
+        {},
+        False,
+        acquisition=_acquisition(_identity()),
+    )
+
+    blocked = app._bind_forced_home_inactive_identity(result)
+
+    assert blocked.status is PlayerSavePreflightStatus.BLOCKED
+    assert blocked.reason == "home_inactive_round_identity_unavailable"
+    assert app._battle_identity_store.active() is None
+    app._player_save_preflight_coordinator.discard_carry.assert_called_once()
+
+
+def test_running_start_binds_forced_identity_before_completion(tmp_path):
+    app = App.__new__(App)
+    workflow = {
+        "request_id": "start-1",
+        "intent": "start_battle",
+        "status": "action_dispatched",
+    }
+    app._supervisor = SimpleNamespace(
+        is_paused=False,
+        battle_workflow=workflow,
+        manual_control=None,
+    )
+    app._mission_mgr = Mock()
+    app._mission_mgr.active_battle_observed.return_value = False
+    app._mission_mgr.observe_active_round_identity.return_value = False
+    app._player_save_runtime_session_id = "runtime-1"
+    app._adb_target_session = SimpleNamespace(
+        snapshot=lambda: SimpleNamespace(
+            target="localhost:5555",
+            generation=7,
+            owned=True,
+        )
+    )
+    identity = _identity()
+    acquisition = _acquisition(identity)
+    result = SimpleNamespace(
+        complete=True,
+        identity=identity,
+        relation=BattleIdentityRelation.FIRST_OBSERVATION,
+        acquisition=acquisition,
+    )
+    app._battle_identity_coordinator = Mock()
+    app._battle_identity_coordinator.bind.return_value = result
+    app._battle_identity_store = BattleIdentityStore(
+        tmp_path / "battle_identity.json"
+    )
+    app._update_action_authority = Mock()
+    app._runtime_action_guard = Mock(return_value=True)
+    app._publish_forced_battle_identity_bundle = Mock()
+    app._battle_identity_reconciliation_required = True
+    app._active_round_identity_fingerprint = None
+
+    consumed = app._force_battle_identity(
+        {"state": "RUNNING"},
+        object(),
+    )
+
+    assert consumed is True
+    assert app._active_round_identity_fingerprint == identity.fingerprint
+    assert app._battle_identity_reconciliation_required is False
+    app._mission_mgr.observe_active_round_identity.assert_called_once_with(
+        identity.fingerprint,
+        changed_from_retained=False,
+    )
+    app._publish_forced_battle_identity_bundle.assert_called_once_with(
+        acquisition,
+        relation=BattleIdentityRelation.FIRST_OBSERVATION,
+        identity_fingerprint=identity.fingerprint,
+    )
 
 
 def test_coordinator_preserves_serializer_block_classification(tmp_path):

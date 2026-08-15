@@ -9358,7 +9358,6 @@ class App:
         if (
             not isinstance(current, Mapping)
             or current.get("game_state") != "active_battle"
-            or not current.get("activity_scope_run_id")
             or type(current.get("target_generation")) is not int
             or int(current["target_generation"]) < 1
         ):
@@ -9392,7 +9391,6 @@ class App:
                         "pid",
                         "adb_target",
                         "target_generation",
-                        "activity_scope_run_id",
                     )
                 )
                 if fields_match:
@@ -9405,17 +9403,14 @@ class App:
         transition_source_activity_scope_id: Optional[str] = None,
         pending_adoption_workflow_id: Optional[str] = None,
     ) -> PlayerSaveAttachmentContext:
-        """Return exact process/scope authority for a RUNNING attachment.
+        """Return process/target context for a RUNNING save projection.
 
-        A continuity comparison can durably replace the activity scope before
-        the next captured frame publishes that new scope. During that single
-        recapture boundary, accept only the source scope carried by the same
-        forced-save claim. A retained ready claim may also be revalidated just
-        before observation-only lifecycle adoption; that exception is scoped
-        to the exact process-local workflow and cannot authorize another save
-        read. Every other owner, target, generation, or scope mismatch still
-        fails closed.
+        ``activity_scope_id`` remains projection metadata for existing report
+        consumers.  It is deliberately not checked as battle authority; the
+        forced save's ``ActiveRoundIdentity`` owns that decision.
         """
+
+        del transition_source_activity_scope_id
 
         session = self._adb_target_session
         if session is None:
@@ -9471,23 +9466,8 @@ class App:
                 "player-save attachment battle identity is not active"
             )
         if reconciliation_owner is not None or pending_adoption_owner:
-            observed_scope_id = (
-                str(current.get("activity_scope_run_id") or "")
-                if isinstance(current, Mapping)
-                else ""
-            )
-            source_scope_id = str(
-                transition_source_activity_scope_id or ""
-            ).strip()
-            scope_matches = observed_scope_id == scope_id
-            expected_transition = bool(
-                source_scope_id
-                and source_scope_id != scope_id
-                and observed_scope_id == source_scope_id
-            )
             if (
-                not (scope_matches or expected_transition)
-                or not isinstance(current, Mapping)
+                not isinstance(current, Mapping)
                 or current.get("target_generation") != target.generation
             ):
                 raise RuntimeError(
