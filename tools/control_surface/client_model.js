@@ -149,7 +149,10 @@
       integration_recovery_required: 1,
       restaging_required: 1,
       promotion_pending: 2,
-      production_validation_pending: 3,
+      automatic_integration_pending: 2,
+      promotion_cleanup_pending: 3,
+      remote_publication_pending: 3,
+      production_validation_pending: 4,
       authority_pending: 4,
       active_local: 5,
       review_required: 6,
@@ -171,6 +174,9 @@
       "integration_recovery_required",
       "restaging_required",
       "promotion_pending",
+      "automatic_integration_pending",
+      "promotion_cleanup_pending",
+      "remote_publication_pending",
       "production_validation_pending",
     ].includes(String(item?.state || ""))).sort((left, right) => (
       (statePriority[left?.state] ?? 99) - (statePriority[right?.state] ?? 99)
@@ -200,7 +206,13 @@
       : winningState === "restaging_required"
         ? "Save mapping must be restaged on current main"
       : winningState === "promotion_pending"
-        ? "Save mapping awaiting production promotion"
+        ? "Verified save mapping queued for automatic promotion"
+      : winningState === "automatic_integration_pending"
+        ? "Verified save mapping queued for automatic integration"
+      : winningState === "promotion_cleanup_pending"
+        ? "Published save mapping awaiting automatic cleanup"
+      : winningState === "remote_publication_pending"
+        ? "Save mapping awaiting automatic publication"
       : winningState === "production_validation_pending"
         ? "Deployed save mapping awaiting fresh validation"
       : winningState === "authority_pending"
@@ -337,12 +349,18 @@
 
   function saveMappingIntegrationCompatible(status) {
     return status?.api_version === 1
-      && Number(status?.server_revision) >= 44
+      && Number(status?.server_revision) >= 45
       && (status?.capabilities || []).includes(
         "save_mapping_staged_candidate_v1",
       )
       && (status?.capabilities || []).includes(
         "save_mapping_candidate_disposition_v1",
+      )
+      && (status?.capabilities || []).includes(
+        "save_mapping_automatic_promotion_v1",
+      )
+      && (status?.capabilities || []).includes(
+        "save_mapping_machine_verification_v1",
       );
   }
 
@@ -431,12 +449,26 @@
         && target.changed === reviewed.changed
         && target.mode === reviewed.mode
       )));
+    const promoted = result?.disposition === "promoted"
+      && result?.promoted === true
+      && result?.published === true
+      && result?.automatic_retry === false;
+    const queued = result?.disposition === "promotion_queued"
+      && typeof result?.promoted === "boolean"
+      && typeof result?.published === "boolean"
+      && (result.published === false || result.promoted === true)
+      && result?.automatic_retry === true
+      && typeof result?.code === "string"
+      && result.code.length > 0
+      && typeof result?.reason === "string"
+      && result.reason.length > 0
+      && typeof result?.agent_review_prompt === "string";
     const valid = result
       && typeof result === "object"
       && result.schema_version === 3
       && result.capability === "save_mapping_staged_candidate_v1"
-      && result.operation === "stage"
-      && result.disposition === "staged_for_promotion"
+      && result.operation === "integrate"
+      && (promoted || queued)
       && typeof result.idempotent === "boolean"
       && expectedCandidate.length > 0
       && result.candidate_record_id === expectedCandidate
@@ -448,7 +480,10 @@
       && result.committed === true
       && result.staged === true
       && typeof result.promoted === "boolean"
-      && (result.promoted !== true || result.idempotent === true)
+      && typeof result.published === "boolean"
+      && typeof result.agent_required === "boolean"
+      && typeof result.next_action === "string"
+      && result.next_action.length > 0
       && result.mapping_invariants === "passed"
       && result.promotion_validation === "pending"
       && targets.length > 0
@@ -461,7 +496,7 @@
       code: valid ? "" : "integrated_result_invalid",
       reason: valid
         ? ""
-        : "The server response did not prove this exact reviewed proposal was staged without moving main.",
+        : "The server response did not prove this exact reviewed proposal was promoted or durably queued for automatic promotion.",
     };
   }
 
@@ -476,18 +511,28 @@
     if (!validation.valid) {
       return {
         success: false,
-        title: "Staging outcome is unconfirmed",
+        title: "Integration outcome is unconfirmed",
         detail: `${validation.reason} Refresh the catalog before taking another action.`,
         code: validation.code,
       };
     }
     const changed = result.targets.filter((target) => target.changed).length;
+    if (result.disposition === "promotion_queued") {
+      return {
+        success: false,
+        title: result.published
+          ? "Mapping published; cleanup queued"
+          : result.promoted
+          ? "Mapping promoted; publication queued"
+          : "Automatic promotion queued",
+        detail: `${changed} canonical mapping file${changed === 1 ? "" : "s"} committed as ${result.staged_commit.slice(0, 12)}. ${result.reason} ${result.next_action}`,
+        code: result.code,
+      };
+    }
     return {
       success: true,
-      title: result.idempotent
-        ? "Already staged for promotion"
-        : "Staged for promotion",
-      detail: `${changed} canonical mapping file${changed === 1 ? "" : "s"} staged as ${result.staged_commit.slice(0, 12)}. Mapping invariants passed; ${result.promoted ? "a fresh stable decode remains pending" : "production promotion and a fresh stable decode remain pending"}.`,
+      title: "Mapping integrated and published",
+      detail: `${changed} canonical mapping file${changed === 1 ? "" : "s"} committed as ${result.staged_commit.slice(0, 12)}. Production and origin contain it; only a fresh stable decode remains pending.`,
       code: "",
     };
   }

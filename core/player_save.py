@@ -14,11 +14,13 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+import fcntl
 import gzip
 import hashlib
 import json
 import math
 from functools import lru_cache
+import os
 from pathlib import Path
 import re
 import time
@@ -65,6 +67,16 @@ from core.module_icon_index import EMPTY_MODULE_ASSIGNMENT
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAYER_SAVE_MAPPING_DIR = ROOT / "config" / "player_save_versions"
+_DEVELOPMENT_LOG_DIR = os.environ.get("THETOWER_DEVELOPMENT_LOG_DIR")
+PLAYER_SAVE_MAPPING_SET_LOCK = (
+    (
+        Path(_DEVELOPMENT_LOG_DIR).resolve()
+        if _DEVELOPMENT_LOG_DIR
+        else ROOT / "logs"
+    )
+    / "player_save_mapping_candidates"
+    / "canonical-mapping-files.lock"
+)
 PLAYER_SAVE_DEVICE_PATH = (
     "/sdcard/Android/data/"
     "com.TechTreeGames.TheTower/files/playerInfo.dat"
@@ -1026,13 +1038,67 @@ def reconcile_direct_retry_requirements(
     return result
 
 
-@lru_cache(maxsize=1)
 def _load_mappings() -> tuple[dict[str, Any], ...]:
+    """Load one stable canonical set and notice later Git promotions.
+
+    The shared lock prevents an application-owned multi-file checkout from
+    being observed halfway through.  The metadata signature keeps steady-state
+    decodes cached while invalidating immediately after Git replaces a mapping
+    file, so a mapping-only promotion does not require a process restart.
+    """
+
+    PLAYER_SAVE_MAPPING_SET_LOCK.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    descriptor = os.open(
+        PLAYER_SAVE_MAPPING_SET_LOCK,
+        os.O_RDWR | os.O_CREAT,
+        0o600,
+    )
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_SH)
+        signature = _mapping_file_signature()
+        mappings = _load_mappings_for_signature(signature)
+        if _mapping_file_signature() != signature:
+            raise PlayerSaveError(
+                "canonical player-save mappings changed during one decode"
+            )
+        return mappings
+    finally:
+        os.close(descriptor)
+
+
+def _mapping_file_signature() -> tuple[tuple[str, int, int, int, int, int], ...]:
+    try:
+        return tuple(
+            (
+                path.name,
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_size,
+                metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
+            )
+            for path in sorted(PLAYER_SAVE_MAPPING_DIR.glob("*.json"))
+            for metadata in (path.stat(),)
+        )
+    except OSError as exc:
+        raise PlayerSaveError(
+            "canonical player-save mappings could not be inspected"
+        ) from exc
+
+
+@lru_cache(maxsize=4)
+def _load_mappings_for_signature(
+    signature: tuple[tuple[str, int, int, int, int, int], ...],
+) -> tuple[dict[str, Any], ...]:
     mappings: list[dict[str, Any]] = []
     sources: dict[str, Path] = {}
     identities: dict[tuple[Any, Any], str] = {}
-    for path in sorted(PLAYER_SAVE_MAPPING_DIR.glob("*.json")):
-        payload = json.loads(path.read_text(encoding="utf-8"))
+    for name, *_metadata in signature:
+        path = PLAYER_SAVE_MAPPING_DIR / name
+        payload = json.loads(path.read_bytes())
         if payload.get("schema_version") != 1:
             raise PlayerSaveError(f"unsupported mapping schema in {path}")
         _validate_raw_field_manifest(payload, source=path)
@@ -1899,8 +1965,11 @@ def confirmed_local_mapping_status(
     integration_lifecycle_states = {
         "integration_recovery_required",
         "integration_unconfirmed",
+        "automatic_integration_pending",
         "production_validation_pending",
         "promotion_pending",
+        "promotion_cleanup_pending",
+        "remote_publication_pending",
         "restaging_required",
     }
     integration_candidate_ids = {

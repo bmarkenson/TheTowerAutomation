@@ -393,7 +393,7 @@ def test_wpf_rebase_and_publish_reviews_explain_next_boundary_use():
     assert "queues its latest definition for the next battle" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 44" in compatibility
+    assert "MinimumServerRevision = 45" in compatibility
     assert '"save_mapping_staged_candidate_v1"' in compatibility
     assert '"save_mapping_candidate_disposition_v1"' in compatibility
     assert '"bluestacks_maintenance_v1"' not in compatibility
@@ -425,13 +425,16 @@ def test_wpf_save_mapping_integration_requires_review_and_second_confirmation():
     api_client = _text("ApiClient.cs")
 
     assert 'Text="1. OBSERVATION"' in xaml
-    assert 'Text="2. PRIVATE STAGING ELIGIBILITY"' in xaml
-    assert 'Header="3. Exact reviewed proposal"' in xaml
+    assert 'Text="2. AUTOMATIC INTEGRATION READINESS"' in xaml
+    assert 'Header="3. Exact proposal or verification"' in xaml
     assert "ReviewSaveMappingIntegrationAsync" in api_client
     assert "DismissSaveMappingObservationAsync" in api_client
     assert "IntegrateSaveMappingAsync" in api_client
     assert "SaveMappingIntegrationViewModels.ReviewMatches" in code
-    assert '"Stage canonical save mapping"' in code
+    assert '"Integrate canonical save mapping"' in code
+    assert "ReviewButton.Visibility = candidate?.ReviewAvailable == false" in code
+    assert "DismissButton.Visibility = candidate is not null" in code
+    assert "IntegrateButton.Visibility = candidate?.ReviewAvailable == false" in code
     assert "MessageBoxImage.Warning" in code
     assert "private staging ref" in code
     assert "ValidateIntegratedResult" in code

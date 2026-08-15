@@ -75,8 +75,10 @@ from core.player_save import confirmed_local_mapping_status
 from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
 from core.player_save_mapping_candidates import AppendOnlyMappingCandidateStore
 from core.player_save_mapping_staged_candidate import (
+    SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY,
     SAVE_MAPPING_DISPOSITION_CAPABILITY,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
+    SAVE_MAPPING_MACHINE_VERIFICATION_CAPABILITY,
     SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
     SaveMappingIntegrationError,
     SaveMappingIntegrationManager,
@@ -96,7 +98,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 44
+CONTROL_SURFACE_REVISION = 45
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -128,6 +130,8 @@ CONTROL_SURFACE_CAPABILITIES = (
     SAVE_MAPPING_REVIEW_STATUS_CAPABILITY,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
     SAVE_MAPPING_DISPOSITION_CAPABILITY,
+    SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY,
+    SAVE_MAPPING_MACHINE_VERIFICATION_CAPABILITY,
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
     "strategy_aware_attach_v1",
@@ -304,15 +308,87 @@ class ControlSurfaceService:
         return self.profile_store.catalog()
 
     def save_mapping_integration(self) -> dict[str, Any]:
-        """Return review candidates and private staging eligibility."""
+        """Return review, machine-verification, and integration state."""
 
         return self.save_mapping_integration_manager.catalog()
+
+    def reconcile_save_mapping_integration(self) -> dict[str, Any]:
+        """Run one audited automatic mapping-integration transition."""
+
+        plan = self.save_mapping_integration_manager.automatic_reconciliation_plan()
+        if plan.get("needed") is not True:
+            return plan
+        candidate_id = str(plan.get("candidate_record_id") or "")
+        operation_id = (
+            f"save-mapping-auto-{candidate_id[:12]}-"
+            f"{secrets.token_hex(6)}"
+        )
+        action_warning = self._append_audit(
+            "Reconciling automatic canonical save mapping "
+            f"candidate={candidate_id[:12]} action={plan.get('action')} "
+            f"[OPERATION] id={operation_id}",
+            level="ACTION",
+        )
+        if action_warning:
+            return {
+                **plan,
+                "disposition": "promotion_queued",
+                "code": "mapping_integration_audit_unavailable",
+                "reason": (
+                    "Automatic integration did not run because its audit ACTION "
+                    "could not be written."
+                ),
+                "automatic_retry": True,
+                "agent_required": True,
+            }
+        try:
+            result = self.save_mapping_integration_manager.reconcile_automatic()
+        except SaveMappingIntegrationError as exc:
+            self._append_audit(
+                "Automatic canonical save mapping "
+                f"disposition={_save_mapping_integration_disposition(exc.code)} "
+                f"code={exc.code} [OPERATION] id={operation_id}",
+                level="RESULT",
+            )
+            return {
+                **plan,
+                "disposition": _save_mapping_integration_disposition(exc.code),
+                "code": exc.code,
+                "reason": str(exc),
+                "automatic_retry": False,
+                "agent_required": True,
+            }
+        except Exception as exc:
+            self._append_audit(
+                "Automatic canonical save mapping disposition=unconfirmed "
+                "code=unexpected_failure "
+                f"[OPERATION] id={operation_id}",
+                level="RESULT",
+            )
+            return {
+                **plan,
+                "disposition": "unconfirmed",
+                "code": "mapping_integration_unexpected_failure",
+                "reason": str(exc),
+                "automatic_retry": False,
+                "agent_required": True,
+            }
+        self._append_audit(
+            "Automatic canonical save mapping "
+            f"disposition={result.get('disposition', 'idle')} "
+            f"candidate={candidate_id[:12]} "
+            f"promoted={str(bool(result.get('promoted'))).lower()} "
+            f"published={str(bool(result.get('published'))).lower()} "
+            f"[OPERATION] id={operation_id}",
+            level="RESULT",
+        )
+        return result
 
     def apply_save_mapping_integration(
         self,
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Review, dismiss, or stage one exact mapping observation."""
+        """Review, dismiss, or integrate one exact mapping observation."""
 
         if not isinstance(request, Mapping):
             raise ControlSurfaceRequestError("Request body must be a JSON object")
@@ -420,7 +496,7 @@ class ControlSurfaceService:
                 f"{secrets.token_hex(6)}"
             )
             action_warning = self._append_audit(
-                "Staging reviewed canonical save mapping for promotion "
+                "Integrating reviewed canonical save mapping "
                 f"candidate={record_prefix} "
                 f"review={fingerprint_prefix} "
                 f"[OPERATION] id={operation_id}",
@@ -433,14 +509,14 @@ class ControlSurfaceService:
                     code="mapping_integration_audit_unavailable",
                 )
             try:
-                result = self.save_mapping_integration_manager.stage(
+                result = self.save_mapping_integration_manager.integrate_reviewed(
                     candidate_record_id=candidate_record_id,
                     reviewed_proposal_fingerprint=reviewed_fingerprint,
                 )
             except SaveMappingIntegrationError as exc:
                 disposition = _save_mapping_integration_disposition(exc.code)
                 self._append_audit(
-                    "Canonical save mapping staging "
+                    "Canonical save mapping integration "
                     f"disposition={disposition} code={exc.code} "
                     f"[OPERATION] id={operation_id}",
                     level="RESULT",
@@ -448,23 +524,24 @@ class ControlSurfaceService:
                 raise
             except Exception as exc:
                 self._append_audit(
-                    "Canonical save mapping staging "
+                    "Canonical save mapping integration "
                     "disposition=unconfirmed code=unexpected_failure "
                     f"[OPERATION] id={operation_id}",
                     level="RESULT",
                 )
                 raise ControlSurfaceRequestError(
-                    "Canonical mapping staging failed unexpectedly; inspect main, "
+                    "Canonical mapping integration failed unexpectedly; inspect main, "
                     "the private staging ref, and the durable transaction before "
                     "continuing.",
                     status=500,
                     code="mapping_integration_unexpected_failure",
                 ) from exc
             result_warning = self._append_audit(
-                "Canonical save mapping staging "
-                "disposition=staged_for_promotion "
+                "Canonical save mapping integration "
+                f"disposition={result.get('disposition')} "
                 f"candidate={record_prefix} commit={result.get('staged_commit')} "
                 f"staged=true promoted={str(bool(result.get('promoted'))).lower()} "
+                f"published={str(bool(result.get('published'))).lower()} "
                 "mapping_invariants=passed "
                 f"[OPERATION] id={operation_id}",
                 level="RESULT",

@@ -109,31 +109,45 @@ integration work. There is no need to fingerprint or attest a worker's
 complete source tree for emulator access. Branch, HEAD, and an ordinary dirty
 summary are sufficient diagnostic context in a handoff or lease log.
 
-The save-mapping control-surface workflow is one narrow operator-maintenance
+The save-mapping control-surface workflow is one narrow application-owned
 exception to the feature-branch route. It accepts only a durable server-
-generated mapping candidate while the production `main` worktree is clean, at
-its branch tip, and the private `refs/thetower/save-mapping-candidate` ref is
-empty. The read-only review binds the proposal, canonical target before/after
-hashes and modes, and mapping-set invariants—not unrelated content elsewhere in
-`main`. After separate operator confirmation, the server re-renders those
-inputs against current `main`; if they are still exact, it uses a private Git
-index to construct one standardized child of that current tip and atomically
-creates the private staging ref while verifying that `main` did not move. The
-production branch, index, and worktree remain unchanged. The client supplies no
-path, ref, target, patch, message, identity, or arbitrary value.
+generated mapping candidate while the production `main` worktree is clean and
+at its branch tip. A read-only operator review binds a proposal, canonical
+target before/after hashes and modes, and mapping-set invariants—not unrelated
+content elsewhere in `main`. The one machine-review exception is a
+`battle_history_killed_by_id` receipt whose exact terminal Game Over or
+Tournament Results observation is paired to a deterministic, exact-locator,
+pre-mutation save and retains complete runtime, target, activity, round, and
+boundary fingerprints. Conflicts or any missing proof return to operator or
+ordinary development review.
 
-A private durable transaction binds the actual parent, target hashes and modes,
-generated commit, fixed staging ref, and candidate provenance through production
-promotion and a fresh canonical decode. It permits only exact idempotent
-recovery and exact retirement after validation; it never authorizes reset,
-backward branch movement, production promotion, service restart,
-runtime-control change, or emulator input. Target drift, an occupied or moved
-staging ref, unsupported proposal ownership, or uncertain state leaves the
-routine lane. Unrelated `main` changes before confirmation do not invalidate the
-review when the mapping inputs remain exact; an advance after staging makes the
-old commit non-promotable and requires restaging on current `main`. The staged
-commit receives the mapping-only candidate gate and normal production procedure
-before deployment.
+After review or machine certification, the server re-renders the inputs
+against current `main`. If they remain exact, it uses a private Git index to
+construct one standardized child and atomically creates
+`refs/thetower/save-mapping-candidate`. That ref is a durable internal boundary,
+not a terminal queue. The background integration owner immediately consumes it:
+it acquires `refs/thetower/promotion-owner`, creates a deterministic annotated
+rollback tag, excludes runtime mapping loads only across the local checkout,
+fast-forwards clean production `main`, verifies the exact target and mapping-set
+invariants again, and publishes that exact commit to `origin/main` without
+force. A readable remote tip outside the exact candidate ancestry queues
+coordination before local mutation. It releases only its own exact
+promotion-owner ref. The client supplies
+no path, ref, target, patch, message, identity, or arbitrary value.
+
+The private transaction binds the parent, target hashes and modes, generated
+commit, staging ref, candidate provenance, promotion phase, remote publication,
+and fresh canonical decode. Owner contention or a transient publication
+failure remains visibly queued and retries with bounded backoff; a persistent
+or uncertain blocker includes an agent-ready recovery request. If a larger
+coordinated outcome already contains the exact mapping commit, the application
+may verify its local and remote ancestry and close its own transaction, but it
+never publishes that larger outcome. An unrelated `main` advance that does not
+contain the commit triggers exact automatic retirement and restaging only while
+the reviewed mapping inputs are unchanged. Target drift, a moved ref, malformed
+journal, or unprovable state fails closed. This authority never permits reset,
+backward branch movement, another file change, general outcome promotion,
+service restart, runtime-control change, or emulator input.
 
 ### Staging, promotion, and rollback
 

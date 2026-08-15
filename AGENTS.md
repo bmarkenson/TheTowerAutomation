@@ -25,10 +25,14 @@ changes this model.
   work and validation but must not mutate production, services, artifacts,
   `origin/main`, or its cleanup topology. Contenders wait, refresh, retest, and
   retry; contention or another unfinished closure guard is not completion.
-- The operator-confirmed save-mapping fast lane documented in
+- The reviewed or machine-verified save-mapping fast lane documented in
   [development isolation](docs/architecture/development_isolation.md) is the
-  only application-owned feature-branch exception. It may stage one allowlisted
-  child of current `main`, but never moves `main` or grants a general bypass.
+  only application-owned repository-change exception. It may create and
+  consume one allowlisted canonical-mapping child of clean current `main`: it
+  uses the global promotion-owner ref, an exact rollback tag, fast-forward-only
+  local promotion, non-forcing `origin/main` publication, and durable retry.
+  It never changes another path, publishes a larger enclosing outcome, moves
+  `main` backward, controls services or the device, or grants a general bypass.
 - Treat unrelated tracked and untracked changes as another participant's work.
   Do not overwrite, delete, stage, or incorporate them. Recheck status and each
   target diff immediately before editing, staging, or committing; reconcile a

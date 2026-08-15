@@ -250,8 +250,8 @@ function renderConfirmedLocalMapping(status) {
   reviewButton.hidden = !presentation.visible;
   reviewButton.disabled = !compatible;
   reviewButton.title = compatible
-    ? "Review an exact canonical proposal and stage it for promotion."
-    : "Linux API revision 44 with staged-candidate and disposition capabilities is required.";
+    ? "Inspect mapping evidence and integrate proposals that need judgment."
+    : "Linux API revision 45 with automatic mapping integration is required.";
 }
 
 function saveMappingCandidate() {
@@ -280,6 +280,7 @@ function updateSaveMappingControls() {
   const copyButton = byId("copySaveMappingAgentPromptButton");
   const dismissButton = byId("dismissSaveMappingObservationButton");
   const integrateButton = byId("integrateSaveMappingButton");
+  reviewButton.hidden = Boolean(item && item.review_available !== true);
   reviewButton.disabled = state.saveMappingBusy
     || !item
     || item.review_available !== true;
@@ -288,7 +289,8 @@ function updateSaveMappingControls() {
   copyButton.disabled = state.saveMappingBusy || !agentPrompt;
   copyButton.title = agentPrompt
     ? "Copy the complete request shown in the proposal panel."
-    : "No agent-review request is needed for this observation.";
+    : "No agent request is needed for this observation.";
+  dismissButton.hidden = Boolean(item && item.dismiss_available !== true);
   dismissButton.disabled = state.saveMappingBusy
     || !item
     || item.dismiss_available !== true;
@@ -296,6 +298,7 @@ function updateSaveMappingControls() {
     state.saveMappingReview,
     byId("saveMappingCandidateSelect").value,
   );
+  integrateButton.hidden = Boolean(item && item.review_available !== true);
   integrateButton.disabled = state.saveMappingBusy
     || state.saveMappingResult != null
     || !availability.available;
@@ -352,8 +355,8 @@ function renderSaveMappingCatalog(catalog) {
   }
   const repository = catalog.repository || {};
   const readiness = repository.integration_available
-    ? "Eligible: main is clean and the private staging ref is empty."
-    : repository.reason || "Private-ref staging is unavailable.";
+    ? "Eligible: main is clean and automatic integration is available."
+    : repository.reason || "Automatic integration is temporarily unavailable.";
   setText(
     "saveMappingRepositoryDetail",
     `main ${repository.main_commit || "unknown"}\n`
@@ -388,7 +391,36 @@ function renderSaveMappingSelection() {
   dismissButton.title = item?.dismiss_available === false
     ? item.dismiss_reason || "This observation cannot be dismissed now."
     : "Hide this observation from the active queue while preserving its receipt.";
-  if (item?.review_available === false) {
+  if (item?.automatic_integration === true) {
+    const proposal = byId("saveMappingProposal");
+    proposal.replaceChildren();
+    proposal.className = "mapping-proposal";
+    proposal.append(mappingProposalRow(
+      "Machine-verified evidence",
+      item.machine_verification?.reason
+        || "This observation is verified without operator judgment.",
+    ));
+    if (item.machine_verification?.proof) {
+      proposal.append(mappingProposalRow(
+        "Exact causal proof",
+        JSON.stringify(item.machine_verification.proof, null, 2),
+      ));
+    }
+    proposal.append(mappingProposalRow(
+      "What happens next",
+      item.next_action || "Automatic integration is queued.",
+    ));
+    if (item.agent_review_prompt) {
+      proposal.append(mappingProposalRow(
+        "Agent recovery request",
+        item.agent_review_prompt,
+      ));
+    }
+    setText(
+      "saveMappingIntegrateStatus",
+      item.next_action || "No review is needed; automatic integration is queued.",
+    );
+  } else if (item?.review_available === false) {
     const proposal = byId("saveMappingProposal");
     proposal.replaceChildren();
     proposal.className = "mapping-proposal";
@@ -408,13 +440,13 @@ function renderSaveMappingSelection() {
     }
     setText(
       "saveMappingIntegrateStatus",
-      item.next_action || "The exact proposal must be resolved before staging.",
+      item.next_action || "The exact proposal must be resolved before integration.",
     );
   } else {
     setText(
       "saveMappingIntegrateStatus",
       item
-        ? "Review this exact candidate before staging, or dismiss it if it is incorrect."
+        ? "Review this exact candidate before integration, or dismiss it if it is incorrect."
         : "Choose an observation to see its available actions.",
     );
   }
@@ -473,8 +505,8 @@ function renderSaveMappingReview(review) {
   setText(
     "saveMappingIntegrateStatus",
     availability.available
-      ? "Ready to create one verified staged commit without moving main."
-      : availability.reason || "Private-ref staging is unavailable.",
+      ? "Ready to integrate this exact proposal into production and origin/main."
+      : availability.reason || "Automatic integration is unavailable.",
   );
   if (review.recovery_required === true) {
     const result = byId("saveMappingResult");
@@ -508,10 +540,10 @@ function renderSaveMappingResult(
   title.textContent = presentation.title;
   detail.textContent = presentation.detail;
   container.append(title, detail);
-  if (presentation.success) {
+  if (presentation.success || result.disposition === "promotion_queued") {
     container.append(mappingProposalRow(
       "Lifecycle state",
-      `base: ${result.base_commit}\nstaging ref: ${result.staging_ref}\nstaged commit: ${result.staged_commit}\ncommitted: ${String(result.committed)}\nstaged: ${String(result.staged)}\npromoted: ${String(result.promoted)}\nmapping invariants: ${result.mapping_invariants}\nproduction validation: ${result.promotion_validation}`,
+      `base: ${result.base_commit}\nstaging ref: ${result.staging_ref}\ncommit: ${result.staged_commit}\ncommitted: ${String(result.committed)}\npromoted: ${String(result.promoted)}\npublished: ${String(result.published)}\nautomatic retry: ${String(result.automatic_retry)}\nmapping invariants: ${result.mapping_invariants}\nproduction validation: ${result.promotion_validation}\nrollback tag: ${result.rollback_tag || "owned by enclosing promotion or pending"}\nremote main: ${result.remote_main_commit || "pending"}`,
     ));
     for (const target of result.targets) {
       container.append(mappingProposalRow(
@@ -521,6 +553,12 @@ function renderSaveMappingResult(
     }
     if (result.warning) {
       container.append(mappingProposalRow("Audit warning", result.warning));
+    }
+    if (result.agent_review_prompt) {
+      container.append(mappingProposalRow(
+        "Agent recovery request",
+        result.agent_review_prompt,
+      ));
     }
   }
   return presentation;
@@ -623,9 +661,9 @@ async function copySaveMappingAgentPrompt() {
   try {
     if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
     await navigator.clipboard.writeText(prompt);
-    toast("Agent-review request copied");
+    toast("Agent request copied");
   } catch (_error) {
-    window.prompt("Copy this agent-review request:", prompt);
+    window.prompt("Copy this agent request:", prompt);
   }
 }
 
@@ -725,14 +763,14 @@ async function integrateSaveMappingProposal() {
   const confirmation = [
     review.recovery_required
       ? "Recover and verify this exact durable integration?"
-      : "Stage this exact proposal for production promotion?",
+      : "Integrate this exact proposal into production?",
     review.repository.staging_ref,
     `Fingerprint: ${review.reviewed_proposal_fingerprint}`,
     `Targets: ${targets.length}`,
     "",
     review.recovery_required
-      ? "This retries only the durable reviewed identity and verifies exact Git refs and mappings. It does not create a second commit, promote, restart services, send device input, change runtime authority, or alter the current battle."
-      : "This creates one verified child of current main under a private staging ref. It does not move main, touch the production index or worktree, restart services, send device input, change runtime authority, or alter the current battle.",
+      ? "This recovers only the durable reviewed identity, then automatically completes any safe promotion and publication still pending. It does not create a second mapping commit, restart services, send device input, change runtime authority, or alter the current battle."
+      : "This creates one verified child of current main, then automatically fast-forwards production and publishes origin/main under the narrow mapping authority. It does not restart services, send device input, change runtime authority, or alter the current battle.",
   ].join("\n");
   if (!window.confirm(confirmation)) return;
   setSaveMappingBusy(true);
@@ -771,9 +809,17 @@ async function integrateSaveMappingProposal() {
       "saveMappingIntegrateStatus",
       presentation.detail,
     );
-    toast(result.promoted
-      ? "Canonical mapping is deployed; a fresh stable decode is pending"
-      : "Canonical mapping staged privately; production promotion is pending");
+    toast(result.disposition === "promotion_queued"
+      ? result.published
+        ? "Canonical mapping is published; automatic cleanup is queued"
+        : result.promoted
+          ? "Canonical mapping is promoted; automatic publication is pending"
+          : "Automatic canonical mapping promotion is queued"
+      : result.published
+        ? "Canonical mapping is integrated; a fresh stable decode is pending"
+        : result.promoted
+        ? "Canonical mapping is promoted; automatic publication is pending"
+        : "Automatic canonical mapping promotion is queued");
     if (result.warning) toast(result.warning, true);
     await refresh();
   } catch (error) {

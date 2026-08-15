@@ -19,8 +19,11 @@ from core.player_save_mapping_candidates import (
 )
 from core.player_save_mapping_staged_candidate import (
     CanonicalDecodeReceiptStore,
+    PROMOTION_OWNER_REF,
+    SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY,
     SAVE_MAPPING_DISPOSITION_CAPABILITY,
     SAVE_MAPPING_INTEGRATION_CAPABILITY,
+    SAVE_MAPPING_MACHINE_VERIFICATION_CAPABILITY,
     SAVE_MAPPING_STAGING_REF,
     SaveMappingIntegrationError,
     SaveMappingIntegrationManager,
@@ -127,7 +130,11 @@ def _record(
     )
 
 
-def _killed_by_record() -> dict:
+def _killed_by_record(
+    *,
+    game_state: str = "terminal_game_over",
+    boundary_fingerprint: str = "b" * 64,
+) -> dict:
     pending = pending_mapping_candidate(
         value_kind="battle_history_killed_by_id",
         raw_value=9,
@@ -172,9 +179,9 @@ def _killed_by_record() -> dict:
             "pid": 4242,
             "target_generation_fingerprint": "7" * 64,
             "activity_scope_fingerprint": "8" * 64,
-            "game_state": "terminal_game_over",
+            "game_state": game_state,
             "active_round_identity_fingerprint": "a" * 64,
-            "boundary_fingerprint": "b" * 64,
+            "boundary_fingerprint": boundary_fingerprint,
         },
         observed_at=OBSERVED_AT,
         recorded_at="2026-08-10T12:02:01+00:00",
@@ -192,6 +199,19 @@ def integration_repository(tmp_path: Path):
             mapping_dir / name,
         )
         (mapping_dir / name).chmod(0o664)
+    # The repository itself now contains the real 9 -> Ray integration.  This
+    # fixture deliberately models its immediately preceding production state
+    # so the staged-candidate lifecycle remains testable.
+    authority_path = mapping_dir / "data_9_game_1073.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    authority["runtime_save"]["battle_history"]["killed_by_ids"].pop(
+        "9",
+        None,
+    )
+    authority_path.write_text(
+        json.dumps(authority, indent=2) + "\n",
+        encoding="utf-8",
+    )
     _git(production, "init", "-b", "main")
     _git(production, "config", "user.name", "TheTower Test")
     _git(production, "config", "user.email", "thetower@example.invalid")
@@ -228,6 +248,14 @@ def _transaction(manager: SaveMappingIntegrationManager) -> dict:
 
 def _promote(production: Path) -> None:
     _git(production, "merge", "--ff-only", SAVE_MAPPING_STAGING_REF)
+
+
+def _configure_origin(production: Path) -> Path:
+    origin = production.parent / "origin.git"
+    _git(origin.parent, "init", "--bare", "-b", "main", str(origin))
+    _git(production, "remote", "add", "origin", str(origin))
+    _git(production, "push", "-u", "origin", "main")
+    return origin
 
 
 def _start_evidence(production: Path, transaction: dict) -> dict[str, str]:
@@ -341,7 +369,29 @@ def test_compatible_killed_by_review_and_stage_change_only_runtime_authority(
         for item in manager.catalog()["items"]
         if item["record_id"] == record["record_id"]
     )
-    assert catalog_item["review_available"] is True
+    assert catalog_item["review_available"] is False
+    assert catalog_item["automatic_integration"] is True
+    assert catalog_item["automatic_integration_blocked"] is False
+    assert catalog_item["agent_review_prompt"] == ""
+    assert catalog_item["machine_verification"]["eligible"] is True
+    assert catalog_item["machine_verification"]["proof"] == {
+        "check_id": "battle_history_killed_by",
+        "value_kind": "battle_history_killed_by_id",
+        "raw_value": 9,
+        "semantic_value": "Ray",
+        "evidence_strength": "deterministic",
+        "pairing_method": "exact_locator",
+        "pre_mutation": True,
+        "game_state": "terminal_game_over",
+        "snapshot_fingerprint": "4" * 64,
+        "ui_evidence_fingerprint": "5" * 64,
+        "source_observation_fingerprint": "3" * 64,
+        "runtime_session_fingerprint": "6" * 64,
+        "target_generation_fingerprint": "7" * 64,
+        "activity_scope_fingerprint": "8" * 64,
+        "active_round_identity_fingerprint": "a" * 64,
+        "boundary_fingerprint": "b" * 64,
+    }
 
     review = _review(manager, record)
     assert [target["mapping_id"] for target in review["proposal"]["targets"]] == [
@@ -362,6 +412,460 @@ def test_compatible_killed_by_review_and_stage_change_only_runtime_authority(
     ).splitlines() == [
         "config/player_save_versions/data_9_game_1073.json"
     ]
+
+
+def test_machine_verified_killed_by_integrates_and_publishes_without_review(
+    integration_repository,
+):
+    production, store, _record_fixture, manager = integration_repository
+    origin = _configure_origin(production)
+    record = _killed_by_record()
+    store.append_once(record)
+    base = _git(production, "rev-parse", "main")
+
+    plan = manager.automatic_reconciliation_plan()
+    result = manager.reconcile_automatic()
+
+    assert plan == {
+        "capability": SAVE_MAPPING_AUTOMATIC_PROMOTION_CAPABILITY,
+        "needed": True,
+        "action": "machine_verify_and_integrate",
+        "candidate_record_id": record["record_id"],
+    }
+    assert result["operation"] == "integrate"
+    assert result["disposition"] == "promoted"
+    assert result["promoted"] is True
+    assert result["published"] is True
+    assert result["automatic_retry"] is False
+    assert result["agent_required"] is False
+    assert _git(production, "rev-parse", "main") == result["staged_commit"]
+    assert _git(origin, "rev-parse", "main") == result["remote_main_commit"]
+    assert _git(
+        production,
+        "rev-parse",
+        f"refs/tags/{result['rollback_tag']}^{{commit}}",
+    ) == base
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        PROMOTION_OWNER_REF,
+    )
+    authority = json.loads(
+        (
+            production
+            / "config/player_save_versions/data_9_game_1073.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert authority["runtime_save"]["battle_history"]["killed_by_ids"]["9"] == "Ray"
+    assert _transaction(manager)["phase"] == "published"
+    assert manager.catalog()["items"][0]["state"] == "production_validation_pending"
+
+    transaction = _transaction(manager)
+    assert manager.observe_canonical_decode(
+        _snapshot(transaction),
+        start_evidence=_start_evidence(production, transaction),
+    ) is True
+    assert not manager.transaction_path.exists()
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        SAVE_MAPPING_STAGING_REF,
+    )
+
+
+def test_nonterminal_killed_by_evidence_still_requires_operator_review(
+    integration_repository,
+):
+    _production, store, _record_fixture, manager = integration_repository
+    record = _killed_by_record(game_state="active_battle")
+    store.append_once(record)
+
+    item = next(
+        candidate
+        for candidate in manager.catalog()["items"]
+        if candidate["record_id"] == record["record_id"]
+    )
+
+    assert item["automatic_integration"] is False
+    assert item["review_available"] is True
+    assert item["machine_verification"] == {
+        "capability": SAVE_MAPPING_MACHINE_VERIFICATION_CAPABILITY,
+        "eligible": False,
+        "code": "operator_review_required",
+        "reason": (
+            "This observation is not a complete exact-boundary killed-by "
+            "proof, so its meaning still requires operator review."
+        ),
+        "proof": None,
+    }
+
+
+def test_placeholder_killed_by_fingerprint_cannot_be_machine_verified(
+    integration_repository,
+):
+    _production, store, _record_fixture, manager = integration_repository
+    record = _killed_by_record(boundary_fingerprint="0" * 64)
+    store.append_once(record)
+
+    item = next(
+        candidate
+        for candidate in manager.catalog()["items"]
+        if candidate["record_id"] == record["record_id"]
+    )
+
+    assert item["automatic_integration"] is False
+    assert item["review_available"] is True
+    assert item["machine_verification"]["code"] == "operator_review_required"
+
+
+def test_explicitly_reviewed_mapping_is_promoted_instead_of_left_staged(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    origin = _configure_origin(production)
+    review = _review(manager, record)
+
+    result = manager.integrate_reviewed(
+        candidate_record_id=record["record_id"],
+        reviewed_proposal_fingerprint=review["reviewed_proposal_fingerprint"],
+    )
+
+    assert result["disposition"] == "promoted"
+    assert result["published"] is True
+    assert _git(production, "rev-parse", "main") == result["staged_commit"]
+    assert _git(origin, "rev-parse", "main") == result["staged_commit"]
+    assert _transaction(manager)["phase"] == "published"
+
+
+def test_busy_global_promotion_owner_queues_then_background_consumes(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    _configure_origin(production)
+    other = _detached_commit(production, "other promotion")
+    _git(
+        production,
+        "update-ref",
+        "--create-reflog",
+        "-m",
+        "promotion other /tmp/other",
+        PROMOTION_OWNER_REF,
+        other,
+        "0" * 40,
+    )
+    base = _git(production, "rev-parse", "main")
+    review = _review(manager, record)
+
+    queued = manager.integrate_reviewed(
+        candidate_record_id=record["record_id"],
+        reviewed_proposal_fingerprint=review["reviewed_proposal_fingerprint"],
+    )
+
+    assert queued["disposition"] == "promotion_queued"
+    assert queued["code"] == "promotion_owner_busy"
+    assert queued["automatic_retry"] is True
+    assert queued["promoted"] is False
+    assert _git(production, "rev-parse", "main") == base
+    assert _git(production, "rev-parse", SAVE_MAPPING_STAGING_REF) == queued["staged_commit"]
+
+    _git(production, "update-ref", "-d", PROMOTION_OWNER_REF, other)
+    completed = manager.reconcile_automatic()
+
+    assert completed["disposition"] == "promoted"
+    assert completed["published"] is True
+
+
+def test_published_aggregate_is_recognized_without_pushing_unrelated_main(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    origin = _configure_origin(production)
+    staged = _stage(manager, record, _review(manager, record))
+    _promote(production)
+    aggregate = _unrelated_commit(production, "aggregate\n")
+    _git(production, "push", "origin", "main")
+
+    completed = manager.promote_staged()
+
+    assert completed["disposition"] == "promoted"
+    assert completed["remote_main_commit"] == aggregate
+    assert aggregate != staged["staged_commit"]
+    assert _git(origin, "rev-parse", "main") == aggregate
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        PROMOTION_OWNER_REF,
+    )
+
+
+def test_remote_failure_keeps_durable_queue_and_agent_recovery_request(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    review = _review(manager, record)
+
+    queued = manager.integrate_reviewed(
+        candidate_record_id=record["record_id"],
+        reviewed_proposal_fingerprint=review["reviewed_proposal_fingerprint"],
+    )
+
+    assert queued["disposition"] == "promotion_queued"
+    assert queued["promoted"] is True
+    assert queued["published"] is False
+    assert queued["code"] == "remote_publication_pending"
+    assert queued["agent_required"] is True
+    assert "Please finish TheTower automatic save-mapping integration" in queued[
+        "agent_review_prompt"
+    ]
+    assert _transaction(manager)["phase"] == "promoting"
+    assert _git(production, "rev-parse", PROMOTION_OWNER_REF) == queued["staged_commit"]
+
+    origin = _configure_origin(production)
+    completed = manager.reconcile_automatic()
+
+    assert completed["disposition"] == "promoted"
+    assert completed["published"] is True
+    assert _git(origin, "rev-parse", "main") == completed["staged_commit"]
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        PROMOTION_OWNER_REF,
+    )
+
+
+def test_proven_remote_divergence_queues_before_local_production_moves(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    origin = _configure_origin(production)
+    base = _git(production, "rev-parse", "main")
+    remote_advance = _detached_commit(production, "remote outcome")
+    _git(
+        production,
+        "push",
+        "origin",
+        f"{remote_advance}:refs/heads/main",
+    )
+    review = _review(manager, record)
+
+    queued = manager.integrate_reviewed(
+        candidate_record_id=record["record_id"],
+        reviewed_proposal_fingerprint=review["reviewed_proposal_fingerprint"],
+    )
+
+    assert queued["disposition"] == "promotion_queued"
+    assert queued["code"] == "remote_publication_pending"
+    assert queued["promoted"] is False
+    assert queued["published"] is False
+    assert "Local production was not changed" in queued["reason"]
+    assert _git(production, "rev-parse", "main") == base
+    assert _git(origin, "rev-parse", "main") == remote_advance
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        PROMOTION_OWNER_REF,
+    )
+
+
+def test_dirty_production_after_staging_is_a_durable_automatic_queue(
+    integration_repository,
+):
+    production, _store, record, manager = integration_repository
+    _configure_origin(production)
+    staged = _stage(manager, record, _review(manager, record))
+    dirty = production / "untracked.txt"
+    dirty.write_text("operator work\n", encoding="utf-8")
+
+    queued = manager.reconcile_automatic()
+
+    assert queued["disposition"] == "promotion_queued"
+    assert queued["code"] == "production_worktree_dirty"
+    assert queued["staged_commit"] == staged["staged_commit"]
+    assert queued["promoted"] is False
+    assert queued["published"] is False
+    assert queued["automatic_retry"] is True
+    assert "agent" in queued["agent_review_prompt"].lower()
+
+    dirty.unlink()
+    completed = manager.reconcile_automatic()
+
+    assert completed["disposition"] == "promoted"
+    assert completed["published"] is True
+
+
+def test_published_owner_release_failure_is_consumed_as_cleanup_queue(
+    integration_repository,
+):
+    production, store, record, manager = integration_repository
+    _configure_origin(production)
+    review = _review(manager, record)
+
+    def interrupt(transition: str) -> None:
+        if transition == "remote_published":
+            raise RuntimeError("lost before owner release")
+
+    interrupted = SaveMappingIntegrationManager(
+        repository_root=production,
+        candidate_store=store,
+        lock_path=manager.lock_path,
+        mapping_set_lock_path=manager.mapping_set_lock_path,
+        transaction_path=manager.transaction_path,
+        decode_receipt_path=manager.decode_receipts.path,
+        transaction_fault_hook=interrupt,
+    )
+    with pytest.raises(RuntimeError, match="lost before owner release"):
+        interrupted.integrate_reviewed(
+            candidate_record_id=record["record_id"],
+            reviewed_proposal_fingerprint=review[
+                "reviewed_proposal_fingerprint"
+            ],
+        )
+    transaction = _transaction(manager)
+    owner_path = Path(
+        _git(production, "rev-parse", "--git-path", PROMOTION_OWNER_REF)
+    )
+    if not owner_path.is_absolute():
+        owner_path = production / owner_path
+    owner_lock = Path(f"{owner_path}.lock")
+    owner_lock.parent.mkdir(parents=True, exist_ok=True)
+    owner_lock.write_text("held\n", encoding="utf-8")
+    try:
+        queued = manager.reconcile_automatic()
+
+        assert queued["disposition"] == "promotion_queued"
+        assert queued["code"] == "promotion_owner_release_failed"
+        assert queued["promoted"] is True
+        assert queued["published"] is True
+        assert queued["automatic_retry"] is True
+        item = manager.catalog()["items"][0]
+        assert item["state"] == "promotion_cleanup_pending"
+        assert item["review_available"] is False
+        assert item["agent_review_prompt"].startswith(
+            "Please recover TheTower automatic save-mapping integration"
+        )
+        assert "do not repeat review" in item["agent_review_prompt"]
+        assert manager.automatic_reconciliation_plan()["action"] == (
+            "release_promotion_owner"
+        )
+    finally:
+        owner_lock.unlink(missing_ok=True)
+
+    completed = manager.reconcile_automatic()
+
+    assert completed["disposition"] == "promoted"
+    assert completed["published"] is True
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        PROMOTION_OWNER_REF,
+    )
+    assert _transaction(manager)["phase"] == "published"
+
+
+def test_crash_after_local_fast_forward_recovers_same_commit_and_owner(
+    integration_repository,
+):
+    production, store, record, manager = integration_repository
+    origin = _configure_origin(production)
+    review = _review(manager, record)
+
+    def interrupt(transition: str) -> None:
+        if transition == "main_promoted":
+            raise RuntimeError("lost after local fast-forward")
+
+    interrupted = SaveMappingIntegrationManager(
+        repository_root=production,
+        candidate_store=store,
+        lock_path=manager.lock_path,
+        mapping_set_lock_path=manager.mapping_set_lock_path,
+        transaction_path=manager.transaction_path,
+        decode_receipt_path=manager.decode_receipts.path,
+        transaction_fault_hook=interrupt,
+    )
+    with pytest.raises(RuntimeError, match="lost after local fast-forward"):
+        interrupted.integrate_reviewed(
+            candidate_record_id=record["record_id"],
+            reviewed_proposal_fingerprint=review[
+                "reviewed_proposal_fingerprint"
+            ],
+        )
+    transaction = _transaction(manager)
+    expected = transaction["staging"]["expected_commit"]
+    assert transaction["phase"] == "promoting"
+    assert _git(production, "rev-parse", "main") == expected
+    assert _git(production, "rev-parse", PROMOTION_OWNER_REF) == expected
+    assert _git(origin, "rev-parse", "main") != expected
+
+    recovered = manager.reconcile_automatic()
+
+    assert recovered["staged_commit"] == expected
+    assert recovered["disposition"] == "promoted"
+    assert recovered["published"] is True
+    assert _git(origin, "rev-parse", "main") == expected
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        PROMOTION_OWNER_REF,
+    )
+
+
+def test_decode_closes_published_crash_and_releases_exact_owned_ref(
+    integration_repository,
+):
+    production, store, record, manager = integration_repository
+    _configure_origin(production)
+    review = _review(manager, record)
+
+    def interrupt(transition: str) -> None:
+        if transition == "remote_published":
+            raise RuntimeError("lost before owner release")
+
+    interrupted = SaveMappingIntegrationManager(
+        repository_root=production,
+        candidate_store=store,
+        lock_path=manager.lock_path,
+        mapping_set_lock_path=manager.mapping_set_lock_path,
+        transaction_path=manager.transaction_path,
+        decode_receipt_path=manager.decode_receipts.path,
+        transaction_fault_hook=interrupt,
+    )
+    with pytest.raises(RuntimeError, match="lost before owner release"):
+        interrupted.integrate_reviewed(
+            candidate_record_id=record["record_id"],
+            reviewed_proposal_fingerprint=review[
+                "reviewed_proposal_fingerprint"
+            ],
+        )
+    transaction = _transaction(manager)
+    expected = transaction["staging"]["expected_commit"]
+    assert transaction["phase"] == "published"
+    assert _git(production, "rev-parse", PROMOTION_OWNER_REF) == expected
+
+    assert manager.observe_canonical_decode(
+        _snapshot(transaction),
+        start_evidence=_start_evidence(production, transaction),
+    ) is True
+
+    assert not manager.transaction_path.exists()
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        PROMOTION_OWNER_REF,
+    )
+    assert not _git(
+        production,
+        "for-each-ref",
+        "--format=%(objectname)",
+        SAVE_MAPPING_STAGING_REF,
+    )
 
 
 def test_dismiss_preserves_receipt_hides_observation_and_is_idempotent(
@@ -631,12 +1135,15 @@ def test_catalog_tracks_promotion_and_decode_then_retires_private_ref(
     integration_repository,
 ):
     production, _store, record, manager = integration_repository
+    _configure_origin(production)
     result = _stage(manager, record, _review(manager, record))
     pending = manager.catalog()
     assert pending["items"][0]["state"] == "promotion_pending"
     assert pending["items"][0]["staged_commit"] == result["staged_commit"]
 
-    _promote(production)
+    promoted = manager.promote_staged()
+    assert promoted["disposition"] == "promoted"
+    assert promoted["published"] is True
     deployed = manager.catalog()
     assert deployed["items"][0]["state"] == "production_validation_pending"
     transaction = _transaction(manager)
@@ -687,6 +1194,34 @@ def test_dirty_production_disables_review_without_writing(
     with pytest.raises(SaveMappingIntegrationError) as failure:
         _review(manager, record)
     assert failure.value.code == "production_worktree_dirty"
+    assert not manager.transaction_path.exists()
+
+
+def test_machine_verified_candidate_exposes_agent_route_when_integration_blocked(
+    integration_repository,
+):
+    production, store, _record_fixture, manager = integration_repository
+    record = _killed_by_record()
+    store.append_once(record)
+    (production / "untracked.txt").write_text("operator work\n", encoding="utf-8")
+
+    item = next(
+        candidate
+        for candidate in manager.catalog()["items"]
+        if candidate["record_id"] == record["record_id"]
+    )
+
+    assert item["automatic_integration"] is True
+    assert item["automatic_integration_blocked"] is True
+    assert item["automatic_integration_blocker_code"] == "production_worktree_dirty"
+    assert "Production has tracked" in item[
+        "automatic_integration_blocker_reason"
+    ]
+    assert "No semantic review is needed" in item["next_action"]
+    assert item["agent_review_prompt"].startswith(
+        "Please recover TheTower automatic save-mapping integration"
+    )
+    assert "do not repeat semantic review" in item["agent_review_prompt"]
     assert not manager.transaction_path.exists()
 
 
@@ -965,8 +1500,9 @@ def test_complete_corrupt_decode_receipt_keeps_status_unavailable(
     integration_repository,
 ):
     production, _store, record, manager = integration_repository
+    _configure_origin(production)
     _stage(manager, record, _review(manager, record))
-    _promote(production)
+    manager.promote_staged()
     manager.decode_receipts.path.write_text("{}\n", encoding="utf-8")
 
     status = manager.status()
