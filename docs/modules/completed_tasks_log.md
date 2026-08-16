@@ -51,7 +51,9 @@ resolved dossier instead of copying its detail.
   a new battle.
 - The live-work policy now treats restoration of a previously Running runtime
   as part of completing an agent-owned Pause or Stop, subject to fresh owner,
-  control, target, screen, manual-control, and safety checks.
+  control, target, screen, manual-control, and safety checks. An agent-created
+  Pause remains intermediate across Stop or process replacement; an existing
+  or newer operator Pause instead remains authoritative.
 - Exact runtime candidate `8270e1d` passed the complete repository checkpoint:
   compilation, state definitions, clickmap integrity with zero errors and the
   established 44 orphan notices, and all 2,985 tests in 436.20 seconds using

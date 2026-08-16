@@ -115,11 +115,15 @@ screen condition forbids restoration. A process replacement that starts
 Paused is part of the same restoration obligation when the agent stopped a
 previously Running owner.
 
-Never restore a pre-existing Pause, a Pause whose request or owner was
-superseded, or a safety/manual-control boundary. If fresh evidence makes
-restoration unsafe or impossible, leave the state unchanged and report the
-exact blocked handoff; do not silently present the agent-owned work as
-complete.
+Do not rebase that obligation onto an agent-created Pause merely because the
+agent requested it immediately before Stop, process replacement, validation,
+or another nested part of the same work. That Pause remains agent-owned across
+the boundary. Conversely, an operator Pause that existed before the work or a
+newer operator Pause supersedes the earlier Running posture and must remain
+Paused. Never restore a Pause whose request or owner was superseded, or a
+safety/manual-control boundary. If fresh evidence makes restoration unsafe or
+impossible, leave the state unchanged and report the exact blocked handoff; do
+not silently present the agent-owned work as complete.
 
 `--fast-game-over` suppresses capture only for a known already-recorded
 terminal screen. Restart normally afterward so future battles remain

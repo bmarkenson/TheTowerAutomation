@@ -71,9 +71,11 @@ changes this model.
   work is not complete until the replacement/current runtime is restored to
   `RUNNING` after fresh evidence proves the control boundary is still
   agent-owned and no newer operator, manual-control, safety, target, or screen
-  condition forbids restoration. Never restore a pre-existing or superseded
-  Pause; leave an explicit blocked handoff instead of silently leaving an
-  agent-owned Pause behind.
+  condition forbids restoration. An agent-created Pause remains agent-owned
+  across a later Stop, process replacement, or nested piece of the same work;
+  none of those boundaries rebases the restoration posture to `PAUSED`. Never
+  restore over a pre-existing or newer operator Pause; leave an explicit
+  blocked handoff instead of silently leaving an agent-owned Pause behind.
 
 ## Outcome coordination
 

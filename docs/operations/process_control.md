@@ -26,6 +26,9 @@ strategy, handler, recovery, and terminal action. An agent that changes a
 Running runtime to Pause or Stop owns restoration of that prior Running posture
 as part of completing the work, subject to the exact-owner safeguards in
 [`live_action_authority.md`](../live_action_authority.md#cleanup-and-reporting).
+An agent-created pre-Stop Pause and the replacement process's startup Pause are
+intermediate states, not a new restoration baseline; a pre-existing or newer
+operator Pause remains authoritative.
 
 Pause, Stop, Take Manual Control, input-owner acquisition, and terminal-policy
 writes share the runtime's final cross-process input-dispatch boundary. The
