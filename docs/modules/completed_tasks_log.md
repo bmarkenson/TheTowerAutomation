@@ -4640,9 +4640,13 @@ resolved dossier instead of copying its detail.
   `x5.0` maximum now survives transient read failures, preventing redundant
   ceiling probes until a target or battle boundary resets that proof.
 - The focused game-speed suite passed 26 tests and the complete repository
-  suite passed all 993 tests. Live activation was intentionally deferred when
-  fresh evidence showed operator-owned Pause and a Welcome Back / resume
-  dialog instead of the active `RUNNING` state required by the guarded reload.
+  suite passed all 993 tests. Live activation was initially deferred when fresh
+  evidence showed operator-owned Pause and a Welcome Back / resume dialog.
+  On 2026-08-15, a later production process containing `852febf` was freshly
+  observed `RUNNING` at wave 2088 and `x6.3`; three transient OCR misses each
+  recovered to `target_satisfied` at `x6.3` with zero taps. This closed the
+  activation check without replaying the regression-covered `x5.0` ceiling
+  sequence on the live battle.
 
 ### 2026-07-31 versioned player-save observation channel
 

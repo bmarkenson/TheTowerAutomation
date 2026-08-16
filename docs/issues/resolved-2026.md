@@ -2409,8 +2409,17 @@ and actionable work lives in
   post-input verification, and maximum-ceiling retention across an OCR
   failure.
 - **Validation:** The focused game-speed suite passed 26 tests. The complete
-  repository suite passed all 993 tests. Live activation remains pending until
-  the same runtime is again safely observable as an active battle.
+  repository suite passed all 993 tests. Initial live activation was correctly
+  deferred while the operator-owned runtime was paused outside an active
+  battle.
+- **Live activation:** On 2026-08-15, fresh host-backed status showed production
+  PID `3892486`, started at 19:39 PDT from a production `main` descendant of
+  `852febf`, actively `RUNNING` at wave 2088 and `x6.3`. Three transient
+  `speed_ocr_failed` results were each followed by `target_satisfied` at
+  `x6.3` with zero taps, confirming that the deployed guard recovered without
+  a false adjustment or retry input. This was an activation smoke rather than
+  a live replay of the original `x5.0` no-change probe; the deterministic
+  regression owns that exact sequence.
 - **Fixed by:** `852febf`.
 
 ### Perk timeline restart and hidden-UI gaps lost or misattributed selections
