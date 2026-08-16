@@ -443,7 +443,7 @@ The reverse listener address is fixed to Linux loopback. Its Linux port and
 Windows BlueStacks port are separate settings, both defaulting to 5555, so
 multiple PCs can expose distinct Linux ports without changing their local
 listeners. A PC may also reuse a former PC's Linux port after the former
-reverse forward releases it. **System > Services > Use this PC's emulator**
+reverse forward releases it. **System > Connections > Use this PC's emulator**
 submits the active forward's actual Linux and Windows ports, the client's
 stable local host ID and name, and any exact listener process identity the
 client can inspect. The Linux runtime treats that declaration as a host

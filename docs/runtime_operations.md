@@ -13,6 +13,7 @@ work, load only the matching operation.
 | Promote one candidate or roll production back | [`operations/production_promotion.md`](operations/production_promotion.md) |
 | Start, resume, or resolve a startup decision | [`operations/startup_gates.md`](operations/startup_gates.md) |
 | Start/stop, attach, switch ADB targets, or change Strategy | [`operations/managed_runtime.md`](operations/managed_runtime.md) |
+| Move the emulator between Windows PCs, including same-port reuse and tunnel recovery | [`operations/managed_runtime.md`](operations/managed_runtime.md#move-the-emulator-between-windows-pcs) |
 | Pause, change mode or game speed, replace a process, or recover a terminal run | [`operations/process_control.md`](operations/process_control.md) |
 | Start a bounded read-only live stream for operator or worker observation | [`operations/passive_stream.md`](operations/passive_stream.md) |
 | Hold automation for development, send one leased exact-target input, or preclaim one explicitly authorized owned test battle | [`operations/interactive_development.md`](operations/interactive_development.md) |
