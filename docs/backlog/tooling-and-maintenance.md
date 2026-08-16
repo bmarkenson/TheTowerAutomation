@@ -55,6 +55,39 @@ work. Historical checked detail remains in the
   - Add tooling only for a demonstrated discovery gap; keep the universal
     reuse-first safeguard canonical in `AGENTS.md`.
 
+## Runtime artifact retention and archival
+
+- [ ] Archive the finite legacy `logs/coins_per_min_*.csv` collection now that
+  structured completed-run records own current Coins/min history.
+  - Re-inventory the files and preserve their original names and contents in a
+    lossless compressed archive outside automatic runtime retention.
+  - Document recovery, verify archive readability plus file and data-row
+    counts, and remove the individual CSVs only after the verified archive
+    provides a recoverable boundary.
+- [ ] Constrain configured wave/coin sample retention roots to dedicated
+  repository-local diagnostic directories.
+  - Reject the repository root, broad ancestors, canonical record/evidence
+    locations, path aliases, and overlapping roots that could enroll unrelated
+    durable data in automatic deletion.
+  - Preserve intentional custom sample directories and cover accepted and
+    rejected boundaries with focused tests and operator-facing errors.
+- [ ] Make every executed generated-artifact retention sweep auditable,
+  including successful no-op sweeps.
+  - Emit one concise summary at startup or the rate-limited interval, not on
+    every heartbeat check, with the policy, examined roots, removed and
+    protected totals, and errors.
+  - Consolidate existing deletion/error reporting and cover no-op, deletion,
+    protection, rate-limiting, and error outcomes without log noise.
+- [ ] Audit retained screenshots for reusable development-validation evidence
+  and promote each selected frame into version-controlled `test/fixtures/`.
+  - Select only evidence that reproduces a detector, OCR, navigation,
+    lifecycle, or regression contract; do not preserve every automatic OCR or
+    failure capture.
+  - Add or update a focused test that consumes each promoted fixture, preserve
+    concise provenance, and leave source production artifacts untouched.
+  - Verify all existing fixtures are tracked and every durable documentation
+    reference that remains inside a cleanup root is narrowly protected.
+
 ## Codebase maintenance
 
 - [ ] Resolve the compatibility and removal decisions from the
