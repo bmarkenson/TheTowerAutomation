@@ -22,8 +22,9 @@ file have been deliberately selected.
 
 Wait for the current runtime to acknowledge a directive. `PAUSED` still permits
 capture, detection, lifecycle observation, and status, but blocks every
-strategy, handler, recovery, and terminal action. An agent-owned work Pause
-must be reconciled under
+strategy, handler, recovery, and terminal action. An agent that changes a
+Running runtime to Pause or Stop owns restoration of that prior Running posture
+as part of completing the work, subject to the exact-owner safeguards in
 [`live_action_authority.md`](../live_action_authority.md#cleanup-and-reporting).
 
 Pause, Stop, Take Manual Control, input-owner acquisition, and terminal-policy
@@ -144,15 +145,19 @@ stale metadata.
 
 To recover a preserved terminal after uncertain process ownership:
 
-1. Keep mode `WAIT`; inspect the screen, owner, lock, and exact target.
+1. Inspect the screen, owner, lock, exact target, and currently selected
+   terminal policy (`WAIT`, `HOME`, or `NEXT_BATTLE`).
 2. Stop the known owner cleanly and start the replacement `PAUSED`.
 3. Require the new PID/target plus fresh `GAME_OVER/PAUSED` or
    `TOURNAMENT_RESULTS/PAUSED` evidence.
-4. Reconfirm `WAIT`, then select Automation Enabled only to let terminal
-   capture proceed.
+4. Reconfirm the intended terminal policy, then restore Automation Enabled.
+   Game Over may collect the fresh terminal and follow Wait, Home, or Continue;
+   Continue arms the Retry as a new battle. Tournament Results retains its
+   separately documented terminal route.
 
 A terminal-only replacement may preserve Game Stats, Perks, and More Stats,
 but it cannot attach process-local Strategy, configuration, timeline, or
-sampling evidence without a matching canonical active-round binding. Do not
-leave the terminal manually, run another battle, and enable an older waiting
-handler.
+sampling evidence without a matching canonical active-round binding. Its fresh
+screen route is an explicitly unbound fallback, not proof that the completed
+battle was the retained pre-restart battle. Do not leave the terminal manually,
+run another battle, and enable an older waiting handler.

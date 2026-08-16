@@ -8630,12 +8630,11 @@ class App:
         *,
         owner: Optional[AuthorityHold],
     ) -> bool:
-        """Allow only the documented WAIT-bound terminal replacement route."""
+        """Allow the selected policy on one fresh, unbound Game Over screen."""
 
         if (
             str(state or "").upper() != "GAME_OVER"
             or owner is not AuthorityHold.OPERATOR_WORKFLOW
-            or AUTOMATION.mode is not ExecMode.WAIT
             or not self._awaiting_initial_battle_intent()
         ):
             return False
@@ -8664,6 +8663,42 @@ class App:
             and type(evidence.get("target_generation")) is int
             and int(evidence["target_generation"]) > 0
         )
+
+    def _authorize_preserved_game_over_retry(self) -> bool:
+        """Arm a new run only after the unbound terminal Retry was dispatched."""
+
+        if not self._awaiting_initial_battle_intent():
+            return True
+        manager = getattr(self, "_mission_mgr", None)
+        authorize = getattr(manager, "authorize_initial_battle_intent", None)
+        if callable(authorize):
+            try:
+                authorized = authorize("start_battle") is True
+            except Exception:
+                authorized = False
+            if authorized:
+                log(
+                    "[GAME_OVER] The preserved terminal Retry started a new "
+                    "battle boundary; released the replacement runtime's "
+                    "initial-intent hold",
+                    "INFO",
+                    console=True,
+                )
+                return True
+        supervisor = getattr(self, "_supervisor", None)
+        pause = getattr(supervisor, "pause_for_operator_authority", None)
+        if callable(pause):
+            pause(
+                "preserved Game Over Retry was dispatched, but the replacement "
+                "runtime could not arm the new battle boundary"
+            )
+        log(
+            "[GAME_OVER] Retry was dispatched from the preserved terminal, but "
+            "the new battle could not be armed; Automation is Paused",
+            "ERROR",
+            console=True,
+        )
+        return False
 
     @staticmethod
     def _interactive_development_timestamp(
@@ -19473,7 +19508,8 @@ class App:
             if preserved_terminal_recovery:
                 log(
                     "[GAME_OVER] Recovering the fresh preserved terminal under "
-                    "the explicit WAIT policy without attaching stale run state",
+                    "the selected terminal policy without attaching stale run "
+                    "state",
                     "INFO",
                     console=True,
                 )
@@ -19630,6 +19666,8 @@ class App:
                 self._observe_strategy_request()
 
             def mark_retry_started() -> None:
+                if preserved_terminal_recovery:
+                    self._authorize_preserved_game_over_retry()
                 retry_scope = start_retry_activity_scope()
                 self._accept_pending_terminal_history_handoff()
                 run_binding = (

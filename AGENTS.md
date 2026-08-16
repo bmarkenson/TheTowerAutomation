@@ -66,8 +66,14 @@ changes this model.
   [`docs/live_action_authority.md`](docs/live_action_authority.md); ambiguity
   fails closed.
 - Pause blocks every strategy and handler action while capture and detection
-  may continue. Reconcile an agent-owned work Pause when finished, restoring
-  `RUNNING` only after fresh evidence proves the Pause is still agent-owned.
+  may continue. Before an agent changes a live `RUNNING` runtime to `PAUSED`
+  or `STOPPED` for its work, retain the prior control request and owner. That
+  work is not complete until the replacement/current runtime is restored to
+  `RUNNING` after fresh evidence proves the control boundary is still
+  agent-owned and no newer operator, manual-control, safety, target, or screen
+  condition forbids restoration. Never restore a pre-existing or superseded
+  Pause; leave an explicit blocked handoff instead of silently leaving an
+  agent-owned Pause behind.
 
 ## Outcome coordination
 

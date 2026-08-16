@@ -105,10 +105,21 @@ Those contracts authorize only their bounded setting action.
 
 ## Cleanup and reporting
 
-An agent-owned work Pause must be reconciled when the task ends. Reinspect
-control, owner, target, and screen; restore `RUNNING` only when the Pause is
-still agent-owned and no new stop condition exists. Never leave an owned Pause
-as undocumented handoff state.
+Before an agent changes a live `RUNNING` runtime to `PAUSED` or `STOPPED` for
+its work, it must retain the prior control request and owner. The work is not
+complete merely because its code, diagnosis, validation, or deployment is
+finished. Reinspect the current/replacement runtime, exact control request,
+owner, target, and screen, then restore `RUNNING` when the changed boundary is
+still agent-owned and no newer operator, manual-control, safety, target, or
+screen condition forbids restoration. A process replacement that starts
+Paused is part of the same restoration obligation when the agent stopped a
+previously Running owner.
+
+Never restore a pre-existing Pause, a Pause whose request or owner was
+superseded, or a safety/manual-control boundary. If fresh evidence makes
+restoration unsafe or impossible, leave the state unchanged and report the
+exact blocked handoff; do not silently present the agent-owned work as
+complete.
 
 `--fast-game-over` suppresses capture only for a known already-recorded
 terminal screen. Restart normally afterward so future battles remain

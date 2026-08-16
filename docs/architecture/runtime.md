@@ -799,7 +799,12 @@ ownership is unchanged, revision/source evidence advances, the active identity
 changes, and its current tail exactly equals the carried terminal tail. The
 collector then clears all old identity and Perk progression before observing
 the new round. It never carries this evidence across a process session, and a
-process that starts on Game Over remains terminal-only and unbound.
+process that starts on Game Over remains terminal-only and unbound. Fresh
+runtime/target/screen evidence may nevertheless authorize that replacement to
+follow the selected terminal policy. Wait retains Game Over, Home leaves it,
+and Continue dispatches Retry and arms the successor as a new battle. This is
+lifecycle recovery only: it does not bind the completed battle or make its
+save-derived report and process-local evidence reusable.
 Perk-ID overlays have a narrower but compatible lifetime: accepted semantics
 survive UI correlation-window resets and ordinary direct Retries on the same
 owned target generation, while per-round UI batches do not. A target handoff,
@@ -817,7 +822,8 @@ Perks remain passive evidence, More Stats remains the guarded fallback, and
 continuity, terminal binding, Strategy, attachment, record construction,
 Perks-navigation decisions, UI suppression, and lifecycle authority remain
 unchanged. A terminal-only process remains unbound and cannot inherit Strategy
-or process-local evidence.
+or process-local evidence, even when its fresh-screen fallback follows Home or
+Continue.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through

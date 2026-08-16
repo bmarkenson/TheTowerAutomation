@@ -51,11 +51,14 @@ also records a one-shot handoff for that battle, regardless of whether
 automation originally started it or attached later. Start consumes that
 handoff with a fresh ordinary Attach workflow and forced save; wave progression
 does not matter because the proof is the battle identity. The service restores
-Enabled authority only after the same identity is adopted. A changed or ended
+Enabled authority only after the same identity is adopted. A changed active
 battle, target mismatch, or unavailable proof leaves the replacement Paused
-for explicit intent. Without a handoff, Start retains its normal Paused,
-explicit-intent behavior. Repeating an already satisfied Start or Stop is
-reported as a no-op; the old one-step attached reload remains retired.
+for explicit intent. If the retained battle instead reached fresh Game Over,
+the failed same-battle Attach remains unbound, but restoring Enabled may follow
+the selected Wait/Home/Continue terminal policy; Continue arms Retry as a new
+battle. Without a handoff, Start retains its normal Paused, explicit-intent
+behavior. Repeating an already satisfied Start or Stop is reported as a no-op;
+the old one-step attached reload remains retired.
 
 ## Set what happens when a battle ends
 

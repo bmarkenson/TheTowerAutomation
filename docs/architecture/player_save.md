@@ -609,8 +609,11 @@ guarded terminal consumer; the observation itself did not implement polling,
 same-round Perk retention, history attachment, record construction, or UI
 suppression. In particular, a terminal-only replay remains `unbound` under
 the [current-process terminal-binding rule](../issues/resolved-2026.md#terminal-only-restart-attached-stale-strategy-and-perk-history-to-a-manual-battle),
-and it cannot supply Strategy or process-local tracker evidence. Unknown future
-`killedBy` values still fail semantic publication closed. Foreground save
+and it cannot supply Strategy or process-local tracker evidence. It may still
+use fresh runtime/target/Game Over evidence to follow the selected terminal
+screen policy; that unbound lifecycle fallback does not promote History or
+other partial chronology into battle identity. Unknown future `killedBy`
+values still fail semantic publication closed. Foreground save
 progress does not claim pause/background cadence, and the observed survival
 checkpoints and visual transitions do not prove repeated-event completeness or
 exact timer formulas; those remain `V1073-RUNTIME-015` and
