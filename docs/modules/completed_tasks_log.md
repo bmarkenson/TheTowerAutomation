@@ -39,6 +39,33 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-16 Save-derived survival-ability activation waves
+
+- Exact implementation candidate `bebd076` consumes the version-1101 active
+  save's allowlisted survival-ability use counts, refresh countdowns, and
+  recharge-research levels under the adopted round identity and monotonic save
+  ordering. A positive count with an active recharge timer derives a candidate
+  activation wave; repeated checkpoints retain the observed candidate range.
+  Battle reports and the native Battle History view label that evidence as
+  save-derived while keeping uncaptured visual detections approximate.
+- A live causal audit observed Second Wind visually near wave 5,359 and then
+  derived candidates 5,355 and 5,356 from three active-timer saves, producing
+  the bounded range 5,355–5,356. Demon Mode was observed visually near wave
+  5,634 and derived as wave 5,631 from its first captured active timer. Earlier
+  zero-count checkpoints produced inactive refresh targets of both 1,000,000
+  and 999,998, so zero count and the recharge window guard authority instead of
+  a false exact sentinel. Only normalized allowlisted values were retained;
+  the raw save was not retained and no device input was sent for the audit.
+- The one complete checkpoint on `bebd076` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,973 repository tests in 443.58 seconds. The final
+  affected suite passed 344 tests in 7.69 seconds. Both Release
+  ControlSurface and TunnelHost cross-builds completed with zero errors; their
+  only warnings were the established read-only NuGet vulnerability-cache
+  `NU1900`. Validation used development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`;
+  the cross-build is not a Windows runtime validation.
+
 ### 2026-08-15 Unambiguous Windows host-sampling status
 
 - The native Host Health panel now says **Sampling off** whenever collection is
