@@ -35,6 +35,10 @@ from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
 )
+from core.battle_activation_tracker import (
+    battle_activation_checkpoint_configuration_fingerprint,
+    battle_activation_snapshot_from_checkpoint,
+)
 from core.runtime_save import (
     ActiveRoundIdentity,
     RoundCounterVectorEvidence,
@@ -134,6 +138,14 @@ class ActiveBattleIdentityRecord:
     operation_id: str = field(repr=False)
     acquisition: Mapping[str, Any] = field(default_factory=dict, repr=False)
     session_preflight: Optional[Mapping[str, Any]] = field(
+        default=None,
+        repr=False,
+    )
+    strategy_snapshot: Optional[Mapping[str, Any]] = field(
+        default=None,
+        repr=False,
+    )
+    survival_activation_checkpoint: Optional[Mapping[str, Any]] = field(
         default=None,
         repr=False,
     )
@@ -269,11 +281,17 @@ class BattleIdentityStore:
             if (
                 relation is BattleIdentityRelation.SAME_BATTLE
                 and previous is not None
-                and previous.session_preflight is not None
             ):
-                payload["session_preflight"] = dict(
-                    previous.session_preflight
-                )
+                for key, value in (
+                    ("session_preflight", previous.session_preflight),
+                    ("strategy_snapshot", previous.strategy_snapshot),
+                    (
+                        "survival_activation_checkpoint",
+                        previous.survival_activation_checkpoint,
+                    ),
+                ):
+                    if value is not None:
+                        payload[key] = dict(value)
             self._write_payload(payload)
             return _record_from_payload(payload), relation
 
@@ -385,6 +403,160 @@ class BattleIdentityStore:
                 "completed_at": _aware_timestamp(completed_at).isoformat(),
                 "evidence": detached_evidence,
             }
+            self._write_payload(payload)
+            return True
+
+    def record_strategy_snapshot(
+        self,
+        *,
+        identity_fingerprint: str,
+        strategy: str,
+        strategy_definition_fingerprint: str,
+        session_preflight_configuration_fingerprint: str,
+        run_configuration: Mapping[str, Any],
+        recorded_at: Optional[datetime] = None,
+    ) -> bool:
+        """Retain one immutable reporting snapshot for the exact battle."""
+
+        expected = str(identity_fingerprint or "").strip()
+        strategy_name = str(strategy or "").strip()
+        definition_fingerprint = str(
+            strategy_definition_fingerprint or ""
+        ).strip()
+        preflight_fingerprint = str(
+            session_preflight_configuration_fingerprint or ""
+        ).strip()
+        if (
+            _SHA256_RE.fullmatch(expected) is None
+            or not strategy_name
+            or _SHA256_RE.fullmatch(definition_fingerprint) is None
+            or _SHA256_RE.fullmatch(preflight_fingerprint) is None
+            or not isinstance(run_configuration, Mapping)
+        ):
+            return False
+        try:
+            detached_configuration = _detached_json_mapping(run_configuration)
+        except (OverflowError, RecursionError, TypeError, ValueError):
+            return False
+        material = {
+            "schema_version": 1,
+            "identity_fingerprint": expected,
+            "strategy": strategy_name,
+            "strategy_definition_fingerprint": definition_fingerprint,
+            "session_preflight_configuration_fingerprint": (
+                preflight_fingerprint
+            ),
+            "run_configuration": detached_configuration,
+            "run_configuration_fingerprint": _json_fingerprint(
+                detached_configuration
+            ),
+            "recorded_at": _aware_timestamp(recorded_at).isoformat(),
+        }
+        material["fingerprint"] = _mapping_fingerprint(material)
+        with self._lock:
+            payload = self._read_payload()
+            if payload is None or payload.get("status") != "active":
+                return False
+            record = _record_from_payload(payload)
+            if record.fingerprint != expected:
+                return False
+            existing = record.strategy_snapshot
+            if existing is not None:
+                # Strategy identity is immutable for this battle. A changed
+                # candidate is selected for a later safe boundary instead;
+                # an identical repeat is simply already satisfied.
+                return False
+            payload["strategy_snapshot"] = material
+            self._write_payload(payload)
+            return True
+
+    def record_survival_activation_checkpoint(
+        self,
+        *,
+        identity_fingerprint: str,
+        tracker_configuration_fingerprint: str,
+        checkpoint: Mapping[str, Any],
+        recorded_at: Optional[datetime] = None,
+    ) -> bool:
+        """Retain one validated tracker checkpoint under its exact battle."""
+
+        expected = str(identity_fingerprint or "").strip()
+        configuration_fingerprint = str(
+            tracker_configuration_fingerprint or ""
+        ).strip()
+        if (
+            _SHA256_RE.fullmatch(expected) is None
+            or _SHA256_RE.fullmatch(configuration_fingerprint) is None
+            or battle_activation_checkpoint_configuration_fingerprint(
+                checkpoint,
+                expected_identity_fingerprint=expected,
+            )
+            != configuration_fingerprint
+        ):
+            return False
+        try:
+            detached_checkpoint = _detached_json_mapping(checkpoint)
+        except (OverflowError, RecursionError, TypeError, ValueError):
+            return False
+        envelope = {
+            "schema_version": 1,
+            "identity_fingerprint": expected,
+            "tracker_configuration_fingerprint": configuration_fingerprint,
+            "recorded_at": _aware_timestamp(recorded_at).isoformat(),
+            "checkpoint": detached_checkpoint,
+        }
+        with self._lock:
+            payload = self._read_payload()
+            if payload is None or payload.get("status") != "active":
+                return False
+            record = _record_from_payload(payload)
+            if record.fingerprint != expected:
+                return False
+            existing = record.survival_activation_checkpoint
+            if isinstance(existing, Mapping):
+                existing_checkpoint = existing.get("checkpoint")
+                if isinstance(existing_checkpoint, Mapping):
+                    old_last = existing_checkpoint.get("last_save")
+                    new_last = detached_checkpoint.get("last_save")
+                    old_revision = (
+                        old_last.get("revision")
+                        if isinstance(old_last, Mapping)
+                        else None
+                    )
+                    new_revision = (
+                        new_last.get("revision")
+                        if isinstance(new_last, Mapping)
+                        else None
+                    )
+                    if (
+                        type(old_revision) is int
+                        and (
+                            type(new_revision) is not int
+                            or new_revision < old_revision
+                        )
+                    ):
+                        return False
+                    old_wave = (
+                        old_last.get("wave")
+                        if isinstance(old_last, Mapping)
+                        else None
+                    )
+                    new_wave = (
+                        new_last.get("wave")
+                        if isinstance(new_last, Mapping)
+                        else None
+                    )
+                    if (
+                        type(old_wave) is int
+                        and (
+                            type(new_wave) is not int
+                            or new_wave < old_wave
+                        )
+                    ):
+                        return False
+                    if existing_checkpoint == detached_checkpoint:
+                        return False
+            payload["survival_activation_checkpoint"] = envelope
             self._write_payload(payload)
             return True
 
@@ -626,7 +798,20 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
             "battle identity timestamp is invalid"
         ) from exc
     acquisition = payload.get("acquisition")
-    session_preflight = payload.get("session_preflight")
+    session_preflight = _validated_session_preflight(
+        payload.get("session_preflight"),
+        identity_fingerprint=(identity.fingerprint if identity else ""),
+    )
+    strategy_snapshot = _validated_strategy_snapshot(
+        payload.get("strategy_snapshot"),
+        identity_fingerprint=(identity.fingerprint if identity else ""),
+    )
+    survival_activation_checkpoint = (
+        _validated_survival_activation_checkpoint(
+            payload.get("survival_activation_checkpoint"),
+            identity_fingerprint=(identity.fingerprint if identity else ""),
+        )
+    )
     terminal_continuity_value = payload.get("terminal_continuity")
     if (
         identity is None
@@ -634,10 +819,6 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
         or not reason
         or not operation_id
         or not isinstance(acquisition, Mapping)
-        or (
-            session_preflight is not None
-            and not isinstance(session_preflight, Mapping)
-        )
     ):
         raise BattleIdentityStoreError("battle identity record is malformed")
     terminal_continuity = _validated_terminal_continuity(
@@ -659,8 +840,131 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
             if isinstance(session_preflight, Mapping)
             else None
         ),
+        strategy_snapshot=(
+            dict(strategy_snapshot)
+            if isinstance(strategy_snapshot, Mapping)
+            else None
+        ),
+        survival_activation_checkpoint=(
+            dict(survival_activation_checkpoint)
+            if isinstance(survival_activation_checkpoint, Mapping)
+            else None
+        ),
         terminal_continuity=terminal_continuity,
     )
+
+
+def _validated_session_preflight(
+    value: object,
+    *,
+    identity_fingerprint: str,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    completed_at = str(value.get("completed_at") or "").strip()
+    try:
+        parsed = datetime.fromisoformat(completed_at)
+    except ValueError:
+        return None
+    evidence = value.get("evidence")
+    if (
+        parsed.tzinfo is None
+        or value.get("identity_fingerprint") != identity_fingerprint
+        or not str(value.get("strategy") or "").strip()
+        or _SHA256_RE.fullmatch(
+            str(value.get("configuration_fingerprint") or "")
+        )
+        is None
+        or not isinstance(evidence, Mapping)
+    ):
+        return None
+    try:
+        detached = _detached_json_mapping(value)
+    except (OverflowError, RecursionError, TypeError, ValueError):
+        return None
+    return detached
+
+
+def _validated_strategy_snapshot(
+    value: object,
+    *,
+    identity_fingerprint: str,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    recorded_at = str(value.get("recorded_at") or "").strip()
+    try:
+        parsed = datetime.fromisoformat(recorded_at)
+    except ValueError:
+        return None
+    if (
+        parsed.tzinfo is None
+        or value.get("identity_fingerprint") != identity_fingerprint
+        or not str(value.get("strategy") or "").strip()
+        or _SHA256_RE.fullmatch(
+            str(value.get("strategy_definition_fingerprint") or "")
+        )
+        is None
+        or _SHA256_RE.fullmatch(
+            str(
+                value.get(
+                    "session_preflight_configuration_fingerprint"
+                )
+                or ""
+            )
+        )
+        is None
+        or not isinstance(value.get("run_configuration"), Mapping)
+        or _SHA256_RE.fullmatch(
+            str(value.get("run_configuration_fingerprint") or "")
+        )
+        is None
+        or _json_fingerprint(value.get("run_configuration"))
+        != value.get("run_configuration_fingerprint")
+        or _SHA256_RE.fullmatch(str(value.get("fingerprint") or "")) is None
+        or _mapping_fingerprint(value) != value.get("fingerprint")
+    ):
+        return None
+    try:
+        return _detached_json_mapping(value)
+    except (OverflowError, RecursionError, TypeError, ValueError):
+        return None
+
+
+def _validated_survival_activation_checkpoint(
+    value: object,
+    *,
+    identity_fingerprint: str,
+) -> Optional[dict[str, Any]]:
+    if not (
+        isinstance(value, Mapping)
+        and value.get("schema_version") == 1
+        and value.get("identity_fingerprint") == identity_fingerprint
+        and isinstance(value.get("checkpoint"), Mapping)
+    ):
+        return None
+    configuration_fingerprint = str(
+        value.get("tracker_configuration_fingerprint") or ""
+    ).strip()
+    recorded_at = str(value.get("recorded_at") or "").strip()
+    try:
+        parsed = datetime.fromisoformat(recorded_at)
+    except ValueError:
+        return None
+    if (
+        parsed.tzinfo is None
+        or _SHA256_RE.fullmatch(configuration_fingerprint) is None
+        or battle_activation_checkpoint_configuration_fingerprint(
+            value.get("checkpoint"),
+            expected_identity_fingerprint=identity_fingerprint,
+        )
+        != configuration_fingerprint
+    ):
+        return None
+    try:
+        return _detached_json_mapping(value)
+    except (OverflowError, RecursionError, TypeError, ValueError):
+        return None
 
 
 def _terminal_continuity_from_acquisition(
@@ -731,6 +1035,122 @@ def _validated_terminal_continuity(
         save_revision=save_revision,
         target_binding_fingerprint=target_fingerprint,
     )
+
+
+def durable_terminal_report_evidence_from_record(
+    record: ActiveBattleIdentityRecord,
+    *,
+    terminal_binding: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Restore component evidence only after exact terminal vector proof."""
+
+    if not isinstance(record, ActiveBattleIdentityRecord):
+        return {}
+    identity = str(record.fingerprint or "").strip()
+    if not (
+        isinstance(terminal_binding, Mapping)
+        and terminal_binding.get("status") == "bound"
+        and terminal_binding.get("binding_source")
+        == "durable_full_round_counter_vector"
+        and terminal_binding.get("active_round_identity_fingerprint")
+        == identity
+    ):
+        return {}
+    strategy_snapshot = _validated_strategy_snapshot(
+        record.strategy_snapshot,
+        identity_fingerprint=identity,
+    )
+    restored: dict[str, Any] = {}
+    components: list[str] = []
+    component_fingerprints: dict[str, str] = {}
+    if strategy_snapshot is not None:
+        strategy = str(strategy_snapshot["strategy"])
+        restored.update(
+            {
+                "strategy": strategy,
+                "run_configuration": _detached_json_mapping(
+                    strategy_snapshot["run_configuration"]
+                ),
+                "strategy_definition_fingerprint": strategy_snapshot[
+                    "strategy_definition_fingerprint"
+                ],
+            }
+        )
+        components.append("strategy_snapshot")
+        component_fingerprints["strategy_snapshot"] = str(
+            strategy_snapshot["fingerprint"]
+        )
+
+        receipt = _validated_session_preflight(
+            record.session_preflight,
+            identity_fingerprint=identity,
+        )
+        if (
+            receipt is not None
+            and receipt.get("strategy") == strategy
+            and receipt.get("configuration_fingerprint")
+            == strategy_snapshot.get(
+                "session_preflight_configuration_fingerprint"
+            )
+        ):
+            evidence = _detached_json_mapping(receipt["evidence"])
+            if (
+                evidence.get("valid") is True
+                and isinstance(evidence.get("failed_checks"), list)
+                and not evidence["failed_checks"]
+            ):
+                restored["session_preflight_evidence"] = evidence
+                components.append("session_preflight_evidence")
+                component_fingerprints["session_preflight_evidence"] = str(
+                    receipt["configuration_fingerprint"]
+                )
+
+    envelope = _validated_survival_activation_checkpoint(
+        record.survival_activation_checkpoint,
+        identity_fingerprint=identity,
+    )
+    if envelope is not None:
+        checkpoint = envelope["checkpoint"]
+        activations = battle_activation_snapshot_from_checkpoint(
+            checkpoint,
+            expected_identity_fingerprint=identity,
+        )
+        if activations is not None:
+            last_save = checkpoint.get("last_save")
+            activations["durable_restoration"] = {
+                "schema_version": 1,
+                "status": "observed_events_through_checkpoint",
+                "complete_history": False,
+                "checkpoint_recorded_at": envelope["recorded_at"],
+                "last_save_revision": (
+                    last_save.get("revision")
+                    if isinstance(last_save, Mapping)
+                    else None
+                ),
+                "last_saved_wave": (
+                    last_save.get("wave")
+                    if isinstance(last_save, Mapping)
+                    else None
+                ),
+            }
+            restored["survival_ability_activations"] = activations
+            components.append("survival_ability_activations")
+            component_fingerprints["survival_ability_activations"] = str(
+                envelope["tracker_configuration_fingerprint"]
+            )
+
+    if not components:
+        return {}
+
+    restored["durable_terminal_evidence"] = {
+        "schema_version": 1,
+        "status": "restored",
+        "binding_source": "durable_full_round_counter_vector",
+        "active_round_identity_fingerprint": identity,
+        "components": components,
+        "component_fingerprints": component_fingerprints,
+    }
+    return restored
 
 
 def terminal_run_binding_from_round_counters(
@@ -829,6 +1249,37 @@ def terminal_run_binding_from_round_counters(
     }
 
 
+def _detached_json_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    detached = json.loads(
+        json.dumps(
+            dict(value),
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+    if not isinstance(detached, dict):
+        raise TypeError("detached evidence must remain a mapping")
+    return detached
+
+
+def _mapping_fingerprint(value: Mapping[str, Any]) -> str:
+    material = {key: item for key, item in value.items() if key != "fingerprint"}
+    return _json_fingerprint(material)
+
+
+def _json_fingerprint(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _aware_timestamp(value: Optional[datetime]) -> datetime:
     timestamp = value or datetime.now(timezone.utc)
     if timestamp.tzinfo is None:
@@ -883,5 +1334,6 @@ __all__ = [
     "BattleIdentityRelation",
     "BattleIdentityStore",
     "BattleIdentityStoreError",
+    "durable_terminal_report_evidence_from_record",
     "terminal_run_binding_from_round_counters",
 ]

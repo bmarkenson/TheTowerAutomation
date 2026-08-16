@@ -544,6 +544,34 @@ def test_survival_activation_markdown_distinguishes_legacy_and_observed_none():
     assert "- Second Wind activations: none observed" in observed_none
 
 
+def test_survival_activation_markdown_labels_durable_partial_checkpoint():
+    lines = render_survival_ability_activations_markdown(
+        {
+            "schema_version": 5,
+            "second_wind_activations": [],
+            "demon_mode_first_activation": None,
+            "demon_mode_activations": [],
+            "nuke_activations": [],
+            "durable_restoration": {
+                "schema_version": 1,
+                "status": "observed_events_through_checkpoint",
+                "complete_history": False,
+                "last_saved_wave": 5_600,
+            },
+        }
+    )
+
+    assert any(
+        "restored from exact-battle evidence through saved wave 5600" in line
+        for line in lines
+    )
+    assert any(
+        "an absent entry does not prove that no later activation occurred"
+        in line
+        for line in lines
+    )
+
+
 def test_survival_activation_markdown_labels_save_timer_wave_range():
     lines = render_survival_ability_activations_markdown(
         {
@@ -1673,6 +1701,37 @@ def test_unbound_terminal_record_is_valid_but_warns_about_omitted_run_evidence()
     assert record["runtime"]["run_binding"]["status"] == "unbound"
     warning = record["quality"]["warnings"][-1]
     assert "Process-local run evidence was omitted" in warning
+    assert warning in render_battle_markdown(record)
+
+
+def test_unbound_terminal_warning_acknowledges_restored_durable_evidence():
+    record = build_battle_record_from_clipboard(
+        _frame(9),
+        CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8"),
+        strategy_name="farm_t19",
+        run_configuration={"profile": "farm", "tier": 19},
+        runtime_context={
+            "terminal_state": "GAME_OVER",
+            "run_binding": {
+                "schema_version": 1,
+                "status": "unbound",
+                "reason": "terminal_without_observed_active_battle",
+                "activity_scope_run_id": "replacement-scope",
+            },
+            "durable_terminal_evidence": {
+                "schema_version": 1,
+                "status": "restored",
+                "binding_source": "durable_full_round_counter_vector",
+                "active_round_identity_fingerprint": "a" * 64,
+                "components": ["strategy_snapshot"],
+            },
+        },
+        game_stats_text_fn=_clipboard_game_text,
+    )
+
+    warning = record["quality"]["warnings"][-1]
+    assert record["battle_type"] == "farm"
+    assert "independently durable exact-battle evidence was restored" in warning
     assert warning in render_battle_markdown(record)
 
 

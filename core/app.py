@@ -103,6 +103,7 @@ from core.battle_identity import (
     BattleIdentityRelation,
     BattleIdentityStore,
     BattleIdentityStoreError,
+    durable_terminal_report_evidence_from_record,
     terminal_run_binding_from_round_counters,
 )
 from core.player_save import (
@@ -725,6 +726,172 @@ class App:
             tracker = BattleActivationTracker()
             self._battle_activation_tracker = tracker
         return tracker
+
+    def _retained_battle_record_for(
+        self,
+        identity_fingerprint: str,
+    ) -> Optional[ActiveBattleIdentityRecord]:
+        """Return retained evidence only for one exact active identity."""
+
+        expected = str(identity_fingerprint or "").strip()
+        record = getattr(self, "_retained_battle_identity_record", None)
+        if (
+            isinstance(record, ActiveBattleIdentityRecord)
+            and record.fingerprint == expected
+        ):
+            return record
+        return None
+
+    def _refresh_retained_battle_record(self) -> None:
+        """Refresh the advisory record after this process advances it."""
+
+        store = getattr(self, "_battle_identity_store", None)
+        if store is None:
+            return
+        try:
+            self._retained_battle_identity_record = store.active()
+        except BattleIdentityStoreError:
+            self._retained_battle_identity_record = None
+
+    def _persist_battle_strategy_snapshot(
+        self,
+        identity_fingerprint: str,
+    ) -> bool:
+        """Freeze report-only Strategy evidence for one settled battle."""
+
+        expected = str(identity_fingerprint or "").strip()
+        manager = getattr(self, "_mission_mgr", None)
+        strategy = getattr(manager, "strategy", None)
+        active_battle_observed = getattr(
+            manager,
+            "active_battle_observed",
+            None,
+        )
+        if (
+            not expected
+            or strategy is None
+            or not callable(active_battle_observed)
+            or active_battle_observed() is not True
+            or self._awaiting_initial_battle_intent()
+        ):
+            return False
+        record = self._retained_battle_record_for(expected)
+        if record is None:
+            return False
+        if isinstance(record.strategy_snapshot, Mapping):
+            return False
+        try:
+            strategy_name = str(strategy.name or "").strip()
+            definition_fingerprint = str(
+                strategy.definition_fingerprint() or ""
+            ).strip()
+            preflight_fingerprint = str(
+                strategy.session_preflight_fingerprint() or ""
+            ).strip()
+            run_configuration = strategy.run_configuration()
+        except (AttributeError, TypeError, ValueError):
+            return False
+        store = getattr(self, "_battle_identity_store", None)
+        if store is None:
+            return False
+        try:
+            updated = store.record_strategy_snapshot(
+                identity_fingerprint=expected,
+                strategy=strategy_name,
+                strategy_definition_fingerprint=definition_fingerprint,
+                session_preflight_configuration_fingerprint=(
+                    preflight_fingerprint
+                ),
+                run_configuration=run_configuration,
+            )
+        except (BattleIdentityStoreError, OSError, TypeError, ValueError):
+            return False
+        if updated:
+            self._refresh_retained_battle_record()
+            log(
+                "[RUN_BINDING] Retained the active battle's exact Strategy "
+                f"report snapshot identity={expected[:16]}",
+                "DEBUG",
+            )
+        return bool(updated)
+
+    def _bind_survival_activation_tracker(
+        self,
+        identity_fingerprint: str,
+    ) -> bool:
+        """Bind or restore the activation tracker for one exact battle."""
+
+        expected = str(identity_fingerprint or "").strip()
+        if not expected:
+            return False
+        tracker = self._activation_tracker()
+        current = tracker.checkpoint()
+        if (
+            isinstance(current, Mapping)
+            and current.get("active_round_identity_fingerprint") == expected
+        ):
+            return True
+        tracker.reset()
+        record = self._retained_battle_record_for(expected)
+        envelope = (
+            record.survival_activation_checkpoint
+            if record is not None
+            else None
+        )
+        checkpoint = (
+            envelope.get("checkpoint")
+            if isinstance(envelope, Mapping)
+            else None
+        )
+        if isinstance(checkpoint, Mapping) and tracker.restore_checkpoint(
+            checkpoint,
+            expected_identity_fingerprint=expected,
+        ):
+            log(
+                "[BATTLE_EVENT] Restored the exact-battle survival "
+                f"activation checkpoint identity={expected[:16]}",
+                "INFO",
+            )
+            return True
+        return tracker.bind_round_identity(expected)
+
+    def _persist_survival_activation_checkpoint(self) -> bool:
+        """Advance the battle-bound activation checkpoint when available."""
+
+        identity = str(
+            getattr(self, "_active_round_identity_fingerprint", None) or ""
+        ).strip()
+        record = self._retained_battle_record_for(identity)
+        checkpoint = self._activation_tracker().checkpoint()
+        configuration_fingerprint = (
+            str(
+                checkpoint.get("tracker_configuration_fingerprint") or ""
+            ).strip()
+            if isinstance(checkpoint, Mapping)
+            else ""
+        )
+        store = getattr(self, "_battle_identity_store", None)
+        if (
+            not identity
+            or record is None
+            or not configuration_fingerprint
+            or not isinstance(checkpoint, Mapping)
+            or store is None
+        ):
+            return False
+        try:
+            updated = store.record_survival_activation_checkpoint(
+                identity_fingerprint=identity,
+                tracker_configuration_fingerprint=(
+                    configuration_fingerprint
+                ),
+                checkpoint=checkpoint,
+            )
+        except (BattleIdentityStoreError, OSError, TypeError, ValueError):
+            return False
+        if updated:
+            self._refresh_retained_battle_record()
+        return bool(updated)
 
     def _observe_player_save_audit_screen(
         self,
@@ -1641,12 +1808,13 @@ class App:
             try:
                 snapshot = getattr(acquisition, "snapshot", None)
                 runtime = getattr(snapshot, "runtime_save", None)
-                self._activation_tracker().observe_save_checkpoint(
-                    runtime,
-                    expected_identity_fingerprint=(
-                        context.active_round_identity_fingerprint
-                    ),
-                )
+                identity = context.active_round_identity_fingerprint
+                if self._bind_survival_activation_tracker(identity):
+                    self._activation_tracker().observe_save_checkpoint(
+                        runtime,
+                        expected_identity_fingerprint=identity,
+                    )
+                    self._persist_survival_activation_checkpoint()
             except Exception:
                 log(
                     "[PLAYER_SAVE_API] Survival-activation projection "
@@ -1686,7 +1854,7 @@ class App:
         context = self._current_player_save_observation_context()
         if context is None:
             return
-        self._activation_tracker().bind_round_identity(
+        self._bind_survival_activation_tracker(
             context.active_round_identity_fingerprint
         )
         if monitor is not None or metric_monitor is not None:
@@ -1886,6 +2054,7 @@ class App:
             if changed:
                 self._last_requested_perk_checkpoint_signature = None
                 self._bind_new_perk_monitor_activity()
+            self._persist_battle_strategy_snapshot(identity)
             return
         if state in {"HOME", "HOME_SCREEN"} and HomeBattleControl.parse(
             detection.get("home_battle_control", "UNKNOWN")
@@ -2095,6 +2264,20 @@ class App:
         battle_conditions = terminal_save.get("battle_conditions")
         if isinstance(battle_conditions, Mapping):
             context["battle_conditions"] = dict(battle_conditions)
+        durable_context = terminal_save.get(
+            "_durable_terminal_evidence_context"
+        )
+        if isinstance(durable_context, Mapping):
+            for key in (
+                "strategy",
+                "run_configuration",
+                "strategy_definition_fingerprint",
+                "session_preflight_evidence",
+                "survival_ability_activations",
+                "durable_terminal_evidence",
+            ):
+                if key in durable_context:
+                    context[key] = copy.deepcopy(durable_context[key])
         if binding["status"] != "bound":
             signature = (
                 terminal,
@@ -2110,8 +2293,9 @@ class App:
                 log(
                     "[RUN_BINDING] Terminal battle was not observed active in "
                     "the current process with a forced save identity; selected "
-                    "strategy and process-local run evidence are omitted from "
-                    "the record",
+                    "current-process-only run evidence is omitted from the "
+                    "record; independently durable exact-battle evidence may "
+                    "be restored after terminal counter continuity",
                     "WARN",
                     console=True,
                 )
@@ -2290,6 +2474,7 @@ class App:
             return unavailable(reason)
         snapshot = acquisition.snapshot
         report_binding = dict(run_binding)
+        durable_terminal_evidence_context: dict[str, Any] = {}
         if recovery_candidate is not None:
             recovered_binding = terminal_run_binding_from_round_counters(
                 recovery_candidate,
@@ -2305,10 +2490,28 @@ class App:
             )
             if recovered_binding.get("status") == "bound":
                 report_binding = recovered_binding
+                durable_terminal_evidence_context = (
+                    durable_terminal_report_evidence_from_record(
+                        recovery_candidate,
+                        terminal_binding=recovered_binding,
+                    )
+                )
+                restored_components = (
+                    durable_terminal_evidence_context.get(
+                        "durable_terminal_evidence",
+                        {},
+                    ).get("components", ())
+                )
                 log(
                     "[RUN_BINDING] Exact full-tier battle-start counter "
                     "equality bound the retained battle to this Game Over "
-                    "save; process-local strategy evidence remains omitted",
+                    "save; current-process-only evidence remains omitted"
+                    + (
+                        "; restored independently durable components="
+                        + ",".join(str(item) for item in restored_components)
+                        if restored_components
+                        else ""
+                    ),
                     "INFO",
                     console=True,
                 )
@@ -2437,6 +2640,9 @@ class App:
             "_acquisition": acquisition,
             "_mapping_observer": mapping_observer,
             "_report_run_binding": report_binding,
+            "_durable_terminal_evidence_context": (
+                durable_terminal_evidence_context
+            ),
         }
         if terminal == "TOURNAMENT_RESULTS":
             try:
@@ -17106,16 +17312,20 @@ class App:
                     wave_confidence=wave_conf,
                     wave_observed_at=wave_observed_at,
                 )
+                activation_checkpoint_changed = bool(activation_events)
                 for capture in activation_tracker.drain_evidence_captures():
                     evidence_path = self._retain_activation_evidence(capture)
                     if evidence_path is None:
                         continue
                     ability = str(capture.get("ability") or "")
                     sequence = int(capture.get("sequence") or 0)
-                    activation_tracker.record_evidence_image(
-                        ability,
-                        sequence,
-                        evidence_path,
+                    activation_checkpoint_changed = bool(
+                        activation_tracker.record_evidence_image(
+                            ability,
+                            sequence,
+                            evidence_path,
+                        )
+                        or activation_checkpoint_changed
                     )
                     for event in activation_events:
                         if (
@@ -17133,6 +17343,8 @@ class App:
                         f"{display_name} activation #{sequence}: {evidence_path}",
                         "INFO",
                     )
+                if activation_checkpoint_changed:
+                    self._persist_survival_activation_checkpoint()
                 self._observe_player_save_audit_visual_events(activation_events)
                 for event in activation_events:
                     name = {

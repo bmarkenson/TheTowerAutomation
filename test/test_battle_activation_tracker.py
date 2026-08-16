@@ -1,3 +1,4 @@
+import copy
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -5,7 +6,10 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from core.battle_activation_tracker import BattleActivationTracker
+from core.battle_activation_tracker import (
+    BattleActivationTracker,
+    battle_activation_snapshot_from_checkpoint,
+)
 from core.matcher import MatchResult, get_match_result
 from core.runtime_save import (
     ActiveRoundIdentity,
@@ -370,6 +374,113 @@ def test_save_refresh_timer_rejects_count_regression_and_merges_wave_range():
     assert events[0]["refresh_wave_min"] == 5_807
     assert events[0]["refresh_wave_max"] == 5_808
     assert events[0]["save_revision"] == 202
+
+
+def test_checkpoint_roundtrip_preserves_events_and_save_monotonicity():
+    tracker = BattleActivationTracker()
+    first, identity = _save_checkpoint(
+        ability="nuke",
+        sequence=2,
+        activation_wave=5_507,
+        saved_wave=5_600,
+        recharge_waves=300,
+        save_revision=200,
+    )
+    assert tracker.bind_round_identity(identity)
+    assert tracker.observe_save_checkpoint(
+        first,
+        expected_identity_fingerprint=identity,
+    )
+    checkpoint = tracker.checkpoint()
+    assert checkpoint is not None
+    assert checkpoint["tracker_configuration_fingerprint"] == (
+        tracker.configuration_fingerprint()
+    )
+
+    replacement = BattleActivationTracker()
+    assert replacement.restore_checkpoint(
+        checkpoint,
+        expected_identity_fingerprint=identity,
+    )
+    assert replacement.snapshot() == tracker.snapshot()
+    assert battle_activation_snapshot_from_checkpoint(
+        checkpoint,
+        expected_identity_fingerprint=identity,
+    ) == tracker.snapshot()
+    differently_configured = BattleActivationTracker(
+        presence_confirmation_frames=3
+    )
+    assert not differently_configured.restore_checkpoint(
+        checkpoint,
+        expected_identity_fingerprint=identity,
+    )
+
+    older, _ = _save_checkpoint(
+        ability="nuke",
+        sequence=2,
+        activation_wave=5_400,
+        saved_wave=5_500,
+        recharge_waves=300,
+        save_revision=199,
+        captured_at="2026-08-16T11:55:00+00:00",
+    )
+    newer, _ = _save_checkpoint(
+        ability="nuke",
+        sequence=2,
+        activation_wave=5_508,
+        saved_wave=5_800,
+        recharge_waves=300,
+        save_revision=201,
+        captured_at="2026-08-16T12:05:00+00:00",
+    )
+    assert replacement.observe_save_checkpoint(
+        older,
+        expected_identity_fingerprint=identity,
+    ) == []
+    replacement.observe_save_checkpoint(
+        newer,
+        expected_identity_fingerprint=identity,
+    )
+    restored_event = replacement.snapshot()["nuke_activations"][0]
+    assert restored_event["activation_wave_min"] == 5_507
+    assert restored_event["activation_wave_max"] == 5_508
+    assert restored_event["save_revision"] == 201
+
+
+def test_checkpoint_rejects_wrong_identity_and_tampered_report():
+    tracker = BattleActivationTracker()
+    runtime, identity = _save_checkpoint(
+        ability="second_wind",
+        sequence=1,
+        activation_wave=5_000,
+        saved_wave=5_100,
+        recharge_waves=400,
+    )
+    assert tracker.bind_round_identity(identity)
+    tracker.observe_save_checkpoint(
+        runtime,
+        expected_identity_fingerprint=identity,
+    )
+    checkpoint = tracker.checkpoint()
+    assert checkpoint is not None
+
+    replacement = BattleActivationTracker()
+    assert not replacement.restore_checkpoint(
+        checkpoint,
+        expected_identity_fingerprint="d" * 64,
+    )
+    tampered = copy.deepcopy(checkpoint)
+    tampered["report"]["second_wind_activations"][0][
+        "activation_wave"
+    ] = 1
+    assert not replacement.restore_checkpoint(
+        tampered,
+        expected_identity_fingerprint=identity,
+    )
+    assert battle_activation_snapshot_from_checkpoint(
+        tampered,
+        expected_identity_fingerprint=identity,
+    ) is None
 
 
 def test_late_demon_save_does_not_mislabel_sequence_two_as_first_activation():

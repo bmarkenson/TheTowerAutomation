@@ -2211,6 +2211,29 @@ def render_survival_ability_activations_markdown(
         ),
         "",
     ]
+    durable_restoration = observations.get("durable_restoration")
+    if (
+        isinstance(durable_restoration, Mapping)
+        and durable_restoration.get("status")
+        == "observed_events_through_checkpoint"
+    ):
+        checkpoint_wave = durable_restoration.get("last_saved_wave")
+        boundary = (
+            f" through saved wave {checkpoint_wave}"
+            if type(checkpoint_wave) is int
+            else " through its last durable checkpoint"
+        )
+        lines.extend(
+            [
+                (
+                    "This section was restored from exact-battle evidence"
+                    f"{boundary}. It preserves observed activations only; "
+                    "an absent entry does not prove that no later activation "
+                    "occurred."
+                ),
+                "",
+            ]
+        )
     if has_second_wind_observer:
         if second_winds:
             lines.extend(

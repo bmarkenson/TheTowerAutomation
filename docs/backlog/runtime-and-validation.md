@@ -104,11 +104,14 @@ as checked checkpoint narrative here.
   - [ ] Complete post-clear and terminal reconciliation for the merged survival
     activation timeline. The ordinary run tracker now consumes stable
     same-round save checkpoints, keys exact refresh-timer evidence by count,
-    and merges nearby visual transitions without double counting. Add durable
-    cross-process retention where justified, retain confirmed visual events
-    after the newest active save through Game Over, and reconcile all observed
-    sequences with terminal Battle History counts. Missing intermediate timing
-    remains unknown; conflicts must not synthesize a wave.
+    merges nearby visual transitions without double counting, and durably
+    checkpoints that merged report under the exact battle and its versioned
+    tracker-configuration fingerprint for same-battle restart and vector-proven
+    terminal recovery, independently of Strategy.
+    Reconcile all observed sequences with terminal Battle History counts so an
+    activation after the final usable active save, or an otherwise missed
+    intermediate sequence, is represented without invented timing. Missing
+    intermediate timing remains unknown; conflicts must not synthesize a wave.
   - [ ] Inventory checkpoint candidates that could replace other observation
     routes, including game speed, buy quantities, Card activity, and
     UW/Bot/Guardian cooldowns. Rank them by navigation/OCR cost and staleness

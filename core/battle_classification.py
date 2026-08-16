@@ -17,6 +17,10 @@ UNBOUND_RUN_EVIDENCE_WARNING = (
     "Process-local run evidence was omitted because the terminal screen was "
     "not bound to a forced-save battle identity observed on this process and target"
 )
+RESTORED_DURABLE_RUN_EVIDENCE_WARNING = (
+    "Current-process-only run evidence was omitted; independently durable "
+    "exact-battle evidence was restored after terminal counter continuity"
+)
 
 _DISSONANCE_PRESET_PREFIXES = {
     "attack": ("attack disso", "atk disso"),
@@ -43,6 +47,9 @@ def unbound_run_evidence_warning(
         return None
     binding = runtime_context.get("run_binding")
     if isinstance(binding, Mapping) and binding.get("status") == "unbound":
+        durable = runtime_context.get("durable_terminal_evidence")
+        if isinstance(durable, Mapping) and durable.get("status") == "restored":
+            return RESTORED_DURABLE_RUN_EVIDENCE_WARNING
         return UNBOUND_RUN_EVIDENCE_WARNING
     return None
 
@@ -318,6 +325,7 @@ def _normalize_observed_tier(value: object) -> int | None:
 
 __all__ = [
     "KNOWN_BATTLE_TYPES",
+    "RESTORED_DURABLE_RUN_EVIDENCE_WARNING",
     "UNBOUND_RUN_EVIDENCE_WARNING",
     "analyze_battle_type",
     "classification_for_record",

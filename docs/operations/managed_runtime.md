@@ -59,12 +59,19 @@ Continue arms Retry as a new battle. The replacement may additionally bind the
 terminal save report to the retained battle when the durable active snapshot
 and fresh inactive save have exact full-tier battle-start-counter equality,
 non-regressing save revision, and the same handoff identity and target. That
-proof does not restore the stopped process's Strategy or other process-local
-telemetry merely from replacement-process state. A future evidence-specific
-restoration path must separately prove that a durable, complete snapshot is
-bound to this exact battle before using it. Missing legacy vector evidence or
-any changed counter leaves the report unbound without blocking the screen-
-policy fallback. Without a handoff, Start retains its normal Paused, explicit-
+proof never restores values from replacement-process state. It does make the
+retained immutable Strategy/run-configuration snapshot, a matching completed
+session-preflight receipt, and the versioned survival-activation checkpoint
+eligible for report-only restoration because each is separately durable and
+bound to the exact battle and its own configuration fingerprint; activation
+evidence does not require a Strategy. Perk timelines, active-run
+metrics, wave and coin samples, game-speed state, and every other process-local
+tracker remain excluded. A restored activation section contains observed
+events only through its named durable checkpoint; absent entries do not claim
+that no later activation occurred. A malformed or mismatched optional
+component is omitted locally. Missing legacy vector evidence or any changed
+counter leaves the report unbound without blocking the screen-policy fallback. Without a
+handoff, Start retains its normal Paused, explicit-
 intent behavior. Repeating an already satisfied Start or Stop is reported as a
 no-op; the old one-step attached reload remains retired.
 

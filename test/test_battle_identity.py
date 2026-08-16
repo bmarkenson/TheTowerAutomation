@@ -11,6 +11,7 @@ import pytest
 from automation.missions.manager import MissionManager
 from core.action_authority import AuthorityHold
 from core.app import App
+from core.battle_activation_tracker import BattleActivationTracker
 from core.battle_identity import (
     ActiveBattleIdentityCoordinator,
     BattleIdentityCheckContext,
@@ -238,6 +239,188 @@ def test_store_uses_active_round_identity_for_same_and_later_battles(tmp_path):
     assert relation is BattleIdentityRelation.LATER_BATTLE
     assert later.fingerprint == later_identity.fingerprint
     assert later.session_preflight is None
+
+
+def test_store_preserves_battle_bound_strategy_and_activation_checkpoint(
+    tmp_path,
+):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    assert store.record_strategy_snapshot(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        strategy_definition_fingerprint="d" * 64,
+        session_preflight_configuration_fingerprint="e" * 64,
+        run_configuration={"profile": "farm", "tier": 19},
+    )
+    record = store.active()
+    assert record is not None
+    assert record.strategy_snapshot is not None
+    tracker = BattleActivationTracker()
+    assert tracker.bind_round_identity(identity.fingerprint)
+    tracker._record_visual_event(
+        {
+            "ability": "nuke",
+            "sequence": 1,
+            "approximate_wave": 2_500,
+            "detection_source": "button_disappearance",
+        }
+    )
+    checkpoint = tracker.checkpoint()
+    assert checkpoint is not None
+    tracker_configuration_fingerprint = checkpoint[
+        "tracker_configuration_fingerprint"
+    ]
+    assert not store.record_survival_activation_checkpoint(
+        identity_fingerprint=identity.fingerprint,
+        tracker_configuration_fingerprint="f" * 64,
+        checkpoint=checkpoint,
+    )
+    assert store.record_survival_activation_checkpoint(
+        identity_fingerprint=identity.fingerprint,
+        tracker_configuration_fingerprint=(
+            tracker_configuration_fingerprint
+        ),
+        checkpoint=checkpoint,
+    )
+
+    same, relation = store.bind(
+        identity,
+        reason="automation_resumed",
+        operation_id="resume-1",
+        acquisition=_acquisition(identity),
+    )
+    assert relation is BattleIdentityRelation.SAME_BATTLE
+    assert same.strategy_snapshot is not None
+    assert same.survival_activation_checkpoint is not None
+
+    later_identity = _identity(seed=54321, counter=10)
+    later, relation = store.bind(
+        later_identity,
+        reason="automation_resumed",
+        operation_id="resume-2",
+        acquisition=_acquisition(later_identity),
+    )
+    assert relation is BattleIdentityRelation.LATER_BATTLE
+    assert later.strategy_snapshot is None
+    assert later.survival_activation_checkpoint is None
+
+
+def test_malformed_optional_evidence_is_omitted_without_losing_identity(
+    tmp_path,
+):
+    path = tmp_path / "battle_identity.json"
+    store = BattleIdentityStore(path)
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    assert store.record_strategy_snapshot(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        strategy_definition_fingerprint="d" * 64,
+        session_preflight_configuration_fingerprint="e" * 64,
+        run_configuration={"profile": "farm", "tier": 19},
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["strategy_snapshot"]["run_configuration"]["tier"] = 20
+    payload["survival_activation_checkpoint"] = {"schema_version": 1}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    record = store.active()
+
+    assert record is not None
+    assert record.fingerprint == identity.fingerprint
+    assert record.strategy_snapshot is None
+    assert record.survival_activation_checkpoint is None
+
+
+def test_app_persists_and_restores_survival_checkpoint_for_exact_battle(
+    tmp_path,
+):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    record, _relation = store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    strategy = SimpleNamespace(
+        name="farm_t19",
+        definition_fingerprint=lambda: "d" * 64,
+        session_preflight_fingerprint=lambda: "e" * 64,
+        run_configuration=lambda: {"profile": "farm", "tier": 19},
+    )
+    app = App.__new__(App)
+    app._mission_mgr = SimpleNamespace(
+        strategy=strategy,
+        active_battle_observed=lambda: True,
+        awaiting_initial_battle_intent=lambda: False,
+    )
+    app._battle_identity_store = store
+    app._retained_battle_identity_record = record
+    app._active_round_identity_fingerprint = identity.fingerprint
+    app._battle_activation_tracker = BattleActivationTracker()
+    assert app._bind_survival_activation_tracker(identity.fingerprint)
+    app._battle_activation_tracker._record_visual_event(
+        {
+            "ability": "nuke",
+            "sequence": 1,
+            "approximate_wave": 2_500,
+            "detection_source": "button_disappearance",
+        }
+    )
+
+    assert app._persist_battle_strategy_snapshot(identity.fingerprint)
+    assert app._persist_survival_activation_checkpoint()
+
+    replacement = App.__new__(App)
+    replacement._retained_battle_identity_record = store.active()
+    replacement._battle_activation_tracker = BattleActivationTracker()
+    assert replacement._bind_survival_activation_tracker(identity.fingerprint)
+    restored = replacement._battle_activation_tracker.snapshot()
+    assert restored["nuke_activations"][0]["approximate_wave"] == 2_500
+
+
+def test_app_persists_survival_checkpoint_without_strategy_snapshot(tmp_path):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    record, _relation = store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    app = App.__new__(App)
+    app._battle_identity_store = store
+    app._retained_battle_identity_record = record
+    app._active_round_identity_fingerprint = identity.fingerprint
+    app._battle_activation_tracker = BattleActivationTracker()
+    assert app._bind_survival_activation_tracker(identity.fingerprint)
+    app._battle_activation_tracker._record_visual_event(
+        {
+            "ability": "second_wind",
+            "sequence": 1,
+            "approximate_wave": 2_400,
+            "detection_source": "active_status_icon",
+        }
+    )
+
+    assert app._persist_survival_activation_checkpoint()
+    retained = store.active()
+    assert retained is not None
+    assert retained.strategy_snapshot is None
+    assert retained.survival_activation_checkpoint is not None
 
 
 def test_terminal_full_counter_vector_recovers_the_retained_battle(tmp_path):

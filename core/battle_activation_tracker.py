@@ -5,6 +5,9 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
+import json
+import re
 import threading
 from typing import Any, Mapping, Optional
 
@@ -42,6 +45,18 @@ _SECOND_WIND_DETECTION_SOURCE = "active_status_icon"
 _SAVE_TIMER_DETECTION_SOURCE = "player_save_refresh_timer"
 _SAVE_TIMER_PRECISIONS = frozenset({"exact", "save_timer"})
 _VISUAL_SAVE_MERGE_WAVE_TOLERANCE = 50
+_CHECKPOINT_SCHEMA_VERSION = 1
+_CHECKPOINT_CONFIGURATION_SCHEMA_VERSION = 1
+_REPORT_SCHEMA_VERSION = 5
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_ABILITY_NAMES = ("second_wind", "demon_mode", "nuke")
+_REPORT_SOURCES = frozenset(
+    {
+        _DETECTION_SOURCE,
+        _SAVE_TIMER_DETECTION_SOURCE,
+        "visual_transition_and_player_save_refresh_timer",
+    }
+)
 
 
 @dataclass
@@ -342,6 +357,119 @@ class BattleActivationTracker:
         with self._lock:
             return self._snapshot_unlocked()
 
+    def checkpoint(self) -> Optional[dict[str, Any]]:
+        """Return restart-safe state only after an exact battle is bound."""
+
+        with self._lock:
+            identity = str(
+                self._bound_round_identity_fingerprint or ""
+            ).strip()
+            if _SHA256_RE.fullmatch(identity) is None:
+                return None
+            tracker_configuration = self._checkpoint_configuration_unlocked()
+            material = {
+                "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+                "active_round_identity_fingerprint": identity,
+                "tracker_configuration": tracker_configuration,
+                "tracker_configuration_fingerprint": _json_fingerprint(
+                    tracker_configuration
+                ),
+                "report": self._snapshot_unlocked(),
+                "last_save": {
+                    "revision": self._last_save_revision,
+                    "wave": self._last_saved_wave,
+                    "captured_at": (
+                        self._last_save_captured_at.isoformat()
+                        if self._last_save_captured_at is not None
+                        else None
+                    ),
+                    "activation_counts": dict(
+                        self._last_save_activation_counts
+                    ),
+                },
+            }
+            detached = _json_detached(material)
+            detached["fingerprint"] = _checkpoint_fingerprint(detached)
+            return detached
+
+    def restore_checkpoint(
+        self,
+        checkpoint: Mapping[str, Any],
+        *,
+        expected_identity_fingerprint: str,
+    ) -> bool:
+        """Restore only a valid checkpoint for the exact adopted battle."""
+
+        normalized = _validated_checkpoint(
+            checkpoint,
+            expected_identity_fingerprint=expected_identity_fingerprint,
+            expected_tracker_configuration_fingerprint=(
+                self.configuration_fingerprint()
+            ),
+        )
+        if normalized is None:
+            return False
+        with self._lock:
+            report = normalized["report"]
+            last_save = normalized["last_save"]
+            self._buttons = {
+                name: _ButtonObservation() for name in _BUTTON_PATHS
+            }
+            self._intro_sprint = _IntroSprintObservation()
+            self._second_wind = _SecondWindObservation()
+            self._second_wind_activations = copy.deepcopy(
+                report["second_wind_activations"]
+            )
+            self._demon_mode_activations = copy.deepcopy(
+                report["demon_mode_activations"]
+            )
+            self._nuke_activations = copy.deepcopy(
+                report["nuke_activations"]
+            )
+            self._sync_demon_mode_first_activation()
+            self._bound_round_identity_fingerprint = normalized[
+                "active_round_identity_fingerprint"
+            ]
+            self._last_save_revision = last_save["revision"]
+            self._last_saved_wave = last_save["wave"]
+            captured_at = last_save["captured_at"]
+            self._last_save_captured_at = (
+                datetime.fromisoformat(captured_at)
+                if captured_at is not None
+                else None
+            )
+            self._last_save_activation_counts = dict(
+                last_save["activation_counts"]
+            )
+            self._pending_evidence_captures = []
+            self._reported_match_errors.clear()
+            return True
+
+    def configuration_fingerprint(self) -> str:
+        """Identify the exact tracker/checkpoint interpretation contract."""
+
+        with self._lock:
+            return _json_fingerprint(
+                self._checkpoint_configuration_unlocked()
+            )
+
+    def _checkpoint_configuration_unlocked(self) -> dict[str, int]:
+        return {
+            "schema_version": _CHECKPOINT_CONFIGURATION_SCHEMA_VERSION,
+            "report_schema_version": _REPORT_SCHEMA_VERSION,
+            "presence_confirmation_frames": (
+                self._presence_confirmation_frames
+            ),
+            "absence_confirmation_frames": self._absence_confirmation_frames,
+            "second_wind_active_confirmation_frames": (
+                self._second_wind_active_confirmation_frames
+            ),
+            "second_wind_rearm_waves": _SECOND_WIND_REARM_WAVES,
+            "visual_save_merge_wave_tolerance": (
+                _VISUAL_SAVE_MERGE_WAVE_TOLERANCE
+            ),
+        }
+
     def _snapshot_unlocked(self) -> dict[str, Any]:
         events = tuple(
             event
@@ -371,7 +499,7 @@ class BattleActivationTracker:
         else:
             source = _DETECTION_SOURCE
         return {
-            "schema_version": 5,
+            "schema_version": _REPORT_SCHEMA_VERSION,
             "source": source,
             "second_wind_activations": copy.deepcopy(
                 self._second_wind_activations
@@ -1008,4 +1136,264 @@ class BattleActivationTracker:
         )
 
 
-__all__ = ["BattleActivationTracker"]
+def battle_activation_snapshot_from_checkpoint(
+    checkpoint: object,
+    *,
+    expected_identity_fingerprint: str,
+) -> Optional[dict[str, Any]]:
+    """Project report evidence without mutating a replacement tracker."""
+
+    normalized = _validated_checkpoint(
+        checkpoint,
+        expected_identity_fingerprint=expected_identity_fingerprint,
+    )
+    return (
+        copy.deepcopy(normalized["report"])
+        if normalized is not None
+        else None
+    )
+
+
+def battle_activation_checkpoint_configuration_fingerprint(
+    checkpoint: object,
+    *,
+    expected_identity_fingerprint: str,
+) -> Optional[str]:
+    """Return the producer contract only for a valid exact-battle checkpoint."""
+
+    normalized = _validated_checkpoint(
+        checkpoint,
+        expected_identity_fingerprint=expected_identity_fingerprint,
+    )
+    return (
+        str(normalized["tracker_configuration_fingerprint"])
+        if normalized is not None
+        else None
+    )
+
+
+def _validated_checkpoint(
+    checkpoint: object,
+    *,
+    expected_identity_fingerprint: str,
+    expected_tracker_configuration_fingerprint: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(checkpoint, Mapping):
+        return None
+    try:
+        detached = _json_detached(checkpoint)
+    except (OverflowError, RecursionError, TypeError, ValueError):
+        return None
+    expected = str(expected_identity_fingerprint or "").strip()
+    identity = str(
+        detached.get("active_round_identity_fingerprint") or ""
+    ).strip()
+    fingerprint = str(detached.get("fingerprint") or "").strip()
+    if (
+        detached.get("schema_version") != _CHECKPOINT_SCHEMA_VERSION
+        or _SHA256_RE.fullmatch(expected) is None
+        or identity != expected
+        or _SHA256_RE.fullmatch(fingerprint) is None
+        or _checkpoint_fingerprint(detached) != fingerprint
+    ):
+        return None
+    report = _validated_report_snapshot(detached.get("report"))
+    last_save = _validated_last_save(detached.get("last_save"))
+    tracker_configuration = _validated_tracker_configuration(
+        detached.get("tracker_configuration")
+    )
+    configuration_fingerprint = str(
+        detached.get("tracker_configuration_fingerprint") or ""
+    ).strip()
+    if (
+        report is None
+        or last_save is None
+        or tracker_configuration is None
+        or _SHA256_RE.fullmatch(configuration_fingerprint) is None
+        or _json_fingerprint(tracker_configuration)
+        != configuration_fingerprint
+        or (
+            expected_tracker_configuration_fingerprint is not None
+            and configuration_fingerprint
+            != str(expected_tracker_configuration_fingerprint or "").strip()
+        )
+    ):
+        return None
+    return {
+        "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+        "active_round_identity_fingerprint": identity,
+        "tracker_configuration": tracker_configuration,
+        "tracker_configuration_fingerprint": configuration_fingerprint,
+        "report": report,
+        "last_save": last_save,
+        "fingerprint": fingerprint,
+    }
+
+
+def _validated_tracker_configuration(
+    value: object,
+) -> Optional[dict[str, int]]:
+    if not isinstance(value, Mapping):
+        return None
+    expected_keys = {
+        "schema_version",
+        "report_schema_version",
+        "presence_confirmation_frames",
+        "absence_confirmation_frames",
+        "second_wind_active_confirmation_frames",
+        "second_wind_rearm_waves",
+        "visual_save_merge_wave_tolerance",
+    }
+    if set(value) != expected_keys:
+        return None
+    normalized = {key: value.get(key) for key in expected_keys}
+    if (
+        normalized["schema_version"]
+        != _CHECKPOINT_CONFIGURATION_SCHEMA_VERSION
+        or normalized["report_schema_version"] != _REPORT_SCHEMA_VERSION
+        or any(type(item) is not int for item in normalized.values())
+        or normalized["presence_confirmation_frames"] < 1
+        or normalized["absence_confirmation_frames"] < 1
+        or normalized["second_wind_active_confirmation_frames"] < 1
+        or normalized["second_wind_rearm_waves"] != _SECOND_WIND_REARM_WAVES
+        or normalized["visual_save_merge_wave_tolerance"]
+        != _VISUAL_SAVE_MERGE_WAVE_TOLERANCE
+    ):
+        return None
+    return {key: int(normalized[key]) for key in sorted(normalized)}
+
+
+def _validated_report_snapshot(value: object) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    source = str(value.get("source") or "")
+    if (
+        value.get("schema_version") != _REPORT_SCHEMA_VERSION
+        or source not in _REPORT_SOURCES
+    ):
+        return None
+    normalized: dict[str, Any] = {
+        "schema_version": _REPORT_SCHEMA_VERSION,
+        "source": source,
+    }
+    for ability in _ABILITY_NAMES:
+        key = f"{ability}_activations"
+        raw_events = value.get(key)
+        if not isinstance(raw_events, list):
+            return None
+        events: list[dict[str, Any]] = []
+        prior_sequence = 0
+        for raw_event in raw_events:
+            if not isinstance(raw_event, Mapping):
+                return None
+            event = _json_detached(raw_event)
+            sequence = event.get("sequence")
+            if (
+                event.get("ability") != ability
+                or type(sequence) is not int
+                or sequence <= prior_sequence
+                or str(event.get("wave_precision") or "")
+                not in {"approximate", "exact", "save_timer"}
+            ):
+                return None
+            prior_sequence = sequence
+            events.append(event)
+        normalized[key] = events
+    expected_first = next(
+        (
+            event
+            for event in normalized["demon_mode_activations"]
+            if event["sequence"] == 1
+        ),
+        None,
+    )
+    if value.get("demon_mode_first_activation") != expected_first:
+        return None
+    normalized["demon_mode_first_activation"] = copy.deepcopy(expected_first)
+    return normalized
+
+
+def _validated_last_save(value: object) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    revision = value.get("revision")
+    wave = value.get("wave")
+    captured_at = value.get("captured_at")
+    if revision is None and wave is None and captured_at is None:
+        normalized_revision = None
+        normalized_wave = None
+        normalized_captured_at = None
+    else:
+        if (
+            type(revision) is not int
+            or revision < 0
+            or type(wave) is not int
+            or wave < 0
+            or not isinstance(captured_at, str)
+        ):
+            return None
+        try:
+            parsed = datetime.fromisoformat(captured_at)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return None
+        normalized_revision = revision
+        normalized_wave = wave
+        normalized_captured_at = captured_at
+    raw_counts = value.get("activation_counts")
+    if not isinstance(raw_counts, Mapping):
+        return None
+    counts: dict[str, int] = {}
+    for raw_ability, raw_count in raw_counts.items():
+        ability = str(raw_ability or "")
+        if (
+            ability not in _ABILITY_NAMES
+            or type(raw_count) is not int
+            or raw_count < 0
+        ):
+            return None
+        counts[ability] = raw_count
+    return {
+        "revision": normalized_revision,
+        "wave": normalized_wave,
+        "captured_at": normalized_captured_at,
+        "activation_counts": counts,
+    }
+
+
+def _json_detached(value: object) -> Any:
+    return json.loads(
+        json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
+
+def _checkpoint_fingerprint(checkpoint: Mapping[str, Any]) -> str:
+    material = {
+        key: value for key, value in checkpoint.items() if key != "fingerprint"
+    }
+    return _json_fingerprint(material)
+
+
+def _json_fingerprint(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+__all__ = [
+    "BattleActivationTracker",
+    "battle_activation_checkpoint_configuration_fingerprint",
+    "battle_activation_snapshot_from_checkpoint",
+]

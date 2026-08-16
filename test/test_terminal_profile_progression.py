@@ -1,3 +1,5 @@
+import hashlib
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -5,9 +7,11 @@ import pytest
 
 from core.adb_target_session import AdbTargetSnapshot
 from core.app import App
+from core.battle_activation_tracker import BattleActivationTracker
 from core.battle_identity import (
     ActiveBattleIdentityRecord,
     ActiveBattleTerminalContinuity,
+    durable_terminal_report_evidence_from_record,
 )
 from core.player_save_acquisition import (
     PlayerSaveTargetBinding,
@@ -47,6 +51,35 @@ def _normalized_progression():
         "components": {},
         "warnings": [],
     }
+
+
+def _durable_strategy_snapshot(
+    identity_fingerprint: str,
+) -> dict[str, object]:
+    run_configuration = {"profile": "farm", "tier": 19}
+
+    def fingerprint(value):
+        rendered = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(rendered).hexdigest()
+
+    snapshot = {
+        "schema_version": 1,
+        "identity_fingerprint": identity_fingerprint,
+        "strategy": "farm_t19",
+        "strategy_definition_fingerprint": "c" * 64,
+        "session_preflight_configuration_fingerprint": "e" * 64,
+        "run_configuration": run_configuration,
+        "run_configuration_fingerprint": fingerprint(run_configuration),
+        "recorded_at": "2026-08-16T06:33:30+00:00",
+    }
+    snapshot["fingerprint"] = fingerprint(snapshot)
+    return snapshot
 
 
 def _install_shared_acquirer(app, decoded):
@@ -187,12 +220,45 @@ def test_restarted_game_over_uses_retained_counter_proof_for_save_report():
         round_seed=1721080409,
         fingerprint="a" * 64,
     )
+    activation_tracker = BattleActivationTracker()
+    assert activation_tracker.bind_round_identity(identity.fingerprint)
+    activation_tracker._record_visual_event(
+        {
+            "ability": "nuke",
+            "sequence": 1,
+            "approximate_wave": 4_991,
+            "detection_source": "button_disappearance",
+        }
+    )
+    activation_checkpoint = activation_tracker.checkpoint()
+    assert activation_checkpoint is not None
+    strategy_snapshot = _durable_strategy_snapshot(identity.fingerprint)
     retained = ActiveBattleIdentityRecord(
         identity=identity,
         bound_at="2026-08-16T06:33:00+00:00",
         reason="automation_stopped",
         operation_id="stop-1",
         acquisition={"binding_fingerprint": target_binding.fingerprint},
+        session_preflight={
+            "schema_version": 1,
+            "identity_fingerprint": identity.fingerprint,
+            "strategy": "farm_t19",
+            "configuration_fingerprint": "e" * 64,
+            "completed_at": "2026-08-16T06:34:00+00:00",
+            "evidence": {"valid": True, "failed_checks": []},
+        },
+        strategy_snapshot=strategy_snapshot,
+        survival_activation_checkpoint={
+            "schema_version": 1,
+            "identity_fingerprint": identity.fingerprint,
+            "tracker_configuration_fingerprint": (
+                activation_checkpoint[
+                    "tracker_configuration_fingerprint"
+                ]
+            ),
+            "recorded_at": "2026-08-16T06:35:00+00:00",
+            "checkpoint": activation_checkpoint,
+        },
         terminal_continuity=ActiveBattleTerminalContinuity(
             round_counter_vector_fingerprint="b" * 64,
             round_counter_tier_count=40,
@@ -247,6 +313,7 @@ def test_restarted_game_over_uses_retained_counter_proof_for_save_report():
         "schema_version": 1,
         "status": "bound",
         "reason": "retained_round_counter_vector_matches_terminal_save",
+        "binding_source": "durable_full_round_counter_vector",
         "activity_scope_run_id": "scope-1",
         "active_round_identity_fingerprint": identity.fingerprint,
     }
@@ -290,8 +357,220 @@ def test_restarted_game_over_uses_retained_counter_proof_for_save_report():
     assert project_report.call_args.kwargs["run_binding"] == recovered_binding
     assert result["_report_run_binding"] == recovered_binding
     assert result["_mapping_observer"] is None
+    durable = result["_durable_terminal_evidence_context"]
+    assert durable["strategy"] == "farm_t19"
+    assert durable["run_configuration"] == {"profile": "farm", "tier": 19}
+    assert durable["session_preflight_evidence"] == {
+        "valid": True,
+        "failed_checks": [],
+    }
+    assert durable["survival_ability_activations"]["nuke_activations"][0][
+        "approximate_wave"
+    ] == 4_991
+    assert durable["survival_ability_activations"]["durable_restoration"] == {
+        "schema_version": 1,
+        "status": "observed_events_through_checkpoint",
+        "complete_history": False,
+        "checkpoint_recorded_at": "2026-08-16T06:35:00+00:00",
+        "last_save_revision": None,
+        "last_saved_wave": None,
+    }
+    assert durable["durable_terminal_evidence"]["components"] == [
+        "strategy_snapshot",
+        "session_preflight_evidence",
+        "survival_ability_activations",
+    ]
     app._perk_save_monitor.observe_bundle.assert_not_called()
     app._active_run_metric_monitor.observe_bundle.assert_not_called()
+
+
+def test_durable_terminal_components_fail_closed_independently():
+    identity = ActiveRoundIdentity(
+        game_version=1102,
+        current_tier=19,
+        rounds_started_this_tier=319,
+        round_seed=1721080409,
+        fingerprint="a" * 64,
+    )
+    tracker = BattleActivationTracker()
+    assert tracker.bind_round_identity(identity.fingerprint)
+    checkpoint = tracker.checkpoint()
+    assert checkpoint is not None
+    strategy_snapshot = _durable_strategy_snapshot(identity.fingerprint)
+    record = ActiveBattleIdentityRecord(
+        identity=identity,
+        bound_at="2026-08-16T06:33:00+00:00",
+        reason="automation_stopped",
+        operation_id="stop-1",
+        acquisition={},
+        session_preflight={
+            "schema_version": 1,
+            "identity_fingerprint": identity.fingerprint,
+            "strategy": "farm_t19",
+            "configuration_fingerprint": "wrong",
+            "completed_at": "2026-08-16T06:34:00+00:00",
+            "evidence": {"valid": True, "failed_checks": []},
+        },
+        strategy_snapshot=strategy_snapshot,
+        survival_activation_checkpoint={
+            "schema_version": 1,
+            "identity_fingerprint": identity.fingerprint,
+            "tracker_configuration_fingerprint": "f" * 64,
+            "recorded_at": "2026-08-16T06:35:00+00:00",
+            "checkpoint": checkpoint,
+        },
+    )
+
+    assert durable_terminal_report_evidence_from_record(
+        record,
+        terminal_binding={"status": "unbound"},
+    ) == {}
+
+    durable = durable_terminal_report_evidence_from_record(
+        record,
+        terminal_binding={
+            "schema_version": 1,
+            "status": "bound",
+            "binding_source": "durable_full_round_counter_vector",
+            "active_round_identity_fingerprint": identity.fingerprint,
+        },
+    )
+
+    assert durable["strategy"] == "farm_t19"
+    assert "session_preflight_evidence" not in durable
+    assert "survival_ability_activations" not in durable
+    assert durable["durable_terminal_evidence"]["components"] == [
+        "strategy_snapshot"
+    ]
+
+
+def test_durable_activation_checkpoint_does_not_require_a_strategy_snapshot():
+    identity = ActiveRoundIdentity(
+        game_version=1102,
+        current_tier=19,
+        rounds_started_this_tier=319,
+        round_seed=1721080409,
+        fingerprint="a" * 64,
+    )
+    tracker = BattleActivationTracker()
+    assert tracker.bind_round_identity(identity.fingerprint)
+    tracker._record_visual_event(
+        {
+            "ability": "nuke",
+            "sequence": 1,
+            "approximate_wave": 4_991,
+            "detection_source": "button_disappearance",
+        }
+    )
+    checkpoint = tracker.checkpoint()
+    assert checkpoint is not None
+    record = ActiveBattleIdentityRecord(
+        identity=identity,
+        bound_at="2026-08-16T06:33:00+00:00",
+        reason="automation_stopped",
+        operation_id="stop-1",
+        acquisition={},
+        survival_activation_checkpoint={
+            "schema_version": 1,
+            "identity_fingerprint": identity.fingerprint,
+            "tracker_configuration_fingerprint": checkpoint[
+                "tracker_configuration_fingerprint"
+            ],
+            "recorded_at": "2026-08-16T06:35:00+00:00",
+            "checkpoint": checkpoint,
+        },
+    )
+
+    durable = durable_terminal_report_evidence_from_record(
+        record,
+        terminal_binding={
+            "schema_version": 1,
+            "status": "bound",
+            "binding_source": "durable_full_round_counter_vector",
+            "active_round_identity_fingerprint": identity.fingerprint,
+        },
+    )
+
+    assert "strategy" not in durable
+    assert durable["survival_ability_activations"]["nuke_activations"][0][
+        "approximate_wave"
+    ] == 4_991
+    assert durable["durable_terminal_evidence"]["components"] == [
+        "survival_ability_activations"
+    ]
+
+
+def test_terminal_bundle_applies_durable_evidence_without_process_state():
+    app = App.__new__(App)
+    process_binding = {
+        "schema_version": 1,
+        "status": "unbound",
+        "reason": "terminal_without_forced_active_battle",
+        "activity_scope_run_id": "scope-2",
+        "active_round_identity_fingerprint": None,
+    }
+    durable = {
+        "strategy": "farm_t19",
+        "run_configuration": {"profile": "farm", "tier": 19},
+        "strategy_definition_fingerprint": "c" * 64,
+        "session_preflight_evidence": {
+            "valid": True,
+            "failed_checks": [],
+        },
+        "survival_ability_activations": {
+            "schema_version": 5,
+            "source": "player_save_refresh_timer",
+            "second_wind_activations": [],
+            "demon_mode_first_activation": None,
+            "demon_mode_activations": [],
+            "nuke_activations": [],
+        },
+        "durable_terminal_evidence": {
+            "schema_version": 1,
+            "status": "restored",
+            "binding_source": "durable_full_round_counter_vector",
+            "active_round_identity_fingerprint": "a" * 64,
+            "components": [
+                "strategy_snapshot",
+                "session_preflight_evidence",
+                "survival_ability_activations",
+            ],
+            "component_fingerprints": {
+                "strategy_snapshot": "d" * 64,
+                "session_preflight_evidence": "e" * 64,
+                "survival_ability_activations": "f" * 64,
+            },
+        },
+    }
+    app._terminal_run_binding = Mock(return_value=process_binding)
+    app._capture_terminal_player_save = Mock(
+        return_value={
+            "profile_progression": _normalized_progression(),
+            "terminal_save_report": {"status": "complete"},
+            "_durable_terminal_evidence_context": durable,
+        }
+    )
+    app._sync_perk_timeline_save_checkpoint = Mock()
+    app._perk_timeline_observer = Mock()
+    app._battle_activation_tracker = Mock()
+    app._reset_player_save_audit_perk_mapping_evidence = Mock()
+    app._last_unbound_terminal_signature = None
+
+    context, acquisition, mapping_observer = app._terminal_battle_bundle(
+        "GAME_OVER"
+    )
+
+    assert acquisition is None
+    assert mapping_observer is None
+    assert context["run_binding"] == process_binding
+    assert context["strategy"] == "farm_t19"
+    assert context["session_preflight_evidence"]["valid"] is True
+    assert "coin_rate_samples" not in context
+    assert "perk_selection_timeline" not in context
+    app._perk_timeline_observer.reset.assert_called_once_with(
+        fresh_battle=False
+    )
+    app._battle_activation_tracker.reset.assert_called_once_with()
 
 
 def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():
