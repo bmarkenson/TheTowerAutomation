@@ -89,7 +89,17 @@ and actionable work lives in
   `e7d5359` then passed compilation, state definitions, clickmap integrity with
   zero errors and the same 44 established notices, and all 2,996 repository
   tests in 436.27 seconds using the same development environment.
-- **Fixed by:** `373f8c5`, `8270e1d`, `e7d5359`.
+  The explicit legacy-attestation follow-up passed 373 focused identity,
+  terminal-report, control-surface, and control-model tests. A non-production
+  dry run against copies of the retained Tier 19 record and fresh live status
+  matched battle `38e1b7e831f5a263c568befec056943e9b93205ecd749e2ae405f29c1195c076`,
+  Strategy `farm_t19_ad_assist`, and preflight fingerprint
+  `69f730af5a62a7f94810d6b5863594bafec09f2bd39ea00bbacb5ae3ab5f4e68`.
+  Exact candidate `15139a9` then passed compilation, state definitions,
+  clickmap integrity with zero errors and the same 44 notices, and all 3,005
+  repository tests in 437.08 seconds using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Fixed by:** `373f8c5`, `8270e1d`, `e7d5359`, `15139a9`.
 
 ### Orb Distance treated selected Range lab level as live Attack Range
 

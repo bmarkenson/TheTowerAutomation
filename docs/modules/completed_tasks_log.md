@@ -66,6 +66,17 @@ resolved dossier instead of copying its detail.
   complete repository checkpoint: compilation, state definitions, clickmap
   integrity with zero errors and the same 44 established notices, and all
   2,996 tests in 436.27 seconds using the same development environment.
+- Exact follow-up candidate `15139a9` independently restores a valid legacy
+  session-preflight receipt even when its Strategy snapshot is absent. For a
+  terminal that lacks generic counter-vector proof, an audited explicit
+  operator receipt can bind only that report while exact Pause, Game Over,
+  retained identity/handoff, live runtime/target, activity scope, selected
+  Strategy, and preflight fingerprint all agree. It reuses an independently
+  durable Strategy snapshot or labels an operator-backed snapshot; it grants
+  no input or active-battle authority. The focused suites passed 373 tests, a
+  copy-only dry run matched the retained Tier 19 evidence, and the complete
+  checkpoint passed all 3,005 tests in 437.08 seconds with zero clickmap errors
+  and the same 44 established notices.
 
 ### 2026-08-16 Explicit final-save survival-activation fallback
 
