@@ -371,8 +371,16 @@ as checked checkpoint narrative here.
     authorized boundary.
     Compare false-positive/false-negative behavior with exact run/configuration
     and exact-listener-lifetime cross-run host telemetry before changing the trigger
-    thresholds. This completes mitigation validation but does not by itself
-    resolve the cause tracked in
+    thresholds. For each exact comparable recurrence, use the retained
+    save-backed active checkpoints and completed records to separate
+    whole-run/interval CPH, effective speed, waves/hour, cells/hour, coin-source
+    rates, terminal enemy density, and coins per enemy. Report cohort membership
+    and exclusion reasons; a mapping/configuration difference, missing
+    checkpoint, or partial metric claim is not a performance change. If that
+    evidence still cannot distinguish economy configuration from
+    emulator/entity-throughput loss, record the smallest passive next
+    observation instead of adding permanent telemetry. This completes
+    mitigation validation but does not by itself resolve the cause tracked in
     [`ISSUE-2026-002`](../issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
     The first revision-41 operator attempt identified the installed `Pie64`
     mapping but could not bind its listener because module-level process
@@ -428,6 +436,15 @@ can change as operator use supplies better evidence.
      representative prior runs. Define the comparison cohort and exclude
      configuration repairs, surrendered runs, and other non-representative
      outcomes from the estimate.
+   - Publish the latest accepted save-backed active-run checkpoint through the
+     same atomic snapshot and display whole-run realized CPH plus interval CPH
+     when its baseline is valid. Include checkpoint wave, capture time/age, and
+     semantic status, and keep both values distinct from OCR Coins/min. Status
+     polling must reuse `ActiveRunMetricMonitor` state without acquiring or
+     forcing a save, changing the independent 300-second passive cadence, or
+     making Perk observations force writes. Identity changes and
+     partial/unavailable claims clear only these fields rather than displaying
+     stale values.
    - Resolve the stale-running top-bar defect tracked in
      [`ISSUE-2026-012`](../issues/open-2026.md#native-top-bar-retained-a-running-directive-after-automation-stopped).
 3. [ ] Extend concise human-readable requirement results to in-battle
@@ -526,3 +543,19 @@ can change as operator use supplies better evidence.
    - Confirm the redesign adds no passive CPU regression. Defer drag-to-reorder,
      floating panes, and extensive per-card hiding until operator use
      demonstrates a concrete need.
+10. [ ] Add an operator-facing completed-run comparison to Battle History.
+    - Compare a selected representative run with an explicitly listed compatible
+      prior cohort, showing both membership and exclusion reasons.
+    - Start with realized CPH, cells/hour, waves/hour, effective speed, and the
+      available coin-source, enemy-density, and coins-per-enemy diagnostics that
+      can explain a CPH change. Preserve unavailable and partial claims rather
+      than substituting values.
+    - Reuse persisted completed records and the existing exact-comparability
+      boundary where it fits, but do not present automatic-recovery thresholds
+      as analytical conclusions. Normal comparisons must respect battle kind,
+      Tier, Strategy, exact run configuration, save-mapping semantics, and
+      authoritative representative-run disposition. Until item 8 supplies a
+      disposition, ambiguous records remain visibly excluded.
+    - Comparison is read-only historical analysis: it must not acquire or force
+      a save, interact with the game, or assign semantic names to structural raw
+      indices.
