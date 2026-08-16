@@ -587,7 +587,14 @@ def test_survival_activation_markdown_labels_save_timer_wave_range():
     )
 
     markdown = "\n".join(lines)
-    assert "Save-derived waves or ranges come from in-battle saves" in markdown
+    assert (
+        "Save-derived waves or ranges require a later in-battle save"
+        in markdown
+    )
+    assert (
+        "after the final in-battle save—especially shortly before Game Over—"
+        in markdown
+    )
     assert (
         "| 1 | 5507–5508 | Save-derived (timer) | "
         "2026-08-16T12:00:00+00:00 |"

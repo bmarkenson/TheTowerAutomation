@@ -2204,9 +2204,10 @@ def render_survival_ability_activations_markdown(
         "## Survival ability activations",
         "",
         (
-            "Save-derived waves or ranges come from in-battle saves that "
-            "captured the active refresh timer; visual-only detections remain "
-            "approximate."
+            "Save-derived waves or ranges require a later in-battle save that "
+            "captured the active refresh timer. If an activation occurs after "
+            "the final in-battle save—especially shortly before Game Over—it "
+            "has no save-timer evidence and remains visually approximate."
         ),
         "",
     ]

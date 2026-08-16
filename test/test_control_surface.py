@@ -3676,6 +3676,7 @@ def test_native_battle_history_surfaces_partial_save_metric_claims():
     assert 'TryGetProperty("metric_conflicts"' in source
     assert 'TryGetProperty("conflicts"' in source
     assert 'component.NameEquals("economy")' not in source
+    assert "no later in-battle save captured the active timer" in source
 
 
 def test_browser_activity_defaults_to_operational_narrative_levels():
