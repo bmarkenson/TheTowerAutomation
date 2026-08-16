@@ -39,6 +39,24 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Windows emulator-handoff operator runbook
+
+- The canonical managed-runtime procedure now gives a complete source-to-
+  destination Windows emulator move: the independent listener/forward/runtime/
+  host layers, stable-per-PC and reused-port policies, Pause-before-release
+  ordering, active-endpoint adoption, explicit host selection, safe-resume
+  proof, CPH attribution, disabled-control explanations, tunnel-host lifecycle,
+  recovery matrix, and a compact 12-step checklist.
+- The Windows guide and architecture now name the control's actual
+  **System > Connections** location instead of **System > Services**, and the
+  runtime operations router plus Windows guide link directly to the canonical
+  runbook.
+- Exact documentation candidate `865c6df` passed `git diff --check`, local
+  target/anchor verification from both inbound routes, source/UI route
+  comparison, and all four documentation-lifecycle tests using development
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-15 Explicit Windows emulator-host handoff and CPH attribution
 
 - The native client can now submit **Use this PC's emulator** from its active
