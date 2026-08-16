@@ -397,13 +397,14 @@ and actionable work lives in
   runtime, target generation, workflow/control operation, visible boundary,
   source restoration, and canonical save identity remain fail-closed guards;
   log-scope change is not one.
-- **Unpromoted-work audit:** The retained
-  `feature/capture-ui-resolution-mapping-candidates` worktree still contains
-  the obsolete scope rejection and History-based continuity model and must not
-  be merged or cherry-picked. Any still-wanted setup-inspection UX from that
-  branch must be reimplemented narrowly on the current save-identity
-  architecture. Other retained lifecycle, passive-save, and Retry branches
-  are either already represented here or superseded by promoted mainline work.
+- **Unpromoted-work audit:** Audit of the former local
+  `feature/capture-ui-resolution-mapping-candidates` tip `5507833` found the
+  obsolete scope rejection and History-based continuity model; it was archived
+  and retired rather than merged or cherry-picked. Any still-wanted
+  setup-inspection UX from that branch must be reimplemented narrowly on the
+  current save-identity architecture. Other retained lifecycle, passive-save,
+  and Retry branches are either already represented here or superseded by
+  promoted mainline work.
 - **Final repository validation:** Exact code/test candidate `62b696f` passed
   compilation, state-definition validation, clickmap integrity with zero
   errors and the established 44 orphan notices, and all 2,842 repository tests

@@ -140,6 +140,48 @@ as checked checkpoint narrative here.
       before/change/restore evidence. Validate Spotlight Missiles off through
       one explicitly authorized reversible transition. Do not enumerate every
       boolean combination.
+- [ ] Reimplement the optional **Inspect unresolved fields...** setup-capture
+  workflow narrowly on the current save-identity architecture. Offer it only
+  after a successful partial capture has at least one field that an existing
+  read-only owner can inspect at the verified boundary; opening the UI requires
+  separate explicit operator intent and must never be an automatic consequence
+  of Capture, result reopening, or process restart.
+  - Inventory every unresolved status and reason. Before confirmation, name the
+    inspectable and excluded fields, explain each exclusion, and state that the
+    workflow changes no configuration and cannot start, end, resume, retry, or
+    Surrender a battle. Cancellation is a no-op.
+  - Bind the exact runtime, PID, target generation, activity scope, capture
+    request, captured-save fingerprint, and observed boundary. Hold navigation
+    exclusively, recheck action authority before every input, stop on Pause,
+    Stop, manual-control ownership, stale evidence, or changed target/scope,
+    retain only pre-mutation evidence, and restore the source screen when safe.
+    Pause only when dispatched lifecycle/navigation input leaves source
+    ownership unproven; ordinary read, OCR, or unsupported-field failure must
+    preserve prior authority and release the hold. A new inspection requires a
+    new operator request, while atomic receipt retry must not repeat navigation.
+  - Merge normalized values into the capture review with distinct
+    `ui_inspection` provenance, observation time, binding/boundary, and
+    resolution status, then recalculate the base difference. Keep unavailable
+    fields explicit and every saved artifact inactive; this path must never
+    select, publish, queue, activate, apply, repair, or otherwise mutate a
+    Strategy.
+  - Keep capture provenance, Strategy authoring, and canonical player-save
+    mapping as separate schemas and authority owners. Reuse current readers,
+    normalizers, local-definition owners, typed acquisition, and schema-2
+    mapping-candidate review; UI evidence is never mapping authority by itself.
+    Add First Perk Choice to the existing Strategy authoring registry only if
+    its established runtime destination still supports authoring. Damage
+    Slider, Orb Distance, and Module identity must retain their current owners
+    and mapping semantics.
+  - Add one named additive capability beyond `save_backed_setup_capture_v2`
+    across the Linux API/runtime, browser, native Windows, and CLI clients while
+    preserving v1/v2 behavior. Cover eligibility and cancellation, authority
+    rejection, partial/read failures, restoration, zero mutation, private-claim
+    restart safety, navigation-free receipt retry, distinct UI provenance,
+    inactive artifacts, and deterministic/ambiguous/conflicting/insufficient
+    mapping evidence. The superseded feature branch audited in
+    [the save-identity resolution](../issues/resolved-2026.md#start-battle-intent-was-rejected-after-its-strategy-applied-at-home)
+    is reference-only and must not be merged or cherry-picked.
 - [ ] Capture the numeric level of every equipped Module from authoritative
   overview evidence, retain it with preflight and completed-run records, and
   surface threshold violations without confusing an intentional Tournament
