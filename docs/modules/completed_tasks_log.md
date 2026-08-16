@@ -39,6 +39,23 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-15 Unambiguous Windows host-sampling status
+
+- The native Host Health panel now says **Sampling off** whenever collection is
+  disabled and uses **Start sampling** / **Stop sampling** actions. Its queue
+  presentation checks sampling first, so disabled collection never appears as
+  **Buffering**; a remaining backlog separately identifies the uploader
+  draining it or its local-only state.
+- Sampling cadence, persistence, partial-window flush, spool, upload, reconnect,
+  and automation behavior are unchanged. Exact code candidate `a251821`
+  passed all 39 host-performance Python tests, all 197 portable .NET tests, and
+  the Release WPF cross-build with zero errors using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  Native restore/build emitted only the established read-only NuGet
+  vulnerability-cache `NU1900` warning. This code-only outcome did not inspect
+  the live runtime, emulator, or a Windows WPF session.
+
 ### 2026-08-15 Windows emulator-handoff operator runbook
 
 - The canonical managed-runtime procedure now gives a complete source-to-
