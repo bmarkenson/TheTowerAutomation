@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import fcntl
+import hashlib
 import http.client
 import json
 import os
@@ -9,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -54,6 +56,98 @@ def _service(root: Path, *, stale_after_seconds: int = 180) -> ControlSurfaceSer
         repository_root=root,
         stale_after_seconds=stale_after_seconds,
     )
+
+
+def _legacy_terminal_attestation_status(identity_fingerprint: str):
+    owner = {
+        "runtime_id": "runtime-current",
+        "pid": 1234,
+        "adb_target": "localhost:5555",
+        "target_generation": 2,
+    }
+    observation = {
+        "observation_id": "runtime-current:42",
+        "observed_at": "2026-08-16T19:00:00+00:00",
+        "primary_state": "GAME_OVER",
+        "game_state": "game_over",
+        "activity_scope_run_id": "scope-current",
+        "freshness": "fresh",
+        "available": True,
+    }
+    evidence = {**observation, **owner}
+    return {
+        "healthy": True,
+        "control": {
+            "state": "PAUSED",
+            "resume_at": None,
+            "mode": "NEXT_BATTLE",
+            "strategy": "farm_t19",
+            "process_restart_handoff": {
+                "status": "failed",
+                "expected_active_round_identity_fingerprint": (
+                    identity_fingerprint
+                ),
+                "source_evidence": {
+                    "game_state": "active_battle",
+                    "active_round_identity_fingerprint": (
+                        identity_fingerprint
+                    ),
+                    "adb_target": "localhost:5555",
+                    "target_generation": 3,
+                    "activity_scope_run_id": "scope-current",
+                },
+            },
+        },
+        "acknowledgements": {
+            "state": {
+                "value": "PAUSED",
+                "acknowledges_current": True,
+            },
+            "mode": {
+                "value": "NEXT_BATTLE",
+                "acknowledges_current": True,
+            },
+            "strategy": {
+                "value": "farm_t19",
+                "acknowledges_current": True,
+            },
+        },
+        "control_model": {
+            "action_authority": {"effective": "paused"},
+            "observation": observation,
+            "workflow_evidence": evidence,
+            "strategy_scope": {"startup_default": "farm_t19"},
+        },
+        "strategy_action_gate": {
+            "available": True,
+            "stale": False,
+            "owner_matches_exact_runtime": True,
+            "global_pause": True,
+            "owner": owner,
+        },
+        "runtime": {
+            "instances": [
+                {
+                    "active": True,
+                    "runtime_id": "runtime-current",
+                    "pid": 1234,
+                    "target": "localhost:5555",
+                    "target_generation": 2,
+                }
+            ]
+        },
+        "process_service": {
+            "active": True,
+            "main_pid": 1234,
+            "adb_target": "localhost:5555",
+            "strategy": "farm_t19",
+        },
+        "adb_connection": {
+            "connected": True,
+            "target": "localhost:5555",
+        },
+        "current_run": {"run_id": "scope-current"},
+    }
 
 
 def _write_battle(root: Path, battle_id: str = "Battle20260719T101126-0700") -> Path:
@@ -1004,6 +1098,110 @@ def test_status_projection_uses_battle_identity_bound_current_save_perks(tmp_pat
         "battle_identity_unavailable"
     )
     assert "current_battle_perks_v1" in status["capabilities"]
+
+
+def test_terminal_attestation_requires_exact_pause_and_stores_audit_pair(
+    tmp_path,
+):
+    service = _service(tmp_path)
+    identity_values = {
+        "game_version": 1102,
+        "current_tier": 19,
+        "rounds_started_this_tier": 319,
+        "round_seed": 1721080409,
+    }
+    identity_fingerprint = hashlib.sha256(
+        json.dumps(
+            identity_values,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    identity_path = tmp_path / "logs" / "battle_identity.json"
+    identity_path.parent.mkdir(parents=True, exist_ok=True)
+    identity_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "active",
+                "identity": {
+                    **identity_values,
+                    "fingerprint": identity_fingerprint,
+                },
+                "bound_at": "2026-08-16T06:33:00+00:00",
+                "reason": "battle_started",
+                "operation_id": "launch-1",
+                "acquisition": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert service.battle_identity_store.record_session_preflight(
+        identity_fingerprint=identity_fingerprint,
+        strategy="farm_t19",
+        configuration_fingerprint="e" * 64,
+        evidence={"valid": True, "failed_checks": []},
+    )
+    status = _legacy_terminal_attestation_status(identity_fingerprint)
+    service.status = Mock(return_value=status)
+    strategy = SimpleNamespace(
+        name="farm_t19",
+        definition_fingerprint=lambda: "d" * 64,
+        session_preflight_fingerprint=lambda: "e" * 64,
+        run_configuration=lambda: {"profile": "farm", "tier": 19},
+    )
+
+    with patch("core.control_surface.get_strategy", return_value=strategy):
+        result = service.apply_terminal_evidence_attestation(
+            {
+                "confirmation": (
+                    "terminal_and_strategy_unchanged_since_battle"
+                ),
+                "expected_active_round_identity_fingerprint": (
+                    identity_fingerprint
+                ),
+                "reason": "Operator confirmed no terminal or Strategy change",
+            }
+        )
+
+    assert result["status"] == "attested"
+    retained = service.battle_identity_store.active()
+    assert retained is not None
+    assert retained.strategy_snapshot is not None
+    assert retained.operator_terminal_attestation is not None
+    assert retained.strategy_snapshot["provenance"]["kind"] == (
+        "operator_terminal_attestation"
+    )
+    activity = (tmp_path / "logs" / "actions.log").read_text(
+        encoding="utf-8"
+    )
+    assert activity.count("[ACTION ") == 1
+    assert activity.count("[RESULT ") == 1
+    assert activity.count(result["operation_id"]) == 2
+
+
+def test_terminal_attestation_fails_closed_when_pause_is_not_exact(tmp_path):
+    service = _service(tmp_path)
+    status = _legacy_terminal_attestation_status("a" * 64)
+    status["control"]["state"] = "RUNNING"
+    service.status = Mock(return_value=status)
+
+    with pytest.raises(ControlSurfaceRequestError) as rejected:
+        service.apply_terminal_evidence_attestation(
+            {
+                "confirmation": (
+                    "terminal_and_strategy_unchanged_since_battle"
+                ),
+                "expected_active_round_identity_fingerprint": "a" * 64,
+                "reason": "Operator confirmed no terminal or Strategy change",
+            }
+        )
+
+    assert rejected.value.code == "pause_not_exactly_acknowledged"
+    assert not (tmp_path / "logs" / "battle_identity.json").exists()
+    assert not (tmp_path / "logs" / "actions.log").exists()
 
 
 def test_status_exposes_local_mapping_lifecycle_without_blocking_health(tmp_path):
@@ -5632,6 +5830,53 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         response = connection.getresponse()
         response.read()
         assert response.status == 503
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def test_http_terminal_evidence_attestation_endpoint_dispatches(tmp_path):
+    service = _service(tmp_path)
+    service.apply_terminal_evidence_attestation = Mock(
+        return_value={"schema_version": 1, "status": "attested"}
+    )
+    server = ControlSurfaceHTTPServer(
+        ("127.0.0.1", 0),
+        service=service,
+        static_dir=STATIC_DIR,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_port,
+        timeout=3,
+    )
+    request = {
+        "confirmation": "terminal_and_strategy_unchanged_since_battle",
+        "expected_active_round_identity_fingerprint": "a" * 64,
+        "reason": "operator confirmation",
+    }
+    body = json.dumps(request)
+    try:
+        connection.request(
+            "POST",
+            "/api/v1/terminal-evidence-attestation",
+            body=body,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload["status"] == "attested"
+        service.apply_terminal_evidence_attestation.assert_called_once_with(
+            request
+        )
     finally:
         connection.close()
         server.shutdown()

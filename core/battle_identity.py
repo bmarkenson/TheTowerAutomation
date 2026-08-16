@@ -145,6 +145,10 @@ class ActiveBattleIdentityRecord:
         default=None,
         repr=False,
     )
+    operator_terminal_attestation: Optional[Mapping[str, Any]] = field(
+        default=None,
+        repr=False,
+    )
     survival_activation_checkpoint: Optional[Mapping[str, Any]] = field(
         default=None,
         repr=False,
@@ -285,6 +289,10 @@ class BattleIdentityStore:
                 for key, value in (
                     ("session_preflight", previous.session_preflight),
                     ("strategy_snapshot", previous.strategy_snapshot),
+                    (
+                        "operator_terminal_attestation",
+                        previous.operator_terminal_attestation,
+                    ),
                     (
                         "survival_activation_checkpoint",
                         previous.survival_activation_checkpoint,
@@ -438,21 +446,20 @@ class BattleIdentityStore:
             detached_configuration = _detached_json_mapping(run_configuration)
         except (OverflowError, RecursionError, TypeError, ValueError):
             return False
-        material = {
-            "schema_version": 1,
-            "identity_fingerprint": expected,
-            "strategy": strategy_name,
-            "strategy_definition_fingerprint": definition_fingerprint,
-            "session_preflight_configuration_fingerprint": (
+        material = _strategy_snapshot_material(
+            identity_fingerprint=expected,
+            strategy=strategy_name,
+            strategy_definition_fingerprint=definition_fingerprint,
+            session_preflight_configuration_fingerprint=(
                 preflight_fingerprint
             ),
-            "run_configuration": detached_configuration,
-            "run_configuration_fingerprint": _json_fingerprint(
-                detached_configuration
-            ),
-            "recorded_at": _aware_timestamp(recorded_at).isoformat(),
-        }
-        material["fingerprint"] = _mapping_fingerprint(material)
+            run_configuration=detached_configuration,
+            recorded_at=_aware_timestamp(recorded_at),
+            provenance={
+                "schema_version": 1,
+                "kind": "settled_active_battle_observation",
+            },
+        )
         with self._lock:
             payload = self._read_payload()
             if payload is None or payload.get("status") != "active":
@@ -467,6 +474,171 @@ class BattleIdentityStore:
                 # an identical repeat is simply already satisfied.
                 return False
             payload["strategy_snapshot"] = material
+            self._write_payload(payload)
+            return True
+
+    def record_operator_terminal_strategy_attestation(
+        self,
+        *,
+        identity_fingerprint: str,
+        strategy: str,
+        strategy_definition_fingerprint: str,
+        session_preflight_configuration_fingerprint: str,
+        run_configuration: Mapping[str, Any],
+        runtime_id: str,
+        pid: int,
+        target_binding: PlayerSaveTargetBinding,
+        observation_id: str,
+        observed_at: datetime,
+        reason: str,
+        attested_at: Optional[datetime] = None,
+    ) -> bool:
+        """Atomically attest one legacy terminal and its unchanged Strategy.
+
+        This is an explicit trusted-operator exception for a retained battle
+        that predates the automatic durable snapshot. It never supplies action
+        authority, and it requires the older exact-battle preflight receipt to
+        match the Strategy definition currently being attested.
+        """
+
+        expected = str(identity_fingerprint or "").strip()
+        strategy_name = str(strategy or "").strip()
+        definition_fingerprint = str(
+            strategy_definition_fingerprint or ""
+        ).strip()
+        preflight_fingerprint = str(
+            session_preflight_configuration_fingerprint or ""
+        ).strip()
+        normalized_runtime = str(runtime_id or "").strip()[:128]
+        normalized_observation = str(observation_id or "").strip()[:160]
+        normalized_reason = " ".join(str(reason or "").split())[:256]
+        if (
+            _SHA256_RE.fullmatch(expected) is None
+            or not strategy_name
+            or _SHA256_RE.fullmatch(definition_fingerprint) is None
+            or _SHA256_RE.fullmatch(preflight_fingerprint) is None
+            or not isinstance(run_configuration, Mapping)
+            or not normalized_runtime
+            or type(pid) is not int
+            or pid <= 0
+            or not isinstance(target_binding, PlayerSaveTargetBinding)
+            or not normalized_observation
+            or not isinstance(observed_at, datetime)
+            or observed_at.tzinfo is None
+            or not normalized_reason
+        ):
+            return False
+        try:
+            detached_configuration = _detached_json_mapping(run_configuration)
+        except (OverflowError, RecursionError, TypeError, ValueError):
+            return False
+        timestamp = _aware_timestamp(attested_at)
+        attestation_id = _json_fingerprint(
+            {
+                "identity_fingerprint": expected,
+                "strategy": strategy_name,
+                "runtime_id": normalized_runtime,
+                "pid": pid,
+                "target_binding_fingerprint": target_binding.fingerprint,
+                "observation_id": normalized_observation,
+                "observed_at": observed_at.isoformat(),
+                "attested_at": timestamp.isoformat(),
+            }
+        )
+        operator_material = _strategy_snapshot_material(
+            identity_fingerprint=expected,
+            strategy=strategy_name,
+            strategy_definition_fingerprint=definition_fingerprint,
+            session_preflight_configuration_fingerprint=(
+                preflight_fingerprint
+            ),
+            run_configuration=detached_configuration,
+            recorded_at=timestamp,
+            provenance={
+                "schema_version": 1,
+                "kind": "operator_terminal_attestation",
+                "attestation_id": attestation_id,
+            },
+        )
+        with self._lock:
+            payload = self._read_payload()
+            if payload is None or payload.get("status") != "active":
+                return False
+            record = _record_from_payload(payload)
+            if (
+                record.fingerprint != expected
+                or record.operator_terminal_attestation is not None
+            ):
+                return False
+            receipt = _validated_session_preflight(
+                record.session_preflight,
+                identity_fingerprint=expected,
+            )
+            evidence = (
+                receipt.get("evidence")
+                if isinstance(receipt, Mapping)
+                else None
+            )
+            if not (
+                isinstance(receipt, Mapping)
+                and receipt.get("strategy") == strategy_name
+                and receipt.get("configuration_fingerprint")
+                == preflight_fingerprint
+                and isinstance(evidence, Mapping)
+                and evidence.get("valid") is True
+                and isinstance(evidence.get("failed_checks"), list)
+                and not evidence["failed_checks"]
+            ):
+                return False
+            existing_snapshot = record.strategy_snapshot
+            if existing_snapshot is not None:
+                if not (
+                    existing_snapshot.get("strategy") == strategy_name
+                    and existing_snapshot.get(
+                        "strategy_definition_fingerprint"
+                    )
+                    == definition_fingerprint
+                    and existing_snapshot.get(
+                        "session_preflight_configuration_fingerprint"
+                    )
+                    == preflight_fingerprint
+                    and existing_snapshot.get(
+                        "run_configuration_fingerprint"
+                    )
+                    == _json_fingerprint(detached_configuration)
+                ):
+                    return False
+                material = dict(existing_snapshot)
+                snapshot_source = "independently_durable"
+            else:
+                material = operator_material
+                snapshot_source = "operator_backfill"
+            attestation = {
+                "schema_version": 1,
+                "attestation_id": attestation_id,
+                "identity_fingerprint": expected,
+                "statement": "terminal_and_strategy_unchanged_since_battle",
+                "reason": normalized_reason,
+                "attested_at": timestamp.isoformat(),
+                "runtime": {
+                    "runtime_id": normalized_runtime,
+                    "pid": pid,
+                    "adb_target": target_binding.target,
+                    "target_generation": target_binding.generation,
+                    "target_binding_fingerprint": target_binding.fingerprint,
+                },
+                "observation": {
+                    "observation_id": normalized_observation,
+                    "observed_at": observed_at.isoformat(),
+                    "primary_state": "GAME_OVER",
+                    "game_state": "game_over",
+                },
+                "strategy_snapshot_source": snapshot_source,
+                "strategy_snapshot_fingerprint": material["fingerprint"],
+            }
+            attestation["fingerprint"] = _mapping_fingerprint(attestation)
+            payload["strategy_snapshot"] = material
+            payload["operator_terminal_attestation"] = attestation
             self._write_payload(payload)
             return True
 
@@ -806,6 +978,23 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
         payload.get("strategy_snapshot"),
         identity_fingerprint=(identity.fingerprint if identity else ""),
     )
+    operator_terminal_attestation = _validated_operator_terminal_attestation(
+        payload.get("operator_terminal_attestation"),
+        identity_fingerprint=(identity.fingerprint if identity else ""),
+        strategy_snapshot=strategy_snapshot,
+    )
+    snapshot_provenance = (
+        strategy_snapshot.get("provenance")
+        if isinstance(strategy_snapshot, Mapping)
+        else None
+    )
+    if (
+        isinstance(snapshot_provenance, Mapping)
+        and snapshot_provenance.get("kind")
+        == "operator_terminal_attestation"
+        and operator_terminal_attestation is None
+    ):
+        strategy_snapshot = None
     survival_activation_checkpoint = (
         _validated_survival_activation_checkpoint(
             payload.get("survival_activation_checkpoint"),
@@ -843,6 +1032,11 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
         strategy_snapshot=(
             dict(strategy_snapshot)
             if isinstance(strategy_snapshot, Mapping)
+            else None
+        ),
+        operator_terminal_attestation=(
+            dict(operator_terminal_attestation)
+            if isinstance(operator_terminal_attestation, Mapping)
             else None
         ),
         survival_activation_checkpoint=(
@@ -897,6 +1091,24 @@ def _validated_strategy_snapshot(
         parsed = datetime.fromisoformat(recorded_at)
     except ValueError:
         return None
+    provenance = value.get("provenance")
+    if provenance is not None and not (
+        isinstance(provenance, Mapping)
+        and provenance.get("schema_version") == 1
+        and provenance.get("kind")
+        in {
+            "settled_active_battle_observation",
+            "operator_terminal_attestation",
+        }
+        and (
+            provenance.get("kind") != "operator_terminal_attestation"
+            or _SHA256_RE.fullmatch(
+                str(provenance.get("attestation_id") or "")
+            )
+            is not None
+        )
+    ):
+        return None
     if (
         parsed.tzinfo is None
         or value.get("identity_fingerprint") != identity_fingerprint
@@ -921,6 +1133,96 @@ def _validated_strategy_snapshot(
         is None
         or _json_fingerprint(value.get("run_configuration"))
         != value.get("run_configuration_fingerprint")
+        or _SHA256_RE.fullmatch(str(value.get("fingerprint") or "")) is None
+        or _mapping_fingerprint(value) != value.get("fingerprint")
+    ):
+        return None
+    try:
+        return _detached_json_mapping(value)
+    except (OverflowError, RecursionError, TypeError, ValueError):
+        return None
+
+
+def _validated_operator_terminal_attestation(
+    value: object,
+    *,
+    identity_fingerprint: str,
+    strategy_snapshot: Optional[Mapping[str, Any]],
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    attested_at = str(value.get("attested_at") or "").strip()
+    runtime = value.get("runtime")
+    observation = value.get("observation")
+    try:
+        parsed_attestation = datetime.fromisoformat(attested_at)
+        parsed_observation = datetime.fromisoformat(
+            str(
+                observation.get("observed_at")
+                if isinstance(observation, Mapping)
+                else ""
+            )
+        )
+        target_binding = PlayerSaveTargetBinding(
+            str(
+                runtime.get("adb_target")
+                if isinstance(runtime, Mapping)
+                else ""
+            ),
+            int(
+                runtime.get("target_generation")
+                if isinstance(runtime, Mapping)
+                else 0
+            ),
+        )
+    except (TypeError, ValueError):
+        return None
+    provenance = (
+        strategy_snapshot.get("provenance")
+        if isinstance(strategy_snapshot, Mapping)
+        else None
+    )
+    snapshot_source = value.get("strategy_snapshot_source")
+    operator_backfill = bool(
+        snapshot_source == "operator_backfill"
+        and isinstance(provenance, Mapping)
+        and provenance.get("kind") == "operator_terminal_attestation"
+        and provenance.get("attestation_id") == value.get("attestation_id")
+    )
+    independently_durable = bool(
+        snapshot_source == "independently_durable"
+        and (
+            provenance is None
+            or (
+                isinstance(provenance, Mapping)
+                and provenance.get("kind")
+                == "settled_active_battle_observation"
+            )
+        )
+    )
+    if (
+        parsed_attestation.tzinfo is None
+        or parsed_observation.tzinfo is None
+        or value.get("identity_fingerprint") != identity_fingerprint
+        or value.get("statement")
+        != "terminal_and_strategy_unchanged_since_battle"
+        or not str(value.get("reason") or "").strip()
+        or _SHA256_RE.fullmatch(str(value.get("attestation_id") or ""))
+        is None
+        or not isinstance(runtime, Mapping)
+        or not str(runtime.get("runtime_id") or "").strip()
+        or type(runtime.get("pid")) is not int
+        or runtime["pid"] <= 0
+        or runtime.get("target_binding_fingerprint")
+        != target_binding.fingerprint
+        or not isinstance(observation, Mapping)
+        or not str(observation.get("observation_id") or "").strip()
+        or observation.get("primary_state") != "GAME_OVER"
+        or observation.get("game_state") != "game_over"
+        or not isinstance(strategy_snapshot, Mapping)
+        or value.get("strategy_snapshot_fingerprint")
+        != strategy_snapshot.get("fingerprint")
+        or not (operator_backfill or independently_durable)
         or _SHA256_RE.fullmatch(str(value.get("fingerprint") or "")) is None
         or _mapping_fingerprint(value) != value.get("fingerprint")
     ):
@@ -1042,7 +1344,7 @@ def durable_terminal_report_evidence_from_record(
     *,
     terminal_binding: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Restore component evidence only after exact terminal vector proof."""
+    """Restore components only after an accepted terminal binding proof."""
 
     if not isinstance(record, ActiveBattleIdentityRecord):
         return {}
@@ -1051,7 +1353,10 @@ def durable_terminal_report_evidence_from_record(
         isinstance(terminal_binding, Mapping)
         and terminal_binding.get("status") == "bound"
         and terminal_binding.get("binding_source")
-        == "durable_full_round_counter_vector"
+        in {
+            "durable_full_round_counter_vector",
+            "operator_terminal_attestation",
+        }
         and terminal_binding.get("active_round_identity_fingerprint")
         == identity
     ):
@@ -1063,6 +1368,11 @@ def durable_terminal_report_evidence_from_record(
     restored: dict[str, Any] = {}
     components: list[str] = []
     component_fingerprints: dict[str, str] = {}
+    component_sources: dict[str, str] = {}
+    receipt = _validated_session_preflight(
+        record.session_preflight,
+        identity_fingerprint=identity,
+    )
     if strategy_snapshot is not None:
         strategy = str(strategy_snapshot["strategy"])
         restored.update(
@@ -1080,10 +1390,11 @@ def durable_terminal_report_evidence_from_record(
         component_fingerprints["strategy_snapshot"] = str(
             strategy_snapshot["fingerprint"]
         )
-
-        receipt = _validated_session_preflight(
-            record.session_preflight,
-            identity_fingerprint=identity,
+        provenance = strategy_snapshot.get("provenance")
+        component_sources["strategy_snapshot"] = str(
+            provenance.get("kind")
+            if isinstance(provenance, Mapping)
+            else "legacy_settled_active_battle_observation"
         )
         if (
             receipt is not None
@@ -1104,6 +1415,25 @@ def durable_terminal_report_evidence_from_record(
                 component_fingerprints["session_preflight_evidence"] = str(
                     receipt["configuration_fingerprint"]
                 )
+                component_sources["session_preflight_evidence"] = (
+                    "exact_battle_session_preflight_receipt"
+                )
+    elif receipt is not None:
+        evidence = _detached_json_mapping(receipt["evidence"])
+        if (
+            evidence.get("valid") is True
+            and isinstance(evidence.get("failed_checks"), list)
+            and not evidence["failed_checks"]
+        ):
+            restored["strategy"] = str(receipt["strategy"])
+            restored["session_preflight_evidence"] = evidence
+            components.append("session_preflight_evidence")
+            component_fingerprints["session_preflight_evidence"] = str(
+                receipt["configuration_fingerprint"]
+            )
+            component_sources["session_preflight_evidence"] = (
+                "exact_battle_session_preflight_receipt"
+            )
 
     envelope = _validated_survival_activation_checkpoint(
         record.survival_activation_checkpoint,
@@ -1138,6 +1468,9 @@ def durable_terminal_report_evidence_from_record(
             component_fingerprints["survival_ability_activations"] = str(
                 envelope["tracker_configuration_fingerprint"]
             )
+            component_sources["survival_ability_activations"] = (
+                "exact_battle_activation_checkpoint"
+            )
 
     if not components:
         return {}
@@ -1145,12 +1478,106 @@ def durable_terminal_report_evidence_from_record(
     restored["durable_terminal_evidence"] = {
         "schema_version": 1,
         "status": "restored",
-        "binding_source": "durable_full_round_counter_vector",
+        "binding_source": str(terminal_binding["binding_source"]),
         "active_round_identity_fingerprint": identity,
         "components": components,
         "component_fingerprints": component_fingerprints,
+        "component_sources": component_sources,
     }
+    if terminal_binding.get("binding_source") == "operator_terminal_attestation":
+        attestation = _validated_operator_terminal_attestation(
+            record.operator_terminal_attestation,
+            identity_fingerprint=identity,
+            strategy_snapshot=strategy_snapshot,
+        )
+        if attestation is None or terminal_binding.get(
+            "operator_attestation_fingerprint"
+        ) != attestation.get("fingerprint"):
+            return {}
+        restored["durable_terminal_evidence"]["operator_attestation"] = {
+            "attestation_id": attestation["attestation_id"],
+            "attested_at": attestation["attested_at"],
+            "statement": attestation["statement"],
+            "strategy_snapshot_source": attestation[
+                "strategy_snapshot_source"
+            ],
+            "fingerprint": attestation["fingerprint"],
+        }
     return restored
+
+
+def terminal_run_binding_from_operator_attestation(
+    record: ActiveBattleIdentityRecord,
+    acquisition: PlayerSaveAcquisitionBundle,
+    *,
+    expected_identity_fingerprint: str,
+    activity_scope_run_id: Optional[str],
+) -> dict[str, Any]:
+    """Bind one legacy Game Over through a narrow trusted-operator receipt."""
+
+    expected_identity = str(expected_identity_fingerprint or "").strip()
+
+    def unbound(reason: str) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "status": "unbound",
+            "reason": reason,
+            "activity_scope_run_id": (
+                str(activity_scope_run_id or "").strip() or None
+            ),
+            "active_round_identity_fingerprint": expected_identity or None,
+        }
+
+    if not isinstance(record, ActiveBattleIdentityRecord):
+        return unbound("retained_active_battle_unavailable")
+    if (
+        _SHA256_RE.fullmatch(expected_identity) is None
+        or expected_identity != record.fingerprint
+    ):
+        return unbound("operator_attestation_battle_identity_mismatch")
+    attestation = _validated_operator_terminal_attestation(
+        record.operator_terminal_attestation,
+        identity_fingerprint=expected_identity,
+        strategy_snapshot=record.strategy_snapshot,
+    )
+    if attestation is None:
+        return unbound("operator_terminal_attestation_unavailable")
+    if not (
+        isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        and acquisition.complete
+        and acquisition.acquisition_type
+        is PlayerSaveAcquisitionType.NATURAL_BOUNDARY
+        and acquisition.boundary is not None
+        and acquisition.boundary.kind is PlayerSaveBoundaryKind.GAME_OVER
+        and acquisition.boundary.active_round_identity_fingerprint
+        == expected_identity
+    ):
+        return unbound("terminal_natural_boundary_mismatch")
+    runtime_evidence = attestation["runtime"]
+    if acquisition.binding_fingerprint != runtime_evidence.get(
+        "target_binding_fingerprint"
+    ):
+        return unbound("operator_attested_terminal_target_changed")
+    runtime = getattr(acquisition.snapshot, "runtime_save", None)
+    if getattr(runtime, "round_active", None) is not False:
+        return unbound("terminal_save_still_active")
+    return {
+        "schema_version": 1,
+        "status": "bound",
+        "reason": "trusted_operator_attested_legacy_terminal_continuity",
+        "binding_source": "operator_terminal_attestation",
+        "activity_scope_run_id": (
+            str(activity_scope_run_id or "").strip() or None
+        ),
+        "active_round_identity_fingerprint": record.fingerprint,
+        "operator_attestation_fingerprint": attestation["fingerprint"],
+        "terminal_continuity": {
+            "schema_version": 1,
+            "comparison": "trusted_operator_attestation",
+            "target_binding_fingerprint": acquisition.binding_fingerprint,
+            "attested_at": attestation["attested_at"],
+        },
+    }
 
 
 def terminal_run_binding_from_round_counters(
@@ -1269,6 +1696,41 @@ def _mapping_fingerprint(value: Mapping[str, Any]) -> str:
     return _json_fingerprint(material)
 
 
+def _strategy_snapshot_material(
+    *,
+    identity_fingerprint: str,
+    strategy: str,
+    strategy_definition_fingerprint: str,
+    session_preflight_configuration_fingerprint: str,
+    run_configuration: Mapping[str, Any],
+    recorded_at: datetime,
+    provenance: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build one immutable, self-fingerprinted Strategy report snapshot."""
+
+    detached_configuration = _detached_json_mapping(run_configuration)
+    detached_provenance = _detached_json_mapping(provenance)
+    material = {
+        "schema_version": 1,
+        "identity_fingerprint": identity_fingerprint,
+        "strategy": strategy,
+        "strategy_definition_fingerprint": (
+            strategy_definition_fingerprint
+        ),
+        "session_preflight_configuration_fingerprint": (
+            session_preflight_configuration_fingerprint
+        ),
+        "run_configuration": detached_configuration,
+        "run_configuration_fingerprint": _json_fingerprint(
+            detached_configuration
+        ),
+        "recorded_at": _aware_timestamp(recorded_at).isoformat(),
+        "provenance": detached_provenance,
+    }
+    material["fingerprint"] = _mapping_fingerprint(material)
+    return material
+
+
 def _json_fingerprint(value: object) -> str:
     encoded = json.dumps(
         value,
@@ -1335,5 +1797,6 @@ __all__ = [
     "BattleIdentityStore",
     "BattleIdentityStoreError",
     "durable_terminal_report_evidence_from_record",
+    "terminal_run_binding_from_operator_attestation",
     "terminal_run_binding_from_round_counters",
 ]

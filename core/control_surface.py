@@ -15,6 +15,7 @@ import threading
 import time
 from typing import Any, Mapping, Optional, Sequence
 
+from automation.strategies import get_strategy
 from core.adb_connection import PersistentAdbConnectionManager
 from core.action_authority import AuthorityHold
 from core.app_setup import (
@@ -27,6 +28,11 @@ from core.battle_classification import (
     observed_tier_for_record,
 )
 from core.battle_stats import included_in_default_history
+from core.battle_identity import (
+    ActiveBattleIdentityRecord,
+    BattleIdentityStore,
+    BattleIdentityStoreError,
+)
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
@@ -73,6 +79,7 @@ from core.player_save_setup_capture import (
     module_preset_source_from_capture,
 )
 from core.player_save import confirmed_local_mapping_status
+from core.player_save_acquisition import PlayerSaveTargetBinding
 from core.player_save_confirmed_local_mapping import ConfirmedLocalMappingStore
 from core.player_save_mapping_candidates import AppendOnlyMappingCandidateStore
 from core.player_save_mapping_staged_candidate import (
@@ -145,6 +152,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "strategy_profile_catalog_v1",
     "strategy_profile_editor_v2",
     "strategy_revision_history_v1",
+    "terminal_evidence_operator_attestation_v1",
     "terminal_dispositions_v2",
     "tournament_launch_confirmation",
 )
@@ -290,6 +298,9 @@ class ControlSurfaceService:
         self.control_store = ControlDirectiveStore(
             self.control_path,
             strategy_profile_dir=self.strategy_profile_dir,
+        )
+        self.battle_identity_store = BattleIdentityStore(
+            self.control_path.with_name("battle_identity.json")
         )
         self.process_manager = process_manager
         self.adb_connection_manager = adb_connection_manager
@@ -2740,6 +2751,377 @@ class ControlSurfaceService:
                 f"Unable to persist host-performance telemetry: {exc}",
                 status=503,
             ) from exc
+
+    def apply_terminal_evidence_attestation(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Attest one legacy retained Game Over under exact live evidence."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        confirmation = str(request.get("confirmation") or "").strip()
+        if confirmation != "terminal_and_strategy_unchanged_since_battle":
+            raise ControlSurfaceRequestError(
+                "confirmation must explicitly state "
+                "terminal_and_strategy_unchanged_since_battle",
+                status=409,
+                code="operator_confirmation_required",
+            )
+        expected_identity = str(
+            request.get("expected_active_round_identity_fingerprint") or ""
+        ).strip()
+        if re.fullmatch(r"[0-9a-f]{64}", expected_identity) is None:
+            raise ControlSurfaceRequestError(
+                "expected_active_round_identity_fingerprint must be an exact "
+                "SHA-256 fingerprint"
+            )
+        reason = " ".join(str(request.get("reason") or "").split())
+        if not reason or len(reason) > 256:
+            raise ControlSurfaceRequestError(
+                "reason must contain between 1 and 256 characters"
+            )
+
+        with self._battle_mutation_lock:
+            current = self.status()
+            control = current.get("control")
+            acknowledgements = current.get("acknowledgements")
+            control_model = current.get("control_model")
+            gate = current.get("strategy_action_gate")
+            runtime = current.get("runtime")
+            process = current.get("process_service")
+            adb_connection = current.get("adb_connection")
+            if not all(
+                isinstance(value, Mapping)
+                for value in (
+                    control,
+                    acknowledgements,
+                    control_model,
+                    gate,
+                    runtime,
+                    process,
+                    adb_connection,
+                )
+            ):
+                raise ControlSurfaceRequestError(
+                    "Exact live runtime evidence is unavailable",
+                    status=409,
+                    code="live_evidence_unavailable",
+                )
+            authority = control_model.get("action_authority")
+            observation = control_model.get("observation")
+            evidence = control_model.get("workflow_evidence")
+            strategy_scope = control_model.get("strategy_scope")
+            owner = gate.get("owner")
+            state_ack = acknowledgements.get("state")
+            mode_ack = acknowledgements.get("mode")
+            strategy_ack = acknowledgements.get("strategy")
+            if not (
+                current.get("healthy") is True
+                and control.get("state") == "PAUSED"
+                and control.get("resume_at") is None
+                and isinstance(authority, Mapping)
+                and authority.get("effective") == "paused"
+                and isinstance(state_ack, Mapping)
+                and state_ack.get("acknowledges_current") is True
+                and state_ack.get("value") == "PAUSED"
+                and gate.get("available") is True
+                and gate.get("stale") is False
+                and gate.get("owner_matches_exact_runtime") is True
+                and gate.get("global_pause") is True
+            ):
+                raise ControlSurfaceRequestError(
+                    "Automation must be durably and freshly Paused before "
+                    "terminal evidence can be attested",
+                    status=409,
+                    code="pause_not_exactly_acknowledged",
+                )
+            if not (
+                control.get("mode") == "NEXT_BATTLE"
+                and isinstance(mode_ack, Mapping)
+                and mode_ack.get("acknowledges_current") is True
+                and mode_ack.get("value") == "NEXT_BATTLE"
+            ):
+                raise ControlSurfaceRequestError(
+                    "The exact NEXT_BATTLE policy must be acknowledged before "
+                    "this attestation",
+                    status=409,
+                    code="terminal_policy_not_acknowledged",
+                )
+            if not (
+                isinstance(observation, Mapping)
+                and observation.get("freshness") == "fresh"
+                and observation.get("available") is True
+                and observation.get("primary_state") == "GAME_OVER"
+                and observation.get("game_state") == "game_over"
+                and isinstance(evidence, Mapping)
+                and evidence.get("observation_id")
+                == observation.get("observation_id")
+                and evidence.get("game_state") == "game_over"
+                and isinstance(owner, Mapping)
+                and all(
+                    evidence.get(field) == owner.get(field)
+                    for field in (
+                        "runtime_id",
+                        "pid",
+                        "adb_target",
+                        "target_generation",
+                    )
+                )
+            ):
+                raise ControlSurfaceRequestError(
+                    "A fresh exact-runtime Game Over observation is required",
+                    status=409,
+                    code="game_over_observation_unavailable",
+                )
+
+            active_instances = [
+                item
+                for item in runtime.get("instances", [])
+                if isinstance(item, Mapping) and item.get("active") is True
+            ]
+            if not (
+                len(active_instances) == 1
+                and active_instances[0].get("runtime_id")
+                == owner.get("runtime_id")
+                and active_instances[0].get("pid") == owner.get("pid")
+                and active_instances[0].get("target")
+                == owner.get("adb_target")
+                and active_instances[0].get("target_generation")
+                == owner.get("target_generation")
+                and process.get("active") is True
+                and process.get("main_pid") == owner.get("pid")
+                and process.get("adb_target") == owner.get("adb_target")
+                and adb_connection.get("connected") is True
+                and adb_connection.get("target") == owner.get("adb_target")
+            ):
+                raise ControlSurfaceRequestError(
+                    "The runtime, service, and ADB owners do not identify one "
+                    "exact live process",
+                    status=409,
+                    code="runtime_owner_mismatch",
+                )
+
+            handoff = control.get("process_restart_handoff")
+            source = (
+                handoff.get("source_evidence")
+                if isinstance(handoff, Mapping)
+                else None
+            )
+            current_run = current.get("current_run")
+            if not (
+                isinstance(handoff, Mapping)
+                and handoff.get("status") in {"pending", "failed"}
+                and handoff.get(
+                    "expected_active_round_identity_fingerprint"
+                )
+                == expected_identity
+                and isinstance(source, Mapping)
+                and source.get("game_state") == "active_battle"
+                and source.get("active_round_identity_fingerprint")
+                == expected_identity
+                and source.get("adb_target") == owner.get("adb_target")
+                and str(source.get("activity_scope_run_id") or "")
+                == str(evidence.get("activity_scope_run_id") or "")
+                and isinstance(current_run, Mapping)
+                and str(current_run.get("run_id") or "")
+                == str(evidence.get("activity_scope_run_id") or "")
+            ):
+                raise ControlSurfaceRequestError(
+                    "The retained process handoff does not bind this exact "
+                    "battle to the current Game Over runtime",
+                    status=409,
+                    code="retained_battle_handoff_mismatch",
+                )
+
+            try:
+                record = self.battle_identity_store.active()
+            except BattleIdentityStoreError as exc:
+                raise ControlSurfaceRequestError(
+                    f"The retained battle identity is unreadable: {exc}",
+                    status=409,
+                    code="retained_battle_identity_unavailable",
+                ) from exc
+            if not (
+                isinstance(record, ActiveBattleIdentityRecord)
+                and record.fingerprint == expected_identity
+                and record.operator_terminal_attestation is None
+            ):
+                raise ControlSurfaceRequestError(
+                    "The exact legacy battle is unavailable or is already "
+                    "operator-attested",
+                    status=409,
+                    code="legacy_battle_not_attestable",
+                )
+
+            selected_strategy = str(control.get("strategy") or "").strip()
+            if not (
+                selected_strategy
+                and isinstance(strategy_ack, Mapping)
+                and strategy_ack.get("acknowledges_current") is True
+                and strategy_ack.get("value") == selected_strategy
+                and isinstance(strategy_scope, Mapping)
+                and strategy_scope.get("startup_default")
+                == selected_strategy
+                and process.get("strategy") == selected_strategy
+            ):
+                raise ControlSurfaceRequestError(
+                    "The selected Strategy is not exactly acknowledged by the "
+                    "current runtime and process",
+                    status=409,
+                    code="strategy_not_exactly_acknowledged",
+                )
+            try:
+                strategy = get_strategy(
+                    selected_strategy,
+                    profile_directory=self.strategy_profile_dir,
+                )
+                if strategy is None:
+                    raise ValueError("the selected Strategy has no definition")
+                definition_fingerprint = strategy.definition_fingerprint()
+                preflight_fingerprint = strategy.session_preflight_fingerprint()
+                run_configuration = strategy.run_configuration()
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise ControlSurfaceRequestError(
+                    f"The selected Strategy could not be loaded exactly: {exc}",
+                    status=409,
+                    code="strategy_definition_unavailable",
+                ) from exc
+            if not (
+                strategy.name == selected_strategy
+                and isinstance(run_configuration, Mapping)
+                and run_configuration.get("tier")
+                == record.identity.current_tier
+            ):
+                raise ControlSurfaceRequestError(
+                    "The current Strategy identity or Tier does not match the "
+                    "retained battle",
+                    status=409,
+                    code="strategy_battle_mismatch",
+                )
+            try:
+                target_binding = PlayerSaveTargetBinding(
+                    str(owner.get("adb_target") or ""),
+                    int(owner.get("target_generation")),
+                )
+                observed_at = datetime.fromisoformat(
+                    str(evidence.get("observed_at") or "")
+                )
+            except (TypeError, ValueError) as exc:
+                raise ControlSurfaceRequestError(
+                    "The exact target or observation timestamp is invalid",
+                    status=409,
+                    code="live_evidence_invalid",
+                ) from exc
+
+            operation_id = f"terminal-attestation-{secrets.token_hex(8)}"
+            audit_warning = self._append_audit(
+                "Attesting exact legacy Game Over and unchanged Strategy "
+                f"identity={expected_identity[:16]} strategy={selected_strategy} "
+                f"[OPERATION] id={operation_id}",
+                level="ACTION",
+            )
+            if audit_warning:
+                raise ControlSurfaceRequestError(
+                    "Terminal evidence was not changed because the required "
+                    "audit ACTION could not be written",
+                    status=503,
+                    code="attestation_audit_unavailable",
+                )
+            try:
+                store = self.battle_identity_store
+                stored = store.record_operator_terminal_strategy_attestation(
+                    identity_fingerprint=expected_identity,
+                    strategy=selected_strategy,
+                    strategy_definition_fingerprint=definition_fingerprint,
+                    session_preflight_configuration_fingerprint=(
+                        preflight_fingerprint
+                    ),
+                    run_configuration=run_configuration,
+                    runtime_id=str(owner.get("runtime_id") or ""),
+                    pid=int(owner.get("pid")),
+                    target_binding=target_binding,
+                    observation_id=str(
+                        evidence.get("observation_id") or ""
+                    ),
+                    observed_at=observed_at,
+                    reason=reason,
+                )
+            except (
+                BattleIdentityStoreError,
+                OSError,
+                TypeError,
+                ValueError,
+            ) as exc:
+                stored = False
+                failure_reason = str(exc)
+            else:
+                failure_reason = "exact receipt or legacy state changed"
+            if not stored:
+                self._append_audit(
+                    "Legacy terminal attestation result=failed "
+                    f"identity={expected_identity[:16]} "
+                    f"reason={failure_reason} [OPERATION] id={operation_id}",
+                    level="RESULT",
+                )
+                raise ControlSurfaceRequestError(
+                    "The legacy terminal attestation was not stored because "
+                    "its exact evidence changed",
+                    status=409,
+                    code="attestation_evidence_changed",
+                )
+            try:
+                updated = self.battle_identity_store.active()
+            except (BattleIdentityStoreError, OSError) as exc:
+                updated = None
+                readback_reason = str(exc)
+            else:
+                readback_reason = "stored evidence did not validate"
+            attestation = (
+                updated.operator_terminal_attestation
+                if isinstance(updated, ActiveBattleIdentityRecord)
+                else None
+            )
+            snapshot = (
+                updated.strategy_snapshot
+                if isinstance(updated, ActiveBattleIdentityRecord)
+                else None
+            )
+            if not (
+                isinstance(attestation, Mapping)
+                and isinstance(snapshot, Mapping)
+            ):
+                self._append_audit(
+                    "Legacy terminal attestation result=unconfirmed "
+                    f"identity={expected_identity[:16]} "
+                    f"reason={readback_reason} "
+                    f"[OPERATION] id={operation_id}",
+                    level="RESULT",
+                )
+                raise ControlSurfaceRequestError(
+                    "The stored terminal attestation could not be read back",
+                    status=503,
+                    code="attestation_readback_failed",
+                )
+            self._append_audit(
+                "Legacy terminal attestation result=stored "
+                f"identity={expected_identity[:16]} strategy={selected_strategy} "
+                f"attestation={str(attestation.get('fingerprint') or '')[:16]} "
+                f"[OPERATION] id={operation_id}",
+                level="RESULT",
+            )
+            return {
+                "schema_version": 1,
+                "status": "attested",
+                "operation_id": operation_id,
+                "active_round_identity_fingerprint": expected_identity,
+                "strategy": selected_strategy,
+                "strategy_snapshot_fingerprint": snapshot.get("fingerprint"),
+                "operator_attestation_fingerprint": attestation.get(
+                    "fingerprint"
+                ),
+                "target_binding_fingerprint": target_binding.fingerprint,
+            }
 
     def apply_control(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Apply one allowlisted control-file mutation and return fresh status."""

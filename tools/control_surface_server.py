@@ -89,6 +89,7 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             "/api/v1/save-mapping-integration",
             "/api/v1/strategy-profiles",
             "/api/v1/host-performance",
+            "/api/v1/terminal-evidence-attestation",
             "/api/v1/interactive-development-lease",
             "/api/v1/host-maintenance",
         }:
@@ -143,6 +144,12 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/v1/host-maintenance":
                 response = self.server.service.apply_host_maintenance(payload)
+            elif parsed.path == "/api/v1/terminal-evidence-attestation":
+                response = (
+                    self.server.service.apply_terminal_evidence_attestation(
+                        payload
+                    )
+                )
             else:
                 response = self.server.service.publish_host_performance(payload)
         except UnicodeDecodeError:

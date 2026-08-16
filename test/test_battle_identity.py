@@ -20,6 +20,8 @@ from core.battle_identity import (
     BattleIdentityRelation,
     BattleIdentityStore,
     BattleIdentityStoreError,
+    durable_terminal_report_evidence_from_record,
+    terminal_run_binding_from_operator_attestation,
     terminal_run_binding_from_round_counters,
 )
 from core.battle_lifecycle import HomeBattleControl
@@ -539,6 +541,301 @@ def test_legacy_active_record_without_counter_vector_stays_readable(tmp_path):
     )
     assert binding["status"] == "unbound"
     assert binding["reason"] == "retained_round_counter_vector_unavailable"
+
+
+def test_legacy_preflight_receipt_restores_without_strategy_snapshot(tmp_path):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    record, _relation = store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    assert store.record_session_preflight(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        configuration_fingerprint="e" * 64,
+        evidence={"valid": True, "failed_checks": []},
+    )
+    record = store.active()
+    assert record is not None
+    assert record.strategy_snapshot is None
+
+    restored = durable_terminal_report_evidence_from_record(
+        record,
+        terminal_binding={
+            "schema_version": 1,
+            "status": "bound",
+            "binding_source": "durable_full_round_counter_vector",
+            "active_round_identity_fingerprint": identity.fingerprint,
+        },
+    )
+
+    assert restored["strategy"] == "farm_t19"
+    assert restored["session_preflight_evidence"] == {
+        "valid": True,
+        "failed_checks": [],
+    }
+    assert "run_configuration" not in restored
+    assert restored["durable_terminal_evidence"]["components"] == [
+        "session_preflight_evidence"
+    ]
+
+
+def test_operator_attestation_atomically_restores_legacy_terminal_strategy(
+    tmp_path,
+):
+    path = tmp_path / "battle_identity.json"
+    store = BattleIdentityStore(path)
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.pop("terminal_continuity")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert store.record_session_preflight(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        configuration_fingerprint="e" * 64,
+        evidence={"valid": True, "failed_checks": []},
+    )
+    observed_at = datetime(2026, 8, 16, 19, 0, tzinfo=timezone.utc)
+
+    assert store.record_operator_terminal_strategy_attestation(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        strategy_definition_fingerprint="d" * 64,
+        session_preflight_configuration_fingerprint="e" * 64,
+        run_configuration={"profile": "farm", "tier": 19},
+        runtime_id="runtime-current",
+        pid=1234,
+        target_binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        observation_id="runtime-current:42",
+        observed_at=observed_at,
+        reason="Operator confirmed this retained Game Over is unchanged",
+        attested_at=observed_at,
+    )
+    record = store.active()
+    assert record is not None
+    assert record.terminal_continuity is None
+    assert record.strategy_snapshot is not None
+    assert record.strategy_snapshot["provenance"]["kind"] == (
+        "operator_terminal_attestation"
+    )
+    assert record.operator_terminal_attestation is not None
+
+    binding = terminal_run_binding_from_operator_attestation(
+        record,
+        _terminal_acquisition(identity),
+        expected_identity_fingerprint=identity.fingerprint,
+        activity_scope_run_id="scope-1",
+    )
+    restored = durable_terminal_report_evidence_from_record(
+        record,
+        terminal_binding=binding,
+    )
+
+    assert binding["status"] == "bound"
+    assert binding["binding_source"] == "operator_terminal_attestation"
+    assert restored["strategy"] == "farm_t19"
+    assert restored["run_configuration"] == {
+        "profile": "farm",
+        "tier": 19,
+    }
+    evidence = restored["durable_terminal_evidence"]
+    assert evidence["binding_source"] == "operator_terminal_attestation"
+    assert evidence["operator_attestation"]["statement"] == (
+        "terminal_and_strategy_unchanged_since_battle"
+    )
+    assert evidence["operator_attestation"]["strategy_snapshot_source"] == (
+        "operator_backfill"
+    )
+
+
+def test_operator_attestation_rejects_changed_target_and_tampering(tmp_path):
+    path = tmp_path / "battle_identity.json"
+    store = BattleIdentityStore(path)
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.pop("terminal_continuity")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert store.record_session_preflight(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        configuration_fingerprint="e" * 64,
+        evidence={"valid": True, "failed_checks": []},
+    )
+    observed_at = datetime.now(timezone.utc)
+    assert store.record_operator_terminal_strategy_attestation(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        strategy_definition_fingerprint="d" * 64,
+        session_preflight_configuration_fingerprint="e" * 64,
+        run_configuration={"profile": "farm", "tier": 19},
+        runtime_id="runtime-current",
+        pid=1234,
+        target_binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        observation_id="runtime-current:42",
+        observed_at=observed_at,
+        reason="Operator confirmed this retained Game Over is unchanged",
+    )
+    record = store.active()
+    assert record is not None
+
+    changed_target = terminal_run_binding_from_operator_attestation(
+        record,
+        _terminal_acquisition(identity, target_generation=8),
+        expected_identity_fingerprint=identity.fingerprint,
+        activity_scope_run_id="scope-1",
+    )
+    assert changed_target["status"] == "unbound"
+    assert changed_target["reason"] == (
+        "operator_attested_terminal_target_changed"
+    )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["operator_terminal_attestation"]["runtime"]["pid"] += 1
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    tampered = store.active()
+    assert tampered is not None
+    assert tampered.operator_terminal_attestation is None
+    assert tampered.strategy_snapshot is None
+
+
+def test_operator_attestation_reuses_matching_independent_strategy_snapshot(
+    tmp_path,
+):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    assert store.record_session_preflight(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        configuration_fingerprint="e" * 64,
+        evidence={"valid": True, "failed_checks": []},
+    )
+    assert store.record_strategy_snapshot(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        strategy_definition_fingerprint="d" * 64,
+        session_preflight_configuration_fingerprint="e" * 64,
+        run_configuration={"profile": "farm", "tier": 19},
+    )
+    original = store.active()
+    assert original is not None
+    original_fingerprint = original.strategy_snapshot["fingerprint"]
+
+    assert store.record_operator_terminal_strategy_attestation(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        strategy_definition_fingerprint="d" * 64,
+        session_preflight_configuration_fingerprint="e" * 64,
+        run_configuration={"profile": "farm", "tier": 19},
+        runtime_id="runtime-current",
+        pid=1234,
+        target_binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        observation_id="runtime-current:42",
+        observed_at=datetime.now(timezone.utc),
+        reason="Operator confirmed this retained Game Over is unchanged",
+    )
+    retained = store.active()
+    assert retained is not None
+    assert retained.strategy_snapshot["fingerprint"] == original_fingerprint
+    assert retained.operator_terminal_attestation[
+        "strategy_snapshot_source"
+    ] == "independently_durable"
+
+
+def test_app_accepts_fresh_operator_attestation_without_restart_vector(
+    tmp_path,
+):
+    path = tmp_path / "battle_identity.json"
+    store = BattleIdentityStore(path)
+    identity = _identity()
+    initial, _relation = store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.pop("terminal_continuity")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert store.record_session_preflight(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        configuration_fingerprint="e" * 64,
+        evidence={"valid": True, "failed_checks": []},
+    )
+    assert store.record_operator_terminal_strategy_attestation(
+        identity_fingerprint=identity.fingerprint,
+        strategy="farm_t19",
+        strategy_definition_fingerprint="d" * 64,
+        session_preflight_configuration_fingerprint="e" * 64,
+        run_configuration={"profile": "farm", "tier": 19},
+        runtime_id="runtime-current",
+        pid=1234,
+        target_binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        observation_id="runtime-current:42",
+        observed_at=datetime.now(timezone.utc),
+        reason="Operator confirmed this retained Game Over is unchanged",
+    )
+    app = App.__new__(App)
+    app._battle_identity_store = store
+    app._retained_battle_identity_record = initial
+    app._process_restart_reattachment_enabled = False
+    app._mission_mgr = SimpleNamespace(
+        awaiting_initial_battle_intent=lambda: True,
+    )
+    app._supervisor = SimpleNamespace(
+        process_restart_handoff={
+            "status": "failed",
+            "expected_active_round_identity_fingerprint": (
+                identity.fingerprint
+            ),
+            "source_evidence": {
+                "game_state": "active_battle",
+                "active_round_identity_fingerprint": identity.fingerprint,
+                "adb_target": "localhost:5555",
+                "target_generation": 3,
+            },
+        }
+    )
+    app._current_control_workflow_evidence = Mock(
+        return_value={
+            "runtime_id": "runtime-current",
+            "pid": 1234,
+            "adb_target": "localhost:5555",
+            "target_generation": 7,
+            "game_state": "game_over",
+        }
+    )
+
+    candidate = app._retained_game_over_binding_candidate(
+        "GAME_OVER",
+        {"status": "unbound"},
+    )
+
+    assert candidate is not None
+    assert candidate.fingerprint == identity.fingerprint
+    assert candidate.terminal_continuity is None
+    assert candidate.operator_terminal_attestation is not None
 
 
 def test_forced_inactive_save_closes_retained_active_identity(tmp_path):

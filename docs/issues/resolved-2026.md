@@ -61,8 +61,14 @@ and actionable work lives in
   or mismatched components fail closed locally, and activation evidence is
   explicitly partial through its checkpoint. Perk timelines, active-run
   metrics, wave/coin samples, speed state, and other process-local evidence
-  remain excluded. Legacy records—including the Game Over that exposed this
-  issue—cannot be enriched retroactively. Agent policy now makes
+  remain excluded. Legacy records cannot be enriched automatically. A later
+  narrow follow-up permits an explicit trusted-operator terminal attestation
+  while exact Pause, fresh Game Over, retained identity/handoff, live runtime,
+  target generation, activity scope, selected Strategy, and its completed
+  preflight fingerprint all agree. That audited report-only receipt reuses an
+  independently durable Strategy snapshot or labels a one-time operator
+  backfill; it cannot restore absent tracker state or grant input/adoption
+  authority. Agent policy now makes
   restoration of a previously Running runtime part of completing agent-owned
   Pause/Stop work, after fresh owner, control, target, and screen checks; pre-
   existing, superseded, manual, and safety pauses are never restored

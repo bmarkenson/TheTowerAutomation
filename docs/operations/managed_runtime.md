@@ -64,14 +64,30 @@ retained immutable Strategy/run-configuration snapshot, a matching completed
 session-preflight receipt, and the versioned survival-activation checkpoint
 eligible for report-only restoration because each is separately durable and
 bound to the exact battle and its own configuration fingerprint; activation
-evidence does not require a Strategy. Perk timelines, active-run
+evidence does not require a Strategy. A valid exact-battle preflight receipt is
+restored independently even for a legacy record without a Strategy snapshot;
+it restores Strategy/preflight evidence but not an invented run configuration.
+For a legacy record that also lacks the counter vector, the trusted operator
+may use `POST /api/v1/terminal-evidence-attestation` with the exact retained
+identity, the literal confirmation
+`terminal_and_strategy_unchanged_since_battle`, and a reason. The service
+accepts it only under acknowledged indefinite Pause, acknowledged
+`NEXT_BATTLE`, fresh Game Over, one exact runtime/PID/service/ADB owner, the
+matching active-battle Stop handoff and activity scope, and a currently loaded
+Strategy whose Tier and preflight fingerprint match the retained receipt. It
+atomically records an audited report-only receipt plus either the matching
+independently durable Strategy snapshot or an explicitly operator-backed
+snapshot. A runtime, PID, target-generation, screen, identity, Strategy, or
+receipt change rejects it; the receipt never grants input or active-battle
+adoption authority. Perk timelines, active-run
 metrics, wave and coin samples, game-speed state, and every other process-local
 tracker remain excluded. A restored activation section contains observed
 events only through its named durable checkpoint; absent entries do not claim
 that no later activation occurred. A malformed or mismatched optional
-component is omitted locally. Missing legacy vector evidence or any changed
-counter leaves the report unbound without blocking the screen-policy fallback. Without a
-handoff, Start retains its normal Paused, explicit-
+component is omitted locally. Missing generic vector evidence without an
+accepted explicit legacy receipt, or any changed counter, leaves the report
+unbound without blocking the screen-policy fallback. Without a handoff, Start
+retains its normal Paused, explicit-
 intent behavior. Repeating an already satisfied Start or Stop is reported as a
 no-op; the old one-step attached reload remains retired.
 

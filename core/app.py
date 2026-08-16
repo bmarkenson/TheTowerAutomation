@@ -104,6 +104,7 @@ from core.battle_identity import (
     BattleIdentityStore,
     BattleIdentityStoreError,
     durable_terminal_report_evidence_from_record,
+    terminal_run_binding_from_operator_attestation,
     terminal_run_binding_from_round_counters,
 )
 from core.player_save import (
@@ -2109,24 +2110,20 @@ class App:
         terminal_state: str,
         run_binding: Mapping[str, Any],
     ) -> Optional[ActiveBattleIdentityRecord]:
-        """Return the restart-retained battle eligible for save-only proof."""
+        """Return a retained battle eligible for terminal save proof."""
 
         if not (
             str(terminal_state or "").upper() == "GAME_OVER"
             and run_binding.get("status") == "unbound"
-            and getattr(
-                self,
-                "_process_restart_reattachment_enabled",
-                False,
-            )
             and self._awaiting_initial_battle_intent()
         ):
             return None
+        # The control surface may add a narrowly scoped operator attestation
+        # while this runtime remains Paused. Refresh only this advisory record;
+        # validation below still binds it to the exact live runtime and screen.
+        self._refresh_retained_battle_record()
         record = getattr(self, "_retained_battle_identity_record", None)
-        if not (
-            isinstance(record, ActiveBattleIdentityRecord)
-            and record.terminal_continuity is not None
-        ):
+        if not isinstance(record, ActiveBattleIdentityRecord):
             return None
         supervisor = getattr(self, "_supervisor", None)
         handoff = getattr(supervisor, "process_restart_handoff", None)
@@ -2149,6 +2146,35 @@ class App:
             == record.fingerprint
             and current.get("game_state") == "game_over"
             and source.get("adb_target") == current.get("adb_target")
+        ):
+            return None
+
+        attestation = record.operator_terminal_attestation
+        attested_runtime = (
+            attestation.get("runtime")
+            if isinstance(attestation, Mapping)
+            else None
+        )
+        if isinstance(attested_runtime, Mapping):
+            if (
+                str(attested_runtime.get("runtime_id") or "")
+                == str(current.get("runtime_id") or "")
+                and attested_runtime.get("pid") == current.get("pid")
+                and str(attested_runtime.get("adb_target") or "")
+                == str(current.get("adb_target") or "")
+                and attested_runtime.get("target_generation")
+                == current.get("target_generation")
+            ):
+                return record
+            return None
+
+        if not (
+            getattr(
+                self,
+                "_process_restart_reattachment_enabled",
+                False,
+            )
+            and record.terminal_continuity is not None
             and type(source.get("target_generation")) is int
             and source.get("target_generation") > 0
             and source.get("target_generation")
@@ -2476,18 +2502,36 @@ class App:
         report_binding = dict(run_binding)
         durable_terminal_evidence_context: dict[str, Any] = {}
         if recovery_candidate is not None:
-            recovered_binding = terminal_run_binding_from_round_counters(
-                recovery_candidate,
-                acquisition,
-                expected_identity_fingerprint=(
+            binding_arguments = {
+                "expected_identity_fingerprint": (
                     recovery_candidate.fingerprint
                 ),
-                activity_scope_run_id=(
+                "activity_scope_run_id": (
                     str(scope.get("run_id") or "")
                     if isinstance(scope, Mapping)
                     else None
                 ),
-            )
+            }
+            if recovery_candidate.terminal_continuity is not None:
+                recovered_binding = terminal_run_binding_from_round_counters(
+                    recovery_candidate,
+                    acquisition,
+                    **binding_arguments,
+                )
+            else:
+                recovered_binding = {}
+            if (
+                recovered_binding.get("status") != "bound"
+                and recovery_candidate.operator_terminal_attestation
+                is not None
+            ):
+                recovered_binding = (
+                    terminal_run_binding_from_operator_attestation(
+                        recovery_candidate,
+                        acquisition,
+                        **binding_arguments,
+                    )
+                )
             if recovered_binding.get("status") == "bound":
                 report_binding = recovered_binding
                 durable_terminal_evidence_context = (
@@ -2502,10 +2546,16 @@ class App:
                         {},
                     ).get("components", ())
                 )
+                source_description = (
+                    "Exact full-tier battle-start counter equality"
+                    if recovered_binding.get("binding_source")
+                    == "durable_full_round_counter_vector"
+                    else "The exact-battle trusted operator attestation"
+                )
                 log(
-                    "[RUN_BINDING] Exact full-tier battle-start counter "
-                    "equality bound the retained battle to this Game Over "
-                    "save; current-process-only evidence remains omitted"
+                    f"[RUN_BINDING] {source_description} bound the retained "
+                    "battle to this Game Over save; only independently "
+                    "durable or explicitly attested evidence was restored"
                     + (
                         "; restored independently durable components="
                         + ",".join(str(item) for item in restored_components)

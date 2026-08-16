@@ -384,6 +384,91 @@ def test_restarted_game_over_uses_retained_counter_proof_for_save_report():
     app._active_run_metric_monitor.observe_bundle.assert_not_called()
 
 
+def test_restarted_legacy_game_over_uses_operator_attestation_binding():
+    target = AdbTargetSnapshot("localhost:5555", 4, True)
+    identity = ActiveRoundIdentity(
+        game_version=1102,
+        current_tier=19,
+        rounds_started_this_tier=319,
+        round_seed=1721080409,
+        fingerprint="a" * 64,
+    )
+    retained = ActiveBattleIdentityRecord(
+        identity=identity,
+        bound_at="2026-08-16T06:33:00+00:00",
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition={},
+        operator_terminal_attestation={"runtime": {"runtime_id": "runtime-2"}},
+    )
+    app = App.__new__(App)
+    app._adb_target_session = _StableSession(target, target)
+    app._player_save_runtime_session_id = "runtime-2"
+    app._perk_save_monitor = Mock()
+    app._active_run_metric_monitor = Mock()
+    app._player_save_audit_collector = Mock()
+    app._retained_game_over_binding_candidate = Mock(return_value=retained)
+    decoded = SimpleNamespace(
+        profile_progression=_normalized_progression(),
+        mapping_id="data-9-game-1073",
+        save_revision=50677,
+        checks={},
+    )
+    _install_shared_acquirer(app, decoded)
+    process_binding = {
+        "schema_version": 1,
+        "status": "unbound",
+        "reason": "terminal_without_forced_active_battle",
+    }
+    recovered_binding = {
+        "schema_version": 1,
+        "status": "bound",
+        "binding_source": "operator_terminal_attestation",
+        "active_round_identity_fingerprint": identity.fingerprint,
+    }
+    durable = {
+        "strategy": "farm_t19",
+        "run_configuration": {"profile": "farm", "tier": 19},
+    }
+    scope = {"schema_version": 1, "run_id": "scope-1"}
+
+    with (
+        patch("core.app.get_activity_scope", return_value=scope),
+        patch(
+            "core.app.terminal_run_binding_from_operator_attestation",
+            return_value=recovered_binding,
+        ) as operator_binding,
+        patch(
+            "core.app.terminal_run_binding_from_round_counters"
+        ) as counter_binding,
+        patch(
+            "core.app.durable_terminal_report_evidence_from_record",
+            return_value=durable,
+        ),
+        patch(
+            "core.app.terminal_history_transition_from_acquisition",
+            return_value={"status": "complete", "complete": True},
+        ) as history,
+        patch(
+            "core.app.terminal_save_report_from_acquisition",
+            return_value={"status": "complete", "complete": True},
+        ) as report,
+    ):
+        result = app._capture_terminal_player_save(
+            "GAME_OVER",
+            run_binding=process_binding,
+        )
+
+    acquisition = operator_binding.call_args.args[1]
+    assert acquisition.boundary.active_round_identity_fingerprint == (
+        identity.fingerprint
+    )
+    counter_binding.assert_not_called()
+    assert history.call_args.kwargs["run_binding"] == recovered_binding
+    assert report.call_args.kwargs["run_binding"] == recovered_binding
+    assert result["_durable_terminal_evidence_context"] == durable
+
+
 def test_durable_terminal_components_fail_closed_independently():
     identity = ActiveRoundIdentity(
         game_version=1102,
