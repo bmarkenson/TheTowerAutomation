@@ -165,9 +165,11 @@ battle started; one changed element rejects the attachment. Missing legacy
 evidence, shape drift, target change, revision regression, or any mismatch keeps
 the report on the existing UI fallback.
 
-This save-only continuity never attaches process-local Strategy,
-configuration, timeline, or sampling evidence from the stopped process. The
-fresh Wait/Home/Continue screen route remains available as an explicitly
-unbound lifecycle fallback even when the vector proof is unavailable. Do not
-leave the terminal manually, run another battle, and enable an older waiting
-handler.
+This save-only continuity does not infer process-local Strategy,
+configuration, timeline, or sampling evidence from whatever state the
+replacement process happens to load. Such evidence remains excluded unless a
+separate restoration contract durably binds that exact snapshot to the battle
+and validates its completeness. The fresh Wait/Home/Continue screen route
+remains available as an explicitly unbound lifecycle fallback even when the
+vector proof is unavailable. Do not leave the terminal manually, run another
+battle, and enable an older waiting handler.

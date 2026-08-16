@@ -45,15 +45,16 @@ resolved dossier instead of copying its detail.
   lets a replacement runtime obey Wait, Home, or Continue on a fresh exact-
   target Game Over. A new exact full-tier battle-start-counter proof may bind
   only the terminal save report to the retained battle; missing legacy
-  evidence or any changed counter keeps the report on UI fallback. Strategy
-  and process-local telemetry remain unbound; Continue arms Retry as a new
-  battle.
+  evidence or any changed counter keeps the report on UI fallback. The
+  replacement does not infer Strategy or process-local telemetry without a
+  separate durable exact-battle completeness contract; Continue arms Retry as
+  a new battle.
 - The live-work policy now treats restoration of a previously Running runtime
   as part of completing an agent-owned Pause or Stop, subject to fresh owner,
   control, target, screen, manual-control, and safety checks.
-- Exact runtime candidate `373f8c5` passed the complete repository checkpoint:
+- Exact runtime candidate `8270e1d` passed the complete repository checkpoint:
   compilation, state definitions, clickmap integrity with zero errors and the
-  established 44 orphan notices, and all 2,976 tests in 439.67 seconds using
+  established 44 orphan notices, and all 2,985 tests in 436.20 seconds using
   development-environment fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 

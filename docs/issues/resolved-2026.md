@@ -34,10 +34,11 @@ and actionable work lives in
 - **Safety response:** Diagnosis sent no device input and did not bind the
   terminal to the retained battle without complete prior vector evidence.
   Strategy, configuration, Perk and survival timelines, active-run metrics,
-  and other process-local evidence remained excluded. Canonical active-round
-  identity remains the active adoption key; a complete battle-start counter
-  epoch may establish only the narrower terminal-save continuity described
-  below.
+  and other process-local evidence remained excluded because the replacement
+  had no independently durable, complete snapshots for them. Canonical active-
+  round identity remains the active adoption key; a complete battle-start
+  counter epoch may establish only the narrower terminal-save continuity
+  described below.
 - **Cause:** Preserved-terminal recovery under the initial-intent hold was
   limited to `WAIT`. `HOME` and `NEXT_BATTLE` therefore had no lifecycle route
   once the active battle ended before reattachment, even though handling the
@@ -52,21 +53,26 @@ and actionable work lives in
   inactive terminal save report when that entire vector is exactly equal, the
   revision does not regress, and handoff identity and target still match. One
   changed counter—or missing legacy evidence—keeps the report unbound and on
-  UI fallback. Stopped-process Strategy and process-local telemetry are never
-  recovered by this proof. Agent policy now makes restoration of a previously
-  Running runtime part of completing agent-owned Pause/Stop work, after fresh
-  owner, control, target, and screen checks; pre-existing, superseded, manual,
-  and safety pauses are never restored automatically.
+  UI fallback. This proof does not infer stopped-process Strategy or process-
+  local telemetry from replacement state; any later reuse needs its own
+  durable exact-battle completeness contract. Agent policy now makes
+  restoration of a previously Running runtime part of completing agent-owned
+  Pause/Stop work, after fresh owner, control, target, and screen checks; pre-
+  existing, superseded, manual, and safety pauses are never restored
+  automatically.
 - **Regression and validation:** Preserved-terminal tests cover all three
   policies, reject stale or nonterminal authority, arm a real successor after
-  Retry, and Pause if that arming cannot be persisted. The Better Control,
-  initialization, and action-authority suites passed 379 tests, and all four
-  documentation-lifecycle tests passed. Exact runtime candidate `373f8c5`
-  passed compilation, state definitions, clickmap integrity with zero errors
-  and the established 44 orphan notices, and all 2,976 repository tests in
-  439.67 seconds using development-environment fingerprint
+  Retry, and Pause if that arming cannot be persisted. Counter-continuity tests
+  cover active-to-inactive equality, increments at the first, active, and last
+  declared tiers, shape/type drift, target change, revision regression, legacy
+  records, candidate handoff binding, and exclusion of replacement-process
+  trackers. Focused save/identity/terminal/documentation coverage passed 264
+  tests and the broader control/report coverage passed 552 tests. Exact runtime
+  candidate `8270e1d` passed compilation, state definitions, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 2,985
+  repository tests in 436.20 seconds using development-environment fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
-- **Fixed by:** `373f8c5`.
+- **Fixed by:** `373f8c5`, `8270e1d`.
 
 ### Orb Distance treated selected Range lab level as live Attack Range
 

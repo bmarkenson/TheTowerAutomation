@@ -60,11 +60,13 @@ terminal save report to the retained battle when the durable active snapshot
 and fresh inactive save have exact full-tier battle-start-counter equality,
 non-regressing save revision, and the same handoff identity and target. That
 proof does not restore the stopped process's Strategy or other process-local
-telemetry. Missing legacy vector evidence or any changed counter leaves the
-report unbound without blocking the screen-policy fallback. Without a handoff,
-Start retains its normal Paused, explicit-intent behavior. Repeating an already
-satisfied Start or Stop is reported as a no-op; the old one-step attached
-reload remains retired.
+telemetry merely from replacement-process state. A future evidence-specific
+restoration path must separately prove that a durable, complete snapshot is
+bound to this exact battle before using it. Missing legacy vector evidence or
+any changed counter leaves the report unbound without blocking the screen-
+policy fallback. Without a handoff, Start retains its normal Paused, explicit-
+intent behavior. Repeating an already satisfied Start or Stop is reported as a
+no-op; the old one-step attached reload remains retired.
 
 ## Set what happens when a battle ends
 
