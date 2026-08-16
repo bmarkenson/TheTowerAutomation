@@ -8,6 +8,55 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Process replacement stranded a fresh Game Over behind initial intent
+
+**Stable ID:** `ISSUE-2026-053` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-16 an agent-owned deployment Stop retained the exact
+  Tier 19 active-round identity, but the battle reached Game Over before the
+  replacement runtime could perform its forced-save Attach. The operator later
+  restored Enable with the selected Continue policy.
+- **Symptom:** The replacement correctly failed same-battle reattachment and
+  remained terminal-only, but its initial-intent `OPERATOR_WORKFLOW` hold also
+  denied the ordinary Game Over handler. Restoring Enable therefore left the
+  fresh Game Over screen untouched. Separately, the operating policy required
+  an agent to reconcile a Pause but did not make restoration of a Running
+  runtime an explicit completion condition after agent-owned Pause or Stop.
+- **Evidence:** The durable Stop handoff named one active identity and target;
+  the replacement observed fresh Game Over on that target after the save had
+  cleared its active round seed. The terminal History tail had advanced, but
+  neither History chronology nor elapsed time is canonical battle identity.
+  The clipboard More Stats report contains `Real Time` but no absolute
+  timestamp, so a third-party tracker's displayed run date/time cannot be
+  derived from that paste as battle-start proof.
+- **Safety response:** Diagnosis sent no device input and did not bind the
+  terminal to the retained battle. Strategy, configuration, Perk and survival
+  timelines, active-run metrics, and other process-local evidence remained
+  excluded. The existing full active-round identity remains the only durable
+  same-battle key.
+- **Cause:** Preserved-terminal recovery under the initial-intent hold was
+  limited to `WAIT`. `HOME` and `NEXT_BATTLE` therefore had no lifecycle route
+  once the active battle ended before reattachment, even though handling the
+  fresh screen did not require attributing it to the stopped process.
+- **Resolution:** A fresh exact-target Game Over under the replacement's
+  initial-intent workflow may now follow the selected Wait, Home, or Continue
+  policy while remaining explicitly unbound. Continue releases the initial-
+  intent hold only after Retry dispatch and treats the successor as a new
+  battle. Agent policy now makes restoration of a previously Running runtime
+  part of completing agent-owned Pause/Stop work, after fresh owner, control,
+  target, and screen checks; pre-existing, superseded, manual, and safety
+  pauses are never restored automatically.
+- **Regression and validation:** Preserved-terminal tests cover all three
+  policies, reject stale or nonterminal authority, arm a real successor after
+  Retry, and Pause if that arming cannot be persisted. The Better Control,
+  initialization, and action-authority suites passed 379 tests, and all four
+  documentation-lifecycle tests passed. Exact runtime candidate `373f8c5`
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 2,976 repository tests in
+  439.67 seconds using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Fixed by:** `373f8c5`.
+
 ### Orb Distance treated selected Range lab level as live Attack Range
 
 **Stable ID:** `ISSUE-2026-052` · **Lifecycle:** `resolved`

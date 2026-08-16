@@ -39,6 +39,22 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-16 Preserved Game Over lifecycle recovery
+
+- [`ISSUE-2026-053`](../issues/resolved-2026.md#process-replacement-stranded-a-fresh-game-over-behind-initial-intent)
+  lets a replacement runtime obey Wait, Home, or Continue on a fresh exact-
+  target Game Over without claiming that the stopped process owned the
+  completed battle. Strategy and process-local telemetry remain unbound;
+  Continue arms Retry as a new battle.
+- The live-work policy now treats restoration of a previously Running runtime
+  as part of completing an agent-owned Pause or Stop, subject to fresh owner,
+  control, target, screen, manual-control, and safety checks.
+- Exact runtime candidate `373f8c5` passed the complete repository checkpoint:
+  compilation, state definitions, clickmap integrity with zero errors and the
+  established 44 orphan notices, and all 2,976 tests in 439.67 seconds using
+  development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-16 Save-derived survival-ability activation waves
 
 - Exact implementation candidate `bebd076` consumes the version-1101 active
