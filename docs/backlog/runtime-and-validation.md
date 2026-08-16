@@ -199,6 +199,22 @@ as checked checkpoint narrative here.
   evidence in
   [`ISSUE-2026-007`](../issues/open-2026.md#game-stats-ocr-dropped-a-coin-value-decimal).
 
+## Operator-facing logging refinements
+
+- [ ] Refine the remaining ambiguous configuration and gem `RESULT` messages
+  without changing the underlying `ACTION`/`RESULT` history contract.
+  - For read-only Target Priority verification, report the first detected
+    mismatch and state explicitly that the check was observation-only and made
+    no changes.
+  - For Home ad-gem checks, distinguish a stale or vanished control and a
+    normally unavailable reward from an attempted tap or collection failure;
+    keep expected no-op outcomes out of failure wording.
+  - For Daily Gem checks, include the remaining cooldown when OCR produces a
+    confident duration, while retaining a safe generic not-ready result when
+    the duration is absent or uncertain.
+  - Cover each distinct outcome in the underlying log and Operational-view
+    rendering tests.
+
 ## Tournament Battle Condition evidence
 
 - [ ] Capture each Tournament's Battle Conditions into its structured run
