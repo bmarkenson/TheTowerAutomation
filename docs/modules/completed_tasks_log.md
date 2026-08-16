@@ -43,9 +43,11 @@ resolved dossier instead of copying its detail.
 
 - [`ISSUE-2026-053`](../issues/resolved-2026.md#process-replacement-stranded-a-fresh-game-over-behind-initial-intent)
   lets a replacement runtime obey Wait, Home, or Continue on a fresh exact-
-  target Game Over without claiming that the stopped process owned the
-  completed battle. Strategy and process-local telemetry remain unbound;
-  Continue arms Retry as a new battle.
+  target Game Over. A new exact full-tier battle-start-counter proof may bind
+  only the terminal save report to the retained battle; missing legacy
+  evidence or any changed counter keeps the report on UI fallback. Strategy
+  and process-local telemetry remain unbound; Continue arms Retry as a new
+  battle.
 - The live-work policy now treats restoration of a previously Running runtime
   as part of completing an agent-owned Pause or Stop, subject to fresh owner,
   control, target, screen, manual-control, and safety checks.

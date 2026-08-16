@@ -155,9 +155,19 @@ To recover a preserved terminal after uncertain process ownership:
    Continue arms the Retry as a new battle. Tournament Results retains its
    separately documented terminal route.
 
-A terminal-only replacement may preserve Game Stats, Perks, and More Stats,
-but it cannot attach process-local Strategy, configuration, timeline, or
-sampling evidence without a matching canonical active-round binding. Its fresh
-screen route is an explicitly unbound fallback, not proof that the completed
-battle was the retained pre-restart battle. Do not leave the terminal manually,
-run another battle, and enable an older waiting handler.
+A terminal-only replacement may bind the natural save report to the retained
+battle only when the Stop handoff and durable active record name the same
+canonical identity and target, the active record retained the complete declared
+per-tier battle-start counter vector, and the fresh inactive Game Over save has
+the exact same complete vector with a non-regressing save revision. These
+counters advance when a battle starts, so equality proves that no successor
+battle started; one changed element rejects the attachment. Missing legacy
+evidence, shape drift, target change, revision regression, or any mismatch keeps
+the report on the existing UI fallback.
+
+This save-only continuity never attaches process-local Strategy,
+configuration, timeline, or sampling evidence from the stopped process. The
+fresh Wait/Home/Continue screen route remains available as an explicitly
+unbound lifecycle fallback even when the vector proof is unavailable. Do not
+leave the terminal manually, run another battle, and enable an older waiting
+handler.

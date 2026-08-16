@@ -19,6 +19,7 @@ from core.battle_identity import (
     BattleIdentityRelation,
     BattleIdentityStore,
     BattleIdentityStoreError,
+    terminal_run_binding_from_round_counters,
 )
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HomeBattleEvidence
@@ -27,6 +28,8 @@ from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
+    PlayerSaveBoundaryKind,
+    PlayerSaveNaturalBoundary,
     PlayerSaveTargetBinding,
     StablePlayerSaveAcquirer,
 )
@@ -39,7 +42,10 @@ from core.player_save_preflight import (
     PlayerSavePreflightStatus,
 )
 from core.run_state import AUTOMATION, RunState
-from core.runtime_save import ActiveRoundIdentity
+from core.runtime_save import (
+    ActiveRoundIdentity,
+    RoundCounterVectorEvidence,
+)
 
 
 def _identity(*, seed: int = 12345, counter: int = 9) -> ActiveRoundIdentity:
@@ -66,10 +72,22 @@ def _acquisition(
     identity: ActiveRoundIdentity | None,
 ) -> PlayerSaveAcquisitionBundle:
     now = datetime.now(timezone.utc)
+    vector = _round_counter_vector(identity) if identity is not None else None
     snapshot = SimpleNamespace(
+        save_revision=100,
         runtime_save=SimpleNamespace(
             round_active=identity is not None,
             active_round_identity=identity,
+            save_revision=100,
+            save_revision_status="observed",
+            save_revision_reason="",
+            round_counter_vector=vector,
+            round_counter_vector_status=(
+                "observed" if vector is not None else "unavailable"
+            ),
+            round_counter_vector_reason=(
+                "" if vector is not None else "round_inactive_fixture"
+            ),
         )
     )
     return PlayerSaveAcquisitionBundle(
@@ -82,6 +100,81 @@ def _acquisition(
         acquisition_completed_at=now,
         transport_stable=True,
         snapshot=snapshot,
+    )
+
+
+def _round_counter_vector(
+    identity: ActiveRoundIdentity,
+    *,
+    incremented_tier: int | None = None,
+) -> RoundCounterVectorEvidence:
+    counters = [0] * 40
+    counters[identity.current_tier] = identity.rounds_started_this_tier
+    if incremented_tier is not None:
+        counters[incremented_tier] += 1
+    rendered = json.dumps(
+        {
+            "schema_version": 1,
+            "game_version": identity.game_version,
+            "rounds_started_this_tier": counters,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return RoundCounterVectorEvidence(
+        tier_count=len(counters),
+        fingerprint=hashlib.sha256(rendered).hexdigest(),
+    )
+
+
+def _terminal_acquisition(
+    identity: ActiveRoundIdentity,
+    *,
+    incremented_tier: int | None = None,
+    save_revision: int = 101,
+    target_generation: int = 7,
+) -> PlayerSaveAcquisitionBundle:
+    now = datetime.now(timezone.utc)
+    vector = _round_counter_vector(
+        identity,
+        incremented_tier=incremented_tier,
+    )
+    snapshot = SimpleNamespace(
+        save_revision=save_revision,
+        runtime_save=SimpleNamespace(
+            round_active=False,
+            active_round_identity=None,
+            save_revision=save_revision,
+            save_revision_status="observed",
+            save_revision_reason="",
+            round_counter_vector=vector,
+            round_counter_vector_status="observed",
+            round_counter_vector_reason="",
+        ),
+    )
+    boundary = PlayerSaveNaturalBoundary(
+        kind=PlayerSaveBoundaryKind.GAME_OVER,
+        observed_at=now,
+        runtime_session_id="runtime-2",
+        activity_scope_id="scope-1",
+        active_round_identity_fingerprint=identity.fingerprint,
+    )
+    return PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.NATURAL_BOUNDARY,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="stable_player_save_decoded",
+        binding=PlayerSaveTargetBinding(
+            "localhost:5555",
+            target_generation,
+        ),
+        acquisition_started_at=now,
+        captured_at=now,
+        acquisition_completed_at=now,
+        transport_stable=True,
+        snapshot=snapshot,
+        boundary=boundary,
     )
 
 
@@ -116,6 +209,9 @@ def test_store_uses_active_round_identity_for_same_and_later_battles(tmp_path):
 
     assert relation is BattleIdentityRelation.FIRST_OBSERVATION
     assert record.fingerprint == first.fingerprint
+    assert record.terminal_continuity is not None
+    assert record.terminal_continuity.round_counter_tier_count == 40
+    assert record.terminal_continuity.save_revision == 100
     assert store.record_session_preflight(
         identity_fingerprint=first.fingerprint,
         strategy="farm_t19",
@@ -142,6 +238,124 @@ def test_store_uses_active_round_identity_for_same_and_later_battles(tmp_path):
     assert relation is BattleIdentityRelation.LATER_BATTLE
     assert later.fingerprint == later_identity.fingerprint
     assert later.session_preflight is None
+
+
+def test_terminal_full_counter_vector_recovers_the_retained_battle(tmp_path):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    record, _relation = store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+
+    binding = terminal_run_binding_from_round_counters(
+        record,
+        _terminal_acquisition(identity),
+        expected_identity_fingerprint=identity.fingerprint,
+        activity_scope_run_id="scope-1",
+    )
+
+    assert binding["status"] == "bound"
+    assert binding["active_round_identity_fingerprint"] == identity.fingerprint
+    assert binding["binding_source"] == "durable_full_round_counter_vector"
+    assert record.terminal_continuity is not None
+    assert binding["terminal_continuity"] == {
+        "schema_version": 1,
+        "comparison": "exact_full_vector_match",
+        "round_counter_tier_count": 40,
+        "active_save_revision": 100,
+        "terminal_save_revision": 101,
+        "target_binding_fingerprint": (
+            record.terminal_continuity.target_binding_fingerprint
+        ),
+    }
+
+
+@pytest.mark.parametrize("incremented_tier", (0, 19, 39))
+def test_terminal_counter_increment_rejects_retained_battle(
+    tmp_path,
+    incremented_tier,
+):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    record, _relation = store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+
+    binding = terminal_run_binding_from_round_counters(
+        record,
+        _terminal_acquisition(
+            identity,
+            incremented_tier=incremented_tier,
+        ),
+        expected_identity_fingerprint=identity.fingerprint,
+        activity_scope_run_id="scope-1",
+    )
+
+    assert binding["status"] == "unbound"
+    assert binding["reason"] == "terminal_round_counter_vector_changed"
+
+
+def test_terminal_counter_proof_rejects_revision_or_target_regression(tmp_path):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    record, _relation = store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+
+    old_revision = terminal_run_binding_from_round_counters(
+        record,
+        _terminal_acquisition(identity, save_revision=99),
+        expected_identity_fingerprint=identity.fingerprint,
+        activity_scope_run_id="scope-1",
+    )
+    changed_target = terminal_run_binding_from_round_counters(
+        record,
+        _terminal_acquisition(identity, target_generation=8),
+        expected_identity_fingerprint=identity.fingerprint,
+        activity_scope_run_id="scope-1",
+    )
+
+    assert old_revision["reason"] == (
+        "terminal_save_revision_regressed_or_unavailable"
+    )
+    assert changed_target["reason"] == "terminal_save_target_changed"
+
+
+def test_legacy_active_record_without_counter_vector_stays_readable(tmp_path):
+    path = tmp_path / "battle_identity.json"
+    store = BattleIdentityStore(path)
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.pop("terminal_continuity")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    record = store.active()
+
+    assert record is not None
+    assert record.terminal_continuity is None
+    binding = terminal_run_binding_from_round_counters(
+        record,
+        _terminal_acquisition(identity),
+        expected_identity_fingerprint=identity.fingerprint,
+        activity_scope_run_id="scope-1",
+    )
+    assert binding["status"] == "unbound"
+    assert binding["reason"] == "retained_round_counter_vector_unavailable"
 
 
 def test_forced_inactive_save_closes_retained_active_identity(tmp_path):

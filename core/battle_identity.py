@@ -27,6 +27,7 @@ from typing import Any, Callable, Mapping, Optional
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionType,
+    PlayerSaveBoundaryKind,
     PlayerSaveTargetBinding,
     StablePlayerSaveAcquirer,
 )
@@ -34,7 +35,10 @@ from core.player_save_serialization import (
     GuardedPlayerSaveSerializer,
     GuardedSerializationStatus,
 )
-from core.runtime_save import ActiveRoundIdentity
+from core.runtime_save import (
+    ActiveRoundIdentity,
+    RoundCounterVectorEvidence,
+)
 
 
 BATTLE_IDENTITY_SCHEMA_VERSION = 1
@@ -89,6 +93,38 @@ class BattleIdentityCheckContext:
 
 
 @dataclass(frozen=True)
+class ActiveBattleTerminalContinuity:
+    """Save facts retained to recognize this battle after it becomes inactive."""
+
+    round_counter_vector_fingerprint: str
+    round_counter_tier_count: int
+    save_revision: int
+    target_binding_fingerprint: str
+
+    def __post_init__(self) -> None:
+        if (
+            _SHA256_RE.fullmatch(self.round_counter_vector_fingerprint) is None
+            or _SHA256_RE.fullmatch(self.target_binding_fingerprint) is None
+            or type(self.round_counter_tier_count) is not int
+            or self.round_counter_tier_count <= 0
+            or type(self.save_revision) is not int
+            or self.save_revision < 0
+        ):
+            raise ValueError("battle terminal continuity is invalid")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "round_counter_vector_fingerprint": (
+                self.round_counter_vector_fingerprint
+            ),
+            "round_counter_tier_count": self.round_counter_tier_count,
+            "save_revision": self.save_revision,
+            "target_binding_fingerprint": self.target_binding_fingerprint,
+        }
+
+
+@dataclass(frozen=True)
 class ActiveBattleIdentityRecord:
     """Validated durable record for the last force-bound active battle."""
 
@@ -98,6 +134,10 @@ class ActiveBattleIdentityRecord:
     operation_id: str = field(repr=False)
     acquisition: Mapping[str, Any] = field(default_factory=dict, repr=False)
     session_preflight: Optional[Mapping[str, Any]] = field(
+        default=None,
+        repr=False,
+    )
+    terminal_continuity: Optional[ActiveBattleTerminalContinuity] = field(
         default=None,
         repr=False,
     )
@@ -189,6 +229,9 @@ class BattleIdentityStore:
             raise BattleIdentityStoreError(
                 "forced serialization does not contain the supplied battle identity"
             )
+        terminal_continuity = _terminal_continuity_from_acquisition(
+            acquisition
+        )
         timestamp = _aware_timestamp(bound_at).isoformat()
 
         with self._lock:
@@ -219,6 +262,10 @@ class BattleIdentityStore:
                 "operation_id": normalized_operation,
                 "acquisition": acquisition.redacted_provenance(),
             }
+            if terminal_continuity is not None:
+                payload["terminal_continuity"] = (
+                    terminal_continuity.as_dict()
+                )
             if (
                 relation is BattleIdentityRelation.SAME_BATTLE
                 and previous is not None
@@ -580,6 +627,7 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
         ) from exc
     acquisition = payload.get("acquisition")
     session_preflight = payload.get("session_preflight")
+    terminal_continuity_value = payload.get("terminal_continuity")
     if (
         identity is None
         or parsed.tzinfo is None
@@ -592,6 +640,14 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
         )
     ):
         raise BattleIdentityStoreError("battle identity record is malformed")
+    terminal_continuity = _validated_terminal_continuity(
+        terminal_continuity_value,
+        acquisition=acquisition,
+    )
+    if terminal_continuity_value is not None and terminal_continuity is None:
+        raise BattleIdentityStoreError(
+            "battle terminal continuity record is malformed"
+        )
     return ActiveBattleIdentityRecord(
         identity=identity,
         bound_at=bound_at,
@@ -603,7 +659,174 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
             if isinstance(session_preflight, Mapping)
             else None
         ),
+        terminal_continuity=terminal_continuity,
     )
+
+
+def _terminal_continuity_from_acquisition(
+    acquisition: PlayerSaveAcquisitionBundle,
+) -> Optional[ActiveBattleTerminalContinuity]:
+    snapshot = acquisition.snapshot
+    runtime = getattr(snapshot, "runtime_save", None)
+    vector = getattr(runtime, "round_counter_vector", None)
+    runtime_revision = getattr(runtime, "save_revision", None)
+    snapshot_revision = getattr(snapshot, "save_revision", None)
+    target_fingerprint = acquisition.binding_fingerprint
+    if not (
+        getattr(runtime, "round_counter_vector_status", None) == "observed"
+        and getattr(runtime, "round_counter_vector_reason", None) == ""
+        and isinstance(vector, RoundCounterVectorEvidence)
+        and type(vector.tier_count) is int
+        and vector.tier_count > 0
+        and _SHA256_RE.fullmatch(vector.fingerprint) is not None
+        and getattr(runtime, "save_revision_status", None) == "observed"
+        and getattr(runtime, "save_revision_reason", None) == ""
+        and type(runtime_revision) is int
+        and runtime_revision >= 0
+        and snapshot_revision == runtime_revision
+        and _SHA256_RE.fullmatch(str(target_fingerprint or "")) is not None
+    ):
+        return None
+    return ActiveBattleTerminalContinuity(
+        round_counter_vector_fingerprint=vector.fingerprint,
+        round_counter_tier_count=vector.tier_count,
+        save_revision=runtime_revision,
+        target_binding_fingerprint=str(target_fingerprint),
+    )
+
+
+def _validated_terminal_continuity(
+    value: object,
+    *,
+    acquisition: object,
+) -> Optional[ActiveBattleTerminalContinuity]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    vector_fingerprint = str(
+        value.get("round_counter_vector_fingerprint") or ""
+    ).strip()
+    target_fingerprint = str(
+        value.get("target_binding_fingerprint") or ""
+    ).strip()
+    tier_count = value.get("round_counter_tier_count")
+    save_revision = value.get("save_revision")
+    acquisition_binding = (
+        acquisition.get("binding_fingerprint")
+        if isinstance(acquisition, Mapping)
+        else None
+    )
+    if not (
+        _SHA256_RE.fullmatch(vector_fingerprint) is not None
+        and _SHA256_RE.fullmatch(target_fingerprint) is not None
+        and target_fingerprint == acquisition_binding
+        and type(tier_count) is int
+        and tier_count > 0
+        and type(save_revision) is int
+        and save_revision >= 0
+    ):
+        return None
+    return ActiveBattleTerminalContinuity(
+        round_counter_vector_fingerprint=vector_fingerprint,
+        round_counter_tier_count=tier_count,
+        save_revision=save_revision,
+        target_binding_fingerprint=target_fingerprint,
+    )
+
+
+def terminal_run_binding_from_round_counters(
+    record: ActiveBattleIdentityRecord,
+    acquisition: PlayerSaveAcquisitionBundle,
+    *,
+    expected_identity_fingerprint: str,
+    activity_scope_run_id: Optional[str],
+) -> dict[str, Any]:
+    """Bind an inactive Game Over save by exact battle-start counter equality."""
+
+    expected_identity = str(expected_identity_fingerprint or "").strip()
+
+    def unbound(reason: str) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "status": "unbound",
+            "reason": reason,
+            "activity_scope_run_id": (
+                str(activity_scope_run_id or "").strip() or None
+            ),
+            "active_round_identity_fingerprint": expected_identity or None,
+        }
+
+    if not isinstance(record, ActiveBattleIdentityRecord):
+        return unbound("retained_active_battle_unavailable")
+    if (
+        _SHA256_RE.fullmatch(expected_identity) is None
+        or expected_identity != record.fingerprint
+    ):
+        return unbound("restart_handoff_battle_identity_mismatch")
+    continuity = record.terminal_continuity
+    if continuity is None:
+        return unbound("retained_round_counter_vector_unavailable")
+    if not (
+        isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        and acquisition.complete
+        and acquisition.acquisition_type
+        is PlayerSaveAcquisitionType.NATURAL_BOUNDARY
+        and acquisition.boundary is not None
+        and acquisition.boundary.kind is PlayerSaveBoundaryKind.GAME_OVER
+        and acquisition.boundary.active_round_identity_fingerprint
+        == expected_identity
+    ):
+        return unbound("terminal_natural_boundary_mismatch")
+    if acquisition.binding_fingerprint != (
+        continuity.target_binding_fingerprint
+    ):
+        return unbound("terminal_save_target_changed")
+
+    snapshot = acquisition.snapshot
+    runtime = getattr(snapshot, "runtime_save", None)
+    vector = getattr(runtime, "round_counter_vector", None)
+    terminal_revision = getattr(runtime, "save_revision", None)
+    snapshot_revision = getattr(snapshot, "save_revision", None)
+    if getattr(runtime, "round_active", None) is not False:
+        return unbound("terminal_save_still_active")
+    if not (
+        getattr(runtime, "round_counter_vector_status", None) == "observed"
+        and getattr(runtime, "round_counter_vector_reason", None) == ""
+        and isinstance(vector, RoundCounterVectorEvidence)
+    ):
+        return unbound("terminal_round_counter_vector_unavailable")
+    if vector.tier_count != continuity.round_counter_tier_count:
+        return unbound("terminal_round_counter_vector_shape_changed")
+    if vector.fingerprint != continuity.round_counter_vector_fingerprint:
+        return unbound("terminal_round_counter_vector_changed")
+    if not (
+        getattr(runtime, "save_revision_status", None) == "observed"
+        and getattr(runtime, "save_revision_reason", None) == ""
+        and type(terminal_revision) is int
+        and snapshot_revision == terminal_revision
+        and terminal_revision >= continuity.save_revision
+    ):
+        return unbound("terminal_save_revision_regressed_or_unavailable")
+
+    return {
+        "schema_version": 1,
+        "status": "bound",
+        "reason": "retained_round_counter_vector_matches_terminal_save",
+        "binding_source": "durable_full_round_counter_vector",
+        "activity_scope_run_id": (
+            str(activity_scope_run_id or "").strip() or None
+        ),
+        "active_round_identity_fingerprint": record.fingerprint,
+        "terminal_continuity": {
+            "schema_version": 1,
+            "comparison": "exact_full_vector_match",
+            "round_counter_tier_count": continuity.round_counter_tier_count,
+            "active_save_revision": continuity.save_revision,
+            "terminal_save_revision": terminal_revision,
+            "target_binding_fingerprint": (
+                continuity.target_binding_fingerprint
+            ),
+        },
+    }
 
 
 def _aware_timestamp(value: Optional[datetime]) -> datetime:
@@ -653,10 +876,12 @@ def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
 __all__ = [
     "ActiveBattleIdentityCoordinator",
     "ActiveBattleIdentityRecord",
+    "ActiveBattleTerminalContinuity",
     "BattleIdentityCheckContext",
     "BattleIdentityCheckResult",
     "BattleIdentityCheckStatus",
     "BattleIdentityRelation",
     "BattleIdentityStore",
     "BattleIdentityStoreError",
+    "terminal_run_binding_from_round_counters",
 ]

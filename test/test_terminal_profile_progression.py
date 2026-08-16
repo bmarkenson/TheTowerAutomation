@@ -5,8 +5,16 @@ import pytest
 
 from core.adb_target_session import AdbTargetSnapshot
 from core.app import App
-from core.player_save_acquisition import StablePlayerSaveAcquirer
+from core.battle_identity import (
+    ActiveBattleIdentityRecord,
+    ActiveBattleTerminalContinuity,
+)
+from core.player_save_acquisition import (
+    PlayerSaveTargetBinding,
+    StablePlayerSaveAcquirer,
+)
 from core.player_save_serialization import quiet_player_save_read
+from core.runtime_save import ActiveRoundIdentity
 
 
 class _StableSession:
@@ -167,6 +175,123 @@ def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
     audit_call = app._player_save_audit_collector.observe_acquisition.call_args
     assert audit_call.args == (call.args[0],)
     assert audit_call.kwargs == {"reason_code": "game_over"}
+
+
+def test_restarted_game_over_uses_retained_counter_proof_for_save_report():
+    target = AdbTargetSnapshot("localhost:5555", 4, True)
+    target_binding = PlayerSaveTargetBinding("localhost:5555", 4)
+    identity = ActiveRoundIdentity(
+        game_version=1102,
+        current_tier=19,
+        rounds_started_this_tier=319,
+        round_seed=1721080409,
+        fingerprint="a" * 64,
+    )
+    retained = ActiveBattleIdentityRecord(
+        identity=identity,
+        bound_at="2026-08-16T06:33:00+00:00",
+        reason="automation_stopped",
+        operation_id="stop-1",
+        acquisition={"binding_fingerprint": target_binding.fingerprint},
+        terminal_continuity=ActiveBattleTerminalContinuity(
+            round_counter_vector_fingerprint="b" * 64,
+            round_counter_tier_count=40,
+            save_revision=50670,
+            target_binding_fingerprint=target_binding.fingerprint,
+        ),
+    )
+    app = App.__new__(App)
+    app._adb_target_session = _StableSession(target, target)
+    app._player_save_runtime_session_id = "runtime-2"
+    app._process_restart_reattachment_enabled = True
+    app._retained_battle_identity_record = retained
+    app._mission_mgr = SimpleNamespace(
+        awaiting_initial_battle_intent=lambda: True,
+    )
+    app._supervisor = SimpleNamespace(
+        process_restart_handoff={
+            "status": "failed",
+            "workflow_id": None,
+            "expected_active_round_identity_fingerprint": identity.fingerprint,
+            "source_evidence": {
+                "game_state": "active_battle",
+                "active_round_identity_fingerprint": identity.fingerprint,
+                "adb_target": target.target,
+                "target_generation": target.generation,
+            },
+        }
+    )
+    current = {
+        "game_state": "game_over",
+        "adb_target": target.target,
+        "target_generation": target.generation,
+    }
+    app._current_control_workflow_evidence = Mock(return_value=current)
+    app._perk_save_monitor = Mock()
+    app._active_run_metric_monitor = Mock()
+    decoded = SimpleNamespace(
+        profile_progression=_normalized_progression(),
+        mapping_id="data-9-game-1073",
+        save_revision=50677,
+        checks={},
+    )
+    _install_shared_acquirer(app, decoded)
+    process_binding = {
+        "schema_version": 1,
+        "status": "unbound",
+        "reason": "terminal_without_forced_active_battle",
+        "activity_scope_run_id": "scope-1",
+        "active_round_identity_fingerprint": None,
+    }
+    recovered_binding = {
+        "schema_version": 1,
+        "status": "bound",
+        "reason": "retained_round_counter_vector_matches_terminal_save",
+        "activity_scope_run_id": "scope-1",
+        "active_round_identity_fingerprint": identity.fingerprint,
+    }
+    transition = {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+    }
+    report = {"status": "complete", "complete": True}
+    scope = {"schema_version": 1, "run_id": "scope-1"}
+
+    with (
+        patch("core.app.get_activity_scope", return_value=scope),
+        patch(
+            "core.app.terminal_run_binding_from_round_counters",
+            return_value=recovered_binding,
+        ) as recover,
+        patch(
+            "core.app.terminal_history_transition_from_acquisition",
+            return_value=transition,
+        ) as history,
+        patch(
+            "core.app.terminal_save_report_from_acquisition",
+            return_value=report,
+        ) as project_report,
+    ):
+        result = app._capture_terminal_player_save(
+            "GAME_OVER",
+            run_binding=process_binding,
+        )
+
+    acquisition = recover.call_args.args[1]
+    assert acquisition.boundary.active_round_identity_fingerprint == (
+        identity.fingerprint
+    )
+    assert recover.call_args.kwargs == {
+        "expected_identity_fingerprint": identity.fingerprint,
+        "activity_scope_run_id": "scope-1",
+    }
+    assert history.call_args.kwargs["run_binding"] == recovered_binding
+    assert project_report.call_args.kwargs["run_binding"] == recovered_binding
+    assert result["_report_run_binding"] == recovered_binding
+    assert result["_mapping_observer"] is None
+    app._perk_save_monitor.observe_bundle.assert_not_called()
+    app._active_run_metric_monitor.observe_bundle.assert_not_called()
 
 
 def test_terminal_bundle_fans_out_to_all_tournament_projectors_without_reread():

@@ -97,11 +97,13 @@ from core.battle_stats import (
 from core.battle_activation_tracker import BattleActivationTracker
 from core.battle_identity import (
     ActiveBattleIdentityCoordinator,
+    ActiveBattleIdentityRecord,
     BattleIdentityCheckContext,
     BattleIdentityCheckStatus,
     BattleIdentityRelation,
     BattleIdentityStore,
     BattleIdentityStoreError,
+    terminal_run_binding_from_round_counters,
 )
 from core.player_save import (
     PlayerSaveParser,
@@ -1933,6 +1935,71 @@ class App:
             ),
         }
 
+    def _retained_game_over_binding_candidate(
+        self,
+        terminal_state: str,
+        run_binding: Mapping[str, Any],
+    ) -> Optional[ActiveBattleIdentityRecord]:
+        """Return the restart-retained battle eligible for save-only proof."""
+
+        if not (
+            str(terminal_state or "").upper() == "GAME_OVER"
+            and run_binding.get("status") == "unbound"
+            and getattr(
+                self,
+                "_process_restart_reattachment_enabled",
+                False,
+            )
+            and self._awaiting_initial_battle_intent()
+        ):
+            return None
+        record = getattr(self, "_retained_battle_identity_record", None)
+        if not (
+            isinstance(record, ActiveBattleIdentityRecord)
+            and record.terminal_continuity is not None
+        ):
+            return None
+        supervisor = getattr(self, "_supervisor", None)
+        handoff = getattr(supervisor, "process_restart_handoff", None)
+        if not (
+            isinstance(handoff, Mapping)
+            and handoff.get("status") in {"pending", "failed"}
+            and handoff.get(
+                "expected_active_round_identity_fingerprint"
+            )
+            == record.fingerprint
+        ):
+            return None
+        source = handoff.get("source_evidence")
+        current = self._current_control_workflow_evidence()
+        if not (
+            isinstance(source, Mapping)
+            and isinstance(current, Mapping)
+            and source.get("game_state") == "active_battle"
+            and source.get("active_round_identity_fingerprint")
+            == record.fingerprint
+            and current.get("game_state") == "game_over"
+            and source.get("adb_target") == current.get("adb_target")
+            and type(source.get("target_generation")) is int
+            and source.get("target_generation") > 0
+            and source.get("target_generation")
+            == current.get("target_generation")
+        ):
+            return None
+        try:
+            source_binding = PlayerSaveTargetBinding(
+                str(source.get("adb_target") or ""),
+                int(source["target_generation"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        if (
+            record.terminal_continuity.target_binding_fingerprint
+            != source_binding.fingerprint
+        ):
+            return None
+        return record
+
     def _terminal_battle_context(
         self,
         terminal_state: str,
@@ -2150,6 +2217,10 @@ class App:
             scope = get_activity_scope()
         except Exception:
             scope = None
+        recovery_candidate = self._retained_game_over_binding_candidate(
+            terminal,
+            run_binding,
+        )
         if terminal in {kind.value for kind in PlayerSaveBoundaryKind}:
             runtime_session_id = str(
                 getattr(self, "_player_save_runtime_session_id", "") or ""
@@ -2167,6 +2238,11 @@ class App:
                 ),
                 active_round_identity_fingerprint=str(
                     run_binding.get("active_round_identity_fingerprint")
+                    or (
+                        recovery_candidate.fingerprint
+                        if recovery_candidate is not None
+                        else ""
+                    )
                     or ""
                 )
                 or None,
@@ -2213,6 +2289,36 @@ class App:
             )
             return unavailable(reason)
         snapshot = acquisition.snapshot
+        report_binding = dict(run_binding)
+        if recovery_candidate is not None:
+            recovered_binding = terminal_run_binding_from_round_counters(
+                recovery_candidate,
+                acquisition,
+                expected_identity_fingerprint=(
+                    recovery_candidate.fingerprint
+                ),
+                activity_scope_run_id=(
+                    str(scope.get("run_id") or "")
+                    if isinstance(scope, Mapping)
+                    else None
+                ),
+            )
+            if recovered_binding.get("status") == "bound":
+                report_binding = recovered_binding
+                log(
+                    "[RUN_BINDING] Exact full-tier battle-start counter "
+                    "equality bound the retained battle to this Game Over "
+                    "save; process-local strategy evidence remains omitted",
+                    "INFO",
+                    console=True,
+                )
+            else:
+                log(
+                    "[RUN_BINDING] Retained Game Over save proof was not "
+                    "accepted; the terminal UI fallback remains authoritative: "
+                    f"reason={recovered_binding.get('reason')}",
+                    "DEBUG",
+                )
 
         try:
             progression = snapshot.profile_progression
@@ -2234,7 +2340,7 @@ class App:
             history_transition = terminal_history_transition_from_acquisition(
                 acquisition,
                 terminal_state=terminal,
-                run_binding=run_binding,
+                run_binding=report_binding,
                 activity_scope=scope,
             )
         except Exception as exc:
@@ -2308,7 +2414,7 @@ class App:
             terminal_report = terminal_save_report_from_acquisition(
                 acquisition,
                 terminal_state=terminal,
-                run_binding=run_binding,
+                run_binding=report_binding,
                 activity_scope=scope,
                 history_transition=history_transition,
             )
@@ -2330,6 +2436,7 @@ class App:
             "terminal_save_report": terminal_report,
             "_acquisition": acquisition,
             "_mapping_observer": mapping_observer,
+            "_report_run_binding": report_binding,
         }
         if terminal == "TOURNAMENT_RESULTS":
             try:

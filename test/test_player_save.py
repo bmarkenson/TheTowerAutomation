@@ -1388,6 +1388,8 @@ def test_unknown_forward_appended_round_counter_is_dependency_local(monkeypatch)
     assert snapshot.mapping_resolution == "compatible_forward_revision"
     assert snapshot.runtime_save is not None
     assert snapshot.runtime_save.active_round_identity is not None
+    assert snapshot.runtime_save.round_counter_vector is None
+    assert snapshot.runtime_save.round_counter_vector_status == "unavailable"
     assert snapshot.runtime_save.active_tallies is not None
     assert snapshot.runtime_save.active_tallies.status == "observed"
 
@@ -1769,7 +1771,7 @@ def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
     assert runtime is not None
 
     payload = runtime.as_dict()
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["capture"] == {
         "captured_at": CAPTURED_AT.isoformat(),
         "source_name": "playerInfo.dat",
@@ -1789,6 +1791,11 @@ def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
     assert "raw_text" not in json.dumps(history)
     assert "playfabID" not in json.dumps(history)
     assert "damageTakenWhileBerserked" not in json.dumps(history)
+    counter_vector = payload["round_counter_vector"]
+    assert counter_vector["status"] == "observed"
+    assert counter_vector["evidence"]["tier_count"] == 40
+    assert len(counter_vector["evidence"]["fingerprint"]) == 64
+    assert "rounds_started_this_tier" not in json.dumps(counter_vector)
 
     rows = {
         (section["key"], row["key"]): row
@@ -4236,6 +4243,8 @@ def test_unrelated_round_counter_change_preserves_active_identity(monkeypatch):
     assert snapshot.runtime_save is not None
     assert snapshot.runtime_save.active_round_identity is not None
     assert snapshot.runtime_save.active_identity_status == "observed"
+    assert snapshot.runtime_save.round_counter_vector is None
+    assert snapshot.runtime_save.round_counter_vector_status == "unavailable"
     assert snapshot.runtime_save.perks_status == "observed"
     assert snapshot.runtime_save.battle_history_tail.structural_status == "observed"
 
@@ -4250,8 +4259,45 @@ def test_current_round_counter_failure_is_local_to_active_identity(monkeypatch):
     assert snapshot.runtime_save is not None
     assert snapshot.runtime_save.active_round_identity is None
     assert snapshot.runtime_save.active_identity_status == "unavailable"
+    assert snapshot.runtime_save.round_counter_vector is None
+    assert snapshot.runtime_save.round_counter_vector_status == "unavailable"
     assert snapshot.runtime_save.perks_status == "observed"
     assert snapshot.runtime_save.battle_history_tail.structural_status == "observed"
+
+
+def test_full_round_counter_vector_is_stable_when_battle_becomes_inactive(
+    monkeypatch,
+):
+    active = _snapshot(monkeypatch, _decoded_save()).runtime_save
+    terminal_decoded = _decoded_save()
+    terminal_decoded["roundActiveBool"] = False
+    terminal_decoded["currentWave"] = 0
+    terminal_decoded["roundSeed"] = 0
+    terminal = _snapshot(monkeypatch, terminal_decoded).runtime_save
+
+    assert active is not None
+    assert terminal is not None
+    assert active.round_counter_vector_status == "observed"
+    assert terminal.round_counter_vector_status == "observed"
+    assert active.round_counter_vector == terminal.round_counter_vector
+    assert terminal.active_round_identity is None
+
+
+def test_full_round_counter_vector_detects_an_increment_at_any_tier(monkeypatch):
+    baseline = _snapshot(monkeypatch, _decoded_save()).runtime_save
+    changed_decoded = _decoded_save()
+    changed_decoded["roundsStartedThisTier"][0] += 1
+    changed = _snapshot(monkeypatch, changed_decoded).runtime_save
+
+    assert baseline is not None
+    assert changed is not None
+    assert baseline.active_round_identity == changed.active_round_identity
+    assert baseline.round_counter_vector is not None
+    assert changed.round_counter_vector is not None
+    assert (
+        baseline.round_counter_vector.fingerprint
+        != changed.round_counter_vector.fingerprint
+    )
 
 
 def test_candidate_mapping_keeps_ui_for_matching_checks(monkeypatch):

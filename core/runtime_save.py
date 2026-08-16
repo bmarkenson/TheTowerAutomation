@@ -21,7 +21,7 @@ from typing import Any, Optional
 from core.read_only_data import deep_freeze, deep_thaw
 
 
-RUNTIME_SAVE_SCHEMA_VERSION = 3
+RUNTIME_SAVE_SCHEMA_VERSION = 4
 ACTIVE_RUN_TALLIES_SCHEMA_VERSION = 1
 SURVIVAL_ABILITY_ACTIVATIONS_SCHEMA_VERSION = 1
 HISTORY_ENTRY_SCHEMA_VERSION = 1
@@ -68,6 +68,20 @@ class ActiveRoundIdentity:
             "current_tier": self.current_tier,
             "rounds_started_this_tier": self.rounds_started_this_tier,
             "round_seed": self.round_seed,
+            "fingerprint": self.fingerprint,
+        }
+
+
+@dataclass(frozen=True)
+class RoundCounterVectorEvidence:
+    """Exact full-tier battle-start counter identity without raw counters."""
+
+    tier_count: int
+    fingerprint: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "tier_count": self.tier_count,
             "fingerprint": self.fingerprint,
         }
 
@@ -616,6 +630,9 @@ class NormalizedRuntimeSave:
     round_state_reason: str = ""
     current_wave_status: str = "observed"
     current_wave_reason: str = ""
+    round_counter_vector_status: str = "unavailable"
+    round_counter_vector_reason: str = "vector_unavailable"
+    round_counter_vector: Optional[RoundCounterVectorEvidence] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "capture", deep_freeze(self.capture))
@@ -654,6 +671,15 @@ class NormalizedRuntimeSave:
             "active_round_identity_evidence": {
                 "status": self.active_identity_status,
                 "reason": self.active_identity_reason,
+            },
+            "round_counter_vector": {
+                "status": self.round_counter_vector_status,
+                "reason": self.round_counter_vector_reason,
+                "evidence": (
+                    self.round_counter_vector.as_dict()
+                    if self.round_counter_vector is not None
+                    else None
+                ),
             },
             "perks": {
                 "status": self.perks_status,
@@ -758,6 +784,50 @@ def normalize_runtime_save(
     else:
         current_wave_status = "observed"
         current_wave_reason = ""
+
+    try:
+        expected_round_counter_count = _required_positive_mapping_int(
+            runtime_spec,
+            "rounds_started_tier_count",
+        )
+        complete_round_counters = _required_sequence(
+            decoded,
+            "roundsStartedThisTier",
+        )
+        if len(complete_round_counters) != expected_round_counter_count:
+            raise RuntimeSaveNormalizationError(
+                "roundsStartedThisTier length changed:"
+                f"expected={expected_round_counter_count}:"
+                f"actual={len(complete_round_counters)}"
+            )
+        normalized_round_counters = tuple(
+            _exact_nonnegative_int(
+                value,
+                f"roundsStartedThisTier[{index}]",
+                RuntimeSaveNormalizationError,
+            )
+            for index, value in enumerate(complete_round_counters)
+        )
+    except RuntimeSaveNormalizationError as exc:
+        round_counter_vector = None
+        round_counter_vector_status = "unavailable"
+        round_counter_vector_reason = str(exc)
+    else:
+        round_counter_vector = RoundCounterVectorEvidence(
+            tier_count=expected_round_counter_count,
+            fingerprint=_fingerprint(
+                {
+                    "schema_version": 1,
+                    "game_version": game_version,
+                    "rounds_started_this_tier": list(
+                        normalized_round_counters
+                    ),
+                }
+            ),
+        )
+        round_counter_vector_status = "observed"
+        round_counter_vector_reason = ""
+
     active_identity: Optional[ActiveRoundIdentity] = None
     active_identity_status = "not_applicable"
     active_identity_reason = "round_inactive"
@@ -951,6 +1021,9 @@ def normalize_runtime_save(
         round_state_reason=round_state_reason,
         current_wave_status=current_wave_status,
         current_wave_reason=current_wave_reason,
+        round_counter_vector_status=round_counter_vector_status,
+        round_counter_vector_reason=round_counter_vector_reason,
+        round_counter_vector=round_counter_vector,
     )
 
 
@@ -2627,6 +2700,7 @@ __all__ = [
     "RuntimePerkCalibrationPick",
     "RuntimePerkPick",
     "RuntimePerkSnapshot",
+    "RoundCounterVectorEvidence",
     "RuntimeSaveNormalizationError",
     "RuntimeSurvivalAbilityActivation",
     "RuntimeTallyClaimDefinition",

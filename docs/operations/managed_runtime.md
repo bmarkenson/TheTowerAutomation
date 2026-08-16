@@ -54,11 +54,17 @@ does not matter because the proof is the battle identity. The service restores
 Enabled authority only after the same identity is adopted. A changed active
 battle, target mismatch, or unavailable proof leaves the replacement Paused
 for explicit intent. If the retained battle instead reached fresh Game Over,
-the failed same-battle Attach remains unbound, but restoring Enabled may follow
-the selected Wait/Home/Continue terminal policy; Continue arms Retry as a new
-battle. Without a handoff, Start retains its normal Paused, explicit-intent
-behavior. Repeating an already satisfied Start or Stop is reported as a no-op;
-the old one-step attached reload remains retired.
+restoring Enabled may follow the selected Wait/Home/Continue terminal policy;
+Continue arms Retry as a new battle. The replacement may additionally bind the
+terminal save report to the retained battle when the durable active snapshot
+and fresh inactive save have exact full-tier battle-start-counter equality,
+non-regressing save revision, and the same handoff identity and target. That
+proof does not restore the stopped process's Strategy or other process-local
+telemetry. Missing legacy vector evidence or any changed counter leaves the
+report unbound without blocking the screen-policy fallback. Without a handoff,
+Start retains its normal Paused, explicit-intent behavior. Repeating an already
+satisfied Start or Stop is reported as a no-op; the old one-step attached
+reload remains retired.
 
 ## Set what happens when a battle ends
 

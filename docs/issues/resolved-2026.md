@@ -24,28 +24,39 @@ and actionable work lives in
   runtime an explicit completion condition after agent-owned Pause or Stop.
 - **Evidence:** The durable Stop handoff named one active identity and target;
   the replacement observed fresh Game Over on that target after the save had
-  cleared its active round seed. The terminal History tail had advanced, but
-  neither History chronology nor elapsed time is canonical battle identity.
-  The clipboard More Stats report contains `Real Time` but no absolute
-  timestamp, so a third-party tracker's displayed run date/time cannot be
-  derived from that paste as battle-start proof.
+  cleared its active round seed. The active evidence and terminal save both
+  retained Tier 19's `roundsStartedThisTier` value `319`, corroborating that the
+  counter advances at battle start rather than completion. The terminal
+  History tail had advanced, but neither History chronology nor elapsed time is
+  canonical battle identity. The clipboard More Stats report contains `Real
+  Time` but no absolute timestamp, so a third-party tracker's displayed run
+  date/time cannot be derived from that paste as battle-start proof.
 - **Safety response:** Diagnosis sent no device input and did not bind the
-  terminal to the retained battle. Strategy, configuration, Perk and survival
-  timelines, active-run metrics, and other process-local evidence remained
-  excluded. The existing full active-round identity remains the only durable
-  same-battle key.
+  terminal to the retained battle without complete prior vector evidence.
+  Strategy, configuration, Perk and survival timelines, active-run metrics,
+  and other process-local evidence remained excluded. Canonical active-round
+  identity remains the active adoption key; a complete battle-start counter
+  epoch may establish only the narrower terminal-save continuity described
+  below.
 - **Cause:** Preserved-terminal recovery under the initial-intent hold was
   limited to `WAIT`. `HOME` and `NEXT_BATTLE` therefore had no lifecycle route
   once the active battle ended before reattachment, even though handling the
   fresh screen did not require attributing it to the stopped process.
 - **Resolution:** A fresh exact-target Game Over under the replacement's
   initial-intent workflow may now follow the selected Wait, Home, or Continue
-  policy while remaining explicitly unbound. Continue releases the initial-
-  intent hold only after Retry dispatch and treats the successor as a new
-  battle. Agent policy now makes restoration of a previously Running runtime
-  part of completing agent-owned Pause/Stop work, after fresh owner, control,
-  target, and screen checks; pre-existing, superseded, manual, and safety
-  pauses are never restored automatically.
+  policy even when it remains explicitly unbound. Continue releases the
+  initial-intent hold only after Retry dispatch and treats the successor as a
+  new battle. New forced active bindings also retain a privacy-safe fingerprint
+  of the complete declared per-tier battle-start counter vector, its tier
+  count, save revision, and target binding. A replacement may bind only the
+  inactive terminal save report when that entire vector is exactly equal, the
+  revision does not regress, and handoff identity and target still match. One
+  changed counter—or missing legacy evidence—keeps the report unbound and on
+  UI fallback. Stopped-process Strategy and process-local telemetry are never
+  recovered by this proof. Agent policy now makes restoration of a previously
+  Running runtime part of completing agent-owned Pause/Stop work, after fresh
+  owner, control, target, and screen checks; pre-existing, superseded, manual,
+  and safety pauses are never restored automatically.
 - **Regression and validation:** Preserved-terminal tests cover all three
   policies, reject stale or nonterminal authority, arm a real successor after
   Retry, and Pause if that arming cannot be persisted. The Better Control,
