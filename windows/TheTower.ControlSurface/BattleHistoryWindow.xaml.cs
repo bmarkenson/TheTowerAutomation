@@ -1310,6 +1310,8 @@ public partial class BattleHistoryWindow : Window
             value = wave == "-"
                 ? "Approx. wave unknown"
                 : $"Approx. wave {wave}";
+            value +=
+                "; visual only—no later in-battle save captured the active timer";
         }
         if (includeEstimatedRearm)
         {
