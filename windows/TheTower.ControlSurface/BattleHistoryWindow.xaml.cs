@@ -1187,13 +1187,39 @@ public partial class BattleHistoryWindow : Window
             }
         }
 
+        var appendedDemonModeList = false;
         if (activations.TryGetProperty(
+                "demon_mode_activations",
+                out var demonModes)
+            && demonModes.ValueKind == JsonValueKind.Array)
+        {
+            var fallbackDemonModeSequence = 1;
+            foreach (var demonMode in demonModes.EnumerateArray())
+            {
+                if (demonMode.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+                var sequence = JsonValue(demonMode, "sequence");
+                AppendSurvivalAbilityActivationRow(
+                    demonMode,
+                    sequence == "-"
+                        ? $"Demon Mode activation {fallbackDemonModeSequence}"
+                        : $"Demon Mode activation {sequence}",
+                    destination);
+                appendedDemonModeList = true;
+                fallbackDemonModeSequence++;
+            }
+        }
+
+        if (!appendedDemonModeList
+            && activations.TryGetProperty(
                 "demon_mode_first_activation",
-                out var demonMode)
-            && demonMode.ValueKind == JsonValueKind.Object)
+                out var firstDemonMode)
+            && firstDemonMode.ValueKind == JsonValueKind.Object)
         {
             AppendSurvivalAbilityActivationRow(
-                demonMode,
+                firstDemonMode,
                 "Demon Mode first activation",
                 destination);
         }
@@ -1227,22 +1253,85 @@ public partial class BattleHistoryWindow : Window
         ICollection<ReportRow> destination,
         bool includeEstimatedRearm = false)
     {
-        var detectedAt = JsonValue(activation, "detected_at");
-        var wave = JsonValue(activation, "approximate_wave");
+        var precision = JsonValue(activation, "wave_precision");
+        var exact = string.Equals(
+            precision,
+            "exact",
+            StringComparison.OrdinalIgnoreCase);
+        var saveTimer = exact || string.Equals(
+            precision,
+            "save_timer",
+            StringComparison.OrdinalIgnoreCase);
+        var observedAt = JsonValue(
+            activation,
+            saveTimer ? "save_observed_at" : "detected_at");
+        if (observedAt == "-")
+        {
+            observedAt = JsonValue(activation, "detected_at");
+        }
+        var wave = JsonValue(
+            activation,
+            saveTimer ? "activation_wave" : "approximate_wave");
+        if (wave == "-")
+        {
+            wave = JsonValue(activation, "approximate_wave");
+        }
+        var waveMinimum = JsonValue(activation, "activation_wave_min");
+        var waveMaximum = JsonValue(activation, "activation_wave_max");
+        var waveIsRange = saveTimer
+            && waveMinimum != "-"
+            && waveMaximum != "-"
+            && waveMinimum != waveMaximum;
+        if (saveTimer && waveMinimum != "-" && waveMaximum != "-")
+        {
+            wave = waveIsRange
+                ? $"{waveMinimum}–{waveMaximum}"
+                : waveMinimum;
+        }
         var waveConfidence = JsonValue(activation, "wave_confidence");
-        var name = detectedAt == "-" ? label : $"{label} at {detectedAt}";
-        var value = wave == "-" ? "Approx. wave unknown" : $"Approx. wave {wave}";
+        var name = observedAt == "-" ? label : $"{label} at {observedAt}";
+        string value;
+        if (exact)
+        {
+            value = wave == "-"
+                ? "Exact wave unavailable"
+                : $"Exact wave {wave} (save timer)";
+        }
+        else if (saveTimer)
+        {
+            value = wave == "-"
+                ? "Save-derived wave unavailable"
+                : waveIsRange
+                    ? $"Save-derived waves {wave} (timer)"
+                    : $"Save-derived wave {wave} (timer)";
+        }
+        else
+        {
+            value = wave == "-"
+                ? "Approx. wave unknown"
+                : $"Approx. wave {wave}";
+        }
         if (includeEstimatedRearm)
         {
             var estimatedRearm = JsonValue(
                 activation,
                 "estimated_rearm_wave");
+            var rearmMinimum = JsonValue(activation, "rearm_wave_min");
+            var rearmMaximum = JsonValue(activation, "rearm_wave_max");
+            if (saveTimer && rearmMinimum != "-" && rearmMaximum != "-")
+            {
+                estimatedRearm = rearmMinimum == rearmMaximum
+                    ? rearmMinimum
+                    : $"{rearmMinimum}–{rearmMaximum}";
+            }
             if (estimatedRearm != "-")
             {
-                value += $"; estimated re-arm wave {estimatedRearm}";
+                value += saveTimer
+                    ? $"; re-arm wave {estimatedRearm}"
+                    : $"; estimated re-arm wave {estimatedRearm}";
             }
         }
-        if (waveConfidence != "-")
+        if (!saveTimer && waveConfidence != "-")
         {
             value += $" ({waveConfidence}% wave OCR)";
         }

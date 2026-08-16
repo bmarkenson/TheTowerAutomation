@@ -161,6 +161,8 @@
         "coinsEarnedWaveSkipThisRound",
         "critCoinCoinsThisRound",
         "deathWaveCoinsThisRound",
+        "demonModeWavesUntilRefresh",
+        "demonModesUsedThisRound",
         "enemyAttackLevelSkips",
         "enemyHealthLevelSkips",
         "freeAttackUpgradesThisRound",
@@ -170,8 +172,12 @@
         "goldenTowerCoinsThisRound",
         "goldenTowerPlusCoinsThisRound",
         "highestCPMThisRound",
+        "nukeWavesUntilRefresh",
+        "nukesUsedThisRound",
         "orbCoinsThisRound",
         "realTimeThisRound",
+        "secondWindWavesUntilRefresh",
+        "secondWindsUsedThisRound",
         "spotlightCoinsThisRound",
         "totalCoinsByBotThisRound",
         "totalCoinsFetchedByGuardianThisRound",
@@ -384,8 +390,6 @@
         "demonModeLingeringTimeoutWave",
         "demonModeOffCooldown",
         "demonModeUsedThisRound",
-        "demonModeWavesUntilRefresh",
-        "demonModesUsedThisRound",
         "demonTimer",
         "dev_ResetGuardianChip",
         "dissonanceActive",
@@ -567,8 +571,6 @@
         "nukeOffCooldown",
         "nukeSlowTimeoutWave",
         "nukeUsedThisRound",
-        "nukeWavesUntilRefresh",
-        "nukesUsedThisRound",
         "orbHitsThisRound",
         "pauseBattleInsideMenus",
         "playTime",
@@ -619,8 +621,6 @@
         "secondWindAngelWingsTimeoutWave",
         "secondWindThisRound",
         "secondWindTimer",
-        "secondWindWavesUntilRefresh",
-        "secondWindsUsedThisRound",
         "selectedBackground",
         "selectedMenu",
         "selectedMissions",
@@ -2166,6 +2166,82 @@
             }
           },
           "derived": {}
+        }
+      }
+    },
+    "survival_ability_activations": {
+      "schema_version": 1,
+      "capability_id": "thetower.player_save.survival_ability_activations.v1",
+      "forward_policy": "exact_version_only",
+      "audit_id": "V1101-RUNTIME-018",
+      "evidence_level": "live_causal",
+      "scope": {
+        "semantics": {
+          "state": "latest_cumulative_active_round_activation",
+          "identity": "game_version_tier_started_count_seed",
+          "checkpoint_order": "capture_time_save_revision_wave",
+          "refresh_relation": "refresh_wave=saved_wave+waves_until_refresh",
+          "activation_relation": "activation_wave=refresh_wave-recharge_waves",
+          "inactive_timer_handling": "count_zero_or_outside_recharge_window",
+          "merged_precision": "observed_save_timer_candidate_range",
+          "checkpoint_coverage": "latest_activation_only"
+        },
+        "binding": {
+          "game_version": "versionNumber",
+          "save_revision": "saveRevision",
+          "round_active": "roundActiveBool",
+          "current_tier": "currentTier",
+          "current_wave": "currentWave",
+          "round_seed": "roundSeed",
+          "round_counter_vector": "roundsStartedThisTier",
+          "research_vector": "researchLevel"
+        }
+      },
+      "abilities": {
+        "demon_mode": {
+          "count_source": "demonModesUsedThisRound",
+          "waves_until_refresh_source": "demonModeWavesUntilRefresh",
+          "recharge_research_index": 146,
+          "recharge_waves_by_level": [
+            null,
+            1500,
+            1250,
+            1000,
+            750,
+            550,
+            400,
+            300
+          ]
+        },
+        "nuke": {
+          "count_source": "nukesUsedThisRound",
+          "waves_until_refresh_source": "nukeWavesUntilRefresh",
+          "recharge_research_index": 149,
+          "recharge_waves_by_level": [
+            null,
+            1500,
+            1250,
+            1000,
+            750,
+            550,
+            400,
+            300
+          ]
+        },
+        "second_wind": {
+          "count_source": "secondWindsUsedThisRound",
+          "waves_until_refresh_source": "secondWindWavesUntilRefresh",
+          "recharge_research_index": 145,
+          "recharge_waves_by_level": [
+            null,
+            2000,
+            1500,
+            1250,
+            1000,
+            750,
+            550,
+            400
+          ]
         }
       }
     }

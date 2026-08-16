@@ -502,11 +502,23 @@ def test_battle_record_retains_resolved_run_configuration():
     assert "## Coins/min progression" in markdown
     assert "| 2026-07-15T11:00:00-07:00 | 1000 | 1.25T | 98.5% |" in markdown
     assert "## Survival ability activations" in markdown
-    assert "| 1 | 4190 | 4590 | 2026-07-15T11:29:30-07:00 |" in markdown
-    assert "| 2 | 4590 | 4990 | 2026-07-15T11:39:30-07:00 |" in markdown
+    assert (
+        "| 1 | 4190 | Approximate (visual) | 4590 | "
+        "2026-07-15T11:29:30-07:00 |"
+    ) in markdown
+    assert (
+        "| 2 | 4590 | Approximate (visual) | 4990 | "
+        "2026-07-15T11:39:30-07:00 |"
+    ) in markdown
     assert "Demon Mode first activation: approximately wave 4210" in markdown
-    assert "| 1 | 4211 | 2026-07-15T11:30:02-07:00 |" in markdown
-    assert "| 2 | 4611 | 2026-07-15T11:40:02-07:00 |" in markdown
+    assert (
+        "| 1 | 4211 | Approximate (visual) | "
+        "2026-07-15T11:30:02-07:00 |"
+    ) in markdown
+    assert (
+        "| 2 | 4611 | Approximate (visual) | "
+        "2026-07-15T11:40:02-07:00 |"
+    ) in markdown
 
 
 def test_survival_activation_markdown_distinguishes_legacy_and_observed_none():
@@ -530,6 +542,64 @@ def test_survival_activation_markdown_distinguishes_legacy_and_observed_none():
 
     assert not any("Second Wind" in line for line in legacy)
     assert "- Second Wind activations: none observed" in observed_none
+
+
+def test_survival_activation_markdown_labels_save_timer_wave_range():
+    lines = render_survival_ability_activations_markdown(
+        {
+            "schema_version": 5,
+            "second_wind_activations": [],
+            "demon_mode_activations": [
+                {
+                    "sequence": 1,
+                    "activation_wave": 5_507,
+                    "activation_wave_min": 5_507,
+                    "activation_wave_max": 5_508,
+                    "approximate_wave": 5_507,
+                    "wave_precision": "save_timer",
+                    "wave_source": "player_save_refresh_timer",
+                    "save_observed_at": "2026-08-16T12:00:00+00:00",
+                },
+                {
+                    "sequence": 2,
+                    "approximate_wave": 5_810,
+                    "wave_precision": "approximate",
+                    "detected_at": "2026-08-16T12:10:00+00:00",
+                },
+            ],
+            "demon_mode_first_activation": {
+                "sequence": 1,
+                "activation_wave": 5_507,
+                "wave_precision": "save_timer",
+            },
+            "nuke_activations": [
+                {
+                    "sequence": 1,
+                    "activation_wave": 5_509,
+                    "activation_wave_min": 5_509,
+                    "activation_wave_max": 5_509,
+                    "approximate_wave": 5_509,
+                    "wave_precision": "save_timer",
+                    "save_observed_at": "2026-08-16T12:00:00+00:00",
+                }
+            ],
+        }
+    )
+
+    markdown = "\n".join(lines)
+    assert "Save-derived waves or ranges come from in-battle saves" in markdown
+    assert (
+        "| 1 | 5507–5508 | Save-derived (timer) | "
+        "2026-08-16T12:00:00+00:00 |"
+    ) in markdown
+    assert (
+        "| 2 | 5810 | Approximate (visual) | "
+        "2026-08-16T12:10:00+00:00 |"
+    ) in markdown
+    assert (
+        "| 1 | 5509 | Save-derived (timer) | "
+        "2026-08-16T12:00:00+00:00 |"
+    ) in markdown
 
 
 def test_emulator_location_markdown_exposes_host_and_cph_attribution():

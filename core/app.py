@@ -1635,6 +1635,23 @@ class App:
                             "unaffected",
                             "DEBUG",
                         )
+        if context is not None:
+            try:
+                snapshot = getattr(acquisition, "snapshot", None)
+                runtime = getattr(snapshot, "runtime_save", None)
+                self._activation_tracker().observe_save_checkpoint(
+                    runtime,
+                    expected_identity_fingerprint=(
+                        context.active_round_identity_fingerprint
+                    ),
+                )
+            except Exception:
+                log(
+                    "[PLAYER_SAVE_API] Survival-activation projection "
+                    "rejected one shared observation; other consumers are "
+                    "unaffected",
+                    "DEBUG",
+                )
         self._observe_shared_acquisition_for_audit(
             acquisition,
             reason_code=reason_code,
@@ -1665,9 +1682,12 @@ class App:
         monitor = getattr(self, "_perk_save_monitor", None)
         metric_monitor = getattr(self, "_active_run_metric_monitor", None)
         context = self._current_player_save_observation_context()
-        if context is not None and (
-            monitor is not None or metric_monitor is not None
-        ):
+        if context is None:
+            return
+        self._activation_tracker().bind_round_identity(
+            context.active_round_identity_fingerprint
+        )
+        if monitor is not None or metric_monitor is not None:
             with self._perk_save_monitor_guard():
                 self._pending_perk_timeline_save_checkpoint = None
                 if monitor is not None:

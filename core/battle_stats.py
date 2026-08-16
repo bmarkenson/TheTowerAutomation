@@ -2163,7 +2163,7 @@ def _format_metric_multiplier(value: Any) -> str:
 def render_survival_ability_activations_markdown(
     observations: Any,
 ) -> list[str]:
-    """Render approximate Second Wind, Demon Mode, and Nuke activation waves."""
+    """Render save-timer-derived waves with visual fallback evidence."""
 
     if not isinstance(observations, Mapping):
         return []
@@ -2176,6 +2176,15 @@ def render_survival_ability_activations_markdown(
         else []
     )
     demon = observations.get("demon_mode_first_activation")
+    raw_demons = observations.get("demon_mode_activations")
+    demons = (
+        [event for event in raw_demons if isinstance(event, Mapping)]
+        if isinstance(raw_demons, Sequence)
+        and not isinstance(raw_demons, (str, bytes))
+        else []
+    )
+    if not demons and isinstance(demon, Mapping):
+        demons = [demon]
     raw_nukes = observations.get("nuke_activations")
     nukes = (
         [event for event in raw_nukes if isinstance(event, Mapping)]
@@ -2185,55 +2194,84 @@ def render_survival_ability_activations_markdown(
     )
     if (
         not has_second_wind_observer
-        and not isinstance(demon, Mapping)
+        and not demons
         and not nukes
     ):
         return []
 
-    lines = ["", "## Survival ability activations", ""]
+    lines = [
+        "",
+        "## Survival ability activations",
+        "",
+        (
+            "Save-derived waves or ranges come from in-battle saves that "
+            "captured the active refresh timer; visual-only detections remain "
+            "approximate."
+        ),
+        "",
+    ]
     if has_second_wind_observer:
         if second_winds:
             lines.extend(
                 [
-                    "| Second Wind activation | Approximate wave | "
-                    "Estimated re-arm wave | Detected |",
-                    "| ---: | ---: | ---: | --- |",
+                    "| Second Wind activation | Wave | Precision | "
+                    "Re-arm wave | Observed |",
+                    "| ---: | ---: | --- | ---: | --- |",
                 ]
             )
             for index, event in enumerate(second_winds, start=1):
                 sequence = event.get("sequence", index)
-                wave = event.get("approximate_wave")
-                estimated_rearm = event.get("estimated_rearm_wave")
+                wave = _activation_wave_value(event)
+                estimated_rearm = _activation_rearm_wave_value(event)
                 lines.append(
                     f"| {sequence} | "
                     f"{wave if wave is not None else 'unknown'} | "
+                    f"{_activation_precision_label(event)} | "
                     f"{estimated_rearm if estimated_rearm is not None else 'unknown'} | "
-                    f"{event.get('detected_at', '')} |"
+                    f"{_activation_observed_at(event)} |"
                 )
             lines.append("")
         else:
             lines.extend(["- Second Wind activations: none observed", ""])
-    if isinstance(demon, Mapping):
+    if len(demons) == 1:
         lines.append(
             "- Demon Mode first activation: "
-            + _render_activation_wave(demon)
+            + _render_activation_wave(demons[0])
         )
+    elif demons:
+        lines.extend(
+            [
+                "| Demon Mode activation | Wave | Precision | Observed |",
+                "| ---: | ---: | --- | --- |",
+            ]
+        )
+        for index, event in enumerate(demons, start=1):
+            sequence = event.get("sequence", index)
+            wave = _activation_wave_value(event)
+            lines.append(
+                f"| {sequence} | "
+                f"{wave if wave is not None else 'unknown'} | "
+                f"{_activation_precision_label(event)} | "
+                f"{_activation_observed_at(event)} |"
+            )
     else:
         lines.append("- Demon Mode first activation: not observed")
     if nukes:
         lines.extend(
             [
                 "",
-                "| Nuke activation | Approximate wave | Detected |",
-                "| ---: | ---: | --- |",
+                "| Nuke activation | Wave | Precision | Observed |",
+                "| ---: | ---: | --- | --- |",
             ]
         )
         for index, event in enumerate(nukes, start=1):
             sequence = event.get("sequence", index)
-            wave = event.get("approximate_wave")
+            wave = _activation_wave_value(event)
             lines.append(
-                f"| {sequence} | {wave if wave is not None else 'unknown'} | "
-                f"{event.get('detected_at', '')} |"
+                f"| {sequence} | "
+                f"{wave if wave is not None else 'unknown'} | "
+                f"{_activation_precision_label(event)} | "
+                f"{_activation_observed_at(event)} |"
             )
     else:
         lines.append("- Nuke activations: none observed")
@@ -2540,12 +2578,67 @@ def render_save_backed_perks_markdown(perks: Any) -> list[str]:
 
 
 def _render_activation_wave(event: Mapping[str, Any]) -> str:
-    wave = event.get("approximate_wave")
+    wave = _activation_wave_value(event)
     wave_text = str(wave) if wave is not None else "unknown wave"
-    detected_at = event.get("detected_at")
+    detected_at = _activation_observed_at(event)
+    if event.get("wave_precision") == "exact":
+        if detected_at:
+            return f"exactly wave {wave_text} (save captured {detected_at})"
+        return f"exactly wave {wave_text}"
+    if event.get("wave_precision") == "save_timer":
+        label = "waves" if _activation_wave_is_range(event) else "wave"
+        if detected_at:
+            return f"save-derived {label} {wave_text} (save captured {detected_at})"
+        return f"save-derived {label} {wave_text}"
     if detected_at:
         return f"approximately wave {wave_text} (detected {detected_at})"
     return f"approximately wave {wave_text}"
+
+
+def _activation_wave_value(event: Mapping[str, Any]) -> Any:
+    if event.get("wave_precision") in {"exact", "save_timer"}:
+        minimum = event.get("activation_wave_min")
+        maximum = event.get("activation_wave_max")
+        if type(minimum) is int and type(maximum) is int:
+            return minimum if minimum == maximum else f"{minimum}–{maximum}"
+        derived_wave = event.get("activation_wave")
+        if derived_wave is not None:
+            return derived_wave
+    return event.get("approximate_wave")
+
+
+def _activation_wave_is_range(event: Mapping[str, Any]) -> bool:
+    minimum = event.get("activation_wave_min")
+    maximum = event.get("activation_wave_max")
+    return (
+        type(minimum) is int
+        and type(maximum) is int
+        and minimum != maximum
+    )
+
+
+def _activation_rearm_wave_value(event: Mapping[str, Any]) -> Any:
+    minimum = event.get("rearm_wave_min")
+    maximum = event.get("rearm_wave_max")
+    if type(minimum) is int and type(maximum) is int:
+        return minimum if minimum == maximum else f"{minimum}–{maximum}"
+    return event.get("estimated_rearm_wave")
+
+
+def _activation_precision_label(event: Mapping[str, Any]) -> str:
+    if event.get("wave_precision") == "exact":
+        return "Exact (save timer)"
+    if event.get("wave_precision") == "save_timer":
+        return "Save-derived (timer)"
+    return "Approximate (visual)"
+
+
+def _activation_observed_at(event: Mapping[str, Any]) -> str:
+    if event.get("wave_precision") in {"exact", "save_timer"}:
+        return str(
+            event.get("save_observed_at") or event.get("detected_at") or ""
+        )
+    return str(event.get("detected_at") or "")
 
 
 def _default_ocr_data(frame: Frame) -> Mapping[str, Sequence[Any]]:

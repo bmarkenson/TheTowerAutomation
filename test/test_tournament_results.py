@@ -254,7 +254,10 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
         "45K | 900M | 800 | x4.800 |"
     ) in markdown
     assert "## Survival ability activations" in markdown
-    assert "| 1 | 2100 | 2500 | 2026-07-18T05:30:00-07:00 |" in markdown
+    assert (
+        "| 1 | 2100 | Approximate (visual) | 2500 | "
+        "2026-07-18T05:30:00-07:00 |"
+    ) in markdown
     assert "Demon Mode first activation: approximately wave 2120" in markdown
     assert "## Battle conditions" in markdown
     assert "Codes: DR / TR / AR / MB / DD / PU / MAE / SD / SRM" in markdown

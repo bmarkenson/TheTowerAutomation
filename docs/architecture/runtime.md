@@ -527,12 +527,13 @@ upgrade component unavailable rather than guessing from a large value.
 
 Survival abilities are checkpoint state, not an event log. Demon Mode, Nuke,
 and Second Wind each expose round counts plus candidate active, cooldown,
-recharge-wave, and effect-timeout fields. Those fields may establish that an
-activation occurred and, after causal calibration, may identify the latest
-activation wave from a countdown or absolute-wave relationship. A single late
-snapshot cannot by itself reconstruct every earlier activation. Exact waves
-must never be inferred until the versioned mapping proves the field units,
-sentinels, reset behavior, recharge length, and serialization timing.
+recharge-wave, and effect-timeout fields. The narrow version-1101 capability
+uses only plural counts, active refresh countdowns, and recharge research to
+derive the latest activation's save-timer candidate. Two ordinary checkpoints
+may capture adjacent field-update phases, so repeated candidates accumulate a
+bounded range rather than being mislabeled exact. A single late snapshot cannot
+reconstruct every earlier activation, and the remaining booleans, timers,
+reset behavior, and broader state remain unpublished.
 
 The history component accepts the game's source-ordered list of at most 30
 entries and allowlist-validates the required members of its newest entry while
@@ -586,15 +587,17 @@ rules:
 5. The Perk monitor retains the newest complete same-round prefix across
    post-run clearing. The active-run metric monitor rejects inactive values,
    retains bounded active component timelines, and reconciles the last values
-   only against a bound natural terminal. Future upgrade and survival owners
-   must establish their own independent retention rules.
+   only against a bound natural terminal. The active survival tracker is
+   process-local; future upgrade and terminal-survival owners must establish
+   their own independent retention rules.
 6. Stable save checkpoints and passive visual events merge monotonically. A
    count increase establishes that one or more activations occurred in the
    half-open interval `(prior saved wave, current saved wave]`. It produces an
-   exact wave only when a calibrated timer relation or a matching visual
-   transition supports one; otherwise the record retains the interval, count
-   delta, and provenance without distributing multiple events across invented
-   waves.
+   save-derived candidate only when the versioned timer relation supports one.
+   Repeated candidates bound that event's range; otherwise the record retains
+   the interval, count delta, and provenance without distributing multiple
+   events across invented waves. A nearby visual transition merges without
+   upgrading its independent approximate wave to exact.
 7. The visual activation tracker remains active. Its confirmed transition
    event and first evidence frame can fill the tail after the last stable
    active save, survive a save-field clear at Game Over, and refine a
@@ -745,13 +748,17 @@ session. Its bounded normalized-evidence schema retains only:
   already-confirmed visual activation events, with an optional relative
   evidence-image reference.
 
-The optional normalized-component path is separately manifest-gated. The
-committed survival component remains disabled because
-`V1073-RUNTIME-015`/`016` have not promoted its polarity, counters, timers, or
-merge semantics; no survival state or exact activation wave is guessed. A
-disabled or rejected optional component cannot erase a valid core receipt.
-Visual waves are explicitly approximate observations, never exact activation
-waves.
+The optional auditor normalized-component path is separately manifest-gated.
+Its broad legacy survival component remains disabled: the ordinary runtime does
+not route the new narrow version-1101 capability through that campaign log.
+Instead, `V1101-RUNTIME-018` publishes only three cumulative use counts, three
+refresh countdowns, and their recharge-research dependencies through the shared
+typed acquisition. The run-scoped activation tracker may upgrade the latest
+counted event to a save-derived wave or bounded range only when that active-save
+timer passes its identity, ordering, count, curve, and recharge-window guards. A disabled or
+rejected auditor component cannot erase a valid core receipt, and a rejected
+ordinary ability cannot erase the other abilities. Visual-only waves remain
+explicitly approximate.
 
 Unknown-field discovery remains a separate, targeted mapping-calibration
 workflow that gathers purpose-specific evidence. The auditor is not a raw

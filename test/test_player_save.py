@@ -64,7 +64,10 @@ from core.profile_progression import (
     normalize_profile_progression,
 )
 from core.runtime_save import runtime_with_perk_id_overrides
-from core.runtime_save import active_tally_contract_fingerprints
+from core.runtime_save import (
+    active_tally_contract_fingerprints,
+    survival_activation_contract_fingerprints,
+)
 
 
 CAPTURED_AT = datetime(2026, 7, 31, 20, 0, tzinfo=timezone.utc)
@@ -194,7 +197,7 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
     assert manifest["field_name_sha256"] == _raw_field_name_sha256(names)
     assert len(manifest["dispositions"]["automation_gating"]) == 40
     assert len(manifest["dispositions"]["profile_observation"]) == 48
-    assert len(manifest["dispositions"]["unknown"]) == 508
+    assert len(manifest["dispositions"]["unknown"]) == 502
     assert set(names) - old_names == {
         "enemiesKilledThisWave",
         "enemiesSpawnedThisWave",
@@ -204,7 +207,7 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
         "enemiesKilledThisWave",
         "enemiesSpawnedThisWave",
     } <= set(manifest["dispositions"]["unknown"])
-    assert len(manifest["dispositions"]["runtime_observation"]) == 29
+    assert len(manifest["dispositions"]["runtime_observation"]) == 35
     _validate_runtime_save_extensions(
         VERSION_1101_MAPPING,
         source="v1101 test mapping",
@@ -212,6 +215,9 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
     assert VERSION_1101_MAPPING["runtime_save_extensions"][
         "active_tallies"
     ]["audit_id"] == "V1101-RUNTIME-017"
+    assert VERSION_1101_MAPPING["runtime_save_extensions"][
+        "survival_ability_activations"
+    ]["audit_id"] == "V1101-RUNTIME-018"
 
     unchanged_semantic_sections = {
         "auto_pick_order",
@@ -591,6 +597,8 @@ def _decoded_save_v1101() -> dict:
             "coinsEarnedWaveSkipThisRound": 2_530_000_000_000_000_000.0,
             "critCoinCoinsThisRound": 12_900_000_000_000_000.0,
             "deathWaveCoinsThisRound": 243_000_000_000_000_000.0,
+            "demonModeWavesUntilRefresh": 999_550,
+            "demonModesUsedThisRound": 0,
             "enemyAttackLevelSkips": 2915,
             "enemyHealthLevelSkips": 3194,
             "freeAttackUpgradesThisRound": 598,
@@ -600,8 +608,12 @@ def _decoded_save_v1101() -> dict:
             "goldenTowerCoinsThisRound": 440_000_000_000_000_000.0,
             "goldenTowerPlusCoinsThisRound": 4_250_000_000_000_000_000.0,
             "highestCPMThisRound": 43_535_364_765_253_630.0,
+            "nukeWavesUntilRefresh": 999_550,
+            "nukesUsedThisRound": 0,
             "orbCoinsThisRound": 106_000_000_000_000_000.0,
             "realTimeThisRound": 15_988.3486328125,
+            "secondWindWavesUntilRefresh": 999_550,
+            "secondWindsUsedThisRound": 0,
             "spotlightCoinsThisRound": 297_000_000_000_000_000.0,
             "totalCoinsByBotThisRound": 401_000_000_000_000_000.0,
             "totalCoinsFetchedByGuardianThisRound": 6_000_000_000_000_000.0,
@@ -610,6 +622,9 @@ def _decoded_save_v1101() -> dict:
             "wavesSkippedThisRound": 2911,
         }
     )
+    payload["researchLevel"][145] = 7
+    payload["researchLevel"][146] = 7
+    payload["researchLevel"][149] = 7
     return payload
 
 
@@ -862,6 +877,162 @@ def test_v1101_active_tally_failure_isolated_to_one_leaf(monkeypatch):
     assert "changed-shape" not in json.dumps(payload)
 
 
+@pytest.mark.parametrize(
+    (
+        "ability",
+        "count_field",
+        "refresh_field",
+        "recharge_waves",
+    ),
+    (
+        ("demon_mode", "demonModesUsedThisRound", "demonModeWavesUntilRefresh", 300),
+        ("nuke", "nukesUsedThisRound", "nukeWavesUntilRefresh", 300),
+        (
+            "second_wind",
+            "secondWindsUsedThisRound",
+            "secondWindWavesUntilRefresh",
+            400,
+        ),
+    ),
+)
+def test_v1101_survival_refresh_timer_derives_activation_wave_candidate(
+    monkeypatch,
+    ability,
+    count_field,
+    refresh_field,
+    recharge_waves,
+):
+    decoded = _decoded_save_v1101()
+    saved_wave = 5_600
+    activation_wave = 5_507
+    decoded["currentWave"] = saved_wave
+    for field in (
+        "demonModeWavesUntilRefresh",
+        "nukeWavesUntilRefresh",
+        "secondWindWavesUntilRefresh",
+    ):
+        decoded[field] = 1_000_000 - saved_wave
+    decoded[count_field] = 1
+    decoded[refresh_field] = activation_wave + recharge_waves - saved_wave
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+    runtime = snapshot.runtime_save
+
+    assert runtime is not None
+    activations = runtime.survival_ability_activations
+    assert activations is not None
+    assert activations.status == "observed"
+    payload = activations.as_dict()
+    observed = payload["abilities"][ability]
+    assert observed["activation_count"] == 1
+    assert observed["refresh_wave"] == activation_wave + recharge_waves
+    assert observed["recharge_research_level"] == 7
+    assert observed["recharge_waves"] == recharge_waves
+    assert observed["activation_wave"] == {
+        "status": "derived",
+        "reason": "",
+        "value": activation_wave,
+        "precision": "save_timer",
+        "derivation": (
+            "saved_wave + waves_until_refresh - recharge_waves"
+        ),
+    }
+    capability = snapshot.capability(
+        "thetower.player_save.survival_ability_activations.v1"
+    )
+    assert capability is not None
+    assert capability.status == "observed"
+    assert capability.authority_id == "V1101-RUNTIME-018"
+
+
+def test_v1101_inactive_survival_timer_skew_does_not_invent_activation(
+    monkeypatch,
+):
+    decoded = _decoded_save_v1101()
+    for field in (
+        "demonModeWavesUntilRefresh",
+        "nukeWavesUntilRefresh",
+        "secondWindWavesUntilRefresh",
+    ):
+        decoded[field] -= 2
+    runtime = _snapshot_v1101(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    activations = runtime.survival_ability_activations
+    assert activations is not None
+    payload = activations.as_dict()
+    assert payload["status"] == "observed"
+    assert all(
+        ability["activation_wave"]["status"] == "not_observed"
+        and ability["activation_wave"]["reason"] == "activation_count_zero"
+        and ability["refresh_wave"] == 999_998
+        for ability in payload["abilities"].values()
+    )
+
+
+def test_v1101_positive_count_without_active_countdown_remains_untimed(
+    monkeypatch,
+):
+    decoded = _decoded_save_v1101()
+    decoded["secondWindsUsedThisRound"] = 1
+
+    runtime = _snapshot_v1101(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    activations = runtime.survival_ability_activations
+    assert activations is not None
+    second_wind = activations.as_dict()["abilities"]["second_wind"]
+    assert second_wind["activation_count"] == 1
+    assert second_wind["activation_wave"]["status"] == "not_observed"
+    assert second_wind["activation_wave"]["reason"] == (
+        "refresh_timer_inactive_at_checkpoint"
+    )
+
+
+def test_v1101_survival_field_failure_isolated_to_one_ability(monkeypatch):
+    decoded = _decoded_save_v1101()
+    decoded["nukeWavesUntilRefresh"] = "changed-shape"
+
+    runtime = _snapshot_v1101(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    activations = runtime.survival_ability_activations
+    assert activations is not None
+    payload = activations.as_dict()
+    assert payload["status"] == "partial"
+    assert payload["abilities"]["nuke"]["status"] == "unavailable"
+    assert payload["abilities"]["demon_mode"]["status"] == "observed"
+    assert payload["abilities"]["second_wind"]["status"] == "observed"
+    assert "changed-shape" not in json.dumps(payload)
+
+
+def test_survival_activation_contract_separates_semantics_from_raw_binding():
+    original = copy.deepcopy(
+        VERSION_1101_MAPPING["runtime_save_extensions"][
+            "survival_ability_activations"
+        ]
+    )
+    semantic, binding = survival_activation_contract_fingerprints(original)
+
+    rebound = copy.deepcopy(original)
+    rebound["abilities"]["nuke"]["waves_until_refresh_source"] = (
+        "renamedNukeRefresh"
+    )
+    rebound_semantic, rebound_binding = (
+        survival_activation_contract_fingerprints(rebound)
+    )
+    changed_semantics = copy.deepcopy(original)
+    changed_semantics["abilities"]["nuke"]["recharge_waves_by_level"][7] = 301
+    changed_semantic, changed_binding = (
+        survival_activation_contract_fingerprints(changed_semantics)
+    )
+
+    assert rebound_semantic == semantic
+    assert rebound_binding != binding
+    assert changed_semantic != semantic
+    assert changed_binding == binding
+
+
 def test_active_tally_contract_separates_semantics_from_raw_binding():
     original = copy.deepcopy(
         VERSION_1101_MAPPING["runtime_save_extensions"]["active_tallies"]
@@ -1111,6 +1282,10 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
     assert snapshot.runtime_save.active_round_identity.game_version == 1102
     assert snapshot.runtime_save.active_tallies is not None
     assert snapshot.runtime_save.active_tallies.status == "observed"
+    assert snapshot.runtime_save.survival_ability_activations is None
+    assert snapshot.runtime_save.survival_ability_activations_reason == (
+        "survival_activation_mapping_unavailable"
+    )
     capability = snapshot.capability(
         "thetower.player_save.active_run_tallies.v1"
     )
@@ -1124,6 +1299,9 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
     assert capability.binding_fingerprint == (
         provider_capability.binding_fingerprint
     )
+    assert snapshot.capability(
+        "thetower.player_save.survival_ability_activations.v1"
+    ) is None
     assert snapshot.profile_progression["status"] == "unavailable"
     assert snapshot.profile_progression["reason"] == (
         "exact_version_progression_mapping_unavailable"
@@ -1255,6 +1433,10 @@ def test_unknown_data_lineage_resolves_only_declared_semantic_capability(
     assert snapshot.runtime_save.battle_history_tail.terminal_identity_reason == ""
     assert "987654321" not in json.dumps(snapshot.as_dict())
     assert snapshot.runtime_save.active_tallies is not None
+    assert snapshot.runtime_save.survival_ability_activations is None
+    assert snapshot.capability(
+        "thetower.player_save.survival_ability_activations.v1"
+    ) is None
     capability = snapshot.capability(
         "thetower.player_save.active_run_tallies.v1"
     )

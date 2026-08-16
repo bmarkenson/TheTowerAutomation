@@ -79,34 +79,36 @@ as checked checkpoint narrative here.
     or remove it. Do not enable it merely for this review. If retained, decide
     whether the unconfirmed direct-Retry rollover or `V1073-RUNTIME-015`/`016`
     warrants a bounded campaign.
-  - [ ] Extend the semantic runtime capability registry with independently failing
-    active-upgrade, survival-ability, and remaining allowlisted live-tally
-    claims. The capability whose authority originates at version 1101 already
-    publishes the 29 validated economy, progress, and coin-source counters
-    documented in the
+  - [ ] Extend the semantic runtime capability registry with independently
+    failing active-upgrade and remaining allowlisted live-tally claims. The
+    capabilities whose authority originates at version 1101 already publish
+    the 29 validated economy, progress, and coin-source counters plus the
+    narrow guarded survival-activation timing contract documented in the
     [versioned audit matrix](../architecture/player_save.md#versioned-audit-addition-data-9-game-1101);
-    exact 1073 remains unavailable, while unknown additive forward revisions
-    may inherit only those declared claims. For upgrades,
+    exact 1073 remains unavailable. Unknown additive forward revisions may
+    inherit only the declared tally claims; survival timing remains
+    exact-version-only. For upgrades,
     map all three current-level arrays to their Workshop baselines and versioned
     caps so a gold-box claim is explicit rather than inferred from magnitude.
-    Damage, resource, upgrade, survival, and other unvalidated candidates remain
-    unavailable. Prioritize only values that replace an existing
+    Damage, resource, upgrade, broad survival state, and other unvalidated
+    candidates remain unavailable. Prioritize only values that replace an existing
     OCR/navigation route or reconcile a terminal record, and keep the arbitrary
     decoded root private.
-  - [ ] Causally calibrate Demon Mode, Nuke, and Second Wind active-round
-    fields across natural activation, recharge, repeated activation, Game
-    Over, and clearing. Establish use-count polarity, sentinel values, timer
-    units, recharge lengths, and whether each countdown/timeout yields an exact
-    activation wave or only bounds it between stable save waves. Validate each
-    ability independently and do not infer a complete history from one late
-    snapshot.
-  - [ ] Merge stable same-round save checkpoints with the existing passive
-    visual activation tracker. Count deltas establish event intervals; a
-    matching visual transition may refine an interval without double counting.
-    Cache the newest complete active snapshot across post-run clearing, retain
-    confirmed screenshot-derived events after its saved wave through Game
-    Over, and reconcile the merged events with terminal Battle History counts.
-    Missing timing remains unknown/bounded; conflicts force the full UI audit.
+  - [ ] Complete calibration of the remaining Demon Mode, Nuke, and Second
+    Wind active-round booleans, effect timeouts, and non-refresh timers across
+    manual/automatic activation, repeated recharge, Game Over, and clearing.
+    The narrow version-1101 capability now owns plural counts, the
+    inactive/out-of-window timer handling, versioned recharge curves, and
+    guarded latest-event timing ranges. Validate any broader state independently and do not
+    infer a complete history from one late snapshot.
+  - [ ] Complete post-clear and terminal reconciliation for the merged survival
+    activation timeline. The ordinary run tracker now consumes stable
+    same-round save checkpoints, keys exact refresh-timer evidence by count,
+    and merges nearby visual transitions without double counting. Add durable
+    cross-process retention where justified, retain confirmed visual events
+    after the newest active save through Game Over, and reconcile all observed
+    sequences with terminal Battle History counts. Missing intermediate timing
+    remains unknown; conflicts must not synthesize a wave.
   - [ ] Inventory checkpoint candidates that could replace other observation
     routes, including game speed, buy quantities, Card activity, and
     UW/Bot/Guardian cooldowns. Rank them by navigation/OCR cost and staleness

@@ -23,6 +23,7 @@ from core.read_only_data import deep_freeze, deep_thaw
 
 RUNTIME_SAVE_SCHEMA_VERSION = 3
 ACTIVE_RUN_TALLIES_SCHEMA_VERSION = 1
+SURVIVAL_ABILITY_ACTIVATIONS_SCHEMA_VERSION = 1
 HISTORY_ENTRY_SCHEMA_VERSION = 1
 HISTORY_TAIL_IDENTITY_SCHEMA_VERSION = 2
 DOTNET_TICKS_MASK = 0x3FFFFFFFFFFFFFFF
@@ -268,6 +269,85 @@ class ActiveRunTalliesSnapshot:
             "components": {
                 component.name: component.as_dict()
                 for component in self.components
+            },
+            "ui_action_authority": False,
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeSurvivalAbilityActivation:
+    """Latest active-round activation evidence for one survival ability."""
+
+    ability: str
+    status: str
+    reason: str
+    activation_count: Optional[int] = None
+    waves_until_refresh: Optional[int] = None
+    refresh_wave: Optional[int] = None
+    recharge_research_level: Optional[int] = None
+    recharge_waves: Optional[int] = None
+    activation_wave_status: str = "unavailable"
+    activation_wave_reason: str = "ability_unavailable"
+    activation_wave: Optional[int] = None
+    source_fields: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "activation_count": self.activation_count,
+            "waves_until_refresh": self.waves_until_refresh,
+            "refresh_wave": self.refresh_wave,
+            "recharge_research_level": self.recharge_research_level,
+            "recharge_waves": self.recharge_waves,
+            "activation_wave": {
+                "status": self.activation_wave_status,
+                "reason": self.activation_wave_reason,
+                "value": self.activation_wave,
+                "precision": (
+                    "save_timer"
+                    if self.activation_wave_status == "derived"
+                    else None
+                ),
+                "derivation": (
+                    "saved_wave + waves_until_refresh - recharge_waves"
+                    if self.activation_wave_status == "derived"
+                    else None
+                ),
+            },
+            "source_fields": list(self.source_fields),
+        }
+
+
+@dataclass(frozen=True)
+class SurvivalAbilityActivationsSnapshot:
+    """Versioned save-timer evidence for active-round survival abilities."""
+
+    status: str
+    reason: str
+    state: str
+    audit_id: str
+    evidence_level: str
+    abilities: tuple[RuntimeSurvivalAbilityActivation, ...]
+    capability_id: str = ""
+    semantic_fingerprint: str = ""
+    binding_fingerprint: str = ""
+    forward_policy: str = "none"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": SURVIVAL_ABILITY_ACTIVATIONS_SCHEMA_VERSION,
+            "status": self.status,
+            "reason": self.reason,
+            "state": self.state,
+            "capability_id": self.capability_id,
+            "semantic_fingerprint": self.semantic_fingerprint,
+            "binding_fingerprint": self.binding_fingerprint,
+            "forward_policy": self.forward_policy,
+            "audit_id": self.audit_id,
+            "evidence_level": self.evidence_level,
+            "abilities": {
+                ability.ability: ability.as_dict() for ability in self.abilities
             },
             "ui_action_authority": False,
         }
@@ -523,6 +603,11 @@ class NormalizedRuntimeSave:
     active_tallies_status: str = "unavailable"
     active_tallies_reason: str = "mapping_unavailable"
     active_tallies: Optional[ActiveRunTalliesSnapshot] = None
+    survival_ability_activations_status: str = "unavailable"
+    survival_ability_activations_reason: str = "mapping_unavailable"
+    survival_ability_activations: Optional[
+        SurvivalAbilityActivationsSnapshot
+    ] = None
     active_identity_status: str = "unavailable"
     active_identity_reason: str = "identity_unavailable"
     save_revision_status: str = "observed"
@@ -591,6 +676,26 @@ class NormalizedRuntimeSave:
                         else "round_state_unavailable"
                     ),
                     "components": {},
+                    "ui_action_authority": False,
+                }
+            ),
+            "survival_ability_activations": (
+                self.survival_ability_activations.as_dict()
+                if self.survival_ability_activations is not None
+                else {
+                    "schema_version": (
+                        SURVIVAL_ABILITY_ACTIVATIONS_SCHEMA_VERSION
+                    ),
+                    "status": self.survival_ability_activations_status,
+                    "reason": self.survival_ability_activations_reason,
+                    "state": (
+                        "active_round"
+                        if self.round_active is True
+                        else "inactive_round"
+                        if self.round_active is False
+                        else "round_state_unavailable"
+                    ),
+                    "abilities": {},
                     "ui_action_authority": False,
                 }
             ),
@@ -785,6 +890,36 @@ def normalize_runtime_save(
             active_tallies_status = active_tallies.status
             active_tallies_reason = active_tallies.reason
 
+    if round_active is None:
+        survival_ability_activations = None
+        survival_ability_activations_status = "unavailable"
+        survival_ability_activations_reason = round_state_reason
+    elif current_wave is None:
+        survival_ability_activations = None
+        survival_ability_activations_status = "unavailable"
+        survival_ability_activations_reason = current_wave_reason
+    else:
+        try:
+            survival_ability_activations = (
+                _normalize_survival_ability_activations(
+                    decoded,
+                    runtime_spec,
+                    round_active=round_active,
+                    current_wave=current_wave,
+                )
+            )
+        except _ComponentUnavailable as exc:
+            survival_ability_activations = None
+            survival_ability_activations_status = "unavailable"
+            survival_ability_activations_reason = str(exc)
+        else:
+            survival_ability_activations_status = (
+                survival_ability_activations.status
+            )
+            survival_ability_activations_reason = (
+                survival_ability_activations.reason
+            )
+
     return NormalizedRuntimeSave(
         mapping_id=str(mapping.get("mapping_id") or ""),
         audit_matrix_id=audit_matrix_id,
@@ -801,6 +936,13 @@ def normalize_runtime_save(
         active_tallies_status=active_tallies_status,
         active_tallies_reason=active_tallies_reason,
         active_tallies=active_tallies,
+        survival_ability_activations_status=(
+            survival_ability_activations_status
+        ),
+        survival_ability_activations_reason=(
+            survival_ability_activations_reason
+        ),
+        survival_ability_activations=survival_ability_activations,
         active_identity_status=active_identity_status,
         active_identity_reason=active_identity_reason,
         save_revision_status=save_revision_status,
@@ -895,6 +1037,283 @@ def active_tally_contract_fingerprints(
         }
     )
     return semantic, binding
+
+
+def survival_activation_contract_fingerprints(
+    activation_spec: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Return semantic and raw-binding fingerprints for save-timer evidence."""
+
+    capability_id = str(activation_spec.get("capability_id") or "").strip()
+    scope = activation_spec.get("scope")
+    abilities = activation_spec.get("abilities")
+    if (
+        not capability_id
+        or not isinstance(scope, Mapping)
+        or not isinstance(abilities, Mapping)
+        or not abilities
+    ):
+        raise RuntimeSaveNormalizationError(
+            "survival activation semantic contract is unavailable"
+        )
+    semantics = scope.get("semantics")
+    binding_scope = scope.get("binding")
+    if not isinstance(semantics, Mapping) or not isinstance(
+        binding_scope, Mapping
+    ):
+        raise RuntimeSaveNormalizationError(
+            "survival activation scope contract changed shape"
+        )
+    semantic_abilities: dict[str, Any] = {}
+    binding_abilities: dict[str, Any] = {}
+    for ability_name, ability_spec in sorted(abilities.items()):
+        if not isinstance(ability_spec, Mapping):
+            raise RuntimeSaveNormalizationError(
+                "survival activation ability contract changed shape"
+            )
+        semantic_abilities[str(ability_name)] = {
+            "recharge_waves_by_level": list(
+                ability_spec.get("recharge_waves_by_level") or ()
+            ),
+        }
+        binding_abilities[str(ability_name)] = {
+            "count_source": ability_spec.get("count_source"),
+            "waves_until_refresh_source": ability_spec.get(
+                "waves_until_refresh_source"
+            ),
+            "recharge_research_index": ability_spec.get(
+                "recharge_research_index"
+            ),
+        }
+    semantic = _fingerprint(
+        {
+            "capability_id": capability_id,
+            "scope": dict(semantics),
+            "abilities": semantic_abilities,
+        }
+    )
+    binding = _fingerprint(
+        {
+            "capability_id": capability_id,
+            "scope": dict(binding_scope),
+            "abilities": binding_abilities,
+        }
+    )
+    return semantic, binding
+
+
+def _normalize_survival_ability_activations(
+    decoded: Mapping[str, Any],
+    runtime_spec: Mapping[str, Any],
+    *,
+    round_active: bool,
+    current_wave: int,
+) -> SurvivalAbilityActivationsSnapshot:
+    activation_spec = runtime_spec.get("survival_ability_activations")
+    if not isinstance(activation_spec, Mapping):
+        raise _ComponentUnavailable("survival_activation_mapping_unavailable")
+    if (
+        activation_spec.get("schema_version")
+        != SURVIVAL_ABILITY_ACTIVATIONS_SCHEMA_VERSION
+    ):
+        raise _ComponentUnavailable("survival_activation_mapping_schema_changed")
+    audit_id = str(activation_spec.get("audit_id") or "")
+    evidence_level = str(activation_spec.get("evidence_level") or "")
+    capability_id = str(activation_spec.get("capability_id") or "")
+    forward_policy = str(activation_spec.get("forward_policy") or "")
+    if (
+        not audit_id
+        or evidence_level != "live_causal"
+        or capability_id
+        != "thetower.player_save.survival_ability_activations.v1"
+        or forward_policy != "exact_version_only"
+    ):
+        raise _ComponentUnavailable("survival_activation_mapping_authority_changed")
+    semantic_fingerprint, binding_fingerprint = (
+        survival_activation_contract_fingerprints(activation_spec)
+    )
+    ability_specs = activation_spec.get("abilities")
+    scope = activation_spec.get("scope")
+    scope_semantics = scope.get("semantics") if isinstance(scope, Mapping) else None
+    scope_binding = scope.get("binding") if isinstance(scope, Mapping) else None
+    if (
+        not isinstance(ability_specs, Mapping)
+        or not ability_specs
+        or not isinstance(scope_semantics, Mapping)
+        or not isinstance(scope_binding, Mapping)
+    ):
+        raise _ComponentUnavailable("survival_activation_abilities_unavailable")
+
+    if not round_active:
+        return SurvivalAbilityActivationsSnapshot(
+            status="not_applicable",
+            reason="round_inactive",
+            state="inactive_round",
+            capability_id=capability_id,
+            semantic_fingerprint=semantic_fingerprint,
+            binding_fingerprint=binding_fingerprint,
+            forward_policy=forward_policy,
+            audit_id=audit_id,
+            evidence_level=evidence_level,
+            abilities=tuple(
+                RuntimeSurvivalAbilityActivation(
+                    ability=str(ability_name),
+                    status="not_applicable",
+                    reason="round_inactive",
+                    activation_wave_reason="round_inactive",
+                )
+                for ability_name in ability_specs
+            ),
+        )
+
+    research_vector_source = str(
+        scope_binding.get("research_vector") or ""
+    )
+    if (
+        scope_semantics.get("inactive_timer_handling")
+        != "count_zero_or_outside_recharge_window"
+        or scope_semantics.get("merged_precision")
+        != "observed_save_timer_candidate_range"
+    ):
+        raise _ComponentUnavailable("survival_activation_timer_guard_changed")
+
+    abilities: list[RuntimeSurvivalAbilityActivation] = []
+    for ability_name, ability_spec in ability_specs.items():
+        name = str(ability_name)
+        try:
+            ability = _normalize_survival_ability_activation(
+                decoded,
+                name=name,
+                spec=ability_spec,
+                current_wave=current_wave,
+                research_vector_source=research_vector_source,
+            )
+        except _ComponentUnavailable as exc:
+            ability = RuntimeSurvivalAbilityActivation(
+                ability=name,
+                status="unavailable",
+                reason=str(exc),
+                activation_wave_reason=str(exc),
+            )
+        abilities.append(ability)
+    observed_count = sum(ability.status == "observed" for ability in abilities)
+    if observed_count == len(abilities):
+        status = "observed"
+        reason = ""
+    elif observed_count:
+        status = "partial"
+        reason = "one_or_more_survival_abilities_unavailable"
+    else:
+        status = "unavailable"
+        reason = "all_survival_abilities_unavailable"
+    return SurvivalAbilityActivationsSnapshot(
+        status=status,
+        reason=reason,
+        state="active_round",
+        capability_id=capability_id,
+        semantic_fingerprint=semantic_fingerprint,
+        binding_fingerprint=binding_fingerprint,
+        forward_policy=forward_policy,
+        audit_id=audit_id,
+        evidence_level=evidence_level,
+        abilities=tuple(abilities),
+    )
+
+
+def _normalize_survival_ability_activation(
+    decoded: Mapping[str, Any],
+    *,
+    name: str,
+    spec: Any,
+    current_wave: int,
+    research_vector_source: str,
+) -> RuntimeSurvivalAbilityActivation:
+    if not isinstance(spec, Mapping):
+        raise _ComponentUnavailable(f"survival_ability_changed:{name}")
+    count_source = str(spec.get("count_source") or "")
+    refresh_source = str(spec.get("waves_until_refresh_source") or "")
+    research_index = spec.get("recharge_research_index")
+    recharge_curve = spec.get("recharge_waves_by_level")
+    if (
+        not count_source
+        or not refresh_source
+        or not research_vector_source
+        or type(research_index) is not int
+        or research_index < 0
+        or not _is_sequence(recharge_curve)
+    ):
+        raise _ComponentUnavailable(f"survival_ability_changed:{name}")
+
+    count = _component_nonnegative_int(
+        decoded.get(count_source),
+        f"survival_activation_count:{name}",
+    )
+    waves_until_refresh = _component_nonnegative_int(
+        decoded.get(refresh_source),
+        f"survival_refresh_timer:{name}",
+    )
+    research_vector = decoded.get(research_vector_source)
+    if not _is_sequence(research_vector) or research_index >= len(
+        research_vector
+    ):
+        raise _ComponentUnavailable(
+            f"survival_recharge_research_unavailable:{name}"
+        )
+    research_level = _component_nonnegative_int(
+        research_vector[research_index],
+        f"survival_recharge_research_level:{name}",
+    )
+    recharge_waves: Optional[int] = None
+    if research_level < len(recharge_curve):
+        raw_recharge = recharge_curve[research_level]
+        if raw_recharge is not None:
+            recharge_waves = _component_nonnegative_int(
+                raw_recharge,
+                f"survival_recharge_curve:{name}",
+            )
+
+    refresh_wave = current_wave + waves_until_refresh
+    activation_wave_status = "unavailable"
+    activation_wave_reason = "refresh_timer_not_usable"
+    activation_wave: Optional[int] = None
+    if count == 0:
+        activation_wave_status = "not_observed"
+        activation_wave_reason = "activation_count_zero"
+    elif recharge_waves is None or recharge_waves <= 0:
+        activation_wave_reason = "recharge_research_level_unavailable"
+    elif waves_until_refresh > recharge_waves:
+        activation_wave_status = "not_observed"
+        activation_wave_reason = "refresh_timer_inactive_at_checkpoint"
+    else:
+        candidate = refresh_wave - recharge_waves
+        if (
+            waves_until_refresh <= recharge_waves
+            and 0 <= candidate <= current_wave <= refresh_wave
+        ):
+            activation_wave_status = "derived"
+            activation_wave_reason = ""
+            activation_wave = candidate
+        else:
+            activation_wave_reason = "refresh_timer_outside_recharge_window"
+
+    return RuntimeSurvivalAbilityActivation(
+        ability=name,
+        status="observed",
+        reason="",
+        activation_count=count,
+        waves_until_refresh=waves_until_refresh,
+        refresh_wave=refresh_wave,
+        recharge_research_level=research_level,
+        recharge_waves=recharge_waves,
+        activation_wave_status=activation_wave_status,
+        activation_wave_reason=activation_wave_reason,
+        activation_wave=activation_wave,
+        source_fields=(
+            count_source,
+            refresh_source,
+            f"{research_vector_source}[{research_index}]",
+        ),
+    )
 
 
 def _normalize_active_run_tallies(
@@ -2209,10 +2628,13 @@ __all__ = [
     "RuntimePerkPick",
     "RuntimePerkSnapshot",
     "RuntimeSaveNormalizationError",
+    "RuntimeSurvivalAbilityActivation",
     "RuntimeTallyClaimDefinition",
     "RuntimeTallyComponent",
     "RuntimeTallyMetric",
+    "SurvivalAbilityActivationsSnapshot",
     "active_tally_contract_fingerprints",
     "normalize_runtime_save",
     "runtime_with_perk_id_overrides",
+    "survival_activation_contract_fingerprints",
 ]

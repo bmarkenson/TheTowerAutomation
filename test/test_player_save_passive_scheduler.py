@@ -413,6 +413,7 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
         "accepted_checkpoint"
     )
     app._active_run_metric_monitor.latest_summary.return_value = None
+    app._battle_activation_tracker = Mock()
     app._player_save_audit_collector = Mock()
 
     app._consume_passive_player_save_bundle(
@@ -429,9 +430,30 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
         acquisition,
         context=context,
     )
+    app._battle_activation_tracker.observe_save_checkpoint.assert_called_once_with(
+        acquisition.snapshot.runtime_save,
+        expected_identity_fingerprint=(
+            context.active_round_identity_fingerprint
+        ),
+    )
     app._player_save_audit_collector.observe_acquisition.assert_called_once_with(
         acquisition,
         reason_code="perk_selection_boundary",
+    )
+
+
+def test_app_binds_activation_tracker_without_optional_save_monitors():
+    app = App.__new__(App)
+    context = _context()
+    app._perk_save_monitor = None
+    app._active_run_metric_monitor = None
+    app._battle_activation_tracker = Mock()
+    app._current_player_save_observation_context = Mock(return_value=context)
+
+    app._bind_new_perk_monitor_activity()
+
+    app._battle_activation_tracker.bind_round_identity.assert_called_once_with(
+        context.active_round_identity_fingerprint
     )
 
 

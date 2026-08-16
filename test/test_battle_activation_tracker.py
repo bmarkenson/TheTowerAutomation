@@ -7,6 +7,13 @@ import numpy as np
 
 from core.battle_activation_tracker import BattleActivationTracker
 from core.matcher import MatchResult, get_match_result
+from core.runtime_save import (
+    ActiveRoundIdentity,
+    BattleHistoryTail,
+    NormalizedRuntimeSave,
+    RuntimeSurvivalAbilityActivation,
+    SurvivalAbilityActivationsSnapshot,
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -21,6 +28,98 @@ def _match(*, visible: bool, failure_reason: str | None = None) -> MatchResult:
         search_region=(0, 0, 100, 100),
         failure_reason=failure_reason,
     )
+
+
+def _save_checkpoint(
+    *,
+    ability: str,
+    sequence: int,
+    activation_wave: int,
+    saved_wave: int,
+    recharge_waves: int,
+    save_revision: int = 200,
+    captured_at: str = "2026-08-16T12:00:00+00:00",
+) -> tuple[NormalizedRuntimeSave, str]:
+    identity = ActiveRoundIdentity(
+        game_version=1101,
+        current_tier=19,
+        rounds_started_this_tier=12,
+        round_seed=123456789,
+        fingerprint="a" * 64,
+    )
+    abilities = []
+    for name in ("demon_mode", "nuke", "second_wind"):
+        if name == ability:
+            refresh_wave = activation_wave + recharge_waves
+            abilities.append(
+                RuntimeSurvivalAbilityActivation(
+                    ability=name,
+                    status="observed",
+                    reason="",
+                    activation_count=sequence,
+                    waves_until_refresh=refresh_wave - saved_wave,
+                    refresh_wave=refresh_wave,
+                    recharge_research_level=7,
+                    recharge_waves=recharge_waves,
+                    activation_wave_status="derived",
+                    activation_wave_reason="",
+                    activation_wave=activation_wave,
+                )
+            )
+        else:
+            abilities.append(
+                RuntimeSurvivalAbilityActivation(
+                    ability=name,
+                    status="observed",
+                    reason="",
+                    activation_count=0,
+                    waves_until_refresh=1_000_000 - saved_wave,
+                    refresh_wave=1_000_000,
+                    recharge_research_level=7,
+                    recharge_waves=400 if name == "second_wind" else 300,
+                    activation_wave_status="not_observed",
+                    activation_wave_reason="activation_count_zero",
+                )
+            )
+    activation_snapshot = SurvivalAbilityActivationsSnapshot(
+        status="observed",
+        reason="",
+        state="active_round",
+        capability_id="thetower.player_save.survival_ability_activations.v1",
+        semantic_fingerprint="b" * 64,
+        binding_fingerprint="c" * 64,
+        forward_policy="exact_version_only",
+        audit_id="V1101-RUNTIME-018",
+        evidence_level="live_causal",
+        abilities=tuple(abilities),
+    )
+    history = BattleHistoryTail(
+        structural_status="observed",
+        structural_reason="",
+        entry_count=0,
+        capacity=30,
+        identity=None,
+        completed_entry_status="unavailable",
+        completed_entry_reason="battle_history_empty",
+        entry=None,
+    )
+    runtime = NormalizedRuntimeSave(
+        mapping_id="data-9-game-1101",
+        audit_matrix_id="V1073-RUNTIME-001",
+        capture={"captured_at": captured_at},
+        save_revision=save_revision,
+        round_active=True,
+        current_wave=saved_wave,
+        active_round_identity=identity,
+        perks_status="unavailable",
+        perks_reason="not_needed",
+        perks=None,
+        battle_history_tail=history,
+        survival_ability_activations_status="observed",
+        survival_ability_activations_reason="",
+        survival_ability_activations=activation_snapshot,
+    )
+    return runtime, identity.fingerprint
 
 
 def test_tracker_records_first_demon_mode_and_every_rearmed_nuke():
@@ -93,6 +192,205 @@ def test_tracker_records_first_demon_mode_and_every_rearmed_nuke():
 
     snapshot["nuke_activations"].clear()
     assert len(tracker.snapshot()["nuke_activations"]) == 2
+
+
+def test_save_refresh_timer_records_derived_activation_without_visual_event():
+    tracker = BattleActivationTracker()
+    runtime, identity = _save_checkpoint(
+        ability="nuke",
+        sequence=2,
+        activation_wave=5_507,
+        saved_wave=5_600,
+        recharge_waves=300,
+    )
+    assert tracker.observe_save_checkpoint(
+        runtime,
+        expected_identity_fingerprint=identity,
+    ) == []
+    assert tracker.bind_round_identity(identity)
+
+    upgraded = tracker.observe_save_checkpoint(
+        runtime,
+        expected_identity_fingerprint=identity,
+    )
+
+    assert len(upgraded) == 1
+    event = upgraded[0]
+    assert event["sequence"] == 2
+    assert event["activation_wave"] == 5_507
+    assert event["approximate_wave"] == 5_507
+    assert event["activation_wave_min"] == 5_507
+    assert event["activation_wave_max"] == 5_507
+    assert event["wave_precision"] == "save_timer"
+    assert event["wave_source"] == "player_save_refresh_timer"
+    assert event["saved_wave"] == 5_600
+    assert event["refresh_wave"] == 5_807
+    assert event["recharge_waves"] == 300
+    snapshot = tracker.snapshot()
+    assert snapshot["schema_version"] == 5
+    assert snapshot["source"] == "player_save_refresh_timer"
+    assert snapshot["nuke_activations"] == [event]
+
+
+def test_save_refresh_timer_upgrades_matching_visual_wave_without_double_count():
+    tracker = BattleActivationTracker()
+    visual = tracker._record_visual_event(
+        {
+            "ability": "nuke",
+            "sequence": 1,
+            "approximate_wave": 5_510,
+            "wave_precision": "approximate",
+            "wave_source": "visual_wave_ocr",
+            "wave_confidence": 98.4,
+            "detected_at": "2026-08-16T11:59:55+00:00",
+            "detection_source": "button_disappearance",
+        }
+    )
+    assert visual["approximate_wave"] == 5_510
+    runtime, identity = _save_checkpoint(
+        ability="nuke",
+        sequence=2,
+        activation_wave=5_507,
+        saved_wave=5_600,
+        recharge_waves=300,
+    )
+    assert tracker.bind_round_identity(identity)
+
+    tracker.observe_save_checkpoint(
+        runtime,
+        expected_identity_fingerprint=identity,
+    )
+
+    events = tracker.snapshot()["nuke_activations"]
+    assert len(events) == 1
+    event = events[0]
+    assert event["sequence"] == 2
+    assert event["activation_wave"] == 5_507
+    assert event["approximate_wave"] == 5_507
+    assert event["visual_approximate_wave"] == 5_510
+    assert event["wave_precision"] == "save_timer"
+    assert event["detection_source"] == "button_disappearance"
+    assert event["detected_at"] == "2026-08-16T11:59:55+00:00"
+    assert event["save_observed_at"] == "2026-08-16T12:00:00+00:00"
+    assert event["evidence_sources"] == [
+        "button_disappearance",
+        "player_save_refresh_timer",
+    ]
+    assert tracker.snapshot()["source"] == (
+        "visual_transition_and_player_save_refresh_timer"
+    )
+
+
+def test_save_refresh_timer_rejects_wrong_identity_and_older_checkpoint():
+    tracker = BattleActivationTracker()
+    newer, identity = _save_checkpoint(
+        ability="second_wind",
+        sequence=1,
+        activation_wave=5_000,
+        saved_wave=5_100,
+        recharge_waves=400,
+        save_revision=201,
+    )
+    older, _ = _save_checkpoint(
+        ability="second_wind",
+        sequence=1,
+        activation_wave=4_900,
+        saved_wave=5_000,
+        recharge_waves=400,
+        save_revision=200,
+    )
+    assert tracker.bind_round_identity(identity)
+
+    assert tracker.observe_save_checkpoint(
+        newer,
+        expected_identity_fingerprint="wrong",
+    ) == []
+    assert tracker.observe_save_checkpoint(
+        newer,
+        expected_identity_fingerprint=identity,
+    )
+    assert tracker.observe_save_checkpoint(
+        older,
+        expected_identity_fingerprint=identity,
+    ) == []
+    assert tracker.snapshot()["second_wind_activations"][0][
+        "activation_wave"
+    ] == 5_000
+
+
+def test_save_refresh_timer_rejects_count_regression_and_merges_wave_range():
+    tracker = BattleActivationTracker()
+    first, identity = _save_checkpoint(
+        ability="nuke",
+        sequence=2,
+        activation_wave=5_507,
+        saved_wave=5_600,
+        recharge_waves=300,
+        save_revision=200,
+    )
+    regressed_count, _ = _save_checkpoint(
+        ability="nuke",
+        sequence=1,
+        activation_wave=5_600,
+        saved_wave=5_700,
+        recharge_waves=300,
+        save_revision=201,
+        captured_at="2026-08-16T12:05:00+00:00",
+    )
+    conflicting_wave, _ = _save_checkpoint(
+        ability="nuke",
+        sequence=2,
+        activation_wave=5_508,
+        saved_wave=5_800,
+        recharge_waves=300,
+        save_revision=202,
+        captured_at="2026-08-16T12:10:00+00:00",
+    )
+    assert tracker.bind_round_identity(identity)
+
+    assert tracker.observe_save_checkpoint(
+        first,
+        expected_identity_fingerprint=identity,
+    )
+    assert tracker.observe_save_checkpoint(
+        regressed_count,
+        expected_identity_fingerprint=identity,
+    ) == []
+    tracker.observe_save_checkpoint(
+        conflicting_wave,
+        expected_identity_fingerprint=identity,
+    )
+
+    events = tracker.snapshot()["nuke_activations"]
+    assert len(events) == 1
+    assert events[0]["sequence"] == 2
+    assert events[0]["activation_wave"] == 5_507
+    assert events[0]["activation_wave_min"] == 5_507
+    assert events[0]["activation_wave_max"] == 5_508
+    assert events[0]["refresh_wave_min"] == 5_807
+    assert events[0]["refresh_wave_max"] == 5_808
+    assert events[0]["save_revision"] == 202
+
+
+def test_late_demon_save_does_not_mislabel_sequence_two_as_first_activation():
+    tracker = BattleActivationTracker()
+    runtime, identity = _save_checkpoint(
+        ability="demon_mode",
+        sequence=2,
+        activation_wave=5_500,
+        saved_wave=5_600,
+        recharge_waves=300,
+    )
+    assert tracker.bind_round_identity(identity)
+
+    tracker.observe_save_checkpoint(
+        runtime,
+        expected_identity_fingerprint=identity,
+    )
+
+    snapshot = tracker.snapshot()
+    assert snapshot["demon_mode_first_activation"] is None
+    assert snapshot["demon_mode_activations"][0]["sequence"] == 2
 
 
 def test_nonrunning_and_match_failures_cannot_confirm_disappearance():
@@ -284,7 +582,7 @@ def test_intro_sprint_disabled_buttons_register_as_present():
     assert [event["ability"] for event in events] == ["demon_mode", "nuke"]
     assert events[0]["presence_confidence"] >= 0.8
     assert events[1]["presence_confidence"] >= 0.9
-    assert tracker.snapshot()["schema_version"] == 4
+    assert tracker.snapshot()["schema_version"] == 5
 
 
 def test_intro_sprint_status_matches_noisy_icon_only():

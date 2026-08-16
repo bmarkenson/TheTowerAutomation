@@ -35,6 +35,7 @@ from core.runtime_save import (
     RuntimeSaveNormalizationError,
     active_tally_contract_fingerprints,
     normalize_runtime_save,
+    survival_activation_contract_fingerprints,
 )
 from core.profile_progression import (
     ProfileProgressionError,
@@ -644,54 +645,88 @@ def _build_capability_evidence(
     """Publish only declared semantic contracts and their normalized status."""
 
     runtime_spec = mapping.get("runtime_save")
-    tally_spec = (
-        runtime_spec.get("active_tallies")
-        if isinstance(runtime_spec, Mapping)
-        else None
-    )
-    if not isinstance(tally_spec, Mapping):
+    if not isinstance(runtime_spec, Mapping):
         return {}
-    capability_id = str(tally_spec.get("capability_id") or "").strip()
-    if not capability_id:
-        return {}
-    semantic_fingerprint, binding_fingerprint = (
-        active_tally_contract_fingerprints(tally_spec)
+    evidence: dict[str, PlayerSaveCapabilityEvidence] = {}
+    provider_mapping_id = str(
+        mapping_resolution.structural_mapping_id
+        or mapping.get("mapping_id")
+        or ""
     )
-    tallies = (
-        runtime_save.active_tallies
-        if runtime_save is not None
-        else None
-    )
-    status = getattr(tallies, "status", "unavailable")
-    reason = getattr(
-        tallies,
-        "reason",
-        "runtime_projection_unavailable",
-    )
-    if (
+    identity_unavailable = bool(
         runtime_save is not None
         and runtime_save.round_active
         and runtime_save.active_round_identity is None
-    ):
-        status = "unavailable"
-        reason = runtime_save.active_identity_reason
-    return {
-        capability_id: PlayerSaveCapabilityEvidence(
-            capability_id=capability_id,
-            status=str(status),
-            reason=str(reason),
-            semantic_fingerprint=semantic_fingerprint,
-            binding_fingerprint=binding_fingerprint,
-            authority_id=str(tally_spec.get("audit_id") or ""),
-            provider_mapping_id=str(
-                mapping_resolution.structural_mapping_id
-                or mapping.get("mapping_id")
-                or ""
-            ),
-            resolution=mapping_resolution.resolution,
-            forward_policy=str(tally_spec.get("forward_policy") or "none"),
-        )
-    }
+    )
+
+    tally_spec = runtime_spec.get("active_tallies")
+    if isinstance(tally_spec, Mapping):
+        capability_id = str(tally_spec.get("capability_id") or "").strip()
+        if capability_id:
+            semantic_fingerprint, binding_fingerprint = (
+                active_tally_contract_fingerprints(tally_spec)
+            )
+            tallies = runtime_save.active_tallies if runtime_save else None
+            status = getattr(tallies, "status", "unavailable")
+            reason = getattr(
+                tallies,
+                "reason",
+                "runtime_projection_unavailable",
+            )
+            if identity_unavailable:
+                status = "unavailable"
+                reason = runtime_save.active_identity_reason
+            evidence[capability_id] = PlayerSaveCapabilityEvidence(
+                capability_id=capability_id,
+                status=str(status),
+                reason=str(reason),
+                semantic_fingerprint=semantic_fingerprint,
+                binding_fingerprint=binding_fingerprint,
+                authority_id=str(tally_spec.get("audit_id") or ""),
+                provider_mapping_id=provider_mapping_id,
+                resolution=mapping_resolution.resolution,
+                forward_policy=str(
+                    tally_spec.get("forward_policy") or "none"
+                ),
+            )
+
+    activation_spec = runtime_spec.get("survival_ability_activations")
+    if isinstance(activation_spec, Mapping):
+        capability_id = str(
+            activation_spec.get("capability_id") or ""
+        ).strip()
+        if capability_id:
+            semantic_fingerprint, binding_fingerprint = (
+                survival_activation_contract_fingerprints(activation_spec)
+            )
+            activations = (
+                runtime_save.survival_ability_activations
+                if runtime_save
+                else None
+            )
+            status = getattr(activations, "status", "unavailable")
+            reason = getattr(
+                activations,
+                "reason",
+                "runtime_projection_unavailable",
+            )
+            if identity_unavailable:
+                status = "unavailable"
+                reason = runtime_save.active_identity_reason
+            evidence[capability_id] = PlayerSaveCapabilityEvidence(
+                capability_id=capability_id,
+                status=str(status),
+                reason=str(reason),
+                semantic_fingerprint=semantic_fingerprint,
+                binding_fingerprint=binding_fingerprint,
+                authority_id=str(activation_spec.get("audit_id") or ""),
+                provider_mapping_id=provider_mapping_id,
+                resolution=mapping_resolution.resolution,
+                forward_policy=str(
+                    activation_spec.get("forward_policy") or "none"
+                ),
+            )
+    return evidence
 
 
 def pull_player_save_bytes(
@@ -1357,16 +1392,21 @@ def _select_semantic_forward_provider(
     for mapping in _load_mappings():
         identity = mapping.get("identity") or {}
         extensions = mapping.get("runtime_save_extensions")
-        tally_spec = (
-            extensions.get("active_tallies")
+        additive_extensions = (
+            tuple(
+                component
+                for component in extensions.values()
+                if isinstance(component, Mapping)
+                and component.get("forward_policy")
+                == "additive_dependencies"
+            )
             if isinstance(extensions, Mapping)
-            else None
+            else ()
         )
         mapped_data = identity.get("data_version")
         mapped_game = identity.get("game_version")
         if (
-            isinstance(tally_spec, Mapping)
-            and tally_spec.get("forward_policy") == "additive_dependencies"
+            additive_extensions
             and identity.get("root_class") == actual_class
             and type(mapped_data) is int
             and type(mapped_game) is int
@@ -1400,15 +1440,26 @@ def _semantic_capability_mapping(
     authority = _mapping_by_id(str(compatibility["authority_mapping_id"]))
     runtime_spec = authority.get("runtime_save")
     extensions = provider.get("runtime_save_extensions")
-    tally_spec = (
-        extensions.get("active_tallies")
+    additive_extensions = (
+        {
+            str(name): component
+            for name, component in extensions.items()
+            if isinstance(component, Mapping)
+            and component.get("forward_policy") == "additive_dependencies"
+        }
         if isinstance(extensions, Mapping)
-        else None
+        else {}
     )
-    if not isinstance(runtime_spec, Mapping) or not isinstance(tally_spec, Mapping):
+    if not isinstance(runtime_spec, Mapping) or not additive_extensions:
         raise PlayerSaveError("semantic provider runtime contract is unavailable")
     effective_runtime = deepcopy(dict(runtime_spec))
-    effective_runtime["active_tallies"] = deepcopy(dict(tally_spec))
+    for component_name, component in additive_extensions.items():
+        if component_name in effective_runtime:
+            raise PlayerSaveError(
+                "semantic provider overrides runtime authority component "
+                f"{component_name!r}"
+            )
+        effective_runtime[component_name] = deepcopy(dict(component))
     effective_runtime["semantic_capabilities_only"] = True
     return {
         "mapping_id": mapping_id,
@@ -2399,9 +2450,15 @@ def _validate_runtime_save_extensions(
     extensions = mapping.get("runtime_save_extensions")
     if extensions is None:
         return
-    if not isinstance(extensions, Mapping) or set(extensions) != {
-        "active_tallies"
-    }:
+    allowed_extensions = {
+        "active_tallies",
+        "survival_ability_activations",
+    }
+    if (
+        not isinstance(extensions, Mapping)
+        or "active_tallies" not in extensions
+        or not set(extensions) <= allowed_extensions
+    ):
         raise PlayerSaveError(
             f"runtime-save extensions are malformed in {source}"
         )
@@ -2568,12 +2625,143 @@ def _validate_runtime_save_extensions(
                     f"active-tally derivation {component_name}.{output_name} "
                     f"is invalid in {source}"
                 )
-    if used_sources != allowlisted:
+    active_tally_contract_fingerprints(active)
+    survival_sources = _validate_survival_activation_extension(
+        extensions.get("survival_ability_activations"),
+        dispositions=dispositions,
+        allowlisted=allowlisted,
+        source=source,
+    )
+    if used_sources & survival_sources or (
+        used_sources | survival_sources
+    ) != allowlisted:
         raise PlayerSaveError(
             "runtime-observation fields must be published exactly once by "
-            f"the active-tally extension in {source}"
+            f"one runtime extension in {source}"
         )
-    active_tally_contract_fingerprints(active)
+
+
+def _validate_survival_activation_extension(
+    activation: Any,
+    *,
+    dispositions: Mapping[str, Any],
+    allowlisted: set[str],
+    source: Path | str,
+) -> set[str]:
+    """Validate the independently failing save-timer activation contract."""
+
+    if activation is None:
+        return set()
+    expected_keys = {
+        "schema_version",
+        "capability_id",
+        "forward_policy",
+        "audit_id",
+        "evidence_level",
+        "scope",
+        "abilities",
+    }
+    if not isinstance(activation, Mapping) or set(activation) != expected_keys:
+        raise PlayerSaveError(
+            f"survival-activation runtime extension is malformed in {source}"
+        )
+    if (
+        activation.get("schema_version")
+        != RUNTIME_SAVE_EXTENSION_SCHEMA_VERSION
+        or activation.get("capability_id")
+        != "thetower.player_save.survival_ability_activations.v1"
+        or activation.get("forward_policy") != "exact_version_only"
+        or not str(activation.get("audit_id") or "").strip()
+        or activation.get("evidence_level") != "live_causal"
+    ):
+        raise PlayerSaveError(
+            f"survival-activation runtime authority is invalid in {source}"
+        )
+    expected_scope = {
+        "semantics": {
+            "state": "latest_cumulative_active_round_activation",
+            "identity": "game_version_tier_started_count_seed",
+            "checkpoint_order": "capture_time_save_revision_wave",
+            "refresh_relation": (
+                "refresh_wave=saved_wave+waves_until_refresh"
+            ),
+            "activation_relation": (
+                "activation_wave=refresh_wave-recharge_waves"
+            ),
+            "inactive_timer_handling": (
+                "count_zero_or_outside_recharge_window"
+            ),
+            "merged_precision": "observed_save_timer_candidate_range",
+            "checkpoint_coverage": "latest_activation_only",
+        },
+        "binding": {
+            "game_version": "versionNumber",
+            "save_revision": "saveRevision",
+            "round_active": "roundActiveBool",
+            "current_tier": "currentTier",
+            "current_wave": "currentWave",
+            "round_seed": "roundSeed",
+            "round_counter_vector": "roundsStartedThisTier",
+            "research_vector": "researchLevel",
+        },
+    }
+    if activation.get("scope") != expected_scope:
+        raise PlayerSaveError(
+            f"survival-activation scope authority is invalid in {source}"
+        )
+    if "researchLevel" not in set(
+        dispositions.get("automation_gating") or ()
+    ):
+        raise PlayerSaveError(
+            f"survival recharge research binding is invalid in {source}"
+        )
+
+    abilities = activation.get("abilities")
+    expected_abilities = {"demon_mode", "nuke", "second_wind"}
+    if not isinstance(abilities, Mapping) or set(abilities) != expected_abilities:
+        raise PlayerSaveError(
+            f"survival-activation abilities are invalid in {source}"
+        )
+    used_sources: set[str] = set()
+    used_indices: set[int] = set()
+    for ability_name, ability_spec in abilities.items():
+        if not isinstance(ability_spec, Mapping) or set(ability_spec) != {
+            "count_source",
+            "waves_until_refresh_source",
+            "recharge_research_index",
+            "recharge_waves_by_level",
+        }:
+            raise PlayerSaveError(
+                f"survival-activation ability {ability_name!r} is malformed "
+                f"in {source}"
+            )
+        count_source = str(ability_spec.get("count_source") or "")
+        refresh_source = str(
+            ability_spec.get("waves_until_refresh_source") or ""
+        )
+        research_index = ability_spec.get("recharge_research_index")
+        recharge_curve = ability_spec.get("recharge_waves_by_level")
+        sources = {count_source, refresh_source}
+        if (
+            "" in sources
+            or not sources <= allowlisted
+            or used_sources & sources
+            or type(research_index) is not int
+            or research_index < 0
+            or research_index in used_indices
+            or not isinstance(recharge_curve, list)
+            or len(recharge_curve) < 2
+            or recharge_curve[0] is not None
+            or any(type(value) is not int or value <= 0 for value in recharge_curve[1:])
+        ):
+            raise PlayerSaveError(
+                f"survival-activation ability {ability_name!r} has invalid "
+                f"authority in {source}"
+            )
+        used_sources.update(sources)
+        used_indices.add(research_index)
+    survival_activation_contract_fingerprints(activation)
+    return used_sources
 
 
 def _validate_sorted_field_names(
