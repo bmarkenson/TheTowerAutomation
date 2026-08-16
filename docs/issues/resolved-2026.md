@@ -53,9 +53,16 @@ and actionable work lives in
   inactive terminal save report when that entire vector is exactly equal, the
   revision does not regress, and handoff identity and target still match. One
   changed counter—or missing legacy evidence—keeps the report unbound and on
-  UI fallback. This proof does not infer stopped-process Strategy or process-
-  local telemetry from replacement state; any later reuse needs its own
-  durable exact-battle completeness contract. Agent policy now makes
+  UI fallback. The vector never promotes replacement-process memory. Future
+  active records now independently retain an immutable Strategy/run-
+  configuration snapshot, a matching session-preflight configuration receipt,
+  and an activation checkpoint with its own tracker-configuration fingerprint.
+  Exact vector proof may unlock each matching component report-only; malformed
+  or mismatched components fail closed locally, and activation evidence is
+  explicitly partial through its checkpoint. Perk timelines, active-run
+  metrics, wave/coin samples, speed state, and other process-local evidence
+  remain excluded. Legacy records—including the Game Over that exposed this
+  issue—cannot be enriched retroactively. Agent policy now makes
   restoration of a previously Running runtime part of completing agent-owned
   Pause/Stop work, after fresh owner, control, target, and screen checks; pre-
   existing, superseded, manual, and safety pauses are never restored
@@ -72,7 +79,11 @@ and actionable work lives in
   with zero errors and the established 44 orphan notices, and all 2,985
   repository tests in 436.20 seconds using development-environment fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
-- **Fixed by:** `373f8c5`, `8270e1d`.
+  The durable-component follow-up passed 266 focused tests. Exact candidate
+  `e7d5359` then passed compilation, state definitions, clickmap integrity with
+  zero errors and the same 44 established notices, and all 2,996 repository
+  tests in 436.27 seconds using the same development environment.
+- **Fixed by:** `373f8c5`, `8270e1d`, `e7d5359`.
 
 ### Orb Distance treated selected Range lab level as live Attack Range
 

@@ -44,11 +44,14 @@ resolved dossier instead of copying its detail.
 - [`ISSUE-2026-053`](../issues/resolved-2026.md#process-replacement-stranded-a-fresh-game-over-behind-initial-intent)
   lets a replacement runtime obey Wait, Home, or Continue on a fresh exact-
   target Game Over. A new exact full-tier battle-start-counter proof may bind
-  only the terminal save report to the retained battle; missing legacy
-  evidence or any changed counter keeps the report on UI fallback. The
-  replacement does not infer Strategy or process-local telemetry without a
-  separate durable exact-battle completeness contract; Continue arms Retry as
-  a new battle.
+  the terminal save report to the retained battle; missing legacy evidence or
+  any changed counter keeps the report on UI fallback. Future active records
+  independently retain a Strategy/run-configuration snapshot, matching
+  session-preflight evidence, and a versioned activation checkpoint under
+  their exact battle and component configuration fingerprints. Vector proof
+  may restore only those components; activation history remains explicitly
+  partial through its checkpoint, and every other process-local tracker stays
+  excluded. Continue arms Retry as a new battle.
 - The live-work policy now treats restoration of a previously Running runtime
   as part of completing an agent-owned Pause or Stop, subject to fresh owner,
   control, target, screen, manual-control, and safety checks. An agent-created
@@ -59,6 +62,10 @@ resolved dossier instead of copying its detail.
   established 44 orphan notices, and all 2,985 tests in 436.20 seconds using
   development-environment fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- Exact durable-evidence candidate `e7d5359` passed 266 focused tests and the
+  complete repository checkpoint: compilation, state definitions, clickmap
+  integrity with zero errors and the same 44 established notices, and all
+  2,996 tests in 436.27 seconds using the same development environment.
 
 ### 2026-08-16 Explicit final-save survival-activation fallback
 
