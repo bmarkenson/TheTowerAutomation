@@ -261,27 +261,287 @@ A failed handoff remains Paused and retains the old runtime target while the
 control service may continue bounded registration retries for the saved next-
 start target.
 
-### Move to another Windows PC while reusing the Linux port
+### Move the emulator between Windows PCs
 
-1. On the former PC, stop its ADB reverse forward (or change its Linux forward
-   port). The new client will not kill or adopt that tunnel.
-2. On the new PC, configure its Windows BlueStacks listener and the desired old
-   Linux port, then start the ADB forward. If Connections reports a remote bind
-   conflict, the former forward or another listener still owns that port;
-   resolve it and select Retry/Restart.
-3. Select indefinite Pause and wait for the runtime acknowledgement.
-4. Under **System > Services**, select **Use this PC's emulator**. This submits
-   the active forward rather than merely saving Preferences.
-5. Wait for the displayed host selection and ADB target to show acknowledged.
-   Same-port selection still requires a fresh supported frame and advances the
-   target generation.
-6. Verify the fresh screen, then select **Automation Enabled** only when
-   appropriate.
+Use this procedure when BlueStacks and The Tower move from one Windows PC to
+another while the Linux control service and managed automation process remain
+the same. It covers both distinct Linux ports and intentional reuse of the
+former PC's Linux port. The same procedure applies when moving back: exchange
+the source and destination PC names and perform every step again.
 
-Completed Battle History records the Windows host selections for the battle.
-A battle spanning more than one host remains visible with both transitions but
-is excluded from host-specific CPH comparison; a battle without attribution
-from its beginning is marked partial.
+Opening a Control Surface on another PC does **not** select that PC's emulator.
+The client cannot safely infer that a changed Windows process is the intended
+target. Saving Preferences also does **not** change a desired/running SSH
+forward or the live Linux runtime target. The explicit
+**Use this PC's emulator** action is the handoff boundary.
+
+#### Understand the four independent layers
+
+| Layer | Example | What it proves |
+| --- | --- | --- |
+| Windows BlueStacks listener | Windows `127.0.0.1:5555` | BlueStacks is accepting local ADB connections on that PC. It does not prove an SSH forward or usable game frame. |
+| ADB reverse forward | Linux `127.0.0.1:5565` → Windows `127.0.0.1:5555` | This PC's tunnel host owns the named Linux listener and forwards it to this PC. It does not select the Linux runtime target. |
+| Managed runtime target | Linux `localhost:5565` | The running automation process is registered to that Linux endpoint. It does not identify which Windows PC currently owns a reused port. |
+| Explicit emulator host | `MAIN-PC`, stable host ID, ports, and optional exact BlueStacks process | Linux has validated and acknowledged this Windows client as the selected emulator host for attribution and current target authority. |
+
+The header's **Linux service**, **HTTP**, **API SSH**, and **ADB SSH** indicators
+are also independent. An active API tunnel does not prove an ADB tunnel, and
+an active ADB tunnel does not prove HTTP compatibility or a valid emulator
+screen.
+
+The per-user `TheTower.TunnelHost.exe` owns the API and ADB SSH children.
+Closing the Control Surface disconnects the GUI but deliberately leaves every
+desired tunnel running. Closing BlueStacks also does not release the Linux
+reverse-listener port. An explicit **Stop ADB forward** clears that desire and
+releases the listener. When no GUI is connected and neither tunnel is desired,
+the tunnel host exits normally after about 15 seconds.
+
+#### Choose the Linux-port policy
+
+The Windows BlueStacks listener and the Linux reverse-listener port are
+separate values. BlueStacks may listen on Windows port `5555` on every PC while
+the Linux ports differ.
+
+| Policy | Example | Tradeoff |
+| --- | --- | --- |
+| Stable Linux port per Windows PC | Main PC: Linux `5555` → Windows `5555`; laptop: Linux `5565` → Windows `5555` | Lowest-conflict workflow. The ports do not contend, although the golden path still stops the unused source forward. **Use this PC's emulator** remains required on every move, and the Linux runtime target text changes. |
+| Reuse one Linux port | Either PC: Linux `5555` → that PC's Windows `5555` | Keeps one familiar Linux target, but the source PC must release the port before the destination can bind it. The target text may not change, so explicit host selection is the only safe ownership boundary. |
+
+Do not use the port number as a substitute for Windows-host identity. A
+successful same-port selection creates a new request, validates a fresh frame,
+and advances the runtime target generation even though `localhost:<port>` is
+textually unchanged.
+
+For the cleanest performance attribution, move at a natural completed-battle or
+Home boundary before the next battle begins. Select **Wait** or
+**Return to / stay Home** as the battle-end policy in advance when appropriate;
+never Surrender an operator-owned battle merely to manufacture a handoff
+boundary. A mid-battle move is supported when it is operationally necessary,
+but that completed battle will intentionally be classified as mixed-host and
+excluded from host-specific CPH baselines.
+
+#### One-time preparation on each Windows PC
+
+Before relying on a PC as a handoff destination:
+
+1. Deploy the complete matching publish directory. Confirm
+   `TheTower.ControlSurface.exe` and `TheTower.TunnelHost.exe` are adjacent;
+   copying only the GUI executable is incomplete.
+2. Confirm passwordless SSH and host-key trust for the configured Linux
+   destination. The tunnel host is intentionally noninteractive.
+3. In **Preferences**, configure:
+   - the Linux SSH destination;
+   - the normal API ports, usually `8787` on both sides;
+   - the actual Windows BlueStacks ADB listener port, usually `5555`; and
+   - this PC's chosen Linux ADB-forward port.
+4. Start BlueStacks and confirm **System > Connections** reports a Windows ADB
+   listener on the configured Windows port.
+5. Confirm the client can establish the API tunnel and reach a compatible
+   Linux API before depending on it for Pause or handoff control.
+
+Preferences are defaults for the next explicit Start or Restart. If a tunnel
+host already has a desired or failed endpoint, changing Preferences does not
+silently replace that endpoint.
+
+#### Phase 1 — Pause and release the source PC
+
+Perform these steps while the source PC's API connection and current emulator
+path still work:
+
+1. Open the source PC's Control Surface.
+2. Select indefinite **Automation Paused**. Do not use a timed pause.
+3. Wait until the runtime—not merely the button—reports the current Pause
+   request as **acknowledged**. The action-authority display must say
+   Automation Paused.
+4. Go to **System > Connections** on the source PC and select
+   **Stop ADB forward**. Wait for the ADB reverse-forward panel to say
+   **Stopped**. The API tunnel may remain active.
+5. Only after Pause acknowledgement and forward release, close The Tower or
+   BlueStacks on the source PC and close its Control Surface if desired.
+
+This order is deliberate: Pause acknowledgement is easiest to prove while the
+old emulator path still works, and the destination cannot reuse the same Linux
+port until the old reverse forward has actually stopped.
+
+Closing only BlueStacks or the Control Surface is insufficient. If the source
+GUI was already closed, reopen it; it should attach to its still-running
+per-user tunnel host and recover the ADB forward's desired and active state.
+Stop the ADB forward explicitly. Do not terminate a generic `ssh.exe` or guess
+which process owns the port.
+
+If the source PC is unavailable and its forward may still own the desired
+Linux port, use a different free Linux port on the destination. Do not displace
+an unidentified listener merely to preserve a preferred port number.
+
+#### Phase 2 — Establish the destination PC's paths
+
+1. Start BlueStacks on the destination PC, launch The Tower, and wait for the
+   intended current game screen to be fully visible.
+2. Start the destination PC's Control Surface and open
+   **System > Connections**.
+3. Confirm the tunnel host is available. Establish the API tunnel if needed,
+   then require:
+   - **API SSH: Active**;
+   - **HTTP: Connected**; and
+   - a compatible, reachable Linux service.
+4. Review **Configured connection defaults**. Verify the displayed mapping is
+   the intended `Linux localhost:<L> → Windows localhost:<W>` pair.
+5. Compare those defaults with the ADB reverse-forward panel's desired and
+   active endpoint. If the panel retains an old, wrong, retrying, or conflicted
+   endpoint, select **Stop ADB forward** first. Wait for **Stopped**; the button
+   will then return to **Start ADB forward** and the next Start will use the
+   saved defaults.
+6. Select **Start ADB forward**. Wait for the panel and header to report the
+   ADB tunnel **Active**, with the exact intended Linux and Windows ports.
+
+The green Windows-listener line alone is not enough. The SSH reverse forward
+itself must be Active. If the button says **Retry ADB forward**, a desired
+forward already exists in a conflict or fault state. Retry is appropriate only
+when its displayed endpoint is already correct and the cause has been fixed;
+otherwise Stop it, correct Preferences, and Start it again.
+
+For same-port reuse, a remote bind conflict normally means the source PC's
+forward—or another reverse listener—still owns that Linux port. Stop the exact
+source forward or deliberately choose another Linux port. The destination
+client never kills or adopts another client's tunnel.
+
+#### Phase 3 — Explicitly select and validate the destination host
+
+1. Reconfirm that indefinite Pause is still acknowledged. If automation is
+   running and the acknowledgement is absent, request Pause again and wait.
+2. In the destination PC's **System > Connections** ADB reverse-forward panel,
+   select **Use this PC's emulator**.
+3. Wait for all of the following:
+   - the selection status names the destination Windows PC;
+   - it shows the active `Linux localhost:<L> → Windows localhost:<W>` mapping;
+   - it says **acknowledged**, not `awaiting runtime validation`;
+   - the requested and active Linux ADB target are the intended endpoint;
+   - Current Status has a fresh heartbeat and a fresh, correct game screen; and
+   - no emulator-location or target-handoff error is displayed.
+
+For same-port reuse, the requested and active target text may look identical
+before and after the click. The newly named Windows host and its
+**acknowledged** status are the visible proof that Linux performed the
+same-port revalidation. Reopening the GUI, starting the forward, or seeing
+`device` transport does not replace this step.
+
+A failed selection keeps automation Paused and retains the former runtime
+target/generation. Correct the reported tunnel, listener, compatibility, or
+frame problem and submit a new explicit selection. Do not Enable automation to
+test whether the failure matters.
+
+#### Phase 4 — Verify and resume deliberately
+
+Before selecting **Automation Enabled**, verify this checklist from the
+destination client:
+
+- the selected emulator host is the destination PC and is acknowledged;
+- ADB SSH is Active on the intended endpoint;
+- HTTP is Connected and the Linux service is reachable;
+- the managed runtime target matches that endpoint;
+- Current Status and heartbeat are fresh;
+- the visible screen is the expected battle, Home, or supported boundary; and
+- no target, host-selection, save, or action-authority warning remains.
+
+Then select **Automation Enabled** only if normal automated input should resume,
+and wait for the runtime to acknowledge that request. A successful live target
+handoff keeps the same managed process and its in-memory Strategy/session state;
+it does not require Stop/Start or Attach merely because the Windows PC changed.
+If the managed process was separately stopped or replaced, follow the normal
+Start/Attach procedure instead of assuming this in-place rule applies.
+
+#### Host attribution and CPH consequences
+
+Every explicit selection records the stable Windows host ID/name, Linux target,
+Windows listener, target generation, and exact BlueStacks process lifetime when
+available. Completed Battle History preserves that timeline.
+
+- A battle explicitly attributed to one host from its beginning is eligible
+  for that host's CPH and performance baselines.
+- A battle that changes Windows hosts is marked `mixed_hosts`. Both transitions
+  remain visible, but the battle is excluded from host-specific CPH comparison
+  and automatic severe-loss calibration.
+- A battle that began before explicit host attribution is marked `partial` and
+  is likewise excluded from host-specific baselines.
+
+This exclusion is intentional: measurements from two PCs or an unknown opening
+segment must not train one PC's performance model.
+
+#### Why **Use this PC's emulator** may be disabled
+
+Hover the disabled button for its current blocker. The button requires all of
+these conditions:
+
+| Requirement | Recovery |
+| --- | --- |
+| This client's ADB reverse forward has an **Active** endpoint | Start or repair the ADB forward; Windows-listener detection alone is insufficient. |
+| A live automation process is indefinitely Paused and that exact request is acknowledged | Select indefinite Pause and wait for runtime acknowledgement. A timed Pause is ineligible. |
+| The managed ADB lifecycle is available | Restore the compatible Linux API/service and refresh status. |
+| The server supports emulator-host selection | Update/restart the Linux API and use the matching complete Windows package. |
+| No selection request is already in flight | Wait for the current request to finish and review its result. |
+
+The click also checks that BlueStacks is listening on the active forward's
+Windows destination port. A stopped or differently configured listener can
+therefore produce a clear error after an otherwise enabled click.
+
+#### Tunnel-host and port recovery
+
+Use the narrow recovery matching the symptom:
+
+| Symptom | Meaning and recovery |
+| --- | --- |
+| Preferences show the new port, but the ADB panel shows the old endpoint | Preferences changed only the default. Select **Stop ADB forward**, wait for Stopped, then **Start ADB forward** to adopt the default. |
+| There is no Start button; the button says Retry | The tunnel is still desired but faulted/conflicted. If its endpoint is wrong, Stop it before starting with corrected defaults. If it is correct, fix the reported cause and Retry. |
+| `remote port forwarding failed for listen port <L>` or **Conflict** | Another listener owns Linux port `<L>`, commonly the former PC's still-desired forward. Stop that exact forward or select a different free Linux port. |
+| ADB SSH is Active, but Linux still names the former PC | Transport recovered, but host selection did not occur. While Paused and acknowledged, click **Use this PC's emulator** on the destination PC. |
+| ADB transport says `device`, but Current Status is stale or wrong | Transport is not frame validation. Keep Pause, bring The Tower to the intended supported screen, and submit the host selection again. |
+| API SSH is Active but HTTP fails | The SSH process and HTTP/API service are separate. Restore the API service/compatibility without changing the ADB forward. |
+| Restarting the Control Surface makes the tunnel host appear | The new GUI successfully launched or attached to the companion. Recheck both tunnel desires/endpoints; a new host never replays desired tunnels automatically. |
+| The tunnel host appears and then exits with no GUI and no desired tunnels | This is the normal approximately 15-second idle shutdown. Open the GUI first or start a desired tunnel. |
+| **Restart tunnel host** is used | It explicitly stops that companion and its owned API/ADB SSH children. The replacement starts with both desires off; manually Start API and ADB again. It is companion recovery, not the normal way to change a port. |
+
+If the tunnel host is unavailable, first restart the Control Surface once and
+allow its normal startup/attach attempt to finish. Verify the complete package
+contains both adjacent executables. For diagnostic manual launch, leave the GUI
+open so its five-second status poll can attach before the 15-second idle exit:
+
+```powershell
+$p = Start-Process .\TheTower.TunnelHost.exe -PassThru
+"Started PID $($p.Id)"
+$p.WaitForExit()
+$p.Refresh()
+"Exit code: $($p.ExitCode)"
+```
+
+Exit code `0` after approximately 15 idle seconds means no GUI or desired
+tunnel kept the host alive. An immediate exit code `0` can instead mean another
+per-user tunnel host already owns the singleton. Exit code `1` is a host
+failure; inspect
+`%LOCALAPPDATA%\TheTower\tunnel-host-startup.log`. Invoking this Windows-
+subsystem executable with `& .\TheTower.TunnelHost.exe` can return PowerShell
+immediately and leave `$LASTEXITCODE` blank, so that form does not capture the
+eventual exit.
+
+#### Compact handoff checklist
+
+Use this only after understanding the detailed procedure above:
+
+1. Source: request indefinite Pause and wait for **acknowledged**.
+2. Source: **System > Connections > Stop ADB forward**; wait for Stopped.
+3. Source: close BlueStacks/GUI only after the forward is released.
+4. Destination: start BlueStacks and The Tower; confirm the Windows listener.
+5. Destination: establish API SSH, HTTP, and compatible Linux service.
+6. Destination: verify Preferences and the exact ADB default mapping.
+7. Destination: Stop any stale desired endpoint, then Start the intended ADB
+   forward; wait for Active.
+8. Destination: reconfirm Pause acknowledgement.
+9. Destination: click **Use this PC's emulator**.
+10. Wait for the destination host, exact mapping, and **acknowledged** status.
+11. Require a fresh correct screen and heartbeat with no handoff error.
+12. Enable automation deliberately and wait for acknowledgement.
+
+Never skip steps 1, 2, 9, or 11 merely because the same Linux port worked on
+that PC before.
 
 ## Change Strategy at a boundary
 

@@ -125,10 +125,13 @@ To move the emulator to this PC while reusing another PC's Linux port, first
 stop or reconfigure the former PC's ADB forward, then start this PC's forward.
 The client does not terminate another tunnel; a remaining owner is reported as
 a bind conflict. With automation indefinitely Paused and acknowledged, use
-**System > Services > Use this PC's emulator**. The command submits the active
-forward's actual endpoint plus this client's stable host identity, so Linux
-revalidates the emulator even when the target remains `localhost:5555`.
-Changing Preferences alone does not perform that runtime handoff.
+**System > Connections > Use this PC's emulator**. The command submits the
+active forward's actual endpoint plus this client's stable host identity, so
+Linux revalidates the emulator even when the target remains `localhost:5555`.
+Changing Preferences alone does not perform that runtime handoff. Follow the
+[detailed Windows-PC emulator handoff runbook](../../docs/operations/managed_runtime.md#move-the-emulator-between-windows-pcs)
+for source release, same-port reuse, acknowledgement, recovery, and safe-resume
+checks.
 
 The host joins itself to a Windows Job Object configured with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` before it starts any SSH process. Its
@@ -278,8 +281,8 @@ a useful type/Tier/wave/coins summary and its History route. Activity and Perks
 receive the full data width and retain their independent refresh and scroll
 behavior. System divides infrastructure into
 **Services**, **Connections**, and **Diagnostics**: process lifecycle and ADB
-runtime target plus the explicit **Use this PC's emulator** handoff;
-API/SSH transport and tunnel host; then optional prior-screen,
+runtime target; API/SSH transport, tunnel host, and the explicit
+**Use this PC's emulator** handoff; then optional prior-screen,
 runtime, and host-performance evidence. When Host Health is expanded,
 Diagnostics places its complete local telemetry card ahead of the verbose
 evidence and presents the remainder in two columns: service/configuration and
