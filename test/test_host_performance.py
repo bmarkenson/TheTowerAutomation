@@ -957,7 +957,7 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     assert "nvidia-smi" not in gpu_sampler
 
 
-def test_native_host_sampling_control_is_persistent_and_collapsible():
+def test_native_host_sampling_control_is_persistent_and_unambiguous():
     native_root = PROJECT_ROOT / "windows" / "TheTower.ControlSurface"
     tracker = (native_root / "HostPerformanceTracker.cs").read_text(
         encoding="utf-8"
@@ -971,12 +971,14 @@ def test_native_host_sampling_control_is_persistent_and_collapsible():
     assert "public bool SamplingEnabled" in tracker
     assert "public void SetSamplingEnabled(bool enabled)" in tracker
     assert "_sampler.ResetRateBaselines();" in tracker
-    assert 'HostPerformanceHealthState.Paused, "Sampling paused"' in tracker
+    assert 'HostPerformanceHealthState.Paused, "Sampling off"' in tracker
     assert (
         "public bool HostPerformanceSamplingEnabled { get; set; } = true;"
         in models
     )
     assert 'x:Name="HostSamplingToggleButton"' in window
+    assert 'Content="Stop sampling"' in window
+    assert "Pause sampling" not in window
     assert 'x:Name="HostGpuText"' in window
     assert 'x:Name="BlueStacksGpuText"' in window
     assert 'x:Name="BlueStacksHandlesText"' in window
@@ -1029,4 +1031,18 @@ def test_native_host_sampling_control_is_persistent_and_collapsible():
     assert 'x:Name="HostPerformancePanel"' in window
     assert "SetHostHealthExpanded" in window_code
     assert "HostPerformanceSamplingEnabled" in window_code
-    assert "queued aggregates still upload" in window_code
+    assert '? "Stop sampling"' in window_code
+    assert ': "Start sampling";' in window_code
+    queue_presentation = window_code.split(
+        "HostTelemetryQueueText.Text = ", maxsplit=1
+    )[1].split(";\n", maxsplit=1)[0]
+    assert queue_presentation.lstrip().startswith("!snapshot.SamplingEnabled")
+    assert '"Sampling off"' in queue_presentation
+    assert "uploader draining" in queue_presentation
+    assert queue_presentation.index('"Sampling off"') < queue_presentation.index(
+        '"Buffering"'
+    )
+    assert "Host sampling is off; the independent uploader" in window_code
+    assert "Sampling paused" not in tracker
+    assert "Pause sampling" not in window_code
+    assert "Resume sampling" not in window_code

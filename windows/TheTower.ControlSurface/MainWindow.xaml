@@ -1331,12 +1331,12 @@
                       </StackPanel>
                       <Button Grid.Column="2"
                               x:Name="HostSamplingToggleButton"
-                              Content="Pause sampling"
+                              Content="Stop sampling"
                               Click="HostSamplingToggle_Click"
                               Padding="9,5"
                               MinWidth="104"
                               VerticalAlignment="Center"
-                              ToolTip="Pause one-second host and BlueStacks sampling. Queued aggregates continue uploading." />
+                              ToolTip="Stop one-second host and BlueStacks sampling. Queued aggregates continue uploading." />
                     </Grid>
 
                     <Grid Grid.Row="1" Margin="0,10,0,0">

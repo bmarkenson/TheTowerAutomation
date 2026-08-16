@@ -880,7 +880,7 @@ public sealed class HostPerformanceTracker : IDisposable
     {
         if (!samplingEnabled)
         {
-            return (HostPerformanceHealthState.Paused, "Sampling paused");
+            return (HostPerformanceHealthState.Paused, "Sampling off");
         }
         if (last is null)
         {

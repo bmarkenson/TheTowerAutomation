@@ -1105,10 +1105,13 @@ the status API. A run ID expires from new samples when status has not refreshed
 for 15 seconds; outage telemetry remains available without being falsely
 assigned to a later run.
 
-Sampling can be paused and resumed only by the local native client. Pausing
+Sampling can be stopped and started only by the local native client. Stopping
 closes and persists the current partial aggregate before the sampler waits;
 the uploader remains active so previously queued evidence can continue
-reconnecting and publishing. Resuming keeps the same host/session identity and
+reconnecting and publishing. While disabled, the health and queue presentation
+say **Sampling off**, never **Buffering**; a remaining backlog separately says
+that the independent uploader is draining it, or that it remains local when
+upload is unavailable. Starting keeps the same host/session identity and
 sequence, while the UTC window timestamps leave the intentional sampling gap
 explicit. The enabled state is stored in the native client's local settings
 and does not add Linux API control authority.

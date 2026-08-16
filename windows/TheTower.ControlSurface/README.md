@@ -916,15 +916,17 @@ for average/maximum CPU, working set, private bytes, inspected-process count,
 and scan cost. The collector records no command lines or window titles and
 never changes automation or game state.
 
-The compact **Pause sampling** control remains visible in the health panel at
-the window's minimum supported size. Pausing flushes the current partial
+The compact **Stop sampling** control remains visible in the health panel at
+the window's minimum supported size. Stopping flushes the current partial
 aggregate and stops new samples, while the independent uploader continues
-draining queued telemetry. The health state changes to **Sampling paused** and
-the tooltip retains the last sample time. **Resume sampling** continues the
-same host/session sequence with an explicit UTC gap. This preference is saved
-locally across control-surface restarts and does not pause automation. The left
-workspace panels retain independent scrollbars, with their minimum heights
-balanced so every panel remains reachable at the minimum window height.
+draining queued telemetry. The health and queue state change to **Sampling
+off**, never **Buffering**. If aggregates remain queued, the queue separately
+identifies the uploader draining them, or their local-only state when upload is
+unavailable. **Start sampling** continues the same host/session sequence with
+an explicit UTC gap. This preference is saved locally across control-surface
+restarts and does not pause automation. The left workspace panels retain
+independent scrollbars, with their minimum heights balanced so every panel
+remains reachable at the minimum window height.
 
 Raw samples remain in a two-minute memory ring. Approximately ten-second
 aggregates are queued in

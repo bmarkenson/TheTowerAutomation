@@ -4290,8 +4290,8 @@ public partial class MainWindow : Window
             _ => (Brush)FindResource("MutedBrush"),
         };
         HostSamplingToggleButton.Content = snapshot.SamplingEnabled
-            ? "Pause sampling"
-            : "Resume sampling";
+            ? "Stop sampling"
+            : "Start sampling";
         if (snapshot.SamplingEnabled)
         {
             HostSamplingToggleButton.ClearValue(StyleProperty);
@@ -4302,8 +4302,8 @@ public partial class MainWindow : Window
                 (Style)FindResource("PrimaryButton");
         }
         HostSamplingToggleButton.ToolTip = snapshot.SamplingEnabled
-            ? "Pause one-second host and BlueStacks sampling. Queued aggregates continue uploading."
-            : "Resume one-second host and BlueStacks sampling.";
+            ? "Stop one-second host and BlueStacks sampling. Queued aggregates continue uploading."
+            : "Start one-second host and BlueStacks sampling.";
         HostCpuText.Text = FormatPercent(snapshot.HostCpuPercent);
         HostMemoryText.Text = snapshot.HostMemoryUsedPercent is null
             ? "-"
@@ -4415,13 +4415,19 @@ public partial class MainWindow : Window
                 or HostProcessAttributionState.Recovering
             ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
             : (Brush)FindResource("MutedBrush");
-        HostTelemetryQueueText.Text = !snapshot.UploadEnabled
-            ? $"Local only · {snapshot.PendingAggregateCount} queued"
-            : snapshot.PendingAggregateCount == 0
-                ? snapshot.LastUploadedAtUtc is null
-                    ? "Buffering"
-                    : "Published"
-                : $"{snapshot.PendingAggregateCount} queued";
+        HostTelemetryQueueText.Text = !snapshot.SamplingEnabled
+            ? snapshot.PendingAggregateCount == 0
+                ? "Sampling off"
+                : snapshot.UploadEnabled
+                    ? $"Sampling off · uploader draining {snapshot.PendingAggregateCount} queued"
+                    : $"Sampling off · local only · {snapshot.PendingAggregateCount} queued"
+            : !snapshot.UploadEnabled
+                ? $"Local only · {snapshot.PendingAggregateCount} queued"
+                : snapshot.PendingAggregateCount == 0
+                    ? snapshot.LastUploadedAtUtc is null
+                        ? "Buffering"
+                        : "Published"
+                    : $"{snapshot.PendingAggregateCount} queued";
         if (snapshot.DroppedAggregateCount > 0)
         {
             HostTelemetryQueueText.Text +=
@@ -4437,7 +4443,7 @@ public partial class MainWindow : Window
         {
             snapshot.SamplingEnabled
                 ? "Host sampling is enabled."
-                : "Host sampling is paused; queued aggregates still upload.",
+                : "Host sampling is off; the independent uploader continues handling queued aggregates.",
             snapshot.SampledAtUtc is null
                 ? "No host sample is available yet."
                 : $"Sampled {snapshot.SampledAtUtc.Value.ToLocalTime():T}.",
