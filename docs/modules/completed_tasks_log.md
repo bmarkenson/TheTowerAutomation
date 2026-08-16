@@ -39,6 +39,25 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-16 Explicit final-save survival-activation fallback
+
+- Exact implementation candidate `65b90ce` makes the timer-coverage boundary
+  explicit in both report formats: save-derived timing requires a later
+  in-battle save that captures the active refresh timer. An activation after
+  the final usable active checkpoint, especially when Game Over arrives before
+  another save, retains its visual-only approximate wave. The underlying
+  visual fallback and save/visual merge behavior are unchanged.
+- The one complete checkpoint on `65b90ce` passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 2,973 repository tests in 435.64 seconds. The
+  affected Python suite passed 52 tests; portable native validation passed 197
+  ControlSurface and 18 TunnelHost tests; and the Release WPF cross-build
+  completed with zero errors. The only native warning was the established
+  read-only NuGet vulnerability-cache `NU1900`. Validation used development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`;
+  the cross-build is not a Windows runtime validation.
+
 ### 2026-08-16 Save-derived survival-ability activation waves
 
 - Exact implementation candidate `bebd076` consumes the version-1101 active
