@@ -39,6 +39,24 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-17 Telemetry rejection presentation
+
+- Exact implementation candidate `9f594d1` keeps the compact Host Health queue
+  line focused on current sampling, backlog, upload-error, and capacity-drop
+  state. The bounded retained rejection count no longer remains permanently
+  prominent; an active upload error instead appears as **upload issue** until a
+  later Linux acknowledgement succeeds.
+- The retained count, diagnostic-spool location, and latest retained reason
+  remain available in the Host Health tooltip, explicitly labeled as history
+  that does not by itself indicate a current upload problem. Spool retention
+  and upload behavior are unchanged.
+- All 39 affected Python tests, 210 portable Control Surface tests, and 18
+  portable Tunnel Host tests passed. The Release WindowsDesktop cross-build
+  completed with zero warnings and zero errors using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  The cross-build is not a Windows WPF runtime validation.
+
 ### 2026-08-17 Windows status alignment and speed OCR retries
 
 - Exact implementation candidate `26818db` places the save-backed metric row
