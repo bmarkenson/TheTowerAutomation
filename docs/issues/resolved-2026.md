@@ -8,6 +8,52 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Enabled automation could not recover an unowned Welcome Back battle
+
+**Stable ID:** `ISSUE-2026-054` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-17 the live runtime remained healthy, acknowledged
+  `RUNNING`, and owned its exact ADB target while The Tower displayed Welcome
+  Back for the still-active Tier 19 battle. The retained screenshot showed
+  wave 2799, but tier and wave were diagnostic only.
+- **Symptom:** Welcome Back remained indefinitely even though automation was
+  Enabled. The action log reported that no exact BlueStacks maintenance
+  request owned its buttons, so the blocking-primary guard suppressed every
+  ordinary action and never reached the existing forced save identity path.
+- **Safety response:** Diagnosis used fresh read-only runtime, control, log, and
+  screenshot evidence. It sent no device input and did not infer battle
+  continuity from tier, wave, modal text, elapsed time, or Battle History.
+- **Cause:** `GAME_RESTARTED` routed Resume only for a coordinated
+  `emulator_maintenance` owner. An uncoordinated game-process restart had no
+  exact owner capable of clearing the modal and then invoking
+  `ActiveBattleIdentityCoordinator`. A fresh managed process could also retain
+  a same-battle-only Stop/Start handoff; that workflow raced the new recovery
+  claim and deliberately Paused if the forced save identified a successor.
+- **Resolution:** An exact Enabled runtime may now claim an otherwise unowned
+  Welcome Back only when the durable identity store retains the prior
+  force-proven `ActiveRoundIdentity`, the runtime/target/Enable request still
+  match, and no manual, development, setup, maintenance, validation, or battle
+  workflow owns input. It performs one bounded freshly rematched Resume, then
+  reuses the existing forced-save coordinator. `SAME_BATTLE` continues the
+  already-owned lifecycle or enters normal Attach on a fresh runtime;
+  `LATER_BATTLE` clears the prior battle-local lifecycle and enters that same
+  Attach path. There is no tier/wave fallback and no unowned End Run action.
+  A pending process-restart handoff now transfers ownership to its normal
+  Attach, records the retained and actual save IDs plus their same/later
+  relation, and accepts a force-proven later battle instead of competing or
+  Pausing. Legacy completed same-battle records without the relation field
+  remain valid.
+- **Fix and regression:** Exact candidate `0939e78` adds Welcome Back owner,
+  fresh-process, same-ID, later-ID, handoff-transfer, persistence compatibility,
+  bounded-dispatch, and control-surface wait coverage in
+  `test/test_emulator_recovery.py`, `test/test_better_control_model.py`, and
+  `test/test_automation_process.py`. Related control/identity suites passed 499
+  tests. The committed candidate passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 3,018 repository tests in 446.45 seconds using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### Process replacement stranded a fresh Game Over behind initial intent
 
 **Stable ID:** `ISSUE-2026-053` · **Lifecycle:** `resolved`

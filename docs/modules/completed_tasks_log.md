@@ -39,6 +39,21 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-17 Welcome Back active-battle recovery
+
+- [`ISSUE-2026-054`](../issues/resolved-2026.md#enabled-automation-could-not-recover-an-unowned-welcome-back-battle)
+  lets an exact Enabled runtime clear an otherwise unowned Welcome Back, then
+  compares the forced save's canonical `ActiveRoundIdentity` with the retained
+  battle. Equal identity continues or reattaches; a later identity clears old
+  battle-local state and completes the normal Attach. Pending restart handoffs
+  transfer to that same forced-save path instead of competing with it. Tier and
+  wave never serve as identity.
+- Exact candidate `0939e78` passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  3,018 repository tests in 446.45 seconds using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-16 Preserved Game Over lifecycle recovery
 
 - [`ISSUE-2026-053`](../issues/resolved-2026.md#process-replacement-stranded-a-fresh-game-over-behind-initial-intent)
